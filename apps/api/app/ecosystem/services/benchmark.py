@@ -421,7 +421,118 @@ class BenchmarkService:
         run.status = "completed"
         run.finished_at = datetime.now(UTC)
         await self.db.flush()
+        await self._detect_regression(run)
         return run
+
+    # Lower-is-better dimensions: a significant INCREASE is the regression
+    _LOWER_BETTER_DIMS = frozenset({"cost_usd", "latency_ms"})
+
+    async def _detect_regression(self, run: BenchmarkRun) -> None:
+        """promptfoo/LangSmith CI bar: compare this completed run against the
+        PREVIOUS completed run for the same suite + target; any dimension that
+        significantly worsened (Welch p<0.05 on summary stats) emits a typed
+        `degraded` change event on the internal benchmark source. Detection
+        only — no auto-rollback, no lifecycle mutation (safety posture)."""
+        from app.ecosystem.services.stats import welch_t_from_stats
+
+        target = run.target or {}
+        entity_id = target.get("entity_id")
+        if not entity_id:
+            return
+        previous = None
+        older = await self.db.scalars(
+            select(BenchmarkRun)
+            .where(
+                BenchmarkRun.suite_id == run.suite_id,
+                BenchmarkRun.status == "completed",
+                BenchmarkRun.id != run.id,
+            )
+            .order_by(BenchmarkRun.finished_at.desc())
+            .limit(100)
+        )
+        for candidate in older:
+            if (candidate.target or {}).get("entity_id") == entity_id:
+                previous = candidate
+                break
+        if previous is None:
+            return
+        new_stats = (run.dimension_scores or {}).get("dimension_stats") or {}
+        old_stats = (previous.dimension_scores or {}).get("dimension_stats") or {}
+        regressions = []
+        for dim, ns in new_stats.items():
+            os_ = old_stats.get(dim)
+            if not isinstance(ns, dict) or not isinstance(os_, dict):
+                continue
+            try:
+                p_value = welch_t_from_stats(
+                    float(ns["mean"]), float(ns.get("std", 0)), int(ns.get("n", 0)),
+                    float(os_["mean"]), float(os_.get("std", 0)), int(os_.get("n", 0)),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            worse = (
+                ns["mean"] > os_["mean"]
+                if dim in self._LOWER_BETTER_DIMS
+                else ns["mean"] < os_["mean"]
+            )
+            if worse and p_value < 0.05:
+                regressions.append(
+                    {
+                        "dimension": dim,
+                        "old_mean": os_["mean"],
+                        "new_mean": ns["mean"],
+                        "p_value": p_value,
+                    }
+                )
+        if not regressions:
+            return
+        import hashlib
+
+        from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+        from app.ecosystem.models.source import EcosystemSource
+        from app.ecosystem.services.change_detection import _fanout
+
+        source = await self.db.scalar(
+            select(EcosystemSource).where(EcosystemSource.name == "internal:benchmark-lab")
+        )
+        if source is None:
+            source = EcosystemSource(
+                name="internal:benchmark-lab",
+                source_type="internal_research",
+                trust_level="internal",
+                adapter_key="manual",
+                parser_version="1.0",
+                robots_compliant=True,
+            )
+            self.db.add(source)
+            await self.db.flush()
+        obs = EcosystemObservation(
+            source_id=source.id,
+            event_type="benchmark_published",
+            entity_kind=target.get("entity_kind"),
+            canonical_entity_kind=target.get("entity_kind"),
+            canonical_entity_id=entity_id,
+            raw_hash=hashlib.sha256(f"regression:{run.id}".encode()).hexdigest(),
+            normalized={"run_id": run.id, "previous_run_id": previous.id,
+                        "regressions": regressions},
+            extraction_method="structured",
+        )
+        self.db.add(obs)
+        await self.db.flush()
+        change = ChangeEvent(
+            observation_id=obs.id,
+            change_type="benchmark",
+            field="benchmark_regression",
+            old_value={"run_id": previous.id},
+            new_value={"run_id": run.id, "regressions": regressions},
+            severity="degraded",
+            entity_kind=target.get("entity_kind"),
+            canonical_entity_id=entity_id,
+        )
+        self.db.add(change)
+        await self.db.flush()
+        _fanout(self.db, change)
+        await self.db.flush()
 
     async def _aggregate(self, run: BenchmarkRun) -> dict:
         """Aggregate results into preserved per-dimension scores.
@@ -627,7 +738,24 @@ class BenchmarkService:
             return (0, float(value) if lower_is_better else -float(value))
 
         rows.sort(key=sort_key)
-        return {"dimension": dimension, "rows": rows[:limit]}
+        rows = rows[:limit]
+        # Pareto frontier (Artificial-Analysis style quality-vs-cost): a row is
+        # on the frontier when NO other row has strictly better quality AND
+        # strictly lower cost. Only computed for higher-is-better dimensions
+        # with a usable cost; rows without both stay unflagged, never hidden.
+        if not lower_is_better:
+            scored = [
+                (i, float(r["dimension_scores"][dimension]), r["total_cost_usd"])
+                for i, r in enumerate(rows)
+                if isinstance(r["dimension_scores"].get(dimension), (int, float))
+                and r["total_cost_usd"] > 0
+            ]
+            for i, quality, cost in scored:
+                dominated = any(
+                    q2 > quality and c2 < cost for j, q2, c2 in scored if j != i
+                )
+                rows[i]["on_frontier"] = not dominated
+        return {"dimension": dimension, "rows": rows}
 
     async def compare_runs(self, run_ids: list[str]) -> dict:
         """Side-by-side dimension comparison for completed runs."""

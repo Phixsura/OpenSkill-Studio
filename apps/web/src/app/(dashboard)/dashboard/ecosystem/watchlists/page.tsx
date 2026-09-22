@@ -10,8 +10,19 @@ import { LIFECYCLE_STYLES, SEVERITY_STYLES, fmtDate, shortId } from "../lib";
 interface Watchlist {
   id: string;
   name: string;
+  min_severity: string;
+  muted_until: string | null;
   created_at: string;
 }
+
+const SEVERITY_LEVELS = [
+  "info",
+  "update_available",
+  "degraded",
+  "sunset_risk",
+  "breaking",
+  "security_critical",
+];
 interface WatchItem {
   id: string;
   target_kind: string;
@@ -70,6 +81,23 @@ export default function WatchlistsPage() {
       invalidate();
     },
   });
+  const updateList = useMutation({
+    mutationFn: (body: {
+      id: string;
+      min_severity?: string;
+      muted_until?: string;
+      clear_mute?: boolean;
+    }) =>
+      apiWithAuth(`/ecosystem/watchlists/${body.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          min_severity: body.min_severity,
+          muted_until: body.muted_until,
+          clear_mute: body.clear_mute ?? false,
+        }),
+      }),
+    onSuccess: () => invalidate(),
+  });
   const addItem = useMutation({
     mutationFn: () =>
       apiWithAuth(`/ecosystem/watchlists/${selected}/items`, {
@@ -117,17 +145,48 @@ export default function WatchlistsPage() {
             </button>
           </form>
           {(watchlists.data?.data ?? []).map((w) => (
-            <button
+            <div
               key={w.id}
-              onClick={() => setSelected(selected === w.id ? null : w.id)}
-              className={`block w-full rounded-lg border p-3 text-left text-sm shadow-sm ${
+              className={`flex w-full items-center gap-2 rounded-lg border p-3 text-left text-sm shadow-sm ${
                 selected === w.id
                   ? "border-[hsl(var(--primary))] bg-[hsl(var(--secondary))]"
                   : "bg-[hsl(var(--card))]"
               }`}
             >
-              {w.name}
-            </button>
+              <button
+                onClick={() => setSelected(selected === w.id ? null : w.id)}
+                className="flex-1 text-left"
+              >
+                {w.name}
+                {w.muted_until && <span className="ml-2 text-xs text-amber-600">muted</span>}
+              </button>
+              <select
+                value={w.min_severity ?? "info"}
+                title="Only notify at/above this severity"
+                onChange={(e) => updateList.mutate({ id: w.id, min_severity: e.target.value })}
+                className="rounded-md border bg-[hsl(var(--background))] px-1 py-0.5 text-xs"
+              >
+                {SEVERITY_LEVELS.map((sev) => (
+                  <option key={sev}>{sev}</option>
+                ))}
+              </select>
+              <button
+                title={w.muted_until ? "Unmute notifications" : "Mute notifications for 7 days"}
+                onClick={() =>
+                  updateList.mutate(
+                    w.muted_until
+                      ? { id: w.id, clear_mute: true }
+                      : {
+                          id: w.id,
+                          muted_until: new Date(Date.now() + 7 * 86400_000).toISOString(),
+                        },
+                  )
+                }
+                className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+              >
+                {w.muted_until ? "🔔" : "🔕"}
+              </button>
+            </div>
           ))}
           {selected && (
             <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">

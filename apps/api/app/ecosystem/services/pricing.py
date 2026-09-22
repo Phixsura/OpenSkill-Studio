@@ -6,7 +6,7 @@ control-plane catalog (append-style, effective-dated). Rejection and
 supersession are audit-tracked.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
@@ -107,6 +107,101 @@ class PricingService:
             query.order_by(PriceObservation.observed_at.desc()).limit(limit).offset(offset)
         )
         return list(rows)
+
+    async def latest_prices(self, entity_kind: str, entity_id: str) -> dict[str, dict]:
+        """Latest price per unit for one entity — approved rows win over
+        merely-observed ones; within a class, most recently observed wins."""
+        rows = await self.db.scalars(
+            select(PriceObservation)
+            .where(
+                PriceObservation.entity_kind == entity_kind,
+                PriceObservation.entity_id == entity_id,
+                PriceObservation.reconciliation_status.notin_(("rejected", "superseded")),
+            )
+            .order_by(PriceObservation.observed_at.desc())
+            .limit(200)
+        )
+        best: dict[str, dict] = {}
+        for row in rows:
+            current = best.get(row.unit)
+            candidate = {
+                "unit": row.unit,
+                "price": float(row.price),
+                "currency": row.currency,
+                "region": row.region,
+                "approved": row.reconciliation_status == "approved",
+                "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+            }
+            if current is None or (candidate["approved"] and not current["approved"]):
+                best[row.unit] = candidate
+        return best
+
+    async def estimate(
+        self,
+        *,
+        entity_kind: str,
+        entity_ids: "list[str]",
+        workload: "dict[str, float]",
+    ) -> "list[dict]":
+        """OpenRouter-style workload cost estimator: given unit quantities
+        (e.g. {"token_input": 1e6, "token_output": 2e5}), price the workload
+        against each entity's latest observed/approved prices. NEVER a quote —
+        estimates are advisory and flag any unpriced unit explicitly."""
+        if not workload:
+            raise AppError("VALIDATION_ERROR", "workload must not be empty", 422)
+        if len(entity_ids) > 20:
+            raise AppError("VALIDATION_ERROR", "At most 20 entities per estimate", 422)
+        for unit, qty in workload.items():
+            if unit not in PRICE_UNITS:
+                raise AppError("VALIDATION_ERROR", f"Unknown price unit: {unit}", 422)
+            try:
+                qty_f = float(qty)
+            except (TypeError, ValueError):
+                raise AppError("VALIDATION_ERROR", f"Invalid quantity for {unit}", 422) from None
+            if not (0 <= qty_f <= 1e12):
+                raise AppError("VALIDATION_ERROR", f"Quantity out of range for {unit}", 422)
+        results = []
+        for entity_id in entity_ids:
+            prices = await self.latest_prices(entity_kind, entity_id)
+            breakdown = []
+            total = 0.0
+            missing = []
+            all_approved = True
+            for unit, qty in workload.items():
+                price = prices.get(unit)
+                if price is None:
+                    missing.append(unit)
+                    continue
+                line = round(float(qty) * price["price"], 6)
+                total += line
+                all_approved = all_approved and price["approved"]
+                breakdown.append(
+                    {
+                        "unit": unit,
+                        "quantity": float(qty),
+                        "unit_price": price["price"],
+                        "currency": price["currency"],
+                        "approved": price["approved"],
+                        "line_total": line,
+                    }
+                )
+            results.append(
+                {
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "estimated_total": round(total, 6) if breakdown else None,
+                    "currency": breakdown[0]["currency"] if breakdown else None,
+                    "breakdown": breakdown,
+                    "missing_units": missing,
+                    "fully_priced": not missing,
+                    "all_prices_approved": bool(breakdown) and all_approved,
+                }
+            )
+        # Fully-priced first, then cheapest
+        results.sort(
+            key=lambda r: (not r["fully_priced"], r["estimated_total"] if r["estimated_total"] is not None else float("inf"))
+        )
+        return results
 
     async def reconcile(
         self,
@@ -297,6 +392,80 @@ class AvailabilityService:
         await self.db.flush()
         _fanout(self.db, change)
         await self.db.flush()
+
+    async def uptime(
+        self, *, entity_kind: str, entity_id: str, days: int = 30
+    ) -> dict:
+        """StatusGator-style SLO summary over trailing `days`: time-weighted
+        uptime %, incident count, current status, per-day worst status. Built
+        purely from our own probe history — honest 'unknown' before the first
+        probe rather than assumed-up."""
+        if not (1 <= days <= 365):
+            raise AppError("VALIDATION_ERROR", "days must be 1-365", 422)
+        window_start = datetime.now(UTC) - timedelta(days=days)
+        rows = list(
+            await self.db.scalars(
+                select(AvailabilityRecord)
+                .where(
+                    AvailabilityRecord.entity_kind == entity_kind,
+                    AvailabilityRecord.entity_id == entity_id,
+                    AvailabilityRecord.record_type == "status",
+                )
+                .order_by(AvailabilityRecord.observed_at.asc())
+            )
+        )
+        now = datetime.now(UTC)
+        # Status intervals: each probe's status holds until the next probe
+        points = [
+            ((r.observed_at if r.observed_at.tzinfo else r.observed_at.replace(tzinfo=UTC)),
+             (r.value or {}).get("status") or "unknown")
+            for r in rows
+        ]
+        up_seconds = 0.0
+        down_seconds = 0.0
+        incidents = 0
+        prev_status: str | None = None
+        day_worst: dict[str, str] = {}
+        rank = {"operational": 0, "unknown": 1, "degraded": 2, "unreachable": 3}
+        for i, (ts, status) in enumerate(points):
+            end = points[i + 1][0] if i + 1 < len(points) else now
+            seg_start = max(ts, window_start)
+            seg_end = max(min(end, now), seg_start)
+            span = (seg_end - seg_start).total_seconds()
+            if span > 0:
+                if status == "operational":
+                    up_seconds += span
+                elif status in ("degraded", "unreachable"):
+                    down_seconds += span
+            if prev_status not in (None, "degraded", "unreachable") and status in (
+                "degraded",
+                "unreachable",
+            ):
+                incidents += 1
+            prev_status = status
+            # Per-day worst status (only days the interval touches, within window)
+            cursor = seg_start
+            while cursor < seg_end:
+                key = cursor.date().isoformat()
+                if rank.get(status, 1) > rank.get(day_worst.get(key, "operational"), 0):
+                    day_worst[key] = status
+                cursor = datetime(
+                    cursor.year, cursor.month, cursor.day, tzinfo=UTC
+                ) + timedelta(days=1)
+        observed = up_seconds + down_seconds
+        return {
+            "entity_kind": entity_kind,
+            "entity_id": entity_id,
+            "window_days": days,
+            "current_status": points[-1][1] if points else "unknown",
+            "uptime_pct": round(100.0 * up_seconds / observed, 3) if observed > 0 else None,
+            "observed_seconds": round(observed, 1),
+            "coverage_pct": round(100.0 * observed / (days * 86400), 3),
+            "incidents": incidents,
+            "daily": [
+                {"date": d, "worst_status": day_worst[d]} for d in sorted(day_worst)
+            ],
+        }
 
     async def record(
         self,

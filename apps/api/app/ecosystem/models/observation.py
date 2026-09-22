@@ -46,12 +46,22 @@ ENTITY_KINDS = frozenset(
 EXTRACTION_METHODS = frozenset({"structured", "llm", "manual"})
 
 CHANGE_TYPES = frozenset(
-    {"price", "limits", "license", "api", "model_version", "lifecycle", "region", "security"}
+    {"price", "limits", "license", "api", "model_version", "lifecycle", "region", "security", "benchmark"}
 )
 
 CHANGE_SEVERITIES = frozenset(
     {"info", "update_available", "degraded", "breaking", "security_critical", "sunset_risk"}
 )
+
+# Ordering for watchlist min_severity thresholds (higher = more severe)
+SEVERITY_RANK = {
+    "info": 0,
+    "update_available": 1,
+    "degraded": 2,
+    "sunset_risk": 3,
+    "breaking": 4,
+    "security_critical": 5,
+}
 
 
 class EcosystemObservation(Base):

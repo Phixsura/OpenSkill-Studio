@@ -16,7 +16,6 @@ from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
 from app.ecosystem.services.benchmark import BenchmarkService
 from app.ecosystem.services.drafts import DraftService
 from app.exceptions import AppError
-
 from tests.test_eco_services_db import (
     _mk_source,
     _mk_suite_with_cases,

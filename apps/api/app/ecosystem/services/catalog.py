@@ -12,6 +12,7 @@ from app.ecosystem.models.catalog import (
     LIFECYCLE_TRANSITIONS,
     LifecycleTransition,
 )
+from app.ecosystem.models.mapping import AvailabilityRecord
 from app.ecosystem.models.observation import EcosystemObservation
 from app.ecosystem.security import sanitize_text
 from app.exceptions import AppError
@@ -162,6 +163,113 @@ class CatalogService:
             "sources": sources,
         }
 
+    async def scorecard(self, kind: str, entity_id: str) -> dict:
+        """Backstage-style scorecard: independent PASS/WARN/FAIL checks, each
+        with its raw evidence. Deliberately NOT collapsed into one magic
+        number — the grade is the count of passing checks over applicable
+        checks, and every check shows why."""
+        from datetime import UTC, datetime, timedelta
+
+        from app.ecosystem.services.benchmark import latest_completed_run
+        from app.ecosystem.services.pricing import AvailabilityService, PricingService
+
+        entity = await self.get(kind, entity_id)
+        now = datetime.now(UTC)
+        checks: list[dict] = []
+
+        def check(key: str, status: str, evidence: dict) -> None:
+            checks.append({"check": key, "status": status, "evidence": evidence})
+
+        # 1. Lifecycle: verified/active is healthy, deprecated/sunset fails
+        lc = entity.lifecycle_status
+        check(
+            "lifecycle",
+            "pass" if lc in ("verified", "active") else
+            "fail" if lc in ("deprecated", "sunset", "blocked") else "warn",
+            {"lifecycle_status": lc},
+        )
+        # 2. Corroboration: >=2 distinct sources or human verification
+        corr = await self.corroboration(kind, entity_id)
+        check(
+            "corroboration",
+            "pass" if corr["distinct_sources"] >= 2 or corr["human_verified_any"] else
+            "warn" if corr["distinct_sources"] == 1 else "fail",
+            {
+                "distinct_sources": corr["distinct_sources"],
+                "trust_weighted_score": corr["trust_weighted_score"],
+                "human_verified_any": corr["human_verified_any"],
+            },
+        )
+        # 3. Freshness: observed within 30d passes, 90d warns, older fails
+        last_seen = max(
+            (s2["last_observed_at"] for s2 in corr["sources"] if s2["last_observed_at"]),
+            default=None,
+        )
+        if last_seen is not None and last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=UTC)
+        age_days = (now - last_seen).days if last_seen else None
+        check(
+            "freshness",
+            "fail" if age_days is None or age_days > 90 else
+            "warn" if age_days > 30 else "pass",
+            {"last_observed_at": last_seen.isoformat() if last_seen else None,
+             "age_days": age_days},
+        )
+        # 4. Availability: recent operational probe passes; degraded fails;
+        #    never probed = not-applicable (honest unknown, not a failure)
+        uptime = await AvailabilityService(self.db).uptime(
+            entity_kind=kind, entity_id=entity_id, days=30
+        )
+        if uptime["current_status"] == "unknown":
+            check("availability", "n/a", {"reason": "never probed"})
+        else:
+            check(
+                "availability",
+                "pass" if uptime["current_status"] == "operational" else "fail",
+                {"current_status": uptime["current_status"],
+                 "uptime_pct": uptime["uptime_pct"],
+                 "incidents_30d": uptime["incidents"]},
+            )
+        # 5. Benchmark coverage: a completed run in 90d passes; ever = warn
+        run = await latest_completed_run(self.db, kind, entity_id)
+        if run is None:
+            check("benchmark", "n/a", {"reason": "never benchmarked"})
+        else:
+            fin = run.finished_at
+            if fin is not None and fin.tzinfo is None:
+                fin = fin.replace(tzinfo=UTC)
+            stale = fin is None or (now - fin) > timedelta(days=90)
+            check(
+                "benchmark",
+                "warn" if stale else "pass",
+                {"run_id": run.id,
+                 "finished_at": fin.isoformat() if fin else None},
+            )
+        # 6. Pricing: any non-rejected price known; approved passes
+        prices = await PricingService(self.db).latest_prices(kind, entity_id)
+        if not prices:
+            check("pricing", "n/a", {"reason": "no observed prices"})
+        else:
+            check(
+                "pricing",
+                "pass" if any(p2["approved"] for p2 in prices.values()) else "warn",
+                {"units": sorted(prices),
+                 "any_approved": any(p2["approved"] for p2 in prices.values())},
+            )
+        applicable = [c for c in checks if c["status"] != "n/a"]
+        passing = sum(1 for c in applicable if c["status"] == "pass")
+        failing = sum(1 for c in applicable if c["status"] == "fail")
+        return {
+            "entity_kind": kind,
+            "entity_id": entity_id,
+            "canonical_name": entity.canonical_name,
+            "grade": "healthy" if failing == 0 and passing == len(applicable)
+            else "failing" if failing > 0 else "attention",
+            "passing": passing,
+            "applicable": len(applicable),
+            "checks": checks,
+        }
+
     async def global_search(self, q: str, *, limit_per_kind: int = 3) -> list[dict]:
         """One search box across all seven catalog kinds (HF posture, §14).
 
@@ -216,6 +324,55 @@ class CatalogService:
                     )
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:20]
+
+    async def compare_entities(self, kind: str, entity_ids: list[str]) -> list[dict]:
+        """Side-by-side comparison (Artificial-Analysis style): canonical facts,
+        latest per-unit pricing, latest availability status, latest benchmark
+        dimension scores. Missing entities 404 (uniform, no existence oracle
+        difference between 1 and N)."""
+        from app.ecosystem.services.benchmark import latest_completed_run
+        from app.ecosystem.services.pricing import PricingService
+
+        if not (2 <= len(entity_ids) <= 6):
+            raise AppError("VALIDATION_ERROR", "Compare 2-6 entities", 422)
+        if len(set(entity_ids)) != len(entity_ids):
+            raise AppError("VALIDATION_ERROR", "Duplicate entity ids", 422)
+        pricing = PricingService(self.db)
+        out = []
+        for entity_id in entity_ids:
+            entity = await self.get(kind, entity_id)  # 404s uniformly
+            run = await latest_completed_run(self.db, kind, entity_id)
+            status_row = await self.db.scalar(
+                select(AvailabilityRecord)
+                .where(
+                    AvailabilityRecord.entity_kind == kind,
+                    AvailabilityRecord.entity_id == entity_id,
+                    AvailabilityRecord.record_type == "status",
+                )
+                .order_by(AvailabilityRecord.observed_at.desc())
+                .limit(1)
+            )
+            out.append(
+                {
+                    "entity_kind": kind,
+                    "entity_id": entity_id,
+                    "canonical_name": entity.canonical_name,
+                    "lifecycle_status": entity.lifecycle_status,
+                    "metadata": getattr(entity, "metadata_", None) or {},
+                    "prices": await pricing.latest_prices(kind, entity_id),
+                    "availability_status": (status_row.value if status_row else None),
+                    "benchmark": (
+                        {
+                            "run_id": run.id,
+                            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                            "dimension_scores": run.dimension_scores or {},
+                        }
+                        if run
+                        else None
+                    ),
+                }
+            )
+        return out
 
     async def merge_entities(
         self, kind: str, source_id: str, target_id: str, *, actor_id: str | None = None

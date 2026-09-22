@@ -217,6 +217,10 @@ class Watchlist(Base):
         String(26), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(200))
+    # Renovate-style noise controls: only changes at/above this severity
+    # notify; muted_until snoozes push notifications entirely (pull unaffected)
+    min_severity: Mapped[str] = mapped_column(String(30), default="info", server_default="info")
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_eco_watchlists_owner", "owner_id"),)

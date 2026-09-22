@@ -50,6 +50,20 @@ interface Corroboration {
   human_verified_any: boolean;
 }
 
+interface Scorecard {
+  grade: string;
+  passing: number;
+  applicable: number;
+  checks: { check: string; status: string; evidence: Record<string, unknown> }[];
+}
+
+const CHECK_STYLES: Record<string, string> = {
+  pass: "bg-emerald-100 text-emerald-800",
+  warn: "bg-amber-100 text-amber-800",
+  fail: "bg-red-100 text-red-800",
+  "n/a": "bg-gray-100 text-gray-500",
+};
+
 export default function CatalogPage() {
   const queryClient = useQueryClient();
   const [segment, setSegment] = useState("models");
@@ -70,6 +84,12 @@ export default function CatalogPage() {
       apiWithAuth<{ data: Corroboration }>(
         `/ecosystem/catalog/${segment}/${selected!.id}/corroboration`,
       ),
+  });
+  const scorecard = useQuery({
+    queryKey: ["eco-scorecard", segment, selected?.id],
+    enabled: Boolean(selected),
+    queryFn: () =>
+      apiWithAuth<{ data: Scorecard }>(`/ecosystem/catalog/${segment}/${selected!.id}/scorecard`),
   });
   const [mergeTarget, setMergeTarget] = useState("");
   const mergeEntity = useMutation({
@@ -213,6 +233,25 @@ export default function CatalogPage() {
       )}
       {selected && (
         <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+          {scorecard.data?.data && (
+            <div className="mb-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                Scorecard: {scorecard.data.data.grade} ({scorecard.data.data.passing}/
+                {scorecard.data.data.applicable} checks passing)
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {scorecard.data.data.checks.map((c) => (
+                  <span
+                    key={c.check}
+                    title={JSON.stringify(c.evidence)}
+                    className={`rounded-full px-2 py-0.5 text-xs ${CHECK_STYLES[c.status] ?? ""}`}
+                  >
+                    {c.check}: {c.status}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">
               Source conflicts for {selected.canonical_name}

@@ -114,12 +114,29 @@ async def handle_notify_watchers(db: AsyncSession, payload: dict) -> None:
     change = await db.get(ChangeEvent, change_event_id)
     if change is None or not change.canonical_entity_id:
         return
-    watcher_rows = await db.execute(
-        select(Watchlist.owner_id)
+    from datetime import UTC, datetime
+
+    from app.ecosystem.models.observation import SEVERITY_RANK
+
+    change_rank = SEVERITY_RANK.get(change.severity, 0)
+    now = datetime.now(UTC)
+    candidate_rows = await db.execute(
+        select(Watchlist.owner_id, Watchlist.min_severity, Watchlist.muted_until)
         .join(WatchItem, WatchItem.watchlist_id == Watchlist.id)
         .where(WatchItem.target_id == change.canonical_entity_id)
         .distinct()
     )
+    # §24 noise controls: below-threshold or snoozed lists don't push. A user
+    # notifies if ANY of their watching lists is loud enough and not muted.
+    eligible: set[str] = set()
+    for owner_id, min_severity, muted_until in candidate_rows:
+        if muted_until is not None:
+            mu = muted_until if muted_until.tzinfo else muted_until.replace(tzinfo=UTC)
+            if mu > now:
+                continue
+        if change_rank >= SEVERITY_RANK.get(min_severity or "info", 0):
+            eligible.add(owner_id)
+    watcher_rows = [(owner_id,) for owner_id in sorted(eligible)]
     # §13: org-scoped watchlists also fan out over the org's webhook
     # subscriptions (StatusGator/GitHub posture: watching means being CALLED,
     # not just having an in-app bell). Delivery is the webhook service's

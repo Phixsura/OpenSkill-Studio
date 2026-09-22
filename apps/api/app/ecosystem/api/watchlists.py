@@ -8,6 +8,7 @@ from app.ecosystem.schemas import (
     AddWatchItemRequest,
     ChangeEventResponse,
     CreateWatchlistRequest,
+    UpdateWatchlistRequest,
     WatchItemResponse,
     WatchlistResponse,
 )
@@ -37,6 +38,25 @@ async def list_watchlists(
     user: User = Depends(get_current_user),
 ):
     return {"data": await WatchlistService(db).list_for_owner(user.id)}
+
+
+@router.patch("/{watchlist_id}", response_model=DataResponse[WatchlistResponse])
+async def update_watchlist(
+    watchlist_id: str,
+    body: UpdateWatchlistRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Noise controls: min_severity threshold, mute/unmute (owner only)."""
+    watchlist = await WatchlistService(db).update_settings(
+        watchlist_id,
+        user.id,
+        min_severity=body.min_severity,
+        muted_until=body.muted_until,
+        clear_mute=body.clear_mute,
+    )
+    await db.commit()
+    return {"data": watchlist}
 
 
 @router.delete("/{watchlist_id}", status_code=204)

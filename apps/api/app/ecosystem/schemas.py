@@ -515,6 +515,8 @@ class WatchlistResponse(_Orm):
     owner_id: str
     org_id: str | None
     name: str
+    min_severity: str
+    muted_until: datetime | None
     created_at: datetime
 
 
@@ -539,3 +541,23 @@ class LifecycleTransitionResponse(_Orm):
 
 class GenericData(BaseModel):
     data: Any
+
+class EstimateRequest(BaseModel):
+    """Workload cost estimate across entities (advisory, never a quote)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_kind: str = Field(..., max_length=30)
+    entity_ids: list[str] = Field(..., min_length=1, max_length=20)
+    # unit -> quantity, e.g. {"token_input": 1000000, "token_output": 200000}
+    workload: dict[str, float] = Field(..., min_length=1, max_length=10)
+
+
+class UpdateWatchlistRequest(BaseModel):
+    """Noise controls: severity threshold + snooze (ADR-016 §24)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_severity: str | None = Field(default=None, max_length=30)
+    muted_until: datetime | None = None
+    clear_mute: bool = False

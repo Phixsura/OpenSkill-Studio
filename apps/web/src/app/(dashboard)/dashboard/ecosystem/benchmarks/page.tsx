@@ -45,6 +45,7 @@ interface LeaderboardRow {
   run_id: string;
   finished_at: string | null;
   total_cost_usd: number;
+  on_frontier?: boolean;
   dimension_scores: Record<string, number | null>;
   dimension_stats: Record<string, { mean: number; n: number; ci95: [number, number] }>;
 }
@@ -175,6 +176,14 @@ export default function BenchmarksPage() {
                     <td className="px-4 py-3 text-sm font-bold">{i + 1}</td>
                     <td className="px-4 py-3 text-sm font-medium">
                       {row.canonical_name}
+                      {row.on_frontier && (
+                        <span
+                          title="Pareto frontier: no other entity is both better and cheaper"
+                          className="ml-1 text-xs text-amber-500"
+                        >
+                          ★ frontier
+                        </span>
+                      )}
                       <span className="ml-1 text-xs text-[hsl(var(--muted-foreground))]">
                         ({row.entity_kind})
                       </span>

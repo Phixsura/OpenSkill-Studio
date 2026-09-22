@@ -628,3 +628,95 @@ What keeps the reference services alive in multi-replica production.
 | Bounded operational history (ops baseline)        | Daily `eco_retention` cron: availability STATUS probes >90d pruned keeping each entity's latest (flips live forever as append-only observations/events); sync-run audit rows pruned at 180d; observation/change ledgers NEVER pruned |
 | Dead-feed detection (StatusGator)                 | `sources_stale` on the operator dashboard: active sources overdue by 3× their sync interval (paused sources excluded)                                                                                                                |
 | Graph visualization (Backstage)                   | Components → Graph renders an inline SVG: center node, dependency column left, dependents right, connecting edges — alongside the click-to-recenter walk                                                                             |
+
+## 17. Governance & operator completeness (2026-09-22, round 7)
+
+| Reference bar                                   | Now shipped                                                                                                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Four-eyes principle (enterprise review culture) | Draft creator can neither approve nor publish their own draft (`ECO_FOUR_EYES`, checked after transition validity); submit/reject/edit stay self-service                              |
+| Run cancellation (any job system)               | `POST /benchmark/runs/{id}/cancel` — fence-aware conditional UPDATE, queued-only; a cancel racing an executor claim has exactly one winner                                            |
+| Self-observability (Prometheus/Datadog)         | `GET /ecosystem/ops/metrics` — plaintext gauges: source states, staleness, review debt, queue depths, eco outbox backlog                                                              |
+| Delta feeds (deps.dev)                          | `GET /ecosystem/export/changes?since=` — oldest-first typed-change delta with `next_since` cursor                                                                                     |
+| In-product audit (enterprise)                   | `GET /ecosystem/audit` — the eco slice of the immutable commercial audit trail, filterable                                                                                            |
+| Day-1 experience (every real product)           | `python -m app.cli eco-seed` — curated starter sources (HF t2i/i2v, ComfyUI releases, analyst desk), ALL seeded PAUSED pending explicit operator attestation + activation; idempotent |
+
+## 18. Property-based & adversarial assurance (2026-09-22, round 8)
+
+Hypothesis suites matching the repo's mutation-testing culture:
+
+- Statistics kernel invariants: CI ordering/containment, weighted-mean bounds,
+  Welch p ∈ [0,1] + two-sided symmetry, two-proportion p ∈ [0,1],
+  Bradley-Terry completeness/finiteness + dominance ordering, pairwise-win
+  mass conservation (ties included), flat-series trend projection,
+  kappa self-agreement, semver exact/caret/bound algebra.
+- Adapter fuzzing: arbitrary bytes AND arbitrary JSON documents against all
+  six adapters — the only permitted exception is the bounded EcoSecurityError
+  family; every produced candidate carries a 64-hex hash and a NUL-free
+  payload (storage-safe by construction).
+- sanitize_text idempotence + control-character freedom.
+
+Round 9 (product completeness): change-feed cursor "load more" UI.
+
+## 19. Comparison & cost-estimation surfaces (2026-09-22, round 10)
+
+| Reference bar                    | Now shipped                                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Artificial Analysis side-by-side | `GET /ecosystem/compare?kind=&ids=` — 2-6 entities: canonical facts, latest per-unit price (approved beats observed), latest availability status, latest benchmark dimension scores; uniform 404 (no existence oracle)               |
+| OpenRouter cost calculator       | `POST /ecosystem/pricing/estimate` — workload {unit: quantity} priced per entity from latest approved/observed prices; sorted fully-priced-then-cheapest; unpriced units FLAGGED, never zeroed; advisory only, never a billing quote |
+| UI                               | `/dashboard/ecosystem/compare` — comparison matrix + workload estimator with approved/observed provenance badges                                                                                                                     |
+
+Safety notes: estimates never touch `cp_provider_cost_rates`; approved
+reconciled prices merely take precedence over raw observations in display.
+
+## 20. Availability SLO summary (2026-09-22, round 11)
+
+StatusGator bar: `GET /ecosystem/pricing/availability/uptime?entity_kind=&entity_id=&days=` —
+time-weighted uptime % from our OWN probe history (each probe's status holds
+until the next), incident count (flips into degraded/unreachable), per-day
+worst status, and an honest `coverage_pct`: before the first probe the answer
+is `unknown`/`null`, never assumed-up. days bounded 1-365.
+
+## 21. Frontier & syndication (2026-09-22, round 12)
+
+- **Pareto frontier** (Artificial Analysis quality-vs-cost chart): leaderboard
+  rows gain `on_frontier` — true when no other row has strictly better quality
+  AND strictly lower cost. Computed only for higher-is-better dimensions with
+  usable cost; unpriceable rows stay unflagged, never hidden. Dominated rows
+  remain visible (the operator sees WHY they lose).
+- **Atom syndication** (endoflife.date / GitHub releases bar):
+  `GET /ecosystem/export/changes.atom` — Atom 1.0 feed of typed change events,
+  newest-first, all change data XML-escaped (untrusted external content).
+
+## 22. Automatic benchmark regression detection (2026-09-22, round 13)
+
+promptfoo/LangSmith CI bar: when a run completes, it is compared against the
+PREVIOUS completed run for the same suite + target. For every dimension with
+summary stats on both sides, Welch's t from summary statistics
+(`welch_t_from_stats` — no raw-result re-read) decides significance; a
+significant worsening (p<0.05, direction-aware: cost/latency reversed) emits a
+`benchmark`/`benchmark_regression` change event, severity `degraded`, on the
+`internal:benchmark-lab` source, riding the normal fan-out (watchers,
+webhooks, Atom, delta export). Detection only — never auto-rollback, never a
+lifecycle mutation. New CHANGE_TYPES member: `benchmark`.
+
+## 23. Entity scorecard (2026-09-22, round 14)
+
+Backstage scorecard bar: `GET /ecosystem/catalog/{segment}/{id}/scorecard` —
+independent pass/warn/fail checks, each carrying raw evidence: lifecycle,
+corroboration (>=2 distinct sources or human verification), freshness
+(30/90-day observation age), availability (current probe status + 30d uptime),
+benchmark recency (90d), pricing (any approved). Deliberately NOT one magic
+number: never-probed/benchmarked/priced surfaces are `n/a` and excluded from
+the denominator — honest unknowns, not failures. Grade = healthy | attention |
+failing.
+
+## 24. Watchlist noise controls (2026-09-22, round 16)
+
+Renovate/Dependabot noise bar: watchlists gain `min_severity` (default `info`)
+and `muted_until`. Push fan-out (`eco.notify_watchers`) skips lists below the
+threshold or currently snoozed — a user notifies when ANY of their watching
+lists is loud enough and not muted. Pull (`matching_changes`) honors the
+LOWEST threshold among the user's lists watching that target (the most
+interested list decides); mute affects push only, never hides data on pull.
+`PATCH /ecosystem/watchlists/{id}` (owner-gated) sets threshold, mute, unmute.
+Migration eco04a00004 (additive, server_default='info').

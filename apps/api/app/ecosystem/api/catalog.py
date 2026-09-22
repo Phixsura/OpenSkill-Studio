@@ -46,6 +46,18 @@ def _kind(segment: str) -> str:
     return kind
 
 
+@router.get("/compare", response_model=DataResponse[list])
+async def compare_entities(
+    kind: str = Query(...),
+    ids: str = Query(..., description="Comma-separated entity ids (2-6)"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Side-by-side entity comparison: facts, pricing, availability, benchmarks."""
+    entity_ids = [x.strip() for x in ids.split(",") if x.strip()]
+    return {"data": await CatalogService(db).compare_entities(kind, entity_ids)}
+
+
 @router.get("/catalog/{segment}", response_model=dict)
 async def list_catalog(
     segment: str,
@@ -115,6 +127,18 @@ async def merge_catalog_entity(
     )
     await db.commit()
     return {"data": outcome}
+
+
+@router.get("/catalog/{segment}/{entity_id}/scorecard", response_model=DataResponse[dict])
+async def entity_scorecard(
+    segment: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Backstage-style scorecard: transparent pass/warn/fail checks + evidence."""
+    kind = _kind(segment)
+    return {"data": await CatalogService(db).scorecard(kind, entity_id)}
 
 
 @router.get("/catalog/{segment}/{entity_id}/conflicts", response_model=DataResponse[list])

@@ -84,6 +84,20 @@ def welch_t_test(a: list[float], b: list[float]) -> dict:
     return out
 
 
+def welch_t_from_stats(
+    mean_a: float, std_a: float, n_a: int, mean_b: float, std_b: float, n_b: int
+) -> float:
+    """Welch p-value from summary statistics (mean/std/n) — lets us compare
+    two aggregated runs without re-reading raw per-case results."""
+    if n_a < 2 or n_b < 2:
+        return 1.0
+    se_sq = (std_a**2) / n_a + (std_b**2) / n_b
+    if se_sq == 0:
+        return 1.0 if mean_a == mean_b else 0.0
+    t = (mean_a - mean_b) / math.sqrt(se_sq)
+    return round(_two_sided_p(t), 6)
+
+
 def two_proportion_z_test(successes_a: int, n_a: int, successes_b: int, n_b: int) -> dict:
     """Two-proportion z-test (reliability comparisons)."""
     out = {

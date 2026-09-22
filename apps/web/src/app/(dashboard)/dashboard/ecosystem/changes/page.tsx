@@ -32,16 +32,43 @@ export default function ChangesPage() {
   const queryClient = useQueryClient();
   const [severity, setSeverity] = useState("");
   const [showAcked, setShowAcked] = useState(false);
+  const [pages, setPages] = useState<ChangeEvent[][]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
+  const filterKey = `${severity}|${showAcked}`;
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-changes", severity, showAcked],
-    queryFn: () =>
-      apiWithAuth<{ data: ChangeEvent[] }>(
-        `/ecosystem/changes?limit=100${severity ? `&severity=${severity}` : ""}${
+    queryKey: ["eco-changes", filterKey],
+    queryFn: async () => {
+      const res = await apiWithAuth<{
+        data: ChangeEvent[];
+        meta: { has_more: boolean; next_cursor: string | null };
+      }>(
+        `/ecosystem/changes?limit=50${severity ? `&severity=${severity}` : ""}${
           showAcked ? "" : "&acknowledged=false"
         }`,
-      ),
+      );
+      setPages([res.data]);
+      setCursor(res.meta?.next_cursor ?? null);
+      setHasMore(Boolean(res.meta?.has_more));
+      return res;
+    },
   });
+
+  const loadMore = async () => {
+    if (!cursor) return;
+    const res = await apiWithAuth<{
+      data: ChangeEvent[];
+      meta: { has_more: boolean; next_cursor: string | null };
+    }>(
+      `/ecosystem/changes?limit=50&cursor=${cursor}${
+        severity ? `&severity=${severity}` : ""
+      }${showAcked ? "" : "&acknowledged=false"}`,
+    );
+    setPages((prev) => [...prev, res.data]);
+    setCursor(res.meta?.next_cursor ?? null);
+    setHasMore(Boolean(res.meta?.has_more));
+  };
 
   const acknowledge = useMutation({
     mutationFn: (id: string) =>
@@ -49,7 +76,7 @@ export default function ChangesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-changes"] }),
   });
 
-  const rows = data?.data ?? [];
+  const rows = pages.length > 0 ? pages.flat() : (data?.data ?? []);
 
   return (
     <div className="space-y-6 p-6">
@@ -116,6 +143,14 @@ export default function ChangesPage() {
               )}
             </div>
           ))}
+          {hasMore && (
+            <button
+              onClick={loadMore}
+              className="w-full rounded-md border px-3 py-2 text-sm hover:bg-[hsl(var(--secondary))]"
+            >
+              Load more (cursor)
+            </button>
+          )}
         </div>
       )}
     </div>

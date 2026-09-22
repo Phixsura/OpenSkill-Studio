@@ -73,6 +73,44 @@ async def ops_metrics(
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
+@router.get("/export/changes.atom", include_in_schema=True)
+async def export_changes_atom(
+    severity: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Atom 1.0 feed of typed change events — newest first, XML-escaped
+    (change data is untrusted external content, never emitted raw)."""
+    from xml.sax.saxutils import escape
+
+    from fastapi.responses import Response
+
+    rows = await DashboardService(db).change_feed(severity=severity, limit=limit, offset=0)
+    entries = []
+    updated = None
+    for c in rows:
+        detected = c.detected_at.isoformat() if c.detected_at else ""
+        updated = updated or detected
+        title = escape(f"[{c.severity}] {c.change_type} · {c.field}")
+        summary = escape(
+            f"entity_kind={c.entity_kind or '?'} old={c.old_value} new={c.new_value}"
+        )
+        entries.append(
+            f"<entry><id>urn:openskill:eco-change:{c.id}</id>"
+            f"<title>{title}</title><updated>{detected}</updated>"
+            f"<summary>{summary}</summary></entry>"
+        )
+    xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        "<id>urn:openskill:eco-changes</id>"
+        "<title>OpenSkill Ecosystem Change Feed</title>"
+        f"<updated>{updated or ''}</updated>" + "".join(entries) + "</feed>"
+    )
+    return Response(content=xml, media_type="application/atom+xml")
+
+
 @router.get("/export/changes", response_model=dict)
 async def export_changes_delta(
     since: str = Query(..., description="ISO-8601 timestamp"),

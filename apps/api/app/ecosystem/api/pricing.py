@@ -7,6 +7,7 @@ from app.api.deps import get_current_user, get_db
 from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     AvailabilityResponse,
+    EstimateRequest,
     PriceObservationResponse,
     ReconcilePriceRequest,
 )
@@ -108,3 +109,37 @@ async def list_availability(
         entity_kind=entity_kind, entity_id=entity_id, record_type=record_type, limit=limit
     )
     return {"data": rows}
+
+@router.post("/estimate", response_model=DataResponse[list])
+async def estimate_workload_cost(
+    payload: EstimateRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Advisory workload cost estimate against latest observed/approved prices.
+
+    Sorted fully-priced-then-cheapest; unpriced units are flagged, never
+    silently zeroed. This is NOT a billing quote (ADR-016 safety posture).
+    """
+    rows = await PricingService(db).estimate(
+        entity_kind=payload.entity_kind,
+        entity_ids=payload.entity_ids,
+        workload=payload.workload,
+    )
+    return {"data": rows}
+
+@router.get("/availability/uptime", response_model=DataResponse[dict])
+async def availability_uptime(
+    entity_kind: str = Query(...),
+    entity_id: str = Query(...),
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Time-weighted uptime/SLO summary from our own probe history (honest
+    'unknown' before first probe; coverage_pct exposes observation gaps)."""
+    out = await AvailabilityService(db).uptime(
+        entity_kind=entity_kind, entity_id=entity_id, days=days
+    )
+    return {"data": out}
+

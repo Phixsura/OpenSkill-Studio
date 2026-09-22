@@ -23,6 +23,29 @@ class WatchlistService:
         await self.db.flush()
         return watchlist
 
+    async def update_settings(
+        self,
+        watchlist_id: str,
+        owner_id: str,
+        *,
+        min_severity: str | None = None,
+        muted_until=None,
+        clear_mute: bool = False,
+    ) -> Watchlist:
+        from app.ecosystem.models.observation import SEVERITY_RANK
+
+        watchlist = await self.get_owned(watchlist_id, owner_id)
+        if min_severity is not None:
+            if min_severity not in SEVERITY_RANK:
+                raise AppError("VALIDATION_ERROR", f"Unknown severity: {min_severity}", 422)
+            watchlist.min_severity = min_severity
+        if clear_mute:
+            watchlist.muted_until = None
+        elif muted_until is not None:
+            watchlist.muted_until = muted_until
+        await self.db.flush()
+        return watchlist
+
     async def get_owned(self, watchlist_id: str, owner_id: str) -> Watchlist:
         watchlist = await self.db.get(Watchlist, watchlist_id)
         # Uniform 404 — never a 403 existence oracle
@@ -95,6 +118,8 @@ class WatchlistService:
         self, owner_id: str, *, limit: int = 50
     ) -> list[ChangeEvent]:
         """Recent change events touching any watched entity for this user."""
+        from app.ecosystem.models.observation import SEVERITY_RANK
+
         watchlists = await self.list_for_owner(owner_id)
         if not watchlists:
             return []
@@ -103,13 +128,30 @@ class WatchlistService:
                 WatchItem.watchlist_id.in_([w.id for w in watchlists])
             )
         )
-        watched_ids = {i.target_id for i in items if i.target_id}
-        if not watched_ids:
+        # Per-target severity floor: the LOWEST min_severity of any list
+        # watching that target wins (most interested list decides)
+        floors = {w.id: SEVERITY_RANK.get(w.min_severity or "info", 0) for w in watchlists}
+        target_floor: dict[str, int] = {}
+        for item in items:
+            if not item.target_id:
+                continue
+            rank = floors.get(item.watchlist_id, 0)
+            current = target_floor.get(item.target_id)
+            target_floor[item.target_id] = rank if current is None else min(current, rank)
+        if not target_floor:
             return []
         rows = await self.db.scalars(
             select(ChangeEvent)
-            .where(ChangeEvent.canonical_entity_id.in_(watched_ids))
+            .where(ChangeEvent.canonical_entity_id.in_(target_floor))
             .order_by(ChangeEvent.detected_at.desc())
-            .limit(limit)
+            .limit(limit * 3)
         )
-        return list(rows)
+        out = []
+        for change in rows:
+            if SEVERITY_RANK.get(change.severity, 0) >= target_floor.get(
+                change.canonical_entity_id, 0
+            ):
+                out.append(change)
+            if len(out) >= limit:
+                break
+        return out
