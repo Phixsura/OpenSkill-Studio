@@ -133,6 +133,7 @@ export default function CatalogPage() {
     queryFn: () =>
       apiWithAuth<{ data: Scorecard }>(`/ecosystem/catalog/${segment}/${selected!.id}/scorecard`),
   });
+  const [watched, setWatched] = useState<Set<string>>(new Set());
   const quickWatch = useMutation({
     mutationFn: (entityId: string) =>
       apiWithAuth("/ecosystem/watchlists/quick-watch", {
@@ -142,7 +143,10 @@ export default function CatalogPage() {
           target_id: entityId,
         }),
       }),
-    onSuccess: () => setError(null),
+    onSuccess: (_res, entityId) => {
+      setError(null);
+      setWatched((prev) => new Set(prev).add(entityId));
+    },
     onError: (e) => setError(e instanceof ApiError ? e.message : "Watch failed"),
   });
   const [showDuplicates, setShowDuplicates] = useState(false);
@@ -323,9 +327,10 @@ export default function CatalogPage() {
                     <button
                       title="Watch: get notified about changes to this entity"
                       onClick={() => quickWatch.mutate(entity.id)}
-                      className="ml-2 rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                      disabled={watched.has(entity.id)}
+                      className="ml-2 rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))] disabled:opacity-60"
                     >
-                      👁 Watch
+                      {watched.has(entity.id) ? "✓ Watching" : "👁 Watch"}
                     </button>
                   </td>
                 </tr>

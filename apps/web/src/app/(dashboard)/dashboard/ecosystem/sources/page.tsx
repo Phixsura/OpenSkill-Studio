@@ -105,6 +105,7 @@ export default function SourcesPage() {
         method: "PATCH",
         body: JSON.stringify({ status }),
       }),
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Action failed"),
     onSuccess: invalidate,
   });
 

@@ -1000,3 +1000,13 @@ re-point list closed three gaps:
   entity (`ECO_INVALID_TRANSITION` — regenerate candidates).
   Deliberately NOT re-pointed (history stays where it happened): impact
   analyses, benchmark run targets, decided resolutions.
+
+## 51. No silent mutation failures (2026-09-23, round 45)
+
+UX-integrity pass: every mutation across the eleven ecosystem pages now
+surfaces failures — 9 previously silent mutations (acknowledge, discovery
+verify/bulk/confirm/llm/reject, watchlist create/update/add/remove, run
+compare, price extract, source toggle) gained onError handlers rendering the
+machine error message in an in-page banner. One-click Watch also gained
+success feedback (button flips to "✓ Watching" and disables) — no more
+fire-and-wonder actions.

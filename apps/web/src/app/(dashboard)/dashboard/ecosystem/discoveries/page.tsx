@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
 import { STATUS_STYLES, fmtDate } from "../lib";
 
@@ -34,6 +34,7 @@ interface ResolutionCandidate {
 export default function DiscoveriesPage() {
   const queryClient = useQueryClient();
   const [eventType, setEventType] = useState("");
+  const [mutError, setMutError] = useState<string | null>(null);
 
   const observations = useQuery({
     queryKey: ["eco-observations", eventType],
@@ -56,6 +57,7 @@ export default function DiscoveriesPage() {
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/observations/${id}/verify`, { method: "POST" }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const bulkVerify = useMutation({
     mutationFn: (ids: string[]) =>
@@ -64,6 +66,7 @@ export default function DiscoveriesPage() {
         body: JSON.stringify({ ids }),
       }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const confirm = useMutation({
     mutationFn: (id: string) =>
@@ -72,16 +75,19 @@ export default function DiscoveriesPage() {
         body: "{}",
       }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const llmSuggest = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/resolution-candidates/${id}/llm-suggest`, { method: "POST" }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const reject = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/resolution-candidates/${id}/reject`, { method: "POST" }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
 
   const pending = resolutions.data?.data ?? [];
@@ -91,6 +97,11 @@ export default function DiscoveriesPage() {
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Discoveries</h1>
       <EcosystemNav />
+      {mutError && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
+          {mutError}
+        </div>
+      )}
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">

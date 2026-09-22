@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
 import { LIFECYCLE_STYLES, SEVERITY_STYLES, fmtDate, shortId } from "../lib";
 
@@ -46,6 +46,7 @@ interface Sunset {
 export default function WatchlistsPage() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [mutError, setMutError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [item, setItem] = useState({ target_kind: "model", target_id: "", target_ref: "" });
 
@@ -80,6 +81,7 @@ export default function WatchlistsPage() {
       setName("");
       invalidate();
     },
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const updateList = useMutation({
     mutationFn: (body: {
@@ -97,6 +99,7 @@ export default function WatchlistsPage() {
         }),
       }),
     onSuccess: () => invalidate(),
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const addItem = useMutation({
     mutationFn: () =>
@@ -109,17 +112,24 @@ export default function WatchlistsPage() {
         }),
       }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
   const removeItem = useMutation({
     mutationFn: (itemId: string) =>
       apiWithAuth(`/ecosystem/watchlists/${selected}/items/${itemId}`, { method: "DELETE" }),
     onSuccess: invalidate,
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
 
   return (
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Watchlists & Deprecation Calendar</h1>
       <EcosystemNav />
+      {mutError && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
+          {mutError}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3">

@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
 import { SEVERITY_STYLES, fmtDate } from "../lib";
 
@@ -31,6 +31,7 @@ const SEVERITIES = [
 export default function ChangesPage() {
   const queryClient = useQueryClient();
   const [severity, setSeverity] = useState("");
+  const [mutError, setMutError] = useState<string | null>(null);
   const [showAcked, setShowAcked] = useState(false);
   const [pages, setPages] = useState<ChangeEvent[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -74,6 +75,7 @@ export default function ChangesPage() {
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/changes/${id}/acknowledge`, { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-changes"] }),
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
 
   const rows = pages.length > 0 ? pages.flat() : (data?.data ?? []);
@@ -82,6 +84,11 @@ export default function ChangesPage() {
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Change Feed</h1>
       <EcosystemNav />
+      {mutError && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
+          {mutError}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <select
           aria-label="Filter by severity"
