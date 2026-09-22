@@ -239,3 +239,12 @@ def test_welch_single_sample_side_is_inconclusive():
     be significant — p must be exactly 1.0, not a computed value."""
     assert welch_t_test([5.0], [1.0, 1.1, 0.9, 1.05])["p_value"] == 1.0
     assert welch_t_test([1.0, 1.1, 0.9], [42.0])["p_value"] == 1.0
+
+def test_unicode_digit_versions_are_rejected_not_crashed():
+    """R254 Hypothesis counterexample: superscript digits pass str.isdigit()
+    but crash int() — parse_version must return None, never raise."""
+    from app.ecosystem.services.stats import parse_version, version_in_range
+
+    assert parse_version("¹.2.3") is None
+    assert parse_version("1.².3") is None
+    assert version_in_range("¹", ">=1.0") is None  # fail-open contract intact

@@ -228,7 +228,8 @@ def parse_version(value: str) -> tuple[int, int, int] | None:
     parts = cleaned.split("-")[0].split("+")[0].split(".")
     nums: list[int] = []
     for part in parts[:3]:
-        if not part.isdigit():
+        # isascii guard: Unicode digits pass isdigit() but crash int()
+        if not (part.isascii() and part.isdigit()):
             return None
         nums.append(int(part))
     if not nums:

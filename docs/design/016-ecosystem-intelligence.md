@@ -1048,3 +1048,27 @@ Same class as the draft blind-approval fix: observation VERIFY was blind —
 the normalized payload was never shown. Each observation row now expands into
 its normalized-JSON payload (capped viewport) beside the provenance link, so
 human verification is evidence-based in-product.
+
+## 54. Governance-guard mutation audit (2026-09-23, round 54)
+
+Same technique as §53, aimed at the guards themselves: six mutants disabling
+or flipping four-eyes, the rollout regression-threshold direction, the
+min_samples floor, the reconcile already-decided gate, uptime's unknown
+handling, and the stuck-run cutoff. Two SURVIVED, exposing untested guards:
+
+- **min_samples** had NO test — a rollout could have shipped with the sample
+  floor silently disabled. Killed: promote with min_samples above the
+  collected count must refuse `ECO_ROLLOUT_INSUFFICIENT_SAMPLES`.
+- **uptime unknown-as-up** had no case with an unknown interval. Killed: an
+  unknown probe interval is neither up nor down — it reduces coverage, never
+  inflates uptime_pct.
+  All six guard mutants now die.
+
+### §54.1 Unicode-digit parser trap (round 54 fix)
+
+The full-suite Hypothesis fuzz surfaced a live counterexample (`'-¹'`):
+superscript digits pass `str.isdigit()` but crash `int()`. Fixed in BOTH
+semver parsers (`workflow_pack` prerelease identifiers and the eco
+`parse_version`) with `isascii() and isdigit()`; explicit killer test pins
+`parse_version("¹.2.3") is None` and the fail-open contract for
+`version_in_range` on unparseable input.

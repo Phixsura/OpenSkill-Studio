@@ -979,3 +979,23 @@ async def test_rollout_refuses_stale_retired_candidate(db):
             replacement_candidate_id=top.id, scope_type="benchmark_only"
         )
     assert exc.value.code == "ECO_INVALID_TRANSITION"
+
+async def test_rollout_min_samples_guardrail_blocks_promote(db):
+    """Mutation-audit killer: with min_samples above the collected sample
+    count, promote must refuse with ECO_ROLLOUT_INSUFFICIENT_SAMPLES."""
+    admin = await _mk_user(db, "admin")
+    deprecated = await _mk_model_version(db, "MinSampOld")
+    await _mk_model_version(db, "MinSampNew")
+    ranked, _ = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id
+    )
+    svc = RolloutService(db)
+    plan = await svc.create(
+        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only",
+        guardrails={"min_samples": 999, "thresholds": {}},
+    )
+    await svc.start(plan.id)
+    await svc.evaluate(plan.id)
+    with pytest.raises(AppError) as exc:
+        await svc.decide(plan.id, decision="promote", actor_id=admin.id)
+    assert exc.value.code == "ECO_ROLLOUT_INSUFFICIENT_SAMPLES"

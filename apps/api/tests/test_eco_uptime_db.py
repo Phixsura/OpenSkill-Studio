@@ -74,3 +74,19 @@ async def test_uptime_unknown_before_first_probe(db):
         await AvailabilityService(db).uptime(
             entity_kind="model", entity_id=model.id, days=0
         )
+
+async def test_unknown_status_never_counts_as_uptime(db):
+    """Mutation-audit killer: an 'unknown' probe interval is neither up nor
+    down — it reduces coverage, never inflates uptime_pct."""
+    model = await _mk_model(db, "UnknownGapGen")
+    # 2h operational → 2h unknown → operational since 1h ago... simpler:
+    db.add(_status(model.id, "operational", 4))
+    db.add(_status(model.id, "unknown", 2))
+    db.add(_status(model.id, "operational", 1))
+    await db.flush()
+    out = await AvailabilityService(db).uptime(
+        entity_kind="model", entity_id=model.id, days=30
+    )
+    # observed = 2h up + 1h up = 3h; the 1h unknown gap is EXCLUDED
+    assert out["uptime_pct"] == 100.0
+    assert out["observed_seconds"] == pytest.approx(3 * 3600, rel=0.05)
