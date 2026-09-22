@@ -41,6 +41,13 @@ interface Entity {
 interface Conflict {
   field: string;
   values: Record<string, string[]>;
+  curated?: { value: string; source_id: string | null; decided_at: string } | null;
+}
+
+interface Corroboration {
+  distinct_sources: number;
+  trust_weighted_score: number;
+  human_verified_any: boolean;
 }
 
 export default function CatalogPage() {
@@ -56,6 +63,40 @@ export default function CatalogPage() {
         `/ecosystem/catalog/${segment}?limit=100`,
       ),
   });
+  const corroboration = useQuery({
+    queryKey: ["eco-corroboration", segment, selected?.id],
+    enabled: Boolean(selected),
+    queryFn: () =>
+      apiWithAuth<{ data: Corroboration }>(
+        `/ecosystem/catalog/${segment}/${selected!.id}/corroboration`,
+      ),
+  });
+  const [mergeTarget, setMergeTarget] = useState("");
+  const mergeEntity = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/ecosystem/catalog/${segment}/${selected!.id}/merge-into/${mergeTarget}`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      setError(null);
+      setSelected(null);
+      queryClient.invalidateQueries({ queryKey: ["eco-catalog", segment] });
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Merge failed"),
+  });
+  const resolveConflict = useMutation({
+    mutationFn: ({ field, value }: { field: string; value: string }) =>
+      apiWithAuth(`/ecosystem/catalog/${segment}/${selected!.id}/resolve-conflict`, {
+        method: "POST",
+        body: JSON.stringify({ field, chosen_value: value }),
+      }),
+    onSuccess: () => {
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["eco-conflicts"] });
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Arbitration failed"),
+  });
+
   const conflicts = useQuery({
     queryKey: ["eco-conflicts", segment, selected?.id],
     enabled: Boolean(selected),
@@ -172,7 +213,33 @@ export default function CatalogPage() {
       )}
       {selected && (
         <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
-          <h3 className="text-sm font-semibold">Source conflicts for {selected.canonical_name}</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">
+              Source conflicts for {selected.canonical_name}
+            </h3>
+            {corroboration.data?.data && (
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                corroboration: {corroboration.data.data.distinct_sources} sources · trust score{" "}
+                {corroboration.data.data.trust_weighted_score}
+                {corroboration.data.data.human_verified_any ? " · human-verified" : ""}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <input
+              placeholder="merge into entity id (26 chars)…"
+              value={mergeTarget}
+              onChange={(e) => setMergeTarget(e.target.value)}
+              className="flex-1 rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
+            />
+            <button
+              onClick={() => mergeTarget.length === 26 && mergeEntity.mutate()}
+              disabled={mergeTarget.length !== 26 || mergeEntity.isPending}
+              className="rounded-md border px-2 py-1 text-xs disabled:opacity-50"
+            >
+              Merge duplicate → survivor
+            </button>
+          </div>
           {(conflicts.data?.data ?? []).length === 0 ? (
             <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
               No disagreeing sources — all observations align.
@@ -181,12 +248,25 @@ export default function CatalogPage() {
             <ul className="mt-2 space-y-2 text-sm">
               {(conflicts.data?.data ?? []).map((c) => (
                 <li key={c.field} className="rounded-md border border-amber-300 bg-amber-50 p-3">
-                  <span className="font-medium">{c.field}</span>: sources disagree —{" "}
-                  {Object.entries(c.values)
-                    .map(([value, sources]) => `"${value}" (${sources.length} source(s))`)
-                    .join(" vs ")}
+                  <span className="font-medium">{c.field}</span>: sources disagree
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {Object.entries(c.values).map(([value, sources]) => (
+                      <button
+                        key={value}
+                        onClick={() => resolveConflict.mutate({ field: c.field, value })}
+                        className={`rounded-md border px-2 py-0.5 text-xs hover:bg-white ${
+                          c.curated?.value === value ? "border-emerald-600 font-semibold" : ""
+                        }`}
+                        title="Adopt this value as the curated decision"
+                      >
+                        &quot;{value}&quot; · {sources.length} src
+                        {c.curated?.value === value ? " ✓ curated" : ""}
+                      </button>
+                    ))}
+                  </div>
                   <div className="mt-1 text-xs text-amber-700">
-                    Both observations are retained; no merged truth is invented.
+                    Both observations stay retained; your pick becomes a curated overlay with
+                    provenance.
                   </div>
                 </li>
               ))}

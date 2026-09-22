@@ -52,12 +52,27 @@ interface Rollout {
   created_at: string;
 }
 
-const TABS = ["Impact", "Replacements", "Drafts", "Rollouts"] as const;
+const TABS = ["Impact", "Replacements", "Drafts", "Rollouts", "Graph"] as const;
 
 export default function ComponentsPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Impact");
   const [error, setError] = useState<string | null>(null);
+
+  const [graphKind, setGraphKind] = useState("model_version");
+  const [graphId, setGraphId] = useState("");
+  const [graphNode, setGraphNode] = useState<{ kind: string; id: string } | null>(null);
+  const graph = useQuery({
+    queryKey: ["eco-graph-node", graphNode],
+    enabled: Boolean(graphNode),
+    queryFn: () =>
+      apiWithAuth<{
+        data: {
+          depends_on: { id: string; to_kind: string; to_id: string; constraint_type: string }[];
+          dependents: { id: string; from_kind: string; from_id: string; constraint_type: string }[];
+        };
+      }>(`/ecosystem/graph/node/${graphNode!.kind}/${graphNode!.id}`),
+  });
 
   const impact = useQuery({
     queryKey: ["eco-impact"],
@@ -378,13 +393,25 @@ export default function ComponentsPage() {
                           typeof cmp === "object" && cmp !== null && "delta" in (cmp as object),
                       )
                       .map(([dim, cmp]) => {
-                        const c = cmp as { baseline: number; candidate: number; improved: boolean };
+                        const c = cmp as {
+                          baseline: number;
+                          candidate: number;
+                          improved: boolean;
+                          p_value?: number;
+                          significant?: boolean;
+                        };
                         return (
                           <div
                             key={dim}
                             className={c.improved ? "text-emerald-700" : "text-red-600"}
                           >
                             {dim}: {c.baseline} → {c.candidate} {c.improved ? "▲" : "▼"}
+                            {c.p_value != null && (
+                              <span className="ml-1 text-[hsl(var(--muted-foreground))]">
+                                p={c.p_value}
+                                {c.significant ? "*" : " (ns)"}
+                              </span>
+                            )}
                           </div>
                         );
                       })}
@@ -394,6 +421,84 @@ export default function ComponentsPage() {
             ))}
           </div>
         ))}
+      {tab === "Graph" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={graphKind}
+              onChange={(e) => setGraphKind(e.target.value)}
+              className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
+            >
+              {[
+                "model_version",
+                "model",
+                "provider",
+                "tool",
+                "node_package",
+                "workflow_pack",
+                "workflow_pack_release",
+                "skill_pack",
+                "learning_path",
+                "capability",
+              ].map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+            <input
+              placeholder="node id"
+              value={graphId}
+              onChange={(e) => setGraphId(e.target.value)}
+              className="w-72 rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
+            />
+            <button
+              onClick={() => graphId && setGraphNode({ kind: graphKind, id: graphId })}
+              className="rounded-md bg-[hsl(var(--primary))] px-3 py-1 text-sm text-[hsl(var(--primary-foreground))]"
+            >
+              Inspect node
+            </button>
+          </div>
+          {graphNode && graph.data?.data ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+                <h3 className="mb-2 text-sm font-semibold">
+                  Depends on ({graph.data.data.depends_on.length})
+                </h3>
+                {graph.data.data.depends_on.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => setGraphNode({ kind: e.to_kind, id: e.to_id })}
+                    className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-[hsl(var(--secondary))]"
+                  >
+                    → {e.to_kind}:{e.to_id.slice(0, 12)}…{" "}
+                    <span className="text-[hsl(var(--muted-foreground))]">
+                      ({e.constraint_type})
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+                <h3 className="mb-2 text-sm font-semibold">
+                  Dependents ({graph.data.data.dependents.length})
+                </h3>
+                {graph.data.data.dependents.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => setGraphNode({ kind: e.from_kind, id: e.from_id })}
+                    className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-[hsl(var(--secondary))]"
+                  >
+                    ← {e.from_kind}:{e.from_id.slice(0, 12)}…{" "}
+                    <span className="text-[hsl(var(--muted-foreground))]">
+                      ({e.constraint_type})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon="🕸️" text="Enter a node to walk the dependency graph both ways." />
+          )}
+        </div>
+      )}
     </div>
   );
 }

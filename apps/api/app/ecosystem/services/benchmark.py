@@ -514,6 +514,81 @@ class BenchmarkService:
         )
         return list(rows)
 
+    async def leaderboard(
+        self,
+        *,
+        family: str | None = None,
+        suite_id: str | None = None,
+        dimension: str = "reliability",
+        limit: int = 50,
+    ) -> dict:
+        """LMArena/AA-style leaderboard: the LATEST completed run per unique
+        target entity across the family's suites, rankable by any preserved
+        dimension. One row per entity — dimensions never collapsed; each row
+        carries the full dimension set + uncertainty so the UI can re-sort
+        client-side without re-fetching.
+        """
+        query = select(BenchmarkRun).where(BenchmarkRun.status == "completed")
+        if suite_id:
+            query = query.where(BenchmarkRun.suite_id == suite_id)
+        elif family:
+            suite_ids = [
+                s.id
+                for s in await self.db.scalars(
+                    select(BenchmarkSuite).where(BenchmarkSuite.family == family)
+                )
+            ]
+            if not suite_ids:
+                return {"dimension": dimension, "rows": []}
+            query = query.where(BenchmarkRun.suite_id.in_(suite_ids))
+        runs = await self.db.scalars(
+            query.order_by(BenchmarkRun.finished_at.desc()).limit(500)
+        )
+        latest_per_target: dict[tuple, BenchmarkRun] = {}
+        for run in runs:
+            target = run.target or {}
+            key = (target.get("entity_kind"), target.get("entity_id"))
+            if key[1] and key not in latest_per_target:
+                latest_per_target[key] = run
+        from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+        rows: list[dict] = []
+        for (entity_kind, entity_id), run in latest_per_target.items():
+            name = entity_id
+            model = CATALOG_KIND_TO_MODEL.get(entity_kind)
+            if model is not None:
+                entity = await self.db.get(model, entity_id)
+                if entity is not None:
+                    name = entity.canonical_name
+            scores = dict(run.dimension_scores or {})
+            stats_blob = scores.pop("dimension_stats", {})
+            rows.append(
+                {
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "canonical_name": name,
+                    "run_id": run.id,
+                    "suite_id": run.suite_id,
+                    "finished_at": run.finished_at,
+                    "total_cost_usd": float(run.total_cost_usd or 0),
+                    "dimension_scores": scores,
+                    "dimension_stats": stats_blob,
+                }
+            )
+        # Rank: lower-is-better for cost/latency dims, higher otherwise;
+        # entities missing the dimension sort last, never hidden
+        lower_is_better = dimension in ("cost_per_case_usd", "speed_p50_ms")
+
+        def sort_key(row: dict):
+            value = row["dimension_scores"].get(dimension)
+            missing = value is None or not isinstance(value, (int, float))
+            if missing:
+                return (1, 0.0)
+            return (0, float(value) if lower_is_better else -float(value))
+
+        rows.sort(key=sort_key)
+        return {"dimension": dimension, "rows": rows[:limit]}
+
     async def compare_runs(self, run_ids: list[str]) -> dict:
         """Side-by-side dimension comparison for completed runs."""
         if not 2 <= len(run_ids) <= 6:

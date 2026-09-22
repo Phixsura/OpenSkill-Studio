@@ -208,7 +208,21 @@ export default function WatchlistsPage() {
             ))
           )}
 
-          <h2 className="pt-4 text-lg font-semibold">Deprecation calendar (next 90 days)</h2>
+          <h2 className="pt-4 text-lg font-semibold">
+            Deprecation calendar (next 90 days)
+            <a
+              href="/api/v1/ecosystem/deprecation-calendar.ics"
+              className="ml-2 text-xs font-normal text-blue-600 underline"
+            >
+              📅 subscribe (.ics)
+            </a>
+            <a
+              href="/api/v1/ecosystem/export"
+              className="ml-2 text-xs font-normal text-blue-600 underline"
+            >
+              ⬇ catalog export (JSON)
+            </a>
+          </h2>
           {(calendar.data?.data ?? []).length === 0 ? (
             <EmptyState icon="🗓️" text="No upcoming sunsets." />
           ) : (

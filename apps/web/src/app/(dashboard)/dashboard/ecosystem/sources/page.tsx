@@ -40,8 +40,18 @@ const ADAPTERS = [
   "manual",
 ];
 
+interface SourceHealth {
+  runs: number;
+  success_rate: number | null;
+  by_status: Record<string, number>;
+  observations_created: number;
+  bytes_fetched: number;
+  last_error: string | null;
+}
+
 export default function SourcesPage() {
   const queryClient = useQueryClient();
+  const [healthFor, setHealthFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -56,6 +66,11 @@ export default function SourcesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["eco-sources"],
     queryFn: () => apiWithAuth<{ data: Source[] }>("/ecosystem/sources"),
+  });
+  const health = useQuery({
+    queryKey: ["eco-source-health", healthFor],
+    enabled: Boolean(healthFor),
+    queryFn: () => apiWithAuth<{ data: SourceHealth }>(`/ecosystem/sources/${healthFor}/health`),
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["eco-sources"] });
@@ -223,6 +238,12 @@ export default function SourcesPage() {
                       Sync now
                     </button>
                     <button
+                      onClick={() => setHealthFor(healthFor === s.id ? null : s.id)}
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                    >
+                      Health
+                    </button>
+                    <button
                       onClick={() =>
                         toggleStatus.mutate({
                           id: s.id,
@@ -238,6 +259,27 @@ export default function SourcesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {healthFor && health.data?.data && (
+        <div className="rounded-lg border bg-[hsl(var(--card))] p-4 text-sm shadow-sm">
+          <h3 className="mb-2 font-semibold">Source health (7d)</h3>
+          <div className="grid gap-2 md:grid-cols-4">
+            <div>runs: {health.data.data.runs}</div>
+            <div>
+              success rate:{" "}
+              {health.data.data.success_rate != null
+                ? `${(health.data.data.success_rate * 100).toFixed(0)}%`
+                : "—"}
+            </div>
+            <div>observations: {health.data.data.observations_created}</div>
+            <div>bytes: {health.data.data.bytes_fetched}</div>
+          </div>
+          {health.data.data.last_error && (
+            <div className="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-700">
+              last error: {health.data.data.last_error}
+            </div>
+          )}
         </div>
       )}
     </div>

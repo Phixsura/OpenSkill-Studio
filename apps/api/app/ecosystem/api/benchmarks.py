@@ -115,6 +115,24 @@ async def create_run(
     return {"data": run}
 
 
+@router.get("/leaderboard", response_model=DataResponse[dict])
+async def benchmark_leaderboard(
+    family: str | None = None,
+    suite_id: str | None = None,
+    dimension: str = Query("reliability", max_length=60),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """§15 (LMArena/AA): latest completed run per target, rankable by any
+    preserved dimension — never a collapsed universal score."""
+    return {
+        "data": await BenchmarkService(db).leaderboard(
+            family=family, suite_id=suite_id, dimension=dimension, limit=limit
+        )
+    }
+
+
 @router.get("/runs", response_model=DataResponse[list[RunResponse]])
 async def list_runs(
     suite_id: str | None = None,

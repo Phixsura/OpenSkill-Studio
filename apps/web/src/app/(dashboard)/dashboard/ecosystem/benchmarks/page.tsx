@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
-import { EcosystemNav, EmptyState, Pill } from "../components";
+import { EcosystemNav, EmptyState, Pill, StatWithCI } from "../components";
 import { STATUS_STYLES, fmtDate } from "../lib";
 
 interface Suite {
@@ -38,11 +38,55 @@ interface Comparison {
   dimensions: string[];
 }
 
+interface LeaderboardRow {
+  entity_kind: string;
+  entity_id: string;
+  canonical_name: string;
+  run_id: string;
+  finished_at: string | null;
+  total_cost_usd: number;
+  dimension_scores: Record<string, number | null>;
+  dimension_stats: Record<string, { mean: number; n: number; ci95: [number, number] }>;
+}
+
+const LEADERBOARD_DIMENSIONS = [
+  "reliability",
+  "cost_per_case_usd",
+  "speed_p50_ms",
+  "human_pref_elo",
+  "text_accuracy",
+];
+
+const FAMILIES = [
+  "ecommerce_hero",
+  "product_consistency",
+  "character_consistency",
+  "chinese_text_render",
+  "storyboard_adherence",
+  "i2v_motion",
+  "temporal_consistency",
+  "commercial_ad_15s",
+  "background_replacement",
+  "multimodal_qa",
+];
+
 export default function BenchmarksPage() {
   const [selectedSuite, setSelectedSuite] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [lbFamily, setLbFamily] = useState("");
+  const [lbDimension, setLbDimension] = useState("reliability");
+  const leaderboard = useQuery({
+    queryKey: ["eco-leaderboard", lbFamily, lbDimension],
+    queryFn: () =>
+      apiWithAuth<{ data: { rows: LeaderboardRow[] } }>(
+        `/ecosystem/benchmark/leaderboard?dimension=${lbDimension}${
+          lbFamily ? `&family=${lbFamily}` : ""
+        }`,
+      ),
+  });
 
   const suites = useQuery({
     queryKey: ["eco-suites"],
@@ -82,6 +126,85 @@ export default function BenchmarksPage() {
           {error}
         </div>
       )}
+
+      <section>
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <h2 className="text-lg font-semibold">Leaderboard</h2>
+          <select
+            value={lbFamily}
+            onChange={(e) => setLbFamily(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
+          >
+            <option value="">All families</option>
+            {FAMILIES.map((f) => (
+              <option key={f}>{f}</option>
+            ))}
+          </select>
+          <select
+            value={lbDimension}
+            onChange={(e) => setLbDimension(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-sm"
+          >
+            {LEADERBOARD_DIMENSIONS.map((d) => (
+              <option key={d}>{d}</option>
+            ))}
+          </select>
+          <span className="text-xs text-[hsl(var(--muted-foreground))]">
+            latest completed run per model — dimensions never collapsed
+          </span>
+        </div>
+        {(leaderboard.data?.data.rows ?? []).length === 0 ? (
+          <EmptyState icon="🏆" text="No completed runs yet for this selection." />
+        ) : (
+          <div className="overflow-x-auto rounded-lg border shadow-sm">
+            <table className="w-full">
+              <thead className="bg-[hsl(var(--secondary))]">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium">#</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">Model</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">{lbDimension}</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">Reliability</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">Cost/case</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">p50 ms</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium">Elo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(leaderboard.data?.data.rows ?? []).map((row, i) => (
+                  <tr key={row.run_id} className="bg-[hsl(var(--card))]">
+                    <td className="px-4 py-3 text-sm font-bold">{i + 1}</td>
+                    <td className="px-4 py-3 text-sm font-medium">
+                      {row.canonical_name}
+                      <span className="ml-1 text-xs text-[hsl(var(--muted-foreground))]">
+                        ({row.entity_kind})
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-semibold">
+                      {row.dimension_scores?.[lbDimension] != null
+                        ? Number(row.dimension_scores[lbDimension]).toFixed(4)
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <StatWithCI stats={row.dimension_stats?.reliability} digits={2} />
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <StatWithCI stats={row.dimension_stats?.cost_usd} digits={4} />
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <StatWithCI stats={row.dimension_stats?.latency_ms} digits={0} />
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {row.dimension_scores?.human_pref_elo != null
+                        ? Number(row.dimension_scores.human_pref_elo).toFixed(0)
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Suites</h2>

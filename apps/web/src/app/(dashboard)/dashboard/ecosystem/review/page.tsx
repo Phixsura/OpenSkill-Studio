@@ -17,6 +17,20 @@ interface Assignment {
 
 const DIMENSIONS = ["quality", "brief_adherence", "consistency", "commercial_readiness"];
 
+interface RevealOut {
+  runs: {
+    run_id: string;
+    alias_label: string | null;
+    target: { entity_kind?: string; entity_id?: string };
+    dimension_scores: Record<string, number | null>;
+  }[];
+  reviewer_agreement: {
+    reviewer_pairs: number;
+    percent_agreement: number | null;
+    mean_cohen_kappa: number | null;
+  };
+}
+
 export default function BlindReviewPage() {
   const queryClient = useQueryClient();
   const [batchId, setBatchId] = useState("");
@@ -31,6 +45,20 @@ export default function BlindReviewPage() {
       apiWithAuth<{ data: Assignment[] }>(
         `/ecosystem/benchmark/review-batches/${activeBatch}/assignments`,
       ),
+  });
+
+  const [revealed, setRevealed] = useState<RevealOut | null>(null);
+  const reveal = useMutation({
+    mutationFn: () =>
+      apiWithAuth<{ data: RevealOut }>(
+        `/ecosystem/benchmark/review-batches/${activeBatch}/reveal`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) => {
+      setRevealed(res.data);
+      setError(null);
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Reveal failed"),
   });
 
   const submit = useMutation({
@@ -78,7 +106,56 @@ export default function BlindReviewPage() {
         >
           Load assignments
         </button>
+        <button
+          type="button"
+          onClick={() => activeBatch && reveal.mutate()}
+          disabled={!activeBatch || reveal.isPending}
+          className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
+          title="Admin: refused until every reviewer has submitted"
+        >
+          Reveal identities
+        </button>
       </form>
+      {revealed && (
+        <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+          <h2 className="text-sm font-semibold">
+            Revealed — Bradley-Terry preference Elo
+            <span className="ml-2 text-xs font-normal text-[hsl(var(--muted-foreground))]">
+              reviewer agreement:{" "}
+              {revealed.reviewer_agreement.percent_agreement != null
+                ? `${(revealed.reviewer_agreement.percent_agreement * 100).toFixed(0)}%`
+                : "n/a"}{" "}
+              · Cohen&apos;s κ {revealed.reviewer_agreement.mean_cohen_kappa ?? "n/a"} (
+              {revealed.reviewer_agreement.reviewer_pairs} pairs)
+            </span>
+          </h2>
+          <table className="mt-2 w-full text-sm">
+            <tbody className="divide-y">
+              {revealed.runs
+                .slice()
+                .sort(
+                  (a, b) =>
+                    Number(b.dimension_scores?.human_pref_elo ?? 0) -
+                    Number(a.dimension_scores?.human_pref_elo ?? 0),
+                )
+                .map((r) => (
+                  <tr key={r.run_id}>
+                    <td className="py-1 font-bold">{r.alias_label}</td>
+                    <td className="py-1 font-mono text-xs">
+                      {r.target?.entity_kind}:{String(r.target?.entity_id ?? "").slice(0, 12)}…
+                    </td>
+                    <td className="py-1">
+                      Elo{" "}
+                      {r.dimension_scores?.human_pref_elo != null
+                        ? Number(r.dimension_scores.human_pref_elo).toFixed(0)
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {error && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">
           {error}

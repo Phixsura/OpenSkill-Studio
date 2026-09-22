@@ -418,3 +418,59 @@ async def test_eco_audit_writes_immutable_event_and_never_raises(db):
     await eco_audit(
         db, admin, action="eco.not_a_registered_action", target_type="x", target_id="y"
     )
+
+
+# ── Leaderboard (round 5 — LMArena/AA product surface) ──────────────
+
+
+async def test_leaderboard_latest_run_per_target_and_ranking(db):
+    from tests.test_eco_e2e_flow import CostedExecutor
+    from tests.test_eco_services_db import _mk_suite_with_cases
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    cheap = await _mk_model_version(db, f"LbCheap{str(ULID())[-4:]}")
+    pricey = await _mk_model_version(db, f"LbPricey{str(ULID())[-4:]}")
+    from app.ecosystem.services.benchmark import BenchmarkService
+
+    # pricey gets TWO runs — leaderboard must use only the latest
+    for target, cost in ((pricey, 0.50), (cheap, 0.02), (pricey, 0.30)):
+        bench = BenchmarkService(db, executor=CostedExecutor(cost=cost, accuracy=0.9))
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": target.id}
+        )
+        await bench.execute_run(run.id)
+    board = await BenchmarkService(db).leaderboard(
+        suite_id=suite.id, dimension="cost_per_case_usd"
+    )
+    rows = board["rows"]
+    assert [r["entity_id"] for r in rows] == [cheap.id, pricey.id]  # lower cost first
+    pricey_row = rows[1]
+    assert pricey_row["dimension_scores"]["cost_per_case_usd"] == 0.30  # latest run only
+    assert pricey_row["canonical_name"].startswith("LbPricey")
+    assert "dimension_stats" in pricey_row and "dimension_stats" not in pricey_row["dimension_scores"]
+    # Higher-is-better ranking flips the order
+    board2 = await BenchmarkService(db).leaderboard(suite_id=suite.id, dimension="reliability")
+    assert all(
+        r["dimension_scores"].get("reliability") == 1.0 for r in board2["rows"]
+    )
+
+
+async def test_leaderboard_missing_dimension_sorts_last_never_hidden(db):
+    from tests.test_eco_e2e_flow import CostedExecutor
+    from tests.test_eco_services_db import _mk_suite_with_cases
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    scored = await _mk_model_version(db, f"LbS{str(ULID())[-4:]}")
+    from app.ecosystem.services.benchmark import BenchmarkService
+
+    bench = BenchmarkService(db, executor=CostedExecutor(cost=0.05, accuracy=0.9))
+    run = await bench.create_run(
+        suite.id, target={"entity_kind": "model_version", "entity_id": scored.id}
+    )
+    await bench.execute_run(run.id)
+    board = await BenchmarkService(db).leaderboard(
+        suite_id=suite.id, dimension="human_pref_elo"  # nobody has it yet
+    )
+    assert len(board["rows"]) == 1  # missing dimension → still listed, ranked last

@@ -73,6 +73,11 @@ export default function DiscoveriesPage() {
       }),
     onSuccess: invalidate,
   });
+  const llmSuggest = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`/ecosystem/resolution-candidates/${id}/llm-suggest`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
   const reject = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/resolution-candidates/${id}/reject`, { method: "POST" }),
@@ -129,6 +134,16 @@ export default function DiscoveriesPage() {
                   >
                     Reject
                   </button>
+                  {!c.candidate_entity_id && (
+                    <button
+                      onClick={() => llmSuggest.mutate(c.id)}
+                      disabled={llmSuggest.isPending}
+                      className="rounded-md border px-3 py-1 text-xs disabled:opacity-50"
+                      title="LLM tie-breaker — suggestion only, never auto-merges"
+                    >
+                      🤖 LLM suggest
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -11,6 +11,7 @@ vi.mock("next/link", () => ({
 vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard/ecosystem" }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
+import BenchmarksPage from "@/app/(dashboard)/dashboard/ecosystem/benchmarks/page";
 import EcosystemOverviewPage from "@/app/(dashboard)/dashboard/ecosystem/page";
 import SourcesPage from "@/app/(dashboard)/dashboard/ecosystem/sources/page";
 import ComponentsPage from "@/app/(dashboard)/dashboard/ecosystem/components/page";
@@ -133,5 +134,67 @@ describe("Ecosystem Intelligence pages (issue #35 Part S)", () => {
       (b) => b.textContent === "Approve",
     );
     expect(approveButtons.length).toBe(1);
+  });
+});
+
+describe("Ecosystem round-5 surfaces", () => {
+  it("benchmark leaderboard renders ranked rows with CI and Elo", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/benchmark/leaderboard")) {
+        return Promise.resolve({
+          data: {
+            rows: [
+              {
+                entity_kind: "model_version",
+                entity_id: "A".repeat(26),
+                canonical_name: "VisionGen 2.0",
+                run_id: "r1",
+                finished_at: null,
+                total_cost_usd: 0.1,
+                dimension_scores: { reliability: 1, human_pref_elo: 1042 },
+                dimension_stats: {
+                  reliability: { mean: 1, n: 6, ci95: [1, 1] },
+                  cost_usd: { mean: 0.03, n: 6, ci95: [0.028, 0.032] },
+                  latency_ms: { mean: 800, n: 6, ci95: [750, 850] },
+                },
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<BenchmarksPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Leaderboard")).toBeTruthy();
+    expect(await screen.findByText("VisionGen 2.0")).toBeTruthy();
+    expect(screen.getByText("1042")).toBeTruthy(); // Elo column
+    expect(screen.getByText(/\u00b10.002/)).toBeTruthy(); // CI half-width on cost
+  });
+
+  it("global search box surfaces cross-kind hits", async () => {
+    api.mockImplementation((path: string) => {
+      if (path === "/ecosystem/dashboard") return Promise.resolve({ data: OVERVIEW });
+      if (path.startsWith("/ecosystem/search")) {
+        return Promise.resolve({
+          data: [
+            {
+              kind: "model",
+              id: "M".repeat(26),
+              canonical_name: "Searchable Gen",
+              lifecycle_status: "verified",
+              score: 0.91,
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<EcosystemOverviewPage />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("Search catalog");
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.change(input, { target: { value: "searchable" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(await screen.findByText("Searchable Gen")).toBeTruthy();
+    expect(screen.getByText(/model \u00b7 verified/)).toBeTruthy();
   });
 });
