@@ -296,6 +296,18 @@ async def _eco_retention(ctx: dict) -> None:
             log.info("eco_history_pruned", **pruned)
 
 
+async def _eco_rollout_eval(ctx: dict) -> None:
+    """ADR-016 §36: auto-evaluate running rollouts; decisions stay human."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_rollout_evaluations
+
+    async with AsyncSessionLocal() as db:
+        out = await sweep_rollout_evaluations(db)
+        if out["evaluated"]:
+            await db.commit()
+            log.info("eco_rollouts_evaluated", **out)
+
+
 async def _eco_impact_sla(ctx: dict) -> None:
     """ADR-016 §25: escalate open impact analyses past their deadline."""
     from app.core.database import AsyncSessionLocal
@@ -440,6 +452,7 @@ def _cron_jobs() -> list:
         cron(_eco_sync_sweep, minute={4, 19, 34, 49}, name="eco_sync_sweep"),
         cron(_eco_retention, hour=3, minute=41, timeout=1800, name="eco_retention"),
         cron(_eco_impact_sla, minute={26, 56}, name="eco_impact_sla"),
+        cron(_eco_rollout_eval, minute={11, 41}, name="eco_rollout_eval"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);

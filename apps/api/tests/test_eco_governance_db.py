@@ -244,3 +244,22 @@ async def test_eco_seed_sources_paused_and_idempotent(db, monkeypatch):
     assert all(r.status == "paused" for r in rows)
     # Seeded specs validate against the SSRF guard + adapter registry
     assert all(r.adapter_key in ("huggingface", "github_releases", "manual") for r in rows)
+
+async def test_audit_csv_defuses_formula_injection(db):
+    from app.controlplane.services.audit import Actor, record_audit
+    from app.ecosystem.api.dashboard import eco_audit_trail_csv
+
+    admin = await _mk_user(db, "admin")
+    await record_audit(
+        db, actor=Actor(user_id=admin.id, type="platform"), action="eco.conflict_resolved",
+        target_type="eco_source", target_id="0" * 26,
+        reason="=HYPERLINK(\"http://evil\")",
+    )
+    await db.flush()
+    resp = await eco_audit_trail_csv(
+        action="eco.conflict_resolved", target_id="0" * 26, limit=10, db=db, _user=admin
+    )
+    body = resp.body.decode()
+    assert resp.media_type.startswith("text/csv")
+    assert "'=HYPERLINK" in body  # formula defused with leading apostrophe
+    assert body.splitlines()[0].startswith("id,actor_user_id,action")

@@ -213,6 +213,59 @@ async def eco_audit_trail(
     }
 
 
+@router.get("/audit.csv", include_in_schema=True)
+async def eco_audit_trail_csv(
+    action: str | None = Query(None, max_length=60),
+    target_id: str | None = Query(None, max_length=26),
+    limit: int = Query(1000, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§17 compliance export: the eco audit slice as CSV. Values are
+    csv-module quoted (untrusted content never breaks the format) and
+    cells starting with =,+,-,@ are prefixed to defuse spreadsheet
+    formula injection."""
+    import csv
+    import io
+    import json as _json
+
+    from fastapi.responses import Response
+    from sqlalchemy import select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    query = select(CommercialAuditEvent).where(
+        CommercialAuditEvent.action.like("eco.%")
+    )
+    if action:
+        query = query.where(CommercialAuditEvent.action == action)
+    if target_id:
+        query = query.where(CommercialAuditEvent.target_id == target_id)
+    rows = list(
+        await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit))
+    )
+
+    def _cell(value) -> str:
+        text = _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value or "")
+        return f"'{text}" if text[:1] in ("=", "+", "-", "@") else text
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["id", "actor_user_id", "action", "target_type", "target_id", "before", "after", "reason"]
+    )
+    for e in rows:
+        writer.writerow([
+            _cell(e.id), _cell(e.actor_user_id), _cell(e.action), _cell(e.target_type),
+            _cell(e.target_id), _cell(e.before), _cell(e.after), _cell(e.reason),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=eco-audit.csv"},
+    )
+
+
 @router.get("/signals/matching", response_model=DataResponse[list])
 async def matching_signals(
     capability_key: str | None = None,

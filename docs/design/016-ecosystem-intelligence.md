@@ -806,3 +806,19 @@ self-contained JSON document (definition + cases + fingerprint; runs/results
 NEVER travel). `POST /benchmark/suites/import` (platform-admin) re-validates
 through the same Pydantic schemas as manual creation, caps at 200 cases,
 lands in draft status, and rejects key collisions rather than merging.
+
+## 36. Automatic rollout evaluation (2026-09-22, round 28)
+
+LaunchDarkly auto-check bar: cron `eco_rollout_eval` (twice hourly)
+re-evaluates every running/evaluating rollout plan so guardrail breaches
+surface without an operator clicking Evaluate. Detection only — promote/
+rollback stays an explicit human decision (§11.4). A NEW regression set
+notifies platform admins once (fingerprint stamp in comparison); the same
+regressions never re-alert. One failing plan never blocks the sweep.
+
+## 37. Compliance CSV export (2026-09-22, round 29)
+
+Enterprise export bar: `GET /ecosystem/audit.csv` (platform-admin, up to 10k
+rows) — the eco audit slice as CSV with csv-module quoting AND spreadsheet
+formula defusal (cells starting with = + - @ get a leading apostrophe), so
+untrusted audit content can never execute in Excel/Sheets.

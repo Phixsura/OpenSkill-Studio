@@ -237,6 +237,70 @@ async def sweep_due_sources(db: AsyncSession) -> int:
     return enqueued
 
 
+async def sweep_rollout_evaluations(db: AsyncSession) -> dict:
+    """LaunchDarkly auto-check bar: re-evaluate every running/evaluating
+    rollout plan on a schedule so guardrail breaches surface without an
+    operator remembering to click Evaluate. Detection only — promote/rollback
+    remains an explicit human decision (§11.4). A NEW guardrail regression
+    notifies platform admins once per regression set (fingerprint stamp)."""
+    import hashlib
+    import json
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.ecosystem.models.replacement import RolloutPlan
+    from app.ecosystem.services.rollout import RolloutService
+    from app.models.user import User, UserRole
+    from app.services.notification import NotificationService
+
+    plans = list(
+        await db.scalars(
+            select(RolloutPlan).where(RolloutPlan.status.in_(("running", "evaluating")))
+        )
+    )
+    if not plans:
+        return {"evaluated": 0, "alerted": 0}
+    svc = RolloutService(db)
+    notify = NotificationService(db)
+    admin_ids = [
+        row for row in await db.scalars(select(User.id).where(User.role == UserRole.ADMIN))
+    ]
+    evaluated = 0
+    alerted = 0
+    for plan in plans:
+        try:
+            plan = await svc.evaluate(plan.id)
+        except Exception:  # noqa: BLE001 — one bad plan never blocks the sweep
+            continue
+        evaluated += 1
+        regressions = (plan.comparison or {}).get("regressions") or []
+        if not regressions:
+            continue
+        fingerprint = hashlib.sha256(
+            json.dumps(sorted(regressions)).encode()
+        ).hexdigest()[:16]
+        comparison = dict(plan.comparison or {})
+        if comparison.get("alerted_fingerprint") == fingerprint:
+            continue  # this exact regression set was already announced
+        comparison["alerted_fingerprint"] = fingerprint
+        plan.comparison = comparison
+        flag_modified(plan, "comparison")
+        for admin_id in admin_ids:
+            await notify.create(
+                user_id=admin_id,
+                notification_type="ecosystem_rollout_guardrail",
+                title=f"Rollout guardrail regression: {', '.join(regressions)}",
+                body=(
+                    f"Rollout plan {plan.id} shows guarded regressions on "
+                    f"{', '.join(regressions)}. Promote stays blocked until resolved."
+                ),
+                data={"rollout_plan_id": plan.id, "regressions": regressions},
+            )
+        alerted += 1
+    await db.flush()
+    return {"evaluated": evaluated, "alerted": alerted}
+
+
 async def sweep_overdue_impacts(db: AsyncSession) -> int:
     """SLA escalation (PagerDuty/Jira bar): an OPEN impact analysis past its
     deadline notifies every platform admin exactly once (escalated_at stamp
