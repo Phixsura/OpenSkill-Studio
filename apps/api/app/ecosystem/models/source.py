@@ -13,8 +13,10 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -108,3 +110,29 @@ class SourceSyncRun(Base):
     parser_version: Mapped[str] = mapped_column(String(20), default="1.0")
 
     __table_args__ = (Index("ix_eco_sync_runs_source", "source_id", "started_at"),)
+
+class RawSnapshot(Base):
+    """Retained raw payload for replay (ADR-016 §42, deps.dev reprocessing bar).
+
+    One row per distinct (source, payload); size already bounded upstream by
+    the source's max_response_bytes security guard. Pruned after 90 days by
+    the retention cron — replay is a recent-history tool, not an archive.
+    """
+
+    __tablename__ = "eco_raw_snapshots"
+
+    id: Mapped[str] = ulid_pk()
+    source_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("eco_sources.id", ondelete="CASCADE")
+    )
+    raw_hash: Mapped[str] = mapped_column(String(64))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    content_length: Mapped[int] = mapped_column(Integer)
+    # Parser version that originally processed this payload
+    parser_version: Mapped[str] = mapped_column(String(20))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "raw_hash", name="uq_eco_raw_snapshot"),
+        Index("ix_eco_raw_snapshots_source", "source_id", "fetched_at"),
+    )

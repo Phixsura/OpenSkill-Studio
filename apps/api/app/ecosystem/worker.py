@@ -407,9 +407,19 @@ async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
         delete(SourceSyncRun).where(SourceSyncRun.started_at < sync_cutoff)
     )
     await db.flush()
+    from sqlalchemy import delete as sa_delete
+
+    from app.ecosystem.models.source import RawSnapshot
+
+    snap_cutoff = (now or datetime.now(UTC)) - timedelta(days=90)
+    snap_result = await db.execute(
+        sa_delete(RawSnapshot).where(RawSnapshot.fetched_at < snap_cutoff)
+    )
+    pruned_snapshots = snap_result.rowcount or 0
     return {
         "availability_status_pruned": stale_status.rowcount or 0,
         "sync_runs_pruned": old_runs.rowcount or 0,
+        "raw_snapshots_pruned": pruned_snapshots,
     }
 
 

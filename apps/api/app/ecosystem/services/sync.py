@@ -181,6 +181,7 @@ class SyncService:
             adapter = ADAPTERS.get(source.adapter_key)
             if adapter is None:
                 raise AppError("VALIDATION_ERROR", "Source adapter not available", 422)
+            await self._store_snapshot(source, body)
             items = adapter.parse(body, source.config or {})
 
             created, changes = await self._ingest(source, run, items)
@@ -202,6 +203,125 @@ class SyncService:
         except Exception as exc:  # noqa: BLE001 — network/parse faults must not 500 silently
             await self._record_failure(source, run, exc)
             raise AppError("ECO_FETCH_FAILED", "Source sync failed", 502) from exc
+
+    async def _store_snapshot(self, source: EcosystemSource, body: bytes) -> None:
+        """Retain the raw payload for replay (idempotent per source+hash;
+        size already bounded by the fetch guard)."""
+        import hashlib
+
+        from app.ecosystem.models.source import RawSnapshot
+
+        digest = hashlib.sha256(body).hexdigest()
+        stmt = (
+            pg_insert(RawSnapshot)
+            .values(
+                source_id=source.id,
+                raw_hash=digest,
+                content=body,
+                content_length=len(body),
+                parser_version=source.parser_version,
+            )
+            .on_conflict_do_nothing(constraint="uq_eco_raw_snapshot")
+        )
+        await self.db.execute(stmt)
+
+    async def replay_source(self, source_id: str, *, limit: int = 100) -> dict:
+        """deps.dev reprocessing bar: re-run the CURRENT adapter + parser over
+        retained raw snapshots. Append-only semantics preserved:
+        - a re-parsed item with an unseen hash ingests normally;
+        - an unchanged item is an idempotent no-op;
+        - an item whose normalized output CHANGED (parser upgrade) creates a
+          NEW observation with a version-derived hash and links the old row
+          via superseded_by_id — history is never rewritten.
+        """
+        import hashlib
+        import json as _json
+
+        from app.ecosystem.models.source import RawSnapshot
+
+        source = await self.db.get(EcosystemSource, source_id)
+        if source is None:
+            raise AppError("NOT_FOUND", "Source not found", 404)
+        adapter = ADAPTERS.get(source.adapter_key)
+        if adapter is None:
+            raise AppError("VALIDATION_ERROR", "Source adapter not available", 422)
+        snapshots = list(
+            await self.db.scalars(
+                select(RawSnapshot)
+                .where(RawSnapshot.source_id == source_id)
+                .order_by(RawSnapshot.fetched_at.asc())
+                .limit(limit)
+            )
+        )
+        run = SourceSyncRun(
+            source_id=source.id, parser_version=source.parser_version, status="running"
+        )
+        self.db.add(run)
+        await self.db.flush()
+        created = superseded = unchanged = 0
+        try:
+            for snap in snapshots:
+                items = adapter.parse(snap.content, source.config or {})
+                for item in items:
+                    existing = await self.db.scalar(
+                        select(EcosystemObservation).where(
+                            EcosystemObservation.source_id == source.id,
+                            EcosystemObservation.raw_hash == item.raw_hash,
+                            EcosystemObservation.event_type == item.event_type,
+                        )
+                    )
+                    if existing is None:
+                        n_created, _ = await self._ingest(source, run, [item])
+                        created += n_created
+                        continue
+                    if _json.dumps(existing.normalized, sort_keys=True, default=str) == _json.dumps(
+                        item.normalized, sort_keys=True, default=str
+                    ):
+                        unchanged += 1
+                        continue
+                    if existing.superseded_by_id is not None:
+                        unchanged += 1  # already superseded by an earlier replay
+                        continue
+                    # Parser upgrade changed the output: append, never rewrite
+                    derived = hashlib.sha256(
+                        f"{item.raw_hash}:{source.parser_version}".encode()
+                    ).hexdigest()
+                    replacement = EcosystemObservation(
+                        source_id=source.id,
+                        sync_run_id=run.id,
+                        event_type=item.event_type,
+                        entity_kind=item.entity_kind,
+                        external_ref=item.external_ref,
+                        raw_hash=derived,
+                        normalized=item.normalized,
+                        parser_version=source.parser_version,
+                        confidence=item.confidence,
+                        provenance_url=item.provenance_url,
+                        effective_at=_parse_iso(item.effective_at),
+                        extraction_method=existing.extraction_method,
+                        # Curated links survive: the replacement inherits the
+                        # canonical resolution instead of re-entering the queue
+                        canonical_entity_kind=existing.canonical_entity_kind,
+                        canonical_entity_id=existing.canonical_entity_id,
+                        human_verified=False,  # new content needs fresh review
+                    )
+                    self.db.add(replacement)
+                    await self.db.flush()
+                    existing.superseded_by_id = replacement.id
+                    superseded += 1
+            run.status = "success"
+            run.observations_created = created
+            run.finished_at = datetime.now(UTC)
+            await self.db.flush()
+        except Exception as exc:  # noqa: BLE001 — parse faults surface as sync failure
+            await self._record_failure(source, run, exc)
+            raise AppError("ECO_FETCH_FAILED", "Replay failed", 502) from exc
+        return {
+            "snapshots": len(snapshots),
+            "created": created,
+            "superseded": superseded,
+            "unchanged": unchanged,
+        }
 
     async def _fetch_with_retries(self, source: EcosystemSource) -> FetchResult:
         import asyncio

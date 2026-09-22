@@ -881,3 +881,19 @@ alert rules over the `/ops/metrics` gauges (staleness, outbox backlog,
 security-critical, curation debt, stuck benchmarks, impact SLA backstop,
 injection-flag rot), each with a runbook line mapping to an in-product
 surface; no alert requires shell access. Includes the full metric inventory.
+
+## 42. Raw retention & parser replay (2026-09-22, round 36)
+
+deps.dev reprocessing bar: raw payloads are now retained
+(`eco_raw_snapshots`, migration eco06a00006 — one row per distinct
+source+payload, size bounded by the fetch guard, pruned after 90 days by the
+retention cron) and `POST /sources/{id}/replay` (platform-admin) re-runs the
+CURRENT adapter over them. Append-only semantics preserved:
+
+- unseen item hash → normal ingest;
+- unchanged output → idempotent no-op;
+- CHANGED output (parser upgrade) → a NEW observation with a
+  version-derived hash, linked from the old row via `superseded_by_id`;
+  the old row is never rewritten. Curated canonical resolution is inherited
+  (no re-queue); `human_verified` resets to false — new content needs fresh
+  review. Re-replaying with the same parser supersedes nothing.

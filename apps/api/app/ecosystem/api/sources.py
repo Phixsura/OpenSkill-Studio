@@ -74,6 +74,22 @@ async def update_source(
     return {"data": source}
 
 
+@router.post("/{source_id}/replay", response_model=DataResponse[dict])
+async def replay_source(
+    source_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Re-run the current parser over retained raw snapshots (append-only:
+    changed output supersedes, never rewrites; curated links inherited)."""
+    from app.ecosystem.services.sync import SyncService
+
+    out = await SyncService(db).replay_source(source_id, limit=limit)
+    await db.commit()
+    return {"data": out}
+
+
 @router.post("/{source_id}/sync", response_model=DataResponse[SyncRunResponse])
 async def sync_source(
     source_id: str,
