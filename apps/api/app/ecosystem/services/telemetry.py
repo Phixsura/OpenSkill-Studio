@@ -234,6 +234,20 @@ class TelemetryService:
         # Need an observation anchor: reuse the latest observation for entity if any
         from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
 
+        # Idempotence: while an unacknowledged divergence flag is open for this
+        # entity, don't stack another (re-flag only after an operator acks)
+        open_flag = await self.db.scalar(
+            select(ChangeEvent.id)
+            .where(
+                ChangeEvent.canonical_entity_id == entity_id,
+                ChangeEvent.field == "benchmark_production_divergence",
+                ChangeEvent.acknowledged.is_(False),
+            )
+            .limit(1)
+        )
+        if open_flag:
+            return False
+
         obs = await self.db.scalar(
             select(EcosystemObservation)
             .where(

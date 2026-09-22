@@ -58,6 +58,22 @@ async def compare_entities(
     return {"data": await CatalogService(db).compare_entities(kind, entity_ids)}
 
 
+@router.get("/catalog/{segment}/duplicates", response_model=DataResponse[list])
+async def catalog_duplicates(
+    segment: str,
+    threshold: float = Query(0.55, ge=0.3, le=1.0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Suspected duplicate entity pairs (trigram similarity) — suggestion only."""
+    return {
+        "data": await CatalogService(db).find_duplicates(
+            _kind(segment), threshold=threshold, limit=limit
+        )
+    }
+
+
 @router.get("/catalog/{segment}", response_model=dict)
 async def list_catalog(
     segment: str,

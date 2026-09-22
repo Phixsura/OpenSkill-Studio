@@ -741,3 +741,52 @@ GitHub watch-button bar: `POST /ecosystem/watchlists/quick-watch` gets or
 creates the user's "Default" watchlist and adds the target idempotently
 (double-click = same item, no duplicates). 👁 Watch button on every catalog
 row. WATCH_TARGET_KINDS extended to all seven catalog kinds.
+
+## 28. Divergence wiring (2026-09-22, round 20)
+
+§3.7 now fires in BOTH directions automatically: a completed benchmark run is
+immediately compared against the latest cross-tenant production telemetry
+(`_check_production_divergence`), and every fresh cross-tenant telemetry
+snapshot is compared against the latest completed benchmark (telemetry-window
+handler). Divergence >0.25 absolute (benchmark reliability vs production
+success rate) emits ONE `degraded` change event — re-flag only after an
+operator acknowledges the open flag (idempotence guard on unacked events).
+Per-org snapshots never drive public divergence flags.
+
+## 29. Duplicate detection sweep (2026-09-22, round 21)
+
+Backstage/deps.dev dedup bar: `GET /ecosystem/catalog/{segment}/duplicates`
+(platform-admin) — trigram self-join surfacing entity pairs with similar
+canonical names (threshold 0.3-1.0, default 0.55), each pair once, retired
+excluded. Suggestion only: merging remains the operator's explicit audited
+action. pg_trgm unavailable → empty list, never an error.
+
+## 30. Price history & trend (2026-09-22, round 22)
+
+AA price-over-time bar: `GET /ecosystem/pricing/history?entity_kind=&entity_id=&unit=` —
+per-unit oldest-first series of non-rejected observations (approved flagged)
+plus a per-unit linear trend (slope in price/day, advisory `projected_next` —
+never a rate). Catalog Inspect panel shows the per-unit latest price with a
+falling/rising/flat arrow and projection.
+
+## 31. Score history (2026-09-22, round 23)
+
+LMArena score-over-time bar: `GET /ecosystem/benchmark/score-history?entity_kind=&entity_id=&dimension=&suite_id=` —
+chronological completed-run series for one dimension (points carry suite_id
+for faceting) + advisory linear trend. Failed runs and other entities never
+appear; unknown dimensions return an empty series, not an error.
+
+## 32. Catalog coverage (2026-09-22, round 24)
+
+Backstage maturity bar: `GET /ecosystem/dashboard/coverage` — per-kind counts
+of entities with capability mapping / completed benchmark / any price
+observation, surfaced as a completeness table on the Overview. Curation debt
+becomes visible per dimension; incomplete entities are never hidden.
+
+## 33. Shareability & trend surfacing (2026-09-22, round 25)
+
+- **Shareable compare URLs**: the comparison lives in the querystring
+  (`/compare?kind=&ids=`) — paste a link, get the same view (Suspense-wrapped
+  useSearchParams; state syncs on submit).
+- **Benchmark trend in catalog Inspect**: latest reliability + improving/
+  declining/stable arrow + run count, from `/benchmark/score-history`.

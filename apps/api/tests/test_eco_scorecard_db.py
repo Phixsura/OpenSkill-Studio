@@ -77,3 +77,43 @@ async def test_scorecard_corroborated_fresh_operational_entity(db):
     assert card["grade"] == "healthy"
     # Every check carries evidence, never a bare verdict
     assert all(c["evidence"] for c in card["checks"])
+
+async def test_dashboard_coverage_counts_evidence_dimensions(db):
+    from app.ecosystem.models.mapping import CapabilityMapping, PriceObservation
+    from app.ecosystem.services.dashboard import DashboardService
+    from tests.test_eco_services_db import _mk_capability_tag, _mk_source
+
+    covered = AIModel(canonical_name="CoveredGen", slug=f"cov-{str(ULID()).lower()}")
+    bare = AIModel(canonical_name="BareGen2", slug=f"bare2-{str(ULID()).lower()}")
+    db.add_all([covered, bare])
+    await db.flush()
+    await _mk_capability_tag(db, "image_generation")
+    db.add(CapabilityMapping(
+        entity_kind="model", entity_id=covered.id, capability_key="image_generation",
+        evidence_level="vendor_claimed",
+        io_spec={"inputs": [{"type": "text"}], "outputs": [{"type": "image"}]},
+    ))
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        canonical_entity_kind="model", canonical_entity_id=covered.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    db.add(PriceObservation(
+        observation_id=obs.id, entity_kind="model", entity_id=covered.id,
+        unit="image", price=0.04, currency="USD",
+    ))
+    await db.flush()
+
+    cov = await DashboardService(db).coverage()
+    models = cov["model"]
+    assert models["total"] >= 2
+    assert models["with_capability_mapping"] >= 1
+    assert models["with_pricing"] >= 1
+    # every catalog kind is present with all four counters
+    for kind_stats in cov.values():
+        assert set(kind_stats) == {
+            "total", "with_capability_mapping", "with_benchmark", "with_pricing"
+        }

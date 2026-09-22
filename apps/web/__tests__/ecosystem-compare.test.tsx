@@ -10,6 +10,8 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/compare",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 

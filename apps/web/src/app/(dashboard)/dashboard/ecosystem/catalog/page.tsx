@@ -54,10 +54,26 @@ interface Conflict {
   curated?: { value: string; source_id: string | null; decided_at: string } | null;
 }
 
+interface DuplicatePair {
+  a: { id: string; canonical_name: string; lifecycle_status: string };
+  b: { id: string; canonical_name: string; lifecycle_status: string };
+  similarity: number;
+}
+
 interface Corroboration {
   distinct_sources: number;
   trust_weighted_score: number;
   human_verified_any: boolean;
+}
+
+interface ScoreHistory {
+  points: { value: number; finished_at: string | null }[];
+  trend: { slope: number; projected_next: number } | null;
+}
+
+interface PriceHistory {
+  series: Record<string, { price: number; currency: string; observed_at: string | null }[]>;
+  trends: Record<string, { slope: number; projected_next: number } | null>;
 }
 
 interface Scorecard {
@@ -95,6 +111,22 @@ export default function CatalogPage() {
         `/ecosystem/catalog/${segment}/${selected!.id}/corroboration`,
       ),
   });
+  const scoreHistory = useQuery({
+    queryKey: ["eco-score-history", segment, selected?.id],
+    enabled: Boolean(selected),
+    queryFn: () =>
+      apiWithAuth<{ data: ScoreHistory }>(
+        `/ecosystem/benchmark/score-history?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
+      ),
+  });
+  const priceHistory = useQuery({
+    queryKey: ["eco-price-history", segment, selected?.id],
+    enabled: Boolean(selected),
+    queryFn: () =>
+      apiWithAuth<{ data: PriceHistory }>(
+        `/ecosystem/pricing/history?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
+      ),
+  });
   const scorecard = useQuery({
     queryKey: ["eco-scorecard", segment, selected?.id],
     enabled: Boolean(selected),
@@ -112,6 +144,13 @@ export default function CatalogPage() {
       }),
     onSuccess: () => setError(null),
     onError: (e) => setError(e instanceof ApiError ? e.message : "Watch failed"),
+  });
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const duplicates = useQuery({
+    queryKey: ["eco-duplicates", segment],
+    enabled: showDuplicates,
+    queryFn: () =>
+      apiWithAuth<{ data: DuplicatePair[] }>(`/ecosystem/catalog/${segment}/duplicates`),
   });
   const [mergeTarget, setMergeTarget] = useState("");
   const mergeEntity = useMutation({
@@ -191,6 +230,40 @@ export default function CatalogPage() {
           {error}
         </div>
       )}
+      <div>
+        <button
+          onClick={() => setShowDuplicates(!showDuplicates)}
+          className="rounded-md border px-3 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+        >
+          {showDuplicates ? "Hide suspected duplicates" : "Scan for duplicates"}
+        </button>
+        {showDuplicates && (
+          <div className="mt-2 space-y-2">
+            {(duplicates.data?.data ?? []).length === 0 ? (
+              <div className="text-xs text-[hsl(var(--muted-foreground))]">
+                {duplicates.isLoading ? "Scanning…" : "No suspected duplicates."}
+              </div>
+            ) : (
+              (duplicates.data?.data ?? []).map((d) => (
+                <div
+                  key={`${d.a.id}-${d.b.id}`}
+                  className="flex flex-wrap items-center gap-2 rounded-md border bg-[hsl(var(--card))] p-2 text-xs"
+                >
+                  <span className="font-medium">{d.a.canonical_name}</span>
+                  <span className="text-[hsl(var(--muted-foreground))]">≈</span>
+                  <span className="font-medium">{d.b.canonical_name}</span>
+                  <span className="text-[hsl(var(--muted-foreground))]">
+                    similarity {d.similarity}
+                  </span>
+                  <span className="text-[hsl(var(--muted-foreground))]">
+                    — inspect &amp; merge manually (merges are audited)
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
       {isLoading ? (
         <div className="text-[hsl(var(--muted-foreground))]">Loading catalog…</div>
       ) : rows.length === 0 ? (
@@ -279,6 +352,38 @@ export default function CatalogPage() {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+          {scoreHistory.data?.data && scoreHistory.data.data.points.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold">Benchmark reliability:</span>
+              <span className="rounded-full border px-2 py-0.5">
+                {scoreHistory.data.data.points[scoreHistory.data.data.points.length - 1]?.value}
+                {scoreHistory.data.data.trend &&
+                  (scoreHistory.data.data.trend.slope > 0
+                    ? " ↑ improving"
+                    : scoreHistory.data.data.trend.slope < 0
+                      ? " ↓ declining"
+                      : " → stable")}
+                {" · "}
+                {scoreHistory.data.data.points.length} runs
+              </span>
+            </div>
+          )}
+          {priceHistory.data?.data && Object.keys(priceHistory.data.data.series).length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <span className="font-semibold">Price trends:</span>
+              {Object.entries(priceHistory.data.data.trends).map(([unit, t]) => {
+                const pts = priceHistory.data!.data.series[unit] ?? [];
+                const last = pts[pts.length - 1];
+                return (
+                  <span key={unit} className="rounded-full border px-2 py-0.5">
+                    {unit}: {last ? `${last.price} ${last.currency}` : "—"}{" "}
+                    {t ? (t.slope < 0 ? "↓ falling" : t.slope > 0 ? "↑ rising" : "→ flat") : ""}
+                    {t && ` (proj. ${t.projected_next})`}
+                  </span>
+                );
+              })}
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">

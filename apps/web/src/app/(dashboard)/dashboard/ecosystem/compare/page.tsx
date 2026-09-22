@@ -1,7 +1,8 @@
 "use client";
 /** Side-by-side entity comparison + workload cost estimator (ADR-016 §19). */
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -47,9 +48,30 @@ interface EstimateRow {
 const KINDS = ["provider", "tool", "model", "model_version", "workflow", "agent", "node_package"];
 
 export default function ComparePage() {
-  const [kind, setKind] = useState("model");
-  const [ids, setIds] = useState("");
-  const [submitted, setSubmitted] = useState<{ kind: string; ids: string } | null>(null);
+  return (
+    <Suspense>
+      <CompareInner />
+    </Suspense>
+  );
+}
+
+function CompareInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const [kind, setKind] = useState(params.get("kind") ?? "model");
+  const [ids, setIds] = useState(params.get("ids") ?? "");
+  const [submitted, setSubmitted] = useState<{ kind: string; ids: string } | null>(
+    params.get("ids") ? { kind: params.get("kind") ?? "model", ids: params.get("ids")! } : null,
+  );
+  // Shareable URLs: the comparison lives in the querystring
+  useEffect(() => {
+    if (submitted) {
+      router.replace(
+        `/dashboard/ecosystem/compare?kind=${submitted.kind}&ids=${encodeURIComponent(submitted.ids)}`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted]);
   const [workload, setWorkload] = useState('{"token_input": 1000000, "token_output": 200000}');
   const [estimate, setEstimate] = useState<EstimateRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -133,6 +133,23 @@ async def benchmark_leaderboard(
     }
 
 
+@router.get("/score-history", response_model=DataResponse[dict])
+async def benchmark_score_history(
+    entity_kind: str = Query(...),
+    entity_id: str = Query(...),
+    dimension: str = Query("reliability", max_length=40),
+    suite_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Score-over-time for one entity + advisory linear trend."""
+    out = await BenchmarkService(db).score_history(
+        entity_kind=entity_kind, entity_id=entity_id,
+        dimension=dimension, suite_id=suite_id,
+    )
+    return {"data": out}
+
+
 @router.get("/runs", response_model=DataResponse[list[RunResponse]])
 async def list_runs(
     suite_id: str | None = None,

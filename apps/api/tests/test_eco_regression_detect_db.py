@@ -106,3 +106,29 @@ async def test_first_run_for_target_has_no_baseline(db):
         select(ChangeEvent).where(ChangeEvent.canonical_entity_id == model.id)
     )
     assert change is None
+
+async def test_score_history_chronological_with_trend(db):
+    from app.ecosystem.services.benchmark import BenchmarkService
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin)
+    model = AIModel(canonical_name="HistGen", slug=f"hist-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    for hours_ago, score in [(72, 0.70), (48, 0.80), (24, 0.90)]:
+        db.add(_run(suite.id, model.id, mean=score, std=0.05, n=10, hours_ago=hours_ago))
+    # failed run and other-entity run never appear
+    db.add(_run(suite.id, model.id, mean=0.1, std=0.05, n=10, status="failed", hours_ago=1))
+    await db.flush()
+
+    out = await BenchmarkService(db).score_history(
+        entity_kind="model", entity_id=model.id, dimension="reliability"
+    )
+    assert [p["value"] for p in out["points"]] == [0.70, 0.80, 0.90]
+    assert out["trend"] is not None
+    assert out["trend"]["slope"] > 0  # improving
+    # Unknown dimension: empty series, no trend, no error
+    other = await BenchmarkService(db).score_history(
+        entity_kind="model", entity_id=model.id, dimension="nonexistent"
+    )
+    assert other["points"] == [] and other["trend"] is None

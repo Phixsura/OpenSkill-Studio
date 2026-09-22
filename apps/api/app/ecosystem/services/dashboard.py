@@ -37,6 +37,48 @@ class DashboardService:
                 stale += 1
         return stale
 
+    async def coverage(self) -> dict:
+        """Backstage maturity bar: per-kind catalog completeness — how many
+        entities have a capability mapping, any benchmark, and any price
+        observation. Ratios expose curation debt per dimension; entities are
+        never hidden for being incomplete."""
+        from sqlalchemy import distinct
+        from sqlalchemy import select as sa_select
+
+        from app.ecosystem.models.benchmark import BenchmarkRun
+        from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+        from app.ecosystem.models.mapping import CapabilityMapping
+
+        # entity_ids present in each evidence dimension (one query each)
+        mapped_ids = {
+            row for row in await self.db.scalars(
+                sa_select(distinct(CapabilityMapping.entity_id))
+            )
+        }
+        priced_ids = {
+            row for row in await self.db.scalars(
+                sa_select(distinct(PriceObservation.entity_id))
+            )
+        }
+        benched_ids = set()
+        for run in await self.db.scalars(
+            sa_select(BenchmarkRun).where(BenchmarkRun.status == "completed").limit(1000)
+        ):
+            target_id = (run.target or {}).get("entity_id")
+            if target_id:
+                benched_ids.add(target_id)
+        out = {}
+        for kind, model in CATALOG_KIND_TO_MODEL.items():
+            ids = {row for row in await self.db.scalars(sa_select(model.id))}
+            total = len(ids)
+            out[kind] = {
+                "total": total,
+                "with_capability_mapping": len(ids & mapped_ids),
+                "with_benchmark": len(ids & benched_ids),
+                "with_pricing": len(ids & priced_ids),
+            }
+        return out
+
     async def overview(self) -> dict:
         """Ecosystem health snapshot for the operator workspace."""
         week_ago = datetime.now(UTC) - timedelta(days=7)

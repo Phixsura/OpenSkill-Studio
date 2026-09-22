@@ -38,6 +38,21 @@ export default function EcosystemOverviewPage() {
     queryKey: ["eco-dashboard"],
     queryFn: () => apiWithAuth<{ data: Overview }>("/ecosystem/dashboard"),
   });
+  const coverage = useQuery({
+    queryKey: ["eco-coverage"],
+    queryFn: () =>
+      apiWithAuth<{
+        data: Record<
+          string,
+          {
+            total: number;
+            with_capability_mapping: number;
+            with_benchmark: number;
+            with_pricing: number;
+          }
+        >;
+      }>("/ecosystem/dashboard/coverage"),
+  });
   const feed = useQuery({
     queryKey: ["eco-feed-preview"],
     queryFn: () =>
@@ -100,6 +115,43 @@ export default function EcosystemOverviewPage() {
             <StatCard label="Replacement proposals" value={overview.replacements_proposed} />
             <StatCard label="Drafts in review" value={overview.drafts_in_review} />
             <StatCard label="Active rollouts" value={overview.rollouts_active} />
+          </div>
+          <div>
+            <h2 className="mb-3 text-lg font-semibold">Catalog coverage</h2>
+            <div className="overflow-x-auto rounded-lg border shadow-sm">
+              <table className="w-full text-sm">
+                <thead className="bg-[hsl(var(--secondary))]">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium">Kind</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium">Total</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium">Capability-mapped</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium">Benchmarked</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium">Priced</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {Object.entries(coverage.data?.data ?? {}).map(([kind, c]) => (
+                    <tr key={kind} className="bg-[hsl(var(--card))]">
+                      <td className="px-4 py-2 font-medium">{kind}</td>
+                      <td className="px-4 py-2">{c.total}</td>
+                      <td className="px-4 py-2">
+                        {c.with_capability_mapping}
+                        {c.total > 0 &&
+                          ` (${Math.round((100 * c.with_capability_mapping) / c.total)}%)`}
+                      </td>
+                      <td className="px-4 py-2">
+                        {c.with_benchmark}
+                        {c.total > 0 && ` (${Math.round((100 * c.with_benchmark) / c.total)}%)`}
+                      </td>
+                      <td className="px-4 py-2">
+                        {c.with_pricing}
+                        {c.total > 0 && ` (${Math.round((100 * c.with_pricing) / c.total)}%)`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
           <div>
             <h2 className="mb-3 text-lg font-semibold">Latest changes</h2>

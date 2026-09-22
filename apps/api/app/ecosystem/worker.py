@@ -92,9 +92,23 @@ async def handle_telemetry_window(db: AsyncSession, payload: dict) -> None:
         window_end = datetime.fromisoformat(payload["window_end"])
     except (KeyError, ValueError):
         return
-    await TelemetryService(db).aggregate_workflow_runs(
+    svc = TelemetryService(db)
+    snapshots = await svc.aggregate_workflow_runs(
         window_start=window_start, window_end=window_end
     )
+    # §3.7 other direction: fresh cross-tenant production numbers are compared
+    # against the latest completed benchmark for the same target
+    from app.ecosystem.services.benchmark import latest_dimension_scores
+
+    for snap in snapshots:
+        if snap.org_id is not None:
+            continue  # only cross-tenant aggregates drive public divergence
+        scores = await latest_dimension_scores(db, snap.entity_kind, snap.entity_id)
+        if scores:
+            scores.pop("dimension_stats", None)
+            await svc.detect_divergence(
+                snap.entity_kind, snap.entity_id, benchmark_scores=scores
+            )
 
 
 @register_handler("eco.notify_watchers")

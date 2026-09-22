@@ -136,6 +136,64 @@ class PricingService:
                 best[row.unit] = candidate
         return best
 
+    async def history(
+        self, *, entity_kind: str, entity_id: str, unit: str | None = None
+    ) -> dict:
+        """AA price-over-time bar: per-unit time series of non-rejected price
+        observations (oldest first) + linear trend per unit (slope in
+        price/day, projected next). Projection is advisory, never a rate."""
+        from app.ecosystem.services.stats import linear_trend
+
+        query = (
+            select(PriceObservation)
+            .where(
+                PriceObservation.entity_kind == entity_kind,
+                PriceObservation.entity_id == entity_id,
+                PriceObservation.reconciliation_status.notin_(("rejected", "superseded")),
+            )
+            .order_by(PriceObservation.observed_at.asc())
+            .limit(500)
+        )
+        if unit:
+            if unit not in PRICE_UNITS:
+                raise AppError("VALIDATION_ERROR", f"Unknown price unit: {unit}", 422)
+            query = query.where(PriceObservation.unit == unit)
+        rows = list(await self.db.scalars(query))
+        series: dict[str, list[dict]] = {}
+        for row in rows:
+            series.setdefault(row.unit, []).append(
+                {
+                    "price": float(row.price),
+                    "currency": row.currency,
+                    "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+                    "approved": row.reconciliation_status == "approved",
+                }
+            )
+        trends: dict[str, dict | None] = {}
+        for u, points in series.items():
+            usable = [
+                p2 for p2 in points if p2["observed_at"] is not None
+            ]
+            if len(usable) >= 2:
+                base = datetime.fromisoformat(usable[0]["observed_at"])
+                xy = [
+                    (
+                        (datetime.fromisoformat(p2["observed_at"]) - base).total_seconds()
+                        / 86400.0,
+                        p2["price"],
+                    )
+                    for p2 in usable
+                ]
+                trends[u] = linear_trend(xy)
+            else:
+                trends[u] = None
+        return {
+            "entity_kind": entity_kind,
+            "entity_id": entity_id,
+            "series": series,
+            "trends": trends,
+        }
+
     async def estimate(
         self,
         *,

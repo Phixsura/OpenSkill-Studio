@@ -422,7 +422,24 @@ class BenchmarkService:
         run.finished_at = datetime.now(UTC)
         await self.db.flush()
         await self._detect_regression(run)
+        await self._check_production_divergence(run)
         return run
+
+    async def _check_production_divergence(self, run: BenchmarkRun) -> None:
+        """§3.7 both directions: a fresh benchmark is immediately compared to
+        the latest cross-tenant production telemetry for the same target."""
+        from app.ecosystem.services.telemetry import TelemetryService
+
+        target = run.target or {}
+        entity_id = target.get("entity_id")
+        entity_kind = target.get("entity_kind")
+        if not entity_id or not entity_kind:
+            return
+        scores = dict(run.dimension_scores or {})
+        scores.pop("dimension_stats", None)
+        await TelemetryService(self.db).detect_divergence(
+            entity_kind, entity_id, benchmark_scores=scores
+        )
 
     # Lower-is-better dimensions: a significant INCREASE is the regression
     _LOWER_BETTER_DIMS = frozenset({"cost_usd", "latency_ms"})
@@ -756,6 +773,68 @@ class BenchmarkService:
                 )
                 rows[i]["on_frontier"] = not dominated
         return {"dimension": dimension, "rows": rows}
+
+    async def score_history(
+        self,
+        *,
+        entity_kind: str,
+        entity_id: str,
+        dimension: str = "reliability",
+        suite_id: str | None = None,
+    ) -> dict:
+        """LMArena score-over-time bar: chronological series of one dimension
+        across an entity's completed runs (+ linear trend, advisory). Suites
+        are not mixed unless explicitly unfiltered — each point carries its
+        suite_id so the UI can facet."""
+        from app.ecosystem.services.stats import linear_trend
+
+        query = (
+            select(BenchmarkRun)
+            .where(BenchmarkRun.status == "completed")
+            .order_by(BenchmarkRun.finished_at.asc())
+            .limit(500)
+        )
+        if suite_id:
+            query = query.where(BenchmarkRun.suite_id == suite_id)
+        points = []
+        for run in await self.db.scalars(query):
+            target = run.target or {}
+            if (
+                target.get("entity_kind") != entity_kind
+                or target.get("entity_id") != entity_id
+            ):
+                continue
+            value = (run.dimension_scores or {}).get(dimension)
+            if not isinstance(value, (int, float)):
+                continue
+            points.append(
+                {
+                    "run_id": run.id,
+                    "suite_id": run.suite_id,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                    "value": float(value),
+                }
+            )
+        trend = None
+        usable = [p2 for p2 in points if p2["finished_at"]]
+        if len(usable) >= 2:
+            base = datetime.fromisoformat(usable[0]["finished_at"])
+            xy = [
+                (
+                    (datetime.fromisoformat(p2["finished_at"]) - base).total_seconds()
+                    / 86400.0,
+                    p2["value"],
+                )
+                for p2 in usable
+            ]
+            trend = linear_trend(xy)
+        return {
+            "entity_kind": entity_kind,
+            "entity_id": entity_id,
+            "dimension": dimension,
+            "points": points,
+            "trend": trend,
+        }
 
     async def compare_runs(self, run_ids: list[str]) -> dict:
         """Side-by-side dimension comparison for completed runs."""

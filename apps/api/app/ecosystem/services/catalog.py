@@ -374,6 +374,50 @@ class CatalogService:
             )
         return out
 
+    async def find_duplicates(
+        self, kind: str, *, threshold: float = 0.55, limit: int = 50
+    ) -> list[dict]:
+        """Backstage/deps.dev dedup bar: trigram self-join surfacing entity
+        PAIRS whose canonical names are suspiciously similar. Suggestion only —
+        merging stays the operator's explicit, audited action. Retired
+        entities are excluded; each pair reported once (a.id < b.id)."""
+        from sqlalchemy import text as sql_text
+
+        from app.ecosystem.services.resolution import _KIND_TABLES
+
+        table = _KIND_TABLES.get(kind)
+        if table is None:
+            raise AppError("VALIDATION_ERROR", f"Unknown entity kind: {kind}", 422)
+        if not (0.3 <= threshold <= 1.0):
+            raise AppError("VALIDATION_ERROR", "threshold must be 0.3-1.0", 422)
+        try:
+            rows = await self.db.execute(
+                sql_text(
+                    f"SELECT a.id AS id_a, a.canonical_name AS name_a, "  # noqa: S608 — table from fixed map
+                    f"a.lifecycle_status AS status_a, "
+                    f"b.id AS id_b, b.canonical_name AS name_b, "
+                    f"b.lifecycle_status AS status_b, "
+                    f"similarity(lower(a.canonical_name), lower(b.canonical_name)) AS score "
+                    f"FROM {table} a JOIN {table} b ON a.id < b.id "
+                    f"WHERE a.lifecycle_status != 'retired' "
+                    f"AND b.lifecycle_status != 'retired' "
+                    f"AND similarity(lower(a.canonical_name), lower(b.canonical_name)) >= :t "
+                    f"ORDER BY score DESC LIMIT :n"
+                ),
+                {"t": threshold, "n": limit},
+            )
+        except Exception:  # noqa: BLE001 — pg_trgm unavailable: no suggestions, never an error
+            return []
+        return [
+            {
+                "kind": kind,
+                "a": {"id": r.id_a, "canonical_name": r.name_a, "lifecycle_status": r.status_a},
+                "b": {"id": r.id_b, "canonical_name": r.name_b, "lifecycle_status": r.status_b},
+                "similarity": round(float(r.score), 3),
+            }
+            for r in rows
+        ]
+
     async def merge_entities(
         self, kind: str, source_id: str, target_id: str, *, actor_id: str | None = None
     ) -> dict:

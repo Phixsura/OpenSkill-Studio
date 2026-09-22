@@ -143,3 +143,17 @@ async def availability_uptime(
     )
     return {"data": out}
 
+@router.get("/history", response_model=DataResponse[dict])
+async def price_history(
+    entity_kind: str = Query(...),
+    entity_id: str = Query(...),
+    unit: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Per-unit price time series + linear trend (advisory projection)."""
+    out = await PricingService(db).history(
+        entity_kind=entity_kind, entity_id=entity_id, unit=unit
+    )
+    return {"data": out}
+

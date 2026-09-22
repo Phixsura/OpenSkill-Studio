@@ -22,6 +22,15 @@ async def dashboard_overview(
     return {"data": await DashboardService(db).overview()}
 
 
+@router.get("/dashboard/coverage", response_model=DataResponse[dict])
+async def catalog_coverage(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Per-kind catalog completeness (capability/benchmark/pricing coverage)."""
+    return {"data": await DashboardService(db).coverage()}
+
+
 @router.get("/dashboard/change-feed", response_model=DataResponse[list[ChangeEventResponse]])
 async def change_feed(
     severity: str | None = None,

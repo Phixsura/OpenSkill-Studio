@@ -123,3 +123,33 @@ async def test_compare_entities_returns_facts_prices_and_uniform_404(db):
     with pytest.raises(AppError) as exc:
         await CatalogService(db).compare_entities("model", [a.id, "0" * 26])
     assert exc.value.status_code == 404
+
+async def test_price_history_series_and_trend(db):
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.services.pricing import PricingService
+
+    model = await _mk_model(db, "TrendGen")
+    base = datetime.now(UTC) - timedelta(days=10)
+    for day, price in [(0, 10.0), (5, 8.0), (10, 6.0)]:
+        row = await _mk_price(db, model.id, "image", price)
+        row.observed_at = base + timedelta(days=day)
+    rejected = await _mk_price(db, model.id, "image", 999.0, status="rejected")
+    rejected.observed_at = base + timedelta(days=11)
+    await db.flush()
+
+    out = await PricingService(db).history(entity_kind="model", entity_id=model.id)
+    points = out["series"]["image"]
+    assert [p["price"] for p in points] == [10.0, 8.0, 6.0]  # oldest first, rejected excluded
+    trend = out["trends"]["image"]
+    assert trend is not None
+    assert trend["slope"] < 0  # falling price
+    # Unknown unit rejected; unit filter works
+    with pytest.raises(AppError):
+        await PricingService(db).history(
+            entity_kind="model", entity_id=model.id, unit="gpu_hour"
+        )
+    only = await PricingService(db).history(
+        entity_kind="model", entity_id=model.id, unit="token_input"
+    )
+    assert only["series"] == {}
