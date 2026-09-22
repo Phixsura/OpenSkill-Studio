@@ -35,6 +35,7 @@ interface Draft {
   draft_type: string;
   title: string;
   status: string;
+  payload: Record<string, unknown> | null;
   validation: { valid: boolean; errors: string[] };
   published_ref: string | null;
   created_at: string;
@@ -57,6 +58,7 @@ const TABS = ["Impact", "Replacements", "Drafts", "Rollouts", "Graph"] as const;
 export default function ComponentsPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<(typeof TABS)[number]>("Impact");
+  const [payloadOpen, setPayloadOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [graphKind, setGraphKind] = useState("model_version");
@@ -276,6 +278,12 @@ export default function ComponentsPage() {
                   </div>
                 </div>
                 <div className="space-x-2">
+                  <button
+                    onClick={() => setPayloadOpen(payloadOpen === d.id ? null : d.id)}
+                    className="rounded-md border px-3 py-1 text-xs"
+                  >
+                    {payloadOpen === d.id ? "Hide payload" : "Review payload"}
+                  </button>
                   {d.status === "draft" && (
                     <button
                       onClick={() => draftAction.mutate({ id: d.id, action: "submit-review" })}
@@ -309,6 +317,11 @@ export default function ComponentsPage() {
                     </button>
                   )}
                 </div>
+                {payloadOpen === d.id && (
+                  <pre className="mt-2 w-full overflow-x-auto rounded-md border bg-[hsl(var(--background))] p-3 font-mono text-xs">
+                    {JSON.stringify(d.payload ?? {}, null, 2)}
+                  </pre>
+                )}
               </div>
             ))}
           </div>

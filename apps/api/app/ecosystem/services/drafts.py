@@ -263,6 +263,12 @@ class DraftService:
             raise AppError("ECO_INVALID_TRANSITION", "Only editable while draft/in_review", 409)
         draft.payload = payload
         draft.validation = self._validate_payload(draft.draft_type, payload)
+        # GitHub "new commits dismiss review" semantics: editing while
+        # in_review invalidates the review basis — the draft drops back to
+        # draft status so it must be re-submitted and re-read. Closes the
+        # TOCTOU window between a reviewer reading and approving.
+        if draft.status == "in_review":
+            draft.status = "draft"
         await self.db.flush()
         return draft
 

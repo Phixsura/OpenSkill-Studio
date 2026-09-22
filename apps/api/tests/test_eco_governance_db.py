@@ -263,3 +263,36 @@ async def test_audit_csv_defuses_formula_injection(db):
     assert resp.media_type.startswith("text/csv")
     assert "'=HYPERLINK" in body  # formula defused with leading apostrophe
     assert body.splitlines()[0].startswith("id,actor_user_id,action")
+
+async def test_editing_in_review_draft_dismisses_review(db):
+    """GitHub 'new commits dismiss review' semantics: an in_review payload
+    edit drops the draft back to draft status — closing the TOCTOU window
+    between a reviewer reading and a second admin approving."""
+    creator = await _mk_user(db, "admin")
+    second_admin = await _mk_user(db, "admin")
+    svc = DraftService(db)
+    draft = await svc.create(
+        draft_type="skill_pack_update", title="toctou",
+        payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
+        created_by=creator.id,
+    )
+    await svc.transition(draft.id, to_status="in_review", actor_id=creator.id)
+
+    # Creator swaps the payload while it sits in review
+    draft = await svc.update_payload(
+        draft.id,
+        payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "SWAPPED"}]},
+    )
+    assert draft.status == "draft"  # review basis invalidated
+
+    # Approval of the swapped content now requires a fresh submit + review
+    with pytest.raises(AppError) as exc:
+        await svc.transition(draft.id, to_status="approved", actor_id=second_admin.id)
+    assert exc.value.code in ("ECO_INVALID_TRANSITION", "ECO_DRAFT_NOT_APPROVED")
+    await svc.transition(draft.id, to_status="in_review", actor_id=creator.id)
+    draft = await svc.transition(draft.id, to_status="approved", actor_id=second_admin.id)
+    assert draft.status == "approved"
+    # Approved drafts are immutable
+    with pytest.raises(AppError):
+        await svc.update_payload(draft.id, payload={"target_pack_id": "P" * 26,
+                                                    "suggestions": [{"kind": "late"}]})

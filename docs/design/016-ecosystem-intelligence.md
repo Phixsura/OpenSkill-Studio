@@ -905,3 +905,14 @@ carries a semantic `aria-label`, icon-only buttons (mute toggle) and bare
 checkboxes (run-comparison, robots-compliance) have accessible names. An a11y
 smoke suite renders all eight interactive pages and fails on ANY control
 without an accessible name — new unlabeled controls can't ship.
+
+## 44. Review integrity (2026-09-22, round 38)
+
+Two governance holes closed:
+
+- **Blind approval**: the Drafts tab now has a "Review payload" expander —
+  reviewers see the exact JSON they are approving, in place.
+- **TOCTOU swap**: editing a draft while `in_review` drops it back to `draft`
+  (GitHub "new commits dismiss review" semantics) — the window between a
+  reviewer reading and a second admin approving can no longer be exploited to
+  swap content. Approved drafts remain immutable.
