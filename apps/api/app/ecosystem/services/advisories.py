@@ -220,7 +220,21 @@ class AdvisoryService:
         out: list[dict] = []
         for kind in kinds:
             model = CATALOG_KIND_TO_MODEL[kind]
-            rows = await self.db.scalars(select(model).limit(2000))
+            # SQL-side prefilter: name prefix match OR alias containment —
+            # never a full-table scan; matching semantics unchanged
+            from sqlalchemy import Text as _Text
+            from sqlalchemy import cast, func, or_
+
+            rows = await self.db.scalars(
+                select(model)
+                .where(
+                    or_(
+                        func.lower(model.canonical_name).like(f"{ref_lower}%"),
+                        func.lower(cast(model.aliases, _Text)).like(f"%{ref_lower}%"),
+                    )
+                )
+                .limit(2000)
+            )
             for entity in rows:
                 name_hit = entity.canonical_name.lower() == ref_lower or ref_lower in [
                     str(a).lower() for a in (entity.aliases or [])

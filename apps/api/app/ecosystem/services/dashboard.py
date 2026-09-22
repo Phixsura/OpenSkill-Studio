@@ -68,15 +68,27 @@ class DashboardService:
             .order_by(func.count(EcosystemObservation.id).desc())
             .limit(limit * 3)
         )
-        out = []
-        for kind, entity_id, count, sources in rows:
-            prev = await self.db.scalar(
-                select(func.count(EcosystemObservation.id)).where(
-                    EcosystemObservation.canonical_entity_id == entity_id,
+        current = list(rows)
+        # ONE grouped query for all previous-window counts (no N+1)
+        prev_counts: dict[str, int] = {}
+        entity_ids = [entity_id for _, entity_id, _, _ in current]
+        if entity_ids:
+            prev_rows = await self.db.execute(
+                select(
+                    EcosystemObservation.canonical_entity_id,
+                    func.count(EcosystemObservation.id),
+                )
+                .where(
+                    EcosystemObservation.canonical_entity_id.in_(entity_ids),
                     EcosystemObservation.observed_at >= prev_start,
                     EcosystemObservation.observed_at < window_start,
                 )
-            ) or 0
+                .group_by(EcosystemObservation.canonical_entity_id)
+            )
+            prev_counts = {entity_id: int(n) for entity_id, n in prev_rows}
+        out = []
+        for kind, entity_id, count, sources in current:
+            prev = prev_counts.get(entity_id, 0)
             name = entity_id
             model = CATALOG_KIND_TO_MODEL.get(kind)
             if model is not None:

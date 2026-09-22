@@ -862,3 +862,22 @@ tests never exercise dependency wiring. New suite pins:
 - API-surface stability: 29 core (method, path) pairs asserted against the
   OpenAPI document — the surface may only GROW; a missing pair fails the
   suite as an undeliberate breaking change.
+
+## 40. Query budgets (2026-09-22, round 34)
+
+Scale-readiness bar: eliminated the two remaining O(n)-query paths —
+trending's per-row previous-window count is now ONE grouped query, and
+advisory affected-entity resolution prefilters in SQL (name-prefix LIKE +
+lowered-alias LIKE; the exact Python recheck is unchanged, so semantics are
+identical — the prefilter can only narrow the scan, never the result).
+Guard tests count real SQL statements via a cursor-execute listener and fail
+on budget breach: trending ≤ 3+rows, overview ≤ 25, coverage ≤ 15 — an
+O(rows) loop reintroduced anywhere in these paths fails CI.
+
+## 41. Alert runbook (2026-09-22, round 35)
+
+Ops deliverable: `docs/ops/ecosystem-alerts.md` — ready-to-import Prometheus
+alert rules over the `/ops/metrics` gauges (staleness, outbox backlog,
+security-critical, curation debt, stuck benchmarks, impact SLA backstop,
+injection-flag rot), each with a runbook line mapping to an in-product
+surface; no alert requires shell access. Includes the full metric inventory.
