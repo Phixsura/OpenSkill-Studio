@@ -36,7 +36,12 @@ async def handle_sync_source(db: AsyncSession, payload: dict) -> None:
         await SyncService(db).run_sync(source_id)
     except AppError as exc:
         # Paused/rate-limited sources are expected states, not worker failures
-        if exc.code in ("ECO_SOURCE_PAUSED", "ECO_RATE_LIMITED", "NOT_FOUND"):
+        if exc.code in (
+            "ECO_SOURCE_PAUSED",
+            "ECO_RATE_LIMITED",
+            "ECO_SYNC_IN_PROGRESS",
+            "NOT_FOUND",
+        ):
             log.info("eco_sync_skipped", source_id=source_id, code=exc.code)
             return
         raise
@@ -199,6 +204,60 @@ async def sweep_due_sources(db: AsyncSession) -> int:
             enqueued += 1
     await db.flush()
     return enqueued
+
+
+async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
+    """§16 retention: bounded operational history without losing evidence.
+
+    - Availability STATUS probes: raw rows older than 90 days are pruned,
+      keeping each entity's latest row. Status FLIPS are permanently preserved
+      as append-only availability_changed observations + change events, so no
+      transition history is lost — only redundant "still fine" samples.
+    - Source sync-run audit rows: pruned after 180 days (observations they
+      produced are append-only and permanent; sync_run_id is SET NULL by FK).
+    The observation/change ledgers are NEVER pruned (Part B: append-only).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete, func
+
+    from app.ecosystem.models.mapping import AvailabilityRecord
+    from app.ecosystem.models.source import SourceSyncRun
+
+    now = now or datetime.now(UTC)
+    status_cutoff = now - timedelta(days=90)
+    latest_per_entity = (
+        select(
+            AvailabilityRecord.entity_kind,
+            AvailabilityRecord.entity_id,
+            func.max(AvailabilityRecord.observed_at).label("latest"),
+        )
+        .where(AvailabilityRecord.record_type == "status")
+        .group_by(AvailabilityRecord.entity_kind, AvailabilityRecord.entity_id)
+        .subquery()
+    )
+    stale_status = await db.execute(
+        delete(AvailabilityRecord).where(
+            AvailabilityRecord.record_type == "status",
+            AvailabilityRecord.observed_at < status_cutoff,
+            ~select(latest_per_entity.c.latest)
+            .where(
+                latest_per_entity.c.entity_kind == AvailabilityRecord.entity_kind,
+                latest_per_entity.c.entity_id == AvailabilityRecord.entity_id,
+                latest_per_entity.c.latest == AvailabilityRecord.observed_at,
+            )
+            .exists(),
+        )
+    )
+    sync_cutoff = now - timedelta(days=180)
+    old_runs = await db.execute(
+        delete(SourceSyncRun).where(SourceSyncRun.started_at < sync_cutoff)
+    )
+    await db.flush()
+    return {
+        "availability_status_pruned": stale_status.rowcount or 0,
+        "sync_runs_pruned": old_runs.rowcount or 0,
+    }
 
 
 @register_handler("eco.check_availability")

@@ -333,6 +333,21 @@ class BenchmarkService:
             raise AppError("NOT_FOUND", "Run not found", 404)
         if run.status not in ("queued",):
             raise AppError("ECO_INVALID_TRANSITION", f"Run is {run.status}, not queued", 409)
+        # §16 fencing (workflow-runtime discipline): claim the run with a
+        # conditional UPDATE so two workers can never double-execute (and
+        # double-bill) the same run — the loser sees rowcount 0 and walks away.
+        from sqlalchemy import update
+
+        claim = await self.db.execute(
+            update(BenchmarkRun)
+            .where(BenchmarkRun.id == run_id, BenchmarkRun.status == "queued")
+            .values(status="running", started_at=datetime.now(UTC))
+        )
+        if not claim.rowcount:
+            raise AppError(
+                "ECO_INVALID_TRANSITION", "Run was claimed by another worker", 409
+            )
+        await self.db.flush()
         suite = await self.get_suite(run.suite_id)
         cases = await self.list_cases(run.suite_id)
         if not cases:
@@ -350,9 +365,7 @@ class BenchmarkService:
             run.finished_at = datetime.now(UTC)
             await self.db.flush()
             return run
-        run.status = "running"
-        run.started_at = datetime.now(UTC)
-        await self.db.flush()
+        run.status = "running"  # keep the in-memory object aligned with the claim
         executor = self._resolve_executor(run)
 
         total_cost = Decimal("0")

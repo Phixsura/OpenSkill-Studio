@@ -21,10 +21,27 @@ class DashboardService:
     async def _count(self, query) -> int:
         return (await self.db.scalar(select(func.count()).select_from(query.subquery()))) or 0
 
+    async def _stale_source_count(self) -> int:
+        """§16 (StatusGator): a feed that stopped succeeding is itself an
+        incident — active sources overdue by 3× their sync interval."""
+        now = datetime.now(UTC)
+        rows = await self.db.scalars(
+            select(EcosystemSource).where(EcosystemSource.status == "active")
+        )
+        stale = 0
+        for source in rows:
+            anchor = source.last_success_at or source.created_at
+            if anchor and (now - anchor) > timedelta(
+                minutes=3 * source.sync_interval_minutes
+            ):
+                stale += 1
+        return stale
+
     async def overview(self) -> dict:
         """Ecosystem health snapshot for the operator workspace."""
         week_ago = datetime.now(UTC) - timedelta(days=7)
         return {
+            "sources_stale": await self._stale_source_count(),
             "sources": {
                 "active": await self._count(
                     select(EcosystemSource.id).where(EcosystemSource.status == "active")

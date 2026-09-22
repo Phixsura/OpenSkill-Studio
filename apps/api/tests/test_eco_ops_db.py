@@ -1,0 +1,236 @@
+"""Round-6 distributed-correctness & ops-hygiene tests (ADR-016 §16).
+
+Benchmark run claim fencing, source-sync row-level mutual exclusion,
+availability/sync-run retention pruning (flips preserved), stale-source
+monitoring, distributed rate-limiter wiring.
+"""
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+from ulid import ULID
+
+from app.core.database import AsyncSessionLocal
+from app.ecosystem.models.mapping import AvailabilityRecord
+from app.ecosystem.models.observation import EcosystemObservation
+from app.ecosystem.models.source import SourceSyncRun
+from app.ecosystem.services.benchmark import BenchmarkService
+from app.ecosystem.services.dashboard import DashboardService
+from app.ecosystem.services.pricing import AvailabilityService
+from app.ecosystem.services.sync import SyncService
+from app.ecosystem.worker import prune_ecosystem_history
+from app.exceptions import AppError
+from tests.test_eco_services_db import (
+    _catalog_payload,
+    _fetcher_for,
+    _mk_model_version,
+    _mk_source,
+    _mk_suite_with_cases,
+    _mk_user,
+)
+
+
+@pytest.fixture
+async def db():
+    from app.core.database import engine
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()
+    await engine.dispose()
+
+
+# ── Benchmark run claim fencing ─────────────────────────────────────
+
+
+async def test_run_claim_fencing_blocks_second_worker(db):
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    run = await bench.create_run(
+        suite.id, target={"entity_kind": "model_version", "entity_id": "F" * 26}
+    )
+    # Simulate a concurrent worker having claimed the run between the status
+    # read and the claim UPDATE: flip the row out from under this executor.
+    from sqlalchemy import update
+
+    from app.ecosystem.models.benchmark import BenchmarkRun
+
+    original_execute = db.execute
+    fenced = {"done": False}
+
+    async def racing_execute(stmt, *args, **kwargs):
+        # First claim attempt loses the race: another worker already flipped it
+        if (
+            not fenced["done"]
+            and getattr(stmt, "is_update", False)
+            and stmt.table.name == "eco_benchmark_runs"
+        ):
+            fenced["done"] = True
+            await original_execute(
+                update(BenchmarkRun)
+                .where(BenchmarkRun.id == run.id)
+                .values(status="running")
+            )
+        return await original_execute(stmt, *args, **kwargs)
+
+    db.execute = racing_execute
+    try:
+        with pytest.raises(AppError) as exc:
+            await bench.execute_run(run.id)
+    finally:
+        db.execute = original_execute
+    assert exc.value.code == "ECO_INVALID_TRANSITION"
+    assert "claimed by another worker" in exc.value.message
+    # No results were produced by the losing worker
+    assert await bench.list_results(run.id) == []
+
+
+async def test_run_executes_normally_without_race(db):
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    run = await bench.create_run(
+        suite.id, target={"entity_kind": "model_version", "entity_id": "G" * 26}
+    )
+    run = await bench.execute_run(run.id)
+    assert run.status == "completed"
+
+
+# ── Source sync mutual exclusion ────────────────────────────────────
+
+
+async def test_concurrent_sync_second_session_skips(db):
+    source = await _mk_source(db)
+    source_id = source.id
+    # A second SESSION must see the source → commit it (cleaned up below)
+    await db.commit()
+    body = _catalog_payload([{"id": f"mx-{ULID()}", "name": "MX", "version": "1"}])
+    from sqlalchemy import select as sa_select
+
+    from app.ecosystem.models.source import EcosystemSource
+
+    try:
+        # Session A takes the row lock (a sync in flight)
+        await db.execute(
+            sa_select(EcosystemSource.id)
+            .where(EcosystemSource.id == source_id)
+            .with_for_update()
+        )
+        # Session B (a second worker) must skip immediately — not block,
+        # not duplicate the fetch
+        async with AsyncSessionLocal() as other:
+            with pytest.raises(AppError) as exc:
+                await SyncService(other, fetcher=_fetcher_for(body)).run_sync(source_id)
+            assert exc.value.code == "ECO_SYNC_IN_PROGRESS"
+            await other.rollback()
+        # Same-session (same transaction) re-entry works — lock is reentrant
+        run = await SyncService(db, fetcher=_fetcher_for(body)).run_sync(source_id)
+        assert run.status == "success"
+        await db.rollback()  # discard the sync's rows before cleanup
+    finally:
+        from sqlalchemy import delete
+
+        from app.ecosystem.models.observation import ChangeEvent
+        from app.ecosystem.models.source import SourceSyncRun
+
+        obs_ids = sa_select(EcosystemObservation.id).where(
+            EcosystemObservation.source_id == source_id
+        )
+        await db.execute(delete(ChangeEvent).where(ChangeEvent.observation_id.in_(obs_ids)))
+        await db.execute(
+            delete(EcosystemObservation).where(EcosystemObservation.source_id == source_id)
+        )
+        await db.execute(delete(SourceSyncRun).where(SourceSyncRun.source_id == source_id))
+        await db.execute(delete(EcosystemSource).where(EcosystemSource.id == source_id))
+        await db.commit()
+
+
+# ── Retention pruning ───────────────────────────────────────────────
+
+
+async def test_retention_prunes_old_probes_keeps_latest_and_flip_evidence(db):
+    version = await _mk_model_version(db, f"Ret{str(ULID())[-4:]}")
+    svc = AvailabilityService(db)
+    old = datetime.now(UTC) - timedelta(days=120)
+    # Three old redundant probes + one fresh
+    for i in range(3):
+        record = await svc.record(
+            entity_kind="model_version", entity_id=version.id,
+            record_type="status", value={"status": "operational"},
+        )
+        record.observed_at = old + timedelta(hours=i)
+    fresh = await svc.record(
+        entity_kind="model_version", entity_id=version.id,
+        record_type="status", value={"status": "operational"},
+    )
+    # An old NON-status record must never be touched
+    rate = await svc.record(
+        entity_kind="model_version", entity_id=version.id,
+        record_type="rate_limit", value={"requests_per_minute": 60},
+    )
+    rate.observed_at = old
+    await db.flush()
+    pruned = await prune_ecosystem_history(db)
+    assert pruned["availability_status_pruned"] == 3
+    remaining = list(
+        await db.scalars(
+            select(AvailabilityRecord).where(AvailabilityRecord.entity_id == version.id)
+        )
+    )
+    kinds = sorted(r.record_type for r in remaining)
+    assert kinds == ["rate_limit", "status"]
+    assert any(r.id == fresh.id for r in remaining)
+
+
+async def test_retention_prunes_old_sync_runs_only(db):
+    source = await _mk_source(db)
+    body = _catalog_payload([{"id": f"rr-{ULID()}", "name": "RR", "version": "1"}])
+    run = await SyncService(db, fetcher=_fetcher_for(body)).run_sync(source.id)
+    ancient = SourceSyncRun(
+        source_id=source.id, status="success", parser_version="1.0",
+    )
+    db.add(ancient)
+    await db.flush()
+    ancient.started_at = datetime.now(UTC) - timedelta(days=200)
+    await db.flush()
+    pruned = await prune_ecosystem_history(db)
+    assert pruned["sync_runs_pruned"] == 1
+    # Recent run + its append-only observation survive
+    assert await db.get(SourceSyncRun, run.id) is not None
+    obs = await db.scalar(
+        select(EcosystemObservation).where(EcosystemObservation.source_id == source.id)
+    )
+    assert obs is not None
+
+
+# ── Stale source monitoring ─────────────────────────────────────────
+
+
+async def test_dashboard_counts_stale_sources(db):
+    healthy = await _mk_source(db, name=f"h-{ULID()}", sync_interval_minutes=60)
+    healthy.last_success_at = datetime.now(UTC) - timedelta(minutes=30)
+    stale = await _mk_source(db, name=f"st-{ULID()}", sync_interval_minutes=60)
+    stale.last_success_at = datetime.now(UTC) - timedelta(hours=5)  # > 3× interval
+    paused = await _mk_source(db, name=f"p-{ULID()}", sync_interval_minutes=60)
+    paused.status = "paused"
+    paused.last_success_at = datetime.now(UTC) - timedelta(days=9)
+    await db.flush()
+    overview = await DashboardService(db).overview()
+    assert overview["sources_stale"] >= 1  # stale counted; paused excluded
+
+
+# ── Distributed rate limiter wiring ─────────────────────────────────
+
+
+def test_eco_router_uses_redis_backed_limiter():
+    import inspect
+
+    import app.ecosystem.api as eco_api
+
+    src = inspect.getsource(eco_api)
+    assert "from app.core.rate_limit import rate_limit" in src
+    assert "rate_limit(120, 60)" in src
+    assert "rate_limit_talent" not in src  # in-memory limiter fully replaced

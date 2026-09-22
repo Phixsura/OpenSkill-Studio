@@ -115,6 +115,20 @@ class SyncService:
         source = await self.db.get(EcosystemSource, source_id)
         if not source:
             raise AppError("NOT_FOUND", "Source not found", 404)
+        # §16: row-level mutual exclusion — a second worker syncing the same
+        # source concurrently skips immediately (NOWAIT) instead of doing a
+        # duplicate fetch. Same-transaction re-entry (tests, retries) is a
+        # no-op because the lock is already held by this session.
+        try:
+            await self.db.execute(
+                select(EcosystemSource.id)
+                .where(EcosystemSource.id == source_id)
+                .with_for_update(nowait=True)
+            )
+        except Exception as exc:  # noqa: BLE001 — lock held elsewhere
+            raise AppError(
+                "ECO_SYNC_IN_PROGRESS", "Another worker is syncing this source", 409
+            ) from exc
         if source.status == "paused":
             raise AppError("ECO_SOURCE_PAUSED", "Source is paused", 409)
         if source.status == "archived":

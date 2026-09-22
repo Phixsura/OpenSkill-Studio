@@ -457,6 +457,93 @@ export default function ComponentsPage() {
               Inspect node
             </button>
           </div>
+          {graphNode && graph.data?.data && (
+            <svg
+              viewBox="0 0 900 360"
+              className="w-full rounded-lg border bg-[hsl(var(--card))] shadow-sm"
+              role="img"
+              aria-label="Dependency graph"
+            >
+              {(() => {
+                const deps = graph.data.data.depends_on.slice(0, 8);
+                const dents = graph.data.data.dependents.slice(0, 8);
+                const yFor = (i: number, n: number) =>
+                  n <= 1 ? 180 : 40 + (i * 300) / Math.max(n - 1, 1);
+                const short = (k: string, id: string) => `${k}:${id.slice(0, 8)}…`;
+                return (
+                  <g fontSize="11" fontFamily="ui-monospace, monospace">
+                    {deps.map((e, i) => (
+                      <g key={e.id}>
+                        <line
+                          x1={230}
+                          y1={yFor(i, deps.length)}
+                          x2={430}
+                          y2={180}
+                          stroke="currentColor"
+                          strokeOpacity="0.35"
+                        />
+                        <rect
+                          x={20}
+                          y={yFor(i, deps.length) - 14}
+                          width={210}
+                          height={28}
+                          rx={6}
+                          fill="hsl(210 40% 96%)"
+                          stroke="currentColor"
+                          strokeOpacity="0.25"
+                        />
+                        <text x={30} y={yFor(i, deps.length) + 4}>
+                          {short(e.to_kind, e.to_id)}
+                        </text>
+                      </g>
+                    ))}
+                    {dents.map((e, i) => (
+                      <g key={e.id}>
+                        <line
+                          x1={470}
+                          y1={180}
+                          x2={670}
+                          y2={yFor(i, dents.length)}
+                          stroke="currentColor"
+                          strokeOpacity="0.35"
+                        />
+                        <rect
+                          x={670}
+                          y={yFor(i, dents.length) - 14}
+                          width={210}
+                          height={28}
+                          rx={6}
+                          fill="hsl(38 92% 95%)"
+                          stroke="currentColor"
+                          strokeOpacity="0.25"
+                        />
+                        <text x={680} y={yFor(i, dents.length) + 4}>
+                          {short(e.from_kind, e.from_id)}
+                        </text>
+                      </g>
+                    ))}
+                    <rect
+                      x={330}
+                      y={162}
+                      width={240}
+                      height={36}
+                      rx={8}
+                      fill="hsl(222 47% 90%)"
+                      stroke="currentColor"
+                      strokeOpacity="0.5"
+                    />
+                    <text x={342} y={184} fontWeight="bold">
+                      {short(graphNode.kind, graphNode.id)}
+                    </text>
+                    <text x={20} y={352} fontSize="10" opacity="0.6">
+                      ← depends on ({graph.data.data.depends_on.length}) · dependents (
+                      {graph.data.data.dependents.length}) →
+                    </text>
+                  </g>
+                );
+              })()}
+            </svg>
+          )}
           {graphNode && graph.data?.data ? (
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">

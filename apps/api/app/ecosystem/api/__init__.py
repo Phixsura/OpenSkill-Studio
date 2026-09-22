@@ -8,6 +8,7 @@ sliding-window limiter — generic despite its talent-era module path).
 
 from fastapi import APIRouter, Depends
 
+from app.core.rate_limit import rate_limit
 from app.ecosystem.api.benchmarks import router as benchmarks_router
 from app.ecosystem.api.catalog import router as catalog_router
 from app.ecosystem.api.dashboard import router as dashboard_router
@@ -20,7 +21,6 @@ from app.ecosystem.api.rollouts import router as rollouts_router
 from app.ecosystem.api.sources import router as sources_router
 from app.ecosystem.api.watchlists import router as watchlists_router
 from app.talent.api.etag import ETagRoute
-from app.talent.api.rate_limit import rate_limit_talent as rate_limit_ecosystem
 
 # Conditional-GET support on the cacheable, read-heavy surfaces
 catalog_router.route_class = ETagRoute
@@ -29,7 +29,10 @@ dashboard_router.route_class = ETagRoute
 pricing_router.route_class = ETagRoute
 benchmarks_router.route_class = ETagRoute
 
-ecosystem_router = APIRouter(dependencies=[Depends(rate_limit_ecosystem)])
+# §16: DISTRIBUTED (Redis sliding-window) rate limiting — the in-memory
+# limiter counts per process; multi-replica deployments need shared buckets.
+# Keyed on authenticated user (falls back to real client IP), route template.
+ecosystem_router = APIRouter(dependencies=[Depends(rate_limit(120, 60))])
 ecosystem_router.include_router(sources_router)
 ecosystem_router.include_router(observations_router)
 ecosystem_router.include_router(catalog_router)
