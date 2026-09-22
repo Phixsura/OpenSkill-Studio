@@ -233,6 +233,10 @@ class RolloutService:
     ) -> RolloutPlan:
         """Explicit human promote/reject/abort."""
         plan = await self.get(plan_id)
+        # Row lock: concurrent decisions serialize — the loser re-reads a
+        # terminal status and is refused, so the promotion side effect
+        # (recommended_replacement edge) is recorded exactly once.
+        await self.db.refresh(plan, with_for_update=True)
         if decision == "promote":
             if plan.status in ("draft", "running"):
                 raise AppError(

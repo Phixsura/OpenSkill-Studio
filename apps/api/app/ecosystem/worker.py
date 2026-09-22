@@ -237,6 +237,36 @@ async def sweep_due_sources(db: AsyncSession) -> int:
     return enqueued
 
 
+async def sweep_stuck_runs(db: AsyncSession, *, max_running_hours: int = 4) -> int:
+    """A worker that dies mid-claim leaves a run in `running` forever — the
+    fence prevents re-execution but nothing closes the run. Mark runs stuck
+    for > max_running_hours as failed (ECO_RUN_STUCK) so the queue metric
+    drains and the operator sees an actionable state instead of a zombie.
+    Conditional UPDATE: a run that completes concurrently is left alone."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.ecosystem.models.benchmark import BenchmarkRun
+
+    cutoff = datetime.now(UTC) - timedelta(hours=max_running_hours)
+    result = await db.execute(
+        update(BenchmarkRun)
+        .where(
+            BenchmarkRun.status == "running",
+            BenchmarkRun.started_at.isnot(None),
+            BenchmarkRun.started_at < cutoff,
+        )
+        .values(
+            status="failed",
+            error="ECO_RUN_STUCK: worker died mid-run; results partial, safe to re-queue",
+            finished_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    return result.rowcount or 0
+
+
 async def sweep_rollout_evaluations(db: AsyncSession) -> dict:
     """LaunchDarkly auto-check bar: re-evaluate every running/evaluating
     rollout plan on a schedule so guardrail breaches surface without an

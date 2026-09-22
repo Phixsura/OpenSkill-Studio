@@ -940,3 +940,15 @@ Concurrency sweep over the remaining unguarded read-modify-writes:
 - **advisory audit**: status transitions now write `eco.advisory_status` to
   the immutable commercial audit trail.
   Proven by two-session race tests (opposite merges, double approval).
+
+## 47. Rollout decide fence + zombie-run sweep (2026-09-22, round 41)
+
+- **decide race**: RolloutService.decide takes a row lock — concurrent
+  promotes serialize; the loser re-reads a terminal status and is refused, so
+  the `recommended_replacement` edge is recorded exactly once (two-session
+  race test).
+- **zombie runs**: cron `eco_stuck_runs` (hourly) closes runs stuck in
+  `running` for >4h as failed (`ECO_RUN_STUCK`, safe to re-queue) via a
+  conditional UPDATE — a concurrently-completing run is left alone; recent
+  runs untouched; idempotent. The claim fence already prevented re-execution;
+  this drains the queue metric and gives the operator an actionable state.
