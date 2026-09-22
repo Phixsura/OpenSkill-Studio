@@ -133,7 +133,10 @@ async def test_concurrent_quick_watch_creates_one_default_list(db):
             )
             await session.commit()
 
-    await asyncio.gather(watch(), watch())
+    try:
+        await asyncio.gather(watch(), watch())
+    finally:
+        await _retire_models(["RaceWatch"])
     async with AsyncSessionLocal() as session:
         lists = list(await session.scalars(
             select(Watchlist).where(
@@ -182,3 +185,24 @@ async def test_merge_repoints_watchers_to_survivor(db):
     # nothing left pointing at the retired duplicate
     stale = await db.scalar(select(WatchItem.id).where(WatchItem.target_id == dup.id))
     assert stale is None
+
+async def _retire_models(prefixes):
+    """Committed fixture models must not pollute other tests (duplicates scan,
+    candidate pools): retire them on exit — retired rows are excluded from
+    both surfaces."""
+    from sqlalchemy import or_
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.catalog import AIModel as _AIModel
+
+    async with AsyncSessionLocal() as session:
+        rows = await session.scalars(
+            _select(_AIModel).where(
+                or_(*[_AIModel.canonical_name.like(f"{p}%") for p in prefixes]),
+                _AIModel.lifecycle_status != "retired",
+            )
+        )
+        for m in rows:
+            m.lifecycle_status = "retired"
+        await session.commit()

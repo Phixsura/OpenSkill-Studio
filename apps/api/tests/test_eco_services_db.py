@@ -916,3 +916,66 @@ async def test_retired_entities_never_recommended(db):
     assert good.id in {c.candidate_id for c in ranked}
     # Retired is history — appears in NEITHER channel
     assert retired.id not in all_ids
+
+async def test_merge_repoints_change_history_and_pending_resolutions(db):
+    from app.ecosystem.models.catalog import ResolutionCandidate
+    from app.ecosystem.models.observation import ChangeEvent
+    from app.ecosystem.services.catalog import CatalogService
+
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:6]
+    dup = AIModel(canonical_name=f"HistDup-{tag}", slug=f"hd-{tag}")
+    survivor = AIModel(canonical_name=f"HistSurv-{tag}", slug=f"hs-{tag}")
+    db.add_all([dup, survivor])
+    await db.flush()
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        canonical_entity_kind="model", canonical_entity_id=dup.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="price", field="pricing",
+        severity="info", entity_kind="model", canonical_entity_id=dup.id,
+    )
+    pending = ResolutionCandidate(
+        observation_id=obs.id, entity_kind="model",
+        candidate_entity_id=dup.id, match_method="similarity",
+        confidence=0.5, status="pending",
+    )
+    decided = ResolutionCandidate(
+        observation_id=obs.id, entity_kind="model",
+        candidate_entity_id=dup.id, match_method="similarity",
+        confidence=0.5, status="confirmed",
+    )
+    db.add_all([change, pending, decided])
+    await db.flush()
+
+    await CatalogService(db).merge_entities("model", dup.id, survivor.id, actor_id=admin.id)
+    await db.refresh(change)
+    await db.refresh(pending)
+    await db.refresh(decided)
+    assert change.canonical_entity_id == survivor.id  # history follows survivor
+    assert pending.candidate_entity_id == survivor.id  # pending re-pointed
+    assert decided.candidate_entity_id == dup.id  # decided rows are history
+
+
+async def test_rollout_refuses_stale_retired_candidate(db):
+    from app.ecosystem.services.rollout import RolloutService
+
+    deprecated = await _mk_model_version(db, "StaleOld")
+    candidate_entity = await _mk_model_version(db, "StaleNew")
+    ranked, _ = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id
+    )
+    top = next(c for c in ranked if c.candidate_id == candidate_entity.id)
+    # Entity gets retired AFTER the candidate row was generated
+    candidate_entity.lifecycle_status = "retired"
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await RolloutService(db).create(
+            replacement_candidate_id=top.id, scope_type="benchmark_only"
+        )
+    assert exc.value.code == "ECO_INVALID_TRANSITION"

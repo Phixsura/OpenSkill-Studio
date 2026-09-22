@@ -69,7 +69,7 @@ async def test_concurrent_promote_records_edge_once(db):
     finally:
         # Committed rows must not pollute other tests' candidate pools:
         # retire the fixture model versions (retired never rank as candidates)
-        from app.ecosystem.models.catalog import ModelVersion
+        from app.ecosystem.models.catalog import AIModel, ModelVersion
 
         async with AsyncSessionLocal() as session:
             for mv in await session.scalars(
@@ -78,6 +78,12 @@ async def test_concurrent_promote_records_edge_once(db):
                 )
             ):
                 mv.lifecycle_status = "retired"
+            # Parent models too — identical committed names otherwise flood
+            # the duplicates scan with 1.0-similarity pairs
+            for m in await session.scalars(
+                select(AIModel).where(AIModel.canonical_name.like("Race%"))
+            ):
+                m.lifecycle_status = "retired"
             await session.commit()
 
 

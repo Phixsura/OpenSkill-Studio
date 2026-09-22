@@ -563,6 +563,30 @@ class CatalogService:
             .values(entity_id=target_id)
         )
 
+        # Change history follows the survivor: entity-scoped queries (UI
+        # filters, watcher pull, delta exports) must see the full story under
+        # the surviving id, not lose it behind a retired duplicate.
+        from app.ecosystem.models.observation import ChangeEvent
+
+        result = await self.db.execute(
+            update(ChangeEvent)
+            .where(ChangeEvent.canonical_entity_id == source_id)
+            .values(canonical_entity_id=target_id)
+        )
+        moved["change_events"] = result.rowcount or 0
+
+        # Pending resolution candidates proposing the duplicate now propose
+        # the survivor — otherwise a later confirm would resolve observations
+        # onto a retired entity.
+        from app.ecosystem.models.catalog import ResolutionCandidate as _ResCand
+
+        result = await self.db.execute(
+            update(_ResCand)
+            .where(_ResCand.candidate_entity_id == source_id, _ResCand.status == "pending")
+            .values(candidate_entity_id=target_id)
+        )
+        moved["pending_resolutions"] = result.rowcount or 0
+
         # Watchers follow the survivor: re-point watch items so a user who
         # watched the duplicate keeps receiving the survivor's change events.
         # Lists already watching the survivor drop the now-duplicate item.

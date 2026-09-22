@@ -983,3 +983,20 @@ duplicate silently stopped receiving every future change event. Fixed:
 merge re-points watch items to the survivor; a list already watching the
 survivor drops the now-duplicate item (never doubled). Nothing is left
 pointing at the retired duplicate (tested for solo- and both-watchers).
+
+## 50. Merge completeness & stale-candidate guard (2026-09-23, round 44)
+
+Systematic audit of every table referencing an entity id against the merge
+re-point list closed three gaps:
+
+- **ChangeEvent.canonical_entity_id** now follows the survivor — entity-scoped
+  views (UI filters, watcher pull, delta export) keep the full change story
+  instead of losing it behind a retired duplicate.
+- **Pending ResolutionCandidate** rows proposing the duplicate re-point to
+  the survivor (a later confirm can no longer resolve observations onto a
+  retired entity); already-decided rows stay untouched as history.
+- **Rollout stale-candidate guard**: a ReplacementCandidate generated before
+  a lifecycle change can no longer start a rollout onto a retired/blocked
+  entity (`ECO_INVALID_TRANSITION` — regenerate candidates).
+  Deliberately NOT re-pointed (history stays where it happened): impact
+  analyses, benchmark run targets, decided resolutions.

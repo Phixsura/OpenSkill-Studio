@@ -44,8 +44,11 @@ async def test_opposite_direction_merges_have_one_winner(db):
                 await session.rollback()
                 return exc.code
 
-    results = await asyncio.gather(merge(a_id, b_id), merge(b_id, a_id))
-    assert sorted(results) == ["ECO_INVALID_TRANSITION", "merged"], results
+    try:
+        results = await asyncio.gather(merge(a_id, b_id), merge(b_id, a_id))
+        assert sorted(results) == ["ECO_INVALID_TRANSITION", "merged"], results
+    finally:
+        pass  # verification below; cleanup at end of test
 
     async with AsyncSessionLocal() as session:
         ra = await session.get(AIModel, a_id)
@@ -55,6 +58,7 @@ async def test_opposite_direction_merges_have_one_winner(db):
             False,
             True,
         ]
+    await _retire_models(["MergeA-", "MergeB-"])
 
 
 async def test_concurrent_price_approval_mints_once(db):
@@ -91,5 +95,29 @@ async def test_concurrent_price_approval_mints_once(db):
                 await session.rollback()
                 return exc.code
 
-    results = await asyncio.gather(approve(), approve())
-    assert sorted(results) == ["ECO_INVALID_TRANSITION", "approved"], results
+    try:
+        results = await asyncio.gather(approve(), approve())
+        assert sorted(results) == ["ECO_INVALID_TRANSITION", "approved"], results
+    finally:
+        await _retire_models(["PriceRace-"])
+
+async def _retire_models(prefixes):
+    """Committed fixture models must not pollute other tests (duplicates scan,
+    candidate pools): retire them on exit — retired rows are excluded from
+    both surfaces."""
+    from sqlalchemy import or_
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.catalog import AIModel as _AIModel
+
+    async with AsyncSessionLocal() as session:
+        rows = await session.scalars(
+            _select(_AIModel).where(
+                or_(*[_AIModel.canonical_name.like(f"{p}%") for p in prefixes]),
+                _AIModel.lifecycle_status != "retired",
+            )
+        )
+        for m in rows:
+            m.lifecycle_status = "retired"
+        await session.commit()

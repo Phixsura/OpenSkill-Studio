@@ -92,6 +92,18 @@ class RolloutService:
                 "Cannot roll out a hard-incompatible candidate",
                 409,
             )
+        # Stale-candidate guard: the candidate row may predate a lifecycle
+        # change — a rollout must never target a retired/blocked entity.
+        from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+        model = CATALOG_KIND_TO_MODEL.get(candidate.candidate_kind)
+        entity = await self.db.get(model, candidate.candidate_id) if model else None
+        if entity is None or entity.lifecycle_status in ("retired", "blocked"):
+            raise AppError(
+                "ECO_INVALID_TRANSITION",
+                "Candidate entity is retired/blocked — regenerate candidates",
+                409,
+            )
         baseline = await latest_dimension_scores(
             self.db, candidate.deprecated_kind, candidate.deprecated_id
         )
