@@ -149,17 +149,30 @@ export function StatCard({
   label,
   value,
   alert,
+  href,
 }: {
   label: string;
   value: number | string;
   alert?: boolean;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+  const body = (
+    <>
       <div className={`text-2xl font-bold ${alert ? "text-red-600" : ""}`}>{value}</div>
       <div className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{label}</div>
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm transition hover:border-[hsl(var(--primary))]"
+      >
+        {body}
+      </Link>
+    );
+  }
+  return <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">{body}</div>;
 }
 
 /** mean ± CI cell from a dimension_stats entry (§15 — AA-style uncertainty). */

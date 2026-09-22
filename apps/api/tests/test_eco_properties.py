@@ -217,3 +217,25 @@ def test_sanitize_text_idempotent_and_control_free(text):
         return
     assert sanitize_text(once, 200) == once  # idempotent
     assert not any(ord(c) < 32 and c not in "\t\n\r" for c in once)
+
+# ── Mutation-audit killers (ADR-016 §53): exact-value assertions ─────
+
+
+def test_ci95_width_uses_the_195_z_score():
+    """Kills the 1.96→1.0 mutant: the half-width must be exactly
+    1.96·std/√n, not merely 'some interval containing the mean'."""
+    values = [10.0, 12.0, 14.0, 16.0, 18.0]
+    out = mean_ci95(values)
+    import statistics
+
+    std = statistics.stdev(values)  # sample std, matching mean_std
+    expected_half = 1.96 * std / math.sqrt(len(values))
+    assert math.isclose(out["ci95"][1] - out["mean"], expected_half, rel_tol=0.02)
+    assert math.isclose(out["mean"] - out["ci95"][0], expected_half, rel_tol=0.02)
+
+
+def test_welch_single_sample_side_is_inconclusive():
+    """Kills the n<2→n<1 boundary mutant: one sample on either side can never
+    be significant — p must be exactly 1.0, not a computed value."""
+    assert welch_t_test([5.0], [1.0, 1.1, 0.9, 1.05])["p_value"] == 1.0
+    assert welch_t_test([1.0, 1.1, 0.9], [42.0])["p_value"] == 1.0

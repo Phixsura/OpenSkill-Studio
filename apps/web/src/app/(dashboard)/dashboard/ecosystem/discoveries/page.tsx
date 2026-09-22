@@ -1,7 +1,7 @@
 "use client";
 /** Discoveries: observation ledger + entity-resolution queue (Parts B/C). */
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -34,6 +34,7 @@ interface ResolutionCandidate {
 export default function DiscoveriesPage() {
   const queryClient = useQueryClient();
   const [eventType, setEventType] = useState("");
+  const [payloadFor, setPayloadFor] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
 
   const observations = useQuery({
@@ -212,43 +213,60 @@ export default function DiscoveriesPage() {
               </thead>
               <tbody className="divide-y">
                 {rows.map((o) => (
-                  <tr key={o.id} className="bg-[hsl(var(--card))]">
-                    <td className="px-4 py-3 text-sm font-medium">{o.event_type}</td>
-                    <td className="px-4 py-3 text-sm">
-                      {o.external_ref ?? "—"}
-                      {o.provenance_url && (
-                        <a
-                          href={o.provenance_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ml-2 text-xs text-blue-600 underline"
-                        >
-                          source
-                        </a>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {o.extraction_method}{" "}
-                      <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                        ({Number(o.confidence).toFixed(2)})
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[hsl(var(--muted-foreground))]">
-                      {fmtDate(o.observed_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {o.human_verified ? (
-                        <Pill value="confirmed" styles={STATUS_STYLES} />
-                      ) : (
+                  <React.Fragment key={o.id}>
+                    <tr className="bg-[hsl(var(--card))]">
+                      <td className="px-4 py-3 text-sm font-medium">{o.event_type}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {o.external_ref ?? "—"}
+                        {o.provenance_url && (
+                          <a
+                            href={o.provenance_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-2 text-xs text-blue-600 underline"
+                          >
+                            source
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {o.extraction_method}{" "}
+                        <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                          ({Number(o.confidence).toFixed(2)})
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-[hsl(var(--muted-foreground))]">
+                        {fmtDate(o.observed_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {o.human_verified ? (
+                          <Pill value="confirmed" styles={STATUS_STYLES} />
+                        ) : (
+                          <button
+                            onClick={() => verify.mutate(o.id)}
+                            className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                          >
+                            Verify
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    <tr className="bg-[hsl(var(--card))]">
+                      <td colSpan={5} className="px-4 pb-2 pt-0">
                         <button
-                          onClick={() => verify.mutate(o.id)}
-                          className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                          onClick={() => setPayloadFor(payloadFor === o.id ? null : o.id)}
+                          className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
                         >
-                          Verify
+                          {payloadFor === o.id ? "Hide payload" : "Payload"}
                         </button>
-                      )}
-                    </td>
-                  </tr>
+                        {payloadFor === o.id && (
+                          <pre className="mt-1 max-h-64 overflow-auto rounded-md border bg-[hsl(var(--background))] p-2 font-mono text-xs">
+                            {JSON.stringify(o.normalized ?? {}, null, 2)}
+                          </pre>
+                        )}
+                      </td>
+                    </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

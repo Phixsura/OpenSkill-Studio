@@ -1028,3 +1028,23 @@ Four operator gaps where backend capability existed with no UI:
   incident count and probe coverage per compared entity.
 - **Sync history** (round 49): per-source History panel — last 20 runs with
   status/HTTP/bytes/observations/changes/error.
+
+## 53. Navigable overview + stats-kernel mutation audit (2026-09-23, rounds 50-52)
+
+- **Clickable stat cards** (round 50): nine Overview counters link straight to
+  their work queues (pricing review, discoveries, benchmark queue, impact,
+  drafts, rollouts, sources) — the dashboard is a router, not a poster.
+- **UI regression tests** (round 51): sync-history panel, impact
+  acknowledge POST wiring, stat-card hrefs (3 new tests).
+- **Mutation audit** (round 52, R136-250 technique): six targeted operator/
+  constant mutations against the statistics kernel. Two SURVIVED — the CI
+  z-score (1.96→1.0) and the Welch n<2 boundary were never numerically
+  asserted. Both killed with exact-value tests (half-width = 1.96·std/√n;
+  single-sample side ⇒ p exactly 1.0); all six mutants now die.
+
+### §53.1 Evidence-first verification (round 53)
+
+Same class as the draft blind-approval fix: observation VERIFY was blind —
+the normalized payload was never shown. Each observation row now expands into
+its normalized-JSON payload (capped viewport) beside the provenance link, so
+human verification is evidence-based in-product.

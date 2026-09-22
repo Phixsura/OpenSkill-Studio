@@ -90,7 +90,11 @@ export default function EcosystemOverviewPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
-            <StatCard label="Active sources" value={overview.sources.active} />
+            <StatCard
+              href="/dashboard/ecosystem/sources"
+              label="Active sources"
+              value={overview.sources.active}
+            />
             <StatCard
               label="Paused / errored sources"
               value={overview.sources.paused + overview.sources.error}
@@ -101,7 +105,11 @@ export default function EcosystemOverviewPage() {
               value={overview.sources_stale}
               alert={overview.sources_stale > 0}
             />
-            <StatCard label="Discoveries (7d)" value={overview.discoveries_7d} />
+            <StatCard
+              href="/dashboard/ecosystem/discoveries"
+              label="Discoveries (7d)"
+              value={overview.discoveries_7d}
+            />
             <StatCard
               label="Unverified observations"
               value={overview.observations_unverified}
@@ -122,13 +130,41 @@ export default function EcosystemOverviewPage() {
               value={overview.security_critical_open}
               alert={overview.security_critical_open > 0}
             />
-            <StatCard label="Pricing to review" value={overview.pricing_unreviewed} />
-            <StatCard label="Resolution queue" value={overview.resolution_pending} />
-            <StatCard label="Benchmark queue" value={overview.benchmark_queue} />
-            <StatCard label="Open impact analyses" value={overview.impact_open} />
-            <StatCard label="Replacement proposals" value={overview.replacements_proposed} />
-            <StatCard label="Drafts in review" value={overview.drafts_in_review} />
-            <StatCard label="Active rollouts" value={overview.rollouts_active} />
+            <StatCard
+              href="/dashboard/ecosystem/pricing"
+              label="Pricing to review"
+              value={overview.pricing_unreviewed}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/discoveries"
+              label="Resolution queue"
+              value={overview.resolution_pending}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/benchmarks"
+              label="Benchmark queue"
+              value={overview.benchmark_queue}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/components"
+              label="Open impact analyses"
+              value={overview.impact_open}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/components"
+              label="Replacement proposals"
+              value={overview.replacements_proposed}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/components"
+              label="Drafts in review"
+              value={overview.drafts_in_review}
+            />
+            <StatCard
+              href="/dashboard/ecosystem/components"
+              label="Active rollouts"
+              value={overview.rollouts_active}
+            />
           </div>
           {(trending.data?.data ?? []).length > 0 && (
             <div>
