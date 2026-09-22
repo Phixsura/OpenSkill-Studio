@@ -34,6 +34,7 @@ OBSERVATION_EVENT_TYPES = frozenset(
         "security_advisory",
         "workflow_dependency_changed",
         "release_published",
+        "availability_changed",
         "catalog_snapshot",
     }
 )

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     AvailabilityResponse,
     PriceObservationResponse,
@@ -68,6 +68,11 @@ async def reconcile_price(
         actor_id=user.id,
         provider_key=body.provider_key,
         model_or_service=body.model_or_service,
+    )
+    await eco_audit(
+        db, user, action="eco.price_reconciled", target_type="eco_price_observation",
+        target_id=price_obs_id,
+        after={"decision": body.decision, "cost_rate_id": row.approved_cost_rate_id},
     )
     await db.commit()
     return {"data": row}

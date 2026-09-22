@@ -71,6 +71,23 @@ class BulkDecideRequest(BaseModel):
     decision: str = Field(max_length=10)  # confirm | reject
 
 
+class ResolveConflictRequest(BaseModel):
+    """§14 curation: arbitrate one conflicting field with provenance."""
+
+    field: str = Field(max_length=40)
+    chosen_value: str = Field(min_length=1, max_length=300)
+    winning_source_id: str | None = Field(default=None, min_length=26, max_length=26)
+
+
+class LLMExtractRequest(BaseModel):
+    """§14: LLM-assisted extraction from untrusted free text (HITL — every
+    resulting observation still requires human verification)."""
+
+    source_id: str = Field(min_length=26, max_length=26)
+    text: str = Field(min_length=1, max_length=20_000)
+    entity_kind: str = Field(default="model", max_length=30)
+
+
 class LifecycleTransitionRequest(BaseModel):
     to_status: str = Field(max_length=20)
     reason: str | None = Field(default=None, max_length=40)

@@ -66,6 +66,157 @@ class CatalogService:
         await self.db.flush()
         return entity
 
+    async def resolve_conflict(
+        self,
+        kind: str,
+        entity_id: str,
+        *,
+        field: str,
+        chosen_value,
+        winning_source_id: str | None = None,
+        actor_id: str | None = None,
+    ) -> dict:
+        """Curated arbitration of a source conflict (Snyk curation loop, §14).
+
+        The analyst's decision is stored as a per-field CURATED overlay on the
+        entity — the disagreeing observations remain untouched (Part Q: both
+        sides stay visible), the overlay records who decided, when, from which
+        source. conflicting_observations() marks curated fields.
+        """
+        allowed_fields = {"license", "sunset_at", "deprecated_at", "version", "api_identifier"}
+        if field not in allowed_fields:
+            raise AppError(
+                "VALIDATION_ERROR", f"Field {field!r} is not conflict-arbitrable", 422
+            )
+        entity = await self.get(kind, entity_id)
+        cleaned = sanitize_text(str(chosen_value), 300)
+        curated = dict((entity.extra or {}).get("curated", {}))
+        curated[field] = {
+            "value": cleaned,
+            "source_id": winning_source_id,
+            "decided_by": actor_id,
+            "decided_at": datetime.now(UTC).isoformat(),
+        }
+        entity.extra = {**(entity.extra or {}), "curated": curated}
+        # Curated license/sunset also update the first-class column when it exists
+        if hasattr(entity, field) and field in ("license", "api_identifier"):
+            setattr(entity, field, cleaned)
+        await self.db.flush()
+        return curated[field]
+
+    async def corroboration(self, kind: str, entity_id: str) -> dict:
+        """Multi-source corroboration score (StatusGator cross-correlation, §14).
+
+        Trust-weighted count of DISTINCT sources that have observed this
+        entity — a fact seen by three official feeds is stronger evidence than
+        one unverified blog, and the score says so numerically.
+        """
+        from app.ecosystem.models.source import EcosystemSource
+
+        await self.get(kind, entity_id)
+        weights = {
+            "official": 1.0,
+            "verified_partner": 0.8,
+            "internal": 0.7,
+            "community": 0.5,
+            "unverified": 0.2,
+        }
+        rows = await self.db.execute(
+            select(
+                EcosystemSource.id,
+                EcosystemSource.trust_level,
+                func.count(EcosystemObservation.id),
+                func.max(EcosystemObservation.observed_at),
+            )
+            .join(EcosystemObservation, EcosystemObservation.source_id == EcosystemSource.id)
+            .where(
+                EcosystemObservation.canonical_entity_kind == kind,
+                EcosystemObservation.canonical_entity_id == entity_id,
+            )
+            .group_by(EcosystemSource.id, EcosystemSource.trust_level)
+        )
+        sources = [
+            {
+                "source_id": source_id,
+                "trust_level": trust,
+                "observations": count,
+                "last_observed_at": last,
+            }
+            for source_id, trust, count, last in rows
+        ]
+        score = round(sum(weights.get(s["trust_level"], 0.2) for s in sources), 2)
+        return {
+            "distinct_sources": len(sources),
+            "trust_weighted_score": score,
+            "human_verified_any": bool(
+                await self.db.scalar(
+                    select(EcosystemObservation.id)
+                    .where(
+                        EcosystemObservation.canonical_entity_kind == kind,
+                        EcosystemObservation.canonical_entity_id == entity_id,
+                        EcosystemObservation.human_verified.is_(True),
+                    )
+                    .limit(1)
+                )
+            ),
+            "sources": sources,
+        }
+
+    async def global_search(self, q: str, *, limit_per_kind: int = 3) -> list[dict]:
+        """One search box across all seven catalog kinds (HF posture, §14).
+
+        Indexed trigram similarity per kind; Python fallback keeps unit
+        contexts working without pg_trgm.
+        """
+        from sqlalchemy import text as sql_text
+
+        from app.ecosystem.services.resolution import _KIND_TABLES, normalize_name
+
+        cleaned = normalize_name(q) or (sanitize_text(q, 100) or "").lower()
+        if not cleaned:
+            return []
+        results: list[dict] = []
+        for kind, table in _KIND_TABLES.items():
+            try:
+                rows = await self.db.execute(
+                    sql_text(
+                        f"SELECT id, canonical_name, lifecycle_status, "  # noqa: S608 — table from fixed map
+                        f"similarity(lower(canonical_name), :q) AS score "
+                        f"FROM {table} WHERE lower(canonical_name) % :q "
+                        f"ORDER BY score DESC LIMIT :n"
+                    ),
+                    {"q": cleaned, "n": limit_per_kind},
+                )
+                for row in rows:
+                    results.append(
+                        {
+                            "kind": kind,
+                            "id": row.id,
+                            "canonical_name": row.canonical_name,
+                            "lifecycle_status": row.lifecycle_status,
+                            "score": round(float(row.score), 3),
+                        }
+                    )
+            except Exception:  # noqa: BLE001 — pg_trgm unavailable
+                model = CATALOG_KIND_TO_MODEL[kind]
+                rows = await self.db.scalars(
+                    select(model).where(model.canonical_name.ilike(f"%{cleaned}%")).limit(
+                        limit_per_kind
+                    )
+                )
+                for entity in rows:
+                    results.append(
+                        {
+                            "kind": kind,
+                            "id": entity.id,
+                            "canonical_name": entity.canonical_name,
+                            "lifecycle_status": entity.lifecycle_status,
+                            "score": 0.5,
+                        }
+                    )
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[:20]
+
     async def merge_entities(
         self, kind: str, source_id: str, target_id: str, *, actor_id: str | None = None
     ) -> dict:
@@ -263,7 +414,9 @@ class CatalogService:
                 if val is not None:
                     values.setdefault(str(val), []).append(obs.source_id)
             if len(values) > 1:
-                conflicts.append({"field": field, "values": values})
+                entity = await self.get(kind, entity_id)
+                curated = ((entity.extra or {}).get("curated") or {}).get(field)
+                conflicts.append({"field": field, "values": values, "curated": curated})
         return conflicts
 
 

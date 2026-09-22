@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     CreateDraftRequest,
     DraftResponse,
@@ -143,4 +143,11 @@ async def publish_draft(
     user: User = Depends(require_platform_admin),
 ):
     """Second explicit human action — refused unless status is approved."""
-    return await _transition(draft_id, "published", db, user)
+    outcome = await _transition(draft_id, "published", db, user)
+    await eco_audit(
+        db, user, action="eco.draft_published", target_type="eco_component_draft",
+        target_id=draft_id,
+        after={"published_ref": outcome["data"].published_ref},
+    )
+    await db.commit()
+    return outcome

@@ -339,3 +339,35 @@ def reviewer_agreement(rows: list[dict]) -> dict:
         "percent_agreement": round(sum(agreements) / len(agreements), 4) if agreements else None,
         "mean_cohen_kappa": round(sum(kappas) / len(kappas), 4) if kappas else None,
     }
+
+
+# ── Linear trend for demand/emergence projection (Lightcast posture) ─
+
+
+def linear_trend(points: list[tuple[float, float]]) -> dict | None:
+    """Least-squares slope/intercept over (t, y) points + next-step projection.
+
+    Returns {"slope", "intercept", "projected_next", "r_squared"}; None for
+    <2 points or zero time variance.
+    """
+    n = len(points)
+    if n < 2:
+        return None
+    mean_t = sum(t for t, _ in points) / n
+    mean_y = sum(y for _, y in points) / n
+    ss_tt = sum((t - mean_t) ** 2 for t, _ in points)
+    if ss_tt == 0:
+        return None
+    ss_ty = sum((t - mean_t) * (y - mean_y) for t, y in points)
+    slope = ss_ty / ss_tt
+    intercept = mean_y - slope * mean_t
+    ss_res = sum((y - (slope * t + intercept)) ** 2 for t, y in points)
+    ss_tot = sum((y - mean_y) ** 2 for _, y in points)
+    r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
+    next_t = max(t for t, _ in points) + 1
+    return {
+        "slope": round(slope, 4),
+        "intercept": round(intercept, 4),
+        "projected_next": round(max(slope * next_t + intercept, 0.0), 2),
+        "r_squared": round(r_squared, 4),
+    }

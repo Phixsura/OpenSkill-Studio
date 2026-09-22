@@ -163,9 +163,34 @@ class SignalsService:
                         "verified_entities": len(maps),
                         "recent_changes": len(changes),
                         "sunset_events": sunset_count,
+                        # §14 (Lightcast Projected Skill Growth): weekly change
+                        # momentum + least-squares projection of next window —
+                        # a planning signal with a trend line, never a decision
+                        "trend": self._weekly_trend(changes, window_days),
                         "recommendation": "content_development_investigation"
                         if signal_type == "emerging_capability"
                         else "curriculum_review",
                     }
                 )
         return out
+
+    @staticmethod
+    def _weekly_trend(changes: list, window_days: int) -> dict | None:
+        from app.ecosystem.services.stats import linear_trend
+
+        if not changes:
+            return None
+        weeks = max(window_days // 7, 1)
+        now = datetime.now(UTC)
+        counts = [0] * weeks
+        for change in changes:
+            detected = change.detected_at
+            if detected is None:
+                continue
+            age_weeks = int((now - detected).days // 7)
+            if 0 <= age_weeks < weeks:
+                counts[weeks - 1 - age_weeks] += 1  # oldest → newest
+        trend = linear_trend([(float(i), float(c)) for i, c in enumerate(counts)])
+        if trend is None:
+            return {"weekly_counts": counts}
+        return {"weekly_counts": counts, **trend}

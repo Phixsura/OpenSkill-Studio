@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     BulkDecideRequest,
     CatalogEntityResponse,
@@ -14,6 +14,7 @@ from app.ecosystem.schemas import (
     LifecycleTransitionResponse,
     MappingResponse,
     ResolutionCandidateResponse,
+    ResolveConflictRequest,
     UpdateCatalogEntityRequest,
     UpsertMappingRequest,
 )
@@ -104,8 +105,13 @@ async def merge_catalog_entity(
     """§13 registry dedupe: merge a duplicate canonical entity into the
     survivor — re-points all references, retires the duplicate with a
     supersedes audit edge. Nothing historical is lost."""
+    kind = _kind(segment)
     outcome = await CatalogService(db).merge_entities(
-        _kind(segment), entity_id, target_id, actor_id=user.id
+        kind, entity_id, target_id, actor_id=user.id
+    )
+    await eco_audit(
+        db, user, action="eco.entity_merged", target_type=f"eco_{kind}",
+        target_id=entity_id, after=outcome,
     )
     await db.commit()
     return {"data": outcome}
@@ -133,13 +139,21 @@ async def lifecycle_transition(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_platform_admin),
 ):
+    kind = _kind(segment)
+    before_entity = await CatalogService(db).get(kind, entity_id)
+    from_status = before_entity.lifecycle_status
     entity = await LifecycleService(db).transition(
-        _kind(segment),
+        kind,
         entity_id,
         to_status=body.to_status,
         reason=body.reason,
         note=body.note,
         actor_id=user.id,
+    )
+    await eco_audit(
+        db, user, action="eco.lifecycle_transitioned", target_type=f"eco_{kind}",
+        target_id=entity_id, before={"status": from_status},
+        after={"status": body.to_status}, reason=body.reason,
     )
     await db.commit()
     return {"data": entity}
@@ -207,6 +221,59 @@ async def deprecation_calendar_ics(
         media_type="text/calendar",
         headers={"Content-Disposition": 'attachment; filename="eco-deprecations.ics"'},
     )
+
+
+@router.post(
+    "/catalog/{segment}/{entity_id}/resolve-conflict",
+    response_model=DataResponse[dict],
+)
+async def resolve_conflict(
+    segment: str,
+    entity_id: str,
+    body: ResolveConflictRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """§14 curation loop: arbitrate a source conflict per field — a curated
+    overlay with full provenance; the disagreeing observations stay visible."""
+    kind = _kind(segment)
+    decision = await CatalogService(db).resolve_conflict(
+        kind,
+        entity_id,
+        field=body.field,
+        chosen_value=body.chosen_value,
+        winning_source_id=body.winning_source_id,
+        actor_id=user.id,
+    )
+    await eco_audit(
+        db, user, action="eco.conflict_resolved", target_type=f"eco_{kind}",
+        target_id=entity_id, after={"field": body.field, "decision": decision},
+    )
+    await db.commit()
+    return {"data": decision}
+
+
+@router.get(
+    "/catalog/{segment}/{entity_id}/corroboration", response_model=DataResponse[dict]
+)
+async def entity_corroboration(
+    segment: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """§14: trust-weighted multi-source corroboration score."""
+    return {"data": await CatalogService(db).corroboration(_kind(segment), entity_id)}
+
+
+@router.get("/search", response_model=DataResponse[list])
+async def global_search(
+    q: str = Query(..., min_length=1, max_length=100),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """§14: one search box across all seven catalog kinds (indexed trigram)."""
+    return {"data": await CatalogService(db).global_search(q)}
 
 
 @router.get("/export", response_model=dict)
@@ -283,6 +350,44 @@ async def list_resolution_candidates(
             entity_kind=entity_kind, limit=limit, offset=offset
         )
     }
+
+
+@router.post(
+    "/resolution-candidates/{candidate_id}/llm-suggest",
+    response_model=DataResponse[ResolutionCandidateResponse],
+)
+async def llm_suggest_resolution(
+    candidate_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§14: LLM tie-breaker for an ambiguous pending candidate. The suggestion
+    updates the candidate (method=llm_suggested, confidence <= 0.7) but NEVER
+    auto-merges — llm_suggested is excluded from the auto-merge policy."""
+    from app.ecosystem.models.catalog import ResolutionCandidate
+    from app.ecosystem.services.llm_extraction import suggest_resolution
+
+    candidate = await db.get(ResolutionCandidate, candidate_id)
+    if candidate is None:
+        raise AppError("NOT_FOUND", "Resolution candidate not found", 404)
+    if candidate.status != "pending":
+        raise AppError("ECO_INVALID_TRANSITION", "Candidate already decided", 409)
+    svc = CatalogService(db)
+    similar = await svc.global_search(
+        str((candidate.proposed_payload or {}).get("name", "")), limit_per_kind=5
+    )
+    options = [
+        {"id": r["id"], "name": r["canonical_name"], "kind": r["kind"]}
+        for r in similar
+        if r["kind"] == candidate.entity_kind
+    ][:8]
+    suggestion = await suggest_resolution(candidate.proposed_payload or {}, options)
+    if suggestion and suggestion.get("candidate_id"):
+        candidate.candidate_entity_id = suggestion["candidate_id"]
+        candidate.match_method = "llm_suggested"
+        candidate.confidence = suggestion["confidence"]
+    await db.commit()
+    return {"data": candidate}
 
 
 @router.post("/resolution-candidates/bulk-decide", response_model=DataResponse[dict])

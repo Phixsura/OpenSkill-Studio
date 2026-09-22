@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import CreateRolloutRequest, DecisionRequest, RolloutResponse
 from app.ecosystem.services.rollout import RolloutService
 from app.models.user import User
@@ -79,6 +79,11 @@ async def decide_rollout(
 ):
     plan = await RolloutService(db).decide(
         plan_id, decision=body.decision, actor_id=user.id, note=body.note
+    )
+    await eco_audit(
+        db, user, action="eco.rollout_decided", target_type="eco_rollout_plan",
+        target_id=plan_id, after={"decision": body.decision, "status": plan.status},
+        reason=body.note,
     )
     await db.commit()
     return {"data": plan}

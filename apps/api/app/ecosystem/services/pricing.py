@@ -218,12 +218,85 @@ class AvailabilityService:
             value = {"status": status, "probe": result.get("probe", {})}
         except Exception as exc:  # noqa: BLE001 — a failing probe IS the signal
             value = {"status": "unreachable", "probe": {"error": str(exc)[:200]}}
-        return await self.record(
+        # §14 early warning (StatusGator): a status FLIP is itself an event —
+        # compare with the previous probe before appending the new record
+        previous = await self.db.scalar(
+            select(AvailabilityRecord)
+            .where(
+                AvailabilityRecord.entity_kind == entity_kind,
+                AvailabilityRecord.entity_id == entity_id,
+                AvailabilityRecord.record_type == "status",
+            )
+            .order_by(AvailabilityRecord.observed_at.desc(), AvailabilityRecord.id.desc())
+            .limit(1)
+        )
+        record = await self.record(
             entity_kind=entity_kind,
             entity_id=entity_id,
             record_type="status",
             value=value,
         )
+        prev_status = (previous.value or {}).get("status") if previous else None
+        if prev_status and prev_status != value["status"]:
+            await self._emit_status_flip(entity_kind, entity_id, prev_status, value["status"])
+        return record
+
+    async def _emit_status_flip(
+        self, entity_kind: str, entity_id: str, old_status: str, new_status: str
+    ) -> None:
+        """Availability flip → typed change event on the internal probe source
+        (rides the normal fan-out: watcher notifications, webhooks)."""
+        import hashlib
+        from datetime import UTC, datetime
+
+        from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+        from app.ecosystem.models.source import EcosystemSource
+        from app.ecosystem.services.change_detection import _fanout
+
+        source = await self.db.scalar(
+            select(EcosystemSource).where(
+                EcosystemSource.name == "internal:availability-probes"
+            )
+        )
+        if source is None:
+            source = EcosystemSource(
+                name="internal:availability-probes",
+                source_type="internal_research",
+                trust_level="internal",
+                adapter_key="manual",
+                parser_version="1.0",
+                robots_compliant=True,
+            )
+            self.db.add(source)
+            await self.db.flush()
+        raw = f"{entity_kind}:{entity_id}:{old_status}->{new_status}:{datetime.now(UTC).isoformat()}"
+        obs = EcosystemObservation(
+            source_id=source.id,
+            event_type="availability_changed",
+            entity_kind=entity_kind,
+            canonical_entity_kind=entity_kind,
+            canonical_entity_id=entity_id,
+            raw_hash=hashlib.sha256(raw.encode()).hexdigest(),
+            normalized={"old_status": old_status, "new_status": new_status},
+            extraction_method="structured",
+        )
+        self.db.add(obs)
+        await self.db.flush()
+        degraded = new_status in ("degraded", "unreachable")
+        change = ChangeEvent(
+            observation_id=obs.id,
+            change_type="region",
+            field="availability_status",
+            old_value={"value": old_status},
+            new_value={"value": new_status},
+            severity="degraded" if degraded else "info",
+            entity_kind=entity_kind,
+            canonical_entity_id=entity_id,
+        )
+        self.db.add(change)
+        await self.db.flush()
+        _fanout(self.db, change)
+        await self.db.flush()
 
     async def record(
         self,

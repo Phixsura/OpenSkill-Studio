@@ -14,6 +14,7 @@ from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
 from app.ecosystem.schemas import (
     BulkIdsRequest,
     ChangeEventResponse,
+    LLMExtractRequest,
     ManualObservationRequest,
     ObservationResponse,
 )
@@ -138,6 +139,57 @@ async def bulk_verify_observations(
         verified.append(obs_id)
     await db.commit()
     return {"data": {"verified": verified, "missing": missing}}
+
+
+@router.post(
+    "/observations/extract-llm",
+    response_model=DataResponse[list[ObservationResponse]],
+    status_code=201,
+)
+async def extract_observations_llm(
+    body: LLMExtractRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§14 (Snyk AI+HITL): extract model facts from untrusted free text via the
+    platform LLM. Every resulting observation is extraction_method='llm',
+    confidence-capped, unverified — the human review queue is the gate before
+    any downstream automation sees it."""
+    from app.ecosystem.services.llm_extraction import LLM_CONFIDENCE_CAP, extract_model_facts
+
+    source = await SourceService(db).get(body.source_id)
+    if source.source_type not in ("manual_analyst", "internal_research"):
+        raise AppError(
+            "VALIDATION_ERROR",
+            "LLM extraction requires a manual_analyst or internal_research source",
+            422,
+        )
+    facts = await extract_model_facts(body.text)
+    created: list[EcosystemObservation] = []
+    for fact in facts:
+        raw = json.dumps(fact, sort_keys=True, default=str).encode()
+        obs = EcosystemObservation(
+            source_id=source.id,
+            event_type="model_released",
+            entity_kind="model_version" if fact.get("version") else body.entity_kind,
+            external_ref=fact.get("official_id") or fact.get("name"),
+            raw_hash=hashlib.sha256(raw).hexdigest(),
+            normalized=fact,
+            parser_version="llm-1.0",
+            confidence=min(0.6, LLM_CONFIDENCE_CAP),
+            extraction_method="llm",
+        )
+        db.add(obs)
+        try:
+            await db.flush()
+        except Exception:  # noqa: BLE001 — duplicate raw_hash → idempotent skip
+            await db.rollback()
+            continue
+        await detect_changes(db, obs)
+        await propose_resolution(db, obs, trust_level=source.trust_level)
+        created.append(obs)
+    await db.commit()
+    return {"data": created}
 
 
 @router.get("/observations/{obs_id}", response_model=DataResponse[ObservationResponse])

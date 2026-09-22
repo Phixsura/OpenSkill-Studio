@@ -69,6 +69,13 @@ AUDIT_ACTIONS = frozenset(
         "invoice.payment_recorded",
         "invoice.voided",
         "invoice.credit_note_issued",
+        # Ecosystem intelligence (Issue #35, ADR-016 §14)
+        "eco.entity_merged",
+        "eco.lifecycle_transitioned",
+        "eco.price_reconciled",
+        "eco.rollout_decided",
+        "eco.draft_published",
+        "eco.conflict_resolved",
         # revenue share / settlements
         "revshare.rule_activated",
         "revshare.rule_retired",
