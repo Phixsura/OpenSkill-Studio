@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.ecosystem.api.deps import require_platform_admin
 from app.ecosystem.schemas import ChangeEventResponse
 from app.ecosystem.services.dashboard import DashboardService
 from app.ecosystem.services.signals import SignalsService
@@ -33,6 +34,124 @@ async def change_feed(
         "data": await DashboardService(db).change_feed(
             severity=severity, limit=limit, offset=offset
         )
+    }
+
+
+@router.get("/ops/metrics", include_in_schema=True)
+async def ops_metrics(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§17 (Datadog/Prometheus posture): the subsystem exposes its own health
+    as scrape-able plaintext metrics — queue depths, review debt, staleness."""
+    from fastapi.responses import PlainTextResponse
+    from sqlalchemy import func, select
+
+    from app.controlplane.models.outbox import OutboxMessage
+
+    overview = await DashboardService(db).overview()
+    outbox_pending = (
+        await db.scalar(
+            select(func.count())
+            .select_from(OutboxMessage)
+            .where(OutboxMessage.status == "pending", OutboxMessage.topic.like("eco.%"))
+        )
+    ) or 0
+    lines = ["# TYPE eco_gauge gauge"]
+
+    def emit(name: str, value) -> None:
+        if isinstance(value, (int, float)):
+            lines.append(f"eco_{name} {value}")
+
+    for key, value in overview.items():
+        if isinstance(value, dict):
+            for sub, subvalue in value.items():
+                emit(f"{key}_{sub}", subvalue)
+        else:
+            emit(key, value)
+    emit("outbox_pending", outbox_pending)
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
+
+@router.get("/export/changes", response_model=dict)
+async def export_changes_delta(
+    since: str = Query(..., description="ISO-8601 timestamp"),
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """§17 (deps.dev delta posture): consumers of the catalog export poll this
+    delta feed instead of re-downloading the world — typed change events since
+    a timestamp, oldest first, cursor by last detected_at."""
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.ecosystem.models.observation import ChangeEvent
+    from app.ecosystem.schemas import ChangeEventResponse
+    from app.exceptions import AppError
+
+    try:
+        since_ts = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AppError("VALIDATION_ERROR", "since must be ISO-8601", 422) from exc
+    rows = list(
+        await db.scalars(
+            select(ChangeEvent)
+            .where(ChangeEvent.detected_at > since_ts)
+            .order_by(ChangeEvent.detected_at.asc(), ChangeEvent.id.asc())
+            .limit(limit + 1)
+        )
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "data": [ChangeEventResponse.model_validate(r).model_dump() for r in rows],
+        "meta": {
+            "has_more": has_more,
+            "next_since": rows[-1].detected_at.isoformat() if rows else since,
+        },
+    }
+
+
+@router.get("/audit", response_model=dict)
+async def eco_audit_trail(
+    action: str | None = Query(None, max_length=60),
+    target_id: str | None = Query(None, max_length=26),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """§17: the eco slice of the immutable commercial audit trail, queryable
+    in-product (enterprise governance baseline)."""
+    from sqlalchemy import select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    query = select(CommercialAuditEvent).where(
+        CommercialAuditEvent.action.like("eco.%")
+    )
+    if action:
+        query = query.where(CommercialAuditEvent.action == action)
+    if target_id:
+        query = query.where(CommercialAuditEvent.target_id == target_id)
+    rows = list(
+        await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit))
+    )
+    return {
+        "data": [
+            {
+                "id": e.id,
+                "actor_user_id": e.actor_user_id,
+                "action": e.action,
+                "target_type": e.target_type,
+                "target_id": e.target_id,
+                "before": e.before,
+                "after": e.after,
+                "reason": e.reason,
+            }
+            for e in rows
+        ]
     }
 
 

@@ -154,6 +154,19 @@ async def compare_runs(
     return {"data": await BenchmarkService(db).compare_runs(run_ids)}
 
 
+@router.post("/runs/{run_id}/cancel", response_model=DataResponse[RunResponse])
+async def cancel_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """§17: fence-aware cancel — only queued runs; racing an executor claim
+    has exactly one winner."""
+    run = await BenchmarkService(db).cancel_run(run_id, actor_id=user.id)
+    await db.commit()
+    return {"data": run}
+
+
 @router.get("/runs/{run_id}", response_model=DataResponse[RunResponse])
 async def get_run(
     run_id: str,

@@ -502,6 +502,33 @@ class BenchmarkService:
         await self.db.flush()
         return run
 
+    async def cancel_run(self, run_id: str, *, actor_id: str | None = None) -> BenchmarkRun:
+        """§17: cancel a queued run (fence-aware conditional UPDATE, so a
+        cancel racing an executor claim has exactly one winner). Running runs
+        are cancel-requested by the same fence: the executor's claim already
+        succeeded, so cancellation of RUNNING is refused — budget caps bound
+        the remaining spend (matches the runtime's cancel-before-spend rule).
+        """
+        from sqlalchemy import update
+
+        run = await self.db.get(BenchmarkRun, run_id)
+        if not run:
+            raise AppError("NOT_FOUND", "Run not found", 404)
+        claimed = await self.db.execute(
+            update(BenchmarkRun)
+            .where(BenchmarkRun.id == run_id, BenchmarkRun.status == "queued")
+            .values(status="cancelled", finished_at=datetime.now(UTC))
+        )
+        if not claimed.rowcount:
+            raise AppError(
+                "ECO_INVALID_TRANSITION",
+                f"Run is {run.status}; only queued runs can be cancelled",
+                409,
+            )
+        await self.db.flush()
+        await self.db.refresh(run)
+        return run
+
     async def get_run(self, run_id: str) -> BenchmarkRun:
         run = await self.db.get(BenchmarkRun, run_id)
         if not run:

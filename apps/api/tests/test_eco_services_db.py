@@ -782,6 +782,7 @@ async def test_replacement_weight_validation(db):
 
 async def test_draft_cannot_skip_to_published(db):
     admin = await _mk_user(db, "admin")
+    approver = await _mk_user(db, "admin")  # §17 four-eyes: approver ≠ creator
     svc = DraftService(db)
     draft = await svc.create(
         draft_type="skill_pack_update", title="Update",
@@ -794,14 +795,15 @@ async def test_draft_cannot_skip_to_published(db):
     assert exc.value.code == "ECO_DRAFT_NOT_APPROVED"
     await svc.transition(draft.id, to_status="in_review", actor_id=admin.id)
     with pytest.raises(AppError):  # in_review -> published also refused
-        await svc.transition(draft.id, to_status="published", actor_id=admin.id)
-    await svc.transition(draft.id, to_status="approved", actor_id=admin.id)
-    draft = await svc.transition(draft.id, to_status="published", actor_id=admin.id)
+        await svc.transition(draft.id, to_status="published", actor_id=approver.id)
+    await svc.transition(draft.id, to_status="approved", actor_id=approver.id)
+    draft = await svc.transition(draft.id, to_status="published", actor_id=approver.id)
     assert draft.status == "published"
 
 
 async def test_invalid_draft_cannot_publish(db):
     admin = await _mk_user(db, "admin")
+    approver = await _mk_user(db, "admin")  # §17 four-eyes
     svc = DraftService(db)
     draft = await svc.create(
         draft_type="workflow_pack", title="Broken", payload={"definition": {}},
@@ -809,9 +811,9 @@ async def test_invalid_draft_cannot_publish(db):
     )
     assert draft.validation["valid"] is False
     await svc.transition(draft.id, to_status="in_review", actor_id=admin.id)
-    await svc.transition(draft.id, to_status="approved", actor_id=admin.id)
+    await svc.transition(draft.id, to_status="approved", actor_id=approver.id)
     with pytest.raises(AppError) as exc:
-        await svc.transition(draft.id, to_status="published", actor_id=admin.id)
+        await svc.transition(draft.id, to_status="published", actor_id=approver.id)
     assert exc.value.code == "ECO_DRAFT_NOT_APPROVED"
 
 

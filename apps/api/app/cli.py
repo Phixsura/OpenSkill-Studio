@@ -70,6 +70,86 @@ async def _run_sweep(name: str) -> None:
     await engine.dispose()
 
 
+
+
+# ── Ecosystem: curated starter sources (Issue #35, ADR-016 §17) ──
+
+# Well-known public feeds an operator would otherwise hand-enter on day 1.
+# All start PAUSED: an operator must review, attest robots/ToS compliance for
+# their jurisdiction, and explicitly activate each one — seeding never grants
+# itself permission to fetch anything.
+ECO_STARTER_SOURCES = [
+    {
+        "name": "Hugging Face — text-to-image models",
+        "source_type": "huggingface",
+        "trust_level": "community",
+        "adapter_key": "huggingface",
+        "base_url": "https://huggingface.co/api/models?pipeline_tag=text-to-image&sort=downloads&limit=50",
+        "sync_interval_minutes": 1440,
+    },
+    {
+        "name": "Hugging Face — image-to-video models",
+        "source_type": "huggingface",
+        "trust_level": "community",
+        "adapter_key": "huggingface",
+        "base_url": "https://huggingface.co/api/models?pipeline_tag=image-to-video&sort=downloads&limit=50",
+        "sync_interval_minutes": 1440,
+    },
+    {
+        "name": "ComfyUI releases (GitHub)",
+        "source_type": "github_repo",
+        "trust_level": "official",
+        "adapter_key": "github_releases",
+        "base_url": "https://api.github.com/repos/comfyanonymous/ComfyUI/releases?per_page=20",
+        "config": {"repo": "comfyanonymous/ComfyUI"},
+        "sync_interval_minutes": 720,
+    },
+    {
+        "name": "Internal analyst desk",
+        "source_type": "manual_analyst",
+        "trust_level": "internal",
+        "adapter_key": "manual",
+        "base_url": None,
+        "sync_interval_minutes": 43200,
+    },
+]
+
+
+async def _eco_seed_sources() -> None:
+    from app.ecosystem.models.source import EcosystemSource
+    from app.ecosystem.services.sources import SourceService
+
+    engine = create_async_engine(settings.database_url)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        svc = SourceService(session)
+        created, skipped = 0, 0
+        for spec in ECO_STARTER_SOURCES:
+            existing = await session.scalar(
+                select(EcosystemSource).where(EcosystemSource.name == spec["name"])
+            )
+            if existing:
+                skipped += 1
+                continue
+            source = await svc.create(
+                name=spec["name"],
+                source_type=spec["source_type"],
+                trust_level=spec["trust_level"],
+                adapter_key=spec["adapter_key"],
+                base_url=spec.get("base_url"),
+                config=spec.get("config") or {},
+                sync_interval_minutes=spec["sync_interval_minutes"],
+                robots_compliant=True,
+            )
+            # Never auto-fetch: operator reviews + activates explicitly
+            source.status = "paused"
+            created += 1
+        await session.commit()
+        print(f"Ecosystem starter sources: {created} created (PAUSED), {skipped} already present.")
+        print("Review each source, confirm robots/ToS compliance, then activate it.")
+    await engine.dispose()
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python -m app.cli <command>")
@@ -84,6 +164,10 @@ def main() -> None:
 
     if command in ("sweep-storage", "sweep-seats", "flush-api"):
         asyncio.run(_run_sweep(command.removeprefix("sweep-").removeprefix("flush-")))
+        return
+
+    if command == "eco-seed":
+        asyncio.run(_eco_seed_sources())
         return
 
     if command == "create-admin":

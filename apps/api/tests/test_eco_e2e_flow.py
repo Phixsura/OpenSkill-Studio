@@ -282,9 +282,11 @@ async def test_full_discovery_to_rollout_e2e(db):
         created_by=admin.id,
     )
     assert draft.status == "draft" and draft.validation["valid"]
+    # §17 four-eyes: a SECOND admin reviews and publishes the author's draft
+    reviewer = await _mk_admin(db)
     await draft_svc.transition(draft.id, to_status="in_review", actor_id=admin.id)
-    await draft_svc.transition(draft.id, to_status="approved", actor_id=admin.id)
-    draft = await draft_svc.transition(draft.id, to_status="published", actor_id=admin.id)
+    await draft_svc.transition(draft.id, to_status="approved", actor_id=reviewer.id)
+    draft = await draft_svc.transition(draft.id, to_status="published", actor_id=reviewer.id)
     assert draft.status == "published"
 
     # 12. Controlled rollout: benchmark-only scope, evaluate, human promotes

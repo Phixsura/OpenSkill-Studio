@@ -230,6 +230,20 @@ class DraftService:
                 else "ECO_INVALID_TRANSITION"
             )
             raise AppError(code, f"Cannot move draft {draft.status} -> {to_status}", 409)
+        # §17 four-eyes (checked AFTER transition validity — the state machine
+        # answers "is this move legal", four-eyes answers "may YOU make it"):
+        # the draft creator can neither approve nor publish their own draft;
+        # submit/reject/edit stay self-service.
+        if (
+            to_status in ("approved", "published")
+            and draft.created_by is not None
+            and actor_id == draft.created_by
+        ):
+            raise AppError(
+                "ECO_FOUR_EYES",
+                "Draft creator cannot approve or publish their own draft",
+                409,
+            )
         if to_status == "published":
             if not (draft.validation or {}).get("valid"):
                 raise AppError("ECO_DRAFT_NOT_APPROVED", "Draft failed validation", 409)
