@@ -95,3 +95,19 @@ async def test_mute_and_unmute_roundtrip(db):
     other = await _mk_user(db)
     with pytest.raises(AppError):
         await svc.update_settings(wl.id, other.id, min_severity="info")
+
+async def test_quick_watch_creates_default_list_idempotently(db):
+    from app.ecosystem.services.watchlists import WatchlistService
+
+    user = await _mk_user(db)
+    model = AIModel(canonical_name="QuickGen", slug=f"quick-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    svc = WatchlistService(db)
+    wl1, item1 = await svc.quick_watch(user.id, target_kind="model", target_id=model.id)
+    assert wl1.name == "Default"
+    # Second click: same list, same item (idempotent, no duplicates)
+    wl2, item2 = await svc.quick_watch(user.id, target_kind="model", target_id=model.id)
+    assert wl2.id == wl1.id
+    assert item2.id == item1.id
+    assert len(await svc.list_for_owner(user.id)) == 1

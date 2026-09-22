@@ -17,6 +17,16 @@ const KINDS = [
   { segment: "node-packages", label: "Node Packages" },
 ];
 
+const SEGMENT_TO_KIND: Record<string, string> = {
+  providers: "provider",
+  tools: "tool",
+  models: "model",
+  "model-versions": "model_version",
+  workflows: "workflow",
+  agents: "agent",
+  "node-packages": "node_package",
+};
+
 const TRANSITIONS: Record<string, string[]> = {
   discovered: ["under_review", "blocked"],
   under_review: ["verified", "blocked", "discovered"],
@@ -90,6 +100,18 @@ export default function CatalogPage() {
     enabled: Boolean(selected),
     queryFn: () =>
       apiWithAuth<{ data: Scorecard }>(`/ecosystem/catalog/${segment}/${selected!.id}/scorecard`),
+  });
+  const quickWatch = useMutation({
+    mutationFn: (entityId: string) =>
+      apiWithAuth("/ecosystem/watchlists/quick-watch", {
+        method: "POST",
+        body: JSON.stringify({
+          target_kind: SEGMENT_TO_KIND[segment] ?? "model",
+          target_id: entityId,
+        }),
+      }),
+    onSuccess: () => setError(null),
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Watch failed"),
   });
   const [mergeTarget, setMergeTarget] = useState("");
   const mergeEntity = useMutation({
@@ -223,6 +245,13 @@ export default function CatalogPage() {
                       className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
                     >
                       Inspect
+                    </button>
+                    <button
+                      title="Watch: get notified about changes to this entity"
+                      onClick={() => quickWatch.mutate(entity.id)}
+                      className="ml-2 rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                    >
+                      👁 Watch
                     </button>
                   </td>
                 </tr>

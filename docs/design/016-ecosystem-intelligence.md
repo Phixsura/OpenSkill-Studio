@@ -720,3 +720,24 @@ LOWEST threshold among the user's lists watching that target (the most
 interested list decides); mute affects push only, never hides data on pull.
 `PATCH /ecosystem/watchlists/{id}` (owner-gated) sets threshold, mute, unmute.
 Migration eco04a00004 (additive, server_default='info').
+
+## 25. Impact SLA escalation (2026-09-22, round 17)
+
+PagerDuty/Jira SLA bar: cron `eco_impact_sla` (twice hourly) sweeps OPEN
+impact analyses past `deadline_at` and notifies every platform admin exactly
+once (`summary.escalated_at` stamp = idempotence). Escalation never mutates
+analysis status — closing an impact stays a human decision.
+
+## 26. Per-case results drill-down (2026-09-22, round 18)
+
+LangSmith trace bar: every run row expands into its per-case results table —
+repeat index, latency, cost, retries, ok/failed (error on hover), automated
+scores — straight from `GET /benchmark/runs/{id}/results`. Failures are data,
+never hidden.
+
+## 27. One-click watch (2026-09-22, round 19)
+
+GitHub watch-button bar: `POST /ecosystem/watchlists/quick-watch` gets or
+creates the user's "Default" watchlist and adds the target idempotently
+(double-click = same item, no duplicates). 👁 Watch button on every catalog
+row. WATCH_TARGET_KINDS extended to all seven catalog kinds.

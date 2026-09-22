@@ -223,6 +223,64 @@ async def sweep_due_sources(db: AsyncSession) -> int:
     return enqueued
 
 
+async def sweep_overdue_impacts(db: AsyncSession) -> int:
+    """SLA escalation (PagerDuty/Jira bar): an OPEN impact analysis past its
+    deadline notifies every platform admin exactly once (escalated_at stamp
+    in summary makes the sweep idempotent). Escalation never mutates the
+    analysis status — closing it stays a human decision."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.ecosystem.models.graph import ImpactAnalysis
+    from app.models.user import User, UserRole
+    from app.services.notification import NotificationService
+
+    now = datetime.now(UTC)
+    rows = list(
+        await db.scalars(
+            select(ImpactAnalysis).where(
+                ImpactAnalysis.status == "open",
+                ImpactAnalysis.deadline_at.isnot(None),
+                ImpactAnalysis.deadline_at < now,
+            )
+        )
+    )
+    overdue = [a for a in rows if not (a.summary or {}).get("escalated_at")]
+    if not overdue:
+        return 0
+    admin_ids = [
+        row for row in await db.scalars(select(User.id).where(User.role == UserRole.ADMIN))
+    ]
+    svc = NotificationService(db)
+    for analysis in overdue:
+        summary = dict(analysis.summary or {})
+        summary["escalated_at"] = now.isoformat()
+        analysis.summary = summary
+        flag_modified(analysis, "summary")
+        deadline = analysis.deadline_at
+        if deadline is not None and deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        overdue_hours = round((now - deadline).total_seconds() / 3600, 1) if deadline else None
+        for admin_id in admin_ids:
+            await svc.create(
+                user_id=admin_id,
+                notification_type="ecosystem_impact_sla",
+                title=f"Impact analysis overdue: {analysis.classification}",
+                body=(
+                    f"Impact {analysis.id} on {analysis.root_kind} has been open "
+                    f"past its deadline ({overdue_hours}h overdue)."
+                ),
+                data={
+                    "impact_analysis_id": analysis.id,
+                    "classification": analysis.classification,
+                    "deadline_at": deadline.isoformat() if deadline else None,
+                },
+            )
+    await db.flush()
+    return len(overdue)
+
+
 async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
     """§16 retention: bounded operational history without losing evidence.
 

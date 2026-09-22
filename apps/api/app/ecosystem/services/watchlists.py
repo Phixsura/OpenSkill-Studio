@@ -114,6 +114,24 @@ class WatchlistService:
         )
         return list(rows)
 
+    async def quick_watch(
+        self, owner_id: str, *, target_kind: str, target_id: str
+    ) -> tuple:
+        """GitHub watch-button bar: one click watches an entity. Gets or
+        creates the user's "Default" watchlist and adds the item idempotently.
+        Returns (watchlist, item)."""
+        default = await self.db.scalar(
+            select(Watchlist).where(
+                Watchlist.owner_id == owner_id, Watchlist.name == "Default"
+            )
+        )
+        if default is None:
+            default = await self.create(owner_id=owner_id, name="Default")
+        item = await self.add_item(
+            default.id, owner_id, target_kind=target_kind, target_id=target_id
+        )
+        return default, item
+
     async def matching_changes(
         self, owner_id: str, *, limit: int = 50
     ) -> list[ChangeEvent]:

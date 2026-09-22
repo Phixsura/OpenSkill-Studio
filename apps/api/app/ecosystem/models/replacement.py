@@ -60,7 +60,10 @@ ROLLOUT_STATUSES = frozenset(
 )
 
 WATCH_TARGET_KINDS = frozenset(
-    {"provider", "model", "tool", "workflow", "github_repo", "capability", "component"}
+    {
+        "provider", "model", "model_version", "tool", "workflow", "agent",
+        "node_package", "github_repo", "capability", "component",
+    }
 )
 
 

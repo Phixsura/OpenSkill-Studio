@@ -8,6 +8,7 @@ from app.ecosystem.schemas import (
     AddWatchItemRequest,
     ChangeEventResponse,
     CreateWatchlistRequest,
+    QuickWatchRequest,
     UpdateWatchlistRequest,
     WatchItemResponse,
     WatchlistResponse,
@@ -105,6 +106,20 @@ async def remove_watch_item(
 ):
     await WatchlistService(db).remove_item(watchlist_id, item_id, user.id)
     await db.commit()
+
+
+@router.post("/quick-watch", response_model=DataResponse[WatchItemResponse], status_code=201)
+async def quick_watch(
+    body: QuickWatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """One-click watch: adds the target to the user's Default watchlist."""
+    _wl, item = await WatchlistService(db).quick_watch(
+        user.id, target_kind=body.target_kind, target_id=body.target_id
+    )
+    await db.commit()
+    return {"data": item}
 
 
 @router.get("/changes/feed", response_model=DataResponse[list[ChangeEventResponse]])

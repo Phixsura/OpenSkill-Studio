@@ -18,6 +18,18 @@ interface Suite {
   status: string;
 }
 
+interface RunResult {
+  id: string;
+  case_id: string;
+  repeat_index: number;
+  latency_ms: number | null;
+  cost_usd: number;
+  retries: number;
+  failed: boolean;
+  error: string | null;
+  automated_scores: Record<string, number>;
+}
+
 interface Run {
   id: string;
   suite_id: string;
@@ -92,6 +104,13 @@ export default function BenchmarksPage() {
   const suites = useQuery({
     queryKey: ["eco-suites"],
     queryFn: () => apiWithAuth<{ data: Suite[] }>("/ecosystem/benchmark/suites"),
+  });
+  const [drillRun, setDrillRun] = useState<string | null>(null);
+  const results = useQuery({
+    queryKey: ["eco-run-results", drillRun],
+    enabled: Boolean(drillRun),
+    queryFn: () =>
+      apiWithAuth<{ data: RunResult[] }>(`/ecosystem/benchmark/runs/${drillRun}/results`),
   });
   const runs = useQuery({
     queryKey: ["eco-runs", selectedSuite],
@@ -272,6 +291,7 @@ export default function BenchmarksPage() {
                   <th className="px-4 py-3 text-left text-sm font-medium">Reliability</th>
                   <th className="px-4 py-3 text-left text-sm font-medium">p50 latency</th>
                   <th className="px-4 py-3 text-left text-sm font-medium">Created</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -305,10 +325,75 @@ export default function BenchmarksPage() {
                     <td className="px-4 py-3 text-sm text-[hsl(var(--muted-foreground))]">
                       {fmtDate(r.created_at)}
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => setDrillRun(drillRun === r.id ? null : r.id)}
+                        className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                      >
+                        {drillRun === r.id ? "Hide results" : "Results"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {drillRun && (
+          <div className="mt-3 rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+            <h3 className="mb-2 text-sm font-semibold">
+              Per-case results <span className="font-mono text-xs">{drillRun.slice(0, 10)}…</span>
+            </h3>
+            {results.isLoading ? (
+              <div className="text-sm text-[hsl(var(--muted-foreground))]">Loading results…</div>
+            ) : (results.data?.data ?? []).length === 0 ? (
+              <div className="text-sm text-[hsl(var(--muted-foreground))]">
+                No per-case results recorded.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[hsl(var(--secondary))]">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Case</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Repeat</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Latency</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Cost</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Retries</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Outcome</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Scores</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {(results.data?.data ?? []).map((res) => (
+                      <tr key={res.id}>
+                        <td className="px-3 py-2 font-mono text-xs">{res.case_id.slice(0, 10)}…</td>
+                        <td className="px-3 py-2">{res.repeat_index}</td>
+                        <td className="px-3 py-2">
+                          {res.latency_ms != null ? `${res.latency_ms} ms` : "—"}
+                        </td>
+                        <td className="px-3 py-2">${Number(res.cost_usd).toFixed(4)}</td>
+                        <td className="px-3 py-2">{res.retries}</td>
+                        <td className="px-3 py-2">
+                          {res.failed ? (
+                            <span className="text-xs text-red-600" title={res.error ?? ""}>
+                              failed
+                            </span>
+                          ) : (
+                            <span className="text-xs text-emerald-600">ok</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs">
+                          {Object.entries(res.automated_scores ?? {})
+                            .map(([k, v]) => `${k}=${v}`)
+                            .join(" ") || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </section>

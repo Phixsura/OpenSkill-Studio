@@ -561,3 +561,10 @@ class UpdateWatchlistRequest(BaseModel):
     min_severity: str | None = Field(default=None, max_length=30)
     muted_until: datetime | None = None
     clear_mute: bool = False
+
+
+class QuickWatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_kind: str = Field(max_length=30)
+    target_id: str = Field(min_length=26, max_length=26)
