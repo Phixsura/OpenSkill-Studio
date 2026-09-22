@@ -1010,3 +1010,21 @@ compare, price extract, source toggle) gained onError handlers rendering the
 machine error message in an in-page banner. One-click Watch also gained
 success feedback (button flips to "✓ Watching" and disables) — no more
 fire-and-wonder actions.
+
+## 52. Operator-surface completion (2026-09-23, rounds 46-49)
+
+Four operator gaps where backend capability existed with no UI:
+
+- **Impact actions** (round 46): Acknowledge/Resolve buttons on impact
+  analyses — the SLA loop closes in-product instead of via raw API calls.
+- **Source replay** (round 46): Replay button beside Sync now (§42 endpoint).
+- **Run failure visibility** (round 46): run rows show the machine error
+  class inline (full text on hover) — ECO_BUDGET_EXCEEDED / ECO_SUITE_DRIFT /
+  ECO_RUN_STUCK are no longer invisible.
+- **Catalog deep links + pagination** (round 47): `?kind=&entity=` restores
+  the Inspect panel (shareable), offset-based Load more with an
+  N-of-total footer.
+- **Compare uptime** (round 48): availability row shows 30d uptime %,
+  incident count and probe coverage per compared entity.
+- **Sync history** (round 49): per-source History panel — last 20 runs with
+  status/HTTP/bytes/observations/changes/error.

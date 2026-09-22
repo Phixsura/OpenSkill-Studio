@@ -7,6 +7,18 @@ import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
 import { STATUS_STYLES, fmtDate } from "../lib";
 
+interface SyncRun {
+  id: string;
+  status: string;
+  http_status: number | null;
+  bytes_fetched: number | null;
+  observations_created: number | null;
+  changes_detected: number | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 interface Source {
   id: string;
   name: string;
@@ -52,6 +64,7 @@ interface SourceHealth {
 export default function SourcesPage() {
   const queryClient = useQueryClient();
   const [healthFor, setHealthFor] = useState<string | null>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -72,6 +85,12 @@ export default function SourcesPage() {
     enabled: Boolean(healthFor),
     queryFn: () => apiWithAuth<{ data: SourceHealth }>(`/ecosystem/sources/${healthFor}/health`),
   });
+  const history = useQuery({
+    queryKey: ["eco-source-runs", historyFor],
+    enabled: Boolean(historyFor),
+    queryFn: () =>
+      apiWithAuth<{ data: SyncRun[] }>(`/ecosystem/sources/${historyFor}/sync-runs?limit=20`),
+  });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["eco-sources"] });
 
@@ -89,6 +108,14 @@ export default function SourcesPage() {
     onError: (e) => setError(e instanceof ApiError ? e.message : "Failed to create source"),
   });
 
+  const replaySource = useMutation({
+    mutationFn: (id: string) => apiWithAuth(`/ecosystem/sources/${id}/replay`, { method: "POST" }),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Replay failed"),
+  });
   const syncSource = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/sources/${id}/sync`, { method: "POST", body: "{}" }),
@@ -243,10 +270,23 @@ export default function SourcesPage() {
                       Sync now
                     </button>
                     <button
+                      title="Re-run the current parser over retained raw snapshots (append-only)"
+                      onClick={() => replaySource.mutate(s.id)}
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                    >
+                      Replay
+                    </button>
+                    <button
                       onClick={() => setHealthFor(healthFor === s.id ? null : s.id)}
                       className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
                     >
                       Health
+                    </button>
+                    <button
+                      onClick={() => setHistoryFor(historyFor === s.id ? null : s.id)}
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
+                    >
+                      History
                     </button>
                     <button
                       onClick={() =>
@@ -264,6 +304,54 @@ export default function SourcesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {historyFor && (
+        <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+          <h3 className="mb-2 text-sm font-semibold">Sync history (last 20)</h3>
+          {history.isLoading ? (
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">Loading…</div>
+          ) : (history.data?.data ?? []).length === 0 ? (
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">No runs yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-[hsl(var(--secondary))]">
+                  <tr>
+                    <th className="px-2 py-1 text-left">When</th>
+                    <th className="px-2 py-1 text-left">Status</th>
+                    <th className="px-2 py-1 text-left">HTTP</th>
+                    <th className="px-2 py-1 text-left">Bytes</th>
+                    <th className="px-2 py-1 text-left">Obs</th>
+                    <th className="px-2 py-1 text-left">Changes</th>
+                    <th className="px-2 py-1 text-left">Error</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {(history.data?.data ?? []).map((run) => (
+                    <tr key={run.id}>
+                      <td className="px-2 py-1">
+                        {fmtDate(run.started_at ?? run.finished_at ?? "")}
+                      </td>
+                      <td className="px-2 py-1">
+                        <Pill value={run.status} styles={STATUS_STYLES} />
+                      </td>
+                      <td className="px-2 py-1">{run.http_status ?? "—"}</td>
+                      <td className="px-2 py-1">{run.bytes_fetched ?? "—"}</td>
+                      <td className="px-2 py-1">{run.observations_created ?? "—"}</td>
+                      <td className="px-2 py-1">{run.changes_detected ?? "—"}</td>
+                      <td
+                        className="max-w-md truncate px-2 py-1 text-red-600"
+                        title={run.error ?? ""}
+                      >
+                        {run.error ?? ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
       {healthFor && health.data?.data && (

@@ -1,7 +1,8 @@
 "use client";
 /** Canonical AI ecosystem catalog + lifecycle + conflicts (Parts C/L/Q). */
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -91,18 +92,49 @@ const CHECK_STYLES: Record<string, string> = {
 };
 
 export default function CatalogPage() {
+  return (
+    <Suspense>
+      <CatalogInner />
+    </Suspense>
+  );
+}
+
+function CatalogInner() {
   const queryClient = useQueryClient();
-  const [segment, setSegment] = useState("models");
+  const router = useRouter();
+  const params = useSearchParams();
+  const [segment, setSegment] = useState(params.get("kind") ?? "models");
   const [selected, setSelected] = useState<Entity | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [pages, setPages] = useState<Entity[][]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-catalog", segment],
-    queryFn: () =>
-      apiWithAuth<{ data: Entity[]; meta: { total: number } }>(
-        `/ecosystem/catalog/${segment}?limit=100`,
-      ),
+    queryKey: ["eco-catalog", segment, offset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Entity[]; meta: { total: number } }>(
+        `/ecosystem/catalog/${segment}?limit=100&offset=${offset}`,
+      );
+      setPages((prev) => (offset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const total = data?.meta?.total ?? 0;
+
+  // Shareable deep link: /catalog?kind=models&entity=<id> restores Inspect
+  useEffect(() => {
+    const entityId = params.get("entity");
+    if (entityId && !selected) {
+      const hit = pages.flat().find((e) => e.id === entityId);
+      if (hit) setSelected(hit);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages]);
+  useEffect(() => {
+    const query = selected ? `?kind=${segment}&entity=${selected.id}` : `?kind=${segment}`;
+    router.replace(`/dashboard/ecosystem/catalog${query}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment, selected]);
   const corroboration = useQuery({
     queryKey: ["eco-corroboration", segment, selected?.id],
     enabled: Boolean(selected),
@@ -205,7 +237,7 @@ export default function CatalogPage() {
     onError: (e) => setError(e instanceof ApiError ? e.message : "Transition failed"),
   });
 
-  const rows = data?.data ?? [];
+  const rows = pages.length > 0 ? pages.flat() : (data?.data ?? []);
 
   return (
     <div className="space-y-6 p-6">
@@ -337,6 +369,19 @@ export default function CatalogPage() {
               ))}
             </tbody>
           </table>
+          <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-[hsl(var(--muted-foreground))]">
+            <span>
+              {rows.length} of {total}
+            </span>
+            {rows.length < total && (
+              <button
+                onClick={() => setOffset(rows.length)}
+                className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+              >
+                Load more
+              </button>
+            )}
+          </div>
         </div>
       )}
       {selected && (

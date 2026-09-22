@@ -76,6 +76,14 @@ export default function ComponentsPage() {
       }>(`/ecosystem/graph/node/${graphNode!.kind}/${graphNode!.id}`),
   });
 
+  const impactStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiWithAuth(`/ecosystem/impact/analyses/${id}/status?status=${status}`, {
+        method: "POST",
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-impact"] }),
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Status change failed"),
+  });
   const impact = useQuery({
     queryKey: ["eco-impact"],
     queryFn: () => apiWithAuth<{ data: ImpactAnalysis[] }>("/ecosystem/impact/analyses"),
@@ -176,6 +184,30 @@ export default function ComponentsPage() {
                     <span className="text-xs text-orange-700">
                       deadline {fmtDate(a.deadline_at)}
                     </span>
+                  )}
+                  {a.status === "open" && (
+                    <>
+                      <button
+                        onClick={() => impactStatus.mutate({ id: a.id, status: "acknowledged" })}
+                        className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+                      >
+                        Acknowledge
+                      </button>
+                      <button
+                        onClick={() => impactStatus.mutate({ id: a.id, status: "resolved" })}
+                        className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+                      >
+                        Resolve
+                      </button>
+                    </>
+                  )}
+                  {a.status === "acknowledged" && (
+                    <button
+                      onClick={() => impactStatus.mutate({ id: a.id, status: "resolved" })}
+                      className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+                    >
+                      Resolve
+                    </button>
                   )}
                 </div>
                 <div className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">

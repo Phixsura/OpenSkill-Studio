@@ -32,6 +32,7 @@ interface RunResult {
 
 interface Run {
   id: string;
+  error: string | null;
   suite_id: string;
   status: string;
   target: { entity_kind?: string; entity_id?: string };
@@ -385,6 +386,11 @@ export default function BenchmarksPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Pill value={r.status} styles={STATUS_STYLES} />
+                      {r.error && (
+                        <span title={r.error} className="ml-1 cursor-help text-xs text-red-600">
+                          {r.error.split(":")[0]}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">${Number(r.total_cost_usd).toFixed(4)}</td>
                     <td className="px-4 py-3 text-sm">

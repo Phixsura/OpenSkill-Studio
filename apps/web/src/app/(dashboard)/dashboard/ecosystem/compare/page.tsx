@@ -29,6 +29,13 @@ interface CompareRow {
   } | null;
 }
 
+interface Uptime {
+  current_status: string;
+  uptime_pct: number | null;
+  incidents: number;
+  coverage_pct: number;
+}
+
 interface EstimateRow {
   entity_id: string;
   estimated_total: number | null;
@@ -86,6 +93,22 @@ function CompareInner() {
   });
 
   const rows = data?.data ?? [];
+  const uptimes = useQuery({
+    queryKey: ["eco-compare-uptime", rows.map((r) => r.entity_id).join(",")],
+    enabled: rows.length > 0,
+    queryFn: async () => {
+      const out: Record<string, Uptime> = {};
+      await Promise.all(
+        rows.map(async (r) => {
+          const res = await apiWithAuth<{ data: Uptime }>(
+            `/ecosystem/pricing/availability/uptime?entity_kind=${r.entity_kind}&entity_id=${r.entity_id}&days=30`,
+          );
+          out[r.entity_id] = res.data;
+        }),
+      );
+      return out;
+    },
+  });
   const allUnits = Array.from(new Set(rows.flatMap((r) => Object.keys(r.prices)))).sort();
   const allDims = Array.from(
     new Set(rows.flatMap((r) => Object.keys(r.benchmark?.dimension_scores ?? {}))),
@@ -205,11 +228,23 @@ function CompareInner() {
               ))}
               <tr className="bg-[hsl(var(--card))]">
                 <td className="px-4 py-2 font-medium">Availability</td>
-                {rows.map((r) => (
-                  <td key={r.entity_id} className="px-4 py-2 font-mono text-xs">
-                    {r.availability_status ? JSON.stringify(r.availability_status) : "—"}
-                  </td>
-                ))}
+                {rows.map((r) => {
+                  const u = uptimes.data?.[r.entity_id];
+                  return (
+                    <td key={r.entity_id} className="px-4 py-2 text-xs">
+                      <div className="font-mono">
+                        {r.availability_status ? JSON.stringify(r.availability_status) : "—"}
+                      </div>
+                      {u && (
+                        <div className="mt-1 text-[hsl(var(--muted-foreground))]">
+                          {u.uptime_pct !== null
+                            ? `${u.uptime_pct}% uptime (30d) · ${u.incidents} incidents · ${u.coverage_pct}% coverage`
+                            : "never probed"}
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             </tbody>
           </table>
