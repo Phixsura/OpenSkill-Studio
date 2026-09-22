@@ -846,3 +846,19 @@ Registration also emits one `security_advisory_affects` change event PER
 affected entity (capped at 50), carrying `canonical_entity_id` — so watchers
 of a hit entity are notified through the normal watch/webhook/Atom fan-out:
 "a model I watch has a CVE" arrives without polling.
+
+## 39. HTTP contract & API-surface stability (2026-09-22, rounds 32-33)
+
+The recurring authz classes are only provable at the HTTP layer — service
+tests never exercise dependency wiring. New suite pins:
+
+- anonymous → 401 on every eco surface (reads and writes) with the
+  machine-readable error envelope;
+- member → 403 on every platform-admin surface (audit, audit.csv, duplicates,
+  source create, advisory create, suite create) — never data;
+- member reads → 200 with the `{data: ...}` envelope on 11 core surfaces;
+- error shapes: unknown catalog kind and nonexistent entity → uniform 404
+  (no existence oracle), bad compare input → 422 `VALIDATION_ERROR`;
+- API-surface stability: 29 core (method, path) pairs asserted against the
+  OpenAPI document — the surface may only GROW; a missing pair fails the
+  suite as an undeliberate breaking change.
