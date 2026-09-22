@@ -916,3 +916,13 @@ Two governance holes closed:
   (GitHub "new commits dismiss review" semantics) — the window between a
   reviewer reading and a second admin approving can no longer be exploited to
   swap content. Approved drafts remain immutable.
+
+## 45. Publish race fencing (2026-09-22, round 39)
+
+Distributed-correctness closure on the last unguarded read-modify-write:
+`DraftService.transition` now takes a row lock (`SELECT ... FOR UPDATE` via
+refresh) before the state-machine check, so two concurrent publishes
+serialize — the loser re-reads `published` and is refused; the
+materialization side effect (`_publish` creating a WorkflowPack) can never
+run twice. Proven by a two-session `asyncio.gather` race test asserting
+exactly one winner, one `ECO_DRAFT_NOT_APPROVED`, and exactly one pack.

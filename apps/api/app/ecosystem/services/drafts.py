@@ -223,6 +223,10 @@ class DraftService:
         self, draft_id: str, *, to_status: str, actor_id: str, org_id: str | None = None
     ) -> ComponentDraft:
         draft = await self.get(draft_id, org_id=org_id)
+        # Row lock: two concurrent publishes must serialize — the loser then
+        # re-reads "published" and is refused by the state machine, so the
+        # materialization side effect (_publish) can never run twice.
+        await self.db.refresh(draft, with_for_update=True)
         if to_status not in _STATUS_FLOW.get(draft.status, set()):
             code = (
                 "ECO_DRAFT_NOT_APPROVED"
