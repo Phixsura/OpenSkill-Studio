@@ -563,6 +563,28 @@ class CatalogService:
             .values(entity_id=target_id)
         )
 
+        # Watchers follow the survivor: re-point watch items so a user who
+        # watched the duplicate keeps receiving the survivor's change events.
+        # Lists already watching the survivor drop the now-duplicate item.
+        from app.ecosystem.models.replacement import WatchItem
+
+        src_items = list(
+            await self.db.scalars(select(WatchItem).where(WatchItem.target_id == source_id))
+        )
+        moved["watch_items"] = 0
+        for item in src_items:
+            duplicate = await self.db.scalar(
+                select(WatchItem.id).where(
+                    WatchItem.watchlist_id == item.watchlist_id,
+                    WatchItem.target_id == target_id,
+                )
+            )
+            if duplicate:
+                await self.db.delete(item)
+            else:
+                item.target_id = target_id
+                moved["watch_items"] += 1
+
         # Merge alias/external_id lists onto the survivor
         target.aliases = sorted(
             {*(target.aliases or []), *(source.aliases or []), source.canonical_name}

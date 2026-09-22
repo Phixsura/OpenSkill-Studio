@@ -974,3 +974,12 @@ top-N). Fixed: retired entities appear in NEITHER channel (blocked entities
 still surface in the hard-incompatible channel so the operator sees why).
 Race tests additionally self-clean their committed fixtures (retire on exit)
 so committed test data can never pollute other tests' candidate pools.
+
+## 49. Watchers follow merges (2026-09-23, round 43)
+
+Data-integrity defect: entity merge re-pointed observations, prices,
+availability, aliases and edges — but NOT watch items, so a user watching the
+duplicate silently stopped receiving every future change event. Fixed:
+merge re-points watch items to the survivor; a list already watching the
+survivor drops the now-duplicate item (never doubled). Nothing is left
+pointing at the retired duplicate (tested for solo- and both-watchers).

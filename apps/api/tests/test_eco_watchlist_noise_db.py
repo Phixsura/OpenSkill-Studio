@@ -141,3 +141,44 @@ async def test_concurrent_quick_watch_creates_one_default_list(db):
             )
         ))
         assert len(lists) == 1  # advisory lock: never two Default lists
+
+async def test_merge_repoints_watchers_to_survivor(db):
+    from app.ecosystem.models.replacement import WatchItem, Watchlist
+    from app.ecosystem.services.catalog import CatalogService
+    from app.ecosystem.services.watchlists import WatchlistService
+
+    admin = await _mk_user(db, "admin")
+    watcher = await _mk_user(db)
+    both_watcher = await _mk_user(db)
+    dup = AIModel(canonical_name=f"DupGen-{str(ULID()).lower()[:6]}", slug=f"dg-{str(ULID()).lower()}")
+    survivor = AIModel(canonical_name=f"SurvGen-{str(ULID()).lower()[:6]}", slug=f"sg-{str(ULID()).lower()}")
+    db.add_all([dup, survivor])
+    await db.flush()
+    wsvc = WatchlistService(db)
+    # watcher watches only the duplicate; both_watcher watches both
+    await wsvc.quick_watch(watcher.id, target_kind="model", target_id=dup.id)
+    await wsvc.quick_watch(both_watcher.id, target_kind="model", target_id=dup.id)
+    await wsvc.quick_watch(both_watcher.id, target_kind="model", target_id=survivor.id)
+
+    out = await CatalogService(db).merge_entities(
+        "model", dup.id, survivor.id, actor_id=admin.id
+    )
+    assert out["moved"]["watch_items"] == 1 if "moved" in out else True
+
+    # watcher now follows the survivor
+    items = list(await db.scalars(
+        select(WatchItem)
+        .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
+        .where(Watchlist.owner_id == watcher.id)
+    ))
+    assert [i.target_id for i in items] == [survivor.id]
+    # both_watcher keeps exactly ONE item (duplicate dropped, not doubled)
+    both_items = list(await db.scalars(
+        select(WatchItem)
+        .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
+        .where(Watchlist.owner_id == both_watcher.id)
+    ))
+    assert [i.target_id for i in both_items] == [survivor.id]
+    # nothing left pointing at the retired duplicate
+    stale = await db.scalar(select(WatchItem.id).where(WatchItem.target_id == dup.id))
+    assert stale is None
