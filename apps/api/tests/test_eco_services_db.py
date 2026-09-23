@@ -1109,3 +1109,43 @@ async def test_review_submit_ownership_and_immutability(db):
     with pytest.raises(AppError) as exc:
         await blind.submit(a1["review_id"], reviewer_id=r1.id, scores={"quality": 1})
     assert exc.value.code == "ECO_INVALID_TRANSITION"
+
+async def test_capability_evidence_gates_and_curation_hygiene(db):
+    """Mutation-audit killers ×3: (a) force WITHOUT admin cannot downgrade
+    evidence; (b) an unknown evidence level is a 422, never a KeyError-500;
+    (c) curated conflict values are sanitized (NUL would 500 at JSONB)."""
+    from app.ecosystem.services.capability_mapping import CapabilityMappingService
+    from app.ecosystem.services.catalog import CatalogService
+
+    admin = await _mk_user(db, "admin")
+    version = await _mk_model_version(db, "EvGate")
+    svc = CapabilityMappingService(db)
+    await _mk_capability_tag(db, "video_generation")
+    await svc.upsert(
+        entity_kind="model_version", entity_id=version.id,
+        capability_key="video_generation", evidence_level="benchmark_verified",
+        io_spec={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
+        actor_id=admin.id,
+    )
+    # (a) downgrade with force but WITHOUT admin → refused
+    with pytest.raises(AppError):
+        await svc.upsert(
+            entity_kind="model_version", entity_id=version.id,
+            capability_key="video_generation", evidence_level="vendor_claimed",
+            io_spec={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
+            actor_id=admin.id, force=True, actor_is_admin=False,
+        )
+    # (b) unknown evidence level → clean 422
+    with pytest.raises(AppError) as exc:
+        await svc.upsert(
+            entity_kind="model_version", entity_id=version.id,
+            capability_key="video_generation", evidence_level="totally_made_up",
+            io_spec={}, actor_id=admin.id,
+        )
+    assert exc.value.code == "VALIDATION_ERROR"
+    # (c) curated value with a NUL byte is stored sanitized
+    curated = await CatalogService(db).resolve_conflict(
+        "model_version", version.id, field="license",
+        chosen_value="MIT\x00 injected", actor_id=admin.id,
+    )
+    assert "\x00" not in curated["value"]  # NUL screened before JSONB

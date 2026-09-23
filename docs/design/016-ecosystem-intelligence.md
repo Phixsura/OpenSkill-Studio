@@ -1225,3 +1225,13 @@ with an exactly-one-source case pinning warn. 5/5 die.
   interval ignored, never-synced never due, and the due boundary flipped were
   all invisible. Killed with a four-state semantics test (never-synced due
   now; fresh waits; overdue re-enqueues; paused never). 4/4 die.
+
+## 61. LLM-safety & curation audits (2026-09-23, rounds 72-73)
+
+- **LLM extraction (72)**: 5/5 mutants died first pass — confidence cap,
+  boundary markers, extra=forbid schema, injection flagging and
+  injection-output rejection are all pinned. No gaps.
+- **Capability evidence & curation (73)**: three holes — force WITHOUT admin
+  could downgrade evidence (authz), an unknown evidence level raised
+  KeyError instead of 422, and curated conflict values skipped sanitization
+  (NUL → JSONB 500 class). Killed with a three-part gate/hygiene test. 4/4 die.
