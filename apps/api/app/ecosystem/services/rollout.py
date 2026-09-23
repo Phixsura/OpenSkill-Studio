@@ -21,7 +21,10 @@ from app.exceptions import AppError
 _STATUS_FLOW = {
     "draft": {"running", "aborted"},
     "running": {"evaluating", "aborted"},
-    "evaluating": {"promoted", "rejected", "aborted"},
+    # evaluating→evaluating: re-evaluation is idempotent — without it the
+    # §36 auto-evaluation sweep silently failed from its second pass on
+    # (and the alert fingerprint stamp was dead code)
+    "evaluating": {"evaluating", "promoted", "rejected", "aborted"},
     "promoted": set(),
     "rejected": set(),
     "aborted": set(),

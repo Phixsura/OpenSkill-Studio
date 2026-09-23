@@ -262,3 +262,51 @@ async def test_push_fanout_respects_threshold_and_mute(db):
     assert loud.id in notified          # default threshold, unmuted → notified
     assert quiet.id not in notified     # info < security_critical threshold
     assert muted.id not in notified     # snoozed → silent
+
+async def test_duplicate_delivery_is_idempotent(db):
+    """Mutation-audit killers: the outbox is at-least-once — BOTH consumers
+    must be exactly-once. Double-delivering compute_impact yields ONE impact
+    analysis; double-delivering notify_watchers yields ONE notification."""
+    from app.ecosystem.models.graph import ImpactAnalysis
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from app.ecosystem.worker import handle_compute_impact, handle_notify_watchers
+    from app.models.notification import Notification
+
+    user = await _mk_user(db)
+    model = AIModel(canonical_name=f"IdemGen-{str(ULID()).lower()[:6]}", slug=f"ig-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    await WatchlistService(db).quick_watch(user.id, target_kind="model", target_id=model.id)
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="license", field="license",
+        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
+        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+    )
+    db.add(change)
+    await db.flush()
+
+    payload = {"change_event_id": change.id}
+    await handle_compute_impact(db, payload)
+    await handle_compute_impact(db, payload)  # duplicate delivery
+    analyses = list(await db.scalars(
+        select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change.id)
+    ))
+    assert len(analyses) == 1
+
+    await handle_notify_watchers(db, payload)
+    await handle_notify_watchers(db, payload)  # duplicate delivery
+    notes = list(await db.scalars(
+        select(Notification).where(
+            Notification.user_id == user.id,
+            Notification.data["change_event_id"].as_string() == change.id,
+        )
+    ))
+    assert len(notes) == 1

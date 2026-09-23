@@ -1194,3 +1194,22 @@ and draft-validation-always-valid were already covered; the corroboration
 floor was NOT — a single unverified source passing as "corroborated" went
 undetected (both existing cases sat on either side of the boundary). Killed
 with an exactly-one-source case pinning warn. 5/5 die.
+
+## 59. Delivery-idempotency audit & sweep repair (2026-09-23, rounds 68-69)
+
+- **HTTP matrix extension (68)**: the §39 authz matrix now covers the
+  endpoints added since — replay, suite import and advisory status on the
+  admin side; pricing history, uptime, score-history and the delta export on
+  the member side; the Atom feed asserted by content type.
+- **Worker idempotency (69)**: ALL FOUR duplicate-delivery mutants survived —
+  the at-least-once outbox had exactly-once consumers with zero tests. Killed:
+  double-delivering compute_impact yields ONE analysis; double-delivering
+  notify_watchers yields ONE notification; the SLA re-stamp and rollout
+  alert fingerprint each fire once.
+- **LIVE DEFECT found by the audit**: evaluating→evaluating was not a legal
+  rollout transition, so the §36 auto-evaluation sweep silently failed from
+  its SECOND pass on (every plan raised, the alert stamp was dead code).
+  Fixed: re-evaluation is idempotent, and the sweep captures the alert
+  fingerprint BEFORE evaluate (evaluation rebuilds comparison from scratch,
+  so reading it afterwards always saw None). Once-per-regression-set alerting
+  now actually works and is race-tested.

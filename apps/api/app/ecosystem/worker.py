@@ -298,6 +298,9 @@ async def sweep_rollout_evaluations(db: AsyncSession) -> dict:
     evaluated = 0
     alerted = 0
     for plan in plans:
+        # Capture the stamp BEFORE evaluate — evaluation rebuilds comparison
+        # from scratch, so reading it afterwards would always see None
+        prior_stamp = (plan.comparison or {}).get("alerted_fingerprint")
         try:
             plan = await svc.evaluate(plan.id)
         except Exception:  # noqa: BLE001 — one bad plan never blocks the sweep
@@ -310,7 +313,10 @@ async def sweep_rollout_evaluations(db: AsyncSession) -> dict:
             json.dumps(sorted(regressions)).encode()
         ).hexdigest()[:16]
         comparison = dict(plan.comparison or {})
-        if comparison.get("alerted_fingerprint") == fingerprint:
+        if prior_stamp == fingerprint:
+            comparison["alerted_fingerprint"] = fingerprint  # keep it sticky
+            plan.comparison = comparison
+            flag_modified(plan, "comparison")
             continue  # this exact regression set was already announced
         comparison["alerted_fingerprint"] = fingerprint
         plan.comparison = comparison

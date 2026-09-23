@@ -30,6 +30,10 @@ MEMBER_READ_PATHS = [
     "/api/v1/ecosystem/watchlists",
     "/api/v1/ecosystem/pricing/observations",
     "/api/v1/ecosystem/deprecation-calendar",
+    "/api/v1/ecosystem/pricing/history?entity_kind=model&entity_id=" + "0" * 26,
+    "/api/v1/ecosystem/pricing/availability/uptime?entity_kind=model&entity_id=" + "0" * 26,
+    "/api/v1/ecosystem/benchmark/score-history?entity_kind=model&entity_id=" + "0" * 26,
+    "/api/v1/ecosystem/export/changes?since=2026-01-01T00:00:00%2B00:00",
 ]
 
 # Platform-admin-only surfaces (member must see 403, never data)
@@ -43,6 +47,10 @@ ADMIN_ONLY = [
      {"advisory_ref": "CVE-X", "title": "t", "severity": "high", "affected_ref": "y"}),
     ("POST", "/api/v1/ecosystem/benchmark/suites",
      {"key": "kx", "name": "n", "family": "image_generation", "capability_key": "c"}),
+    ("POST", "/api/v1/ecosystem/sources/" + "0" * 26 + "/replay", None),
+    ("POST", "/api/v1/ecosystem/benchmark/suites/import",
+     {"format": "openskill.benchmark-suite", "version": 1, "suite": {}, "cases": []}),
+    ("POST", "/api/v1/ecosystem/security/advisories/" + "0" * 26 + "/status?to_status=mitigated", None),
 ]
 
 
@@ -94,6 +102,14 @@ async def test_member_reads_return_data_envelope(http, tokens):
         r = await http.get(path, headers=headers)
         assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:200]}"
         assert "data" in r.json(), path
+
+
+async def test_member_can_read_atom_feed(http, tokens):
+    headers = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/atom+xml")
+    assert r.text.startswith("<?xml")
 
 
 async def test_member_blocked_from_admin_surfaces(http, tokens):
