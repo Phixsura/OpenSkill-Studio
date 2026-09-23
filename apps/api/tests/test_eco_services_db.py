@@ -1251,3 +1251,59 @@ async def test_signals_expose_only_approved_verified_evidence(db):
     assert "benchmark_verified" not in badges.get(
         f"model_version:{weak_evidence.id}", []
     )  # vendor claims never badge
+
+async def test_sync_release_edges_from_manifest_definition(db):
+    """Regression + mutation killers ×4: sync-release reads the definition
+    from the MANIFEST (the model has no .definition — the old attribute
+    access 500'd on every real release), dedupes capabilities, skips
+    non-string entries, and emits requires_capability edges from the
+    workflow_pack_release kind."""
+    import hashlib
+    import json as _json
+
+    from sqlalchemy import select as _select
+
+    from app.ecosystem.models.graph import DependencyEdge
+    from app.ecosystem.services.graph import GraphService
+    from app.models.skill_pack import PackStatus, PackVisibility
+    from app.models.workflow_pack import WorkflowPack, WorkflowPackRelease
+
+    org = await _mk_org(db)
+    pack = WorkflowPack(
+        owner_org_id=org.id, name="EdgePack",
+        slug=f"edgepack-{str(ULID()).lower()}",
+        status=PackStatus.DRAFT, visibility=PackVisibility.PRIVATE,
+    )
+    db.add(pack)
+    await db.flush()
+    manifest = {
+        "schema_version": 1,
+        "version": "1.0.0",
+        "name": "EdgePack",
+        "definition": {"steps": [
+            {"id": "s1", "capability": "image_generation"},
+            {"id": "s2", "capability": "image_generation"},  # duplicate → one edge
+            {"id": "s3", "capability": 123},                  # non-string → skipped
+            {"id": "s4", "capability": "video_generation"},
+        ]},
+    }
+    release = WorkflowPackRelease(
+        pack_id=pack.id, version="1.0.0", manifest=manifest,
+        checksum=hashlib.sha256(_json.dumps(manifest, sort_keys=True).encode()).hexdigest(),
+        step_count=4,
+    )
+    db.add(release)
+    await db.flush()
+
+    created = await GraphService(db).sync_release_edges(release.id)
+    assert created == 2  # dedup + non-string skip
+    edges = list(await db.scalars(
+        _select(DependencyEdge).where(DependencyEdge.from_id == release.id)
+    ))
+    assert len(edges) == 2
+    for edge in edges:
+        assert edge.from_kind == "workflow_pack_release"
+        assert edge.constraint_type == "requires_capability"
+    assert {e.constraint_spec["capability_key"] for e in edges} == {
+        "image_generation", "video_generation",
+    }

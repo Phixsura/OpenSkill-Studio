@@ -118,7 +118,10 @@ class GraphService:
         release = await self.db.get(WorkflowPackRelease, release_id)
         if not release:
             raise AppError("NOT_FOUND", "Release not found", 404)
-        definition = release.definition or {}
+        # A release snapshots the definition INSIDE its manifest — the model
+        # has no .definition attribute, so the old attribute access raised
+        # AttributeError (HTTP 500) for every real release (zero tests hid it)
+        definition = (release.manifest or {}).get("definition") or {}
         steps = definition.get("steps") or []
         created = 0
         seen: set[str] = set()

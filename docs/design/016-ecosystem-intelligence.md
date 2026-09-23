@@ -1266,3 +1266,14 @@ CENTRAL safety promise "publishing the eco draft never publishes the pack"
 every generated step carries review_gate=True; origin is fully traceable;
 generation never pre-approves; the materialized pack is PackStatus.DRAFT +
 PRIVATE. 3/3 die.
+
+## 65. Release-edge sync audit (2026-09-23, round 77)
+
+ALL FOUR mutants survived — and the audit exposed a LIVE broken endpoint:
+`POST /graph/sync-release/{id}` read `release.definition`, an attribute the
+release model does not have (the definition lives inside `manifest`), so the
+endpoint raised AttributeError (HTTP 500) for EVERY real release since it
+shipped — zero tests hid it completely. Fixed to read
+`manifest["definition"]`; regression + killer test covers capability
+dedup (duplicate → one edge), non-string skip, the requires_capability edge
+type and the workflow_pack_release from-kind. 4/4 die.
