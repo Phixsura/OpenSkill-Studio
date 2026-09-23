@@ -1324,3 +1324,14 @@ name/alias prefilters). New `escape_like` helper (backslash-escaped % _ \,
 used with escape="\\") applied at all four sites; killers pin that
 wildcards are literal (an entity named "50%_off-…" is found by its exact
 name, by "%_off-…", never by unrelated text) and the helper's mapping.
+
+## 69. Normalization-key & admin-action audits (2026-09-23, rounds 84-85)
+
+- **normalize_name (84)**: the resolution key's length cap (unbounded keys
+  defeat the alias index) and strict non-string rejection (str(dict) garbage
+  keys would auto-merge junk) were untested — killed; 4/4 die (casefold and
+  punctuation squash were already covered).
+- **Admin action wiring (85)**: three UI interactions pinned — advisory
+  registration POSTs the full structured payload (ref + range), suite import
+  surfaces API rejections, and the duplicates scan renders suspected pairs
+  with similarity (web 570).

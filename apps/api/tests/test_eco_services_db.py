@@ -1337,3 +1337,15 @@ def test_escape_like_helper():
 
     assert escape_like("50%_off") == "50\\%\\_off"
     assert escape_like("a\\b") == "a\\\\b"
+
+def test_normalize_name_bounds_and_strictness():
+    """Round-84 killers: the resolution key is BOUNDED (300 chars — an
+    unbounded key defeats the alias index) and STRICT (non-strings are None,
+    never coerced — str(dict) garbage keys would auto-merge junk)."""
+    from app.ecosystem.services.resolution import normalize_name
+
+    assert normalize_name("A" * 1000) == "a" * 300  # capped, casefolded
+    assert normalize_name(12345) is None            # never coerced
+    assert normalize_name({"name": "x"}) is None
+    assert normalize_name(None) is None
+    assert normalize_name("GPT-Image 2") == normalize_name("gpt_image_2")
