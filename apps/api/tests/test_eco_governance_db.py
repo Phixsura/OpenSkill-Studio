@@ -393,3 +393,34 @@ async def test_published_eco_draft_materializes_private_draft_pack(db):
     assert pack is not None
     assert pack.status == PackStatus.DRAFT          # product-side stays draft
     assert pack.visibility == PackVisibility.PRIVATE  # and private
+
+async def test_lifecycle_gates_refuse_archived_inactive_and_bad_targets(db):
+    """Mutation-audit killers ×3: an ARCHIVED source never syncs; a
+    non-active suite never runs; a run target must name an entity kind."""
+    from app.ecosystem.services.sync import SyncService
+
+    admin = await _mk_user(db, "admin")
+    source = await _mk_source(db, adapter_key="manual")
+    source.status = "archived"
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await SyncService(db).run_sync(source.id, raw_payload=b"{}")
+    assert exc.value.code == "ECO_SOURCE_PAUSED"
+
+    suite = await _mk_suite_with_cases(db, admin)
+    suite.status = "retired"
+    await db.flush()
+    svc = BenchmarkService(db)
+    with pytest.raises(AppError) as exc:
+        await svc.create_run(
+            suite.id, target={"entity_kind": "model", "entity_id": "0" * 26}
+        )
+    assert exc.value.code == "VALIDATION_ERROR"
+
+    suite.status = "active"
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.create_run(suite.id, target={"entity_id": "0" * 26})  # no kind
+    assert exc.value.code == "VALIDATION_ERROR"
+    with pytest.raises(AppError):
+        await svc.create_run(suite.id, target="not-a-dict")  # type: ignore[arg-type]

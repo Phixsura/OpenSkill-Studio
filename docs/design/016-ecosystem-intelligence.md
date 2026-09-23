@@ -1304,3 +1304,13 @@ The §66 sweep continued across every org_id parameter:
   now required; org-less watchlists unchanged.
   Draft write paths were verified admin-only; telemetry already gated. Both
   guards pinned in the HTTP matrix (member 404/403 + admin 200 + org-less 201).
+
+## 67. Lifecycle-gate & noise-control-UI audits (2026-09-23, rounds 81-82)
+
+- **Compliance/lifecycle gates (81)**: robots attestation was covered, but
+  three gates were not — an ARCHIVED source could still sync, a retired suite
+  could still run, and the run-target validation could vanish unnoticed.
+  Killed with a three-gate test. 4/4 die.
+- **Noise-control UI (82)**: the §24 controls had no interaction tests — the
+  severity select now provably PATCHes min_severity and the mute button
+  PATCHes a future muted_until timestamp (web 567).
