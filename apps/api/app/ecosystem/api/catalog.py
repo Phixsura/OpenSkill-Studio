@@ -244,7 +244,15 @@ async def deprecation_calendar_ics(
         day = sunset_at.strftime("%Y%m%d")
         # Escape per RFC 5545 (commas/semicolons/backslashes in names)
         name = (
-            str(item["name"]).replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;")
+            str(item["name"])
+            .replace("\\", "\\\\")
+            .replace(",", "\\,")
+            .replace(";", "\\;")
+            # RFC 5545: literal newlines MUST be escaped — an unescaped one
+            # folds the line and lets a hostile entity name inject arbitrary
+            # ICS properties into the event
+            .replace("\r", "")
+            .replace("\n", "\\n")
         )[:200]
         lines += [
             "BEGIN:VEVENT",

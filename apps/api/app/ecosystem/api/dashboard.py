@@ -77,10 +77,14 @@ async def ops_metrics(
             .where(OutboxMessage.status == "pending", OutboxMessage.topic.like("eco.%"))
         )
     ) or 0
-    lines = ["# TYPE eco_gauge gauge"]
+    lines: list[str] = []
 
     def emit(name: str, value) -> None:
+        # Exposition-format compliance: each metric carries its OWN TYPE line
+        # (a TYPE for a name that never appears leaves every real metric
+        # untyped in Prometheus)
         if isinstance(value, (int, float)):
+            lines.append(f"# TYPE eco_{name} gauge")
             lines.append(f"eco_{name} {value}")
 
     for key, value in overview.items():

@@ -1163,3 +1163,26 @@ exclusion in latest_prices was masked by the approved-preference rule;
 killed with a no-approved-competitor scenario (rejected newest price must
 never win). Sorting, missing-unit flagging and uptime incident counting were
 already covered. 5/5 die.
+
+## 58. Export-format compliance (2026-09-23, round 65)
+
+Two live spec defects found by direct inspection:
+
+- **ICS newline injection**: sanitize_text deliberately preserves newlines,
+  and the calendar escaper handled commas/semicolons/backslashes but NOT
+  newlines — a hostile entity name could fold the SUMMARY line and inject
+  arbitrary ICS properties (ATTENDEE, ORGANIZER…). Fixed per RFC 5545
+  (\r stripped, \n → literal \\n); injection test pins it.
+- **Prometheus exposition non-compliance**: `# TYPE eco_gauge gauge` declared
+  a metric that never appears, leaving every real metric untyped. Each metric
+  now carries its own TYPE line; a compliance test asserts sample↔TYPE
+  bijection.
+
+### §58.1 Blind-review integrity audit (round 66)
+
+Five mutants against the double-blind pipeline. Two real authz/integrity
+holes: submit-ownership (reviewer A could submit reviewer B's assignment)
+and double-submit (scores editable after submission — i.e. near reveal) had
+NO tests. Killed: cross-reviewer submit → uniform 404; a submitted review is
+frozen (resubmit → ECO_INVALID_TRANSITION). Identity-leak, foreign-reviewer
+and score-range mutants were already covered. 5/5 die.

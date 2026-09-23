@@ -1076,3 +1076,36 @@ async def test_resolution_confidence_values_are_exact(db):
     cand_none = await propose_resolution(db, obs_none)
     assert cand_none.candidate_entity_id is None
     assert float(cand_none.confidence) == 0.0
+
+async def test_review_submit_ownership_and_immutability(db):
+    """Mutation-audit killers: (a) reviewer A cannot submit reviewer B's
+    assignment (uniform 404, no oracle); (b) a submitted review is immutable —
+    resubmission is refused, so scores can't be edited after (or near) reveal."""
+    admin = await _mk_user(db, "admin")
+    r1, r2 = await _mk_user(db), await _mk_user(db)
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    runs = []
+    for _ in range(2):
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": str(ULID())}
+        )
+        runs.append(await bench.execute_run(run.id))
+    blind = BlindReviewService(db)
+    batch = await blind.create_batch(
+        suite_id=suite.id, run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+    )
+    a1 = (await blind.assignments_for(batch.id, r1.id))[0]
+
+    # (a) cross-reviewer submit → uniform 404
+    with pytest.raises(AppError) as exc:
+        await blind.submit(a1["review_id"], reviewer_id=r2.id, scores={"quality": 3})
+    assert exc.value.status_code == 404
+
+    # legitimate submit succeeds once...
+    await blind.submit(a1["review_id"], reviewer_id=r1.id, scores={"quality": 4})
+    # ...(b) and never twice — submitted scores are frozen
+    with pytest.raises(AppError) as exc:
+        await blind.submit(a1["review_id"], reviewer_id=r1.id, scores={"quality": 1})
+    assert exc.value.code == "ECO_INVALID_TRANSITION"
