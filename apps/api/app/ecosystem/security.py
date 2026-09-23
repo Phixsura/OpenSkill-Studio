@@ -186,3 +186,10 @@ def looks_like_prompt_injection(text: str) -> bool:
     if not isinstance(text, str):
         return False
     return bool(_INJECTION_PATTERNS.search(text))
+
+
+def escape_like(value: str) -> str:
+    """Escape LIKE/ILIKE wildcards in user-supplied search text so a query
+    for "50%_off" matches literally instead of turning into a wildcard scan.
+    Use with .ilike(..., escape="\\")."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

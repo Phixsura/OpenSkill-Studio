@@ -1314,3 +1314,13 @@ The §66 sweep continued across every org_id parameter:
 - **Noise-control UI (82)**: the §24 controls had no interaction tests — the
   severity select now provably PATCHes min_severity and the mute button
   PATCHes a future muted_until timestamp (web 567).
+
+## 68. LIKE-wildcard escaping (2026-09-23, round 83)
+
+Four call sites interpolated user/curator text into LIKE/ILIKE patterns
+unescaped — a search for "%" scanned everything and "50%_off" could never be
+found literally (catalog search, global-search fallback, and the advisory
+name/alias prefilters). New `escape_like` helper (backslash-escaped % _ \,
+used with escape="\\") applied at all four sites; killers pin that
+wildcards are literal (an entity named "50%_off-…" is found by its exact
+name, by "%_off-…", never by unrelated text) and the helper's mapping.

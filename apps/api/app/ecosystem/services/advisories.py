@@ -19,7 +19,7 @@ from app.ecosystem.models.advisory import (
     SecurityAdvisory,
 )
 from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL, ModelVersion
-from app.ecosystem.security import sanitize_text
+from app.ecosystem.security import escape_like, sanitize_text
 from app.ecosystem.services.stats import version_in_range
 from app.exceptions import AppError
 
@@ -229,8 +229,12 @@ class AdvisoryService:
                 select(model)
                 .where(
                     or_(
-                        func.lower(model.canonical_name).like(f"{ref_lower}%"),
-                        func.lower(cast(model.aliases, _Text)).like(f"%{ref_lower}%"),
+                        func.lower(model.canonical_name).like(
+                            f"{escape_like(ref_lower)}%", escape="\\"
+                        ),
+                        func.lower(cast(model.aliases, _Text)).like(
+                            f"%{escape_like(ref_lower)}%", escape="\\"
+                        ),
                     )
                 )
                 .limit(2000)

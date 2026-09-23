@@ -1307,3 +1307,33 @@ async def test_sync_release_edges_from_manifest_definition(db):
     assert {e.constraint_spec["capability_key"] for e in edges} == {
         "image_generation", "video_generation",
     }
+
+async def test_search_wildcards_are_literal(db):
+    """Round-83 killer: LIKE wildcards in user search text are LITERAL —
+    searching "%" must not match everything, and "50%_off" matches only the
+    entity actually named that way."""
+    from app.ecosystem.services.catalog import CatalogService
+
+    tag = str(ULID()).lower()[:6]
+    weird = AIModel(canonical_name=f"50%_off-{tag}", slug=f"wo-{tag}")
+    plain = AIModel(canonical_name=f"PlainGen-{tag}", slug=f"pl-{tag}")
+    db.add_all([weird, plain])
+    await db.flush()
+    svc = CatalogService(db)
+
+    rows, _total = await svc.list_entities("model", search=f"50%_off-{tag}", limit=50)
+    assert {r.id for r in rows} == {weird.id}
+    # "%" is a literal percent sign, not match-all
+    rows, _total = await svc.list_entities("model", search=f"%_off-{tag}", limit=50)
+    assert {r.id for r in rows} == {weird.id}  # literal '%' and '_' both
+    rows, _total = await svc.list_entities("model", search=f"PlainGen-{tag}", limit=50)
+    assert {r.id for r in rows} == {plain.id}
+    rows, _total = await svc.list_entities("model", search=f"_off-{tag}", limit=50)
+    assert {r.id for r in rows} == {weird.id}  # '_' literal too
+
+
+def test_escape_like_helper():
+    from app.ecosystem.security import escape_like
+
+    assert escape_like("50%_off") == "50\\%\\_off"
+    assert escape_like("a\\b") == "a\\\\b"

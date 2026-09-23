@@ -50,7 +50,11 @@ class CatalogService:
             query = query.where(model.lifecycle_status == lifecycle_status)
         if search:
             cleaned = sanitize_text(search, 200) or ""
-            query = query.where(model.canonical_name.ilike(f"%{cleaned}%"))
+            from app.ecosystem.security import escape_like
+
+            query = query.where(
+                model.canonical_name.ilike(f"%{escape_like(cleaned)}%", escape="\\")
+            )
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
             query.order_by(model.created_at.desc()).limit(limit).offset(offset)
@@ -278,6 +282,7 @@ class CatalogService:
         """
         from sqlalchemy import text as sql_text
 
+        from app.ecosystem.security import escape_like
         from app.ecosystem.services.resolution import _KIND_TABLES, normalize_name
 
         cleaned = normalize_name(q) or (sanitize_text(q, 100) or "").lower()
@@ -308,7 +313,13 @@ class CatalogService:
             except Exception:  # noqa: BLE001 — pg_trgm unavailable
                 model = CATALOG_KIND_TO_MODEL[kind]
                 rows = await self.db.scalars(
-                    select(model).where(model.canonical_name.ilike(f"%{cleaned}%")).limit(
+                    select(model)
+                    .where(
+                        model.canonical_name.ilike(
+                            f"%{escape_like(cleaned)}%", escape="\\"
+                        )
+                    )
+                    .limit(
                         limit_per_kind
                     )
                 )
