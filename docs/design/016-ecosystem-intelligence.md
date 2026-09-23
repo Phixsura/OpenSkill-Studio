@@ -1090,3 +1090,34 @@ Results:
   directly. A localhost-literal pin test was added anyway.
   Six killable mutants die; the two survivors are documented redundancy, not
   gaps.
+
+## 56. Decision-logic mutation audits (2026-09-23, rounds 56-57)
+
+**Resolution policy (round 56)** — four mutants against the auto-merge core
+(similarity allowed in, confidence floor 0.9→0.1, inflated confidences,
+llm_suggested allowed in): ALL FOUR survived initially. The two-condition
+gate (method ∈ set AND confidence ≥ floor) masks single-point drift, and no
+test pinned the policy constants. Fixed with (a) a policy-pin test
+(AUTO_MERGE_METHODS == {official_id, alias}; floor == 0.9;
+LLM_CONFIDENCE_CAP < floor) and (b) behavioural killers: a PERFECT-similarity
+identical-name observation must stay pending; curated-alias hits are exactly
+0.95 and auto-merge (aliases are human-entered facts); no-match candidates
+are exactly 0.0. 4/4 die. (An initial mis-read of the alias branch was
+reverted — zero semantic changes shipped, only pins.)
+
+**Change severity (round 57)** — six mutants (security→info, license→info,
+sunset→info, price-increase threshold ×1000, AUTO_FANOUT_SEVERITIES emptied,
+magnitude sign flip): three survived — sunset-field severity, the automatic
+impact fan-out switch, and the price-magnitude sign had NO tests. Killed with
+a dedicated suite asserting sunset_risk on sunset_at changes, an
+eco.compute_impact outbox row for breaking changes with zero operator
+clicks, and +50% (not −50%) on a 0.04→0.06 price move. 6/6 die.
+
+### §56.1 Impact-BFS audit (round 58)
+
+Six mutants against the blast-radius walk (depth cap off/one, node cap tiny,
+visited-set off, edge direction flipped, version-constraint fail-open →
+fail-closed). One survivor: no test graph was deeper than the cap, so an
+unbounded IMPACT_MAX_DEPTH went unnoticed — killed with an 8-hop chain
+asserting depth 6 is reached and depth 7+ is pruned. 6/6 die on the combined
+suite.

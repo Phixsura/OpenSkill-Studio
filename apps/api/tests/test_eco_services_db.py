@@ -999,3 +999,80 @@ async def test_rollout_min_samples_guardrail_blocks_promote(db):
     with pytest.raises(AppError) as exc:
         await svc.decide(plan.id, decision="promote", actor_id=admin.id)
     assert exc.value.code == "ECO_ROLLOUT_INSUFFICIENT_SAMPLES"
+
+def test_auto_merge_policy_constants_are_pinned():
+    """Mutation-audit pin: the auto-merge safety posture is a CONTRACT.
+    similarity and llm_suggested must never auto-merge; the confidence floor
+    must stay at 0.9; the LLM confidence cap must sit BELOW the floor so an
+    LLM suggestion can never clear it even if the method set drifts."""
+    from app.ecosystem.models.catalog import (
+        AUTO_MERGE_METHODS,
+        AUTO_MERGE_MIN_CONFIDENCE,
+    )
+    from app.ecosystem.services.llm_extraction import LLM_CONFIDENCE_CAP
+
+    assert frozenset({"official_id", "alias"}) == AUTO_MERGE_METHODS
+    assert AUTO_MERGE_MIN_CONFIDENCE == 0.9
+    assert LLM_CONFIDENCE_CAP < AUTO_MERGE_MIN_CONFIDENCE
+
+
+async def test_identical_name_similarity_still_needs_human(db):
+    """Behavioural killer: even a PERFECT similarity score (identical name,
+    passing any confidence floor) must queue for human confirmation — only
+    deterministic identifiers auto-merge. Also pins that the recorded
+    confidence is the real similarity, never inflated to 1.0."""
+    source = await _mk_source(db)
+    name = f"ExactTwin-{str(ULID()).lower()[:6]}"
+    model = AIModel(canonical_name=name, slug=f"et-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="model_released", entity_kind="model",
+        external_ref=name.lower(), raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={"name": name},
+    )
+    db.add(obs)
+    await db.flush()
+    candidate = await propose_resolution(db, obs)
+    assert candidate.match_method == "similarity"
+    assert candidate.status == "pending"  # perfect similarity ≠ auto-merge
+    assert obs.canonical_entity_id is None
+    assert float(candidate.confidence) >= 0.9  # it DID clear the floor
+
+async def test_resolution_confidence_values_are_exact(db):
+    """Mutation-audit killer: recorded confidences are calibrated constants —
+    alias hits are exactly 0.95 and a no-match candidate is exactly 0.0
+    (an inflated constant would lie to the reviewer queue)."""
+    source = await _mk_source(db)
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"AliasCal-{tag}", slug=f"ac-{tag}")
+    db.add(model)
+    await db.flush()
+    db.add(EntityAlias(entity_kind="model", entity_id=model.id,
+                       alias=f"Alias Cal {tag}", alias_type="name"))
+    await db.flush()
+    obs_alias = EcosystemObservation(
+        source_id=source.id, event_type="model_released", entity_kind="model",
+        external_ref=f"zz-ext-{tag}", raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={"name": f"Alias Cal {tag}"},
+    )
+    db.add(obs_alias)
+    await db.flush()
+    cand_alias = await propose_resolution(db, obs_alias)
+    # A curated alias is a deterministic identifier: exact normalized hit is
+    # method "alias" at exactly 0.95 and AUTO-MERGES (aliases are human-entered
+    # facts, unlike raw similarity which always queues)
+    assert cand_alias.match_method == "alias"
+    assert float(cand_alias.confidence) == 0.95
+    assert cand_alias.status == "auto_merged"
+
+    obs_none = EcosystemObservation(
+        source_id=source.id, event_type="model_released", entity_kind="model",
+        external_ref=f"zz-nomatch-{tag}", raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={"name": f"Zz Totally Unrelated {tag}"},
+    )
+    db.add(obs_none)
+    await db.flush()
+    cand_none = await propose_resolution(db, obs_none)
+    assert cand_none.candidate_entity_id is None
+    assert float(cand_none.confidence) == 0.0
