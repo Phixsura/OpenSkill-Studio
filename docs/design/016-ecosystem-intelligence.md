@@ -1152,3 +1152,14 @@ Continuing the §56 technique across the remaining pipelines:
   threshold-off both survived (only the pull path was covered). Killed by
   driving handle_notify_watchers directly: loud user notified, over-threshold
   user silent, snoozed user silent. 5/5 die.
+
+### §57.1 Estimate/compare logic audit (round 64)
+
+Five mutants against pricing decision logic. Two survivors exposed real
+holes: (a) the approved-beats-observed rule was guarded by a test whose
+same-transaction timestamps TIED — ordering (and the assertion) was
+nondeterministic; fixed with explicit timestamps. (b) rejected-price
+exclusion in latest_prices was masked by the approved-preference rule;
+killed with a no-approved-competitor scenario (rejected newest price must
+never win). Sorting, missing-unit flagging and uptime incident counting were
+already covered. 5/5 die.

@@ -78,15 +78,40 @@ async def test_estimate_sorts_fully_priced_then_cheapest(db):
 
 
 async def test_estimate_prefers_approved_price_over_newer_observed(db):
+    from datetime import UTC, datetime, timedelta
+
     model = await _mk_model(db, "ApprovedGen")
-    await _mk_price(db, model.id, "token_input", 5.0, status="approved")
-    await _mk_price(db, model.id, "token_input", 1.0)  # newer but unreviewed
+    older = await _mk_price(db, model.id, "token_input", 5.0, status="approved")
+    newer = await _mk_price(db, model.id, "token_input", 1.0)  # newer but unreviewed
+    # Explicit timestamps: same-transaction server defaults tie, which made
+    # the ordering (and therefore this assertion) nondeterministic
+    older.observed_at = datetime.now(UTC) - timedelta(days=2)
+    newer.observed_at = datetime.now(UTC)
+    # A rejected price must never win, however new it is
+    rejected = await _mk_price(db, model.id, "token_input", 0.001, status="rejected")
+    rejected.observed_at = datetime.now(UTC) + timedelta(minutes=1)
+    await db.flush()
 
     rows = await PricingService(db).estimate(
         entity_kind="model", entity_ids=[model.id], workload={"token_input": 2},
     )
     assert rows[0]["estimated_total"] == pytest.approx(10.0)
     assert rows[0]["all_prices_approved"] is True
+
+    # Rejected must be excluded even with NO approved competitor: only the
+    # unreviewed 1.0 remains eligible on a fresh entity
+    from datetime import UTC, datetime, timedelta
+
+    lone = await _mk_model(db, "LoneGen")
+    ok_price = await _mk_price(db, lone.id, "token_input", 1.0)
+    ok_price.observed_at = datetime.now(UTC) - timedelta(hours=1)
+    bad = await _mk_price(db, lone.id, "token_input", 0.001, status="rejected")
+    bad.observed_at = datetime.now(UTC)
+    await db.flush()
+    rows = await PricingService(db).estimate(
+        entity_kind="model", entity_ids=[lone.id], workload={"token_input": 2},
+    )
+    assert rows[0]["estimated_total"] == pytest.approx(2.0)  # 1.0×2, never 0.001
 
 
 async def test_estimate_rejects_unknown_unit_and_bad_quantity(db):
