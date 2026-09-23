@@ -1290,3 +1290,17 @@ type and the workflow_pack_release from-kind. 4/4 die.
   component drafts including payloads (`/drafts?org_id=`). Both now require
   membership (or platform admin); non-members get 403/404, org-less calls
   keep the public/global scope. HTTP-matrix test pins both.
+
+### §66.1 Remaining org guards (round 80)
+
+The §66 sweep continued across every org_id parameter:
+
+- **Draft single-read leak**: `GET /drafts/{id}` bypassed the org filter the
+  LIST endpoint enforces — any signed-in user could read any org's draft
+  payload by id. Non-members now get a UNIFORM 404 (no existence oracle);
+  platform admins and members read normally.
+- **Watchlist org attach**: any user could attach a watchlist to an arbitrary
+  org, driving that org's WEBHOOK fan-out with their watch events. Membership
+  now required; org-less watchlists unchanged.
+  Draft write paths were verified admin-only; telemetry already gated. Both
+  guards pinned in the HTTP matrix (member 404/403 + admin 200 + org-less 201).

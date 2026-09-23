@@ -26,6 +26,11 @@ async def create_watchlist(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Org attachment drives that org's webhook fan-out — membership required
+    if body.org_id is not None:
+        from app.api.deps import require_org_member
+
+        await require_org_member(body.org_id, user, db)
     watchlist = await WatchlistService(db).create(
         owner_id=user.id, name=body.name, org_id=body.org_id
     )

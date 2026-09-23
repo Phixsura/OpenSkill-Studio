@@ -92,9 +92,22 @@ async def list_drafts(
 async def get_draft(
     draft_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    return {"data": await DraftService(db).get(draft_id)}
+    draft = await DraftService(db).get(draft_id)
+    # Org-scoped drafts are tenant-confidential: non-members get a UNIFORM
+    # 404 (no existence oracle); platform admins and members read normally
+    if draft.org_id is not None and user.role != UserRole.ADMIN:
+        from fastapi import HTTPException
+
+        from app.api.deps import require_org_member
+        from app.exceptions import AppError as _AppError
+
+        try:
+            await require_org_member(draft.org_id, user, db)
+        except HTTPException:
+            raise _AppError("NOT_FOUND", "Draft not found", 404) from None
+    return {"data": draft}
 
 
 @router.patch("/{draft_id}", response_model=DataResponse[DraftResponse])

@@ -207,3 +207,49 @@ async def test_org_scoped_reads_require_membership(http, tokens):
     assert r.status_code == 200
     r = await http.get("/api/v1/ecosystem/drafts", headers=headers)
     assert r.status_code == 200
+
+async def test_org_scoped_draft_single_read_and_watchlist_attach_guarded(http, tokens):
+    """Round-80 guards: (a) an org-scoped draft read by id is a UNIFORM 404
+    for non-members (list was fixed in §66; the by-id path leaked payloads);
+    (b) creating a watchlist attached to a foreign org is refused — org
+    attachment drives that org's webhook fan-out."""
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.services.drafts import DraftService
+    from tests.test_eco_services_db import _mk_org, _mk_user
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        admin = await _mk_user(db, "admin")
+        org = await _mk_org(db)
+        draft = await DraftService(db).create(
+            draft_type="skill_pack_update", title="tenant-secret",
+            payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
+            created_by=admin.id, org_id=org.id,
+        )
+        await db.commit()
+        draft_id, org_id = draft.id, org.id
+    await engine.dispose()
+
+    member_headers = {"Authorization": f"Bearer {tokens['member']}"}
+    admin_headers = {"Authorization": f"Bearer {tokens['admin']}"}
+
+    # (a) non-member by-id read → uniform 404, never the payload
+    r = await http.get(f"/api/v1/ecosystem/drafts/{draft_id}", headers=member_headers)
+    assert r.status_code == 404, r.text[:200]
+    assert "tenant-secret" not in r.text
+    # platform admin still reads it
+    r = await http.get(f"/api/v1/ecosystem/drafts/{draft_id}", headers=admin_headers)
+    assert r.status_code == 200
+
+    # (b) foreign-org watchlist attach refused
+    r = await http.post(
+        "/api/v1/ecosystem/watchlists",
+        json={"name": "spy", "org_id": org_id},
+        headers=member_headers,
+    )
+    assert r.status_code in (403, 404), r.text[:200]
+    # org-less watchlist creation still works
+    r = await http.post(
+        "/api/v1/ecosystem/watchlists", json={"name": "mine"}, headers=member_headers
+    )
+    assert r.status_code == 201
