@@ -234,3 +234,98 @@ def test_eco_router_uses_redis_backed_limiter():
     assert "from app.core.rate_limit import rate_limit" in src
     assert "rate_limit(120, 60)" in src
     assert "rate_limit_talent" not in src  # in-memory limiter fully replaced
+
+async def test_prune_keeps_each_entitys_latest_status_row(db):
+    """Mutation-audit killer: an entity last probed BEFORE the cutoff keeps
+    exactly its latest status row — pruning it would flip current_status to
+    unknown and erase the survivor's only availability evidence."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.ecosystem.models.mapping import AvailabilityRecord
+    from app.ecosystem.worker import prune_ecosystem_history
+
+    entity_id = str(ULID())
+    old = datetime.now(UTC) - timedelta(days=200)
+    for i in range(3):
+        db.add(AvailabilityRecord(
+            entity_kind="model", entity_id=entity_id, record_type="status",
+            value={"status": "operational"},
+            observed_at=old + timedelta(days=i),
+        ))
+    await db.flush()
+    await prune_ecosystem_history(db)
+    rows = list(await db.scalars(
+        _select(AvailabilityRecord).where(AvailabilityRecord.entity_id == entity_id)
+    ))
+    assert len(rows) == 1  # only redundant older samples pruned
+    assert rows[0].observed_at.replace(tzinfo=UTC) == (old + timedelta(days=2))
+
+
+async def test_prune_keeps_recent_raw_snapshots(db):
+    """Mutation-audit killer: raw snapshots inside the 90-day window survive
+    pruning — a zeroed window would destroy the replay capability."""
+    import hashlib
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.ecosystem.models.source import RawSnapshot
+    from app.ecosystem.worker import prune_ecosystem_history
+    from tests.test_eco_services_db import _mk_source
+
+    source = await _mk_source(db)
+    fresh = RawSnapshot(
+        source_id=source.id, raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
+        content=b"{}", content_length=2, parser_version="1.0",
+        fetched_at=datetime.now(UTC) - timedelta(days=5),
+    )
+    stale = RawSnapshot(
+        source_id=source.id, raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
+        content=b"{}", content_length=2, parser_version="1.0",
+        fetched_at=datetime.now(UTC) - timedelta(days=120),
+    )
+    db.add_all([fresh, stale])
+    await db.flush()
+    out = await prune_ecosystem_history(db)
+    assert out["raw_snapshots_pruned"] >= 1
+    remaining = {
+        r.id for r in await db.scalars(
+            _select(RawSnapshot).where(RawSnapshot.source_id == source.id)
+        )
+    }
+    assert fresh.id in remaining     # inside the window: kept
+    assert stale.id not in remaining  # outside: pruned
+
+async def test_sync_scheduler_due_semantics(db):
+    """Mutation-audit killers ×4: the continuous-discovery scheduler enqueues
+    exactly the DUE ACTIVE sources — never-synced counts as due now; recently
+    synced waits its interval; overdue re-enqueues; paused never enqueues."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.ecosystem.worker import sweep_due_sources
+    from tests.test_eco_services_db import _mk_source
+
+    now = datetime.now(UTC)
+    never = await _mk_source(db)                      # active, never synced → due
+    fresh = await _mk_source(db)                      # active, just synced → not due
+    fresh.last_sync_at = now - timedelta(minutes=1)
+    fresh.sync_interval_minutes = 60
+    overdue = await _mk_source(db)                    # active, way past interval → due
+    overdue.last_sync_at = now - timedelta(hours=5)
+    overdue.sync_interval_minutes = 60
+    paused = await _mk_source(db)                     # paused → NEVER enqueued
+    paused.status = "paused"
+    paused.last_sync_at = now - timedelta(hours=99)
+    await db.flush()
+
+    n = await sweep_due_sources(db)
+    msgs = list(await db.scalars(
+        select(OutboxMessage).where(OutboxMessage.topic == "eco.sync_source")
+    ))
+    enqueued = {m.payload.get("source_id") for m in msgs}
+    assert never.id in enqueued
+    assert overdue.id in enqueued
+    assert fresh.id not in enqueued
+    assert paused.id not in enqueued
+    assert n >= 2

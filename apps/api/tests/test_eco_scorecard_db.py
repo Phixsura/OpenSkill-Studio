@@ -154,7 +154,9 @@ async def test_trending_ranks_by_velocity_with_corroboration(db):
     ))
     await db.flush()
 
-    rows = await DashboardService(db).trending(days=7, limit=50)
+    # limit large enough that committed rows from other tests can't crowd
+    # these fixtures out of the page (top-N truncation isn't under test)
+    rows = await DashboardService(db).trending(days=7, limit=500)
     by_id = {r["entity_id"]: r for r in rows}
     assert by_id[hot.id]["observations"] == 4
     assert by_id[hot.id]["distinct_sources"] == 2

@@ -1213,3 +1213,15 @@ with an exactly-one-source case pinning warn. 5/5 die.
   fingerprint BEFORE evaluate (evaluation rebuilds comparison from scratch,
   so reading it afterwards always saw None). Once-per-regression-set alerting
   now actually works and is race-tested.
+
+## 60. Retention & scheduler audits (2026-09-23, rounds 70-71)
+
+- **Retention (70)**: 4 mutants — two real holes: the keep-latest guard
+  (an entity last probed before the cutoff would lose its ONLY status row,
+  flipping current_status to unknown) and the raw-snapshot 90-day window
+  (a zeroed window silently destroys replay) had no tests. Killed. 4/4 die.
+- **Scheduler (71)**: ALL FOUR mutants survived — the continuous-discovery
+  scheduler (the epic's first word) had NO tests: paused sources enqueued,
+  interval ignored, never-synced never due, and the due boundary flipped were
+  all invisible. Killed with a four-state semantics test (never-synced due
+  now; fresh waits; overdue re-enqueues; paused never). 4/4 die.
