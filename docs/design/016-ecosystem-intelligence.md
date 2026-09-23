@@ -1235,3 +1235,14 @@ with an exactly-one-source case pinning warn. 5/5 die.
   could downgrade evidence (authz), an unknown evidence level raised
   KeyError instead of 422, and curated conflict values skipped sanitization
   (NUL → JSONB 500 class). Killed with a three-part gate/hygiene test. 4/4 die.
+
+## 62. Hard-compatibility gate audit (2026-09-23, round 74)
+
+Five mutants against the replacement hard gate — FOUR survived: missing
+capability, the input-direction subset check, the non-commercial license
+gate and the license score direction all had no coverage (existing tests hit
+only IO-output mismatch and blocked lifecycle). A recommended replacement
+lacking a required capability, unable to accept the incumbent's inputs, or
+commercially unusable could have shipped as "compatible". Killed with an
+all-axes gate test (five candidates, one per axis + control) asserting each
+failure code and the score direction. 5/5 die.

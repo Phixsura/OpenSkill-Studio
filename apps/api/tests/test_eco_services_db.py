@@ -1149,3 +1149,59 @@ async def test_capability_evidence_gates_and_curation_hygiene(db):
         chosen_value="MIT\x00 injected", actor_id=admin.id,
     )
     assert "\x00" not in curated["value"]  # NUL screened before JSONB
+
+async def test_hard_compatibility_gate_covers_all_axes(db):
+    """Mutation-audit killers ×4: missing capability, input-direction,
+    non-commercial license and the license score direction are each hard
+    gates — none may silently pass."""
+    deprecated = await _mk_model_version(
+        db, "AxesOld",
+        caps=("image_generation", "video_generation"),
+        io={"inputs": [{"type": "text"}, {"type": "image"}],
+            "outputs": [{"type": "image"}]},
+    )
+    # Missing one required capability
+    lacks_cap = await _mk_model_version(
+        db, "AxesNoCap", caps=("image_generation",),
+        io={"inputs": [{"type": "text"}, {"type": "image"}],
+            "outputs": [{"type": "image"}]},
+    )
+    # Same capabilities but can't accept the image input
+    lacks_input = await _mk_model_version(
+        db, "AxesNoImgIn",
+        caps=("image_generation", "video_generation"),
+        io={"inputs": [{"type": "text"}], "outputs": [{"type": "image"}]},
+    )
+    # Non-commercial license
+    non_commercial = await _mk_model_version(
+        db, "AxesNoncom", commercial=False,
+        caps=("image_generation", "video_generation"),
+        io={"inputs": [{"type": "text"}, {"type": "image"}],
+            "outputs": [{"type": "image"}]},
+    )
+    # Fully compatible control
+    good = await _mk_model_version(
+        db, "AxesGood",
+        caps=("image_generation", "video_generation"),
+        io={"inputs": [{"type": "text"}, {"type": "image"}],
+            "outputs": [{"type": "image"}]},
+    )
+
+    ranked, incompatible = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id, limit=50
+    )
+    ranked_ids = {c.candidate_id for c in ranked}
+    bad = {c.candidate_id: c for c in incompatible}
+
+    assert good.id in ranked_ids
+
+    def codes(c):
+        return {f["code"] for f in (c.hard_failures or [])}
+
+    assert lacks_cap.id in bad and "CAPABILITY_MISSING" in codes(bad[lacks_cap.id])
+    assert lacks_input.id in bad and "IO_TYPE_MISMATCH" in codes(bad[lacks_input.id])
+    assert non_commercial.id in bad and "LICENSE_INCOMPATIBLE" in codes(bad[non_commercial.id])
+    # License score direction: commercial 1.0, non-commercial 0.0
+    good_row = next(c for c in ranked if c.candidate_id == good.id)
+    assert good_row.score_breakdown["license"] == 1.0
+    assert bad[non_commercial.id].score_breakdown["license"] == 0.0
