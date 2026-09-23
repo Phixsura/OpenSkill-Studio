@@ -1186,3 +1186,11 @@ and double-submit (scores editable after submission — i.e. near reveal) had
 NO tests. Killed: cross-reviewer submit → uniform 404; a submitted review is
 frozen (resubmit → ECO_INVALID_TRANSITION). Identity-leak, foreign-reviewer
 and score-range mutants were already covered. 5/5 die.
+
+### §58.2 Scorecard & draft-validation audit (round 67)
+
+Five mutants: freshness-never-fails, n/a-in-denominator, grade-always-healthy
+and draft-validation-always-valid were already covered; the corroboration
+floor was NOT — a single unverified source passing as "corroborated" went
+undetected (both existing cases sat on either side of the boundary). Killed
+with an exactly-one-source case pinning warn. 5/5 die.

@@ -167,3 +167,25 @@ async def test_trending_ranks_by_velocity_with_corroboration(db):
 
     with pytest.raises(AppError):
         await DashboardService(db).trending(days=0)
+
+async def test_single_source_corroboration_is_warn_not_pass(db):
+    """Mutation-audit killer: ONE unverified source is a warn — corroboration
+    means at least two distinct sources (or human verification), never one."""
+    model = AIModel(
+        canonical_name=f"OneSrcGen-{str(ULID()).lower()[:6]}",
+        slug=f"os-{str(ULID()).lower()}", lifecycle_status="verified",
+    )
+    db.add(model)
+    await db.flush()
+    source = await _mk_source(db)
+    db.add(EcosystemObservation(
+        source_id=source.id, event_type="model_released",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        observed_at=datetime.now(UTC) - timedelta(days=1),
+    ))
+    await db.flush()
+    card = await CatalogService(db).scorecard("model", model.id)
+    by_key = {c["check"]: c for c in card["checks"]}
+    assert by_key["corroboration"]["status"] == "warn"
+    assert by_key["corroboration"]["evidence"]["distinct_sources"] == 1
