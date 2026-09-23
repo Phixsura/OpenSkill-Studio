@@ -1256,3 +1256,13 @@ vendor_claimed, badging from any evidence level, and removing the lifecycle
 check entirely were all invisible. Killed with a three-entity contract test
 (approved+verified appears; discovered lifecycle excluded; vendor-claimed
 evidence excluded; badges never from vendor claims). 4/4 die.
+
+## 64. Draft-generation safety audit (2026-09-23, round 76)
+
+Three killable mutants — all survived: the generated steps' human
+review_gate, the origin provenance (kind/source repo/graph hash) and the
+CENTRAL safety promise "publishing the eco draft never publishes the pack"
+(materialized WorkflowPack must be a PRIVATE DRAFT) had no tests. Killed:
+every generated step carries review_gate=True; origin is fully traceable;
+generation never pre-approves; the materialized pack is PackStatus.DRAFT +
+PRIVATE. 3/3 die.
