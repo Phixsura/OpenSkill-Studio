@@ -1246,3 +1246,13 @@ lacking a required capability, unable to accept the incumbent's inputs, or
 commercially unusable could have shipped as "compatible". Killed with an
 all-axes gate test (five candidates, one per axis + control) asserting each
 failure code and the score direction. 5/5 die.
+
+## 63. Approved-only signal audit (2026-09-23, round 75)
+
+ALL FOUR mutants survived — the signal surface feeding the matching engine
+and workforce intelligence (Part N: "raw observations never leak") had NO
+gate tests: widening the lifecycle set, dropping the evidence floor to
+vendor_claimed, badging from any evidence level, and removing the lifecycle
+check entirely were all invisible. Killed with a three-entity contract test
+(approved+verified appears; discovered lifecycle excluded; vendor-claimed
+evidence excluded; badges never from vendor claims). 4/4 die.

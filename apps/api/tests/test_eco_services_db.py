@@ -1205,3 +1205,49 @@ async def test_hard_compatibility_gate_covers_all_axes(db):
     good_row = next(c for c in ranked if c.candidate_id == good.id)
     assert good_row.score_breakdown["license"] == 1.0
     assert bad[non_commercial.id].score_breakdown["license"] == 0.0
+
+async def test_signals_expose_only_approved_verified_evidence(db):
+    """Mutation-audit killers ×4: the matching/workforce signal surface is a
+    DATA CONTRACT — only verified/recommended entities with evidence >=
+    benchmark_verified appear; badges never come from vendor claims."""
+    from app.ecosystem.models.mapping import CapabilityMapping
+    from app.ecosystem.services.signals import SignalsService
+
+    await _mk_capability_tag(db, "signal_gen")
+    approved = await _mk_model_version(db, "SigOK", caps=())
+    unapproved = await _mk_model_version(db, "SigNew", lifecycle="discovered", caps=())
+    weak_evidence = await _mk_model_version(db, "SigWeak", caps=())
+    db.add_all([
+        CapabilityMapping(
+            entity_kind="model_version", entity_id=approved.id,
+            capability_key="signal_gen", evidence_level="benchmark_verified",
+            io_spec={},
+        ),
+        CapabilityMapping(
+            entity_kind="model_version", entity_id=unapproved.id,
+            capability_key="signal_gen", evidence_level="benchmark_verified",
+            io_spec={},
+        ),
+        CapabilityMapping(
+            entity_kind="model_version", entity_id=weak_evidence.id,
+            capability_key="signal_gen", evidence_level="vendor_claimed",
+            io_spec={},
+        ),
+    ])
+    await db.flush()
+
+    svc = SignalsService(db)
+    rows = await svc.matching_signals(capability_key="signal_gen")
+    ids = {r["entity_id"] for r in rows}
+    assert approved.id in ids
+    assert unapproved.id not in ids       # lifecycle gate
+    assert weak_evidence.id not in ids    # evidence floor
+
+    badges = await svc.registry_badges(entity_refs=[
+        ("model_version", approved.id),
+        ("model_version", weak_evidence.id),
+    ])
+    assert "benchmark_verified" in badges[f"model_version:{approved.id}"]
+    assert "benchmark_verified" not in badges.get(
+        f"model_version:{weak_evidence.id}", []
+    )  # vendor claims never badge
