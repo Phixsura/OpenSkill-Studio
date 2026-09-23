@@ -1121,3 +1121,13 @@ fail-closed). One survivor: no test graph was deeper than the cap, so an
 unbounded IMPACT_MAX_DEPTH went unnoticed — killed with an 8-hop chain
 asserting depth 6 is reached and depth 7+ is pruned. 6/6 die on the combined
 suite.
+
+### §56.2 Adapter identity contracts (round 59)
+
+Four mutants against adapter mechanics. Three survived: the idempotency
+hash's key-order independence, and the pricing/HF adapters' event types had
+no contract tests — an event-type drift would silently route price facts
+around the pricing pipeline (or HF models around resolution). Killed with an
+adapter-contract suite: same-content different-key-order hashes are equal
+(different content differs); pricing_json emits price_changed; huggingface
+emits model_released. 4/4 die.
