@@ -206,3 +206,59 @@ async def _retire_models(prefixes):
         for m in rows:
             m.lifecycle_status = "retired"
         await session.commit()
+
+async def test_push_fanout_respects_threshold_and_mute(db):
+    """Mutation-audit killers: the PUSH path (worker fan-out) must honor both
+    noise controls — a below-threshold list and a muted list produce NO
+    notification, while a loud unmuted list does."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from app.ecosystem.worker import handle_notify_watchers
+    from app.models.notification import Notification
+
+    loud = await _mk_user(db)
+    quiet = await _mk_user(db)
+    muted = await _mk_user(db)
+    model = AIModel(canonical_name=f"PushGen-{str(ULID()).lower()[:6]}", slug=f"pg-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    svc = WatchlistService(db)
+    for user in (loud, quiet, muted):
+        await svc.quick_watch(user.id, target_kind="model", target_id=model.id)
+    quiet_list = (await svc.list_for_owner(quiet.id))[0]
+    await svc.update_settings(quiet_list.id, quiet.id, min_severity="security_critical")
+    muted_list = (await svc.list_for_owner(muted.id))[0]
+    await svc.update_settings(
+        muted_list.id, muted.id, muted_until=datetime.now(UTC) + timedelta(days=1)
+    )
+
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="price", field="pricing",
+        severity="info", entity_kind="model", canonical_entity_id=model.id,
+    )
+    db.add(change)
+    await db.flush()
+
+    await handle_notify_watchers(db, {"change_event_id": change.id})
+
+    notified = {
+        n.user_id
+        for n in await db.scalars(
+            select(Notification).where(
+                Notification.type == "ecosystem_change",
+                Notification.data["change_event_id"].as_string() == change.id,
+            )
+        )
+    }
+    assert loud.id in notified          # default threshold, unmuted → notified
+    assert quiet.id not in notified     # info < security_critical threshold
+    assert muted.id not in notified     # snoozed → silent

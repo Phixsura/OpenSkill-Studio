@@ -296,3 +296,36 @@ async def test_editing_in_review_draft_dismisses_review(db):
     with pytest.raises(AppError):
         await svc.update_payload(draft.id, payload={"target_pack_id": "P" * 26,
                                                     "suggestions": [{"kind": "late"}]})
+
+async def test_budget_cap_is_inclusive_boundary(db):
+    """Mutation-audit killer: the budget check is >= — when spend REACHES the
+    cap, execution stops before the next case (a strict > would run one case
+    past the budget)."""
+    from decimal import Decimal
+
+    from app.ecosystem.models.benchmark import BenchmarkResult
+    from app.ecosystem.services.benchmark import BenchmarkService
+
+    class FixedCost:
+        async def execute_case(self, run, case, repeat):
+            return {"output_assets": [], "latency_ms": 100, "usage": {},
+                    "cost_usd": 1.0, "automated_scores": {},
+                    "failed": False, "retries": 0}
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=3)
+    suite.repeat_count = 1
+    await db.flush()
+    svc = BenchmarkService(db, executor=FixedCost())
+    run = await svc.create_run(
+        suite.id, target={"entity_kind": "model", "entity_id": "0" * 26},
+        budget_usd_cap=2.0,
+    )
+    run = await svc.execute_run(run.id)
+    assert run.status == "failed"
+    assert "ECO_BUDGET_EXCEEDED" in (run.error or "")
+    results = list(await db.scalars(
+        select(BenchmarkResult).where(BenchmarkResult.run_id == run.id)
+    ))
+    assert len(results) == 2  # stops the moment spend REACHES the cap
+    assert run.total_cost_usd == Decimal("2")

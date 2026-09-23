@@ -105,3 +105,26 @@ async def test_agreeing_numbers_never_flag(db):
         )
     )
     assert flag is None
+
+async def test_cross_tenant_needs_min_samples_not_just_min_orgs(db):
+    """Mutation-audit killer: the privacy floor is TWO-dimensional — 19
+    samples must be refused even when they span enough orgs (small samples
+    de-anonymize)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.services.telemetry import TelemetryService
+    from app.exceptions import AppError as _AppError
+
+    now = datetime.now(UTC)
+    rows = [
+        {"org_id": None, "succeeded": True, "retries": 0,
+         "latency_ms": 100.0, "cost_usd": None, "error_code": None}
+        for _ in range(19)  # one below TELEMETRY_MIN_SAMPLE
+    ]
+    with pytest.raises(_AppError) as exc:
+        await TelemetryService(db).write_snapshot(
+            entity_kind="provider_offering", entity_id="0" * 26,
+            window_start=now - timedelta(hours=1), window_end=now,
+            rows=rows, org_id=None, contributing_orgs=5,
+        )
+    assert exc.value.code == "ECO_TELEMETRY_THRESHOLD"

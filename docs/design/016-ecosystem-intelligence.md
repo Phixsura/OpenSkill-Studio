@@ -1131,3 +1131,24 @@ around the pricing pipeline (or HF models around resolution). Killed with an
 adapter-contract suite: same-content different-key-order hashes are equal
 (different content differs); pricing_json emits price_changed; huggingface
 emits model_released. 4/4 die.
+
+## 57. Pipeline-guard mutation audits (2026-09-23, rounds 60-63)
+
+Continuing the §56 technique across the remaining pipelines:
+
+- **Telemetry privacy (60)**: 5 mutants — the TWO-dimensional privacy floor
+  had only its org dimension tested: 19 samples across 5 orgs sailed through
+  with the sample floor dropped to 1. Killed (19-sample cross-tenant write
+  must refuse ECO_TELEMETRY_THRESHOLD). Percentile, inverted success-rate and
+  widened divergence band were already covered. 5/5 die.
+- **Benchmark economics (61)**: 5 mutants — the budget boundary (>= vs >) was
+  untested: a strict > runs one case PAST the cap. Killed with an exact-stop
+  test (3 cases × $1, $2 cap ⇒ exactly 2 results, total exactly $2,
+  ECO_BUDGET_EXCEEDED). Weights, failed-as-success, drift gate covered
+  (drift tests added to the harness set). 5/5 die.
+- **Sync guards (62)**: 5/5 died first pass — rate limit, paused gate,
+  bounded retries, failure counter, 304 handling all already pinned.
+- **Watchlist noise (63)**: the PUSH path had NO tests — mute-ignored and
+  threshold-off both survived (only the pull path was covered). Killed by
+  driving handle_notify_watchers directly: loud user notified, over-threshold
+  user silent, snoozed user silent. 5/5 die.
