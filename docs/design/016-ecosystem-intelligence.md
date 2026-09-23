@@ -1277,3 +1277,16 @@ shipped — zero tests hid it completely. Fixed to read
 `manifest["definition"]`; regression + killer test covers capability
 dedup (duplicate → one edge), non-string skip, the requires_capability edge
 type and the workflow_pack_release from-kind. 4/4 die.
+
+## 66. Deep-link tests & cross-tenant org guards (2026-09-23, rounds 78-79)
+
+- **Frontend regression (78)**: three new interaction tests — catalog Inspect
+  restored purely from `?kind=&entity=` (shareable links actually restore),
+  the estimator surfaces API errors instead of swallowing them, and failed
+  runs show their machine error class inline.
+- **CROSS-TENANT LEAKS FIXED (79)**: two org_id query parameters were honored
+  without membership checks — any signed-in member could read ANY org's
+  PRIVATE dependency edges (`/graph/node/...?org_id=`) and ANY org's
+  component drafts including payloads (`/drafts?org_id=`). Both now require
+  membership (or platform admin); non-members get 403/404, org-less calls
+  keep the public/global scope. HTTP-matrix test pins both.

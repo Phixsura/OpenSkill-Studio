@@ -13,7 +13,7 @@ from app.ecosystem.schemas import (
     UpdateDraftPayloadRequest,
 )
 from app.ecosystem.services.drafts import DraftService
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/ecosystem/drafts", tags=["Ecosystem — Drafts"])
@@ -73,8 +73,14 @@ async def list_drafts(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
+    # Cross-tenant guard: an arbitrary org_id would expose that org's drafts
+    # (payloads included) — membership (or platform admin) is required
+    if org_id is not None and user.role != UserRole.ADMIN:
+        from app.api.deps import require_org_member
+
+        await require_org_member(org_id, user, db)
     return {
         "data": await DraftService(db).list(
             draft_type=draft_type, status=status, org_id=org_id, limit=limit, offset=offset

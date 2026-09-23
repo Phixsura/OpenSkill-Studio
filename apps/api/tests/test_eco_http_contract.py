@@ -186,3 +186,24 @@ def test_core_ecosystem_api_surface_is_stable():
     }
     missing = CORE_ENDPOINTS - present
     assert not missing, f"Breaking API change — endpoints gone: {sorted(missing)}"
+
+async def test_org_scoped_reads_require_membership(http, tokens):
+    """Cross-tenant guard (round 79): a member passing an ARBITRARY org_id to
+    graph-node or drafts listings must be refused (403/404) — org-scoped
+    private edges and draft payloads are tenant-confidential."""
+    headers = {"Authorization": f"Bearer {tokens['member']}"}
+    foreign_org = "0" * 26
+    r = await http.get(
+        f"/api/v1/ecosystem/graph/node/model/{'1' * 26}?org_id={foreign_org}",
+        headers=headers,
+    )
+    assert r.status_code in (403, 404), r.text[:200]
+    r = await http.get(
+        f"/api/v1/ecosystem/drafts?org_id={foreign_org}", headers=headers
+    )
+    assert r.status_code in (403, 404), r.text[:200]
+    # Without org_id both remain readable (public/global scope)
+    r = await http.get(f"/api/v1/ecosystem/graph/node/model/{'1' * 26}", headers=headers)
+    assert r.status_code == 200
+    r = await http.get("/api/v1/ecosystem/drafts", headers=headers)
+    assert r.status_code == 200

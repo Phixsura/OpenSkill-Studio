@@ -58,8 +58,14 @@ async def node_edges(
     node_id: str,
     org_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
+    # Cross-tenant guard: an arbitrary org_id would expose that org's PRIVATE
+    # dependency edges — membership (or platform admin) is required
+    if org_id is not None and user.role != UserRole.ADMIN:
+        from app.api.deps import require_org_member
+
+        await require_org_member(org_id, user, db)
     edges = await GraphService(db).edges_for_node(kind, node_id, org_id=org_id)
     return {
         "data": {
