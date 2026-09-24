@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -207,5 +207,34 @@ describe("fmtDate (ecosystem lib)", () => {
     expect(fmtDate("")).toBe("—");
     expect(fmtDate("not-a-date")).toBe("not-a-date"); // never "Invalid Date"
     expect(fmtDate("2026-09-20T00:00:00Z")).not.toContain("Invalid");
+  });
+});
+
+describe("Global search hit links", () => {
+  it("search hits deep-link into the catalog Inspect panel", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/search?"))
+        return Promise.resolve({
+          data: [
+            {
+              kind: "model_version",
+              id: "S".repeat(26),
+              canonical_name: "Found Gen v2",
+              lifecycle_status: "verified",
+              score: 0.91,
+            },
+          ],
+        });
+      return Promise.resolve({ data: [], meta: { total: 0 } });
+    });
+    render(<SourcesPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Search catalog"), {
+      target: { value: "found" },
+    });
+    fireEvent.click(screen.getByText("🔍"));
+    const hit = await screen.findByText(/Found Gen v2/);
+    expect(hit.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/catalog?kind=model-versions&entity=${"S".repeat(26)}`,
+    );
   });
 });

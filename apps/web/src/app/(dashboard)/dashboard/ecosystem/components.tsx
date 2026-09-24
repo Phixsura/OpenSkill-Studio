@@ -40,6 +40,16 @@ interface SearchHit {
 }
 
 /** §15: HF-style global search — one box across all seven catalog kinds. */
+const SEARCH_KIND_TO_SEGMENT: Record<string, string> = {
+  provider: "providers",
+  tool: "tools",
+  model: "models",
+  model_version: "model-versions",
+  workflow: "workflows",
+  agent: "agents",
+  node_package: "node-packages",
+};
+
 export function GlobalSearch() {
   const [q, setQ] = useState("");
   const [submitted, setSubmitted] = useState("");
@@ -78,9 +88,11 @@ export function GlobalSearch() {
             <div className="p-2 text-xs text-[hsl(var(--muted-foreground))]">No matches</div>
           ) : (
             hits.map((hit) => (
-              <div
+              <Link
                 key={`${hit.kind}:${hit.id}`}
+                href={`/dashboard/ecosystem/catalog?kind=${SEARCH_KIND_TO_SEGMENT[hit.kind] ?? "models"}&entity=${hit.id}`}
                 className="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-[hsl(var(--secondary))]"
+                onClick={() => setSubmitted("")}
               >
                 <span>
                   {hit.canonical_name}{" "}
@@ -91,7 +103,7 @@ export function GlobalSearch() {
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">
                   {hit.score.toFixed(2)}
                 </span>
-              </div>
+              </Link>
             ))
           )}
           <button
