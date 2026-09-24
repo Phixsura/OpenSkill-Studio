@@ -255,6 +255,7 @@ function CompareInner() {
       <div className="space-y-3 rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
         <h2 className="font-semibold">Workload cost estimator</h2>
         <textarea
+          aria-label="Workload JSON (unit quantities)"
           value={workload}
           onChange={(e) => setWorkload(e.target.value)}
           rows={2}

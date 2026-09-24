@@ -1675,3 +1675,11 @@ Summary table for reviewers — what was systematically verified and how:
 
 Test counts at this writing: backend regression 6277, eco subset 485,
 web unit 601, browser e2e 3 — all green at every push.
+
+### 84.1 Browser accessibility audit (round 151)
+
+`e2e/a11y-ecosystem.spec.ts` runs axe-core (WCAG 2.0 A/AA) over all 12
+ecosystem routes against a live stack and fails on serious/critical
+violations. First run found ONE: the workload-estimator textarea on the
+compare page had no accessible label — fixed with `aria-label`. Re-run green
+across all 12 pages; the functional sweep stays 3/3.
