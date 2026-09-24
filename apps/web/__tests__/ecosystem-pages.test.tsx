@@ -198,3 +198,14 @@ describe("Ecosystem round-5 surfaces", () => {
     expect(screen.getByText(/model \u00b7 verified/)).toBeTruthy();
   });
 });
+
+describe("fmtDate (ecosystem lib)", () => {
+  it("renders valid dates, dashes empties, and passes garbage through verbatim", async () => {
+    const { fmtDate } = await import("@/app/(dashboard)/dashboard/ecosystem/lib");
+    expect(fmtDate(null)).toBe("—");
+    expect(fmtDate(undefined)).toBe("—");
+    expect(fmtDate("")).toBe("—");
+    expect(fmtDate("not-a-date")).toBe("not-a-date"); // never "Invalid Date"
+    expect(fmtDate("2026-09-20T00:00:00Z")).not.toContain("Invalid");
+  });
+});

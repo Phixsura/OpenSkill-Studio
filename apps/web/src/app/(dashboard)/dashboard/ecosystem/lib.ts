@@ -48,11 +48,10 @@ export const STATUS_STYLES: Record<string, string> = {
 
 export function fmtDate(value: string | null | undefined): string {
   if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+  const d = new Date(value);
+  // new Date(garbage) does not throw — it yields an Invalid Date that
+  // toLocaleString renders as the literal string "Invalid Date"
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
 }
 
 export function shortId(id: string | null | undefined): string {
