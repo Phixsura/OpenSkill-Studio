@@ -245,6 +245,17 @@ class BenchmarkService:
                 continue
             if key == "status" and value not in ("draft", "active", "archived"):
                 raise AppError("VALIDATION_ERROR", f"Unknown status: {value}", 422)
+            # Symmetry with create_suite: text screened, numeric bounds re-checked
+            if key == "name" and value is not None:
+                value = sanitize_text(str(value), 200)
+                if not value:
+                    raise AppError("VALIDATION_ERROR", "Suite name required", 422)
+            if key == "description" and value is not None:
+                value = sanitize_text(str(value), 2000)
+            if key == "repeat_count" and value is not None and not 1 <= int(value) <= 10:
+                raise AppError("VALIDATION_ERROR", "repeat_count must be 1..10", 422)
+            if key == "budget_usd_cap" and value is not None and not 0 < float(value) <= 10000:
+                raise AppError("VALIDATION_ERROR", "budget_usd_cap out of range", 422)
             setattr(suite, key, value)
         await self.db.flush()
         return suite
@@ -261,6 +272,14 @@ class BenchmarkService:
         sort_order: int = 0,
     ) -> BenchmarkCase:
         await self.get_suite(suite_id)
+        # Screen untrusted text and bound the weight — the import path relies
+        # on these same guards (suite documents are untrusted)
+        name = sanitize_text(str(name), 200) or ""
+        prompt = sanitize_text(str(prompt), 20_000) or ""
+        if not name or not prompt:
+            raise AppError("VALIDATION_ERROR", "Case name and prompt required", 422)
+        if not 0 < float(weight) <= 10:
+            raise AppError("VALIDATION_ERROR", "Case weight must be in (0, 10]", 422)
         case = BenchmarkCase(
             suite_id=suite_id,
             name=name,

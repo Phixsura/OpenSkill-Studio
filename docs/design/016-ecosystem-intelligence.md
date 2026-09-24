@@ -1385,3 +1385,16 @@ enum-gated; replacement rationales are internal constants.
 - **Query-boundary contract**: malformed `since`, out-of-range `days`,
   over-cap CSV `limit` and a raw-body NaN workload are all clean 4xx with the
   machine envelope — never 500s (HTTP-matrix pinned).
+
+## 72. Create/update symmetry (2026-09-24, rounds 93-94)
+
+Update paths must never be laxer than create paths:
+
+- **update_suite** skipped text screening and numeric re-checks — a PATCH
+  could set a NUL name, repeat_count 99 or a negative budget. Now symmetric
+  with create_suite (screened text, 1..10 repeats, (0,10k] budget,
+  status enum).
+- **add_case** stored raw name/prompt and any weight — and the suite-IMPORT
+  path (untrusted documents) relies on these service-level guards. Screened
+  - weight bounded to (0, 10].
+    Killers pin each screen/bound. (Source-update symmetry was closed in §70.)

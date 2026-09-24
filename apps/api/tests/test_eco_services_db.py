@@ -1516,3 +1516,33 @@ async def test_catalog_update_screens_and_bounds_inputs(db):
     assert all("\x00" not in a for a in entity.aliases)
     assert len(entity.external_ids) <= 50
     assert all("\x00" not in (v or "") for v in entity.external_ids.values())
+
+async def test_suite_update_is_symmetric_with_create(db):
+    """Round-93 killers: PATCHing a suite screens text and re-checks numeric
+    bounds — update must never be a laxer path than create."""
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin)
+    svc = BenchmarkService(db)
+    updated = await svc.update_suite(suite.id, {"name": "New\x00Name"})
+    assert "\x00" not in updated.name
+    with pytest.raises(AppError):
+        await svc.update_suite(suite.id, {"repeat_count": 99})
+    with pytest.raises(AppError):
+        await svc.update_suite(suite.id, {"budget_usd_cap": -1})
+    with pytest.raises(AppError):
+        await svc.update_suite(suite.id, {"status": "published"})
+
+async def test_add_case_screens_and_bounds(db):
+    """Round-94 killers: case name/prompt are screened (NUL) and weight is
+    bounded — the suite-IMPORT path relies on these service-level guards."""
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin)
+    svc = BenchmarkService(db)
+    case = await svc.add_case(suite.id, name="n\x00x", prompt="p\x00q", weight=2.0)
+    assert "\x00" not in case.name and "\x00" not in case.prompt
+    with pytest.raises(AppError):
+        await svc.add_case(suite.id, name="ok", prompt="ok", weight=0)
+    with pytest.raises(AppError):
+        await svc.add_case(suite.id, name="ok", prompt="ok", weight=99)
+    with pytest.raises(AppError):
+        await svc.add_case(suite.id, name="\x00", prompt="ok")
