@@ -16,7 +16,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import ComponentsPage from "@/app/(dashboard)/dashboard/ecosystem/components/page";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
+
+const ApiErrorCtor = ApiError as unknown as new (message: string) => Error;
 
 const api = vi.mocked(apiWithAuth);
 
@@ -127,5 +129,30 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     );
     expect(call).toBeDefined();
     expect(JSON.parse((call![1] as RequestInit).body as string).decision).toBe("promote");
+  });
+
+  it("a refused rollout decision surfaces its ApiError in the banner", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/rollouts" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: PLAN,
+              scope_type: "benchmark_only",
+              status: "evaluating",
+              guardrails: {},
+              comparison: { sample_size: 1 },
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      if ((init as RequestInit)?.method === "POST")
+        return Promise.reject(new ApiErrorCtor("Guardrails not satisfied: min_samples"));
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Rollouts"));
+    fireEvent.click(await screen.findByText(/[Pp]romote/));
+    expect(await screen.findByText(/Guardrails not satisfied/)).toBeDefined();
   });
 });
