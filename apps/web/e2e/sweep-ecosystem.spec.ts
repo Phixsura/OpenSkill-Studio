@@ -117,3 +117,18 @@ test("3 — quick watch from catalog is member-allowed (or empty state shows)", 
     expect(body).toContain("no ");
   }
 });
+
+test("4 — catalog Inspect deep-links to the entity-filtered change feed", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("inspect")) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  await page.getByText("Inspect").first().dispatchEvent("click");
+  const link = page.getByText("📰 view changes");
+  await link.waitFor({ state: "visible", timeout: 10_000 });
+  await link.dispatchEvent("click");
+  await page.waitForURL(/\/dashboard\/ecosystem\/changes\?entity=/, { timeout: 10_000 });
+  await page.getByText(/filtered to entity/).waitFor({ state: "visible", timeout: 10_000 });
+});

@@ -1702,8 +1702,11 @@ subscribing to THAT model's changes, not the firehose.
 - `GET /export/changes.atom?entity_id=<26>` narrows the feed to one canonical
   entity (served by the R137 `(canonical_entity_id, detected_at)` index);
   XML escaping unchanged. Killer proves inclusion/exclusion + escaping.
-- The catalog Inspect panel now offers a "subscribe to changes (.atom)" link
-  alongside the existing calendar/export links.
+- The catalog Inspect panel now offers a "subscribe (.atom)" link and a
+  "view changes" deep link; the changes page reads `?entity=`, narrows the
+  query (badged), and threads the filter through cursor pagination. The whole
+  loop is browser-verified: `sweep-ecosystem` test 4 clicks Inspect → view
+  changes and asserts the filtered feed (e2e 4/4, a11y still green).
 - FastAPI lesson: a plain `Query(None, ...)` default leaks the Query object
   into direct (non-HTTP) test calls — `Annotated[str | None, Query(...)] = None`
   keeps the bare default.
