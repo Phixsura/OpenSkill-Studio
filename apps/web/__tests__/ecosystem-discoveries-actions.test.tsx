@@ -108,4 +108,18 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("event-type filter drives the observations query string", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.change(await screen.findByLabelText("Filter discoveries"), {
+      target: { value: "price_changed" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      api.mock.calls.some(
+        (c) => typeof c[0] === "string" && (c[0] as string).includes("event_type=price_changed"),
+      ),
+    ).toBe(true);
+  });
 });

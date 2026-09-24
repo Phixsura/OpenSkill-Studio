@@ -341,3 +341,36 @@ async def test_hotpath_indexes_exist_in_db(db):
     ))
     names = sorted(r[0] for r in rows)
     assert names == ["ix_eco_changes_canonical", "ix_eco_watch_items_target"], names
+
+async def test_retention_prunes_stale_unreviewed_prices(db):
+    """Round-153 killer: unreviewed price observations older than 180 days are
+    pruned; DECIDED rows of the same age are kept (billing audit evidence)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.mapping import PriceObservation
+    from app.ecosystem.worker import prune_ecosystem_history
+
+    version = await _mk_model_version(db, "PrRet")
+    source = await _mk_source(db)
+    rows = {}
+    for status in ("unreviewed", "approved"):
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="pricing_changed",
+            raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        row = PriceObservation(
+            observation_id=obs.id, entity_kind="model_version", entity_id=version.id,
+            unit="token_input", price="0.01", currency="USD",
+            reconciliation_status=status,
+            observed_at=datetime.now(UTC) - timedelta(days=200),
+        )
+        db.add(row)
+        await db.flush()
+        rows[status] = row.id
+
+    out = await prune_ecosystem_history(db)
+    assert out["unreviewed_prices_pruned"] >= 1
+    assert await db.get(PriceObservation, rows["unreviewed"]) is None
+    assert await db.get(PriceObservation, rows["approved"]) is not None

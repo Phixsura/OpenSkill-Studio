@@ -45,7 +45,9 @@ let page: Page;
 
 test.describe.configure({ mode: "serial" });
 
+// registration + UI login can exceed the default 60s under load
 test.beforeAll(async ({ browser }) => {
+  test.setTimeout(120_000);
   auth = await registerUser(`Eco A11y${Date.now()}`);
   ctx = await browser.newContext();
   page = await ctx.newPage();

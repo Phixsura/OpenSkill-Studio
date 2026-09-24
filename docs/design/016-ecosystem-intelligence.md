@@ -1683,3 +1683,13 @@ ecosystem routes against a live stack and fails on serious/critical
 violations. First run found ONE: the workload-estimator textarea on the
 compare page had no accessible label — fixed with `aria-label`. Re-run green
 across all 12 pages; the functional sweep stays 3/3.
+
+### 84.2 Price-history retention (rounds 152–153)
+
+`prune_ecosystem_history` covered availability probes, sync runs and raw
+snapshots but NOT price observations — one row per sync per unit, unbounded.
+Unreviewed rows older than 180 days are now pruned (estimates use the latest
+row; the trend window is 90 days); DECIDED rows are kept as billing-mint
+audit evidence. Killer proves the decided row of the same age survives.
+E2E beforeAll timeouts raised to 120s (registration + UI login exceed 60s
+under load — observed flake).

@@ -482,10 +482,24 @@ async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
         sa_delete(RawSnapshot).where(RawSnapshot.fetched_at < snap_cutoff)
     )
     pruned_snapshots = snap_result.rowcount or 0
+    # R153: price observations grow unboundedly (one row per sync per unit).
+    # Undecided (unreviewed) rows older than 180 days are noise — the latest
+    # ones drive estimates and the trend window is 90 days. DECIDED rows
+    # (approved/rejected) are audit evidence for billing mints and are kept.
+    from app.ecosystem.models.mapping import PriceObservation
+
+    price_cutoff = now - timedelta(days=180)
+    old_prices = await db.execute(
+        sa_delete(PriceObservation).where(
+            PriceObservation.reconciliation_status == "unreviewed",
+            PriceObservation.observed_at < price_cutoff,
+        )
+    )
     return {
         "availability_status_pruned": stale_status.rowcount or 0,
         "sync_runs_pruned": old_runs.rowcount or 0,
         "raw_snapshots_pruned": pruned_snapshots,
+        "unreviewed_prices_pruned": old_prices.rowcount or 0,
     }
 
 
