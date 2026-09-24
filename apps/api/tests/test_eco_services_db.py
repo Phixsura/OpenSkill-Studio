@@ -1639,3 +1639,64 @@ async def test_draft_payload_size_bounded(db):
             payload={"suggestions": ["x" * 120_000]},
             created_by=user.id,
         )
+
+async def test_concurrent_confirm_decides_once(db):
+    """Round-132 killer: two admins racing to confirm the same NEW-entity
+    candidate must create ONE canonical entity — without the row lock both
+    saw "pending" and each minted its own entity."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.catalog import ResolutionCandidate
+    from app.ecosystem.services.resolution import ResolutionService
+
+    admin = await _mk_user(db, "admin")
+    source = await _mk_source(db)
+    tag = str(ULID()).lower()[:8]
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="model_released",
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={"name": f"RaceConfirm-{tag}"},
+    )
+    db.add(obs)
+    await db.flush()
+    candidate = ResolutionCandidate(
+        observation_id=obs.id, entity_kind="model",
+        candidate_entity_id=None, match_method="none",
+        confidence=0.0, status="pending",
+        proposed_payload={"name": f"RaceConfirm-{tag}"},
+    )
+    db.add(candidate)
+    await db.commit()
+    cand_id, actor = candidate.id, admin.id
+
+    async def confirm():
+        async with AsyncSessionLocal() as session:
+            try:
+                _, entity_id = await ResolutionService(session).confirm(
+                    cand_id, actor_id=actor
+                )
+                await session.commit()
+                return ("ok", entity_id)
+            except AppError as exc:
+                await session.rollback()
+                return (exc.code, None)
+
+    try:
+        results = await asyncio.gather(confirm(), confirm())
+        codes = sorted(r[0] for r in results)
+        assert codes == ["ECO_INVALID_TRANSITION", "ok"], results
+        entities = list(await db.scalars(
+            select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}")
+        ))
+        assert len(entities) == 1, "double confirm minted two canonical entities"
+    finally:
+        async with AsyncSessionLocal() as session:
+            rows = list(await session.scalars(
+                select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}")
+            ))
+            for r in rows:
+                r.lifecycle_status = "retired"
+            await session.commit()

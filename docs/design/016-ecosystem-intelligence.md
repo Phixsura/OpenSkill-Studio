@@ -1601,3 +1601,20 @@ production `connect-src 'self'` CSP still holds):
 Playwright lessons recorded: React-rerendering rows make `click()` hang on
 stability — `dispatchEvent("click")` delivers through React's root listener
 reliably; form Enter-submit was flaky vs clicking the submit button.
+
+## 82. Decision-point row locks — rounds 132–133
+
+Continuation of the §80 race sweep into human decision points:
+
+1. **`ResolutionService.confirm` (R132)** — no row lock: two admins racing to
+   confirm the same NEW-entity candidate both saw "pending" and each minted
+   its own canonical entity (the second alias registration then hit the
+   unique constraint as a 500). `confirm` and `reject` now take
+   `refresh(with_for_update=True)` before the status check; the two-session
+   race killer asserts exactly one entity and one 409 loser. Lock-removal
+   mutant verified KILLED.
+2. **`DraftService.update_payload` (R133)** — the status check ("editable
+   only while draft/in_review") ran without a lock, so an edit racing the
+   approve→publish transition could mutate a just-published draft's payload.
+   Now locked; the race killer publishes and edits concurrently and asserts
+   the published payload is unchanged whenever the edit lost.

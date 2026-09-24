@@ -424,3 +424,58 @@ async def test_lifecycle_gates_refuse_archived_inactive_and_bad_targets(db):
     assert exc.value.code == "VALIDATION_ERROR"
     with pytest.raises(AppError):
         await svc.create_run(suite.id, target="not-a-dict")  # type: ignore[arg-type]
+
+async def test_payload_edit_racing_publish_cannot_mutate_published_draft(db):
+    """Round-133 killer: a payload edit racing the approve->publish transition
+    must lose cleanly (409) — a published draft's payload is immutable."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.services.drafts import DraftService
+
+    user = await _mk_user(db, "admin")
+    approver = await _mk_user(db, "admin")
+    draft = await DraftService(db).create(
+        draft_type="benchmark_suite",
+        title="RacePub",
+        payload={"family": "ecommerce_hero", "capability_key": "image_generation"},
+        created_by=user.id,
+    )
+    svc = DraftService(db)
+    await svc.transition(draft.id, to_status="in_review", actor_id=user.id)
+    await svc.transition(draft.id, to_status="approved", actor_id=approver.id)
+    await db.commit()
+    draft_id, actor = draft.id, approver.id
+
+    async def publish():
+        async with AsyncSessionLocal() as session:
+            try:
+                await DraftService(session).transition(
+                    draft_id, to_status="published", actor_id=actor
+                )
+                await session.commit()
+                return "published"
+            except AppError as exc:
+                await session.rollback()
+                return exc.code
+
+    async def edit():
+        async with AsyncSessionLocal() as session:
+            try:
+                await DraftService(session).update_payload(
+                    draft_id, payload={"family": "EVIL", "capability_key": "EVIL"}
+                )
+                await session.commit()
+                return "edited"
+            except AppError as exc:
+                await session.rollback()
+                return exc.code
+
+    results = await asyncio.gather(publish(), edit())
+    assert "published" in results, results
+    async with AsyncSessionLocal() as session:
+        from app.ecosystem.models.replacement import ComponentDraft
+
+        row = await session.get(ComponentDraft, draft_id)
+        if "edited" not in results:
+            assert row.payload["family"] == "ecommerce_hero", "published payload mutated"

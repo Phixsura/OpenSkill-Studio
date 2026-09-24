@@ -237,6 +237,10 @@ class ResolutionService:
         candidate = await self.db.get(ResolutionCandidate, candidate_id)
         if not candidate:
             raise AppError("NOT_FOUND", "Resolution candidate not found", 404)
+        # R132: row lock — two concurrent confirms both saw "pending" and
+        # each created its own canonical entity (and the second alias
+        # registration blew up on the unique constraint)
+        await self.db.refresh(candidate, with_for_update=True)
         if candidate.status not in ("pending",):
             raise AppError("ECO_INVALID_TRANSITION", "Candidate already decided", 409)
         entity_id = target_entity_id or candidate.candidate_entity_id
@@ -261,6 +265,7 @@ class ResolutionService:
         candidate = await self.db.get(ResolutionCandidate, candidate_id)
         if not candidate:
             raise AppError("NOT_FOUND", "Resolution candidate not found", 404)
+        await self.db.refresh(candidate, with_for_update=True)  # R132
         if candidate.status != "pending":
             raise AppError("ECO_INVALID_TRANSITION", "Candidate already decided", 409)
         candidate.status = "rejected"

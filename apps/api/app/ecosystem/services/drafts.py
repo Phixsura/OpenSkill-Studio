@@ -267,6 +267,10 @@ class DraftService:
         self, draft_id: str, *, payload: dict, org_id: str | None = None
     ) -> ComponentDraft:
         draft = await self.get(draft_id, org_id=org_id)
+        # R133: row lock — without it a payload edit racing an approve/publish
+        # could land AFTER the status check but concurrent with the terminal
+        # transition, mutating a published draft's payload
+        await self.db.refresh(draft, with_for_update=True)
         if draft.status not in ("draft", "in_review"):
             raise AppError("ECO_INVALID_TRANSITION", "Only editable while draft/in_review", 409)
         draft.payload = payload
