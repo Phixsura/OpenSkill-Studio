@@ -136,4 +136,48 @@ describe("Watch item add/remove (ADR-016 §24 UI)", () => {
     });
     expect(await screen.findByText("Mute rejected")).toBeDefined();
   });
+
+  it("id-backed watched items deep-link to their change feed", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/watchlists" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: LIST_ID,
+              name: "Default",
+              min_severity: "info",
+              muted_until: null,
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      if (path === `/ecosystem/watchlists/${LIST_ID}/items` && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "I1".padEnd(26, "a"),
+              target_kind: "model",
+              target_id: "T".repeat(26),
+              target_ref: null,
+            },
+            {
+              id: "I2".padEnd(26, "b"),
+              target_kind: "github_repo",
+              target_id: null,
+              target_ref: "acme/ref-only",
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Default"));
+    await screen.findByText(/acme\/ref-only/);
+    const links = screen.getAllByText("changes");
+    // only the id-backed item gets a deep link (ref-only items have no entity)
+    expect(links).toHaveLength(1);
+    expect(links[0]!.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/changes?entity=${"T".repeat(26)}`,
+    );
+  });
 });

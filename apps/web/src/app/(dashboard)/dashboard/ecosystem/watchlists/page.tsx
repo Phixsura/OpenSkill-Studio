@@ -1,4 +1,6 @@
 "use client";
+
+import Link from "next/link";
 /** Watchlists + deprecation calendar (Part P). */
 
 import { useState } from "react";
@@ -246,6 +248,14 @@ export default function WatchlistsPage() {
                 <div key={i.id} className="flex items-center justify-between py-1 text-sm">
                   <span>
                     {i.target_kind}: {i.target_ref ?? shortId(i.target_id)}
+                    {i.target_id && (
+                      <Link
+                        href={`/dashboard/ecosystem/changes?entity=${i.target_id}`}
+                        className="ml-2 text-xs text-blue-600 underline"
+                      >
+                        changes
+                      </Link>
+                    )}
                   </span>
                   <button
                     onClick={() => removeItem.mutate(i.id)}
