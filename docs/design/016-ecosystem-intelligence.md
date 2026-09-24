@@ -1474,9 +1474,16 @@ is invisible to render-only tests):
 - **Security**: mitigate/dismiss POST the transition; non-open advisories
   offer neither.
 
+- **Components**: hard-incompatible candidates never approvable; draft
+  approve/publish; rollout promote body; graph inspector typed-path GET with
+  both directions rendered and no stray request without an id.
+- **Error paths**: a failed mutation surfaces its ApiError message in the
+  banner (not just happy paths).
+
 Suites: ecosystem-changes-feed / watch-items / discoveries-actions /
 blind-review / pricing-reconcile / source-controls / catalog-actions /
-benchmark-compare / security (web 591, tsc clean).
+benchmark-compare / security / lifecycle-actions / graph-inspector
+(web 597, tsc + eslint clean).
 
 ## 76. Advisory matching & semver-range audits — rounds 108–110
 
