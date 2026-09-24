@@ -1366,3 +1366,22 @@ The impact DETAIL view returns traversal nodes, which can include org-private
 dependency-edge endpoints — it was member-readable. Tightened to
 platform-admin (the list view's aggregate counts stay member-readable);
 pinned in the HTTP authz matrix.
+
+## 71. Untrusted-text sinks (2026-09-24, rounds 89-90)
+
+Sweep of every user-text column assignment: two sinks were unscreened —
+the rollout decision NOTE and the blind-review COMMENT both stored raw user
+text (a NUL byte 500s at the column, R87 class). Both now pass sanitize_text;
+killers pin NUL/control stripping plus rollout terminal-state freezing
+(even abort is refused after reject). Lifecycle reasons were already
+enum-gated; replacement rationales are internal constants.
+
+### §71.1 PATCH bounds & query-boundary contracts (rounds 91-92)
+
+- **Catalog PATCH** accepted unbounded, unscreened input: 10k-alias lists,
+  unbounded external_ids, NUL in names/descriptions. Schema caps (50 aliases,
+  50 external-id keys) + service-side sanitize on every field; killer pins
+  screening and caps.
+- **Query-boundary contract**: malformed `since`, out-of-range `days`,
+  over-cap CSV `limit` and a raw-body NaN workload are all clean 4xx with the
+  machine envelope — never 500s (HTTP-matrix pinned).

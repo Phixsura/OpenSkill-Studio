@@ -52,8 +52,8 @@ class ManualObservationRequest(BaseModel):
 class UpdateCatalogEntityRequest(BaseModel):
     canonical_name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
-    aliases: list[str] | None = None
-    external_ids: dict | None = None
+    aliases: list[str] | None = Field(default=None, max_length=50)
+    external_ids: dict | None = Field(default=None, max_length=50)
 
 
 class ConfirmResolutionRequest(BaseModel):

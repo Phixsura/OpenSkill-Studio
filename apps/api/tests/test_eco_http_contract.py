@@ -254,3 +254,37 @@ async def test_org_scoped_draft_single_read_and_watchlist_attach_guarded(http, t
         "/api/v1/ecosystem/watchlists", json={"name": "mine"}, headers=member_headers
     )
     assert r.status_code == 201
+
+async def test_query_parameter_boundaries(http, tokens):
+    """Round-92 boundary contract: malformed/out-of-range query params are
+    clean 4xx with the machine envelope — never 500s."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+
+    # Malformed ISO 'since' → 4xx envelope
+    r = await http.get(
+        "/api/v1/ecosystem/export/changes?since=not-a-date", headers=member
+    )
+    assert 400 <= r.status_code < 500
+    assert "error" in r.json()
+    # uptime days out of range → 422
+    r = await http.get(
+        "/api/v1/ecosystem/pricing/availability/uptime"
+        "?entity_kind=model&entity_id=" + "0" * 26 + "&days=9999",
+        headers=member,
+    )
+    assert r.status_code == 422
+    # NaN workload quantity → 4xx, never 500
+    raw = (
+        '{"entity_kind":"model","entity_ids":["' + "0" * 26 + '"],'
+        '"workload":{"token_input":NaN}}'
+    )
+    r = await http.post(
+        "/api/v1/ecosystem/pricing/estimate",
+        content=raw,
+        headers={**member, "content-type": "application/json"},
+    )
+    assert 400 <= r.status_code < 500, r.text[:200]
+    # audit.csv limit above cap → 422
+    r = await http.get("/api/v1/ecosystem/audit.csv?limit=999999", headers=admin)
+    assert r.status_code == 422

@@ -305,6 +305,9 @@ class RolloutService:
             raise AppError("VALIDATION_ERROR", f"Unknown decision: {decision}", 422)
         plan.decided_by = actor_id
         plan.decided_at = datetime.now(UTC)
-        plan.note = note
+        # Operator note is untrusted text: NUL bytes 500 at the column (R87)
+        from app.ecosystem.security import sanitize_text
+
+        plan.note = sanitize_text(note, 2000)
         await self.db.flush()
         return plan

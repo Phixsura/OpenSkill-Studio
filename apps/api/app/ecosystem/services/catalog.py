@@ -66,8 +66,21 @@ class CatalogService:
         # lifecycle_status changes must go through transition() — never PATCH
         allowed = {"canonical_name", "description", "aliases", "external_ids"}
         for key, value in updates.items():
-            if key in allowed:
-                setattr(entity, key, value)
+            if key not in allowed:
+                continue
+            # Untrusted text is screened before the column (NUL 500s, R87)
+            if key in ("canonical_name", "description") and value is not None:
+                value = sanitize_text(str(value), 5000 if key == "description" else 200)
+            if key == "aliases" and value is not None:
+                value = [
+                    a for a in (sanitize_text(str(v), 300) for v in value[:50]) if a
+                ]
+            if key == "external_ids" and value is not None:
+                value = {
+                    (sanitize_text(str(k2), 60) or "")[:60]: sanitize_text(str(v2), 300)
+                    for k2, v2 in list(value.items())[:50]
+                }
+            setattr(entity, key, value)
         await self.db.flush()
         return entity
 

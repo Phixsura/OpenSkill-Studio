@@ -1440,3 +1440,79 @@ async def test_price_extraction_bounds(db):
     assert len(rows) == 1
     assert float(rows[0].price) == 0.04
     assert rows[0].currency == "DOL"  # capped to 3 chars, uppercased
+
+async def test_rollout_decide_note_sanitized_and_terminal_states_frozen(db):
+    """Round-89 killers: the operator note is screened (NUL would 500 at the
+    column) and terminal states refuse further decisions including abort."""
+    admin = await _mk_user(db, "admin")
+    deprecated = await _mk_model_version(db, "NoteOld")
+    await _mk_model_version(db, "NoteNew")
+    ranked, _ = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id
+    )
+    svc = RolloutService(db)
+    plan = await svc.create(
+        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only"
+    )
+    await svc.start(plan.id)
+    await svc.evaluate(plan.id)
+    plan = await svc.decide(
+        plan.id, decision="reject", actor_id=admin.id, note="bad\x00actor\x01note"
+    )
+    assert plan.status == "rejected"
+    assert "\x00" not in (plan.note or "") and "\x01" not in (plan.note or "")
+    assert "badactor" in (plan.note or "").replace(" ", "")
+    # Terminal: even abort is refused
+    with pytest.raises(AppError):
+        await svc.decide(plan.id, decision="abort", actor_id=admin.id)
+
+async def test_review_comment_is_screened(db):
+    """Round-90 killer: reviewer comments are sanitized — NUL bytes must not
+    reach the column (R87 class)."""
+    admin = await _mk_user(db, "admin")
+    r1 = await _mk_user(db)
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    runs = []
+    for _ in range(2):
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": str(ULID())}
+        )
+        runs.append(await bench.execute_run(run.id))
+    blind = BlindReviewService(db)
+    batch = await blind.create_batch(
+        suite_id=suite.id, run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id], created_by=admin.id,
+    )
+    a1 = (await blind.assignments_for(batch.id, r1.id))[0]
+    review = await blind.submit(
+        a1["review_id"], reviewer_id=r1.id,
+        scores={"quality": 4}, comment="good\x00but\x02odd",
+    )
+    assert "\x00" not in (review.comment or "")
+    assert "\x02" not in (review.comment or "")
+    assert "good" in (review.comment or "")
+
+async def test_catalog_update_screens_and_bounds_inputs(db):
+    """Round-91 killers: PATCHed catalog fields are screened (NUL) and
+    bounded (alias list capped at 50, each alias 300 chars, external_ids
+    capped at 50 keys)."""
+    from app.ecosystem.services.catalog import CatalogService
+
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"UpGen-{tag}", slug=f"up-{tag}")
+    db.add(model)
+    await db.flush()
+    entity = await CatalogService(db).update(
+        "model", model.id,
+        {
+            "canonical_name": "Clean\x00Name",
+            "aliases": [f"a{i}\x00x" for i in range(80)],
+            "external_ids": {f"k{i}": "v\x00v" for i in range(80)},
+        },
+    )
+    assert "\x00" not in entity.canonical_name
+    assert len(entity.aliases) <= 50
+    assert all("\x00" not in a for a in entity.aliases)
+    assert len(entity.external_ids) <= 50
+    assert all("\x00" not in (v or "") for v in entity.external_ids.values())

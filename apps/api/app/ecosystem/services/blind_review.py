@@ -140,7 +140,10 @@ class BlindReviewService:
         if not clean_scores:
             raise AppError("VALIDATION_ERROR", "At least one dimension score required", 422)
         review.scores = clean_scores
-        review.comment = comment
+        # Reviewer comments are untrusted text (NUL 500s at the column, R87)
+        from app.ecosystem.security import sanitize_text
+
+        review.comment = sanitize_text(comment, 4000)
         review.submitted_at = datetime.now(UTC)
         await self.db.flush()
         await self._maybe_complete(review.batch_id)
