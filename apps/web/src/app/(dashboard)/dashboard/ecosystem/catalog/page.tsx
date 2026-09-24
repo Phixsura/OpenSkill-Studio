@@ -412,6 +412,13 @@ function CatalogInner() {
               >
                 📡 subscribe (.atom)
               </a>
+              <button
+                aria-label="Close inspect panel"
+                onClick={() => setSelected(null)}
+                className="rounded-md border px-2 py-0.5 text-xs hover:bg-[hsl(var(--secondary))]"
+              >
+                ✕ close
+              </button>
             </span>
           </div>
           {scorecard.data?.data && (

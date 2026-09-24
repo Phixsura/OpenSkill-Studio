@@ -160,4 +160,12 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     // the Inspect panel opens for the fetched entity, not silently dropped
     expect(await screen.findByText(/Source conflicts for Hidden Deep Entity/)).toBeDefined();
   });
+
+  it("Inspect panel closes via the close button", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    await screen.findByText(/Source conflicts for/);
+    fireEvent.click(screen.getByLabelText("Close inspect panel"));
+    expect(screen.queryByText(/Source conflicts for/)).toBeNull();
+  });
 });
