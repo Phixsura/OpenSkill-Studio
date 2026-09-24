@@ -1756,3 +1756,13 @@ cases, which stays correct under the cap.
    "Acknowledge all shown" button that sends ONLY unacknowledged ids.
    Route ordering pinned by the killer (the literal path must not be
    captured by `/{change_id}/acknowledge`).
+
+### 87.1 Same-page deep-link bugs (round 178)
+
+The browser test for search→inspect caught TWO real bugs unit tests missed:
+the catalog deep-link effect only depended on `[pages]`, so a SAME-PAGE
+query change (clicking a search hit while already on /catalog) never fired;
+and `if (entityId && !selected)` refused to SWITCH the panel when another
+entity was already inspected. Both fixed (`[pages, params]` deps;
+`entityId !== selected?.id`); e2e 6/6 including the new
+search-hit → Inspect flow, a11y still green.

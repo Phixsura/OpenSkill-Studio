@@ -132,3 +132,22 @@ test("4 — catalog Inspect deep-links to the entity-filtered change feed", asyn
   await page.waitForURL(/\/dashboard\/ecosystem\/changes\?entity=/, { timeout: 10_000 });
   await page.getByText(/filtered to entity/).waitFor({ state: "visible", timeout: 10_000 });
 });
+
+test("5 — global search hit opens the catalog Inspect panel", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("inspect")) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  // search for the first visible entity name fragment
+  const firstName = await page.locator("tbody tr td:first-child").first().innerText();
+  const term = firstName.trim().split(/\s+/)[0]!.slice(0, 8);
+  await page.getByLabel("Search catalog").fill(term);
+  await page.getByText("🔍").dispatchEvent("click");
+  const hit = page.locator("a[href*='/dashboard/ecosystem/catalog?kind=']").first();
+  await hit.waitFor({ state: "visible", timeout: 10_000 });
+  await hit.dispatchEvent("click");
+  await page.waitForURL(/entity=/, { timeout: 10_000 });
+  await page.getByText(/Source conflicts for/).waitFor({ state: "visible", timeout: 10_000 });
+});

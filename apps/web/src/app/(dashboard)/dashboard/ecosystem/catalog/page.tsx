@@ -126,7 +126,7 @@ function CatalogInner() {
   // Shareable deep link: /catalog?kind=models&entity=<id> restores Inspect
   useEffect(() => {
     const entityId = params.get("entity");
-    if (entityId && !selected) {
+    if (entityId && entityId !== selected?.id) {
       const hit = pages.flat().find((e) => e.id === entityId);
       if (hit) {
         setSelected(hit);
@@ -139,7 +139,7 @@ function CatalogInner() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pages]);
+  }, [pages, params]);
   useEffect(() => {
     const query = selected ? `?kind=${segment}&entity=${selected.id}` : `?kind=${segment}`;
     router.replace(`/dashboard/ecosystem/catalog${query}`);
