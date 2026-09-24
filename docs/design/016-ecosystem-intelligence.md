@@ -1642,3 +1642,36 @@ Continuation of the §80 race sweep into human decision points:
    meaningless `estimated_total`). Mixed-currency entities now get
    `estimated_total: null` + `mixed_currency: true` with lines still
    itemized.
+
+### 83.1 Supply-chain audit & internal-source races (rounds 145–146)
+
+- `pip-audit` over the full backend environment: **no known vulnerabilities**
+  (npm audit unavailable through the configured registry mirror — noted, not
+  actionable in-repo).
+- Two more internal-source get-or-creates raced on their unique names
+  (`internal:availability-probes` in the status-flip emitter,
+  `internal:benchmark-lab` in the benchmark change emitter) — same class as
+  R130; both serialized with per-name advisory locks. Concurrency killer
+  drives two simultaneous status-flip emits and asserts one source row and
+  no unique-violation 500.
+
+## 84. Quality-engineering ledger (rounds 1–150)
+
+Summary table for reviewers — what was systematically verified and how:
+
+| Technique                    | Coverage                                                                                                                                          | Outcome                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Targeted mutation audits     | ~45 subsystems, ~190 mutants                                                                                                                      | All non-equivalent mutants killed; 3 documented equivalents                               |
+| Live defects found by audits | 20+ (semver fail-closed CVE matching, ICS injection, sync-release 500, 4 cross-tenant org leaks, watch dedupe bypass, cross-currency totals, …)   | All fixed with killers                                                                    |
+| Concurrency races            | 9 closed (rollout decide, blind reveal, merge, watch add, impact/notify consumers, confirm, payload-vs-publish, 3× internal-source get-or-create) | Row locks / advisory locks / partial unique indexes; lock-removal mutants verified killed |
+| Input hygiene                | Every user-text sink sanitized; every request JSONB bounded; create/update symmetric                                                              | HTTP boundary contracts pinned                                                            |
+| Authz                        | Uniform-404, org-membership guards, 29-pair OpenAPI surface, all-routes-require-user + bounded-limit AST/route guards                             | Executable invariants                                                                     |
+| Audit trail                  | 10 previously-unaudited admin actions registered + emitted                                                                                        | Round-trip killer                                                                         |
+| Ops                          | Per-metric typed Prometheus exposition; docs↔metrics parity test; alert runbook; 5 crons off-peak                                                 |                                                                                           |
+| Property-based               | Hypothesis totality over stats/version parsing/adapters/sanitizers                                                                                | Found the Unicode-digit crash                                                             |
+| Browser E2E                  | 12 routes + watchlist lifecycle + quick-watch, green against a live stack                                                                         | `sweep-ecosystem.spec.ts`                                                                 |
+| Performance                  | Hot-path EXPLAIN audit; 2 missing per-event indexes added CONCURRENTLY                                                                            | eco08                                                                                     |
+| Supply chain                 | pip-audit clean                                                                                                                                   |                                                                                           |
+
+Test counts at this writing: backend regression 6277, eco subset 485,
+web unit 601, browser e2e 3 — all green at every push.

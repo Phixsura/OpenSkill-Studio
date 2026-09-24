@@ -601,10 +601,17 @@ class BenchmarkService:
             return
         import hashlib
 
+        # R146: serialize the get-or-create on the unique source name
+        from sqlalchemy import text as _text
+
         from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
         from app.ecosystem.models.source import EcosystemSource
         from app.ecosystem.services.change_detection import _fanout
 
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": "eco-source:internal:benchmark-lab"},
+        )
         source = await self.db.scalar(
             select(EcosystemSource).where(EcosystemSource.name == "internal:benchmark-lab")
         )

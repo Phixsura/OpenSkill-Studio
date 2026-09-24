@@ -87,4 +87,32 @@ describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("severity filter + hide-acknowledged drive the query string", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes"))
+        return Promise.resolve({ data: [], meta: { has_more: false, next_cursor: null } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 0));
+    // default: unacknowledged only
+    expect(
+      api.mock.calls.some(
+        (c) => typeof c[0] === "string" && (c[0] as string).includes("acknowledged=false"),
+      ),
+    ).toBe(true);
+    fireEvent.change(await screen.findByLabelText("Filter by severity"), {
+      target: { value: "breaking" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("severity=breaking") &&
+          (c[0] as string).includes("acknowledged=false"),
+      ),
+    ).toBe(true);
+  });
 });

@@ -1761,3 +1761,38 @@ async def test_estimate_never_sums_across_currencies(db):
     assert row["estimated_total"] is None
     assert row["currency"] is None
     assert len(row["breakdown"]) == 2  # both lines still itemized
+
+async def test_concurrent_internal_source_get_or_create(db):
+    """Round-146 killer: two sessions concurrently triggering the internal
+    availability-probes source get-or-create must not 500 on the unique
+    name — the advisory lock serializes creation."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.source import EcosystemSource
+    from app.ecosystem.services.pricing import AvailabilityService
+
+    version = await _mk_model_version(db, "ProbeRace")
+    await db.commit()
+    vid = version.id
+
+    async def flip(old, new):
+        async with AsyncSessionLocal() as session:
+            svc = AvailabilityService(session)
+            await svc._emit_status_flip("model_version", vid, old, new)
+            await session.commit()
+            return "ok"
+
+    results = await asyncio.gather(
+        flip("operational", "degraded"), flip("degraded", "operational")
+    )
+    assert results == ["ok", "ok"]
+    async with AsyncSessionLocal() as session:
+        rows = list(await session.scalars(
+            select(EcosystemSource).where(
+                EcosystemSource.name == "internal:availability-probes"
+            )
+        ))
+        assert len(rows) == 1
