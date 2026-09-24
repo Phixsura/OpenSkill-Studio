@@ -8,10 +8,11 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/catalog",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -32,6 +33,7 @@ const ENTITY = "E".repeat(26);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchParams = new URLSearchParams();
   api.mockImplementation((path: string, init?: RequestInit) => {
     if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
       return Promise.resolve({
@@ -119,5 +121,43 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     expect(changesLink.closest("a")!.getAttribute("href")).toBe(
       `/dashboard/ecosystem/changes?entity=${ENTITY}`,
     );
+  });
+
+  it("deep link to an entity beyond the loaded pages fetches it directly", async () => {
+    const HIDDEN = "H".repeat(26);
+    searchParams = new URLSearchParams({ kind: "models", entity: HIDDEN });
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: ENTITY,
+              canonical_name: "Verified Gen",
+              lifecycle_status: "verified",
+              sunset_at: null,
+              aliases: [],
+            },
+          ],
+          meta: { total: 500 },
+        });
+      if (path === `/ecosystem/catalog/models/${HIDDEN}`)
+        return Promise.resolve({
+          data: {
+            id: HIDDEN,
+            canonical_name: "Hidden Deep Entity",
+            lifecycle_status: "verified",
+            sunset_at: null,
+            aliases: [],
+          },
+        });
+      if (path.includes("/score-history")) return Promise.resolve({ data: { points: [] } });
+      if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
+      if (path.includes("/pricing/history"))
+        return Promise.resolve({ data: { series: {}, trends: {} } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<CatalogPage />, { wrapper: wrapper() });
+    // the Inspect panel opens for the fetched entity, not silently dropped
+    expect(await screen.findByText(/Source conflicts for Hidden Deep Entity/)).toBeDefined();
   });
 });

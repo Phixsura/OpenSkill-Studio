@@ -128,7 +128,15 @@ function CatalogInner() {
     const entityId = params.get("entity");
     if (entityId && !selected) {
       const hit = pages.flat().find((e) => e.id === entityId);
-      if (hit) setSelected(hit);
+      if (hit) {
+        setSelected(hit);
+      } else if (pages.length > 0) {
+        // R165: the deep-linked entity may live beyond the loaded pages —
+        // fetch it directly instead of silently dropping the link
+        apiWithAuth<{ data: Entity }>(`/ecosystem/catalog/${segment}/${entityId}`)
+          .then((res) => setSelected(res.data))
+          .catch(() => {});
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages]);
