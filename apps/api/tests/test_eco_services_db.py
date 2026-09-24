@@ -1785,14 +1785,26 @@ async def test_concurrent_internal_source_get_or_create(db):
             await session.commit()
             return "ok"
 
-    results = await asyncio.gather(
-        flip("operational", "degraded"), flip("degraded", "operational")
-    )
-    assert results == ["ok", "ok"]
-    async with AsyncSessionLocal() as session:
-        rows = list(await session.scalars(
-            select(EcosystemSource).where(
-                EcosystemSource.name == "internal:availability-probes"
-            )
-        ))
-        assert len(rows) == 1
+    try:
+        results = await asyncio.gather(
+            flip("operational", "degraded"), flip("degraded", "operational")
+        )
+        assert results == ["ok", "ok"]
+        async with AsyncSessionLocal() as session:
+            rows = list(await session.scalars(
+                select(EcosystemSource).where(
+                    EcosystemSource.name == "internal:availability-probes"
+                )
+            ))
+            assert len(rows) == 1
+    finally:
+        # self-clean: the committed fixture version must not stay an ACTIVE
+        # model_version — it pollutes replacement-candidate pools (R157 bug)
+        async with AsyncSessionLocal() as session:
+            row = await session.get(ModelVersion, vid)
+            if row:
+                row.lifecycle_status = "retired"
+                parent = await session.get(AIModel, row.model_id)
+                if parent:
+                    parent.lifecycle_status = "retired"
+            await session.commit()

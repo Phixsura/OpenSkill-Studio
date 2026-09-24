@@ -1,4 +1,6 @@
 "use client";
+
+import Link from "next/link";
 /** Canonical AI ecosystem catalog + lifecycle + conflicts (Parts C/L/Q). */
 
 import { Suspense, useEffect, useState } from "react";
@@ -386,6 +388,24 @@ function CatalogInner() {
       )}
       {selected && (
         <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold">{selected.canonical_name}</span>
+            <span className="space-x-3">
+              <Link
+                href={`/dashboard/ecosystem/changes?entity=${selected.id}`}
+                className="text-xs text-blue-600 underline"
+              >
+                📰 view changes
+              </Link>
+              <a
+                href={`/api/v1/ecosystem/export/changes.atom?entity_id=${selected.id}`}
+                className="text-xs text-blue-600 underline"
+                title="Atom feed of changes to THIS entity (GitHub releases.atom posture)"
+              >
+                📡 subscribe (.atom)
+              </a>
+            </span>
+          </div>
           {scorecard.data?.data && (
             <div className="mb-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-semibold">

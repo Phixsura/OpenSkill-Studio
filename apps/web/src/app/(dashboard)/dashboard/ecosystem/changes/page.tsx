@@ -2,6 +2,7 @@
 /** Typed change feed with severity filter + acknowledge (Part B). */
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -30,6 +31,9 @@ const SEVERITIES = [
 
 export default function ChangesPage() {
   const queryClient = useQueryClient();
+  // Deep link from the catalog Inspect panel: ?entity=<26-char id> narrows
+  // the feed to one canonical entity
+  const entity = useSearchParams().get("entity") ?? "";
   const [severity, setSeverity] = useState("");
   const [mutError, setMutError] = useState<string | null>(null);
   const [showAcked, setShowAcked] = useState(false);
@@ -37,7 +41,7 @@ export default function ChangesPage() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
 
-  const filterKey = `${severity}|${showAcked}`;
+  const filterKey = `${severity}|${showAcked}|${entity}`;
   const { data, isLoading } = useQuery({
     queryKey: ["eco-changes", filterKey],
     queryFn: async () => {
@@ -46,8 +50,8 @@ export default function ChangesPage() {
         meta: { has_more: boolean; next_cursor: string | null };
       }>(
         `/ecosystem/changes?limit=50${severity ? `&severity=${severity}` : ""}${
-          showAcked ? "" : "&acknowledged=false"
-        }`,
+          entity ? `&canonical_entity_id=${entity}` : ""
+        }${showAcked ? "" : "&acknowledged=false"}`,
       );
       setPages([res.data]);
       setCursor(res.meta?.next_cursor ?? null);
@@ -64,7 +68,7 @@ export default function ChangesPage() {
     }>(
       `/ecosystem/changes?limit=50&cursor=${cursor}${
         severity ? `&severity=${severity}` : ""
-      }${showAcked ? "" : "&acknowledged=false"}`,
+      }${entity ? `&canonical_entity_id=${entity}` : ""}${showAcked ? "" : "&acknowledged=false"}`,
     );
     setPages((prev) => [...prev, res.data]);
     setCursor(res.meta?.next_cursor ?? null);
@@ -83,6 +87,11 @@ export default function ChangesPage() {
   return (
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Change Feed</h1>
+      {entity && (
+        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+          filtered to entity <span className="font-mono">{entity.slice(0, 12)}…</span>
+        </p>
+      )}
       <EcosystemNav />
       {mutError && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">

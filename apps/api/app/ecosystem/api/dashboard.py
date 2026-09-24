@@ -1,5 +1,7 @@
 """Operator workspace + approved-signal endpoints (Parts N, O, P)."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,17 +102,22 @@ async def ops_metrics(
 @router.get("/export/changes.atom", include_in_schema=True)
 async def export_changes_atom(
     severity: str | None = None,
+    entity_id: Annotated[str | None, Query(min_length=26, max_length=26)] = None,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     """Atom 1.0 feed of typed change events — newest first, XML-escaped
-    (change data is untrusted external content, never emitted raw)."""
+    (change data is untrusted external content, never emitted raw).
+    `entity_id` narrows to one canonical entity (GitHub releases.atom
+    posture: subscribe to the model you depend on, not the firehose)."""
     from xml.sax.saxutils import escape
 
     from fastapi.responses import Response
 
-    rows = await DashboardService(db).change_feed(severity=severity, limit=limit, offset=0)
+    rows = await DashboardService(db).change_feed(
+        severity=severity, canonical_entity_id=entity_id, limit=limit, offset=0
+    )
     entries = []
     updated = None
     for c in rows:

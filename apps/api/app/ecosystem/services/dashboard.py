@@ -231,11 +231,19 @@ class DashboardService:
         }
 
     async def change_feed(
-        self, *, severity: str | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        severity: str | None = None,
+        canonical_entity_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[ChangeEvent]:
         query = select(ChangeEvent)
         if severity:
             query = query.where(ChangeEvent.severity == severity)
+        if canonical_entity_id:
+            # Served by ix_eco_changes_canonical (R137)
+            query = query.where(ChangeEvent.canonical_entity_id == canonical_entity_id)
         rows = await self.db.scalars(
             query.order_by(ChangeEvent.detected_at.desc()).limit(limit).offset(offset)
         )

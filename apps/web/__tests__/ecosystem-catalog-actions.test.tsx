@@ -107,4 +107,17 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("Inspect panel offers a per-entity Atom subscribe link", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    const link = (await screen.findByText(/subscribe \(.atom\)/)) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(
+      `/api/v1/ecosystem/export/changes.atom?entity_id=${ENTITY}`,
+    );
+    const changesLink = (await screen.findByText(/view changes/)) as HTMLAnchorElement;
+    expect(changesLink.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/changes?entity=${ENTITY}`,
+    );
+  });
 });

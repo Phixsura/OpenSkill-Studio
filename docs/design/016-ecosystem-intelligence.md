@@ -1693,3 +1693,23 @@ row; the trend window is 90 days); DECIDED rows are kept as billing-mint
 audit evidence. Killer proves the decided row of the same age survives.
 E2E beforeAll timeouts raised to 120s (registration + UI login exceed 60s
 under load — observed flake).
+
+## 85. Per-entity Atom feeds — rounds 157–158
+
+GitHub `releases.atom` posture: watching a specific model should mean
+subscribing to THAT model's changes, not the firehose.
+
+- `GET /export/changes.atom?entity_id=<26>` narrows the feed to one canonical
+  entity (served by the R137 `(canonical_entity_id, detected_at)` index);
+  XML escaping unchanged. Killer proves inclusion/exclusion + escaping.
+- The catalog Inspect panel now offers a "subscribe to changes (.atom)" link
+  alongside the existing calendar/export links.
+- FastAPI lesson: a plain `Query(None, ...)` default leaks the Query object
+  into direct (non-HTTP) test calls — `Annotated[str | None, Query(...)] = None`
+  keeps the bare default.
+- Test-hygiene regression caught in-flight: the R146 killer's committed
+  ProbeRace versions accumulated (10 across runs) and CROWDED OUT the
+  replacement-candidate top-10 pool, breaking two latency tests. The killer
+  now retires its fixtures in `finally`; one-time purge applied. This is the
+  second instance of the committed-fixture class — every future race killer
+  must self-clean BOTH the version and its parent model.

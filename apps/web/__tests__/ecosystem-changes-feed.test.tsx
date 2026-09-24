@@ -8,10 +8,11 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/changes",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -42,7 +43,10 @@ function change(id: string, field: string) {
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  searchParams = new URLSearchParams();
+});
 
 describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
   it("loads the next page via the cursor and appends rows", async () => {
@@ -112,6 +116,25 @@ describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
           typeof c[0] === "string" &&
           (c[0] as string).includes("severity=breaking") &&
           (c[0] as string).includes("acknowledged=false"),
+      ),
+    ).toBe(true);
+  });
+
+  it("?entity deep link narrows the feed and shows the filter badge", async () => {
+    searchParams = new URLSearchParams({ entity: "E".repeat(26) });
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes"))
+        return Promise.resolve({ data: [], meta: { has_more: false, next_cursor: null } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/filtered to entity/)).toBeDefined();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes(`canonical_entity_id=${"E".repeat(26)}`),
       ),
     ).toBe(true);
   });

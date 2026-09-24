@@ -8,8 +8,9 @@ from ulid import ULID
 from app.core.database import AsyncSessionLocal
 from app.ecosystem.models.benchmark import BenchmarkRun
 from app.ecosystem.models.catalog import AIModel
+from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
 from app.ecosystem.services.benchmark import BenchmarkService
-from tests.test_eco_services_db import _mk_suite_with_cases, _mk_user
+from tests.test_eco_services_db import _mk_source, _mk_suite_with_cases, _mk_user
 
 
 @pytest.fixture
@@ -140,3 +141,39 @@ async def test_suite_export_import_roundtrip(db):
              "suite": {"key": "x"}, "cases": []},
             created_by=admin.id,
         )
+
+async def test_atom_feed_filters_by_entity(db):
+    """Round-157 killer: ?entity_id narrows the Atom feed to ONE canonical
+    entity (GitHub releases.atom posture) — other entities' changes are
+    excluded and the XML stays escaped."""
+    from app.ecosystem.api.dashboard import export_changes_atom
+
+    source = await _mk_source(db)
+    tag = str(ULID()).lower()[:6]
+    wanted = AIModel(canonical_name=f"AtomA-{tag}", slug=f"aa-{tag}")
+    other = AIModel(canonical_name=f"AtomB-{tag}", slug=f"ab-{tag}")
+    db.add_all([wanted, other])
+    await db.flush()
+    for model, marker in ((wanted, f"WANTED-{tag}"), (other, f"OTHER-{tag}")):
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="catalog_snapshot",
+            canonical_entity_kind="model", canonical_entity_id=model.id,
+            raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        db.add(ChangeEvent(
+            observation_id=obs.id, change_type="license", field="license",
+            old_value={"value": marker}, new_value={"value": "<x&y>"},
+            severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+        ))
+    await db.flush()
+
+    resp = await export_changes_atom(
+        severity=None, entity_id=wanted.id, limit=50, db=db, _user=None
+    )
+    body = resp.body.decode()
+    assert f"WANTED-{tag}" in body
+    assert f"OTHER-{tag}" not in body
+    assert "<x&y>" not in body  # escaped, never raw
+    assert "&lt;x&amp;y&gt;" in body
