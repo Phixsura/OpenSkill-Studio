@@ -287,3 +287,57 @@ async def test_upcoming_sunsets_feed_ical_source(db):
     sunsets = await LifecycleService(db).upcoming_sunsets(within_days=90)
     ours = [s for s in sunsets if s["entity_id"] == model_version.id]
     assert ours and ours[0]["sunset_at"] is not None
+
+async def test_muted_org_watchlist_suppresses_webhook(db, monkeypatch):
+    """Round-119 killer: §24 noise controls apply to ORG webhook fan-out too —
+    a muted (or below-threshold) org watchlist must not fire the webhook."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.catalog import AIModel
+    from app.services import webhook as webhook_module
+
+    delivered: list[tuple[str, str, dict]] = []
+
+    async def fake_trigger(self, org_id, event_type, payload):
+        delivered.append((org_id, event_type, payload))
+
+    monkeypatch.setattr(webhook_module.WebhookService, "trigger_event", fake_trigger)
+
+    source = await _mk_source(db)
+    muted_org = await _mk_org(db)
+    strict_org = await _mk_org(db)
+    watcher = await _mk_user(db)
+    model = AIModel(canonical_name=f"WHm {ULID()}", slug=f"whm-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    ref = f"whm-{str(ULID()).lower()}"
+    db.add(EntityAlias(entity_kind="model", entity_id=model.id, alias=ref,
+                       alias_normalized=normalize_name(ref), alias_type="official_id"))
+    await db.flush()
+    wl_svc = WatchlistService(db)
+    muted_wl = await wl_svc.create(owner_id=watcher.id, name="muted-org", org_id=muted_org.id)
+    await wl_svc.add_item(muted_wl.id, watcher.id, target_kind="model", target_id=model.id)
+    await wl_svc.update_settings(
+        muted_wl.id, watcher.id,
+        muted_until=datetime.now(UTC) + timedelta(days=1),
+    )
+    strict_wl = await wl_svc.create(owner_id=watcher.id, name="strict-org", org_id=strict_org.id)
+    await wl_svc.add_item(strict_wl.id, watcher.id, target_kind="model", target_id=model.id)
+    await wl_svc.update_settings(strict_wl.id, watcher.id, min_severity="security_critical")
+
+    v1 = _catalog_payload([{"id": ref, "name": "WHm", "license": "research"}])
+    v2 = _catalog_payload([{"id": ref, "name": "WHm", "license": "commercial"}])
+    await SyncService(db, fetcher=_fetcher_for(v1)).run_sync(source.id)
+    await SyncService(db, fetcher=_fetcher_for(v2)).run_sync(source.id)
+    change = await db.scalar(
+        select(ChangeEvent).where(
+            ChangeEvent.canonical_entity_id == model.id,
+            ChangeEvent.change_type == "license",
+        )
+    )
+    load_handlers()
+    await HANDLERS["eco.notify_watchers"](db, {"change_event_id": change.id})
+    # breaking < security_critical, and the other list is muted → NO webhooks
+    fired_orgs = [d[0] for d in delivered]
+    assert muted_org.id not in fired_orgs
+    assert strict_org.id not in fired_orgs

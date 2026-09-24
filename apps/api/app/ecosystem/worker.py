@@ -155,8 +155,8 @@ async def handle_notify_watchers(db: AsyncSession, payload: dict) -> None:
     # subscriptions (StatusGator/GitHub posture: watching means being CALLED,
     # not just having an in-app bell). Delivery is the webhook service's
     # fail-safe, entitlement-gated, SSRF-guarded path.
-    org_rows = await db.execute(
-        select(Watchlist.org_id)
+    org_candidates = await db.execute(
+        select(Watchlist.org_id, Watchlist.min_severity, Watchlist.muted_until)
         .join(WatchItem, WatchItem.watchlist_id == Watchlist.id)
         .where(
             WatchItem.target_id == change.canonical_entity_id,
@@ -164,6 +164,17 @@ async def handle_notify_watchers(db: AsyncSession, payload: dict) -> None:
         )
         .distinct()
     )
+    # §24 applies to org fan-out too (R119): a muted or below-threshold org
+    # watchlist must not fire the org webhook — same rule as user pushes
+    org_ids: set[str] = set()
+    for org_id, min_severity, muted_until in org_candidates:
+        if muted_until is not None:
+            mu = muted_until if muted_until.tzinfo else muted_until.replace(tzinfo=UTC)
+            if mu > now:
+                continue
+        if change_rank >= SEVERITY_RANK.get(min_severity or "info", 0):
+            org_ids.add(org_id)
+    org_rows = [(org_id,) for org_id in sorted(org_ids)]
     webhook_payload = {
         "change_event_id": change.id,
         "change_type": change.change_type,

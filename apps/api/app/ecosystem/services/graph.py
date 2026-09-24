@@ -107,18 +107,6 @@ class GraphService:
         )
         return {"depends_on": list(outgoing), "dependents": list(incoming)}
 
-    async def dependents_of(
-        self, kind: str, node_id: str, *, include_private: bool = True
-    ) -> list[DependencyEdge]:
-        """All edges whose dependency is this node (reverse traversal step)."""
-        query = select(DependencyEdge).where(
-            DependencyEdge.to_kind == kind, DependencyEdge.to_id == node_id
-        )
-        if not include_private:
-            query = query.where(DependencyEdge.org_id.is_(None))
-        rows = await self.db.scalars(query)
-        return list(rows)
-
     async def sync_release_edges(self, release_id: str) -> int:
         """Derive capability edges from a WorkflowPackRelease's definition."""
         from app.models.workflow_pack import WorkflowPackRelease

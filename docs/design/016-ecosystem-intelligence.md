@@ -1529,3 +1529,17 @@ AND registered:
 Killer `test_admin_actions_are_audited_round115` round-trips every new action
 through `eco_audit` and asserts the rows land — registration is the behavior
 under test.
+
+## 78. Org webhook noise controls + dead-code sweep — rounds 119–120
+
+1. **Org webhook fan-out ignored §24 noise controls** — `handle_notify_watchers`
+   filtered USER pushes by min_severity/muted_until but fired the ORG webhook
+   for every matching watchlist: a muted or strict-threshold org watchlist
+   still got called. Org fan-out now applies the same eligibility rule.
+   Killer: `test_muted_org_watchlist_suppresses_webhook` (a muted org list and
+   a security_critical-threshold org list both stay silent on a breaking
+   change, while the positive-path webhook test still passes).
+2. **Dead code removed** — `GraphService.dependents_of` had zero callers
+   (impact traversal inlines the same reverse query); deleted rather than
+   left as a divergence trap. A public-method↔test cross-reference sweep
+   found no other unreferenced service methods.
