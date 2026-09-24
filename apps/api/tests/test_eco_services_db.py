@@ -221,7 +221,13 @@ async def test_price_and_license_changes_are_typed(db):
     assert run2.changes_detected >= 2
     from sqlalchemy import select
 
-    changes = list(await db.scalars(select(ChangeEvent)))
+    changes = list(
+        await db.scalars(
+            select(ChangeEvent)
+            .join(EcosystemObservation, ChangeEvent.observation_id == EcosystemObservation.id)
+            .where(EcosystemObservation.source_id == source.id)
+        )
+    )
     by_type = {c.change_type: c for c in changes if c.field in ("license", "pricing")}
     assert by_type["license"].severity == "breaking"
     assert by_type["license"].old_value == {"value": "research"}

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -246,4 +247,21 @@ class WatchItem(Base):
     target_ref: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_eco_watch_items_list", "watchlist_id"),)
+    __table_args__ = (
+        Index("ix_eco_watch_items_list", "watchlist_id"),
+        # R127: DB backstop for the §3.12 dedupe — the service-level probe
+        # alone loses the concurrent-insert race (NULLs defeat a single
+        # composite constraint, hence one partial index per target column)
+        Index(
+            "uq_eco_watch_item_target",
+            "watchlist_id", "target_kind", "target_id",
+            unique=True,
+            postgresql_where=text("target_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_eco_watch_item_ref",
+            "watchlist_id", "target_kind", "target_ref",
+            unique=True,
+            postgresql_where=text("target_ref IS NOT NULL"),
+        ),
+    )

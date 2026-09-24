@@ -69,6 +69,16 @@ async def handle_compute_impact(db: AsyncSession, payload: dict) -> None:
     change_event_id = payload.get("change_event_id")
     if not change_event_id:
         return
+    # R128: at-least-once outbox + concurrent consumers — the SELECT-then-
+    # insert dedupe below loses the race between two workers holding the same
+    # redelivered message. Serialize per change event (an advisory lock, not
+    # a unique constraint: admin recompute legitimately adds fresh analyses).
+    from sqlalchemy import text as _text
+
+    await db.execute(
+        _text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"eco-impact:{change_event_id}"},
+    )
     existing = await db.scalar(
         select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_event_id)
     )
@@ -128,6 +138,15 @@ async def handle_notify_watchers(db: AsyncSession, payload: dict) -> None:
     change = await db.get(ChangeEvent, change_event_id)
     if change is None or not change.canonical_entity_id:
         return
+    # R129: same race class as compute_impact — the per-(watcher, change)
+    # notification dedupe is SELECT-then-insert; serialize concurrent
+    # consumers of a redelivered message per change event
+    from sqlalchemy import text as _text
+
+    await db.execute(
+        _text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"eco-notify:{change_event_id}"},
+    )
     from datetime import UTC, datetime
 
     from app.ecosystem.models.observation import SEVERITY_RANK

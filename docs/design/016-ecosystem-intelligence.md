@@ -1564,3 +1564,22 @@ executable, failing at test time for any FUTURE endpoint that violates them:
    auth fails in CI, not in prod
    (`test_all_mutating_eco_routes_require_a_user`, walks the FastAPI
    dependency graph). A scan confirmed zero anonymous routes today.
+
+## 80. Concurrent-consumer races — rounds 127–129
+
+The §3.12/§13 dedupe guards were SELECT-then-insert: correct for sequential
+redelivery (the earlier double-delivery killers), but two CONCURRENT sessions
+both pass the probe. Three instances closed:
+
+1. **Watch items (R127)** — no DB constraint backed the service probe; two
+   racing `add_item` calls double-inserted (→ doubled notifications). Fix:
+   migration `eco07a00007` adds two PARTIAL unique indexes (one per target
+   column — NULLs defeat a single composite constraint) after de-duplicating
+   existing rows; `add_item` catches `IntegrityError` and returns the winner.
+   Race killer: two-session `asyncio.gather` asserts one row and equal ids.
+2. **`handle_compute_impact` (R128)** — a unique constraint is wrong here
+   (admin recompute legitimately adds fresh analyses), so concurrent workers
+   serialize on `pg_advisory_xact_lock('eco-impact:<change>')`. Removing the
+   lock is a verified-killed mutant (the race manifests reliably).
+3. **`handle_notify_watchers` (R129)** — same pattern,
+   `'eco-notify:<change>'`; lock-removal mutant likewise killed.

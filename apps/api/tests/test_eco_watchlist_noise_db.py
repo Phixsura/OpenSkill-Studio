@@ -310,3 +310,135 @@ async def test_duplicate_delivery_is_idempotent(db):
         )
     ))
     assert len(notes) == 1
+
+async def test_concurrent_compute_impact_is_exactly_once(db):
+    """Round-128 killer: TWO WORKERS holding the same redelivered message
+    concurrently must still produce ONE impact analysis — the SELECT-then-
+    insert dedupe alone loses this race; the per-change advisory lock
+    serializes it."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.graph import ImpactAnalysis
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from app.ecosystem.services.watchlists import WatchlistService  # noqa: F401
+    from app.ecosystem.worker import handle_compute_impact
+
+    model = AIModel(
+        canonical_name=f"CImp-{str(ULID()).lower()[:6]}", slug=f"ci-{str(ULID()).lower()}"
+    )
+    db.add(model)
+    await db.flush()
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="license", field="license",
+        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
+        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+    )
+    db.add(change)
+    await db.commit()
+    change_id, model_id = change.id, model.id
+
+    async def worker():
+        async with AsyncSessionLocal() as session:
+            await handle_compute_impact(session, {"change_event_id": change_id})
+            await session.commit()
+
+    try:
+        await asyncio.gather(worker(), worker())
+        async with AsyncSessionLocal() as session:
+            rows = list(await session.scalars(
+                select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_id)
+            ))
+            assert len(rows) == 1, f"concurrent workers created {len(rows)} analyses"
+    finally:
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import delete
+            await session.execute(
+                delete(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_id)
+            )
+            await session.execute(delete(ChangeEvent).where(ChangeEvent.id == change_id))
+            await session.execute(
+                delete(EcosystemObservation).where(EcosystemObservation.id == obs.id)
+            )
+            row = await session.get(AIModel, model_id)
+            if row:
+                row.lifecycle_status = "retired"
+            await session.commit()
+
+async def test_concurrent_notify_watchers_is_exactly_once(db):
+    """Round-129 killer: two workers concurrently delivering the same
+    notify_watchers message must produce ONE notification per watcher."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from app.ecosystem.worker import handle_notify_watchers
+    from app.models.notification import Notification
+
+    user = await _mk_user(db)
+    model = AIModel(
+        canonical_name=f"CNot-{str(ULID()).lower()[:6]}", slug=f"cn-{str(ULID()).lower()}"
+    )
+    db.add(model)
+    await db.flush()
+    await WatchlistService(db).quick_watch(user.id, target_kind="model", target_id=model.id)
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="license", field="license",
+        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
+        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+    )
+    db.add(change)
+    await db.commit()
+    change_id, user_id, model_id = change.id, user.id, model.id
+
+    async def worker():
+        async with AsyncSessionLocal() as session:
+            await handle_notify_watchers(session, {"change_event_id": change_id})
+            await session.commit()
+
+    try:
+        await asyncio.gather(worker(), worker())
+        async with AsyncSessionLocal() as session:
+            rows = list(await session.scalars(
+                select(Notification).where(
+                    Notification.user_id == user_id,
+                    Notification.type == "ecosystem_change",
+                    Notification.data["change_event_id"].as_string() == change_id,
+                )
+            ))
+            assert len(rows) == 1, f"concurrent workers created {len(rows)} notifications"
+    finally:
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import delete
+            await session.execute(
+                delete(Notification).where(
+                    Notification.user_id == user_id,
+                    Notification.type == "ecosystem_change",
+                )
+            )
+            await session.execute(delete(ChangeEvent).where(ChangeEvent.id == change_id))
+            await session.execute(
+                delete(EcosystemObservation).where(EcosystemObservation.id == obs.id)
+            )
+            row = await session.get(AIModel, model_id)
+            if row:
+                row.lifecycle_status = "retired"
+            await session.commit()

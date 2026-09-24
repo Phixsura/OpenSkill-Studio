@@ -120,10 +120,18 @@ class AdvisoryService:
 
     async def _emit_change(self, advisory: SecurityAdvisory) -> None:
         """One typed change event per registration — rides normal fan-out."""
+        # R130: get-or-create on a unique name — serialize concurrent
+        # registrations so the loser doesn't hit IntegrityError (a 500)
+        from sqlalchemy import text as _text
+
         from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
         from app.ecosystem.models.source import EcosystemSource
         from app.ecosystem.services.change_detection import _fanout
 
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": "eco-source:internal:security-desk"},
+        )
         source = await self.db.scalar(
             select(EcosystemSource).where(EcosystemSource.name == "internal:security-desk")
         )

@@ -1,6 +1,7 @@
 """Watchlists (ADR-016 Part P)."""
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.observation import ChangeEvent
@@ -100,7 +101,23 @@ class WatchlistService:
             target_ref=target_ref,
         )
         self.db.add(item)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # R127: lost the concurrent-insert race — the partial unique
+            # index caught it; return the winner instead of erroring
+            await self.db.rollback()
+            existing = await self.db.scalar(
+                select(WatchItem).where(
+                    WatchItem.watchlist_id == watchlist_id,
+                    WatchItem.target_kind == target_kind,
+                    WatchItem.target_id == target_id,
+                    WatchItem.target_ref == target_ref,
+                )
+            )
+            if existing:
+                return existing
+            raise
         return item
 
     async def remove_item(self, watchlist_id: str, item_id: str, owner_id: str) -> None:
