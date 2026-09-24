@@ -1580,3 +1580,56 @@ async def test_watch_item_dedupe_uses_screened_ref(db):
     assert second.id == first.id
     items = await svc.list_items(wl.id, user.id)
     assert len(items) == 1
+
+async def test_constraint_spec_size_bounded(db):
+    """Round-103 killer: a dependency edge cannot store an unbounded
+    constraint_spec blob (20k JSON cap, same class as io_spec)."""
+    from app.ecosystem.services.graph import GraphService
+
+    v1 = await _mk_model_version(db, "EdgeA")
+    v2 = await _mk_model_version(db, "EdgeB")
+    with pytest.raises(AppError):
+        await GraphService(db).add_edge(
+            from_kind="model_version", from_id=v1.id,
+            to_kind="model_version", to_id=v2.id,
+            constraint_spec={"blob": "x" * 30_000},
+        )
+
+async def test_jsonb_depth_guards_round104(db):
+    """Round-104 killers ×2: benchmark seed_settings and source config are
+    JSONB sinks bounded to 20k serialized (same class as io_spec R96)."""
+    from app.ecosystem.services.benchmark import BenchmarkService
+    from app.ecosystem.services.sources import SourceService
+
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    version = await _mk_model_version(db, "SeedBound")
+    with pytest.raises(AppError):
+        await BenchmarkService(db).create_run(
+            suite.id,
+            target={"entity_kind": "model_version", "entity_id": version.id},
+            seed_settings={"blob": "x" * 30_000},
+        )
+    with pytest.raises(AppError):
+        await SourceService(db).create(
+            name=f"cfg-bound-{ULID()}",
+            source_type="provider_api",
+            trust_level="official",
+            adapter_key="json_catalog",
+            base_url="https://example.com/models",
+            config={"blob": "x" * 30_000},
+        )
+
+async def test_draft_payload_size_bounded(db):
+    """Round-105 killer: a generation draft cannot store an unbounded payload
+    (100k serialized cap — payloads embed workflow definitions)."""
+    from app.ecosystem.services.drafts import DraftService
+
+    user = await _mk_user(db)
+    with pytest.raises(AppError):
+        await DraftService(db).create(
+            draft_type="benchmark_suite",
+            title="Big",
+            payload={"suggestions": ["x" * 120_000]},
+            created_by=user.id,
+        )

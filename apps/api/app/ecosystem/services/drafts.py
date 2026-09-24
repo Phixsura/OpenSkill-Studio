@@ -61,6 +61,10 @@ class DraftService:
 
     def _validate_payload(self, draft_type: str, payload: dict) -> dict:
         errors: list[str] = []
+        import json as _json
+
+        if isinstance(payload, dict) and len(_json.dumps(payload, default=str)) > 100_000:
+            raise AppError("VALIDATION_ERROR", "Draft payload too large (100k max)", 422)
         if not isinstance(payload, dict) or not payload:
             errors.append("Payload must be a non-empty object")
         elif draft_type == "workflow_pack":

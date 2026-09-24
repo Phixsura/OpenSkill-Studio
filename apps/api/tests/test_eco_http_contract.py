@@ -8,6 +8,7 @@ errors → {error: {code, message}} shape.
 """
 
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -288,3 +289,36 @@ async def test_query_parameter_boundaries(http, tokens):
     # audit.csv limit above cap → 422
     r = await http.get("/api/v1/ecosystem/audit.csv?limit=999999", headers=admin)
     assert r.status_code == 422
+
+async def test_manual_observation_input_hygiene(http, tokens):
+    """Round-102 killers ×4: manual observations validate event_type against
+    the enum, refuse non-http(s) provenance (rendered as a link), screen
+    external_ref, and bound the normalized payload."""
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    r = await http.post(
+        "/api/v1/ecosystem/sources",
+        json={
+            "name": f"manual-hygiene-{uuid4().hex[:8]}",
+            "source_type": "manual_analyst",
+            "trust_level": "official",
+            "adapter_key": "manual",
+        },
+        headers=admin,
+    )
+    assert r.status_code == 201, r.text
+    source_id = r.json()["data"]["id"]
+    base = {"source_id": source_id, "event_type": "price_changed"}
+
+    r = await http.post("/api/v1/ecosystem/observations",
+                        json={**base, "event_type": "totally_made_up"}, headers=admin)
+    assert r.status_code == 422
+    r = await http.post("/api/v1/ecosystem/observations",
+                        json={**base, "provenance_url": "javascript:alert(1)"}, headers=admin)
+    assert r.status_code == 422
+    r = await http.post("/api/v1/ecosystem/observations",
+                        json={**base, "normalized": {"blob": "x" * 120_000}}, headers=admin)
+    assert r.status_code == 422
+    r = await http.post("/api/v1/ecosystem/observations",
+                        json={**base, "external_ref": "ref\u0000evil"}, headers=admin)
+    assert r.status_code == 201
+    assert "\u0000" not in (r.json()["data"]["external_ref"] or "")

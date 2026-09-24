@@ -6,6 +6,8 @@ Impact traversal walks edges in reverse (dependency -> dependents).
 Never auto-installs anything — the graph is metadata only.
 """
 
+import json
+
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +42,12 @@ class GraphService:
             raise AppError("VALIDATION_ERROR", f"Unknown constraint type: {constraint_type}", 422)
         if from_kind == to_kind and from_id == to_id:
             raise AppError("VALIDATION_ERROR", "Self-edges are not allowed", 422)
+        # Depth guard (R103, same class as io_spec): the spec is stored
+        # verbatim in JSONB and replayed on every impact traversal
+        if constraint_spec is not None and len(
+            json.dumps(constraint_spec, default=str)
+        ) > 20_000:
+            raise AppError("VALIDATION_ERROR", "constraint_spec too large (20k max)", 422)
         stmt = (
             pg_insert(DependencyEdge)
             .values(

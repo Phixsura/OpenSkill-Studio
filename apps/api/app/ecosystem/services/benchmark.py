@@ -5,6 +5,7 @@ tests). Budget caps abort runs; aggregation preserves every score dimension —
 there is deliberately no universal quality score.
 """
 
+import json
 import statistics
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -387,6 +388,10 @@ class BenchmarkService:
         suite = await self.get_suite(suite_id)
         if suite.status != "active":
             raise AppError("VALIDATION_ERROR", "Suite must be active to run", 422)
+        # Depth guard (R104): seed_settings is replayed verbatim into every
+        # executor call and stored in JSONB — bound it
+        if seed_settings is not None and len(json.dumps(seed_settings, default=str)) > 20_000:
+            raise AppError("VALIDATION_ERROR", "seed_settings too large (20k max)", 422)
         if not isinstance(target, dict) or not target.get("entity_kind"):
             raise AppError("VALIDATION_ERROR", "Run target must name an entity", 422)
         cases = await self.list_cases(suite_id)

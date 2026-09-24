@@ -1419,3 +1419,53 @@ Three more gaps closed by targeted review of remaining write paths:
 
 Killers: `test_io_spec_size_bounded`, `test_watch_item_dedupe_uses_screened_ref`
 (services), `test_rollout_scope_ref_is_screened` (amendments).
+
+## 74. Manual-input & JSONB depth-guard sweep — rounds 102–104
+
+The R96 io_spec finding generalized: every JSONB dict accepted from a request
+is now bounded to 20 KB serialized, and the manual-observation endpoint was
+brought up to the same hygiene bar as adapter ingestion.
+
+1. **Manual observations (R102)** — `POST /observations` accepted any
+   `event_type` string (now validated against `OBSERVATION_EVENT_TYPES`),
+   stored `external_ref` unscreened (now `sanitize_text`), accepted an
+   unbounded `normalized` payload (now 100 KB), and stored any
+   `provenance_url` — which Discoveries renders as an `<a href>`, so a
+   `javascript:` URL was a stored link-injection primitive. Now http(s)-only.
+2. **Graph `constraint_spec` (R103)** and **benchmark `seed_settings` +
+   source `config` (R104)** — all three stored verbatim in JSONB and replayed
+   downstream (impact traversals, executor calls, sync fetches); each now
+   capped at 20 KB serialized with a 422.
+
+Killers: `test_manual_observation_input_hygiene` (http contract),
+`test_constraint_spec_size_bounded`, `test_jsonb_depth_guards_round104`
+(services).
+
+### 74.1 Draft payload bound (round 105)
+
+`DraftService.create` stored the draft `payload` dict verbatim after only
+structural checks. Payloads embed whole workflow definitions, so the cap is
+100 KB serialized (vs 20 KB for the smaller sinks). Killer:
+`test_draft_payload_size_bounded`.
+
+## 75. Operator-surface interaction coverage — rounds 95, 99–101, 106–107
+
+Every mutating control on the ecosystem dashboard now has a wiring test that
+pins the exact endpoint, method and body it emits (the class of bug these
+catch — a button that renders but posts to the wrong path or drops a field —
+is invisible to render-only tests):
+
+- **Changes feed**: cursor load-more appends pages / hides at end; acknowledge.
+- **Watchlists**: add item (kind+ref body shape), remove item by id.
+- **Discoveries**: verify-all sends ONLY unverified ids; confirm/reject/LLM-
+  suggest hit the specific candidate; LLM suggest offered only for NEW-entity
+  proposals.
+- **Blind review**: alias secrecy pre-reveal, score submit body, premature
+  reveal surfaces the refusal instead of identities.
+- **Pricing**: approve sends decision+provider_key; reject NEVER sends a
+  provider key (no accidental billing mint).
+- **Sources**: sync-now disabled unless active; pause/resume PATCH bodies;
+  replay POST.
+
+Suites: ecosystem-changes-feed / watch-items / discoveries-actions /
+blind-review / pricing-reconcile / source-controls (web 585, tsc clean).

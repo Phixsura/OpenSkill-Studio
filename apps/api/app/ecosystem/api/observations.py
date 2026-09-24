@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.ecosystem.api.deps import require_platform_admin
-from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+from app.ecosystem.models.observation import (
+    OBSERVATION_EVENT_TYPES,
+    ChangeEvent,
+    EcosystemObservation,
+)
 from app.ecosystem.schemas import (
     BulkIdsRequest,
     ChangeEventResponse,
@@ -18,6 +22,7 @@ from app.ecosystem.schemas import (
     ManualObservationRequest,
     ObservationResponse,
 )
+from app.ecosystem.security import sanitize_text
 from app.ecosystem.services.change_detection import detect_changes
 from app.ecosystem.services.resolution import propose_resolution
 from app.ecosystem.services.sources import SourceService
@@ -95,17 +100,28 @@ async def create_manual_observation(
             "Manual observations require a manual_analyst or internal_research source",
             422,
         )
+    # R102: manual input is still untrusted-adjacent — the analyst pastes
+    # from external pages. Validate the enum, screen the ref, refuse
+    # non-http(s) provenance (rendered as a link on Discoveries), and bound
+    # the normalized payload like every adapter path.
+    if body.event_type not in OBSERVATION_EVENT_TYPES:
+        raise AppError("VALIDATION_ERROR", f"Unknown event type: {body.event_type}", 422)
+    provenance = body.provenance_url
+    if provenance and not provenance.lower().startswith(("http://", "https://")):
+        raise AppError("VALIDATION_ERROR", "provenance_url must be http(s)", 422)
     raw = json.dumps(body.normalized, sort_keys=True, default=str).encode()
+    if len(raw) > 100_000:
+        raise AppError("VALIDATION_ERROR", "normalized payload too large (100k max)", 422)
     obs = EcosystemObservation(
         source_id=source.id,
         event_type=body.event_type,
         entity_kind=body.entity_kind,
-        external_ref=body.external_ref,
+        external_ref=sanitize_text(body.external_ref, 500),
         raw_hash=hashlib.sha256(raw).hexdigest(),
         normalized=body.normalized,
         parser_version=source.parser_version,
         confidence=0.9,
-        provenance_url=body.provenance_url,
+        provenance_url=provenance,
         extraction_method="manual",
     )
     db.add(obs)

@@ -1,5 +1,6 @@
 """External source registry service (ADR-016 Part A)."""
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -51,6 +52,9 @@ class SourceService:
             # SSRF guard at registration time; DNS re-checked at every fetch
             validate_external_url(base_url, resolve_dns=False)
         config = config or {}
+        # Depth guard (R104): adapter config is stored verbatim in JSONB
+        if len(json.dumps(config, default=str)) > 20_000:
+            raise AppError("VALIDATION_ERROR", "config too large (20k max)", 422)
         # Credentials must never be stored in source config — field names only
         for key, value in config.items():
             if isinstance(value, str) and any(
