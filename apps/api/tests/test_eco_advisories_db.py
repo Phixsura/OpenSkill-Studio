@@ -144,3 +144,71 @@ async def test_advisory_notifies_watchers_of_affected_entities(db):
     # Pull view: the watcher sees it in matching_changes
     rows = await WatchlistService(db).matching_changes(watcher.id)
     assert change.id in [c.id for c in rows]
+
+async def test_advisory_watcher_push_fanout_enqueued(db):
+    """Round-108 killer: each per-entity advisory change must ENQUEUE the
+    eco.notify_watchers outbox row (push fan-out), not just be visible in the
+    pull view."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:8]
+    model = AIModel(canonical_name=f"PushGen-{tag}", slug=f"pg-{tag}")
+    db.add(model)
+    await db.flush()
+    version = ModelVersion(
+        model_id=model.id, version="1.0.0", canonical_name=f"PushGen-{tag} 1.0.0"
+    )
+    db.add(version)
+    await db.flush()
+    await AdvisoryService(db).create(
+        advisory_ref=f"CVE-P-{tag}",
+        title="push hit",
+        severity="high",
+        affected_ref=f"PushGen-{tag}",
+        affected_kind="model_version",
+        created_by=admin.id,
+    )
+    change = await db.scalar(
+        select(ChangeEvent).where(
+            ChangeEvent.field == "security_advisory_affects",
+            ChangeEvent.canonical_entity_id == version.id,
+        )
+    )
+    assert change is not None
+    outbox = await db.scalar(
+        select(OutboxMessage).where(
+            OutboxMessage.topic == "eco.notify_watchers",
+            OutboxMessage.payload["change_event_id"].astext == change.id,
+        )
+    )
+    assert outbox is not None, "watcher push fan-out was not enqueued"
+
+
+async def test_advisory_name_match_is_exact_not_substring(db):
+    """Round-108 killer: an advisory for 'fluxsec-<tag>' must NOT hit an
+    unrelated model whose name merely CONTAINS that string — loose matching
+    would spray false security notifications."""
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:8]
+    # The alias contains the ref as a SUBSTRING (passes the SQL prefilter)
+    # but neither the name nor any alias matches exactly — python-level
+    # matching must reject it.
+    bystander = AIModel(
+        canonical_name=f"superfluxsec-{tag}",
+        slug=f"sf-{tag}",
+        aliases=[f"xfluxsec-{tag}y"],
+    )
+    db.add(bystander)
+    await db.flush()
+    svc = AdvisoryService(db)
+    advisory = await svc.create(
+        advisory_ref=f"CVE-X-{tag}",
+        title="exact only",
+        severity="high",
+        affected_ref=f"fluxsec-{tag}",
+        affected_kind="model",
+        created_by=admin.id,
+    )
+    hits = await svc.affected_entities(advisory.id)
+    assert bystander.id not in [h["entity_id"] for h in hits]

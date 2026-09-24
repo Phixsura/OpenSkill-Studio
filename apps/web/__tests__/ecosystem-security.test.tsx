@@ -70,4 +70,45 @@ describe("Ecosystem security advisories page (ADR-016 §38)", () => {
     expect(await screen.findByText("acme-nodes")).toBeDefined();
     expect(screen.getByText(/unknown \(fail-open\)/)).toBeDefined();
   });
+
+  it("Mark mitigated / Dismiss POST the status transition; closed advisories offer neither", async () => {
+    const adv = (id: string, status: string) => ({
+      id,
+      advisory_ref: `CVE-2026-000${id}`,
+      title: "RCE",
+      severity: "high",
+      affected_kind: "node_package",
+      affected_ref: "acme-nodes",
+      affected_range: null,
+      fixed_in: null,
+      status,
+      created_at: "2026-09-20T00:00:00Z",
+    });
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/security/advisories?"))
+        return Promise.resolve({ data: [adv("a1", "open"), adv("a2", "mitigated")] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<SecurityPage />, { wrapper: wrapper() });
+    // Only the open advisory offers transitions
+    expect(await screen.findAllByText("Mark mitigated")).toHaveLength(1);
+    fireEvent.click(screen.getByText("Mark mitigated"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          c[0] === "/ecosystem/security/advisories/a1/status?to_status=mitigated" &&
+          (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+    fireEvent.click(screen.getByText("Dismiss"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          c[0] === "/ecosystem/security/advisories/a1/status?to_status=dismissed" &&
+          (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
 });

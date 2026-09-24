@@ -1,0 +1,110 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/ecosystem/catalog",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
+
+import CatalogPage from "@/app/(dashboard)/dashboard/ecosystem/catalog/page";
+import { apiWithAuth } from "@/lib/api";
+
+const api = vi.mocked(apiWithAuth);
+
+function wrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  return Wrapper;
+}
+
+const ENTITY = "E".repeat(26);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.mockImplementation((path: string, init?: RequestInit) => {
+    if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
+      return Promise.resolve({
+        data: [
+          {
+            id: ENTITY,
+            canonical_name: "Verified Gen",
+            lifecycle_status: "verified",
+            sunset_at: null,
+            aliases: [],
+          },
+        ],
+        meta: { total: 1 },
+      });
+    if (path.includes("/score-history")) return Promise.resolve({ data: { points: [] } });
+    if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
+    if (path.includes("/pricing/history"))
+      return Promise.resolve({ data: { series: {}, trends: {} } });
+    return Promise.resolve({ data: [] });
+  });
+});
+
+describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
+  it("quick Watch POSTs kind+id and flips to Watching", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText(/Watch$/));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/watchlists/quick-watch" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.target_kind).toBe("model");
+    expect(body.target_id).toBe(ENTITY);
+    expect(await screen.findByText(/Watching/)).toBeDefined();
+  });
+
+  it("lifecycle move POSTs to_status; deprecation carries a reason", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    const select = await screen.findByLabelText("Lifecycle transition");
+    fireEvent.change(select, { target: { value: "deprecated" } });
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        (c[0] as string).endsWith(`/${ENTITY}/lifecycle`) &&
+        (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.to_status).toBe("deprecated");
+    expect(body.reason).toBe("manual_decision");
+  });
+
+  it("merge button stays disabled until a full 26-char survivor id is typed", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    const input = await screen.findByPlaceholderText(/merge into entity id/);
+    const button = screen.getByText("Merge duplicate → survivor") as HTMLButtonElement;
+    fireEvent.change(input, { target: { value: "TOOSHORT" } });
+    expect(button.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "S".repeat(26) } });
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).endsWith(`/${ENTITY}/merge-into/${"S".repeat(26)}`) &&
+          (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+});

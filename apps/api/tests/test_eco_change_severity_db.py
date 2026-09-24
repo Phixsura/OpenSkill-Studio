@@ -122,3 +122,39 @@ async def test_impact_depth_cap_truncates_at_six(db):
     assert ids[6] in depths          # depth 6 still reached
     assert ids[7] not in depths      # depth 7 pruned by the cap
     assert ids[8] not in depths
+
+def test_version_range_unparseable_bound_fails_open():
+    """Round-110 killer: an unparseable BOUND in a comparison token must
+    return None (cannot rule out — advisory keeps the entity), never False
+    ("provably safe"). A '2.O' typo in a CVE range must not hide the hit."""
+    from app.ecosystem.services.stats import version_in_range
+
+    for expr in (">=1.0 <2.O", ">=x", "<=beta", ">nope", "==v?"):
+        assert version_in_range("1.5.0", expr) is None, expr
+    # Sanity: well-formed ranges still decide
+    assert version_in_range("1.5.0", ">=1.0 <2.0") is True
+    assert version_in_range("2.5.0", ">=1.0 <2.0") is False
+
+def test_version_range_operator_semantics():
+    """Round-110b killers ×6: pin every operator's boundary semantics —
+    advisories and impact analyses depend on these being exact."""
+    from app.ecosystem.services.stats import version_in_range
+
+    # caret: >=lower (inclusive) <next-major (exclusive)
+    assert version_in_range("1.2.3", "^1.2.3") is True   # lower bound inclusive
+    assert version_in_range("1.9.9", "^1.2.3") is True
+    assert version_in_range("2.0.0", "^1.2.3") is False  # upper bound exclusive
+    # tilde: >=lower <next-minor
+    assert version_in_range("1.2.9", "~1.2.3") is True
+    assert version_in_range("1.3.0", "~1.2.3") is False
+    # comparison boundaries
+    assert version_in_range("1.0.0", ">=1.0.0") is True   # >= includes equal
+    assert version_in_range("2.0.0", "<2.0.0") is False   # < excludes equal
+    assert version_in_range("2.0.0", "<=2.0.0") is True
+    assert version_in_range("1.0.0", ">1.0.0") is False
+    # short versions pad with ZEROS: '1.2' == '1.2.0'
+    assert version_in_range("1.2.0", "==1.2") is True
+    assert version_in_range("1.2.9", "==1.2") is False
+    # bare token is exact match
+    assert version_in_range("1.2.0", "1.2.0") is True
+    assert version_in_range("1.2.1", "1.2.0") is False

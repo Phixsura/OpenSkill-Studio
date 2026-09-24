@@ -1467,5 +1467,40 @@ is invisible to render-only tests):
 - **Sources**: sync-now disabled unless active; pause/resume PATCH bodies;
   replay POST.
 
+- **Catalog**: quick-watch body + Watching flip; lifecycle move carries the
+  deprecation reason; merge disabled until a full 26-char survivor id.
+- **Benchmarks**: compare disabled under 2 selections; running runs
+  unselectable; compare GET carries exactly the selected ids.
+- **Security**: mitigate/dismiss POST the transition; non-open advisories
+  offer neither.
+
 Suites: ecosystem-changes-feed / watch-items / discoveries-actions /
-blind-review / pricing-reconcile / source-controls (web 585, tsc clean).
+blind-review / pricing-reconcile / source-controls / catalog-actions /
+benchmark-compare / security (web 591, tsc clean).
+
+## 76. Advisory matching & semver-range audits — rounds 108–110
+
+Mutation audits of the two subsystems that decide _who gets a security
+notification_:
+
+1. **Advisories (6 mutants)** — 4 killed by existing suites; 2 survived and
+   got killers: (a) the per-entity watcher PUSH fan-out (`eco.notify_watchers`
+   outbox enqueue) was only pull-tested — dropping `_fanout` survived; now the
+   outbox row itself is asserted. (b) exact-vs-substring name matching was
+   masked by the SQL prefilter; the killer routes a bystander through the
+   alias-containment prefilter (alias contains the ref as a substring) and
+   asserts it is rejected python-side.
+2. **`version_in_range` (live fix + 7 mutants)** — comparison operators with
+   an unparseable bound returned **False** ("provably safe") while `^`/`~`/
+   bare paths returned None (fail open). A `>=1.0 <2.O` typo in a CVE range
+   silently excluded affected entities. Fixed: every unparseable bound now
+   fails OPEN. All operator boundaries were untested (7/7 mutants survived);
+   an operator-semantics table now pins caret/tilde upper-exclusive lower-
+   inclusive, `>=`/`<`/`<=`/`>` equality edges, and zero-padding of short
+   versions. 6/7 killed; `matched_any` removal is provably equivalent
+   (non-empty strip always yields a token) — documented, not pinned.
+
+Killers: `test_advisory_watcher_push_fanout_enqueued`,
+`test_advisory_name_match_is_exact_not_substring`,
+`test_version_range_unparseable_bound_fails_open`,
+`test_version_range_operator_semantics`.

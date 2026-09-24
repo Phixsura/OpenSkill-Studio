@@ -253,19 +253,29 @@ def version_in_range(version: str, range_expr: str) -> bool | None:
         matched_any = True
         if token.startswith(">="):
             bound = parse_version(token[2:])
-            ok = ok and bound is not None and v >= bound
+            if bound is None:
+                return None  # unparseable bound: fail OPEN, never "safe"
+            ok = ok and v >= bound
         elif token.startswith("<="):
             bound = parse_version(token[2:])
-            ok = ok and bound is not None and v <= bound
+            if bound is None:
+                return None  # unparseable bound: fail OPEN, never "safe"
+            ok = ok and v <= bound
         elif token.startswith(">"):
             bound = parse_version(token[1:])
-            ok = ok and bound is not None and v > bound
+            if bound is None:
+                return None  # unparseable bound: fail OPEN, never "safe"
+            ok = ok and v > bound
         elif token.startswith("<"):
             bound = parse_version(token[1:])
-            ok = ok and bound is not None and v < bound
+            if bound is None:
+                return None  # unparseable bound: fail OPEN, never "safe"
+            ok = ok and v < bound
         elif token.startswith("=="):
             bound = parse_version(token[2:])
-            ok = ok and bound is not None and v == bound
+            if bound is None:
+                return None  # unparseable bound: fail OPEN, never "safe"
+            ok = ok and v == bound
         elif token.startswith("^"):
             bound = parse_version(token[1:])
             if bound is None:
