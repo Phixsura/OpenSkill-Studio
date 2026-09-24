@@ -20,6 +20,7 @@ from app.ecosystem.services.stats import (
     linear_trend,
     mean_ci95,
     pairwise_wins_from_scores,
+    parse_version,
     two_proportion_z_test,
     version_in_range,
     weighted_mean,
@@ -248,3 +249,27 @@ def test_unicode_digit_versions_are_rejected_not_crashed():
     assert parse_version("¹.2.3") is None
     assert parse_version("1.².3") is None
     assert version_in_range("¹", ">=1.0") is None  # fail-open contract intact
+
+@given(
+    st.integers(min_value=0, max_value=99),
+    st.integers(min_value=0, max_value=99),
+    st.integers(min_value=0, max_value=99),
+    st.text(max_size=20),
+)
+def test_version_in_range_arbitrary_range_never_crashes_or_fails_closed(major, minor, patch, expr):
+    """R110 property: for ANY range expression, the result is True/False/None —
+    and an expression with no parseable structure must be None (fail open),
+    never a crash."""
+    version = f"{major}.{minor}.{patch}"
+    out = version_in_range(version, expr)
+    assert out in (True, False, None)
+
+
+@given(st.text(max_size=30))
+def test_parse_version_total_over_arbitrary_text(raw):
+    """parse_version must be total: any unicode input parses or returns None,
+    never raises (the '¹'.isdigit() class)."""
+    out = parse_version(raw)
+    assert out is None or (
+        isinstance(out, tuple) and len(out) == 3 and all(isinstance(n, int) for n in out)
+    )

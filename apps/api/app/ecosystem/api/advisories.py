@@ -22,6 +22,11 @@ async def create_advisory(
     """Register a structured advisory — emits ONE security change event that
     rides the normal fan-out. Never blocks or migrates anything by itself."""
     advisory = await AdvisoryService(db).create(created_by=user.id, **body.model_dump())
+    await eco_audit(
+        db, user, action="eco.advisory_registered", target_type="eco_security_advisory",
+        target_id=advisory.id,
+        after={"ref": advisory.advisory_ref, "severity": advisory.severity},
+    )
     await db.commit()
     return {"data": advisory}
 

@@ -474,3 +474,31 @@ async def test_leaderboard_missing_dimension_sorts_last_never_hidden(db):
         suite_id=suite.id, dimension="human_pref_elo"  # nobody has it yet
     )
     assert len(board["rows"]) == 1  # missing dimension → still listed, ranked last
+
+async def test_admin_actions_are_audited_round115(db):
+    """Round-115 killers: previously-unaudited irreversible admin actions now
+    land in the immutable audit trail — direct eco_audit round-trips for each
+    newly registered action (an unregistered action is silently swallowed,
+    so registration IS the behavior under test)."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.ecosystem.api.deps import eco_audit
+
+    admin = await _mk_user(db, "admin")
+    actions = [
+        "eco.advisory_registered", "eco.edge_added", "eco.edge_removed",
+        "eco.source_created", "eco.source_updated",
+        "eco.observation_manual_created", "eco.observations_bulk_verified",
+        "eco.suite_imported", "eco.entity_updated",
+    ]
+    tag = str(ULID()).lower()
+    for i, action in enumerate(actions):
+        await eco_audit(
+            db, admin, action=action, target_type="eco_test",
+            target_id=f"{tag[:20]}-{i:02d}"[:26], after={"round": 115},
+        )
+    rows = await db.scalars(
+        select(CommercialAuditEvent).where(
+            CommercialAuditEvent.target_id.like(f"{tag[:20]}-%")
+        )
+    )
+    assert sorted(r.action for r in rows) == sorted(actions)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     CreateSourceRequest,
     SourceResponse,
@@ -29,6 +29,11 @@ async def create_source(
     user: User = Depends(require_platform_admin),
 ):
     source = await SourceService(db).create(created_by=user.id, **body.model_dump())
+    await eco_audit(
+        db, user, action="eco.source_created", target_type="eco_source",
+        target_id=source.id,
+        after={"name": source.name, "trust_level": source.trust_level},
+    )
     await db.commit()
     return {"data": source}
 
@@ -67,8 +72,11 @@ async def update_source(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_platform_admin),
 ):
-    source = await SourceService(db).update(
-        source_id, body.model_dump(exclude_unset=True)
+    updates = body.model_dump(exclude_unset=True)
+    source = await SourceService(db).update(source_id, updates)
+    await eco_audit(
+        db, _user, action="eco.source_updated", target_type="eco_source",
+        target_id=source.id, after={k: str(v)[:200] for k, v in updates.items()},
     )
     await db.commit()
     return {"data": source}

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     AddEdgeRequest,
     ComputeImpactRequest,
@@ -38,6 +38,11 @@ async def add_edge(
         constraint_spec=body.constraint_spec,
         org_id=org_id if body.org_scoped else None,
     )
+    await eco_audit(
+        db, _user, action="eco.edge_added", target_type="eco_dependency_edge",
+        target_id=edge.id,
+        after={"from": f"{body.from_kind}:{body.from_id}", "to": f"{body.to_kind}:{body.to_id}"},
+    )
     await db.commit()
     return {"data": edge}
 
@@ -49,6 +54,10 @@ async def remove_edge(
     _user: User = Depends(require_platform_admin),
 ):
     await GraphService(db).remove_edge(edge_id)
+    await eco_audit(
+        db, _user, action="eco.edge_removed", target_type="eco_dependency_edge",
+        target_id=edge_id,
+    )
     await db.commit()
 
 

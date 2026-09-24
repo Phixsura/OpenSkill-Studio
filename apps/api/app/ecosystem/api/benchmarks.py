@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.schemas import (
     CaseResponse,
     CreateCaseRequest,
@@ -55,6 +55,10 @@ async def import_suite(
 ):
     """Import a portable suite export (draft status; key collisions rejected)."""
     suite = await BenchmarkService(db).import_suite(document, created_by=user.id)
+    await eco_audit(
+        db, user, action="eco.suite_imported", target_type="eco_benchmark_suite",
+        target_id=suite.id, after={"name": suite.name},
+    )
     await db.commit()
     return {"data": suite}
 

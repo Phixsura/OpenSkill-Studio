@@ -1504,3 +1504,28 @@ Killers: `test_advisory_watcher_push_fanout_enqueued`,
 `test_advisory_name_match_is_exact_not_substring`,
 `test_version_range_unparseable_bound_fails_open`,
 `test_version_range_operator_semantics`.
+
+## 77. Audit-trail completeness sweep — rounds 114–116
+
+Property-based totality (round 114): `parse_version` is total over arbitrary
+unicode and `version_in_range` never crashes or escapes {True, False, None}
+for ANY range expression (Hypothesis).
+
+Audit gap sweep (rounds 115–116): §14 requires irreversible ecosystem admin
+actions in the immutable commercial audit trail, but nine mutating admin
+endpoints emitted nothing — and `record_audit` silently swallows unregistered
+actions, so a missing registry entry is as bad as a missing call. Now audited
+AND registered:
+
+- `eco.advisory_registered` (create was unaudited; only status changes were)
+- `eco.edge_added` / `eco.edge_removed` (destructive graph surgery)
+- `eco.source_created` / `eco.source_updated` (trust_level drives
+  auto-resolution; adapter swaps re-stamp parsing)
+- `eco.observation_manual_created`, `eco.observations_bulk_verified`
+  (HITL verification gates downstream automation)
+- `eco.suite_imported` (untrusted document becomes an executable suite)
+- `eco.entity_updated` (canonical PATCH edits names/aliases/external ids)
+
+Killer `test_admin_actions_are_audited_round115` round-trips every new action
+through `eco_audit` and asserts the rows land — registration is the behavior
+under test.

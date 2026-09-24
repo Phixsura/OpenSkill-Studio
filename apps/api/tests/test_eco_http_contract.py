@@ -322,3 +322,25 @@ async def test_manual_observation_input_hygiene(http, tokens):
                         json={**base, "external_ref": "ref\u0000evil"}, headers=admin)
     assert r.status_code == 201
     assert "\u0000" not in (r.json()["data"]["external_ref"] or "")
+
+async def test_documented_alert_metrics_are_emitted(http, tokens):
+    """Round-118 killer: every eco_* metric named in the ops runbook
+    (docs/ops/ecosystem-alerts.md) must actually be emitted by
+    /ecosystem/ops/metrics — a renamed metric silently kills its alert."""
+    import re
+    from pathlib import Path
+
+    doc = Path(__file__).resolve().parents[3] / "docs" / "ops" / "ecosystem-alerts.md"
+    documented = set(re.findall(r"eco_[a-z0-9_]+", doc.read_text()))
+    # cron job names mentioned in runbook prose, not metrics
+    documented -= {"eco_impact_sla", "eco_sync_sweep", "eco_retention", "eco_rollout_eval", "eco_stuck_runs"}
+    assert documented, "runbook lists no metrics — path wrong?"
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
+    assert r.status_code == 200
+    emitted = set(re.findall(r"^eco_[a-z0-9_]+", r.text, flags=re.M))
+    missing = {m.rstrip("_") for m in documented} - emitted
+    # trailing-digit windows like eco_discoveries_7d are emitted verbatim
+    missing = {m for m in missing if m not in emitted}
+    assert not missing, f"runbook metrics not emitted: {sorted(missing)}"

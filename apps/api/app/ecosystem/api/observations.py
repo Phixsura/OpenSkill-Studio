@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import eco_audit, require_platform_admin
 from app.ecosystem.models.observation import (
     OBSERVATION_EVENT_TYPES,
     ChangeEvent,
@@ -128,6 +128,11 @@ async def create_manual_observation(
     await db.flush()
     await detect_changes(db, obs)
     await propose_resolution(db, obs, trust_level=source.trust_level)
+    await eco_audit(
+        db, _user, action="eco.observation_manual_created",
+        target_type="eco_observation", target_id=obs.id,
+        after={"event_type": obs.event_type, "source_id": source.id},
+    )
     await db.commit()
     return {"data": obs}
 
@@ -153,6 +158,11 @@ async def bulk_verify_observations(
             obs.verified_by = user.id
             obs.verified_at = now
         verified.append(obs_id)
+    await eco_audit(
+        db, user, action="eco.observations_bulk_verified",
+        target_type="eco_observation", target_id=verified[0] if verified else "none",
+        after={"verified_count": len(verified), "missing_count": len(missing)},
+    )
     await db.commit()
     return {"data": {"verified": verified, "missing": missing}}
 

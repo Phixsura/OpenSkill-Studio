@@ -112,8 +112,11 @@ async def update_catalog_entity(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_platform_admin),
 ):
-    entity = await CatalogService(db).update(
-        _kind(segment), entity_id, body.model_dump(exclude_unset=True)
+    updates = body.model_dump(exclude_unset=True)
+    entity = await CatalogService(db).update(_kind(segment), entity_id, updates)
+    await eco_audit(
+        db, _user, action="eco.entity_updated", target_type=f"eco_{_kind(segment)}",
+        target_id=entity_id, after={k: str(v)[:200] for k, v in updates.items()},
     )
     await db.commit()
     return {"data": entity}

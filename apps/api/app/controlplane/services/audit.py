@@ -77,6 +77,16 @@ AUDIT_ACTIONS = frozenset(
         "eco.draft_published",
         "eco.conflict_resolved",
         "eco.advisory_status",
+        # R115: previously-unaudited irreversible eco admin actions
+        "eco.advisory_registered",
+        "eco.entity_updated",
+        "eco.edge_added",
+        "eco.edge_removed",
+        "eco.source_created",
+        "eco.source_updated",
+        "eco.observation_manual_created",
+        "eco.observations_bulk_verified",
+        "eco.suite_imported",
         # revenue share / settlements
         "revshare.rule_activated",
         "revshare.rule_retired",
