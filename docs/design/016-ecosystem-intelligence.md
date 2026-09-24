@@ -1618,3 +1618,27 @@ Continuation of the §80 race sweep into human decision points:
    approve→publish transition could mutate a just-published draft's payload.
    Now locked; the race killer publishes and edits concurrently and asserts
    the published payload is unchanged whenever the edit lost.
+
+## 83. Hot-path indexes, error-contract guard & estimator currency safety — rounds 137–142
+
+1. **Hot-path indexes (R137, migration eco08)** — the notify fan-out probed
+   `eco_watch_items` by bare `target_id` (only the watchlist_id prefix was
+   indexed) and the watch feed read `eco_change_events` by bare
+   `canonical_entity_id` (the existing composite leads with entity_kind):
+   both were seq scans ON EVERY CHANGE EVENT at production scale. Verified
+   with EXPLAIN before/after (`enable_seqscan=off` on the small dev table);
+   the new (canonical_entity_id, detected_at) index also absorbs the
+   ORDER BY via a backward index scan. Schema-presence killer added.
+2. **AppError code↔status guard (R139)** — an AST walk over the ecosystem
+   package asserts every literal `AppError(code, msg, status)` pairs its
+   machine code with the matching HTTP status (NOT_FOUND=404 etc.); clients
+   switch on the code, so a mismatched pair breaks them silently. Layering
+   scan confirmed zero service-layer commits.
+3. **Scorecard semantics (R141)** — both check-boundary mutants survived
+   (deprecated-passes-lifecycle, single-source-passes-corroboration); a
+   semantics killer pins fail/warn boundaries. Both re-verified KILLED.
+4. **Estimator currency safety (R142)** — `estimate` summed line totals
+   ACROSS CURRENCIES (a USD token price plus a EUR image price produced a
+   meaningless `estimated_total`). Mixed-currency entities now get
+   `estimated_total: null` + `mixed_currency: true` with lines still
+   itemized.

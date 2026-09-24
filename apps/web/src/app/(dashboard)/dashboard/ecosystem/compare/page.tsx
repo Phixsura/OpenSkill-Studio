@@ -39,6 +39,7 @@ interface Uptime {
 interface EstimateRow {
   entity_id: string;
   estimated_total: number | null;
+  mixed_currency?: boolean;
   currency: string | null;
   fully_priced: boolean;
   all_prices_approved: boolean;
@@ -279,8 +280,15 @@ function CompareInner() {
                   <span className="font-semibold">
                     {e.estimated_total !== null
                       ? `${e.estimated_total} ${e.currency ?? ""}`
-                      : "no priced units"}
+                      : e.mixed_currency
+                        ? "mixed currencies — see lines"
+                        : "no priced units"}
                   </span>
+                  {e.mixed_currency && (
+                    <span className="text-xs text-amber-600">
+                      prices span multiple currencies; no single total
+                    </span>
+                  )}
                   {!e.fully_priced && (
                     <span className="text-xs text-amber-600">
                       missing: {e.missing_units.join(", ")}

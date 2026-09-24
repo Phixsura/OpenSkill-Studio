@@ -394,3 +394,35 @@ def test_all_mutating_eco_routes_require_a_user():
         if not ({"get_current_user", "require_platform_admin"} & names):
             offenders.append(f"{sorted(methods)} {route.path}")
     assert not offenders, f"eco routes without a user dependency: {offenders}"
+
+def test_app_error_code_status_consistency():
+    """Round-139 systemic guard: every literal AppError(code, msg, status) in
+    the ecosystem package pairs its machine code with the matching HTTP
+    status — a NOT_FOUND that ships as 403 (or a VALIDATION_ERROR as 500)
+    breaks every client that switches on the code."""
+    import ast
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parents[1] / "app" / "ecosystem"
+    expect = {
+        "NOT_FOUND": {404},
+        "VALIDATION_ERROR": {422},
+        "ECO_INVALID_TRANSITION": {409},
+        "ECO_RATE_LIMITED": {429},
+        "ECO_SYNC_IN_PROGRESS": {409},
+        "FORBIDDEN": {403},
+    }
+    bad = []
+    for f in base.rglob("*.py"):
+        for node in ast.walk(ast.parse(f.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "AppError"
+                and len(node.args) >= 3
+            ):
+                code, status = node.args[0], node.args[2]
+                if isinstance(code, ast.Constant) and isinstance(status, ast.Constant):
+                    want = expect.get(code.value)
+                    if want and status.value not in want:
+                        bad.append(f"{f.name}:{node.lineno} {code.value} -> {status.value}")
+    assert not bad, f"AppError code/status mismatches: {bad}"

@@ -115,4 +115,50 @@ describe("Ecosystem compare & estimate page (ADR-016 §19)", () => {
       ),
     ).toBe(true);
   });
+
+  it("mixed-currency estimates show the flag instead of a bogus total", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.includes("/pricing/estimate"))
+        return Promise.resolve({
+          data: [
+            {
+              entity_kind: "model",
+              entity_id: "M".repeat(26),
+              estimated_total: null,
+              currency: null,
+              mixed_currency: true,
+              breakdown: [
+                {
+                  unit: "token_input",
+                  quantity: 1000,
+                  unit_price: 0.01,
+                  currency: "USD",
+                  approved: true,
+                  line_total: 10,
+                },
+                {
+                  unit: "image",
+                  quantity: 2,
+                  unit_price: 0.05,
+                  currency: "EUR",
+                  approved: true,
+                  line_total: 0.1,
+                },
+              ],
+              missing_units: [],
+              fully_priced: true,
+              all_prices_approved: true,
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComparePage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByPlaceholderText(/entity ids/), {
+      target: { value: "M".repeat(26) },
+    });
+    fireEvent.click(screen.getByText("Estimate cost"));
+    expect(await screen.findByText(/mixed currencies — see lines/)).toBeDefined();
+    expect(screen.getByText(/multiple currencies; no single total/)).toBeDefined();
+  });
 });

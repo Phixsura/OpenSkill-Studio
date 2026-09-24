@@ -1700,3 +1700,64 @@ async def test_concurrent_confirm_decides_once(db):
             for r in rows:
                 r.lifecycle_status = "retired"
             await session.commit()
+
+async def test_scorecard_check_semantics(db):
+    """Round-141 killers ×2: a deprecated entity FAILS the lifecycle check
+    (not passes), and a single-source unverified entity gets WARN corroboration
+    (not pass) — the scorecard is only as honest as its check boundaries."""
+    from app.ecosystem.services.catalog import CatalogService
+
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(
+        canonical_name=f"ScoreSem-{tag}", slug=f"ss-{tag}", lifecycle_status="deprecated"
+    )
+    db.add(model)
+    await db.flush()
+    source = await _mk_source(db)
+    db.add(EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    ))
+    await db.flush()
+    card = await CatalogService(db).scorecard("model", model.id)
+    by_key = {c["check"]: c["status"] for c in card["checks"]}
+    assert by_key["lifecycle"] == "fail"
+    assert by_key["corroboration"] == "warn"
+
+
+async def test_estimate_never_sums_across_currencies(db):
+    """Round-142 killer: an entity priced in USD for one unit and EUR for
+    another gets NO estimated_total and an explicit mixed_currency flag —
+    summing across currencies is not a number."""
+    from app.ecosystem.models.mapping import PriceObservation
+    from app.ecosystem.services.pricing import PricingService
+
+    version = await _mk_model_version(db, "MixCur")
+    source = await _mk_source(db)
+    for unit, currency, price in (
+        ("token_input", "USD", "0.01"),
+        ("image", "EUR", "0.05"),
+    ):
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="pricing_changed",
+            raw_hash=(str(ULID()).lower() * 3)[:64],
+            normalized={"unit": unit, "price": price},
+        )
+        db.add(obs)
+        await db.flush()
+        db.add(PriceObservation(
+            observation_id=obs.id, entity_kind="model_version", entity_id=version.id,
+            unit=unit, price=price, currency=currency,
+            reconciliation_status="unreviewed",
+        ))
+    await db.flush()
+    out = await PricingService(db).estimate(
+        entity_kind="model_version", entity_ids=[version.id],
+        workload={"token_input": 1000, "image": 2},
+    )
+    row = out[0]
+    assert row["mixed_currency"] is True
+    assert row["estimated_total"] is None
+    assert row["currency"] is None
+    assert len(row["breakdown"]) == 2  # both lines still itemized

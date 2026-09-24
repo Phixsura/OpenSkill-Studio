@@ -144,4 +144,6 @@ class ChangeEvent(Base):
         Index("ix_eco_changes_type", "change_type", "detected_at"),
         Index("ix_eco_changes_severity", "severity", "acknowledged"),
         Index("ix_eco_changes_entity", "entity_kind", "canonical_entity_id"),
+        # R137: watch feed reads by bare canonical_entity_id + recency
+        Index("ix_eco_changes_canonical", "canonical_entity_id", "detected_at"),
     )

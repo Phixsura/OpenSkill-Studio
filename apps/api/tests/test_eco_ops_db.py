@@ -329,3 +329,15 @@ async def test_sync_scheduler_due_semantics(db):
     assert fresh.id not in enqueued
     assert paused.id not in enqueued
     assert n >= 2
+
+async def test_hotpath_indexes_exist_in_db(db):
+    """Round-137 killer: the two per-change-event hot-path indexes exist in
+    the actual schema (migration eco08 applied and names match the models)."""
+    from sqlalchemy import text
+
+    rows = await db.execute(text(
+        "SELECT indexname FROM pg_indexes WHERE indexname IN "
+        "('ix_eco_watch_items_target', 'ix_eco_changes_canonical')"
+    ))
+    names = sorted(r[0] for r in rows)
+    assert names == ["ix_eco_changes_canonical", "ix_eco_watch_items_target"], names

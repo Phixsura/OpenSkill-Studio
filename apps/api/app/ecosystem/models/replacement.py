@@ -249,6 +249,12 @@ class WatchItem(Base):
 
     __table_args__ = (
         Index("ix_eco_watch_items_list", "watchlist_id"),
+        # R137: notify fan-out probes by target_id on EVERY change event
+        Index(
+            "ix_eco_watch_items_target",
+            "target_id",
+            postgresql_where=text("target_id IS NOT NULL"),
+        ),
         # R127: DB backstop for the §3.12 dedupe — the service-level probe
         # alone loses the concurrent-insert race (NULLs defeat a single
         # composite constraint, hence one partial index per target column)

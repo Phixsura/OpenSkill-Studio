@@ -243,14 +243,20 @@ class PricingService:
                         "line_total": line,
                     }
                 )
+            # R142: never sum across currencies — a USD token price plus a
+            # EUR image price is not a number. Mixed-currency entities get no
+            # total and an explicit flag instead.
+            currencies = {line["currency"] for line in breakdown}
+            mixed = len(currencies) > 1
             results.append(
                 {
                     "entity_kind": entity_kind,
                     "entity_id": entity_id,
-                    "estimated_total": round(total, 6) if breakdown else None,
-                    "currency": breakdown[0]["currency"] if breakdown else None,
+                    "estimated_total": round(total, 6) if breakdown and not mixed else None,
+                    "currency": breakdown[0]["currency"] if breakdown and not mixed else None,
                     "breakdown": breakdown,
                     "missing_units": missing,
+                    "mixed_currency": mixed,
                     "fully_priced": not missing,
                     "all_prices_approved": bool(breakdown) and all_approved,
                 }
