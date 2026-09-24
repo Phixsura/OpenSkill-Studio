@@ -23,7 +23,7 @@ dependencies = [
     "openai>=1.50",
     "httpx>=0.28",
     "cryptography>=43.0",
-    "stripe>=11,<13",
+    "stripe>=11,<16",
     "dnspython>=2",
 ]
 
