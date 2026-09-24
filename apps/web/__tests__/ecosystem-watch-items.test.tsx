@@ -16,7 +16,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import WatchlistsPage from "@/app/(dashboard)/dashboard/ecosystem/watchlists/page";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
+
+const ApiErrorCtor = ApiError as unknown as new (message: string) => Error;
 
 const api = vi.mocked(apiWithAuth);
 
@@ -101,5 +103,37 @@ describe("Watch item add/remove (ADR-016 §24 UI)", () => {
           (c[1] as RequestInit)?.method === "DELETE",
       ),
     ).toBe(true);
+  });
+
+  it("a failed mutation surfaces the API error banner", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/watchlists" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: LIST_ID,
+              name: "Default",
+              min_severity: "info",
+              muted_until: null,
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      if (init?.method === "DELETE")
+        return Promise.reject(new ApiErrorCtor("Watch item not found"));
+      return Promise.resolve({ data: [] });
+    });
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Default"));
+    // no items rendered; simulate failure via remove on a stale item is not
+    // reachable — use the severity PATCH failing instead
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") return Promise.reject(new ApiErrorCtor("Mute rejected"));
+      return Promise.resolve({ data: [] });
+    });
+    fireEvent.change(screen.getByTitle("Only notify at/above this severity"), {
+      target: { value: "breaking" },
+    });
+    expect(await screen.findByText("Mute rejected")).toBeDefined();
   });
 });
