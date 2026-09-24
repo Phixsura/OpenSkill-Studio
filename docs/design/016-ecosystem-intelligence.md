@@ -1766,3 +1766,10 @@ and `if (entityId && !selected)` refused to SWITCH the panel when another
 entity was already inspected. Both fixed (`[pages, params]` deps;
 `entityId !== selected?.id`); e2e 6/6 including the new
 search-hit → Inspect flow, a11y still green.
+
+### 87.2 Final browser verification (rounds 179–180)
+
+Inspect panel gained an aria-labeled close button (it could only be
+dismissed by switching segments). Final full-stack browser run: functional
+sweep 5/5 (pages, watchlist lifecycle, quick-watch, catalog→changes deep
+link, search-hit→Inspect) + a11y 12/12 — 6/6 green.
