@@ -1,4 +1,6 @@
 "use client";
+
+import Link from "next/link";
 /** Discoveries: observation ledger + entity-resolution queue (Parts B/C). */
 
 import React, { useState } from "react";
@@ -6,6 +8,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
 import { STATUS_STYLES, fmtDate } from "../lib";
+
+const KIND_TO_SEGMENT: Record<string, string> = {
+  provider: "providers",
+  tool: "tools",
+  model: "models",
+  model_version: "model-versions",
+  workflow: "workflows",
+  agent: "agents",
+  node_package: "node-packages",
+};
 
 interface Observation {
   id: string;
@@ -128,9 +140,20 @@ export default function DiscoveriesPage() {
                     </span>
                   </div>
                   <div className="text-xs text-[hsl(var(--muted-foreground))]">
-                    {c.candidate_entity_id
-                      ? `Merge into existing entity via ${c.match_method} (confidence ${Number(c.confidence).toFixed(2)})`
-                      : "Proposes a NEW canonical entity"}
+                    {c.candidate_entity_id ? (
+                      <>
+                        Merge into existing entity via {c.match_method} (confidence{" "}
+                        {Number(c.confidence).toFixed(2)})
+                        <Link
+                          href={`/dashboard/ecosystem/catalog?kind=${KIND_TO_SEGMENT[c.entity_kind] ?? "models"}&entity=${c.candidate_entity_id}`}
+                          className="ml-2 text-blue-600 underline"
+                        >
+                          view target
+                        </Link>
+                      </>
+                    ) : (
+                      "Proposes a NEW canonical entity"
+                    )}
                   </div>
                 </div>
                 <div className="space-x-2">

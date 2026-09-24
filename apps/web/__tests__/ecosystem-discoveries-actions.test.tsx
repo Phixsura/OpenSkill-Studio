@@ -122,4 +122,31 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("merge candidates link to their target entity in the catalog", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/resolution-candidates" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "RM".padEnd(26, "m"),
+              entity_kind: "model",
+              candidate_entity_id: "T".repeat(26),
+              match_method: "alias",
+              confidence: 0.95,
+              status: "pending",
+              proposed_payload: { name: "Known Model" },
+            },
+          ],
+        });
+      if (path.startsWith("/ecosystem/observations?") && !init)
+        return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    const link = await screen.findByText("view target");
+    expect(link.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/catalog?kind=models&entity=${"T".repeat(26)}`,
+    );
+  });
 });
