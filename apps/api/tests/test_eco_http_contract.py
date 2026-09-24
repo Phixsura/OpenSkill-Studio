@@ -344,3 +344,53 @@ async def test_documented_alert_metrics_are_emitted(http, tokens):
     # trailing-digit windows like eco_discoveries_7d are emitted verbatim
     missing = {m for m in missing if m not in emitted}
     assert not missing, f"runbook metrics not emitted: {sorted(missing)}"
+
+def test_all_eco_limit_params_are_bounded():
+    """Round-122 systemic guard: every `limit` query parameter on an
+    /ecosystem endpoint must declare a maximum (an unbounded limit is a
+    one-request table dump / OOM lever). Applies to future endpoints too."""
+    from app.main import app
+
+    spec = app.openapi()
+    offenders = []
+    for path, ops in spec["paths"].items():
+        if "/ecosystem" not in path:
+            continue
+        for op in ops.values():
+            if not isinstance(op, dict):
+                continue
+            for param in op.get("parameters", []):
+                if param.get("name") != "limit" or param.get("in") != "query":
+                    continue
+                schema = param.get("schema", {})
+                # anyOf for optional ints
+                schemas = schema.get("anyOf", [schema])
+                if not any("maximum" in s for s in schemas if isinstance(s, dict)):
+                    offenders.append(f"{path} [{op.get('operationId')}]")
+    assert not offenders, f"unbounded limit params: {offenders}"
+
+def test_all_mutating_eco_routes_require_a_user():
+    """Round-123 systemic guard: EVERY /ecosystem route (reads included) must
+    resolve a User dependency (get_current_user / require_platform_admin) —
+    a future endpoint that forgets auth fails HERE, not in prod."""
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    def dependant_names(dep, acc):
+        acc.add(getattr(dep.call, "__name__", ""))
+        for sub in dep.dependencies:
+            dependant_names(sub, acc)
+        return acc
+
+    offenders = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or "/ecosystem" not in route.path:
+            continue
+        methods = route.methods & {"GET", "POST", "PATCH", "DELETE", "PUT"}
+        if not methods:
+            continue
+        names = dependant_names(route.dependant, set())
+        if not ({"get_current_user", "require_platform_admin"} & names):
+            offenders.append(f"{sorted(methods)} {route.path}")
+    assert not offenders, f"eco routes without a user dependency: {offenders}"

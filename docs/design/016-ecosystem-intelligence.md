@@ -1543,3 +1543,17 @@ under test.
    (impact traversal inlines the same reverse query); deleted rather than
    left as a divergence trap. A public-method↔test cross-reference sweep
    found no other unreferenced service methods.
+
+## 79. Route-level systemic guards — rounds 122–124
+
+Two invariants that previously lived only in review discipline are now
+executable, failing at test time for any FUTURE endpoint that violates them:
+
+1. **Every `limit` query parameter under /ecosystem declares a maximum** —
+   an unbounded limit is a one-request table dump / OOM lever
+   (`test_all_eco_limit_params_are_bounded`, walks the OpenAPI schema).
+2. **Every /ecosystem route — reads included — resolves a User dependency**
+   (`get_current_user` or `require_platform_admin`); a new route that forgets
+   auth fails in CI, not in prod
+   (`test_all_mutating_eco_routes_require_a_user`, walks the FastAPI
+   dependency graph). A scan confirmed zero anonymous routes today.
