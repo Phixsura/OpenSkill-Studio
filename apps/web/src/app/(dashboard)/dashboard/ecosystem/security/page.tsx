@@ -1,4 +1,6 @@
 "use client";
+
+import Link from "next/link";
 /** Security advisory registry (ADR-016 §38, Snyk/Dependabot bar). */
 
 import { useState } from "react";
@@ -241,6 +243,12 @@ export default function SecurityPage() {
                           {e.version ? ` ${e.version}` : ""}) ·{" "}
                           {MATCH_LABEL[e.range_match] ?? e.range_match} · {e.lifecycle_status}
                         </span>
+                        <Link
+                          href={`/dashboard/ecosystem/changes?entity=${e.entity_id}`}
+                          className="text-xs text-blue-600 underline"
+                        >
+                          changes
+                        </Link>
                       </div>
                     ))
                   )}

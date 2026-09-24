@@ -155,4 +155,30 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     fireEvent.click(await screen.findByText(/[Pp]romote/));
     expect(await screen.findByText(/Guardrails not satisfied/)).toBeDefined();
   });
+
+  it("impact analyses deep-link their root entity to the change feed", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/impact/analyses" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "IMP".padEnd(26, "i"),
+              root_kind: "model_version",
+              root_id: "R".repeat(26),
+              classification: "breaking",
+              status: "open",
+              deadline_at: null,
+              summary: {},
+              computed_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    const link = await screen.findByText("changes");
+    expect(link.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/changes?entity=${"R".repeat(26)}`,
+    );
+  });
 });

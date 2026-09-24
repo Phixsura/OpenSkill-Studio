@@ -111,4 +111,46 @@ describe("Ecosystem security advisories page (ADR-016 §38)", () => {
       ),
     ).toBe(true);
   });
+
+  it("affected entities deep-link to their change feed", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/security/advisories?"))
+        return Promise.resolve({
+          data: [
+            {
+              id: "advL",
+              advisory_ref: "CVE-2026-0002",
+              title: "x",
+              severity: "high",
+              affected_kind: "model",
+              affected_ref: "gen",
+              affected_range: null,
+              fixed_in: null,
+              status: "open",
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      if (path.includes("/affected"))
+        return Promise.resolve({
+          data: [
+            {
+              entity_kind: "model",
+              entity_id: "A".repeat(26),
+              canonical_name: "gen",
+              version: null,
+              range_match: "name_only",
+              lifecycle_status: "verified",
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<SecurityPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Affected entities"));
+    const link = await screen.findByText("changes");
+    expect(link.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/changes?entity=${"A".repeat(26)}`,
+    );
+  });
 });

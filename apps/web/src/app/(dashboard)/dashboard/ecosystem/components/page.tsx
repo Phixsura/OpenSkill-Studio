@@ -1,4 +1,6 @@
 "use client";
+
+import Link from "next/link";
 /** Components workspace: impact, replacement candidates, drafts, rollouts (Parts I/J/K/M). */
 
 import { useState } from "react";
@@ -179,6 +181,12 @@ export default function ComponentsPage() {
                   <span className="text-sm font-medium">
                     {a.root_kind} {shortId(a.root_id)}
                   </span>
+                  <Link
+                    href={`/dashboard/ecosystem/changes?entity=${a.root_id}`}
+                    className="text-xs text-blue-600 underline"
+                  >
+                    changes
+                  </Link>
                   <Pill value={a.status} styles={STATUS_STYLES} />
                   {a.deadline_at && (
                     <span className="text-xs text-orange-700">
