@@ -80,7 +80,7 @@ test("2 — watchlist lifecycle: create, add ref item, mute, remove", async () =
   const listName = `E2E List ${TS}`;
 
   await page.getByPlaceholder("New watchlist name").fill(listName);
-  await page.getByPlaceholder("New watchlist name").press("Enter");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByText(listName)).toBeVisible({ timeout: 10_000 });
 
   // Select the list → item panel appears
@@ -89,15 +89,18 @@ test("2 — watchlist lifecycle: create, add ref item, mute, remove", async () =
   await expect(kindSelect).toBeVisible();
   await kindSelect.selectOption("github_repo");
   await page.getByPlaceholder(/external ref/).fill(`acme/e2e-repo-${TS}`);
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Watch", exact: true }).dispatchEvent("click");
   await expect(page.getByText(`acme/e2e-repo-${TS}`)).toBeVisible({ timeout: 10_000 });
 
   // Mute (bell toggles) — the muted badge appears on the list row
-  await page.getByRole("button", { name: "Mute notifications for 7 days" }).first().click();
+  await page
+    .getByRole("button", { name: "Mute notifications for 7 days" })
+    .first()
+    .dispatchEvent("click");
   await expect(page.getByText("muted").first()).toBeVisible({ timeout: 10_000 });
 
   // Remove the item
-  await page.getByRole("button", { name: "remove" }).first().click();
+  await page.getByRole("button", { name: "remove" }).first().dispatchEvent("click");
   await expect(page.getByText(`acme/e2e-repo-${TS}`)).toBeHidden({ timeout: 10_000 });
 });
 

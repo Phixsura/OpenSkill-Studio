@@ -1583,3 +1583,21 @@ both pass the probe. Three instances closed:
    lock is a verified-killed mutant (the race manifests reliably).
 3. **`handle_notify_watchers` (R129)** — same pattern,
    `'eco-notify:<change>'`; lock-removal mutant likewise killed.
+
+## 81. Browser E2E verification — round 131
+
+First real-browser verification of the epic: `e2e/sweep-ecosystem.spec.ts`
+ran GREEN (3/3) against a live worktree stack (uvicorn :8001 + next start
+:3001 with the new server-only `API_PROXY_URL` rewrite override — unlike
+`NEXT_PUBLIC_API_URL` it is never inlined into the client bundle, so the
+production `connect-src 'self'` CSP still holds):
+
+1. All 12 ecosystem routes render their h1 for a plain member, no crashes.
+2. Watchlist lifecycle end-to-end through the real UI: create list → add
+   github_repo ref item → mute (badge appears) → remove item.
+3. Catalog quick-watch flips to "Watching" (or the empty state shows on a
+   fresh stack).
+
+Playwright lessons recorded: React-rerendering rows make `click()` hang on
+stability — `dispatchEvent("click")` delivers through React's root listener
+reliably; form Enter-submit was flaky vs clicking the submit button.
