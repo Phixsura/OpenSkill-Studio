@@ -100,4 +100,31 @@ describe("Source operator controls (ADR-016 §11 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("Register source form POSTs the full payload (SSRF-guarded server-side)", async () => {
+    mockSources("active");
+    render(<SourcesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Register source"));
+    fireEvent.change(screen.getByPlaceholderText("Source name"), {
+      target: { value: "HF models feed" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Base URL/), {
+      target: { value: "https://huggingface.co/api/models" },
+    });
+    fireEvent.change(screen.getByLabelText("Source type"), { target: { value: "huggingface" } });
+    fireEvent.change(screen.getByLabelText("Trust level"), { target: { value: "community" } });
+    fireEvent.change(screen.getByLabelText("Adapter"), { target: { value: "huggingface" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) => c[0] === "/ecosystem/sources" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.name).toBe("HF models feed");
+    expect(body.base_url).toBe("https://huggingface.co/api/models");
+    expect(body.source_type).toBe("huggingface");
+    expect(body.trust_level).toBe("community");
+    expect(body.adapter_key).toBe("huggingface");
+  });
 });
