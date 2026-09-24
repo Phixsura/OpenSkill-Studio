@@ -1349,3 +1349,94 @@ def test_normalize_name_bounds_and_strictness():
     assert normalize_name({"name": "x"}) is None
     assert normalize_name(None) is None
     assert normalize_name("GPT-Image 2") == normalize_name("gpt_image_2")
+
+async def test_source_update_guards(db):
+    """Round-86 killers ×3: updating base_url re-runs the SSRF validator
+    (an internal URL must be refused); an adapter swap re-stamps
+    parser_version (§11.5); re-activating resets the circuit breaker."""
+    from app.ecosystem.services.adapters import ADAPTERS
+    from app.ecosystem.services.sources import SourceService
+
+    source = await _mk_source(db, adapter_key="manual")
+    source.consecutive_failures = 7
+    await db.flush()
+    svc = SourceService(db)
+
+    # SSRF re-check on update
+    with pytest.raises(Exception) as exc:
+        await svc.update(source.id, {"base_url": "http://localhost/feed"})
+    assert "SSRF" in str(exc.value) or "ECO_SSRF" in str(getattr(exc.value, "code", ""))
+
+    # Adapter swap re-stamps parser version (start from a stale stamp so
+    # the re-stamp is observable even when adapter versions coincide)
+    source.parser_version = "0.1-stale"
+    await db.flush()
+    await svc.update(source.id, {"adapter_key": "huggingface"})
+    assert source.parser_version == ADAPTERS["huggingface"].version
+    assert source.parser_version != "0.1-stale"
+
+    # Un-pausing resets the breaker
+    await svc.update(source.id, {"status": "paused"})
+    source.consecutive_failures = 7
+    await db.flush()
+    await svc.update(source.id, {"status": "active"})
+    assert source.consecutive_failures == 0
+
+
+async def test_conflicts_need_two_values_and_use_latest_per_source(db):
+    """Round-86 killers ×2: a field every source agrees on is NOT a conflict,
+    and each source is represented by its LATEST observation (an updated
+    source that now agrees must clear the conflict)."""
+    from app.ecosystem.services.catalog import CatalogService
+
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"ConfGen-{tag}", slug=f"cf-{tag}")
+    db.add(model)
+    await db.flush()
+    s1, s2 = await _mk_source(db), await _mk_source(db)
+
+    def obs(source, license_val, days_ago):
+        return EcosystemObservation(
+            source_id=source.id, event_type="catalog_snapshot",
+            canonical_entity_kind="model", canonical_entity_id=model.id,
+            raw_hash=(str(ULID()).lower() * 3)[:64],
+            normalized={"license": license_val},
+            observed_at=datetime.now(UTC) - timedelta(days=days_ago),
+        )
+
+    # s1 said GPL long ago, then corrected itself to MIT; s2 says MIT
+    db.add_all([obs(s1, "GPL", 10), obs(s1, "MIT", 1), obs(s2, "MIT", 2)])
+    await db.flush()
+    conflicts = await CatalogService(db).conflicting_observations("model", model.id)
+    licenses = [c for c in conflicts if c["field"] == "license"]
+    # Latest-per-source: both sources NOW say MIT → agreement, no conflict
+    assert licenses == []
+
+async def test_price_extraction_bounds(db):
+    """Round-87 killers ×4: extraction drops negative prices, absurd prices
+    (>1e9), unknown units — and caps currency to 3 chars — while keeping the
+    one valid entry."""
+    from app.ecosystem.services.pricing import PricingService
+
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"XGen-{tag}", slug=f"xg-{tag}")
+    db.add(model)
+    await db.flush()
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={"pricing": [
+            {"unit": "image", "price": -5},              # negative → dropped
+            {"unit": "image", "price": 2e9},             # absurd → dropped
+            {"unit": "gpu_hour", "price": 1.0},          # unknown unit → dropped
+            {"unit": "image", "price": 0.04, "currency": "dollars"},  # kept, capped
+        ]},
+    )
+    db.add(obs)
+    await db.flush()
+    rows = await PricingService(db).extract_from_observation(obs.id)
+    assert len(rows) == 1
+    assert float(rows[0].price) == 0.04
+    assert rows[0].currency == "DOL"  # capped to 3 chars, uppercased

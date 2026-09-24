@@ -120,8 +120,11 @@ async def list_impact(
 async def get_impact(
     analysis_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
+    # Detail view exposes traversal NODES, which can include org-private
+    # dependency edges — operator-only; the list view (aggregate counts)
+    # stays member-readable
     analysis, items = await ImpactService(db).get(analysis_id)
     return {
         "data": {

@@ -41,6 +41,7 @@ ADMIN_ONLY = [
     ("GET", "/api/v1/ecosystem/audit", None),
     ("GET", "/api/v1/ecosystem/audit.csv", None),
     ("GET", "/api/v1/ecosystem/catalog/models/duplicates", None),
+    ("GET", "/api/v1/ecosystem/impact/analyses/" + "0" * 26, None),
     ("POST", "/api/v1/ecosystem/sources", {"name": "x", "source_type": "vendor_api",
                                            "trust_level": "official", "adapter_key": "manual"}),
     ("POST", "/api/v1/ecosystem/security/advisories",

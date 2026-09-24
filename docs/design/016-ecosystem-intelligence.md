@@ -1335,3 +1335,34 @@ name, by "%_off-…", never by unrelated text) and the helper's mapping.
   registration POSTs the full structured payload (ref + range), suite import
   surfaces API rejections, and the duplicates scan renders suspected pairs
   with similarity (web 570).
+
+## 70. Source-update & conflict-surfacing audit (2026-09-23/24, round 86)
+
+ALL FIVE mutants survived initially:
+
+- **base_url SSRF re-check** could be disabled — an admin update could point
+  a source at an internal URL unvalidated (the create path was covered, the
+  update path was not).
+- **Adapter swap** could keep the stale parser_version (§11.5 provenance
+  semantics silently broken) — killed with a stale-stamp-then-swap test
+  (adapter versions coincide today, making a naive assertion equivalent).
+- **Circuit breaker** could survive re-activation.
+- **Conflicts** could report agreement as conflict (noise) and could
+  represent a source by an OUTDATED observation — killed with a
+  self-correcting-source case (both sources now agree ⇒ no conflict).
+  5/5 die.
+
+### §70.1 Price-extraction bounds (round 87)
+
+Four extraction bounds were untested — negative prices, absurd prices
+(>1e9), unknown units and unbounded currency strings all passed silently
+(the unresolved-observation gate was covered). Killed with a mixed-payload
+test: one valid entry survives (currency capped to 3 chars, uppercased),
+the three bad entries drop. 5/5 die.
+
+### §70.2 Impact-detail confidentiality (round 88)
+
+The impact DETAIL view returns traversal nodes, which can include org-private
+dependency-edge endpoints — it was member-readable. Tightened to
+platform-admin (the list view's aggregate counts stay member-readable);
+pinned in the HTTP authz matrix.
