@@ -292,3 +292,26 @@ async def test_adapter_key_swap_restamps_parser_version(db):
     from app.ecosystem.services.adapters import ADAPTERS
 
     assert updated.parser_version == ADAPTERS["pricing_json"].version
+
+async def test_rollout_scope_ref_is_screened(db):
+    """Round-98 killer: scope_ref is operator free-text rendered on rollout
+    surfaces — control characters must be stripped and length bounded (R87)."""
+    deprecated = await _mk_model_version(db, "ScrOld")
+    await _mk_model_version(db, "ScrNew")
+    ranked, _ = await ReplacementService(db).generate_candidates(
+        deprecated_kind="model_version", deprecated_id=deprecated.id
+    )
+    svc = RolloutService(db)
+    with pytest.raises(AppError) as exc:
+        await svc.create(
+            replacement_candidate_id=ranked[0].id,
+            scope_type="internal_org",
+            scope_ref="z" * 27,
+        )
+    assert exc.value.status_code == 422
+    plan = await svc.create(
+        replacement_candidate_id=ranked[0].id,
+        scope_type="internal_org",
+        scope_ref="org\x00" + "a" * 22,
+    )
+    assert "\x00" not in plan.scope_ref and len(plan.scope_ref) <= 26

@@ -1398,3 +1398,24 @@ Update paths must never be laxer than create paths:
   path (untrusted documents) relies on these service-level guards. Screened
   - weight bounded to (0, 10].
     Killers pin each screen/bound. (Source-update symmetry was closed in §70.)
+
+## 73. Sink & dedupe hardening — rounds 96–98
+
+Three more gaps closed by targeted review of remaining write paths:
+
+1. **`io_spec` JSONB unbounded (capability mapping)** — `upsert()` stored the
+   `io_spec` dict verbatim; a single mapping could balloon the row. Now bounded
+   to 20 KB of serialized JSON (`VALIDATION_ERROR` 422). Defence in depth: the
+   API is admin-only today, but service callers will include import paths.
+2. **Watch-item dedupe bypass** — `add_item()` compared the _raw_ `target_ref`
+   against stored rows, but persisted the _sanitized_ value. A control-char
+   variant of an existing ref (`"vendor/model\x00"`) bypassed the §3.12
+   uniqueness probe and inserted a duplicate watch item — doubling every
+   notification for that target. The ref is now screened _before_ the probe.
+3. **`scope_ref` DB-truncation 500-class** — `RolloutService.create()` stored
+   `scope_ref` unscreened into a `varchar(26)` id column; anything longer hit
+   an asyncpg `StringDataRightTruncationError` instead of a client error. Now
+   sanitized and explicitly rejected over 26 chars with a 422.
+
+Killers: `test_io_spec_size_bounded`, `test_watch_item_dedupe_uses_screened_ref`
+(services), `test_rollout_scope_ref_is_screened` (amendments).

@@ -15,6 +15,7 @@ from app.ecosystem.models.replacement import (
     ReplacementCandidate,
     RolloutPlan,
 )
+from app.ecosystem.security import sanitize_text
 from app.ecosystem.services.benchmark import latest_dimension_scores
 from app.exceptions import AppError
 
@@ -86,6 +87,12 @@ class RolloutService:
             raise AppError("VALIDATION_ERROR", f"Unknown scope type: {scope_type}", 422)
         if scope_type != "benchmark_only" and not scope_ref:
             raise AppError("VALIDATION_ERROR", f"scope_ref required for {scope_type}", 422)
+        # scope_ref is a 26-char id reference stored in varchar(26) — screen
+        # control chars and reject oversize explicitly instead of letting the
+        # DB truncation error surface (R87/R98)
+        scope_ref = sanitize_text(scope_ref, 300)
+        if scope_ref and len(scope_ref) > 26:
+            raise AppError("VALIDATION_ERROR", "scope_ref must be a 26-char id", 422)
         candidate = await self.db.get(ReplacementCandidate, replacement_candidate_id)
         if not candidate:
             raise AppError("NOT_FOUND", "Replacement candidate not found", 404)
@@ -306,7 +313,6 @@ class RolloutService:
         plan.decided_by = actor_id
         plan.decided_at = datetime.now(UTC)
         # Operator note is untrusted text: NUL bytes 500 at the column (R87)
-        from app.ecosystem.security import sanitize_text
 
         plan.note = sanitize_text(note, 2000)
         await self.db.flush()

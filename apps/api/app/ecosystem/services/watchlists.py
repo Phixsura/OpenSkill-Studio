@@ -78,6 +78,10 @@ class WatchlistService:
             raise AppError("VALIDATION_ERROR", f"Unknown target kind: {target_kind}", 422)
         if not target_id and not target_ref:
             raise AppError("VALIDATION_ERROR", "target_id or target_ref required", 422)
+        # Screen BEFORE the uniqueness probe — comparing the raw ref against
+        # stored (sanitized) values would let control-char variants of the
+        # same ref bypass dedupe and double every notification (R97)
+        target_ref = sanitize_text(target_ref, 300)
         # Service-level uniqueness (§3.12)
         existing = await self.db.scalar(
             select(WatchItem).where(
@@ -93,7 +97,7 @@ class WatchlistService:
             watchlist_id=watchlist_id,
             target_kind=target_kind,
             target_id=target_id,
-            target_ref=sanitize_text(target_ref, 300),
+            target_ref=target_ref,
         )
         self.db.add(item)
         await self.db.flush()

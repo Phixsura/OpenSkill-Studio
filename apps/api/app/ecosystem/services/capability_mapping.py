@@ -1,5 +1,6 @@
 """Capability + typed I/O mapping (ADR-016 Part D)."""
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -29,6 +30,11 @@ class CapabilityMappingService:
         force: bool = False,
         actor_is_admin: bool = False,
     ) -> CapabilityMapping:
+        # Depth guard: io_spec is stored verbatim in JSONB — bound it so a
+        # single mapping cannot balloon the row (the API is admin-only, but
+        # service callers include future import paths)
+        if io_spec is not None and len(json.dumps(io_spec, default=str)) > 20_000:
+            raise AppError("VALIDATION_ERROR", "io_spec too large (20k max)", 422)
         if evidence_level not in EVIDENCE_RANK:
             raise AppError("VALIDATION_ERROR", f"Unknown evidence level: {evidence_level}", 422)
         if entity_kind not in CATALOG_KIND_TO_MODEL:

@@ -1546,3 +1546,37 @@ async def test_add_case_screens_and_bounds(db):
         await svc.add_case(suite.id, name="ok", prompt="ok", weight=99)
     with pytest.raises(AppError):
         await svc.add_case(suite.id, name="\x00", prompt="ok")
+
+async def test_io_spec_size_bounded(db):
+    """Round-96 killer: a single capability mapping cannot store an unbounded
+    io_spec blob (20k JSON cap, depth guard behind the admin-only API)."""
+    from app.ecosystem.services.capability_mapping import CapabilityMappingService
+
+    version = await _mk_model_version(db, "IoBound")
+    await _mk_capability_tag(db, "audio_generation")
+    svc = CapabilityMappingService(db)
+    with pytest.raises(AppError):
+        await svc.upsert(
+            entity_kind="model_version", entity_id=version.id,
+            capability_key="audio_generation",
+            io_spec={"blob": "x" * 30_000},
+        )
+
+async def test_watch_item_dedupe_uses_screened_ref(db):
+    """Round-97 killer: adding the same target_ref with control-char noise must
+    dedupe against the stored (sanitized) row — not insert a second watch item
+    that doubles every notification."""
+    from app.ecosystem.services.watchlists import WatchlistService
+
+    user = await _mk_user(db)
+    svc = WatchlistService(db)
+    wl = await svc.create(owner_id=user.id, name="DedupeWL")
+    first = await svc.add_item(
+        wl.id, user.id, target_kind="github_repo", target_ref="vendor/model"
+    )
+    second = await svc.add_item(
+        wl.id, user.id, target_kind="github_repo", target_ref="vendor/model\x00"
+    )
+    assert second.id == first.id
+    items = await svc.list_items(wl.id, user.id)
+    assert len(items) == 1
