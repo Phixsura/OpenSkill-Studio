@@ -1734,3 +1734,11 @@ subscribing to THAT model's changes, not the firehose.
    exports 105 entities and asserts all 105 land. Round 169 applies the same
    flagged-ceiling rule to capability mappings and approved prices (the old
    code silently sliced both at 2000).
+
+### 86.1 Suite size bound (round 171)
+
+Round 172 applies the same rule to watchlists (100 per owner — every list
+joins the matching_changes aggregation). `add_case` had no per-suite count cap — every case multiplies run cost
+(× repeat_count) and portable-export size. Bounded at 500 with a 422
+(`test_suite_case_count_is_bounded`); export/list paths already return all
+cases, which stays correct under the cap.

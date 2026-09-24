@@ -1808,3 +1808,33 @@ async def test_concurrent_internal_source_get_or_create(db):
                 if parent:
                     parent.lifecycle_status = "retired"
             await session.commit()
+
+async def test_suite_case_count_is_bounded(db, monkeypatch):
+    """Round-171 killer: a suite cannot grow beyond 500 cases — every case
+    multiplies run cost and export size."""
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    svc = BenchmarkService(db)
+
+    async def fake_scalar(q):
+        return 500
+
+    monkeypatch.setattr(svc.db, "scalar", fake_scalar)
+    with pytest.raises(AppError) as exc:
+        await svc.add_case(suite.id, name="one too many", prompt="p")
+    assert "500" in str(exc.value)
+
+async def test_watchlist_count_is_bounded(db, monkeypatch):
+    """Round-172 killer: a user cannot create more than 100 watchlists."""
+    from app.ecosystem.services.watchlists import WatchlistService
+
+    user = await _mk_user(db)
+    svc = WatchlistService(db)
+
+    async def fake_scalar(q):
+        return 100
+
+    monkeypatch.setattr(svc.db, "scalar", fake_scalar)
+    with pytest.raises(AppError) as exc:
+        await svc.create(owner_id=user.id, name="one too many")
+    assert "100" in str(exc.value)

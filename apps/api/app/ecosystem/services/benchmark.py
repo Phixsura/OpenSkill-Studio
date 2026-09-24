@@ -281,6 +281,17 @@ class BenchmarkService:
             raise AppError("VALIDATION_ERROR", "Case name and prompt required", 422)
         if not 0 < float(weight) <= 10:
             raise AppError("VALIDATION_ERROR", "Case weight must be in (0, 10]", 422)
+        # R171: bound suite size — every case runs repeat_count times per run
+        # and ships in the portable export; 500 is far beyond any real suite
+        from sqlalchemy import func as _func
+
+        n_cases = await self.db.scalar(
+            select(_func.count()).select_from(BenchmarkCase).where(
+                BenchmarkCase.suite_id == suite_id
+            )
+        )
+        if (n_cases or 0) >= 500:
+            raise AppError("VALIDATION_ERROR", "Suite already has 500 cases (max)", 422)
         case = BenchmarkCase(
             suite_id=suite_id,
             name=name,

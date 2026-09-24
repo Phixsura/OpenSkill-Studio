@@ -17,6 +17,17 @@ class WatchlistService:
     async def create(
         self, *, owner_id: str, name: str, org_id: str | None = None
     ) -> Watchlist:
+        # R172: per-owner cap — every list joins the matching_changes
+        # aggregation; 100 is far beyond real use, but unbounded is a lever
+        from sqlalchemy import func as _func
+
+        n = await self.db.scalar(
+            select(_func.count()).select_from(Watchlist).where(
+                Watchlist.owner_id == owner_id
+            )
+        )
+        if (n or 0) >= 100:
+            raise AppError("VALIDATION_ERROR", "Watchlist limit reached (100)", 422)
         watchlist = Watchlist(
             owner_id=owner_id, name=sanitize_text(name, 200) or "Watchlist", org_id=org_id
         )
