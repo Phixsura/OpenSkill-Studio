@@ -345,15 +345,45 @@ async def catalog_export(
 
     svc = CatalogService(db)
     entities: dict = {}
+    totals: dict = {}
+    truncated = False
     for segment, kind in _KIND_SEGMENTS.items():
-        rows, _total = await svc.list_entities(kind, limit=100, offset=0)
+        # R168: the export IS the integration currency — a silent per-kind
+        # cap would hand downstream consumers an incomplete catalog. Page
+        # through everything and stamp totals so drift is detectable.
+        rows_all = []
+        offset = 0
+        while True:
+            rows, total = await svc.list_entities(kind, limit=500, offset=offset)
+            rows_all.extend(rows)
+            offset += len(rows)
+            if offset >= total or not rows or offset >= 10_000:
+                if offset < total:
+                    truncated = True  # 10k hard ceiling — flagged, never silent
+                break
+        totals[segment] = total
         entities[segment] = [
-            CatalogEntityResponse.model_validate(r).model_dump(mode="json") for r in rows
+            CatalogEntityResponse.model_validate(r).model_dump(mode="json") for r in rows_all
         ]
+    # R169: same completeness rule for mappings — flagged ceiling, not a
+    # silent first-2000 slice
+    mapping_rows = list(await db.scalars(select(CapabilityMapping).limit(10_001)))
+    if len(mapping_rows) > 10_000:
+        truncated = True
+        mapping_rows = mapping_rows[:10_000]
     mappings = [
-        MappingResponse.model_validate(m).model_dump(mode="json")
-        for m in await db.scalars(select(CapabilityMapping).limit(2000))
+        MappingResponse.model_validate(m).model_dump(mode="json") for m in mapping_rows
     ]
+    price_rows = list(
+        await db.scalars(
+            select(PriceObservation)
+            .where(PriceObservation.reconciliation_status == "approved")
+            .limit(10_001)
+        )
+    )
+    if len(price_rows) > 10_000:
+        truncated = True
+        price_rows = price_rows[:10_000]
     prices = [
         {
             "entity_kind": p.entity_kind,
@@ -363,11 +393,7 @@ async def catalog_export(
             "currency": p.currency,
             "region": p.region,
         }
-        for p in await db.scalars(
-            select(PriceObservation)
-            .where(PriceObservation.reconciliation_status == "approved")
-            .limit(2000)
-        )
+        for p in price_rows
     ]
     body = {"entities": entities, "capability_mappings": mappings, "approved_prices": prices}
     content_hash = hashlib.sha256(
@@ -378,6 +404,8 @@ async def catalog_export(
             "schema": "openskill.eco.catalog/v1",
             "generated_at": datetime.now(UTC).isoformat(),
             "content_hash": content_hash,
+            "entity_totals": totals,
+            "truncated": truncated,
             **body,
         }
     }

@@ -69,3 +69,21 @@ async def test_ops_metrics_every_sample_has_matching_type_line(db):
         assert name in types, f"sample {name} lacks a matching TYPE line"
     # And no orphan TYPE lines for names that never appear
     assert types == set(samples)
+
+async def test_catalog_export_is_complete_beyond_100_entities(db):
+    """Round-168 killer: the export is the integration currency — a catalog
+    kind with >100 entities must export ALL of them (with per-kind totals),
+    not a silently-truncated first page."""
+    from app.ecosystem.api.catalog import catalog_export
+
+    tag = str(ULID()).lower()[:6]
+    for i in range(105):
+        db.add(AIModel(canonical_name=f"Bulk{tag}-{i:03d}", slug=f"bk{tag}-{i:03d}"))
+    await db.flush()
+
+    out = (await catalog_export(db=db, _user=None))["data"]
+    names = {e["canonical_name"] for e in out["entities"]["models"]}
+    exported = [n for n in names if n.startswith(f"Bulk{tag}-")]
+    assert len(exported) == 105, f"exported only {len(exported)} of 105"
+    assert out["entity_totals"]["models"] >= 105
+    assert out["truncated"] is False

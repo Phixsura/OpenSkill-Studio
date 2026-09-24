@@ -1716,3 +1716,21 @@ subscribing to THAT model's changes, not the firehose.
   now retires its fixtures in `finally`; one-time purge applied. This is the
   second instance of the committed-fixture class — every future race killer
   must self-clean BOTH the version and its parent model.
+
+## 86. Complete catalog export + entity navigation loop — rounds 162–168
+
+1. **Navigation loop completed (162–166)**: every surface that names a
+   canonical entity now links into the loop — watched items, advisory
+   affected entities, impact roots → entity-filtered change feed; discovery
+   merge candidates → catalog Inspect ("view target"). Catalog `?entity=`
+   deep links now resolve entities BEYOND the loaded pages via the
+   single-entity GET (they were silently dropped before). Browser-verified
+   (sweep 4/4 + a11y 12/12 after every UI change).
+2. **Catalog export completeness (168)** — `/catalog/export` capped each
+   kind at its first 100 rows with NO truncation signal, handing downstream
+   consumers (the LiteLLM-manifest posture) a silently incomplete catalog.
+   It now pages through everything (500/page, 10k flagged ceiling) and
+   stamps `entity_totals` + `truncated` so drift is detectable. Killer
+   exports 105 entities and asserts all 105 land. Round 169 applies the same
+   flagged-ceiling rule to capability mappings and approved prices (the old
+   code silently sliced both at 2000).
