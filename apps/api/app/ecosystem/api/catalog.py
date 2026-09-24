@@ -491,6 +491,15 @@ async def bulk_decide_resolution(
                 decided.append({"id": candidate_id})
         except AppError as exc:
             failed.append({"id": candidate_id, "error_code": exc.code})
+    # R176: bulk resolution decisions are irreversible HITL actions — audited
+    # like every other admin decision (single confirms audit via merge path)
+    await eco_audit(
+        db, user, action="eco.resolutions_bulk_decided",
+        target_type="eco_resolution_candidate",
+        target_id=decided[0]["id"] if decided else "none",
+        after={"decision": body.decision, "decided_count": len(decided),
+               "failed_count": len(failed)},
+    )
     await db.commit()
     return {"data": {"decision": body.decision, "decided": decided, "failed": failed}}
 

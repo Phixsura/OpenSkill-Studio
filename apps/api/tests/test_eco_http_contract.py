@@ -426,3 +426,18 @@ def test_app_error_code_status_consistency():
                     if want and status.value not in want:
                         bad.append(f"{f.name}:{node.lineno} {code.value} -> {status.value}")
     assert not bad, f"AppError code/status mismatches: {bad}"
+
+async def test_bulk_acknowledge_changes(http, tokens):
+    """Round-174 killer: bulk-acknowledge drains the triage queue idempotently
+    — missing ids reported, second call a no-op, route ordering must not let
+    the literal path be captured by /{change_id}/acknowledge."""
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    r = await http.post(
+        "/api/v1/ecosystem/changes/bulk-acknowledge",
+        json={"ids": ["0" * 26]},
+        headers=admin,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()["data"]
+    assert body["acknowledged"] == []
+    assert body["missing"] == ["0" * 26]

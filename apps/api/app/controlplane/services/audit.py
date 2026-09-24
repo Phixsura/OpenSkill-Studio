@@ -86,6 +86,8 @@ AUDIT_ACTIONS = frozenset(
         "eco.source_updated",
         "eco.observation_manual_created",
         "eco.observations_bulk_verified",
+        "eco.changes_bulk_acknowledged",
+        "eco.resolutions_bulk_decided",
         "eco.suite_imported",
         # revenue share / settlements
         "revshare.rule_activated",

@@ -138,4 +138,27 @@ describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
       ),
     ).toBe(true);
   });
+
+  it("Acknowledge-all sends only unacknowledged ids to bulk-acknowledge", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes?"))
+        return Promise.resolve({
+          data: [
+            { ...change("c1", "one"), acknowledged: false },
+            { ...change("c2", "two"), acknowledged: true },
+          ],
+          meta: { has_more: false, next_cursor: null },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText(/Acknowledge all shown \(1\)/));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/changes/bulk-acknowledge" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call![1] as RequestInit).body as string).ids).toEqual(["c1"]);
+  });
 });

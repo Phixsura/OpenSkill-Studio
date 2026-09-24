@@ -1742,3 +1742,17 @@ joins the matching_changes aggregation). `add_case` had no per-suite count cap �
 (× repeat_count) and portable-export size. Bounded at 500 with a 422
 (`test_suite_case_count_is_bounded`); export/list paths already return all
 cases, which stays correct under the cap.
+
+## 87. Search-to-inspect + bulk triage — rounds 173–174
+
+1. **Global search hits were a dead end** (name + score, nothing clickable):
+   every hit now deep-links into the catalog Inspect panel via `?entity=`
+   (kind-mapped; the R165 deep-page fallback applies), closing the last
+   navigation gap: search → inspect → changes → subscribe.
+2. **Bulk acknowledge (§11.1 parity)** — the change-triage queue only had
+   per-row acknowledge while observations had bulk-verify. New
+   `POST /changes/bulk-acknowledge` (≤100 ids, idempotent, missing ids
+   reported, audited as `eco.changes_bulk_acknowledged`) with an
+   "Acknowledge all shown" button that sends ONLY unacknowledged ids.
+   Route ordering pinned by the killer (the literal path must not be
+   captured by `/{change_id}/acknowledge`).

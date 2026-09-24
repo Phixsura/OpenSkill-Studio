@@ -82,7 +82,18 @@ export default function ChangesPage() {
     onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
 
+  const bulkAcknowledge = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiWithAuth(`/ecosystem/changes/bulk-acknowledge`, {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-changes"] }),
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
+  });
+
   const rows = pages.length > 0 ? pages.flat() : (data?.data ?? []);
+  const unackedIds = rows.filter((c) => !c.acknowledged).map((c) => c.id);
 
   return (
     <div className="space-y-6 p-6">
@@ -118,6 +129,13 @@ export default function ChangesPage() {
           />
           Include acknowledged
         </label>
+        <button
+          onClick={() => bulkAcknowledge.mutate(unackedIds.slice(0, 100))}
+          disabled={bulkAcknowledge.isPending || unackedIds.length === 0}
+          className="rounded-md border px-3 py-1 text-sm hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
+        >
+          Acknowledge all shown ({Math.min(unackedIds.length, 100)})
+        </button>
       </div>
       {isLoading ? (
         <div className="text-[hsl(var(--muted-foreground))]">Loading changes…</div>

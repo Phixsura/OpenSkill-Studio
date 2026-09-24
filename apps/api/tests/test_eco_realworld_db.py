@@ -489,6 +489,7 @@ async def test_admin_actions_are_audited_round115(db):
         "eco.source_created", "eco.source_updated",
         "eco.observation_manual_created", "eco.observations_bulk_verified",
         "eco.suite_imported", "eco.entity_updated",
+        "eco.changes_bulk_acknowledged", "eco.resolutions_bulk_decided",
     ]
     tag = str(ULID()).lower()
     for i, action in enumerate(actions):

@@ -284,6 +284,35 @@ async def list_changes(
     }
 
 
+@router.post("/changes/bulk-acknowledge", response_model=DataResponse[dict])
+async def bulk_acknowledge_changes(
+    body: BulkIdsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """ADR-016 §11.1 — drain the triage queue like bulk-verify: idempotent,
+    missing ids reported, never fatal."""
+    acknowledged: list[str] = []
+    missing: list[str] = []
+    for change_id in body.ids:
+        change = await db.get(ChangeEvent, change_id)
+        if change is None:
+            missing.append(change_id)
+            continue
+        if not change.acknowledged:
+            change.acknowledged = True
+            change.acknowledged_by = user.id
+        acknowledged.append(change_id)
+    await eco_audit(
+        db, user, action="eco.changes_bulk_acknowledged",
+        target_type="eco_change_event",
+        target_id=acknowledged[0] if acknowledged else "none",
+        after={"acknowledged_count": len(acknowledged), "missing_count": len(missing)},
+    )
+    await db.commit()
+    return {"data": {"acknowledged": acknowledged, "missing": missing}}
+
+
 @router.post("/changes/{change_id}/acknowledge", response_model=DataResponse[ChangeEventResponse])
 async def acknowledge_change(
     change_id: str,
