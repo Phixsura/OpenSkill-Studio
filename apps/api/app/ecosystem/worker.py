@@ -513,12 +513,17 @@ async def sweep_telemetry_window(db: AsyncSession) -> int:
     from app.controlplane.models.outbox import enqueue
 
     now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    window_start = now - timedelta(hours=1)
-    enqueue(db, "eco.telemetry_window", {
-        "window_start": window_start.isoformat(),
-        "window_end": now.isoformat(),
-    })
-    return 1
+    # R208: look back 6 hours so a crashed worker's missed windows self-heal —
+    # the snapshot unique constraint makes re-enqueued windows no-ops
+    n = 0
+    for back in range(1, 7):
+        window_start = now - timedelta(hours=back)
+        enqueue(db, "eco.telemetry_window", {
+            "window_start": window_start.isoformat(),
+            "window_end": (window_start + timedelta(hours=1)).isoformat(),
+        })
+        n += 1
+    return n
 
 
 async def sweep_watched_availability(db: AsyncSession, *, cap: int = 200) -> int:

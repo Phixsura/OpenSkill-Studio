@@ -1864,3 +1864,10 @@ no-op). With probes now cron-driven, `availability_unreachable` (entities
 whose LATEST probe is unreachable, DISTINCT ON per entity) joins the
 overview, /ops/metrics (docs↔metrics parity killer auto-covers it), the
 alert runbook, and an alerting stat card on the dashboard.
+
+### 90.2 Telemetry-window self-healing (round 208)
+
+The hourly sweep only enqueued the previous hour — a crashed worker's missed
+hours were lost forever. It now looks back 6 hours every run; the snapshot
+unique constraint makes re-enqueued windows no-ops, so recovery is free and
+idempotent.

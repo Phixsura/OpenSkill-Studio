@@ -420,8 +420,9 @@ async def test_r198_dead_handler_wiring(db):
     )
     assert probe is not None, "watched entity got no availability probe"
 
-    # (c) telemetry sweep enqueues an hour-aligned window
-    assert await sweep_telemetry_window(db) == 1
+    # (c) telemetry sweep enqueues the last SIX hour-aligned windows so a
+    # crashed worker's missed hours self-heal (idempotent via uq constraint)
+    assert await sweep_telemetry_window(db) == 6
     win = await db.scalar(
         select(OutboxMessage)
         .where(OutboxMessage.topic == "eco.telemetry_window")
