@@ -1773,3 +1773,18 @@ Inspect panel gained an aria-labeled close button (it could only be
 dismissed by switching segments). Final full-stack browser run: functional
 sweep 5/5 (pages, watchlist lifecycle, quick-watch, catalog→changes deep
 link, search-hit→Inspect) + a11y 12/12 — 6/6 green.
+
+## 88. Org watchlists reach the UI — rounds 181–184
+
+Org-attached watchlists (whose matching changes fan out over the org's
+webhooks, §13/§24) existed only at the API — the UI could create personal
+lists exclusively, making the whole webhook path unreachable by hand.
+
+- Create form gains an org selector (personal by default); `org_id` is sent
+  in the POST body (null for personal) — both killer-tested.
+- Rows show an "org" badge with a fan-out tooltip (previously personal and
+  org lists were indistinguishable); `WatchlistResponse.org_id` verified
+  present.
+- Browser-verified end to end: sweep test 6 creates an org via the API
+  helper, creates an org-attached list through the real form, and asserts
+  the badge (e2e 7/7, a11y 12/12).

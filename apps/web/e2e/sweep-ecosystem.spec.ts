@@ -18,7 +18,7 @@
  *   "Component Lifecycle"
  */
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { loginInBrowser, registerUser, type AuthContext } from "./helpers";
+import { createOrg, loginInBrowser, registerUser, type AuthContext } from "./helpers";
 
 const PASSWORD = process.env.E2E_TEST_PASSWORD || "TestPass123!";
 const TS = Date.now();
@@ -150,4 +150,19 @@ test("5 — global search hit opens the catalog Inspect panel", async () => {
   await hit.dispatchEvent("click");
   await page.waitForURL(/entity=/, { timeout: 10_000 });
   await page.getByText(/Source conflicts for/).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+test("6 — org-attached watchlist creation shows the org badge", async () => {
+  const orgId = await createOrg(auth, `Eco Org ${TS}`);
+  expect(orgId).toBeTruthy();
+  await goto(page, "/dashboard/ecosystem/watchlists");
+  const listName = `Org List ${TS}`;
+  await page.getByPlaceholder("New watchlist name").fill(listName);
+  await page.getByLabel("Attach to organization (webhook fan-out)").selectOption(orgId);
+  await page.getByRole("button", { name: "Create", exact: true }).dispatchEvent("click");
+  const row = page.getByText(listName);
+  await row.waitFor({ state: "visible", timeout: 10_000 });
+  // the org badge marks it
+  const badge = page.getByText("org", { exact: true }).first();
+  await badge.waitFor({ state: "visible", timeout: 10_000 });
 });
