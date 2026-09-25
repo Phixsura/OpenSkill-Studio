@@ -55,7 +55,7 @@ async def _offering(db, org_id, capability, features, *, conn_status="active", a
         ProviderModelOffering,
     )
 
-    adapter = ProviderAdapter(key=f"mock-{uuid.uuid4().hex[:8]}", name="Mock")
+    adapter = ProviderAdapter(key=f"mock-{uuid.uuid4().hex[:16]}", name="Mock")
     db.add(adapter)
     await db.flush()
     conn = ProviderConnection(org_id=org_id, adapter_id=adapter.id, name="c", status=conn_status)

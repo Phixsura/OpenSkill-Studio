@@ -19,7 +19,7 @@ API = "http://localhost:8000/api/v1"
 
 
 def uid():
-    return uuid.uuid4().hex[:8]
+    return uuid.uuid4().hex[:16]
 
 
 def _definition() -> dict:

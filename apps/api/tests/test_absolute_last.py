@@ -13,7 +13,7 @@ from app.models.user import User, UserRole, UserStatus
 
 async def _u(db):
     u = User(
-        email=f"al-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"al-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name="AbsLast",
         role=UserRole.STUDENT,

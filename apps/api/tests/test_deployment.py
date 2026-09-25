@@ -15,7 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"deploy-{uuid.uuid4().hex[:8]}@test.com"
+    return f"deploy-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture

@@ -31,7 +31,7 @@ async def c():
 
 
 def _email():
-    return f"wfp-{uuid.uuid4().hex[:8]}@test.com"
+    return f"wfp-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -44,7 +44,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"W-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"W-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201
     return r.json()["data"]["id"]
 

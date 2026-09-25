@@ -298,7 +298,7 @@ async def test_manual_observation_input_hygiene(http, tokens):
     r = await http.post(
         "/api/v1/ecosystem/sources",
         json={
-            "name": f"manual-hygiene-{uuid4().hex[:8]}",
+            "name": f"manual-hygiene-{uuid4().hex[:16]}",
             "source_type": "manual_analyst",
             "trust_level": "official",
             "adapter_key": "manual",

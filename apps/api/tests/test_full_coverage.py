@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _uid():
-    return uuid.uuid4().hex[:8]
+    return uuid.uuid4().hex[:16]
 
 
 def _email():

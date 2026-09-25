@@ -1803,3 +1803,12 @@ Killer covers all four personas.
 org watchlist's changes were visible to its creator alone, while the org
 webhook fired for everyone. Org members' pull feeds now include their orgs'
 attached lists (killer: plain member sees the change, outsider does not).
+
+### 88.3 Regression signal-to-noise: the 8-hex birthday flake (round 188)
+
+Two consecutive full runs each had ONE transient non-eco failure
+(`SLUG_ALREADY_EXISTS` on org creation). Root cause measured, not guessed:
+the dev database has accumulated **394k organizations** and 61 test files
+named orgs with `uuid4().hex[:8]` — at that population every full run has a
+~4% birthday-collision chance. All 61 files widened to 16 hex; the two
+previously-failing files re-ran 149/149 green.

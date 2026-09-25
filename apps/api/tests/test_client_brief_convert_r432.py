@@ -139,7 +139,7 @@ async def test_convert_to_project_r432(db):
     # cross-org cohort → INVALID_COHORT (kills the `is None or wrong-org`
     # -> `and` mutant)
     foreign_cohort = Cohort(
-        org_id=other_org.id, name="X", slug=f"x-{uuid.uuid4().hex[:8]}", created_by=owner.id
+        org_id=other_org.id, name="X", slug=f"x-{uuid.uuid4().hex[:16]}", created_by=owner.id
     )
     db.add(foreign_cohort)
     await db.flush()

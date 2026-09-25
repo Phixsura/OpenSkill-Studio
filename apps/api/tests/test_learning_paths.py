@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"path-{uuid.uuid4().hex[:8]}@test.com"
+    return f"path-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -41,7 +41,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -1251,7 +1251,7 @@ async def test_certificate_not_issued_at_rounded_100_pct(c):
                 org_id=oid,
                 category_id=cat.id,
                 name=f"RC Skill {i}",
-                slug=f"rc-skill-{uuid.uuid4().hex[:8]}",
+                slug=f"rc-skill-{uuid.uuid4().hex[:16]}",
                 description="d" * 10,
             )
             db.add(s)

@@ -121,7 +121,7 @@ async def test_submission_versioning_caps_and_overrides_r403(db):
     # cohort max_submissions_override lifts the project cap for its members
     from app.models.cohort import Cohort, CohortMember, CohortProjectAssignment
 
-    cohort = Cohort(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add(cohort)
     await db.flush()
     db.add(CohortMember(cohort_id=cohort.id, user_id=b.id, role="learner"))
@@ -179,7 +179,7 @@ async def test_visibility_gate_matrix_r403(db):
     from app.models.cohort import Cohort, CohortMember, CohortProjectAssignment
 
     p = await _project(db, org, owner)
-    cohort = Cohort(org_id=org.id, name="V", slug=f"v-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="V", slug=f"v-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add(cohort)
     await db.flush()
     db.add(CohortMember(cohort_id=cohort.id, user_id=inc.id, role="learner"))
@@ -343,8 +343,8 @@ async def test_timing_precedence_and_extensions_r403(db):
     # cohort overrides take the MOST generous value and ignore None overrides
     from app.models.cohort import Cohort, CohortMember, CohortProjectAssignment
 
-    c1 = Cohort(org_id=org.id, name="c1", slug=f"c1-{uuid.uuid4().hex[:8]}", created_by=owner.id)
-    c2 = Cohort(org_id=org.id, name="c2", slug=f"c2-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    c1 = Cohort(org_id=org.id, name="c1", slug=f"c1-{uuid.uuid4().hex[:16]}", created_by=owner.id)
+    c2 = Cohort(org_id=org.id, name="c2", slug=f"c2-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add_all([c1, c2])
     await db.flush()
     db.add_all(
@@ -378,7 +378,7 @@ async def test_timing_precedence_and_extensions_r403(db):
         late_deadline=now - timedelta(hours=2),
     )
     assert await svc.get_submission_timing(p_l2, stu.id) == "closed"
-    c3 = Cohort(org_id=org.id, name="c3", slug=f"c3-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    c3 = Cohort(org_id=org.id, name="c3", slug=f"c3-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add(c3)
     await db.flush()
     db.add(CohortMember(cohort_id=c3.id, user_id=stu.id, role="learner"))
@@ -399,7 +399,7 @@ async def test_timing_precedence_and_extensions_r403(db):
     lone = await _user(db)
     await org_svc.add_member(org.id, lone.id, OrgRole.STUDENT)
     p_solo = await _project(db, org, owner, deadline=now - timedelta(hours=2))
-    c4 = Cohort(org_id=org.id, name="c4", slug=f"c4-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    c4 = Cohort(org_id=org.id, name="c4", slug=f"c4-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add(c4)
     await db.flush()
     db.add(CohortMember(cohort_id=c4.id, user_id=lone.id, role="learner"))

@@ -27,7 +27,7 @@ DB_DSN = "postgresql://postgres:postgres@localhost:5432/openskill"
 
 
 def uid():
-    return uuid.uuid4().hex[:8]
+    return uuid.uuid4().hex[:16]
 
 
 async def post_with_backoff(c: httpx.AsyncClient, path: str, **kw) -> httpx.Response:

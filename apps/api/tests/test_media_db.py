@@ -42,7 +42,7 @@ async def db():
 
 async def _user(db, role=UserRole.STUDENT):
     u = User(
-        email=f"media-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"media-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name="MediaTest",
         role=role,
@@ -61,13 +61,13 @@ async def _org_with_member(db, user, role=OrgRole.OWNER):
     tenant = await create_tenant(
         db,
         name=f"MediaTenant-{uuid.uuid4().hex[:6]}",
-        slug=f"media-t-{uuid.uuid4().hex[:8]}",
+        slug=f"media-t-{uuid.uuid4().hex[:16]}",
         actor=Actor(user_id=user.id, type="tenant"),
         owner_user_id=user.id,
     )
     org = Organization(
         name=f"MediaOrg-{uuid.uuid4().hex[:6]}",
-        slug=f"media-{uuid.uuid4().hex[:8]}",
+        slug=f"media-{uuid.uuid4().hex[:16]}",
         created_by=user.id,
         tenant_id=tenant.id,
     )

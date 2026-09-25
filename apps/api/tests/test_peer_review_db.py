@@ -28,7 +28,7 @@ async def db():
 
 async def _user(db, name="Peer"):
     u = User(
-        email=f"peer-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"peer-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name=name,
         role=UserRole.STUDENT,
@@ -47,13 +47,13 @@ async def _org(db, owner):
     tenant = await create_tenant(
         db,
         name=f"PeerTenant-{uuid.uuid4().hex[:6]}",
-        slug=f"peer-t-{uuid.uuid4().hex[:8]}",
+        slug=f"peer-t-{uuid.uuid4().hex[:16]}",
         actor=Actor(user_id=owner.id, type="tenant"),
         owner_user_id=owner.id,
     )
     org = Organization(
         name=f"PeerOrg-{uuid.uuid4().hex[:6]}",
-        slug=f"peer-{uuid.uuid4().hex[:8]}",
+        slug=f"peer-{uuid.uuid4().hex[:16]}",
         created_by=owner.id,
         tenant_id=tenant.id,
     )
