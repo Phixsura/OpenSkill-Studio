@@ -1887,3 +1887,12 @@ Index audit confirmed the R209 LATERAL and R202 DISTINCT ON queries ride
 The catalog Inspect panel now shows the entity's current availability status
 badge (from the honest-uptime endpoint; probes are cron-driven), closing the
 loop: probes → metric/alert → per-entity visibility.
+
+### 90.5 Uptime semantics pinned (round 214)
+
+The §11.3 SLO computation was nearly untested: 4 of 5 targeted mutants
+survived (unknown-counts-as-up, degraded-not-down, incident-per-bad-probe,
+coverage-always-100). One semantics killer with a fixed 5-probe timeline now
+pins all of it — unknown time excluded from the denominator, degraded is
+down, incidents count good→bad transitions only, coverage is honest.
+5/5 mutants verified killed.

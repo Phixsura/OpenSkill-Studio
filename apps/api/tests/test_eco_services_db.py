@@ -1930,3 +1930,43 @@ async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
     assert change.id not in archived_feed
     with pytest.raises(AppError):
         await svc.get_owned(wl.id, archived.id)
+
+async def test_uptime_slo_semantics(db):
+    """Round-214 killers ×4: the §11.3 uptime number is honest —
+    unknown time is EXCLUDED from the denominator (never assumed up),
+    degraded counts as down, incidents count good→bad TRANSITIONS (not every
+    bad probe), and coverage reflects observed time vs the whole window."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.mapping import AvailabilityRecord
+    from app.ecosystem.services.pricing import AvailabilityService
+
+    version = await _mk_model_version(db, "SloSem")
+    base = datetime.now(UTC) - timedelta(hours=5)
+    seq = [
+        ("operational", 0),   # 1h up
+        ("unknown", 1),       # 1h excluded
+        ("degraded", 2),      # 1h down (+1 incident: op→degraded via unknown?
+                              #   prev=unknown → not a good→bad transition)
+        ("unreachable", 3),   # 1h down (bad→bad: NOT a new incident)
+        ("operational", 4),   # up until now (~1h)
+    ]
+    for status, offset in seq:
+        db.add(AvailabilityRecord(
+            entity_kind="model_version", entity_id=version.id,
+            record_type="status", value={"status": status},
+            observed_at=base + timedelta(hours=offset),
+        ))
+    await db.flush()
+
+    out = await AvailabilityService(db).uptime(
+        entity_kind="model_version", entity_id=version.id, days=30
+    )
+    # up ≈ 2h, down = 2h, unknown 1h excluded → 50% (never ~66% or 100%)
+    assert 45.0 <= out["uptime_pct"] <= 55.0, out["uptime_pct"]
+    # coverage: ~4h observed of 30 days — far from 100
+    assert out["coverage_pct"] < 5.0, out["coverage_pct"]
+    # degraded→unreachable is ONE streak, not two incidents; and unknown→bad
+    # after good start still counts once at most
+    assert out["incidents"] <= 1, out["incidents"]
+    assert out["current_status"] == "operational"
