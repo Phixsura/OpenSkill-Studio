@@ -83,6 +83,13 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
 
 - `GET /api/v1/ecosystem/export` — the full catalog document (content-hashed,
   totals + truncation flags; the integration currency).
+- `GET /api/v1/ecosystem/export/changes?since=&since_id=` — poll this
+  instead of re-downloading the world. The cursor is (timestamp, id): always
+  pass BOTH `next_since` and `next_since_id` back, or batch-inserted rows
+  tied on the boundary timestamp would be skipped.
+- Scope note: the delta stream carries EXTERNAL change events. Curation
+  edits (capability mappings, alias fixes) surface through the full export's
+  `content_hash` changing — re-pull on hash drift.
 - `changes.atom` (global, severity- or entity-filtered), `audit.csv`,
   `deprecation-calendar.ics`, benchmark suite export/import (portable JSON).
 
