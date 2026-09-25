@@ -1879,3 +1879,11 @@ watched entities than the cap, everything beyond it was NEVER probed. The
 sweep now orders by least-recently-probed (LATERAL max(observed_at), NULLS
 FIRST), so never-probed entities go first and coverage rotates. Killer pins
 the ordering (never-probed enqueued before already-probed).
+
+### 90.4 Probe status reaches Inspect (rounds 210–212)
+
+Index audit confirmed the R209 LATERAL and R202 DISTINCT ON queries ride
+`ix_eco_avail_entity`. Full-stack acknowledge-persistence e2e added (8/8).
+The catalog Inspect panel now shows the entity's current availability status
+badge (from the honest-uptime endpoint; probes are cron-driven), closing the
+loop: probes → metric/alert → per-entity visibility.

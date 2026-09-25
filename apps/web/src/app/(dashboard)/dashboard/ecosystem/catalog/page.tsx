@@ -169,6 +169,14 @@ function CatalogInner() {
         `/ecosystem/pricing/history?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
       ),
   });
+  const uptime = useQuery({
+    queryKey: ["eco-uptime", segment, selected?.id],
+    enabled: Boolean(selected),
+    queryFn: () =>
+      apiWithAuth<{ data: { current_status: string; uptime_pct: number | null } }>(
+        `/ecosystem/pricing/availability/uptime?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
+      ),
+  });
   const scorecard = useQuery({
     queryKey: ["eco-scorecard", segment, selected?.id],
     enabled: Boolean(selected),
@@ -397,7 +405,23 @@ function CatalogInner() {
       {selected && (
         <div className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold">{selected.canonical_name}</span>
+            <span className="text-sm font-semibold">
+              {selected.canonical_name}
+              {uptime.data?.data && (
+                <span
+                  title="Latest availability probe (probes run automatically for watched entities)"
+                  className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                    {
+                      operational: "bg-emerald-100 text-emerald-700",
+                      degraded: "bg-amber-100 text-amber-800",
+                      unreachable: "bg-red-100 text-red-700",
+                    }[uptime.data.data.current_status] ?? "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {uptime.data.data.current_status}
+                </span>
+              )}
+            </span>
             <span className="space-x-3">
               <Link
                 href={`/dashboard/ecosystem/changes?entity=${selected.id}`}
