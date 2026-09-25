@@ -51,6 +51,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: [obs("O1".padEnd(26, "x"), false), obs("O2".padEnd(26, "x"), true)],
       });
+    if (path === "/ecosystem/sources" && !init) return Promise.resolve({ data: [] });
     if (path === "/ecosystem/resolution-candidates" && !init)
       return Promise.resolve({
         data: [
@@ -148,5 +149,46 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
     expect(link.closest("a")!.getAttribute("href")).toBe(
       `/dashboard/ecosystem/catalog?kind=models&entity=${"T".repeat(26)}`,
     );
+  });
+
+  it("LLM extraction posts source+text and is gated on both", async () => {
+    const SRC = "L".repeat(26);
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/sources" && !init)
+        return Promise.resolve({
+          data: [
+            { id: SRC, name: "Analyst desk", source_type: "manual_analyst" },
+            { id: "X".repeat(26), name: "HF feed", source_type: "provider_api" },
+          ],
+        });
+      if (path.startsWith("/ecosystem/observations?") && !init)
+        return Promise.resolve({ data: [] });
+      if (path === "/ecosystem/resolution-candidates" && !init)
+        return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    const button = (await screen.findByText(/Extract/)) as HTMLButtonElement;
+    expect(button.disabled).toBe(true); // no source, no text
+    await screen.findByText("Analyst desk");
+    const select = screen.getByLabelText("Extraction source") as HTMLSelectElement;
+    // only manual/internal sources are offered (adapter feeds excluded)
+    expect(select.options.length).toBe(2); // placeholder + analyst desk
+    expect(screen.queryByText("HF feed")).toBeNull();
+    fireEvent.change(select, { target: { value: SRC } });
+    fireEvent.change(screen.getByLabelText("Untrusted text to extract from"), {
+      target: { value: "GPT-9 released at $1/1k tokens" },
+    });
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/observations/extract-llm" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.source_id).toBe(SRC);
+    expect(body.text).toContain("GPT-9");
   });
 });

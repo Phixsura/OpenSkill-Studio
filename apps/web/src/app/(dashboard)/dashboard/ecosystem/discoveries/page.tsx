@@ -49,6 +49,15 @@ export default function DiscoveriesPage() {
   const [payloadFor, setPayloadFor] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
 
+  const [llmSourceId, setLlmSourceId] = useState("");
+  const [llmText, setLlmText] = useState("");
+  const sources = useQuery({
+    queryKey: ["eco-sources-for-extract"],
+    queryFn: () =>
+      apiWithAuth<{ data: { id: string; name: string; source_type: string }[] }>(
+        "/ecosystem/sources",
+      ),
+  });
   const observations = useQuery({
     queryKey: ["eco-observations", eventType],
     queryFn: () =>
@@ -95,6 +104,19 @@ export default function DiscoveriesPage() {
       apiWithAuth(`/ecosystem/resolution-candidates/${id}/llm-suggest`, { method: "POST" }),
     onSuccess: invalidate,
     onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
+  });
+  const llmExtract = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/ecosystem/observations/extract-llm`, {
+        method: "POST",
+        body: JSON.stringify({ source_id: llmSourceId, text: llmText }),
+      }),
+    onSuccess: () => {
+      setLlmText("");
+      setMutError(null);
+      invalidate();
+    },
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Extraction failed"),
   });
   const reject = useMutation({
     mutationFn: (id: string) =>
@@ -184,6 +206,46 @@ export default function DiscoveriesPage() {
             ))}
           </div>
         )}
+      </section>
+
+      <section className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">LLM-assisted extraction (§14 — human-in-the-loop)</h2>
+        <p className="text-xs text-[hsl(var(--muted-foreground))]">
+          Paste untrusted free text (a changelog, an announcement); the platform LLM proposes
+          observations that STILL require human verification below — nothing auto-merges.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <select
+            aria-label="Extraction source"
+            value={llmSourceId}
+            onChange={(e) => setLlmSourceId(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--background))] px-2 py-1 text-xs"
+          >
+            <option value="">choose source…</option>
+            {(sources.data?.data ?? [])
+              .filter((s) => ["manual_analyst", "internal_research"].includes(s.source_type))
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+          </select>
+          <textarea
+            aria-label="Untrusted text to extract from"
+            value={llmText}
+            onChange={(e) => setLlmText(e.target.value)}
+            rows={2}
+            placeholder="Paste announcement / changelog text (max 20k)…"
+            className="min-w-72 flex-1 rounded-md border bg-[hsl(var(--background))] px-2 py-1 font-mono text-xs"
+          />
+          <button
+            onClick={() => llmExtract.mutate()}
+            disabled={llmExtract.isPending || !llmSourceId || !llmText.trim()}
+            className="rounded-md border px-3 py-1 text-xs hover:bg-[hsl(var(--secondary))] disabled:opacity-50"
+          >
+            🤖 Extract
+          </button>
+        </div>
       </section>
 
       <section>

@@ -1812,3 +1812,12 @@ the dev database has accumulated **394k organizations** and 61 test files
 named orgs with `uuid4().hex[:8]` — at that population every full run has a
 ~4% birthday-collision chance. All 61 files widened to 16 hex; the two
 previously-failing files re-ran 149/149 green.
+
+### 88.4 LLM extraction reaches the UI (round 190)
+
+§14 HITL LLM extraction existed only as an API. The Discoveries page now
+offers the flow: pick a manual/internal source (adapter feeds are excluded
+from the selector), paste untrusted text, extract — with copy that makes the
+posture explicit ("proposals still require human verification below;
+nothing auto-merges"). Killer pins the POST body, the double gating
+(source + text), and the source-type filtering.
