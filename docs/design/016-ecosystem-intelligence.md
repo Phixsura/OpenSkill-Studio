@@ -1788,3 +1788,18 @@ lists exclusively, making the whole webhook path unreachable by hand.
 - Browser-verified end to end: sweep test 6 creates an org via the API
   helper, creates an org-attached list through the real form, and asserts
   the badge (e2e 7/7, a11y 12/12).
+
+### 88.1 Org lists are org assets (round 185)
+
+Management of an org-attached watchlist was creator-only — a departed
+creator locked the org's webhook configuration. `get_owned` now grants
+management to the org's OWNER/ADMIN as well (uniform 404 preserved for
+plain members and outsiders; personal lists stay strictly owner-only).
+Killer covers all four personas.
+
+### 88.2 Org lists are a shared radar (round 186)
+
+`matching_changes` (the pull feed) only aggregated lists the user OWNS — an
+org watchlist's changes were visible to its creator alone, while the org
+webhook fired for everyone. Org members' pull feeds now include their orgs'
+attached lists (killer: plain member sees the change, outsider does not).

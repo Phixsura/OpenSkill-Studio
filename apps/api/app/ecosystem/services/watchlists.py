@@ -58,10 +58,29 @@ class WatchlistService:
         await self.db.flush()
         return watchlist
 
+    async def _is_org_admin(self, org_id: str, user_id: str) -> bool:
+        """R185: org-attached lists are ORG assets — the org's owner/admin can
+        manage them too, so a departed creator doesn't lock the list."""
+        from app.models.organization import MemberStatus, OrgMember, OrgRole
+
+        member = await self.db.scalar(
+            select(OrgMember).where(
+                OrgMember.org_id == org_id,
+                OrgMember.user_id == user_id,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        return member is not None and member.role in (OrgRole.OWNER, OrgRole.ADMIN)
+
     async def get_owned(self, watchlist_id: str, owner_id: str) -> Watchlist:
         watchlist = await self.db.get(Watchlist, watchlist_id)
-        # Uniform 404 — never a 403 existence oracle
-        if not watchlist or watchlist.owner_id != owner_id:
+        # Uniform 404 — never a 403 existence oracle. Org-attached lists are
+        # manageable by the creator OR the org's owner/admin (R185).
+        if not watchlist:
+            raise AppError("NOT_FOUND", "Watchlist not found", 404)
+        if watchlist.owner_id != owner_id and not (
+            watchlist.org_id and await self._is_org_admin(watchlist.org_id, owner_id)
+        ):
             raise AppError("NOT_FOUND", "Watchlist not found", 404)
         return watchlist
 
@@ -175,10 +194,28 @@ class WatchlistService:
     async def matching_changes(
         self, owner_id: str, *, limit: int = 50
     ) -> list[ChangeEvent]:
-        """Recent change events touching any watched entity for this user."""
+        """Recent change events touching any watched entity for this user —
+        their own lists PLUS org-attached lists of orgs they belong to
+        (R186: an org watchlist is a shared radar, not the creator's feed)."""
         from app.ecosystem.models.observation import SEVERITY_RANK
+        from app.models.organization import MemberStatus, OrgMember
 
         watchlists = await self.list_for_owner(owner_id)
+        org_ids = [
+            row
+            for row in await self.db.scalars(
+                select(OrgMember.org_id).where(
+                    OrgMember.user_id == owner_id,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                )
+            )
+        ]
+        if org_ids:
+            seen = {w.id for w in watchlists}
+            org_lists = await self.db.scalars(
+                select(Watchlist).where(Watchlist.org_id.in_(org_ids))
+            )
+            watchlists = watchlists + [w for w in org_lists if w.id not in seen]
         if not watchlists:
             return []
         items = await self.db.scalars(

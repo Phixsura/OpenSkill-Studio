@@ -1838,3 +1838,85 @@ async def test_watchlist_count_is_bounded(db, monkeypatch):
     with pytest.raises(AppError) as exc:
         await svc.create(owner_id=user.id, name="one too many")
     assert "100" in str(exc.value)
+
+async def test_org_watchlist_manageable_by_org_admin_not_outsiders(db):
+    """Round-185 killers ×3: an org-attached watchlist is manageable by its
+    creator AND the org's admin (a departed creator must not lock the org
+    asset) — but a plain org member and an outsider still get uniform 404."""
+    from app.ecosystem.services.watchlists import WatchlistService
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+
+    creator = await _mk_user(db)
+    org_admin = await _mk_user(db)
+    plain_member = await _mk_user(db)
+    outsider = await _mk_user(db)
+    org = await _mk_org(db)
+    db.add_all([
+        OrgMember(org_id=org.id, user_id=org_admin.id,
+                  role=OrgRole.ADMIN, status=MemberStatus.ACTIVE),
+        OrgMember(org_id=org.id, user_id=plain_member.id,
+                  role=OrgRole.STUDENT, status=MemberStatus.ACTIVE),
+    ])
+    await db.flush()
+    svc = WatchlistService(db)
+    wl = await svc.create(owner_id=creator.id, name="OrgManaged", org_id=org.id)
+
+    # org admin can manage (mute it)
+    updated = await svc.update_settings(wl.id, org_admin.id, min_severity="breaking")
+    assert updated.min_severity == "breaking"
+    # plain member cannot
+    with pytest.raises(AppError) as exc:
+        await svc.update_settings(wl.id, plain_member.id, min_severity="info")
+    assert exc.value.status_code == 404
+    # outsider cannot
+    with pytest.raises(AppError) as exc:
+        await svc.get_owned(wl.id, outsider.id)
+    assert exc.value.status_code == 404
+    # PERSONAL lists stay owner-only even for org admins
+    personal = await svc.create(owner_id=creator.id, name="PersonalOnly")
+    with pytest.raises(AppError):
+        await svc.get_owned(personal.id, org_admin.id)
+
+async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
+    """Round-186 killer: an org watchlist is a shared radar — a plain org
+    member (not the creator) sees its matching changes in their pull feed;
+    a non-member does not."""
+    from app.ecosystem.services.watchlists import WatchlistService
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+
+    creator = await _mk_user(db)
+    member = await _mk_user(db)
+    outsider = await _mk_user(db)
+    org = await _mk_org(db)
+    db.add(OrgMember(org_id=org.id, user_id=member.id,
+                     role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    await db.flush()
+
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"OrgFeed-{tag}", slug=f"of-{tag}")
+    db.add(model)
+    await db.flush()
+    svc = WatchlistService(db)
+    wl = await svc.create(owner_id=creator.id, name="OrgRadar", org_id=org.id)
+    await svc.add_item(wl.id, creator.id, target_kind="model", target_id=model.id)
+
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    change = ChangeEvent(
+        observation_id=obs.id, change_type="license", field="license",
+        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
+        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+    )
+    db.add(change)
+    await db.flush()
+
+    member_feed = [c.id for c in await svc.matching_changes(member.id)]
+    assert change.id in member_feed
+    outsider_feed = [c.id for c in await svc.matching_changes(outsider.id)]
+    assert change.id not in outsider_feed
