@@ -1896,3 +1896,9 @@ coverage-always-100). One semantics killer with a fixed 5-probe timeline now
 pins all of it — unknown time excluded from the denominator, degraded is
 down, incidents count good→bad transitions only, coverage is honest.
 5/5 mutants verified killed.
+
+### 90.6 Daily status strip (round 215)
+
+The uptime endpoint's per-day worst-status array (computed since §11.3) was
+never rendered. The Inspect panel now shows a StatusGator-style 30-day strip
+(per-day color blocks with tooltips) next to the uptime percentage.

@@ -173,7 +173,13 @@ function CatalogInner() {
     queryKey: ["eco-uptime", segment, selected?.id],
     enabled: Boolean(selected),
     queryFn: () =>
-      apiWithAuth<{ data: { current_status: string; uptime_pct: number | null } }>(
+      apiWithAuth<{
+        data: {
+          current_status: string;
+          uptime_pct: number | null;
+          daily: { date: string; worst_status: string }[];
+        };
+      }>(
         `/ecosystem/pricing/availability/uptime?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
       ),
   });
@@ -445,6 +451,31 @@ function CatalogInner() {
               </button>
             </span>
           </div>
+          {uptime.data?.data && (uptime.data.data.daily ?? []).length > 0 && (
+            <div
+              className="mb-3 flex items-center gap-0.5"
+              title="Daily worst probe status (StatusGator-style)"
+            >
+              <span className="mr-1 text-xs text-[hsl(var(--muted-foreground))]">
+                {uptime.data.data.uptime_pct != null
+                  ? `${uptime.data.data.uptime_pct}% uptime`
+                  : "uptime n/a"}
+              </span>
+              {(uptime.data.data.daily ?? []).slice(-30).map((d) => (
+                <span
+                  key={d.date}
+                  title={`${d.date}: ${d.worst_status}`}
+                  className={`h-3 w-1.5 rounded-sm ${
+                    {
+                      operational: "bg-emerald-500",
+                      degraded: "bg-amber-500",
+                      unreachable: "bg-red-500",
+                    }[d.worst_status] ?? "bg-slate-300"
+                  }`}
+                />
+              ))}
+            </div>
+          )}
           {scorecard.data?.data && (
             <div className="mb-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-semibold">

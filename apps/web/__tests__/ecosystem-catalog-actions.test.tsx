@@ -223,7 +223,16 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
           meta: { total: 1 },
         });
       if (path.includes("/availability/uptime"))
-        return Promise.resolve({ data: { current_status: "degraded", uptime_pct: 97.1 } });
+        return Promise.resolve({
+          data: {
+            current_status: "degraded",
+            uptime_pct: 97.1,
+            daily: [
+              { date: "2026-09-24", worst_status: "operational" },
+              { date: "2026-09-25", worst_status: "unreachable" },
+            ],
+          },
+        });
       if (path.includes("/score-history")) return Promise.resolve({ data: { points: [] } });
       if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
       if (path.includes("/pricing/history"))
@@ -233,5 +242,8 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     render(<CatalogPage />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByText("Inspect"));
     expect(await screen.findByText("degraded")).toBeDefined();
+    // daily strip renders with per-day tooltips
+    expect(await screen.findByText(/97.1% uptime/)).toBeDefined();
+    expect(screen.getByTitle("2026-09-25: unreachable")).toBeDefined();
   });
 });
