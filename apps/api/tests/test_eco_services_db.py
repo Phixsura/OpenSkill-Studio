@@ -1970,3 +1970,32 @@ async def test_uptime_slo_semantics(db):
     # after good start still counts once at most
     assert out["incidents"] <= 1, out["incidents"]
     assert out["current_status"] == "operational"
+
+async def test_curated_facts_reach_compare_and_entity_responses(db):
+    """Round-220 killer: a conflict arbitration (curated fact) must be visible
+    in BOTH the single-entity response's `metadata` and the comparison's
+    `metadata` — the old getattr(entity, "metadata_") never matched the
+    `extra` attribute, so curated facts were silently absent everywhere."""
+    from app.ecosystem.schemas import CatalogEntityResponse
+    from app.ecosystem.services.catalog import CatalogService
+
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:6]
+    a = AIModel(canonical_name=f"CurFact-{tag}", slug=f"cf1-{tag}")
+    b = AIModel(canonical_name=f"CurFactB-{tag}", slug=f"cf2-{tag}")
+    db.add_all([a, b])
+    await db.flush()
+    svc = CatalogService(db)
+    await svc.resolve_conflict(
+        "model", a.id, field="license", chosen_value="MIT",
+        winning_source_id=None, actor_id=admin.id,
+    )
+
+    # single-entity response carries the curated fact
+    resp = CatalogEntityResponse.model_validate(await svc.get("model", a.id))
+    assert resp.metadata["curated"]["license"]["value"] == "MIT"
+
+    # comparison carries it too
+    rows = await svc.compare_entities("model", [a.id, b.id])
+    row_a = next(r for r in rows if r["entity_id"] == a.id)
+    assert row_a["metadata"]["curated"]["license"]["value"] == "MIT"

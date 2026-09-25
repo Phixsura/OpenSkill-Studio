@@ -382,7 +382,10 @@ class CatalogService:
                     "entity_id": entity_id,
                     "canonical_name": entity.canonical_name,
                     "lifecycle_status": entity.lifecycle_status,
-                    "metadata": getattr(entity, "metadata_", None) or {},
+                    # R220: the attribute is `extra` (column name "metadata");
+                    # getattr(entity, "metadata_") never matched — curated facts
+                    # were silently absent from every comparison
+                    "metadata": getattr(entity, "extra", None) or {},
                     "prices": await pricing.latest_prices(kind, entity_id),
                     "availability_status": (status_row.value if status_row else None),
                     "benchmark": (

@@ -314,6 +314,9 @@ class CatalogEntityResponse(_Orm):
     lifecycle_status: str
     external_ids: dict
     aliases: list
+    # R220: curated facts (conflict arbitrations etc.) live in the `extra`
+    # attribute (column "metadata") — expose them as `metadata`
+    metadata: dict = Field(default_factory=dict, validation_alias="extra")
     created_at: datetime
     model_config = ConfigDict(from_attributes=True, extra="allow")
 

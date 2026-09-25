@@ -1909,3 +1909,15 @@ Status-flip mutants 2/2 already killed by existing suites; compare's
 availability cell renders the shared badge instead of raw JSON; browser
 suites 8/8 after every UI change; clean-baseline full regression 6296/0 with
 zero transients (the 16-hex fix holding).
+
+## 91. Curated facts were invisible — round 220
+
+A real bug hiding since the comparison shipped: the catalog models' JSONB
+column is named "metadata" but the mapped ATTRIBUTE is `extra` — and
+`compare_entities` read `getattr(entity, "metadata_")`, which never matched.
+Every conflict arbitration (curated license, api_identifier, …) was silently
+absent from every comparison, and `CatalogEntityResponse` didn't expose the
+field at all. Fixed: compare reads `extra`, the response schema exposes it as
+`metadata` (validation_alias). Killer arbitrates a license conflict and
+asserts the curated fact in BOTH the single-entity response and the
+comparison row.
