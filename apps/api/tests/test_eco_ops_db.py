@@ -464,3 +464,51 @@ def test_every_registered_eco_handler_has_an_enqueue_site():
         if f'"{topic}"' not in corpus:
             orphans.append(topic)
     assert not orphans, f"registered handlers nothing ever enqueues: {orphans}"
+
+async def test_handle_check_availability_records_probe(db):
+    """Round-201 killer: the availability handler (now cron-driven, R198)
+    records a probe for a real entity and skips cleanly for a missing one."""
+    from app.ecosystem.models.mapping import AvailabilityRecord
+    from app.ecosystem.worker import handle_check_availability
+
+    version = await _mk_model_version(db, "ProbeH")
+    await handle_check_availability(
+        db, {"entity_kind": "model_version", "entity_id": version.id}
+    )
+    rec = await db.scalar(
+        select(AvailabilityRecord).where(
+            AvailabilityRecord.entity_id == version.id,
+            AvailabilityRecord.record_type == "status",
+        )
+    )
+    assert rec is not None
+    assert rec.value["status"] in ("operational", "degraded", "unreachable")
+    # missing entity: clean skip, no raise
+    await handle_check_availability(
+        db, {"entity_kind": "model_version", "entity_id": "0" * 26}
+    )
+
+
+async def test_handle_telemetry_window_aggregates_idempotently(db):
+    """Round-201 killer: the telemetry-window handler (now cron-driven, R198)
+    is idempotent per window — double delivery leaves one snapshot set and
+    malformed payloads are a clean no-op."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.graph import TelemetrySnapshot
+    from app.ecosystem.worker import handle_telemetry_window
+
+    end = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    start = end - timedelta(hours=1)
+    payload = {"window_start": start.isoformat(), "window_end": end.isoformat()}
+    await handle_telemetry_window(db, payload)
+    n1 = len(list(await db.scalars(
+        select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
+    )))
+    await handle_telemetry_window(db, payload)  # duplicate delivery
+    n2 = len(list(await db.scalars(
+        select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
+    )))
+    assert n1 == n2
+    # malformed: no raise
+    await handle_telemetry_window(db, {"window_start": "not-a-date"})
