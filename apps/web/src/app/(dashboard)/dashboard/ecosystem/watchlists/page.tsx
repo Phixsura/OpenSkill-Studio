@@ -12,6 +12,7 @@ import { LIFECYCLE_STYLES, SEVERITY_STYLES, fmtDate, shortId } from "../lib";
 interface Watchlist {
   id: string;
   name: string;
+  org_id: string | null;
   min_severity: string;
   muted_until: string | null;
   created_at: string;
@@ -192,6 +193,14 @@ export default function WatchlistsPage() {
                 className="flex-1 text-left"
               >
                 {w.name}
+                {w.org_id && (
+                  <span
+                    title="Org-attached: changes fan out over the org's webhooks"
+                    className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700"
+                  >
+                    org
+                  </span>
+                )}
                 {w.muted_until && <span className="ml-2 text-xs text-amber-600">muted</span>}
               </button>
               <select

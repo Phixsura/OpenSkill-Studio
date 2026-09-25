@@ -223,4 +223,26 @@ describe("Watch item add/remove (ADR-016 §24 UI)", () => {
     );
     expect(JSON.parse((call![1] as RequestInit).body as string).org_id).toBeNull();
   });
+
+  it("org-attached lists show the org badge", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/watchlists" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: LIST_ID,
+              name: "Team Alerts",
+              org_id: "O".repeat(26),
+              min_severity: "info",
+              muted_until: null,
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    await screen.findByText("Team Alerts");
+    expect(screen.getByText("org")).toBeDefined();
+  });
 });
