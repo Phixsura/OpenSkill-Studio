@@ -374,3 +374,93 @@ async def test_retention_prunes_stale_unreviewed_prices(db):
     assert out["unreviewed_prices_pruned"] >= 1
     assert await db.get(PriceObservation, rows["unreviewed"]) is None
     assert await db.get(PriceObservation, rows["approved"]) is not None
+
+async def test_r198_dead_handler_wiring(db):
+    """Round-198 killers ×3: three registered handlers had ZERO production
+    enqueue sites — the §28 telemetry auto-comparison, §11.3 availability
+    probes and deprecation-triggered candidate generation never ran.
+
+    (a) deprecating an entity enqueues eco.generate_candidates;
+    (b) the availability sweep enqueues probes for id-backed watched entities;
+    (c) the telemetry sweep enqueues the previous complete hour."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.ecosystem.services.catalog import LifecycleService
+    from app.ecosystem.services.watchlists import WatchlistService
+    from app.ecosystem.worker import sweep_telemetry_window, sweep_watched_availability
+
+    admin = await _mk_user(db, "admin")
+    version = await _mk_model_version(db, "WireDep")
+
+    # (a) verified -> deprecated enqueues candidate generation
+    await LifecycleService(db).transition(
+        "model_version", version.id, to_status="deprecated",
+        reason="manual_decision", actor_id=admin.id,
+    )
+    msg = await db.scalar(
+        select(OutboxMessage).where(
+            OutboxMessage.topic == "eco.generate_candidates",
+            OutboxMessage.payload["entity_id"].astext == version.id,
+        )
+    )
+    assert msg is not None, "deprecation did not enqueue candidate generation"
+
+    # (b) watched entity gets an availability probe enqueued
+    user = await _mk_user(db)
+    watched = await _mk_model_version(db, "WireProbe")
+    await WatchlistService(db).quick_watch(
+        user.id, target_kind="model_version", target_id=watched.id
+    )
+    n = await sweep_watched_availability(db)
+    assert n >= 1
+    probe = await db.scalar(
+        select(OutboxMessage).where(
+            OutboxMessage.topic == "eco.check_availability",
+            OutboxMessage.payload["entity_id"].astext == watched.id,
+        )
+    )
+    assert probe is not None, "watched entity got no availability probe"
+
+    # (c) telemetry sweep enqueues an hour-aligned window
+    assert await sweep_telemetry_window(db) == 1
+    win = await db.scalar(
+        select(OutboxMessage)
+        .where(OutboxMessage.topic == "eco.telemetry_window")
+        .order_by(OutboxMessage.id.desc())
+    )
+    assert win is not None
+    assert win.payload["window_start"] < win.payload["window_end"]
+
+
+def test_r198_crons_registered():
+    """The two new sweeps are actually scheduled (source-level pin, same
+    pattern as the existing scheduler killers)."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "app" / "controlplane" / "worker.py").read_text()
+    assert 'name="eco_telemetry_sweep"' in src and "minute=58" in src
+    assert 'name="eco_availability_sweep"' in src and "minute={14, 44}" in src
+
+def test_every_registered_eco_handler_has_an_enqueue_site():
+    """Round-199 systemic guard: a registered outbox handler with no enqueue
+    site anywhere in app/ is promised automation that never runs (the R198
+    class). Every eco.* topic in HANDLERS must be enqueued somewhere."""
+    from pathlib import Path
+
+    from app.controlplane.worker import HANDLERS, load_handlers
+
+    load_handlers()
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    enqueue_lines = [
+        line
+        for p in app_dir.rglob("*.py")
+        for line in p.read_text().splitlines()
+        if "enqueue(" in line and "def enqueue" not in line
+    ]
+    corpus = "\n".join(enqueue_lines)
+    orphans = []
+    for topic in HANDLERS:
+        if not topic.startswith("eco."):
+            continue
+        if f'"{topic}"' not in corpus:
+            orphans.append(topic)
+    assert not orphans, f"registered handlers nothing ever enqueues: {orphans}"

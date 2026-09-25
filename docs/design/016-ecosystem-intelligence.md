@@ -1834,3 +1834,24 @@ dropped for every delta consumer. The cursor is now lexicographic on
 the query resumes with an OR-tie clause, and timestamp-only callers keep the
 old strictly-greater semantics. Killer: three same-stamp rows, page size 2,
 follow the cursor — all three arrive.
+
+## 90. Dead-handler wiring — round 198
+
+A caller-graph sweep found three REGISTERED outbox handlers with zero
+production enqueue sites — promised automation that never ran:
+
+1. `eco.telemetry_window` (§28's "fresh telemetry is automatically compared
+   against benchmarks") — new hourly cron `eco_telemetry_sweep` (minute 58)
+   enqueues the previous complete hour; snapshot uniqueness keeps re-enqueues
+   idempotent.
+2. `eco.check_availability` (§11.3's "probed independently of syncs") — new
+   cron `eco_availability_sweep` (minutes 14/44) enqueues probes for every
+   id-backed WATCHED entity (watchers are exactly who status flips matter
+   to), capped at 200/round.
+3. `eco.generate_candidates` — now event-driven: transitioning an entity to
+   `deprecated` enqueues candidate generation in the same transaction.
+
+Killers: outbox-row assertions for all three paths plus source-level cron
+pins. Lesson recorded: a registered handler is not a feature — the
+caller-graph sweep (enqueue-site count per topic) is now part of the audit
+repertoire.

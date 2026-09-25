@@ -503,6 +503,47 @@ async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
     }
 
 
+async def sweep_telemetry_window(db: AsyncSession) -> int:
+    """R198: §28 promised fresh production telemetry is AUTOMATICALLY compared
+    against benchmarks — but nothing ever enqueued eco.telemetry_window. This
+    hourly sweep enqueues the previous complete hour; the snapshot unique
+    constraint keeps re-enqueues idempotent."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.controlplane.models.outbox import enqueue
+
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    window_start = now - timedelta(hours=1)
+    enqueue(db, "eco.telemetry_window", {
+        "window_start": window_start.isoformat(),
+        "window_end": now.isoformat(),
+    })
+    return 1
+
+
+async def sweep_watched_availability(db: AsyncSession, *, cap: int = 200) -> int:
+    """R198: §11.3 promised availability is probed INDEPENDENTLY of syncs —
+    but nothing ever enqueued eco.check_availability. Probe every id-backed
+    watched entity (watchers are exactly who status flips matter to)."""
+    from sqlalchemy import distinct
+
+    from app.controlplane.models.outbox import enqueue
+    from app.ecosystem.models.replacement import WatchItem
+
+    rows = await db.execute(
+        select(distinct(WatchItem.target_kind), WatchItem.target_id)
+        .where(WatchItem.target_id.isnot(None))
+        .limit(cap)
+    )
+    n = 0
+    for target_kind, target_id in rows:
+        enqueue(db, "eco.check_availability", {
+            "entity_kind": target_kind, "entity_id": target_id,
+        })
+        n += 1
+    return n
+
+
 @register_handler("eco.check_availability")
 async def handle_check_availability(db: AsyncSession, payload: dict) -> None:
     """§11.3: availability probed independently of catalog syncs."""

@@ -332,6 +332,30 @@ async def _eco_impact_sla(ctx: dict) -> None:
             log.warning("eco_impacts_escalated", count=n)
 
 
+async def _eco_telemetry_sweep(ctx: dict) -> None:
+    """ADR-016 §28/R198: hourly production-telemetry aggregation window."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_telemetry_window
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_telemetry_window(db)
+        if n:
+            await db.commit()
+            log.info("eco_telemetry_window_enqueued", count=n)
+
+
+async def _eco_availability_sweep(ctx: dict) -> None:
+    """ADR-016 §11.3/R198: probe watched entities independently of syncs."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_watched_availability
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_watched_availability(db)
+        if n:
+            await db.commit()
+            log.info("eco_availability_probes_enqueued", count=n)
+
+
 async def _reap_outbox(ctx: dict) -> None:
     from app.core.database import AsyncSessionLocal
 
@@ -466,6 +490,8 @@ def _cron_jobs() -> list:
         cron(_eco_impact_sla, minute={26, 56}, name="eco_impact_sla"),
         cron(_eco_rollout_eval, minute={11, 41}, name="eco_rollout_eval"),
         cron(_eco_stuck_runs, minute=53, name="eco_stuck_runs"),
+        cron(_eco_telemetry_sweep, minute=58, name="eco_telemetry_sweep"),
+        cron(_eco_availability_sweep, minute={14, 44}, name="eco_availability_sweep"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);

@@ -735,6 +735,14 @@ class LifecycleService:
         if to_status == "deprecated" and reason is None:
             raise AppError("VALIDATION_ERROR", "Deprecation requires a reason", 422)
         entity.lifecycle_status = to_status
+        if to_status == "deprecated":
+            # R198: deprecation should immediately queue replacement-candidate
+            # generation (the handler existed; nothing ever enqueued it)
+            from app.controlplane.models.outbox import enqueue
+
+            enqueue(self.db, "eco.generate_candidates", {
+                "entity_kind": kind, "entity_id": entity_id,
+            })
         self.db.add(
             LifecycleTransition(
                 entity_kind=kind,
