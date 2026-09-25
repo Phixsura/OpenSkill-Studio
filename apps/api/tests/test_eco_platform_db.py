@@ -341,3 +341,97 @@ async def test_muted_org_watchlist_suppresses_webhook(db, monkeypatch):
     fired_orgs = [d[0] for d in delivered]
     assert muted_org.id not in fired_orgs
     assert strict_org.id not in fired_orgs
+
+async def test_changes_cursor_pagination_is_complete_and_duplicate_free(db):
+    """Round-193 killer: walking the change feed by cursor yields every row
+    exactly once (no skips at page boundaries, no repeats) — the property
+    that makes delta consumers trustworthy."""
+    from app.ecosystem.models.catalog import AIModel
+
+    source = await _mk_source(db)
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"CurWalk-{tag}", slug=f"cw-{tag}")
+    db.add(model)
+    await db.flush()
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    created = []
+    for i in range(7):
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="license", field=f"f{i}",
+            old_value=None, new_value={"i": i},
+            severity="info", entity_kind="model", canonical_entity_id=model.id,
+        )
+        db.add(change)
+        await db.flush()
+        created.append(change.id)
+
+    from app.ecosystem.api.observations import list_changes
+
+    seen: list[str] = []
+    cursor = None
+    for _ in range(10):
+        out = await list_changes(
+            change_type=None, severity=None, acknowledged=None,
+            canonical_entity_id=model.id, cursor=cursor, limit=3, offset=0,
+            db=db, _user=None,
+        )
+        seen.extend(r["id"] for r in out["data"])
+        if not out["meta"]["has_more"]:
+            break
+        cursor = out["meta"]["next_cursor"]
+    assert sorted(seen) == sorted(created), (len(seen), len(created))
+    assert len(seen) == len(set(seen)), "duplicates across pages"
+
+async def test_delta_export_does_not_skip_same_timestamp_rows(db):
+    """Round-194 killer: three changes sharing one detected_at (a batch
+    insert), page size 2 — following next_since/next_since_id must yield all
+    three. A bare `detected_at > since` cursor silently drops ties."""
+    from datetime import UTC, datetime
+
+    from app.ecosystem.api.dashboard import export_changes_delta
+    from app.ecosystem.models.catalog import AIModel
+
+    source = await _mk_source(db)
+    tag = str(ULID()).lower()[:6]
+    model = AIModel(canonical_name=f"Delta-{tag}", slug=f"dl-{tag}")
+    db.add(model)
+    await db.flush()
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="catalog_snapshot",
+        canonical_entity_kind="model", canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    stamp = datetime(2026, 9, 25, 12, 0, 0, tzinfo=UTC)
+    created = []
+    for i in range(3):
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="license", field=f"tie{i}",
+            old_value=None, new_value={"i": i}, severity="info",
+            entity_kind="model", canonical_entity_id=model.id,
+            detected_at=stamp,
+        )
+        db.add(change)
+        await db.flush()
+        created.append(change.id)
+
+    seen: list[str] = []
+    since = "2026-09-25T11:59:59Z"
+    since_id = None
+    for _ in range(5):
+        out = await export_changes_delta(
+            since=since, since_id=since_id, limit=2, db=db, _user=None
+        )
+        seen.extend(r["id"] for r in out["data"] if r["id"] in created)
+        if not out["meta"]["has_more"]:
+            break
+        since = out["meta"]["next_since"]
+        since_id = out["meta"].get("next_since_id")
+    assert sorted(seen) == sorted(created), f"lost ties: {len(seen)}/3"

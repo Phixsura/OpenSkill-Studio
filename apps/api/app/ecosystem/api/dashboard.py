@@ -145,16 +145,24 @@ async def export_changes_atom(
 @router.get("/export/changes", response_model=dict)
 async def export_changes_delta(
     since: str = Query(..., description="ISO-8601 timestamp"),
+    since_id: Annotated[str | None, Query(min_length=26, max_length=26)] = None,
     limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     """§17 (deps.dev delta posture): consumers of the catalog export poll this
     delta feed instead of re-downloading the world — typed change events since
-    a timestamp, oldest first, cursor by last detected_at."""
+    a (timestamp, id) cursor, oldest first.
+
+    R194: a bare `detected_at > since` cursor silently DROPS rows sharing the
+    boundary timestamp (batch inserts share server_default now()). The cursor
+    is lexicographic on (detected_at, id): pass back BOTH next_since and
+    next_since_id. Timestamp-only callers keep working (strictly-greater
+    semantics, unchanged) — they just shouldn't batch at page boundaries.
+    """
     from datetime import datetime
 
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from app.ecosystem.models.observation import ChangeEvent
     from app.ecosystem.schemas import ChangeEventResponse
@@ -164,10 +172,17 @@ async def export_changes_delta(
         since_ts = datetime.fromisoformat(since.replace("Z", "+00:00"))
     except ValueError as exc:
         raise AppError("VALIDATION_ERROR", "since must be ISO-8601", 422) from exc
+    if since_id:
+        cursor_where = or_(
+            ChangeEvent.detected_at > since_ts,
+            (ChangeEvent.detected_at == since_ts) & (ChangeEvent.id > since_id),
+        )
+    else:
+        cursor_where = ChangeEvent.detected_at > since_ts
     rows = list(
         await db.scalars(
             select(ChangeEvent)
-            .where(ChangeEvent.detected_at > since_ts)
+            .where(cursor_where)
             .order_by(ChangeEvent.detected_at.asc(), ChangeEvent.id.asc())
             .limit(limit + 1)
         )
@@ -179,6 +194,7 @@ async def export_changes_delta(
         "meta": {
             "has_more": has_more,
             "next_since": rows[-1].detected_at.isoformat() if rows else since,
+            "next_since_id": rows[-1].id if rows else since_id,
         },
     }
 

@@ -1821,3 +1821,16 @@ from the selector), paste untrusted text, extract — with copy that makes the
 posture explicit ("proposals still require human verification below;
 nothing auto-merges"). Killer pins the POST body, the double gating
 (source + text), and the source-type filtering.
+
+## 89. Delta-feed tie loss — rounds 193–194
+
+Round 193 pinned cursor-pagination completeness on the change feed (walk by
+cursor == full set, no repeats). The same property applied to the DELTA
+export found a real data-loss bug: the cursor was a bare
+`detected_at > since`, and batch-inserted change events share one
+server-default timestamp — rows tied with the page boundary were silently
+dropped for every delta consumer. The cursor is now lexicographic on
+(detected_at, id): responses carry `next_since_id` alongside `next_since`,
+the query resumes with an OR-tie clause, and timestamp-only callers keep the
+old strictly-greater semantics. Killer: three same-stamp rows, page size 2,
+follow the cursor — all three arrive.
