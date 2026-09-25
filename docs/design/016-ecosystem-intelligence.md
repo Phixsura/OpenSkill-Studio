@@ -1902,3 +1902,10 @@ down, incidents count good→bad transitions only, coverage is honest.
 The uptime endpoint's per-day worst-status array (computed since §11.3) was
 never rendered. The Inspect panel now shows a StatusGator-style 30-day strip
 (per-day color blocks with tooltips) next to the uptime percentage.
+
+### 90.7 Session close (rounds 216–219)
+
+Status-flip mutants 2/2 already killed by existing suites; compare's
+availability cell renders the shared badge instead of raw JSON; browser
+suites 8/8 after every UI change; clean-baseline full regression 6296/0 with
+zero transients (the 16-hex fix holding).
