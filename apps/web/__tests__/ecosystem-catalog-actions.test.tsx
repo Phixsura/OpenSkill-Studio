@@ -277,4 +277,49 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     fireEvent.click(await screen.findByText("Inspect"));
     expect(await screen.findByText(/license: MIT/)).toBeDefined();
   });
+
+  it("adopting a conflict value POSTs resolve-conflict with field + value", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: ENTITY,
+              canonical_name: "Verified Gen",
+              lifecycle_status: "verified",
+              sunset_at: null,
+              aliases: [],
+            },
+          ],
+          meta: { total: 1 },
+        });
+      if (path.includes("/conflicts"))
+        return Promise.resolve({
+          data: [{ field: "license", values: { MIT: ["s1"], GPL: ["s2"] }, curated: null }],
+        });
+      if (path.includes("/availability/uptime"))
+        return Promise.resolve({
+          data: { current_status: "operational", uptime_pct: null, daily: [] },
+        });
+      if (path.includes("/score-history")) return Promise.resolve({ data: { points: [] } });
+      if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
+      if (path.includes("/pricing/history"))
+        return Promise.resolve({ data: { series: {}, trends: {} } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    fireEvent.click(await screen.findByText(/MIT/));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        (c[0] as string).endsWith(`/${ENTITY}/resolve-conflict`) &&
+        (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.field).toBe("license");
+    expect(body.chosen_value).toBe("MIT");
+  });
 });
