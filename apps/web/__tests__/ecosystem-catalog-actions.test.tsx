@@ -246,4 +246,35 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     expect(await screen.findByText(/97.1% uptime/)).toBeDefined();
     expect(screen.getByTitle("2026-09-25: unreachable")).toBeDefined();
   });
+
+  it("Inspect shows curated facts as pills", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: ENTITY,
+              canonical_name: "Verified Gen",
+              lifecycle_status: "verified",
+              sunset_at: null,
+              aliases: [],
+              metadata: { curated: { license: { value: "MIT", decided_at: "2026-09-25" } } },
+            },
+          ],
+          meta: { total: 1 },
+        });
+      if (path.includes("/availability/uptime"))
+        return Promise.resolve({
+          data: { current_status: "operational", uptime_pct: 99, daily: [] },
+        });
+      if (path.includes("/score-history")) return Promise.resolve({ data: { points: [] } });
+      if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
+      if (path.includes("/pricing/history"))
+        return Promise.resolve({ data: { series: {}, trends: {} } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    expect(await screen.findByText(/license: MIT/)).toBeDefined();
+  });
 });

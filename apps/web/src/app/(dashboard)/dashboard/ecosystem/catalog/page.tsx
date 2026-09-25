@@ -49,6 +49,7 @@ interface Entity {
   version?: string;
   sunset_at?: string | null;
   license?: string | null;
+  metadata?: { curated?: Record<string, { value: string; decided_at: string }> };
 }
 
 interface Conflict {
@@ -473,6 +474,20 @@ function CatalogInner() {
                     }[d.worst_status] ?? "bg-slate-300"
                   }`}
                 />
+              ))}
+            </div>
+          )}
+          {selected.metadata?.curated && Object.keys(selected.metadata.curated).length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <span className="font-semibold">Curated facts:</span>
+              {Object.entries(selected.metadata.curated).map(([field, v]) => (
+                <span
+                  key={field}
+                  title={`Human-arbitrated ${v.decided_at ?? ""}`}
+                  className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-800"
+                >
+                  {field}: {v.value} ✓
+                </span>
               ))}
             </div>
           )}
