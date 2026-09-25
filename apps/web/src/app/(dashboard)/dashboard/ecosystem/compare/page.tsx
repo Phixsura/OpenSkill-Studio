@@ -20,6 +20,7 @@ interface CompareRow {
   entity_id: string;
   canonical_name: string;
   lifecycle_status: string;
+  metadata: { curated?: Record<string, { value: string }> } | null;
   prices: Record<string, PriceEntry>;
   availability_status: Record<string, unknown> | null;
   benchmark: {
@@ -227,6 +228,31 @@ function CompareInner() {
                   ))}
                 </tr>
               ))}
+              <tr className="bg-[hsl(var(--card))]">
+                <td className="px-4 py-2 font-medium">Curated facts</td>
+                {rows.map((r) => {
+                  const curated = r.metadata?.curated ?? {};
+                  const entries = Object.entries(curated);
+                  return (
+                    <td key={r.entity_id} className="px-4 py-2 text-xs">
+                      {entries.length === 0
+                        ? "—"
+                        : entries.map(([field, v]) => (
+                            <div key={field}>
+                              <span className="text-[hsl(var(--muted-foreground))]">{field}:</span>{" "}
+                              <span className="font-medium">{v.value}</span>
+                              <span
+                                className="ml-1 text-emerald-600"
+                                title="Human-arbitrated value (conflict resolution)"
+                              >
+                                ✓
+                              </span>
+                            </div>
+                          ))}
+                    </td>
+                  );
+                })}
+              </tr>
               <tr className="bg-[hsl(var(--card))]">
                 <td className="px-4 py-2 font-medium">Availability</td>
                 {rows.map((r) => {

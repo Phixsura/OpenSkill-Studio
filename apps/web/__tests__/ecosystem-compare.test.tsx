@@ -161,4 +161,42 @@ describe("Ecosystem compare & estimate page (ADR-016 §19)", () => {
     expect(await screen.findByText(/mixed currencies — see lines/)).toBeDefined();
     expect(screen.getByText(/multiple currencies; no single total/)).toBeDefined();
   });
+
+  it("comparison shows human-arbitrated curated facts", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/compare"))
+        return Promise.resolve({
+          data: [
+            {
+              entity_kind: "model",
+              entity_id: "A".repeat(26),
+              canonical_name: "GenA",
+              lifecycle_status: "verified",
+              metadata: { curated: { license: { value: "MIT" } } },
+              prices: {},
+              availability_status: null,
+              benchmark: null,
+            },
+            {
+              entity_kind: "model",
+              entity_id: "B".repeat(26),
+              canonical_name: "GenB",
+              lifecycle_status: "verified",
+              metadata: null,
+              prices: {},
+              availability_status: null,
+              benchmark: null,
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComparePage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByPlaceholderText(/entity ids/), {
+      target: { value: `${"A".repeat(26)},${"B".repeat(26)}` },
+    });
+    fireEvent.click(screen.getByText("Compare", { selector: "button" }));
+    expect(await screen.findByText("Curated facts")).toBeDefined();
+    expect(screen.getByText("MIT")).toBeDefined();
+  });
 });

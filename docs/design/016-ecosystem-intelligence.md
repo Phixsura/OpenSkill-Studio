@@ -1920,4 +1920,5 @@ absent from every comparison, and `CatalogEntityResponse` didn't expose the
 field at all. Fixed: compare reads `extra`, the response schema exposes it as
 `metadata` (validation_alias). Killer arbitrates a license conflict and
 asserts the curated fact in BOTH the single-entity response and the
-comparison row.
+comparison row. Round 221 renders them: the comparison table gains a
+"Curated facts" row (field: value ✓ with an arbitration tooltip).
