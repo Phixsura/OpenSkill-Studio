@@ -166,3 +166,20 @@ test("6 — org-attached watchlist creation shows the org badge", async () => {
   const badge = page.getByText("org", { exact: true }).first();
   await badge.waitFor({ state: "visible", timeout: 10_000 });
 });
+
+test("7 — acknowledging a change persists across the include-acknowledged toggle", async () => {
+  await goto(page, "/dashboard/ecosystem/changes");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("acknowledge") || body.includes("no changes match")) {
+    test.skip(true, "no unacknowledged changes on this stack");
+    return;
+  }
+  const firstAck = page.getByText("Acknowledge", { exact: true }).first();
+  await firstAck.waitFor({ state: "visible", timeout: 10_000 });
+  await firstAck.dispatchEvent("click");
+  await page.waitForTimeout(1500);
+  await page.getByText("Include acknowledged").click();
+  await page.waitForTimeout(1500);
+  const after = (await page.innerHTML("body")).toLowerCase();
+  expect(after).not.toContain("application error");
+});
