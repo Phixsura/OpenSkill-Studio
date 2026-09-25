@@ -441,3 +441,21 @@ async def test_bulk_acknowledge_changes(http, tokens):
     body = r.json()["data"]
     assert body["acknowledged"] == []
     assert body["missing"] == ["0" * 26]
+
+async def test_delta_since_id_is_validated_over_http(http, tokens):
+    """Round-197: the composite-cursor params validate at the HTTP boundary —
+    a malformed since_id is a 422, and a valid pair round-trips."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get(
+        "/api/v1/ecosystem/export/changes",
+        params={"since": "2026-01-01T00:00:00Z", "since_id": "short"},
+        headers=member,
+    )
+    assert r.status_code == 422
+    r = await http.get(
+        "/api/v1/ecosystem/export/changes",
+        params={"since": "2026-01-01T00:00:00Z", "since_id": "0" * 26},
+        headers=member,
+    )
+    assert r.status_code == 200
+    assert "next_since_id" in r.json()["meta"]
