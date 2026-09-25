@@ -91,6 +91,7 @@ All from `overview()` flattened as `eco_<key>[_<subkey>]`, plus:
 | Metric                                      | Meaning                                    |
 | ------------------------------------------- | ------------------------------------------ |
 | `eco_sources_active` / `_paused` / `_error` | source states                              |
+| `eco_availability_unreachable`              | entities whose latest probe is unreachable |
 | `eco_sources_stale`                         | active sources overdue by 3× sync interval |
 | `eco_discoveries_7d`                        | observations in the last 7 days            |
 | `eco_observations_unverified`               | review debt (observations)                 |

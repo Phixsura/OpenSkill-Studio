@@ -1855,3 +1855,12 @@ Killers: outbox-row assertions for all three paths plus source-level cron
 pins. Lesson recorded: a registered handler is not a feature — the
 caller-graph sweep (enqueue-site count per topic) is now part of the audit
 repertoire.
+
+### 90.1 Probe telemetry surfaces (rounds 201–203)
+
+Handler-level killers for the newly-wired sweeps (probe recorded / clean
+skip; window aggregation idempotent under double delivery; malformed payload
+no-op). With probes now cron-driven, `availability_unreachable` (entities
+whose LATEST probe is unreachable, DISTINCT ON per entity) joins the
+overview, /ops/metrics (docs↔metrics parity killer auto-covers it), the
+alert runbook, and an alerting stat card on the dashboard.

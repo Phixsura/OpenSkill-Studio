@@ -154,11 +154,30 @@ class DashboardService:
             }
         return out
 
+    async def _unreachable_entity_count(self) -> int:
+        """R202: entities whose LATEST availability probe says unreachable —
+        the probes are cron-driven now (R198), so this is a live alarm."""
+        from sqlalchemy import text as sql_text
+
+        row = await self.db.execute(sql_text(
+            """
+            SELECT count(*) FROM (
+              SELECT DISTINCT ON (entity_kind, entity_id)
+                     value->>'status' AS status
+              FROM eco_availability_records
+              WHERE record_type = 'status'
+              ORDER BY entity_kind, entity_id, observed_at DESC, id DESC
+            ) latest WHERE latest.status = 'unreachable'
+            """
+        ))
+        return int(row.scalar() or 0)
+
     async def overview(self) -> dict:
         """Ecosystem health snapshot for the operator workspace."""
         from app.ecosystem.models.advisory import SecurityAdvisory as _SecurityAdvisory
         week_ago = datetime.now(UTC) - timedelta(days=7)
         return {
+            "availability_unreachable": await self._unreachable_entity_count(),
             "sources_stale": await self._stale_source_count(),
             "sources": {
                 "active": await self._count(

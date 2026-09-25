@@ -9,6 +9,7 @@ import { SEVERITY_STYLES, fmtDate } from "./lib";
 interface Overview {
   sources: { active: number; paused: number; error: number };
   sources_stale: number;
+  availability_unreachable: number;
   discoveries_7d: number;
   observations_unverified: number;
   injection_flagged_unverified: number;
@@ -104,6 +105,11 @@ export default function EcosystemOverviewPage() {
               label="Stale sources (3× interval)"
               value={overview.sources_stale}
               alert={overview.sources_stale > 0}
+            />
+            <StatCard
+              label="Unreachable entities (latest probe)"
+              value={overview.availability_unreachable}
+              alert={overview.availability_unreachable > 0}
             />
             <StatCard
               href="/dashboard/ecosystem/discoveries"
