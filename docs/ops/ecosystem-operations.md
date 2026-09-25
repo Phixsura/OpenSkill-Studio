@@ -97,5 +97,8 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
 
 `/ecosystem/ops/metrics` is Prometheus-scrapeable (per-metric TYPE lines);
 alert rules and per-alert runbooks live in ecosystem-alerts.md. Crons run
-off-peak minutes; the outbox dead-letters after max attempts and surfaces on
-the failed-outbox ops endpoint.
+off-peak minutes — source sweep (4/19/34/49), impact SLA (26/56), rollout
+eval (11/41), stuck runs (53), telemetry window (58, hourly production
+aggregation + divergence comparison), availability probes for watched
+entities (14/44), retention (03:41). The outbox dead-letters after max
+attempts and surfaces on the failed-outbox ops endpoint.
