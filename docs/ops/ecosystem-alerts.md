@@ -19,6 +19,14 @@ groups:
           summary: "{{ $value }} active sources overdue by 3× their sync interval"
           runbook: "Dashboard → Sources: check last error, adapter_key, vendor status page. A dead vendor is a config change (swap adapter_key), not a code change."
 
+      - alert: EcoEntitiesUnreachable
+        expr: eco_availability_unreachable > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} watched entities' latest availability probe is unreachable"
+          runbook: "Catalog → Inspect the entity; a sustained unreachable status usually precedes a provider incident or a sunset (probes run at :14/:44)."
+
       - alert: EcoSourcesInError
         expr: eco_sources_error > 0
         for: 15m
