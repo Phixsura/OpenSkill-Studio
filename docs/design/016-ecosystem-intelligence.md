@@ -1922,3 +1922,11 @@ field at all. Fixed: compare reads `extra`, the response schema exposes it as
 asserts the curated fact in BOTH the single-entity response and the
 comparison row. Round 221 renders them: the comparison table gains a
 "Curated facts" row (field: value ✓ with an arbitration tooltip).
+
+### 91.1 Arbitration field list unified (rounds 224–228)
+
+Inspect shows curated facts as pills; the adopt-a-value flow is wiring-
+tested; the export schema's additive-evolution contract is documented. The
+conflict-detection field tuple and the arbitration whitelist were duplicate
+literals — extracted to one shared `CONFLICT_ARBITRABLE_FIELDS` constant so
+they structurally cannot drift.

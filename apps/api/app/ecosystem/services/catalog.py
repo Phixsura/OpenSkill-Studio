@@ -25,6 +25,11 @@ def _model_for(kind: str):
     return model
 
 
+# Fields that conflict detection surfaces AND arbitration accepts — one list,
+# used by both, so they can't drift (R228)
+CONFLICT_ARBITRABLE_FIELDS = ("license", "sunset_at", "deprecated_at", "version", "api_identifier")
+
+
 class CatalogService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -101,7 +106,7 @@ class CatalogService:
         sides stay visible), the overlay records who decided, when, from which
         source. conflicting_observations() marks curated fields.
         """
-        allowed_fields = {"license", "sunset_at", "deprecated_at", "version", "api_identifier"}
+        allowed_fields = set(CONFLICT_ARBITRABLE_FIELDS)
         if field not in allowed_fields:
             raise AppError(
                 "VALIDATION_ERROR", f"Field {field!r} is not conflict-arbitrable", 422
@@ -689,7 +694,7 @@ class CatalogService:
         for obs in observations:
             latest_per_source.setdefault(obs.source_id, obs)
         conflicts: list[dict] = []
-        tracked = ("license", "sunset_at", "deprecated_at", "version", "api_identifier")
+        tracked = CONFLICT_ARBITRABLE_FIELDS
         sources = list(latest_per_source.values())
         for field in tracked:
             values: dict[str, list[str]] = {}
