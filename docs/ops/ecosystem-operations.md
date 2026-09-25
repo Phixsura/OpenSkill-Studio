@@ -82,7 +82,10 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
 ## 8. Exports & integration
 
 - `GET /api/v1/ecosystem/export` — the full catalog document (content-hashed,
-  totals + truncation flags; the integration currency).
+  totals + truncation flags; the integration currency). Schema
+  `openskill.eco.catalog/v1` evolves ADDITIVELY: new fields (e.g. per-entity
+  `metadata.curated`) may appear under the same version; removals or type
+  changes bump the version. Parse tolerantly.
 - `GET /api/v1/ecosystem/export/changes?since=&since_id=` — poll this
   instead of re-downloading the world. The cursor is (timestamp, id): always
   pass BOTH `next_since` and `next_since_id` back, or batch-inserted rows
