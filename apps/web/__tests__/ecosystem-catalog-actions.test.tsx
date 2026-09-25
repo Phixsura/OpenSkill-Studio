@@ -168,4 +168,42 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     fireEvent.click(screen.getByLabelText("Close inspect panel"));
     expect(screen.queryByText(/Source conflicts for/)).toBeNull();
   });
+
+  it("Load more appends the next offset page", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (/\/ecosystem\/catalog\/\w+\?limit=100&offset=0/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: ENTITY,
+              canonical_name: "Page One Gen",
+              lifecycle_status: "verified",
+              sunset_at: null,
+              aliases: [],
+            },
+          ],
+          meta: { total: 2 },
+        });
+      if (/offset=1/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "F".repeat(26),
+              canonical_name: "Page Two Gen",
+              lifecycle_status: "verified",
+              sunset_at: null,
+              aliases: [],
+            },
+          ],
+          meta: { total: 2 },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<CatalogPage />, { wrapper: wrapper() });
+    await screen.findByText("Page One Gen");
+    fireEvent.click(screen.getByText("Load more"));
+    await screen.findByText("Page Two Gen");
+    // first page stays appended
+    expect(screen.getByText("Page One Gen")).toBeDefined();
+  });
 });
