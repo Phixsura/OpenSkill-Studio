@@ -180,4 +180,47 @@ describe("Watch item add/remove (ADR-016 §24 UI)", () => {
       `/dashboard/ecosystem/changes?entity=${"T".repeat(26)}`,
     );
   });
+
+  it("creating an org-attached watchlist sends org_id (webhook fan-out)", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/orgs" && !init)
+        return Promise.resolve({ data: [{ id: "O".repeat(26), name: "Acme Studio" }] });
+      if (path === "/ecosystem/watchlists" && !init) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByPlaceholderText("New watchlist name"), {
+      target: { value: "Org Alerts" },
+    });
+    fireEvent.change(await screen.findByLabelText("Attach to organization (webhook fan-out)"), {
+      target: { value: "O".repeat(26) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) => c[0] === "/ecosystem/watchlists" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.name).toBe("Org Alerts");
+    expect(body.org_id).toBe("O".repeat(26));
+  });
+
+  it("personal lists send org_id null", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/orgs" && !init) return Promise.resolve({ data: [] });
+      if (path === "/ecosystem/watchlists" && !init) return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByPlaceholderText("New watchlist name"), {
+      target: { value: "Mine" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) => c[0] === "/ecosystem/watchlists" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(JSON.parse((call![1] as RequestInit).body as string).org_id).toBeNull();
+  });
 });

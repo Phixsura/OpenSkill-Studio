@@ -48,10 +48,15 @@ interface Sunset {
 export default function WatchlistsPage() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [orgId, setOrgId] = useState("");
   const [mutError, setMutError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [item, setItem] = useState({ target_kind: "model", target_id: "", target_ref: "" });
 
+  const myOrgs = useQuery({
+    queryKey: ["my-orgs"],
+    queryFn: () => apiWithAuth<{ data: { id: string; name: string }[] }>("/orgs"),
+  });
   const watchlists = useQuery({
     queryKey: ["eco-watchlists"],
     queryFn: () => apiWithAuth<{ data: Watchlist[] }>("/ecosystem/watchlists"),
@@ -78,7 +83,10 @@ export default function WatchlistsPage() {
 
   const createList = useMutation({
     mutationFn: () =>
-      apiWithAuth("/ecosystem/watchlists", { method: "POST", body: JSON.stringify({ name }) }),
+      apiWithAuth("/ecosystem/watchlists", {
+        method: "POST",
+        body: JSON.stringify({ name, org_id: orgId || null }),
+      }),
     onSuccess: () => {
       setName("");
       invalidate();
@@ -149,6 +157,20 @@ export default function WatchlistsPage() {
               onChange={(e) => setName(e.target.value)}
               className="flex-1 rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
             />
+            <select
+              aria-label="Attach to organization (webhook fan-out)"
+              title="Org-attached lists also fan out over the org's webhooks"
+              value={orgId}
+              onChange={(e) => setOrgId(e.target.value)}
+              className="rounded-md border bg-[hsl(var(--background))] px-2 py-2 text-sm"
+            >
+              <option value="">personal</option>
+              {(myOrgs.data?.data ?? []).map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
             <button
               type="submit"
               className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-[hsl(var(--primary-foreground))]"
