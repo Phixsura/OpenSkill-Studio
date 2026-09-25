@@ -1920,3 +1920,13 @@ async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
     assert change.id in member_feed
     outsider_feed = [c.id for c in await svc.matching_changes(outsider.id)]
     assert change.id not in outsider_feed
+    # R187: an ARCHIVED (departed) member loses the org feed too — and org
+    # management (the _is_org_admin path checks the same status)
+    archived = await _mk_user(db)
+    db.add(OrgMember(org_id=org.id, user_id=archived.id,
+                     role=OrgRole.ADMIN, status=MemberStatus.ARCHIVED))
+    await db.flush()
+    archived_feed = [c.id for c in await svc.matching_changes(archived.id)]
+    assert change.id not in archived_feed
+    with pytest.raises(AppError):
+        await svc.get_owned(wl.id, archived.id)
