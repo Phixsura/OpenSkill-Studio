@@ -233,8 +233,23 @@ function CompareInner() {
                   const u = uptimes.data?.[r.entity_id];
                   return (
                     <td key={r.entity_id} className="px-4 py-2 text-xs">
-                      <div className="font-mono">
-                        {r.availability_status ? JSON.stringify(r.availability_status) : "—"}
+                      <div>
+                        {r.availability_status ? (
+                          <span
+                            className={`rounded-full px-2 py-0.5 ${
+                              {
+                                operational: "bg-emerald-100 text-emerald-700",
+                                degraded: "bg-amber-100 text-amber-800",
+                                unreachable: "bg-red-100 text-red-700",
+                              }[String(r.availability_status.status)] ??
+                              "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {String(r.availability_status.status ?? "unknown")}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
                       </div>
                       {u && (
                         <div className="mt-1 text-[hsl(var(--muted-foreground))]">
