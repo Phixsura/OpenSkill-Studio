@@ -513,3 +513,36 @@ async def test_handle_telemetry_window_aggregates_idempotently(db):
     assert n1 == n2
     # malformed: no raise
     await handle_telemetry_window(db, {"window_start": "not-a-date"})
+
+async def test_availability_sweep_prefers_least_recently_probed(db):
+    """Round-209 killer: with cap=1 and two watched entities — one already
+    probed, one never — the sweep enqueues the NEVER-probed one (a fixed
+    first-page LIMIT starved everything beyond the cap)."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.ecosystem.services.pricing import AvailabilityService
+    from app.ecosystem.services.watchlists import WatchlistService
+    from app.ecosystem.worker import sweep_watched_availability
+
+    user = await _mk_user(db)
+    probed = await _mk_model_version(db, "FairA")
+    fresh = await _mk_model_version(db, "FairB")
+    for v in (probed, fresh):
+        await WatchlistService(db).quick_watch(
+            user.id, target_kind="model_version", target_id=v.id
+        )
+    await AvailabilityService(db).probe_status("model_version", probed.id)
+
+    # cap high enough to cover this test's two entities among pre-existing
+    # watched fixtures; the PROBED one must sort behind every never-probed one
+    n = await sweep_watched_availability(db, cap=500)
+    assert n >= 2
+    msgs = list(await db.scalars(
+        select(OutboxMessage)
+        .where(OutboxMessage.topic == "eco.check_availability")
+        .order_by(OutboxMessage.id.asc())
+    ))
+    order = [m.payload["entity_id"] for m in msgs]
+    assert fresh.id in order and probed.id in order
+    assert order.index(fresh.id) < order.index(probed.id), (
+        "never-probed entity must be enqueued before the already-probed one"
+    )

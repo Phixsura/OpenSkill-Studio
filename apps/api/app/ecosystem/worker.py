@@ -530,15 +530,31 @@ async def sweep_watched_availability(db: AsyncSession, *, cap: int = 200) -> int
     """R198: §11.3 promised availability is probed INDEPENDENTLY of syncs —
     but nothing ever enqueued eco.check_availability. Probe every id-backed
     watched entity (watchers are exactly who status flips matter to)."""
-    from sqlalchemy import distinct
+    from sqlalchemy import text as sql_text
 
     from app.controlplane.models.outbox import enqueue
-    from app.ecosystem.models.replacement import WatchItem
 
+    # R209: least-recently-probed first — a fixed `LIMIT cap` starved every
+    # watched entity beyond the first page. NULL probe times (never probed)
+    # sort first, then the stalest.
     rows = await db.execute(
-        select(distinct(WatchItem.target_kind), WatchItem.target_id)
-        .where(WatchItem.target_id.isnot(None))
-        .limit(cap)
+        sql_text(
+            """
+            SELECT w.target_kind, w.target_id
+            FROM (SELECT DISTINCT target_kind, target_id
+                  FROM eco_watch_items WHERE target_id IS NOT NULL) w
+            LEFT JOIN LATERAL (
+              SELECT max(observed_at) AS last_probe
+              FROM eco_availability_records r
+              WHERE r.entity_kind = w.target_kind
+                AND r.entity_id = w.target_id
+                AND r.record_type = 'status'
+            ) p ON true
+            ORDER BY p.last_probe ASC NULLS FIRST
+            LIMIT :cap
+            """
+        ),
+        {"cap": cap},
     )
     n = 0
     for target_kind, target_id in rows:

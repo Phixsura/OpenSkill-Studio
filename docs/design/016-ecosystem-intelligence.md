@@ -1871,3 +1871,11 @@ The hourly sweep only enqueued the previous hour — a crashed worker's missed
 hours were lost forever. It now looks back 6 hours every run; the snapshot
 unique constraint makes re-enqueued windows no-ops, so recovery is free and
 idempotent.
+
+### 90.3 Probe rotation fairness (round 209)
+
+The availability sweep took a fixed first page (`LIMIT cap`) — with more
+watched entities than the cap, everything beyond it was NEVER probed. The
+sweep now orders by least-recently-probed (LATERAL max(observed_at), NULLS
+FIRST), so never-probed entities go first and coverage rotates. Killer pins
+the ordering (never-probed enqueued before already-probed).
