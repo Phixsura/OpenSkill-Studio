@@ -199,4 +199,47 @@ describe("Ecosystem compare & estimate page (ADR-016 §19)", () => {
     expect(await screen.findByText("Curated facts")).toBeDefined();
     expect(screen.getByText("MIT")).toBeDefined();
   });
+
+  it("renders the 30-day stability strip per entity (R268)", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/compare"))
+        return Promise.resolve({
+          data: [
+            {
+              entity_kind: "model",
+              entity_id: "A".repeat(26),
+              canonical_name: "StripGen",
+              lifecycle_status: "verified",
+              prices: {},
+              availability_status: { status: "operational" },
+              benchmark: null,
+              metadata: null,
+            },
+          ],
+        });
+      if (path.includes("/pricing/availability/uptime"))
+        return Promise.resolve({
+          data: {
+            current_status: "operational",
+            uptime_pct: 96.7,
+            incidents: 1,
+            coverage_pct: 88,
+            daily: [
+              { date: "2026-09-24", worst_status: "operational" },
+              { date: "2026-09-25", worst_status: "unreachable" },
+            ],
+          },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComparePage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByPlaceholderText(/entity ids/), {
+      target: { value: "A".repeat(26) },
+    });
+    fireEvent.click(screen.getByText("Compare", { selector: "button" }));
+    expect(await screen.findByText("StripGen")).toBeDefined();
+    expect(await screen.findByTitle("2026-09-25: unreachable")).toBeDefined();
+    expect(screen.getByTitle("2026-09-24: operational")).toBeDefined();
+    expect(screen.getByText(/96.7% uptime \(30d\)/)).toBeDefined();
+  });
 });

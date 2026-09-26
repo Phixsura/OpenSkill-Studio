@@ -2295,3 +2295,11 @@ automation that silently stopped) recurring at runtime instead of at
 wiring time. `eco_outbox_failed` is now emitted, alerted
 (EcoOutboxDeadLetters, critical, 15m) and runbooked; killer inserts a
 failed row and reads the gauge back through the scrape surface.
+
+### 90.9 Stability strip on compare (round 268)
+
+The §90.6 StatusGator-style 30-day strip existed only on Inspect — but the
+side-by-side comparison is exactly where relative stability drives the
+decision. The compare page's uptime cells now render the same per-day
+worst-status strip (already-fetched daily data; no new requests). Unit
+killer pins per-day title tooltips and the uptime summary line.

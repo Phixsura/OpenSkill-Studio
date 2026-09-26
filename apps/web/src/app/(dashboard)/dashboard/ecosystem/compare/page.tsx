@@ -35,6 +35,7 @@ interface Uptime {
   uptime_pct: number | null;
   incidents: number;
   coverage_pct: number;
+  daily?: { date: string; worst_status: string }[];
 }
 
 interface EstimateRow {
@@ -277,6 +278,23 @@ function CompareInner() {
                           "—"
                         )}
                       </div>
+                      {u && (u.daily ?? []).length > 0 && (
+                        <div className="mt-1 flex gap-[2px]" aria-label="30-day stability strip">
+                          {(u.daily ?? []).slice(-30).map((d) => (
+                            <span
+                              key={d.date}
+                              title={`${d.date}: ${d.worst_status}`}
+                              className={`h-3 w-1.5 rounded-sm ${
+                                {
+                                  operational: "bg-emerald-400",
+                                  degraded: "bg-amber-400",
+                                  unreachable: "bg-red-500",
+                                }[d.worst_status] ?? "bg-slate-200"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
                       {u && (
                         <div className="mt-1 text-[hsl(var(--muted-foreground))]">
                           {u.uptime_pct !== null
