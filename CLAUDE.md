@@ -61,6 +61,7 @@ make test         # Run all tests (Vitest + pytest) — tests run WITHOUT infra
 ## Design Documents
 
 All architecture decisions are documented in `docs/design/`:
+
 - ADR-001: Bootstrap architecture
 - ADR-002: Auth & users
 - ADR-003: Organizations & multitenancy
@@ -75,3 +76,5 @@ All architecture decisions are documented in `docs/design/`:
 - ADR-012: Explainable matching engine
 - ADR-013: Solution composers & creator matching
 - ADR-014: SaaS commercialization control plane
+- ADR-015: Talent graph, skill passport & employment marketplace
+- ADR-016: AI ecosystem intelligence, benchmark lab & component lifecycle

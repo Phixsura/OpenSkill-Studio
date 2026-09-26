@@ -27,7 +27,7 @@ async def c():
 
 
 def _email():
-    return f"crm-{uuid.uuid4().hex[:8]}@test.com"
+    return f"crm-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c, name="Crm"):
@@ -40,7 +40,7 @@ async def _auth(c, name="Crm"):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"G-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"G-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 
@@ -1394,7 +1394,7 @@ async def test_approved_submission_evidence_deduped_per_submission(c):
         proj = Project(
             org_id=oid,
             title="Dedup Proj",
-            slug=f"dedup-{_uuid.uuid4().hex[:8]}",
+            slug=f"dedup-{_uuid.uuid4().hex[:16]}",
             description="d",
             instructions="i",
             project_type=cap,
@@ -1487,7 +1487,7 @@ async def test_approved_evidence_dropped_when_submission_not_finally_approved(c)
         proj = Project(
             org_id=oid,
             title="Flip Proj",
-            slug=f"flip-{_uuid.uuid4().hex[:8]}",
+            slug=f"flip-{_uuid.uuid4().hex[:16]}",
             description="d",
             instructions="i",
             project_type=cap,

@@ -1,0 +1,190 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+let searchParams = new URLSearchParams();
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/ecosystem/changes",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => searchParams,
+}));
+vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
+
+import ChangesPage from "@/app/(dashboard)/dashboard/ecosystem/changes/page";
+import { apiWithAuth } from "@/lib/api";
+
+const api = vi.mocked(apiWithAuth);
+
+function wrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  return Wrapper;
+}
+
+function change(id: string, field: string) {
+  return {
+    id,
+    change_type: "price",
+    field,
+    old_value: null,
+    new_value: { value: 1 },
+    severity: "info",
+    entity_kind: "model",
+    detected_at: "2026-09-20T00:00:00Z",
+    acknowledged: false,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  searchParams = new URLSearchParams();
+});
+
+describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
+  it("loads the next page via the cursor and appends rows", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.includes("cursor=CUR1"))
+        return Promise.resolve({
+          data: [change("c2", "page-two-field")],
+          meta: { has_more: false, next_cursor: null },
+        });
+      if (path.startsWith("/ecosystem/changes"))
+        return Promise.resolve({
+          data: [change("c1", "page-one-field")],
+          meta: { has_more: true, next_cursor: "CUR1" },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/page-one-field/)).toBeDefined();
+    fireEvent.click(screen.getByText("Load more (cursor)"));
+    expect(await screen.findByText(/page-two-field/)).toBeDefined();
+    // First page stays appended, button gone (has_more false)
+    expect(screen.getByText(/page-one-field/)).toBeDefined();
+    expect(screen.queryByText("Load more (cursor)")).toBeNull();
+  });
+
+  it("acknowledge POSTs to the change endpoint", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes?"))
+        return Promise.resolve({
+          data: [change("c9", "ack-me")],
+          meta: { has_more: false, next_cursor: null },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Acknowledge"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          c[0] === "/ecosystem/changes/c9/acknowledge" && (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("severity filter + hide-acknowledged drive the query string", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes"))
+        return Promise.resolve({ data: [], meta: { has_more: false, next_cursor: null } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 0));
+    // default: unacknowledged only
+    expect(
+      api.mock.calls.some(
+        (c) => typeof c[0] === "string" && (c[0] as string).includes("acknowledged=false"),
+      ),
+    ).toBe(true);
+    fireEvent.change(await screen.findByLabelText("Filter by severity"), {
+      target: { value: "breaking" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("severity=breaking") &&
+          (c[0] as string).includes("acknowledged=false"),
+      ),
+    ).toBe(true);
+  });
+
+  it("?entity deep link narrows the feed and shows the filter badge", async () => {
+    searchParams = new URLSearchParams({ entity: "E".repeat(26) });
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes"))
+        return Promise.resolve({ data: [], meta: { has_more: false, next_cursor: null } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/filtered to entity/)).toBeDefined();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes(`canonical_entity_id=${"E".repeat(26)}`),
+      ),
+    ).toBe(true);
+  });
+
+  it("Acknowledge-all sends only unacknowledged ids to bulk-acknowledge", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes?"))
+        return Promise.resolve({
+          data: [
+            { ...change("c1", "one"), acknowledged: false },
+            { ...change("c2", "two"), acknowledged: true },
+          ],
+          meta: { has_more: false, next_cursor: null },
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText(/Acknowledge all shown \(1\)/));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/changes/bulk-acknowledge" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call![1] as RequestInit).body as string).ids).toEqual(["c1"]);
+  });
+});
+
+describe("Feed-page Atom subscription (R248)", () => {
+  it("subscribe link carries the feed token and active severity filter", async () => {
+    api.mockImplementation((path: string) => {
+      if (path === "/ecosystem/export/feed-token")
+        return Promise.resolve({ data: { token: "ft-changes" } });
+      if (path.startsWith("/ecosystem/changes?")) return Promise.resolve({ data: [], meta: {} });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    const link = (await screen.findByText(/subscribe \(.atom\)/)) as HTMLAnchorElement;
+    await waitFor(() =>
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/export/changes.atom?token=ft-changes",
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Filter by severity"), {
+      target: { value: "breaking" },
+    });
+    await waitFor(() =>
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/export/changes.atom?severity=breaking&token=ft-changes",
+      ),
+    );
+  });
+});

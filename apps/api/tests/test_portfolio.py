@@ -114,7 +114,7 @@ async def test_profile_null_clears_nullable_fields(client):
     # own (closed) event loops (same hygiene as test_auth.py)
     await engine.dispose()
 
-    email = f"pf-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"pf-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Pf User"},

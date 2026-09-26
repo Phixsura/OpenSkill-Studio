@@ -35,7 +35,7 @@ async def c():
 
 
 def _email():
-    return f"wfr-{uuid.uuid4().hex[:8]}@test.com"
+    return f"wfr-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -48,7 +48,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"R-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"R-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 
@@ -266,7 +266,7 @@ async def test_run_idempotency_key(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     install_id = await _install(c, h, oid, _definition())
-    key = f"idem-{uuid.uuid4().hex[:8]}"
+    key = f"idem-{uuid.uuid4().hex[:16]}"
     body = {"installation_id": install_id, "inputs": {"topic": "x"}, "idempotency_key": key}
     r1 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
     r2 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
@@ -2104,11 +2104,17 @@ async def test_sweep_recovers_stalled_pending_run(c):
     )
     fresh_id = r2.json()["data"]["id"]
     async with AsyncSessionLocal() as db:
-        # force it back to PENDING but keep created_at recent (default now())
+        # force it back to PENDING and PIN created_at to now — under machine
+        # load the API round-trips above can exceed the grace window and the
+        # genuinely-fresh run would flake as "stalled" (R255 anti-flake)
         await db.execute(
             update(WorkflowRun)
             .where(WorkflowRun.id == fresh_id)
-            .values(status=RunStatus.PENDING, started_at=None)
+            .values(
+                status=RunStatus.PENDING,
+                started_at=None,
+                created_at=datetime.now(UTC),
+            )
         )
         await db.commit()
     async with AsyncSessionLocal() as db:
@@ -2567,7 +2573,7 @@ async def test_idempotent_retry_survives_quota_and_suspension(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
     install_id = await _install(c, h, oid, _definition())
-    key = f"idem-{uuid.uuid4().hex[:8]}"
+    key = f"idem-{uuid.uuid4().hex[:16]}"
     body = {"installation_id": install_id, "inputs": {"topic": "x"}, "idempotency_key": key}
     r1 = await c.post(f"/api/v1/orgs/{oid}/workflow-runs", json=body, headers=h)
     assert r1.status_code == 201, r1.text

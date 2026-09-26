@@ -702,7 +702,7 @@ async def main():
         r = await c.post(
             "/auth/register",
             json={
-                "email": f"adv-long-{uuid.uuid4().hex[:8]}@t.com",
+                "email": f"adv-long-{uuid.uuid4().hex[:16]}@t.com",
                 "password": "Xx1!" + "a" * 96,
                 "display_name": "Long Pass",
             },
@@ -712,7 +712,7 @@ async def main():
             r.status_code in (201, 422),
             f"got {r.status_code}",
         )
-        dup_email = f"adv-dup-{uuid.uuid4().hex[:8]}@t.com"
+        dup_email = f"adv-dup-{uuid.uuid4().hex[:16]}@t.com"
         await c.post(
             "/auth/register",
             json={"email": dup_email, "password": "Adv3rs4ry!x", "display_name": "Dup One"},
@@ -1168,7 +1168,7 @@ async def main():
         r1 = await c.post(
             "/auth/login",
             json={
-                "email": f"ghost-{uuid.uuid4().hex[:8]}@nowhere-example.com",
+                "email": f"ghost-{uuid.uuid4().hex[:16]}@nowhere-example.com",
                 "password": "Wrong1!xx",
             },
         )
@@ -1182,7 +1182,7 @@ async def main():
         )
         f1 = await c.post(
             "/auth/forgot-password",
-            json={"email": f"ghost-{uuid.uuid4().hex[:8]}@nowhere-example.com"},
+            json={"email": f"ghost-{uuid.uuid4().hex[:16]}@nowhere-example.com"},
         )
         f2 = await c.post("/auth/forgot-password", json={"email": dup_email})
         check(

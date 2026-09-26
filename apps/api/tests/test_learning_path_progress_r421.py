@@ -83,14 +83,14 @@ async def _org(db, owner):
 async def _skill(db, org):
     from app.models.skill import Skill, SkillCategory
 
-    cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:8]}")
+    cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:16]}")
     db.add(cat)
     await db.flush()
     s = Skill(
         org_id=org.id,
         category_id=cat.id,
         name=f"S {uuid.uuid4().hex[:4]}",
-        slug=f"s-{uuid.uuid4().hex[:8]}",
+        slug=f"s-{uuid.uuid4().hex[:16]}",
         description="dddddddddd",
     )
     db.add(s)
@@ -253,7 +253,7 @@ async def test_progress_wf_pack_done_and_org_scope_r421(db):
     svc = LearningPathService(db)
     learner = await _user(db, UserRole.STUDENT)
 
-    pack = WorkflowPack(owner_org_id=org.id, name="WF", slug=f"wf-{uuid.uuid4().hex[:8]}")
+    pack = WorkflowPack(owner_org_id=org.id, name="WF", slug=f"wf-{uuid.uuid4().hex[:16]}")
     db.add(pack)
     await db.flush()
     db.add(
@@ -351,7 +351,7 @@ async def test_progress_unlock_and_drip_r421(db):
 
     # drip: a future available_after_days puts the item in 'scheduled' when a
     # cohort assignment date exists (both conditions required — L759 and-gate)
-    cohort = Cohort(org_id=org.id, name="D", slug=f"d-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="D", slug=f"d-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add(cohort)
     await db.flush()
     db.add(
@@ -421,8 +421,8 @@ async def test_effective_skills_union_and_cohort_scope_r421(db):
     org = await _org(db, owner)
     svc = LearningPathService(db)
 
-    cohort = Cohort(org_id=org.id, name="E", slug=f"e-{uuid.uuid4().hex[:8]}", created_by=owner.id)
-    other = Cohort(org_id=org.id, name="O", slug=f"o-{uuid.uuid4().hex[:8]}", created_by=owner.id)
+    cohort = Cohort(org_id=org.id, name="E", slug=f"e-{uuid.uuid4().hex[:16]}", created_by=owner.id)
+    other = Cohort(org_id=org.id, name="O", slug=f"o-{uuid.uuid4().hex[:16]}", created_by=owner.id)
     db.add_all([cohort, other])
     await db.flush()
 
@@ -489,7 +489,7 @@ async def test_cohort_path_progress_learner_filter_r421(db):
     path = await svc.create_path(org.id, owner.id, name="CP")
 
     cohort = Cohort(
-        org_id=org.id, name="CP", slug=f"cp-{uuid.uuid4().hex[:8]}", created_by=owner.id
+        org_id=org.id, name="CP", slug=f"cp-{uuid.uuid4().hex[:16]}", created_by=owner.id
     )
     db.add(cohort)
     await db.flush()

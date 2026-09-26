@@ -21,7 +21,7 @@ from app.models.user import User, UserRole, UserStatus
 
 async def _u(db, role=UserRole.STUDENT):
     u = User(
-        email=f"100-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"100-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name="Hund",
         role=role,
@@ -72,7 +72,7 @@ async def test_auth_reset_password_success(db):
     """Cover the full reset password success path (lines 288-301)."""
     from app.services.auth import AuthService
 
-    email = f"rps-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"rps-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "ResetS")
     await db.flush()
@@ -105,7 +105,7 @@ async def test_auth_verify_email_success(db):
     """Cover the verify email success path (lines 317-331)."""
     from app.services.auth import AuthService
 
-    email = f"ves-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"ves-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "VerS")
     await db.flush()
@@ -147,7 +147,7 @@ async def test_auth_refresh_reuse_detection(db):
     from app.models.user import RefreshToken
     from app.services.auth import AuthService, TokenInvalidError
 
-    email = f"reu-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"reu-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "Reuse")
     await db.flush()
@@ -642,7 +642,7 @@ async def test_rate_limit_real_redis():
     """Cover check_rate_limit with real Redis (lines 28-39, 55-67)."""
     from app.core.rate_limit import check_rate_limit
 
-    key = f"test:ratelimit:{uuid.uuid4().hex[:8]}"
+    key = f"test:ratelimit:{uuid.uuid4().hex[:16]}"
     allowed, remaining = await check_rate_limit(key, 100, 60)
     assert allowed is True
 
@@ -657,7 +657,7 @@ async def test_rate_limit_dependency_denied():
     mock_request.client = MagicMock()
     mock_request.client.host = "127.0.0.1"
     mock_request.url = MagicMock()
-    mock_request.url.path = f"/test/{uuid.uuid4().hex[:8]}"
+    mock_request.url.path = f"/test/{uuid.uuid4().hex[:16]}"
     mock_request.method = "GET"
     mock_request.state = MagicMock()
 

@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"edge-{uuid.uuid4().hex[:8]}@test.com"
+    return f"edge-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -46,7 +46,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 

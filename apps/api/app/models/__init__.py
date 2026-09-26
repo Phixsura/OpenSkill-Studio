@@ -2,6 +2,8 @@
 # Talent models are imported via app.talent.models — they share the same
 # Base so Alembic discovers them, but we import the module (not names) to
 # avoid duplicate Table registration when product code also imports them.
+# ── Ecosystem intelligence layer (Issue #35, ADR-016) ──
+import app.ecosystem.models as _eco_models  # noqa: F401, E402
 import app.talent.models as _talent_models  # noqa: F401
 from app.models.base import Base  # noqa: F401
 from app.models.capability import CapabilityTag  # noqa: F401

@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"inst-{uuid.uuid4().hex[:8]}@test.com"
+    return f"inst-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -49,7 +49,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -1392,7 +1392,7 @@ async def test_registry_search_matches_summary(c):
     """Search term appearing only in summary is found."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique_term = f"xyzzy{uuid.uuid4().hex[:8]}"
+    unique_term = f"xyzzy{uuid.uuid4().hex[:16]}"
     pid = (
         await c.post(
             f"/api/v1/orgs/{oid}/packs",
@@ -1638,7 +1638,7 @@ async def test_registry_search_name_match(c):
     """Search term in pack name returns the pack."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = f"namematch{uuid.uuid4().hex[:8]}"
+    unique = f"namematch{uuid.uuid4().hex[:16]}"
     pid = await _pack_with_release(c, h, oid, f"Pack-{unique}", "public")
 
     r = await c.get(f"/api/v1/registry/packs?search={unique}")
@@ -1651,7 +1651,7 @@ async def test_registry_search_description_match(c):
     """Search term in pack description returns the pack."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = f"descword{uuid.uuid4().hex[:8]}"
+    unique = f"descword{uuid.uuid4().hex[:16]}"
 
     pid = (
         await c.post(
@@ -1711,7 +1711,7 @@ async def test_registry_search_partial_match(c):
     """Partial (substring) match works via ILIKE."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = f"fullword{uuid.uuid4().hex[:8]}"
+    unique = f"fullword{uuid.uuid4().hex[:16]}"
     pid = await _pack_with_release(c, h, oid, f"Pack-{unique}-end", "public")
 
     # Search with substring
@@ -1907,7 +1907,7 @@ async def test_registry_excludes_packs_from_archived_org(c):
     """Packs from an archived org no longer appear in registry search."""
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = f"archivedorg{uuid.uuid4().hex[:8]}"
+    unique = f"archivedorg{uuid.uuid4().hex[:16]}"
     pid = await _pack_with_release(c, h, oid, f"Pack-{unique}", "public")
 
     # Verify it's in the registry first

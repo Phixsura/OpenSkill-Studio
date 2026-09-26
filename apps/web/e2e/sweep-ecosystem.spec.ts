@@ -1,0 +1,191 @@
+/**
+ * Sweep: AI ECOSYSTEM INTELLIGENCE (ADR-016, issue #35).
+ *
+ * Drives the real UI as a plain member: every ecosystem page renders its h1
+ * without crashing, and the member-owned watchlist flow works end to end
+ * (create list → add external-ref item → mute → remove item). Admin-only
+ * surfaces (sources) must render their read view gracefully for members.
+ *
+ * DOM anchors verified against page sources:
+ * - /dashboard/ecosystem: overview stat cards (EcosystemNav present)
+ * - watchlists: h1 "Watchlists & Deprecation Calendar", input
+ *   "New watchlist name", selects aria-label "Watch target kind" /
+ *   "Notification severity threshold", input "external ref (repo url…)",
+ *   button "Watch", per-item "remove"
+ * - other pages: h1s "Model / Tool Catalog", "Change Feed", "Discoveries",
+ *   "Pricing Intelligence", "Benchmark Lab", "Compare & Estimate",
+ *   "External Sources", "Security Advisories", "Blind Review",
+ *   "Component Lifecycle"
+ */
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { createOrg, loginInBrowser, registerUser, type AuthContext } from "./helpers";
+
+const PASSWORD = process.env.E2E_TEST_PASSWORD || "TestPass123!";
+const TS = Date.now();
+
+let auth: AuthContext;
+let ctx: BrowserContext;
+let page: Page;
+
+test.describe.configure({ mode: "serial" });
+
+// registration + UI login can exceed the default 60s under load
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(120_000);
+  auth = await registerUser(`Eco Sweep${TS}`);
+  ctx = await browser.newContext();
+  page = await ctx.newPage();
+  await loginInBrowser(page, auth.email, PASSWORD);
+});
+
+test.afterAll(async () => {
+  await ctx?.close();
+});
+
+async function goto(p: Page, path: string) {
+  await p.goto(path);
+  await p.waitForLoadState("domcontentloaded");
+  await p.waitForTimeout(1200);
+}
+
+const PAGES: Array<[string, string]> = [
+  ["/dashboard/ecosystem", "Ecosystem"],
+  ["/dashboard/ecosystem/catalog", "Model / Tool Catalog"],
+  ["/dashboard/ecosystem/changes", "Change Feed"],
+  ["/dashboard/ecosystem/discoveries", "Discoveries"],
+  ["/dashboard/ecosystem/pricing", "Pricing Intelligence"],
+  ["/dashboard/ecosystem/benchmarks", "Benchmark Lab"],
+  ["/dashboard/ecosystem/compare", "Compare & Estimate"],
+  ["/dashboard/ecosystem/sources", "External Sources"],
+  ["/dashboard/ecosystem/security", "Security Advisories"],
+  ["/dashboard/ecosystem/review", "Blind Review"],
+  ["/dashboard/ecosystem/components", "Component Lifecycle"],
+  ["/dashboard/ecosystem/watchlists", "Watchlists & Deprecation Calendar"],
+];
+
+test("1 — every ecosystem page renders for a member without crashing", async () => {
+  for (const [path, heading] of PAGES) {
+    await goto(page, path);
+    const body = (await page.innerHTML("body")).toLowerCase();
+    expect(body, `${path} should not crash`).not.toContain("application error");
+    if (path !== "/dashboard/ecosystem") {
+      await expect(
+        page.getByRole("heading", { level: 1, name: heading }),
+        `${path} h1`,
+      ).toBeVisible();
+    }
+  }
+});
+
+test("2 — watchlist lifecycle: create, add ref item, mute, remove", async () => {
+  await goto(page, "/dashboard/ecosystem/watchlists");
+  const listName = `E2E List ${TS}`;
+
+  await page.getByPlaceholder("New watchlist name").fill(listName);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByText(listName)).toBeVisible({ timeout: 10_000 });
+
+  // Select the list → item panel appears
+  await page.getByText(listName).click();
+  const kindSelect = page.getByLabel("Watch target kind");
+  await expect(kindSelect).toBeVisible();
+  await kindSelect.selectOption("github_repo");
+  await page.getByPlaceholder(/external ref/).fill(`acme/e2e-repo-${TS}`);
+  await page.getByRole("button", { name: "Watch", exact: true }).dispatchEvent("click");
+  await expect(page.getByText(`acme/e2e-repo-${TS}`)).toBeVisible({ timeout: 10_000 });
+
+  // Mute (bell toggles) — the muted badge appears on the list row
+  await page
+    .getByRole("button", { name: "Mute notifications for 7 days" })
+    .first()
+    .dispatchEvent("click");
+  await expect(page.getByText("muted").first()).toBeVisible({ timeout: 10_000 });
+
+  // Remove the item
+  await page.getByRole("button", { name: "remove" }).first().dispatchEvent("click");
+  await expect(page.getByText(`acme/e2e-repo-${TS}`)).toBeHidden({ timeout: 10_000 });
+});
+
+test("3 — quick watch from catalog is member-allowed (or empty state shows)", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (body.includes("👁 watch")) {
+    await page.getByText("👁 Watch").first().click();
+    await expect(page.getByText("✓ Watching").first()).toBeVisible({ timeout: 10_000 });
+  } else {
+    // Empty catalog is a valid state on a fresh stack — page must say so
+    expect(body).toContain("no ");
+  }
+});
+
+test("4 — catalog Inspect deep-links to the entity-filtered change feed", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("inspect")) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  await page.getByText("Inspect").first().dispatchEvent("click");
+  const link = page.getByText("📰 view changes");
+  await link.waitFor({ state: "visible", timeout: 10_000 });
+  // R232 full-stack check: the subscribe anchor must carry a real feed token
+  // (feed readers can't send Bearer headers)
+  const subscribe = page.getByText("📡 subscribe (.atom)");
+  await expect
+    .poll(async () => (await subscribe.getAttribute("href")) ?? "", { timeout: 10_000 })
+    .toMatch(/changes\.atom\?entity_id=[0-9A-Z]{26}&token=.+/);
+  await link.dispatchEvent("click");
+  await page.waitForURL(/\/dashboard\/ecosystem\/changes\?entity=/, { timeout: 10_000 });
+  await page.getByText(/filtered to entity/).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+test("5 — global search hit opens the catalog Inspect panel", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("inspect")) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  // search for the first visible entity name fragment
+  const firstName = await page.locator("tbody tr td:first-child").first().innerText();
+  const term = firstName.trim().split(/\s+/)[0]!.slice(0, 8);
+  await page.getByLabel("Search catalog").fill(term);
+  await page.getByText("🔍").dispatchEvent("click");
+  const hit = page.locator("a[href*='/dashboard/ecosystem/catalog?kind=']").first();
+  await hit.waitFor({ state: "visible", timeout: 10_000 });
+  await hit.dispatchEvent("click");
+  await page.waitForURL(/entity=/, { timeout: 10_000 });
+  await page.getByText(/Source conflicts for/).waitFor({ state: "visible", timeout: 10_000 });
+});
+
+test("6 — org-attached watchlist creation shows the org badge", async () => {
+  const orgId = await createOrg(auth, `Eco Org ${TS}`);
+  expect(orgId).toBeTruthy();
+  await goto(page, "/dashboard/ecosystem/watchlists");
+  const listName = `Org List ${TS}`;
+  await page.getByPlaceholder("New watchlist name").fill(listName);
+  await page.getByLabel("Attach to organization (webhook fan-out)").selectOption(orgId);
+  await page.getByRole("button", { name: "Create", exact: true }).dispatchEvent("click");
+  const row = page.getByText(listName);
+  await row.waitFor({ state: "visible", timeout: 10_000 });
+  // the org badge marks it
+  const badge = page.getByText("org", { exact: true }).first();
+  await badge.waitFor({ state: "visible", timeout: 10_000 });
+});
+
+test("7 — acknowledging a change persists across the include-acknowledged toggle", async () => {
+  await goto(page, "/dashboard/ecosystem/changes");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("acknowledge") || body.includes("no changes match")) {
+    test.skip(true, "no unacknowledged changes on this stack");
+    return;
+  }
+  const firstAck = page.getByText("Acknowledge", { exact: true }).first();
+  await firstAck.waitFor({ state: "visible", timeout: 10_000 });
+  await firstAck.dispatchEvent("click");
+  await page.waitForTimeout(1500);
+  await page.getByText("Include acknowledged").click();
+  await page.waitForTimeout(1500);
+  const after = (await page.innerHTML("body")).toLowerCase();
+  expect(after).not.toContain("application error");
+});

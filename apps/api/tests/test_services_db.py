@@ -17,7 +17,7 @@ from app.models.user import User, UserRole, UserStatus
 
 async def _user(db, role=UserRole.STUDENT):
     u = User(
-        email=f"svc-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"svc-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name="SvcTest",
         role=role,
@@ -48,7 +48,7 @@ async def test_auth_register_success(db):
     from app.services.auth import AuthService
 
     svc = AuthService(db)
-    result = await svc.register(f"reg-{uuid.uuid4().hex[:8]}@test.com", "Valid123!", "Reg User")
+    result = await svc.register(f"reg-{uuid.uuid4().hex[:16]}@test.com", "Valid123!", "Reg User")
     assert result.access_token
     assert result.user.role == UserRole.STUDENT
 
@@ -57,7 +57,7 @@ async def test_auth_register_success(db):
 async def test_auth_login_success(db):
     from app.services.auth import AuthService
 
-    email = f"login-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"login-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "Login User")
     await db.flush()
@@ -71,7 +71,7 @@ async def test_auth_login_success(db):
 async def test_auth_login_wrong_pw(db):
     from app.services.auth import AuthService, InvalidCredentialsError
 
-    email = f"wp-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"wp-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "WP")
     await db.flush()
@@ -84,7 +84,7 @@ async def test_auth_login_wrong_pw(db):
 async def test_auth_refresh_success(db):
     from app.services.auth import AuthService
 
-    email = f"ref-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"ref-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "Ref")
     await db.flush()
@@ -97,7 +97,7 @@ async def test_auth_refresh_success(db):
 async def test_auth_logout_success(db):
     from app.services.auth import AuthService
 
-    email = f"lo-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"lo-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "Lo")
     await db.flush()
@@ -108,7 +108,7 @@ async def test_auth_logout_success(db):
 async def test_auth_change_password_success(db):
     from app.services.auth import AuthService
 
-    email = f"cp-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"cp-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "OldPass123!", "CP")
     await db.flush()
@@ -119,7 +119,7 @@ async def test_auth_change_password_success(db):
 async def test_auth_forgot_password_success(db):
     from app.services.auth import AuthService
 
-    email = f"fp-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"fp-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "FP")
     await db.flush()
@@ -134,7 +134,7 @@ async def test_auth_verify_email_success(db):
     from app.models.user import EmailVerificationToken
     from app.services.auth import AuthService
 
-    email = f"ve-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"ve-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "VE")
     await db.flush()
@@ -150,7 +150,7 @@ async def test_auth_verify_email_success(db):
 async def test_auth_sessions_list(db):
     from app.services.auth import AuthService
 
-    email = f"sess-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"sess-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "Sess")
     await db.flush()
@@ -163,7 +163,7 @@ async def test_auth_sessions_list(db):
 async def test_auth_revoke_session(db):
     from app.services.auth import AuthService
 
-    email = f"rev-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"rev-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "Rev")
     await db.flush()
@@ -721,7 +721,7 @@ async def test_eval_settings_and_usage(db):
     # R133: randomized — the fixed "EvalOrg" name derives a deterministic slug
     # that permanently collides with a leftover committed row in the shared
     # dev DB after any crashed run (org creation COMMITS the auto-tenant).
-    org = await org_svc.create(f"EvalOrg-{uuid.uuid4().hex[:8]}", None, None, user.id)
+    org = await org_svc.create(f"EvalOrg-{uuid.uuid4().hex[:16]}", None, None, user.id)
     await db.flush()
 
     svc = EvaluationService(db)

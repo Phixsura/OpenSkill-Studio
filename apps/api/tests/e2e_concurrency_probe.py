@@ -171,7 +171,7 @@ async def main() -> None:
 
         # ── 2. Idempotency key: 8 parallel creates → 1 run ──
         print("② Run idempotency (8 parallel creates, same key)")
-        key = f"conc-{uuid.uuid4().hex[:8]}"
+        key = f"conc-{uuid.uuid4().hex[:16]}"
         results = await asyncio.gather(
             *[
                 c.post(

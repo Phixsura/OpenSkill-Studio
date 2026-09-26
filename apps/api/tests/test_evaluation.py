@@ -78,14 +78,14 @@ async def test_eval_settings_null_clears_budget(client):
     # own (closed) event loops (same hygiene as test_auth.py)
     await engine.dispose()
 
-    email = f"evalset-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"evalset-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "EvalSet"},
     )
     assert r.status_code == 201
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
-    r = await client.post("/api/v1/orgs", json={"name": f"E-{_uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await client.post("/api/v1/orgs", json={"name": f"E-{_uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201
     oid = r.json()["data"]["id"]
     url = f"/api/v1/orgs/{oid}/settings/evaluation"
@@ -325,7 +325,7 @@ async def test_multimodal_eval_types_persist_not_500(client):
 
     await engine.dispose()
 
-    email = f"mm-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"mm-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "MM"},
@@ -333,7 +333,7 @@ async def test_multimodal_eval_types_persist_not_500(client):
     assert r.status_code == 201
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     oid = (
-        await client.post("/api/v1/orgs", json={"name": f"MM-{_uuid.uuid4().hex[:8]}"}, headers=h)
+        await client.post("/api/v1/orgs", json={"name": f"MM-{_uuid.uuid4().hex[:16]}"}, headers=h)
     ).json()["data"]["id"]
 
     # Enable AI eval so the trigger reaches the DB write (past EVAL_NOT_ENABLED)

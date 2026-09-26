@@ -1,0 +1,194 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/ecosystem/discoveries",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
+
+import DiscoveriesPage from "@/app/(dashboard)/dashboard/ecosystem/discoveries/page";
+import { apiWithAuth } from "@/lib/api";
+
+const api = vi.mocked(apiWithAuth);
+
+function wrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  return Wrapper;
+}
+
+function obs(id: string, verified: boolean) {
+  return {
+    id,
+    event_type: "model_release",
+    entity_kind: "model",
+    external_ref: `ref-${id}`,
+    canonical_entity_id: null,
+    observed_at: "2026-09-20T00:00:00Z",
+    confidence: 0.8,
+    extraction_method: "adapter",
+    human_verified: verified,
+    provenance_url: null,
+    normalized: {},
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.mockImplementation((path: string, init?: RequestInit) => {
+    if (path.startsWith("/ecosystem/observations?") && !init)
+      return Promise.resolve({
+        data: [obs("O1".padEnd(26, "x"), false), obs("O2".padEnd(26, "x"), true)],
+      });
+    if (path === "/ecosystem/sources" && !init) return Promise.resolve({ data: [] });
+    if (path === "/ecosystem/resolution-candidates" && !init)
+      return Promise.resolve({
+        data: [
+          {
+            id: "R1".padEnd(26, "x"),
+            entity_kind: "model",
+            candidate_entity_id: null,
+            match_method: "none",
+            confidence: 0,
+            status: "pending",
+            proposed_payload: { name: "Fresh Model" },
+          },
+        ],
+      });
+    return Promise.resolve({ data: {} });
+  });
+});
+
+describe("Discoveries review actions (ADR-016 §11 UI)", () => {
+  it("Verify-all sends ONLY the unverified observation ids", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText(/Verify all shown \(1\)/));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/observations/bulk-verify" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    // The already-verified O2 row must NOT be re-sent
+    expect(body.ids).toEqual(["O1".padEnd(26, "x")]);
+  });
+
+  it("Confirm and Reject hit the specific resolution candidate", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Confirm"));
+    fireEvent.click(screen.getByText("Reject"));
+    await new Promise((r) => setTimeout(r, 0));
+    const paths = api.mock.calls
+      .filter((c) => (c[1] as RequestInit)?.method === "POST")
+      .map((c) => c[0]);
+    expect(paths).toContain(`/ecosystem/resolution-candidates/${"R1".padEnd(26, "x")}/confirm`);
+    expect(paths).toContain(`/ecosystem/resolution-candidates/${"R1".padEnd(26, "x")}/reject`);
+  });
+
+  it("LLM suggest is offered only for NEW-entity proposals and POSTs", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText(/LLM suggest/));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          c[0] === `/ecosystem/resolution-candidates/${"R1".padEnd(26, "x")}/llm-suggest` &&
+          (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("event-type filter drives the observations query string", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.change(await screen.findByLabelText("Filter discoveries"), {
+      target: { value: "price_changed" },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(
+      api.mock.calls.some(
+        (c) => typeof c[0] === "string" && (c[0] as string).includes("event_type=price_changed"),
+      ),
+    ).toBe(true);
+  });
+
+  it("merge candidates link to their target entity in the catalog", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/resolution-candidates" && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "RM".padEnd(26, "m"),
+              entity_kind: "model",
+              candidate_entity_id: "T".repeat(26),
+              match_method: "alias",
+              confidence: 0.95,
+              status: "pending",
+              proposed_payload: { name: "Known Model" },
+            },
+          ],
+        });
+      if (path.startsWith("/ecosystem/observations?") && !init)
+        return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    const link = await screen.findByText("view target");
+    expect(link.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/catalog?kind=models&entity=${"T".repeat(26)}`,
+    );
+  });
+
+  it("LLM extraction posts source+text and is gated on both", async () => {
+    const SRC = "L".repeat(26);
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/sources" && !init)
+        return Promise.resolve({
+          data: [
+            { id: SRC, name: "Analyst desk", source_type: "manual_analyst" },
+            { id: "X".repeat(26), name: "HF feed", source_type: "provider_api" },
+          ],
+        });
+      if (path.startsWith("/ecosystem/observations?") && !init)
+        return Promise.resolve({ data: [] });
+      if (path === "/ecosystem/resolution-candidates" && !init)
+        return Promise.resolve({ data: [] });
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    const button = (await screen.findByText(/Extract/)) as HTMLButtonElement;
+    expect(button.disabled).toBe(true); // no source, no text
+    await screen.findByText("Analyst desk");
+    const select = screen.getByLabelText("Extraction source") as HTMLSelectElement;
+    // only manual/internal sources are offered (adapter feeds excluded)
+    expect(select.options.length).toBe(2); // placeholder + analyst desk
+    expect(screen.queryByText("HF feed")).toBeNull();
+    fireEvent.change(select, { target: { value: SRC } });
+    fireEvent.change(screen.getByLabelText("Untrusted text to extract from"), {
+      target: { value: "GPT-9 released at $1/1k tokens" },
+    });
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === "/ecosystem/observations/extract-llm" && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    const body = JSON.parse((call![1] as RequestInit).body as string);
+    expect(body.source_id).toBe(SRC);
+    expect(body.text).toContain("GPT-9");
+  });
+});
