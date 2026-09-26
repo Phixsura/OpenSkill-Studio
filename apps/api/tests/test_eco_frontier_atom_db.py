@@ -177,3 +177,58 @@ async def test_atom_feed_filters_by_entity(db):
     assert f"OTHER-{tag}" not in body
     assert "<x&y>" not in body  # escaped, never raw
     assert "&lt;x&amp;y&gt;" in body
+
+
+async def test_atom_feed_survives_control_chars_and_is_wellformed(db):
+    """Round-230 killer: control chars are legal in Postgres text/JSONB but
+    ILLEGAL in XML 1.0 — saxutils.escape passes them through, so ONE poisoned
+    observation made the whole feed unparseable for every consumer. The feed
+    must stay well-formed XML with the control char stripped."""
+    import xml.etree.ElementTree as ET
+
+    from app.ecosystem.api.dashboard import export_changes_atom
+    from tests.test_eco_services_db import _mk_source
+
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        raw_hash="b" * 64, normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    db.add(ChangeEvent(
+        observation_id=obs.id, change_type="price",
+        field="ver\x08sion",  # backspace: valid in PG, invalid in XML 1.0
+        old_value={"v": "a\x01b"}, new_value={"v": 2},
+        severity="info",
+    ))
+    await db.flush()
+
+    resp = await export_changes_atom(severity=None, limit=50, db=db, _user=None)
+    root = ET.fromstring(resp.body.decode())  # would raise before the fix
+    ns = "{http://www.w3.org/2005/Atom}"
+    titles = [t.text for t in root.iter(f"{ns}title")]
+    assert any("version" in (t or "") for t in titles)  # char stripped, not row dropped
+    # Atom 1.0 spec: feed-level author is required
+    assert root.find(f"{ns}author/{ns}name") is not None
+
+
+async def test_atom_feed_empty_result_still_valid_atom(db):
+    """Round-230: an empty feed must still carry a non-empty RFC3339
+    <updated> (Atom requires it; \'\' is spec-invalid and breaks readers)."""
+    import xml.etree.ElementTree as ET
+
+    from app.ecosystem.api.dashboard import export_changes_atom
+
+    tag = str(ULID()).lower()[:6]
+    lonely = AIModel(canonical_name=f"AtomEmpty-{tag}", slug=f"ae-{tag}")
+    db.add(lonely)
+    await db.flush()
+    resp = await export_changes_atom(
+        severity=None, entity_id=lonely.id, limit=50, db=db, _user=None
+    )
+    root = ET.fromstring(resp.body.decode())
+    ns = "{http://www.w3.org/2005/Atom}"
+    updated = root.find(f"{ns}updated")
+    assert updated is not None and updated.text  # non-empty timestamp
+    assert root.find(f"{ns}author/{ns}name") is not None

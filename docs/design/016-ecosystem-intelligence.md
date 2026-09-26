@@ -1930,3 +1930,214 @@ tested; the export schema's additive-evolution contract is documented. The
 conflict-detection field tuple and the arbitration whitelist were duplicate
 literals — extracted to one shared `CONFLICT_ARBITRABLE_FIELDS` constant so
 they structurally cannot drift.
+
+## 92. Atom feed: XML 1.0 legality of untrusted content (round 230)
+
+**Gap.** `xml.sax.saxutils.escape` only rewrites `<>&`. Control characters
+(\x00–\x08, \x0b, \x0c, \x0e–\x1f) are legal in Postgres `text`/JSONB —
+and change values come from scraped pages and LLM extraction — but they are
+ILLEGAL in XML 1.0. One poisoned observation therefore made the ENTIRE
+`/export/changes.atom` response unparseable for every consumer: a
+single-row denial of service on the whole subscription surface, invisible
+to us because our tests only asserted `&lt;script&gt;` substrings, never
+parsed the document.
+
+**Fix.** `_xml_text()` strips XML-illegal control chars before escaping
+(the row survives with the character removed — dropping the row would hide
+a real change). Two spec repairs rode along: feed-level `<author>` is
+required by Atom 1.0 (strict validators/readers reject feeds without it),
+and an empty feed previously emitted `<updated></updated>` — now falls back
+to now() in RFC3339.
+
+**Killers** (`test_eco_frontier_atom_db.py`): a `\x08` field must yield a
+document that `ElementTree.fromstring` parses, with the title present
+(stripped, not dropped) and `<author>` found; an entity-filtered empty feed
+must parse with a non-empty `<updated>`. Mutation audit: un-stripping,
+re-emptying `updated`, and deleting `<author>` each fail the suite (3/3
+killed).
+
+**Rule.** Any endpoint that serializes untrusted text into a non-JSON
+envelope (XML, CSV, ICS…) must be tested by PARSING the output with a real
+parser, not by substring assertions — escaping bugs live in the characters
+you didn't think to assert about.
+
+## 93. Severity filter whitelist — silent-empty is a lie (round 231)
+
+**Gap.** Advisory INGEST validated `severity` against `ADVISORY_SEVERITIES`,
+but every severity FILTER param accepted arbitrary strings: change-feed,
+`/export/changes.atom`, `/changes`, and `/security/advisories`. A typo
+(`?severity=critcal`) silently returned an empty list/feed — which a
+subscriber reads as "no critical changes", the most dangerous possible
+misreading. Atom URLs are hand-typed into feed readers, so this is a real
+user path, not a UI-only concern (the web dropdown is controlled and its
+6 values match `CHANGE_SEVERITIES` exactly — verified).
+
+**Fix.** `_check_severity(value, allowed)` in `dashboard.py`, reused by all
+four surfaces (change vocabulary for the three change surfaces,
+`ADVISORY_SEVERITIES` for advisories) → 422 `VALIDATION_ERROR` naming the
+allowed values. Valid values still pass (asserted 200 + envelope/Atom).
+
+**Killer** (`test_eco_http_contract.py::test_severity_filters_reject_unknown_values`):
+four bad-value 422s with machine envelope + three good-value 200s. Mutation
+audit: removing each of the four call sites and neutering the guard
+condition each fail the test (5/5 killed).
+
+**Rule.** Every enum-valued filter param must share the writer's vocabulary
+constant and reject unknowns — an unvalidated filter that returns [] is
+indistinguishable from "nothing matched", and that ambiguity always
+resolves against the user.
+
+## 94. Feed tokens — the subscribe surface was end-to-end unusable (round 232)
+
+**Gap.** Every ecosystem route requires a Bearer access token — including
+`/export/changes.atom`. But the two real consumers of that endpoint cannot
+send Authorization headers: a browser navigating the Inspect panel's
+`<a href>` and every Atom feed reader. The subscribe feature we shipped
+(§57) returned 401 to 100% of its intended audience; our tests never saw
+it because ASGI test clients attach headers effortlessly.
+
+**Fix (GitHub private-feed posture).**
+
+- `create_feed_token(user_id)`: JWT `type="feed"`, 365d expiry — a
+  narrow-scope credential safe to embed in URLs.
+- `get_feed_user` dep (ecosystem deps): accepts a normal Bearer access
+  token OR `?token=<feed>`; an ACCESS token in the query string is refused
+  by type — URLs land in server logs, browser history and referrers, and a
+  leaked feed URL must never become an account takeover. Conversely a feed
+  token in a Bearer header opens nothing (`type != "access"`).
+- `GET /export/feed-token` (authed) mints one; the Inspect subscribe link
+  appends it (`staleTime: Infinity` — one mint per session).
+
+**Killers.** HTTP contract: mint → `?token=` 200 Atom; access-token-in-query
+401; garbage 401; Bearer still 200; feed token on `/changes` (query and
+Bearer) both 401 — scope is exactly one endpoint. Web unit: subscribe href
+must end `&token=ft-test-token` after mint resolves.
+
+**Rule.** For every surface, ask who actually presents the credential. A
+test client is not a feed reader, a cron, or a webhook receiver — if the
+real consumer can't send the header, the feature doesn't exist.
+
+### 94.1 Same class, two more surfaces (round 233)
+
+Sweeping the UI for other `<a href="/api/v1/...">` anchors (the §94 rule
+applied as an audit) found two more broken-by-construction consumers:
+`deprecation-calendar.ics` — whose entire point is calendar-app URL
+subscription (endoflife.date posture) — and the catalog `/export` download
+anchor. Both now accept the feed token (`get_feed_user`), and both
+watchlist-page anchors append it. The token's scope statement is refined:
+it grants the READ-ONLY EXPORT/SUBSCRIPTION surfaces (Atom, iCal, catalog
+export) — all non-PII platform intelligence — and nothing else. Killers:
+per-URL matrix (anonymous 401 / access-in-query 401 / feed-token 200 with
+correct content-type / Bearer 200) plus web anchor-href assertions.
+
+### 94.2 Feed-token lifecycle killers (round 234)
+
+Feed tokens are stateless and live 365 days — account deactivation is the
+ONLY server-side revocation. That semantic was implemented
+(`user.is_active` in `get_feed_user`) but untested: a mutation dropping the
+check survived nothing because no test suspended a user. New killer: mint →
+200, suspend account → same token 401, plus a validly-signed token with no
+`sub` and one with a non-string `sub` both 401 (never a KeyError/DB 500).
+Mutation audit: the `is_active` drop is KILLED; the `isinstance(sub, str)`
+gate survives as an EQUIVALENT mutant — PyJWT ≥ 2.10 already raises
+`InvalidSubjectError` for non-string subs at decode time. The gate stays as
+defense against a library-behavior regression, and the audit notes the
+equivalence rather than chasing a kill.
+
+## 95. Conditional GET on the polling surfaces (round 235)
+
+**Gap.** Both machine-polled surfaces re-transferred the world on every
+poll: `/export` (multi-MB catalog, polled by integrations) computed a
+`content_hash` for drift detection but never exposed it as an ETag, and
+`changes.atom` (polled every ~30min by every feed reader) had no validator
+at all. LiteLLM/deps.dev-posture datasets and every real feed server
+support conditional GET; without it our own subscription features tax
+every subscriber and ourselves linearly with adoption.
+
+**Fix.** `/export`: `ETag: "<content_hash>"`, `If-None-Match` match → 304
+empty (DB work still happens; the transfer is what's saved). Atom: the
+change stream is insert-only with oldest-first retention, so the window is
+identified by `(severity, entity_id, limit, newest id, oldest id, count)`
+hashed to a 32-hex ETag; matching poll → 304.
+
+**Killers** (HTTP contract): 200 with ETag mirroring content_hash → replay
+with `If-None-Match` → 304 with empty body → mismatched validator → full
+200 again; same matrix for Atom. Mutation audit: dropping either match
+check and either ETag header each fail the test (4/4 killed).
+
+**Rule.** Any surface designed to be POLLED must carry a cache validator
+from day one — a "content_hash inside the body" is drift detection, not
+caching; the client has to download the body to learn it didn't need to.
+
+### 95.1 Validator must move (round 236)
+
+A cache validator that never changes is worse than none — subscribers 304
+forever and silently miss every new change. Directional killer: capture the
+Atom ETag, commit a new ChangeEvent, replay with the old `If-None-Match` →
+must get 200, a DIFFERENT ETag, and the new entry in the body
+(self-cleaning fixture). This pins the "insert-only window identity"
+construction of §95 against regressions that would freeze it.
+
+### 93.1 Web-vocabulary drift guard (round 239)
+
+§93 turned unknown severities into 422s — which converts a future
+vocabulary drift between the web dropdown's hardcoded list and
+`CHANGE_SEVERITIES` from "silent empty" into "UI filter errors". New CI
+guard parses the changes page's `const SEVERITIES = [...]` and asserts set
+equality with the backend constant, so the drift is caught at test time
+instead of by a user.
+
+## 96. Route-table auth sweep replaces the hand list (round 240)
+
+**Gap.** The anonymous-401 guard enumerated paths BY HAND — every endpoint
+added since (feed-token, audit.csv, changes.atom, the .ics calendar, the
+catalog export...) silently escaped it. A hand-maintained security list is
+a guard that decays.
+
+**Fix.** The test now walks the live route table (recursing through
+FastAPI's `_IncludedRouter` wrappers), and anonymously GETs every
+parameterless `/ecosystem` route: each must return 401 (422 permitted only
+where required-param validation fires before auth), never 200/5xx, with a
+floor assertion (`swept >= 40`) so a broken walk can't vacuously pass.
+Mutation check: removing one endpoint's auth dependency fails the sweep.
+
+**Rule.** Coverage lists for security invariants must be DERIVED from the
+system (route table, handler registry, schema), never maintained by hand —
+the §90 orphan-handler guard and this sweep are the same lesson from
+opposite directions.
+
+### 96.1 Writes swept too (round 241)
+
+The same decay applied to the hand-maintained WRITE list. The sweep now
+exercises every parameterless `/ecosystem` route for EVERY method
+(POST/PATCH/DELETE with an empty JSON body): 401/422 only, with floors
+(`swept >= 60`, `writes >= 15`) so the walk can't silently go vacuous.
+
+### 93.2 Rank/vocabulary parity (round 242)
+
+`SEVERITY_RANK.get(sev, 0)` in the notify fan-out means a severity added to
+`CHANGE_SEVERITIES` but forgotten in `SEVERITY_RANK` would rank as LOWEST —
+threshold watchers would silently miss the new (presumably important)
+class. Guard pins `set(SEVERITY_RANK) == set(CHANGE_SEVERITIES)` and that
+ranks form a strict total order. Together with §93.1 the vocabulary is now
+pinned across all three layers: backend constants ↔ rank map ↔ web dropdown.
+
+## 97. Fixture-domain DNS pinned — a real flake root-caused (round 243)
+
+**Gap.** Full-run #3 failed one test with `ECO_SSRF_BLOCKED: Hostname did
+not resolve`. Root cause: every eco test source uses `example.com`, and the
+SSRF guard re-resolves it via real `getaddrinfo` on every sync — under
+machine load a DNS timeout fail-closes (correct production posture) into a
+test flake (wrong test posture). The failure was transient (standalone
+rerun green) but the CLASS affects all 8 run_sync-exercising test files.
+
+**Fix.** Autouse conftest fixture pins `*.example.com` to a fixed public IP
+without touching the network; every other hostname resolves for real, so
+the SSRF matrix (private ranges, internal TLDs, rebinding stubs with their
+own fake resolvers) is untouched. Verified: amendments + SSRF + service
+suites 101/101.
+
+**Rule.** Tests may depend on the network only when the network IS the
+subject under test. A guard that correctly fails closed in production
+converts any environmental hiccup into a red build — pin the environment,
+not the guard.

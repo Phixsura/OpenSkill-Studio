@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,6 +58,8 @@ beforeEach(() => {
           },
         ],
       });
+    if (path === "/ecosystem/export/feed-token")
+      return Promise.resolve({ data: { token: "ft-cal-token" } });
     return Promise.resolve({ data: [] });
   });
 });
@@ -244,5 +246,21 @@ describe("Watch item add/remove (ADR-016 §24 UI)", () => {
     render(<WatchlistsPage />, { wrapper: wrapper() });
     await screen.findByText("Team Alerts");
     expect(screen.getByText("org")).toBeDefined();
+  });
+});
+
+describe("Export anchors carry the feed token (R233)", () => {
+  it(".ics calendar and catalog export hrefs append ?token=", async () => {
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    const ics = (await screen.findByText(/subscribe \(.ics\)/)).closest("a")!;
+    await waitFor(() =>
+      expect(ics.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/deprecation-calendar.ics?token=ft-cal-token",
+      ),
+    );
+    const exp = (await screen.findByText(/catalog export \(JSON\)/)).closest("a")!;
+    await waitFor(() =>
+      expect(exp.getAttribute("href")).toBe("/api/v1/ecosystem/export?token=ft-cal-token"),
+    );
   });
 });

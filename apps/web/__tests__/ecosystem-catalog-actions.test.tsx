@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -52,6 +52,8 @@ beforeEach(() => {
     if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
     if (path.includes("/pricing/history"))
       return Promise.resolve({ data: { series: {}, trends: {} } });
+    if (path.includes("/export/feed-token"))
+      return Promise.resolve({ data: { token: "ft-test-token" } });
     return Promise.resolve({ data: [] });
   });
 });
@@ -110,12 +112,16 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     ).toBe(true);
   });
 
-  it("Inspect panel offers a per-entity Atom subscribe link", async () => {
+  it("Inspect panel offers a per-entity Atom subscribe link with feed token", async () => {
     render(<CatalogPage />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByText("Inspect"));
     const link = (await screen.findByText(/subscribe \(.atom\)/)) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe(
-      `/api/v1/ecosystem/export/changes.atom?entity_id=${ENTITY}`,
+    // R232: feed readers can't send Bearer headers — the link must carry
+    // the narrow-scope feed token once minted
+    await waitFor(() =>
+      expect(link.getAttribute("href")).toBe(
+        `/api/v1/ecosystem/export/changes.atom?entity_id=${ENTITY}&token=ft-test-token`,
+      ),
     );
     const changesLink = (await screen.findByText(/view changes/)) as HTMLAnchorElement;
     expect(changesLink.closest("a")!.getAttribute("href")).toBe(

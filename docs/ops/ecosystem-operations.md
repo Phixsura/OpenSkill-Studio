@@ -86,6 +86,15 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
   `openskill.eco.catalog/v1` evolves ADDITIVELY: new fields (e.g. per-entity
   `metadata.curated`) may appear under the same version; removals or type
   changes bump the version. Parse tolerantly.
+- `GET /api/v1/ecosystem/export/changes.atom?entity_id=&token=` — Atom for
+  feed readers, which cannot send Bearer headers: mint a narrow-scope token
+  via `GET /api/v1/ecosystem/export/feed-token` (365-day expiry, feed-only)
+  and append it as `?token=`. The same token opens the read-only export/subscription surfaces: `changes.atom`, `deprecation-calendar.ics`, and `GET /export`. Access tokens are rejected in the query string
+  by design — a leaked feed URL only ever exposes the change feed. Rotate by
+  minting again; old tokens expire rather than being revoked server-side.
+- Both polling surfaces honor conditional GET (R235): send back the
+  response `ETag` as `If-None-Match` and a 304 saves the transfer. The
+  export ETag equals the body's `content_hash`.
 - `GET /api/v1/ecosystem/export/changes?since=&since_id=` — poll this
   instead of re-downloading the world. The cursor is (timestamp, id): always
   pass BOTH `next_since` and `next_since_id` back, or batch-inserted rows

@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.api.deps import get_feed_user, require_platform_admin
+from app.ecosystem.models.observation import CHANGE_SEVERITIES
 from app.ecosystem.schemas import ChangeEventResponse
 from app.ecosystem.services.dashboard import DashboardService
 from app.ecosystem.services.signals import SignalsService
@@ -14,6 +15,20 @@ from app.models.user import User
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/ecosystem", tags=["Ecosystem — Dashboard & Signals"])
+
+
+def _check_severity(value: str | None, allowed: frozenset[str]) -> None:
+    """R231: filter params must reject unknown severities — a typo
+    (?severity=critcal) silently returned an empty feed, reading as
+    "no critical changes" to the subscriber."""
+    if value is not None and value not in allowed:
+        from app.exceptions import AppError
+
+        raise AppError(
+            "VALIDATION_ERROR",
+            f"Unknown severity {value!r}; allowed: {', '.join(sorted(allowed))}",
+            422,
+        )
 
 
 @router.get("/dashboard", response_model=DataResponse[dict])
@@ -52,6 +67,7 @@ async def change_feed(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    _check_severity(severity, CHANGE_SEVERITIES)
     return {
         "data": await DashboardService(db).change_feed(
             severity=severity, limit=limit, offset=offset
@@ -99,32 +115,68 @@ async def ops_metrics(
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
+@router.get("/export/feed-token", response_model=dict)
+async def mint_feed_token(
+    user: User = Depends(get_current_user),
+):
+    """R232: exchange a normal session for a narrow-scope feed token to
+    embed in Atom URLs (feed readers cannot send Bearer headers)."""
+    from app.core.security import create_feed_token
+
+    return {"data": {"token": create_feed_token(user.id), "expires_in_days": 365}}
+
+
 @router.get("/export/changes.atom", include_in_schema=True)
 async def export_changes_atom(
+    request: Request = None,
     severity: str | None = None,
     entity_id: Annotated[str | None, Query(min_length=26, max_length=26)] = None,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(get_feed_user),
 ):
     """Atom 1.0 feed of typed change events — newest first, XML-escaped
     (change data is untrusted external content, never emitted raw).
     `entity_id` narrows to one canonical entity (GitHub releases.atom
     posture: subscribe to the model you depend on, not the firehose)."""
+    import re
+    from datetime import UTC, datetime
+    from hashlib import sha256
     from xml.sax.saxutils import escape
 
     from fastapi.responses import Response
 
+    # R230: saxutils.escape only handles <>& — control chars (legal in
+    # Postgres text/JSONB, e.g. \x08 from scraped/LLM-extracted values)
+    # are ILLEGAL in XML 1.0 and make the whole feed unparseable for every
+    # consumer. One poisoned observation must not DoS the subscription
+    # surface: strip them before escaping.
+    _xml_illegal = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+    def _xml_text(value: str) -> str:
+        return escape(_xml_illegal.sub("", value))
+
+    _check_severity(severity, CHANGE_SEVERITIES)
     rows = await DashboardService(db).change_feed(
         severity=severity, canonical_entity_id=entity_id, limit=limit, offset=0
     )
+    # R235: feed readers poll on a schedule — honor conditional GET. The
+    # change stream is insert-only (retention trims oldest), so the window
+    # is identified by (newest id, oldest id, row count) + the filters.
+    window = f"{severity}:{entity_id}:{limit}:" + (
+        f"{rows[0].id}:{rows[-1].id}:{len(rows)}" if rows else "empty"
+    )
+    etag = f'"{sha256(window.encode()).hexdigest()[:32]}"'
+    if request is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
     entries = []
     updated = None
     for c in rows:
         detected = c.detected_at.isoformat() if c.detected_at else ""
         updated = updated or detected
-        title = escape(f"[{c.severity}] {c.change_type} · {c.field}")
-        summary = escape(
+        title = _xml_text(f"[{c.severity}] {c.change_type} · {c.field}")
+        summary = _xml_text(
             f"entity_kind={c.entity_kind or '?'} old={c.old_value} new={c.new_value}"
         )
         entries.append(
@@ -137,9 +189,14 @@ async def export_changes_atom(
         '<feed xmlns="http://www.w3.org/2005/Atom">'
         "<id>urn:openskill:eco-changes</id>"
         "<title>OpenSkill Ecosystem Change Feed</title>"
-        f"<updated>{updated or ''}</updated>" + "".join(entries) + "</feed>"
+        "<author><name>OpenSkill Studio</name></author>"
+        f"<updated>{updated or datetime.now(UTC).isoformat()}</updated>"
+        + "".join(entries)
+        + "</feed>"
     )
-    return Response(content=xml, media_type="application/atom+xml")
+    return Response(
+        content=xml, media_type="application/atom+xml", headers={"ETag": etag}
+    )
 
 
 @router.get("/export/changes", response_model=dict)

@@ -39,6 +39,10 @@ async def list_advisories(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.dashboard import _check_severity
+    from app.ecosystem.models.advisory import ADVISORY_SEVERITIES
+
+    _check_severity(severity, ADVISORY_SEVERITIES)
     return {
         "data": await AdvisoryService(db).list(status=status, severity=severity, limit=limit)
     }

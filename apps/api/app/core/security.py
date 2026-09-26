@@ -72,6 +72,23 @@ def create_access_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
 
 
+def create_feed_token(user_id: str) -> str:
+    """R232: narrow-scope token for Atom feed URLs (GitHub private-feed
+    posture). Feed readers cannot send Authorization headers, so the token
+    travels in the query string — which is why it must NOT be an access
+    token: it grants ONLY the feed read, so a leaked feed URL never becomes
+    an account takeover. Long-lived (365d) like GitHub's."""
+    now = datetime.now(UTC)
+    payload = {
+        "sub": user_id,
+        "type": "feed",
+        "iat": now,
+        "exp": now + timedelta(days=365),
+        "jti": str(ULID()),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+
+
 def create_refresh_token(user_id: str) -> tuple[str, str, datetime]:
     """Return (raw_token, jti, expires_at)."""
     now = datetime.now(UTC)

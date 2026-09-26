@@ -459,3 +459,296 @@ async def test_delta_since_id_is_validated_over_http(http, tokens):
     )
     assert r.status_code == 200
     assert "next_since_id" in r.json()["meta"]
+
+
+async def test_severity_filters_reject_unknown_values(http, tokens):
+    """Round-231 killer: every severity FILTER param must reject unknown
+    values with 422 — a typo (?severity=critcal) used to silently return an
+    empty list/feed, reading as "no critical changes" to the subscriber."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    surfaces = [
+        "/api/v1/ecosystem/dashboard/change-feed?severity=critcal",
+        "/api/v1/ecosystem/export/changes.atom?severity=critcal",
+        "/api/v1/ecosystem/changes?severity=critcal",
+        "/api/v1/ecosystem/security/advisories?severity=serious",
+    ]
+    for url in surfaces:
+        r = await http.get(url, headers=member)
+        assert r.status_code == 422, f"{url} -> {r.status_code}"
+        body = r.json()
+        assert body["error"]["code"] == "VALIDATION_ERROR", url
+        assert "allowed" in body["error"]["message"], url
+
+    # Valid values still pass through (200, list envelope / atom XML)
+    r = await http.get(
+        "/api/v1/ecosystem/dashboard/change-feed?severity=breaking",
+        headers=member,
+    )
+    assert r.status_code == 200 and isinstance(r.json()["data"], list)
+    r = await http.get(
+        "/api/v1/ecosystem/security/advisories?severity=critical", headers=member
+    )
+    assert r.status_code == 200
+    r = await http.get(
+        "/api/v1/ecosystem/export/changes.atom?severity=breaking",
+        headers=member,
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/atom+xml")
+
+
+async def test_atom_feed_token_auth(http, tokens):
+    """Round-232 killer: the Atom subscribe surface was end-to-end unusable —
+    feed readers cannot send Authorization headers, so every real subscriber
+    got 401. A narrow-scope feed token in the query string (GitHub
+    private-feed posture) must work; an ACCESS token in the query string
+    must NOT (URLs leak into logs/history — a leaked feed URL must never
+    become an account takeover)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    # Mint a feed token with a normal session
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    assert r.status_code == 200
+    feed_token = r.json()["data"]["token"]
+    assert feed_token
+
+    # Feed token in query string: the feed-reader path — must work, no header
+    r = await http.get(
+        f"/api/v1/ecosystem/export/changes.atom?token={feed_token}"
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/atom+xml")
+
+    # ACCESS token in query string: refused (wrong type for a URL)
+    r = await http.get(
+        f"/api/v1/ecosystem/export/changes.atom?token={tokens['member']}"
+    )
+    assert r.status_code == 401
+
+    # Garbage token: 401, not 500
+    r = await http.get("/api/v1/ecosystem/export/changes.atom?token=garbage")
+    assert r.status_code == 401
+
+    # Bearer access token still works (dashboard fetches)
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
+    assert r.status_code == 200
+
+    # Narrow scope: the feed token opens NOTHING else — not even the
+    # JSON change list (Bearer-only endpoints ignore ?token=)
+    r = await http.get(f"/api/v1/ecosystem/changes?token={feed_token}")
+    assert r.status_code == 401
+    r = await http.get(
+        "/api/v1/ecosystem/changes",
+        headers={"Authorization": f"Bearer {feed_token}"},
+    )
+    assert r.status_code == 401  # type=feed is not an access token
+
+
+async def test_calendar_and_export_accept_feed_tokens(http, tokens):
+    """Round-233 killer: same class as §94 — the .ics calendar-subscribe URL
+    and the catalog-export download anchor are consumed WITHOUT Bearer
+    headers (calendar apps, browser navigation). Feed token must open both;
+    anonymous and access-token-in-query stay 401."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    feed_token = r.json()["data"]["token"]
+
+    for url, ctype in [
+        ("/api/v1/ecosystem/deprecation-calendar.ics", "text/calendar"),
+        ("/api/v1/ecosystem/export", "application/json"),
+    ]:
+        r = await http.get(url)  # anonymous
+        assert r.status_code == 401, url
+        r = await http.get(f"{url}?token={tokens['member']}")  # access in URL
+        assert r.status_code == 401, url
+        r = await http.get(f"{url}?token={feed_token}")  # the real consumer
+        assert r.status_code == 200, f"{url} -> {r.status_code}"
+        assert r.headers["content-type"].startswith(ctype), url
+        r = await http.get(url, headers=member)  # bearer still fine
+        assert r.status_code == 200, url
+
+
+async def test_feed_token_dies_with_the_account(http):
+    """Round-234 killer: feed tokens live 365 days and are NOT stored
+    server-side — deactivating the account is the ONLY revocation mechanism.
+    A suspended user's feed token must stop working immediately, and a
+    validly-signed feed token without a sub claim must 401, not 500."""
+    from datetime import UTC, datetime, timedelta
+
+    import jwt as _jwt
+
+    from app.config import settings
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import ALGORITHM, create_feed_token
+    from app.models.user import UserStatus
+    from tests.test_eco_services_db import _mk_user
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        user = await _mk_user(db)
+        await db.commit()
+        token = create_feed_token(user.id)
+
+        # Active: feed works
+        r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={token}")
+        assert r.status_code == 200
+
+        # Suspend the account — the token must die with it
+        user.status = UserStatus.SUSPENDED
+        await db.commit()
+        r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={token}")
+        assert r.status_code == 401
+
+        # cleanup: reactivate so shared fixtures stay sane
+        user.status = UserStatus.ACTIVE
+        await db.commit()
+    await engine.dispose()
+
+    # Validly-signed feed token with NO sub claim: 401, never a KeyError-500
+    now = datetime.now(UTC)
+    subless = _jwt.encode(
+        {"type": "feed", "iat": now, "exp": now + timedelta(days=1)},
+        settings.jwt_secret,
+        algorithm=ALGORITHM,
+    )
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={subless}")
+    assert r.status_code == 401
+
+    # ... and a NON-STRING sub (tampered payload): db.get(User, dict) would
+    # raise a 500 without the isinstance gate
+    weird = _jwt.encode(
+        {"sub": {"a": 1}, "type": "feed", "iat": now, "exp": now + timedelta(days=1)},
+        settings.jwt_secret,
+        algorithm=ALGORITHM,
+    )
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={weird}")
+    assert r.status_code == 401
+
+
+async def test_export_and_atom_support_conditional_get(http, tokens):
+    """Round-235 killer: both polling surfaces must honor If-None-Match —
+    integrations poll the multi-MB catalog and feed readers poll the Atom
+    feed on fixed schedules; without 304s every poll re-transfers the world.
+    A stale/different validator must still get a full 200."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    # catalog export: ETag mirrors content_hash
+    r = await http.get("/api/v1/ecosystem/export", headers=member)
+    assert r.status_code == 200
+    etag = r.headers.get("etag")
+    assert etag, "export must carry an ETag"
+    assert r.json()["data"]["content_hash"] in etag
+
+    r2 = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "If-None-Match": etag},
+    )
+    assert r2.status_code == 304
+    assert not r2.content  # 304 carries no body
+
+    r3 = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "If-None-Match": '"something-else"'},
+    )
+    assert r3.status_code == 200  # mismatched validator -> full response
+
+    # Atom feed: same contract
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
+    assert r.status_code == 200
+    aetag = r.headers.get("etag")
+    assert aetag, "atom feed must carry an ETag"
+    r2 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-None-Match": aetag},
+    )
+    assert r2.status_code == 304
+    r3 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-None-Match": '"nope"'},
+    )
+    assert r3.status_code == 200
+
+
+async def test_atom_etag_invalidates_on_new_change(http, tokens):
+    """Round-236 killer: a validator that never changes is WORSE than none —
+    subscribers would 304 forever and miss every new change. Inserting a
+    change must flip the Atom ETag so the stale validator gets a full 200
+    containing the new entry."""
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from tests.test_eco_services_db import _mk_source
+
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
+    old_etag = r.headers["etag"]
+
+    await engine.dispose(close=False)
+    obs_id = None
+    async with AsyncSessionLocal() as db:
+        source = await _mk_source(db)
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="pricing_changed",
+            raw_hash="c" * 64, normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="price",
+            field="etag-flip-marker", old_value={"v": 1}, new_value={"v": 2},
+            severity="info",
+        )
+        db.add(change)
+        await db.commit()
+        obs_id = obs.id
+
+        try:
+            r2 = await http.get(
+                "/api/v1/ecosystem/export/changes.atom",
+                headers={**member, "If-None-Match": old_etag},
+            )
+            # stale validator -> full response, with the new entry inside
+            assert r2.status_code == 200
+            assert r2.headers["etag"] != old_etag
+            assert "etag-flip-marker" in r2.text
+        finally:
+            await db.delete(change)
+            await db.delete(await db.get(EcosystemObservation, obs_id))
+            await db.commit()
+    await engine.dispose()
+
+
+async def test_every_ecosystem_get_route_rejects_anonymous(http):
+    """Round-240: the 401 guard was a HAND-MAINTAINED path list — every new
+    endpoint (feed-token, audit.csv, .atom, .ics, export...) silently
+    escaped it. Sweep the real route table instead: every parameterless
+    /ecosystem GET must 401 anonymously (422 allowed only when required
+    query params fail validation BEFORE auth resolves — never 200/5xx)."""
+    from app.main import app as _app
+
+    def _walk(router):
+        for rt in getattr(router, "routes", []):
+            if type(rt).__name__ == "_IncludedRouter":
+                yield from _walk(rt.original_router)
+            elif hasattr(rt, "path") and hasattr(rt, "methods"):
+                yield rt
+            elif hasattr(rt, "routes"):
+                yield from _walk(rt)
+
+    swept = writes = 0
+    for route in _walk(_app.router):
+        path = route.path
+        if not path.startswith("/ecosystem"):
+            continue
+        if "{" in path:
+            continue  # parameterized: covered by typed tests
+        for method in route.methods or set():
+            if method == "HEAD":
+                continue
+            # R241: writes swept too — the old hand list also missed them
+            kwargs = {} if method == "GET" else {"json": {}}
+            r = await http.request(method, f"/api/v1{path}", **kwargs)
+            assert r.status_code in (401, 422), f"{method} {path} -> {r.status_code}"
+            swept += 1
+            writes += method != "GET"
+    assert swept >= 60 and writes >= 15, f"sweep broken (swept={swept}, writes={writes})"

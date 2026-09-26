@@ -184,6 +184,14 @@ function CatalogInner() {
         `/ecosystem/pricing/availability/uptime?entity_kind=${SEGMENT_TO_KIND[segment] ?? "model"}&entity_id=${selected!.id}`,
       ),
   });
+  // R232: feed readers can't send Bearer headers — the subscribe link
+  // carries a narrow-scope feed token instead (staleTime: token is 365d)
+  const feedToken = useQuery({
+    queryKey: ["eco-feed-token"],
+    enabled: Boolean(selected),
+    staleTime: Infinity,
+    queryFn: () => apiWithAuth<{ data: { token: string } }>("/ecosystem/export/feed-token"),
+  });
   const scorecard = useQuery({
     queryKey: ["eco-scorecard", segment, selected?.id],
     enabled: Boolean(selected),
@@ -437,9 +445,11 @@ function CatalogInner() {
                 📰 view changes
               </Link>
               <a
-                href={`/api/v1/ecosystem/export/changes.atom?entity_id=${selected.id}`}
+                href={`/api/v1/ecosystem/export/changes.atom?entity_id=${selected.id}${
+                  feedToken.data?.data.token ? `&token=${feedToken.data.data.token}` : ""
+                }`}
                 className="text-xs text-blue-600 underline"
-                title="Atom feed of changes to THIS entity (GitHub releases.atom posture)"
+                title="Atom feed of changes to THIS entity (GitHub releases.atom posture) — URL carries a feed-scoped token for your reader"
               >
                 📡 subscribe (.atom)
               </a>

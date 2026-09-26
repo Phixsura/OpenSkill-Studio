@@ -128,6 +128,12 @@ test("4 — catalog Inspect deep-links to the entity-filtered change feed", asyn
   await page.getByText("Inspect").first().dispatchEvent("click");
   const link = page.getByText("📰 view changes");
   await link.waitFor({ state: "visible", timeout: 10_000 });
+  // R232 full-stack check: the subscribe anchor must carry a real feed token
+  // (feed readers can't send Bearer headers)
+  const subscribe = page.getByText("📡 subscribe (.atom)");
+  await expect
+    .poll(async () => (await subscribe.getAttribute("href")) ?? "", { timeout: 10_000 })
+    .toMatch(/changes\.atom\?entity_id=[0-9A-Z]{26}&token=.+/);
   await link.dispatchEvent("click");
   await page.waitForURL(/\/dashboard\/ecosystem\/changes\?entity=/, { timeout: 10_000 });
   await page.getByText(/filtered to entity/).waitFor({ state: "visible", timeout: 10_000 });

@@ -81,3 +81,38 @@ async def test_validation_shapes_are_bounded(client):
     # happens first for malformed shapes; either 401 or 422 is acceptable,
     # but never a 500.
     assert resp.status_code in (401, 422)
+
+
+def test_web_severity_dropdown_matches_backend_vocabulary():
+    """Round-239 drift guard: the web change-feed dropdown hardcodes the
+    severity list; §93 made unknown values a 422 — if either side drifts,
+    the UI filter starts erroring (or silently missing new severities).
+    Pin web SEVERITIES == CHANGE_SEVERITIES in CI."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.observation import CHANGE_SEVERITIES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/changes/page.tsx"
+    )
+    src = page.read_text()
+    m = re.search(r"const SEVERITIES = \[(.*?)\];", src, re.S)
+    assert m, "web changes page must declare const SEVERITIES = [...]"
+    web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    assert web_values == set(CHANGE_SEVERITIES), (
+        f"web dropdown {sorted(web_values)} != backend {sorted(CHANGE_SEVERITIES)}"
+    )
+
+
+def test_severity_rank_covers_the_full_vocabulary():
+    """Round-242 guard: notify fan-out ranks severities via
+    SEVERITY_RANK.get(sev, 0) — a severity added to CHANGE_SEVERITIES but
+    forgotten in SEVERITY_RANK would silently rank as LOWEST and be muted
+    for every watcher with a threshold. Pin the two constants together."""
+    from app.ecosystem.models.observation import CHANGE_SEVERITIES, SEVERITY_RANK
+
+    assert set(SEVERITY_RANK) == set(CHANGE_SEVERITIES)
+    # ranks are a strict total order (no accidental duplicates)
+    assert len(set(SEVERITY_RANK.values())) == len(SEVERITY_RANK)

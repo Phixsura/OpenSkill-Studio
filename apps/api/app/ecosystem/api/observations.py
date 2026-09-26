@@ -258,6 +258,10 @@ async def list_changes(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.dashboard import _check_severity
+    from app.ecosystem.models.observation import CHANGE_SEVERITIES
+
+    _check_severity(severity, CHANGE_SEVERITIES)
     query = select(ChangeEvent)
     if change_type:
         query = query.where(ChangeEvent.change_type == change_type)

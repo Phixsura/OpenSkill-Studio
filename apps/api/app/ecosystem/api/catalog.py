@@ -1,11 +1,12 @@
 """Canonical catalog + resolution + lifecycle endpoints (Parts C, L)."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import Response as PlainResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import eco_audit, require_platform_admin
+from app.ecosystem.api.deps import eco_audit, get_feed_user, require_platform_admin
 from app.ecosystem.schemas import (
     BulkDecideRequest,
     CatalogEntityResponse,
@@ -228,7 +229,9 @@ async def deprecation_calendar(
 async def deprecation_calendar_ics(
     within_days: int = Query(365, ge=1, le=730),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    # R233: calendar apps subscribe by URL and cannot send Bearer headers —
+    # same class as the Atom feed (§94), same narrow-scope token
+    _user: User = Depends(get_feed_user),
 ):
     """iCalendar feed of upcoming sunsets — subscribe from any calendar app
     (endoflife.date's signature integration surface, §13)."""
@@ -329,8 +332,15 @@ async def global_search(
 
 @router.get("/export", response_model=dict)
 async def catalog_export(
+    # None defaults keep direct (non-HTTP) test calls working — FastAPI
+    # injects real objects on HTTP requests (R194 lesson)
+    request: Request = None,
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    # R233: downloaded via a plain <a href> in the UI (browser navigation
+    # carries no Bearer header) and polled by external integrations — the
+    # read-only export credential covers it
+    _user: User = Depends(get_feed_user),
 ):
     """One canonical, machine-readable catalog document (§13) — the LiteLLM
     `model_prices_and_context_window.json` / deps.dev-dataset posture: the
@@ -399,6 +409,14 @@ async def catalog_export(
     content_hash = hashlib.sha256(
         json.dumps(body, sort_keys=True, default=str).encode()
     ).hexdigest()
+    # R235: polling integrations re-download the full catalog every cycle —
+    # honor conditional GET (the hash was already computed; the DB work
+    # still happens, but the multi-MB transfer is skipped on a match).
+    etag = f'"{content_hash}"'
+    if request is not None and request.headers.get("if-none-match") == etag:
+        return PlainResponse(status_code=304, headers={"ETag": etag})
+    if response is not None:
+        response.headers["ETag"] = etag
     return {
         "data": {
             "schema": "openskill.eco.catalog/v1",

@@ -54,6 +54,13 @@ export default function WatchlistsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [item, setItem] = useState({ target_kind: "model", target_id: "", target_ref: "" });
 
+  // R233: the .ics / export anchors are plain browser navigations — they
+  // need the narrow-scope feed token in the URL (Bearer headers don't ride)
+  const feedToken = useQuery({
+    queryKey: ["eco-feed-token"],
+    staleTime: Infinity,
+    queryFn: () => apiWithAuth<{ data: { token: string } }>("/ecosystem/export/feed-token"),
+  });
   const myOrgs = useQuery({
     queryKey: ["my-orgs"],
     queryFn: () => apiWithAuth<{ data: { id: string; name: string }[] }>("/orgs"),
@@ -326,13 +333,17 @@ export default function WatchlistsPage() {
           <h2 className="pt-4 text-lg font-semibold">
             Deprecation calendar (next 90 days)
             <a
-              href="/api/v1/ecosystem/deprecation-calendar.ics"
+              href={`/api/v1/ecosystem/deprecation-calendar.ics${
+                feedToken.data?.data.token ? `?token=${feedToken.data.data.token}` : ""
+              }`}
               className="ml-2 text-xs font-normal text-blue-600 underline"
             >
               📅 subscribe (.ics)
             </a>
             <a
-              href="/api/v1/ecosystem/export"
+              href={`/api/v1/ecosystem/export${
+                feedToken.data?.data.token ? `?token=${feedToken.data.data.token}` : ""
+              }`}
               className="ml-2 text-xs font-normal text-blue-600 underline"
             >
               ⬇ catalog export (JSON)

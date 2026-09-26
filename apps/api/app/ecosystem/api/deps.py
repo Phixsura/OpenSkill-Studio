@@ -5,10 +5,43 @@ admin only. Analyst-grade actions reuse the same gate for now (single-role
 platform ops), org-scoped resources check membership in the router.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, oauth2_scheme_optional
+from app.api.deps import get_db as _get_db
 from app.models.user import User, UserRole
+
+
+async def get_feed_user(
+    bearer: str | None = Depends(oauth2_scheme_optional),
+    token: str | None = Query(None, description="Feed token (?token=...)"),
+    db=Depends(_get_db),
+) -> User:
+    """R232: Atom endpoints are consumed by feed readers, which cannot send
+    Authorization headers. Accept EITHER a normal Bearer access token OR a
+    narrow-scope feed token in the query string. Access tokens are refused
+    in the query string on purpose — URLs land in server logs, browser
+    history and referrers, and a leaked feed token must only ever grant the
+    feed read."""
+    from app.core.security import decode_token
+
+    if bearer is not None:
+        return await get_current_user(token=bearer, db=db)
+    if token is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_token(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+    if payload.get("type") != "feed":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = await db.get(User, sub)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
 
 
 async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
