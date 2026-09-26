@@ -752,3 +752,192 @@ async def test_every_ecosystem_get_route_rejects_anonymous(http):
             swept += 1
             writes += method != "GET"
     assert swept >= 60 and writes >= 15, f"sweep broken (swept={swept}, writes={writes})"
+
+
+async def test_if_none_match_list_and_star_semantics(http, tokens):
+    """Round-244 killer: RFC 7232 §3.2 — If-None-Match may carry a
+    comma-separated validator list (proxies merge them), weak W/ prefixes,
+    or `*`. A strict string-equality match would re-transfer the world to
+    any client behind such a proxy."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export", headers=member)
+    etag = r.headers["etag"]
+
+    # validator list containing ours -> 304
+    r2 = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "If-None-Match": f'"stale-one", {etag}'},
+    )
+    assert r2.status_code == 304
+    # weak form of ours -> 304 (weak comparison is fine for GET)
+    r3 = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "If-None-Match": f"W/{etag}"},
+    )
+    assert r3.status_code == 304
+    # star -> 304 (resource exists)
+    r4 = await http.get(
+        "/api/v1/ecosystem/export", headers={**member, "If-None-Match": "*"}
+    )
+    assert r4.status_code == 304
+    # list of stale validators -> full 200
+    r5 = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "If-None-Match": '"a", "b"'},
+    )
+    assert r5.status_code == 200
+
+
+async def test_atom_supports_if_modified_since(http, tokens):
+    """Round-245 killer: legacy pollers (cron/curl feed scripts) send only
+    If-Modified-Since. The Atom feed must return Last-Modified, honor IMS
+    with a 304, let If-None-Match take precedence when both are sent
+    (RFC 7232), and never 500 on a malformed date."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
+    lm = r.headers.get("last-modified")
+    if lm is None:
+        return  # empty feed on this stack: nothing to condition on
+    r2 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-Modified-Since": lm},
+    )
+    assert r2.status_code == 304
+    # ancient date -> full 200
+    r3 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-Modified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"},
+    )
+    assert r3.status_code == 200
+    # If-None-Match present: IMS ignored (stale etag + fresh IMS -> 200)
+    r4 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-None-Match": '"stale"', "If-Modified-Since": lm},
+    )
+    assert r4.status_code == 200
+    # malformed IMS -> full 200, never 500
+    r5 = await http.get(
+        "/api/v1/ecosystem/export/changes.atom",
+        headers={**member, "If-Modified-Since": "not-a-date"},
+    )
+    assert r5.status_code == 200
+
+
+async def test_atom_subscription_survives_entity_merge(http, tokens):
+    """Round-246 killer: a merge re-points every change to the survivor —
+    subscription URLs pinned to the duplicate would go permanently silent.
+    The empty duplicate feed must 302 to the survivor's feed (filters and
+    token ride along); an ALIVE superseded entity with its own changes is
+    NOT redirected."""
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.replacement import ReplacementEdge
+    from tests.test_eco_services_db import _mk_user
+
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        from ulid import ULID as _ULID
+
+        tag = str(_ULID()).lower()[:8]
+        admin = await _mk_user(db, "admin")
+        dup = AIModel(canonical_name=f"MergeDup-{tag}", slug=f"md-{tag}")
+        survivor = AIModel(canonical_name=f"MergeSurv-{tag}", slug=f"ms-{tag}")
+        db.add_all([dup, survivor])
+        await db.commit()
+        dup_id, surv_id = dup.id, survivor.id
+
+        try:
+            from app.ecosystem.services.catalog import CatalogService
+
+            await CatalogService(db).merge_entities(
+                "model", dup_id, surv_id, actor_id=admin.id
+            )
+            await db.commit()
+
+            r = await http.get(
+                f"/api/v1/ecosystem/export/changes.atom?entity_id={dup_id}"
+                "&severity=breaking",
+                headers=member,
+            )
+            assert r.status_code == 302
+            loc = r.headers["location"]
+            assert surv_id in loc and dup_id not in loc
+            assert "severity=breaking" in loc  # filters ride along
+
+            # the survivor's feed serves normally (empty but 200 — no edge FROM it)
+            r2 = await http.get(
+                f"/api/v1/ecosystem/export/changes.atom?entity_id={surv_id}",
+                headers=member,
+            )
+            assert r2.status_code == 200
+        finally:
+            # self-clean: remove the supersedes edge and both entities
+            for edge in await db.scalars(
+                _select(ReplacementEdge).where(ReplacementEdge.from_id == dup_id)
+            ):
+                await db.delete(edge)
+            for eid in (dup_id, surv_id):
+                obj = await db.get(AIModel, eid)
+                if obj:
+                    await db.delete(obj)
+            await db.commit()
+    await engine.dispose()
+
+
+async def test_ops_metrics_scrapeable_with_admin_feed_token(http, tokens):
+    """Round-247 killer: Prometheus cannot refresh a 15-minute Bearer token,
+    so /ops/metrics was un-scrapeable by its only real consumer. An ADMIN's
+    long-lived feed token in ?token= must scrape; a MEMBER's feed token must
+    403 (role gate is live — checked against the user row, not the token)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=admin)
+    admin_token = r.json()["data"]["token"]
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    member_token = r.json()["data"]["token"]
+
+    r = await http.get(f"/api/v1/ecosystem/ops/metrics?token={admin_token}")
+    assert r.status_code == 200
+    assert "eco_" in r.text  # exposition format served
+
+    r = await http.get(f"/api/v1/ecosystem/ops/metrics?token={member_token}")
+    assert r.status_code == 403
+
+    r = await http.get("/api/v1/ecosystem/ops/metrics")
+    assert r.status_code == 401
+
+    # human path unchanged
+    r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
+    assert r.status_code == 200
+    r = await http.get("/api/v1/ecosystem/ops/metrics", headers=member)
+    assert r.status_code == 403
+
+
+async def test_atom_self_link_present_and_credential_free(http, tokens):
+    """Round-252 killer: the feed carries a rel=self link (validator
+    identity) and it must NEVER echo the ?token= credential back into the
+    response body — feeds get re-shared and cached."""
+    import xml.etree.ElementTree as ET
+
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    feed_token = r.json()["data"]["token"]
+
+    r = await http.get(
+        f"/api/v1/ecosystem/export/changes.atom?severity=breaking&token={feed_token}"
+    )
+    assert r.status_code == 200
+    assert feed_token not in r.text  # credential never round-trips
+    root = ET.fromstring(r.text)
+    ns = "{http://www.w3.org/2005/Atom}"
+    self_links = [
+        link.get("href")
+        for link in root.findall(f"{ns}link")
+        if link.get("rel") == "self"
+    ]
+    assert self_links and "severity=breaking" in self_links[0]
+    assert "token=" not in self_links[0]

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -160,5 +160,31 @@ describe("Change feed cursor + acknowledge (ADR-016 §19 UI)", () => {
     );
     expect(call).toBeDefined();
     expect(JSON.parse((call![1] as RequestInit).body as string).ids).toEqual(["c1"]);
+  });
+});
+
+describe("Feed-page Atom subscription (R248)", () => {
+  it("subscribe link carries the feed token and active severity filter", async () => {
+    api.mockImplementation((path: string) => {
+      if (path === "/ecosystem/export/feed-token")
+        return Promise.resolve({ data: { token: "ft-changes" } });
+      if (path.startsWith("/ecosystem/changes?")) return Promise.resolve({ data: [], meta: {} });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    const link = (await screen.findByText(/subscribe \(.atom\)/)) as HTMLAnchorElement;
+    await waitFor(() =>
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/export/changes.atom?token=ft-changes",
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Filter by severity"), {
+      target: { value: "breaking" },
+    });
+    await waitFor(() =>
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/export/changes.atom?severity=breaking&token=ft-changes",
+      ),
+    );
   });
 });

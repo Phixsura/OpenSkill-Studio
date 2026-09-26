@@ -44,6 +44,17 @@ async def get_feed_user(
     return user
 
 
+async def get_scrape_admin(user: User = Depends(get_feed_user)) -> User:
+    """R247: Prometheus can't refresh a 15-minute Bearer token, so the
+    metrics endpoint was un-scrapeable by its only real consumer. Accept the
+    long-lived feed token via `?token=` — but the ROLE gate stays: the user
+    the token resolves to must still be a platform admin (checked against
+    the live user row, so a demoted admin's old token stops working)."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Only platform admins can read ops metrics")
+    return user
+
+
 async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Only platform admins can modify ecosystem intelligence")

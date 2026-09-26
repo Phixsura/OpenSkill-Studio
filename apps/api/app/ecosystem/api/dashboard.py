@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.ecosystem.api.deps import get_feed_user, require_platform_admin
+from app.ecosystem.api.deps import get_feed_user, get_scrape_admin, require_platform_admin
 from app.ecosystem.models.observation import CHANGE_SEVERITIES
 from app.ecosystem.schemas import ChangeEventResponse
 from app.ecosystem.services.dashboard import DashboardService
@@ -15,6 +15,28 @@ from app.models.user import User
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/ecosystem", tags=["Ecosystem — Dashboard & Signals"])
+
+
+
+
+def _self_url(request) -> str:
+    """Feed self-URL without the credential query param."""
+    url = request.url.remove_query_params("token")
+    return str(url)
+
+
+def _etag_matches(header: str | None, etag: str) -> bool:
+    """RFC 7232 §3.2: If-None-Match may carry a comma-separated validator
+    list (proxies and some readers merge them) or `*`. Weak prefixes compare
+    equal for GET (weak comparison is allowed for 304s)."""
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    return any(
+        candidate.strip().removeprefix("W/") == etag
+        for candidate in header.split(",")
+    )
 
 
 def _check_severity(value: str | None, allowed: frozenset[str]) -> None:
@@ -78,7 +100,9 @@ async def change_feed(
 @router.get("/ops/metrics", include_in_schema=True)
 async def ops_metrics(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    # R247: scrapeable by Prometheus via a long-lived admin feed token
+    # (?token=) — Bearer admin sessions still work for humans
+    _user: User = Depends(get_scrape_admin),
 ):
     """§17 (Datadog/Prometheus posture): the subsystem exposes its own health
     as scrape-able plaintext metrics — queue depths, review debt, staleness."""
@@ -160,6 +184,33 @@ async def export_changes_atom(
     rows = await DashboardService(db).change_feed(
         severity=severity, canonical_entity_id=entity_id, limit=limit, offset=0
     )
+    # R246: a merge re-points every change to the survivor, which would turn
+    # long-lived subscription URLs (?entity_id=<duplicate>) into permanently
+    # empty feeds. When the filtered feed is empty AND a supersedes edge
+    # exists, redirect the reader to the survivor's feed (302 — readers
+    # follow redirects; the token and filters ride along).
+    if entity_id and not rows and request is not None:
+        from sqlalchemy import select
+
+        from app.ecosystem.models.replacement import ReplacementEdge
+
+        successor = await db.scalar(
+            select(ReplacementEdge.to_id)
+            .where(
+                ReplacementEdge.from_id == entity_id,
+                ReplacementEdge.edge_type == "supersedes",
+            )
+            .order_by(ReplacementEdge.created_at.desc())
+            .limit(1)
+        )
+        if successor:
+            # replace ONLY the query-param value — a bare str.replace could
+            # corrupt a token that happens to contain the 26-char id
+            location = str(request.url).replace(
+                f"entity_id={entity_id}", f"entity_id={successor}"
+            )
+            return Response(status_code=302, headers={"Location": location})
+
     # R235: feed readers poll on a schedule — honor conditional GET. The
     # change stream is insert-only (retention trims oldest), so the window
     # is identified by (newest id, oldest id, row count) + the filters.
@@ -167,8 +218,34 @@ async def export_changes_atom(
         f"{rows[0].id}:{rows[-1].id}:{len(rows)}" if rows else "empty"
     )
     etag = f'"{sha256(window.encode()).hexdigest()[:32]}"'
-    if request is not None and request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers={"ETag": etag})
+    # R245: Last-Modified rides along for legacy pollers that only send
+    # If-Modified-Since (still common in cron/curl feed scripts). RFC 7232:
+    # when If-None-Match is present it takes precedence and IMS is ignored.
+    from email.utils import format_datetime, parsedate_to_datetime
+
+    last_modified = (
+        format_datetime(rows[0].detected_at, usegmt=True)
+        if rows and rows[0].detected_at
+        else None
+    )
+    cond_headers = {"ETag": etag}
+    if last_modified:
+        cond_headers["Last-Modified"] = last_modified
+    if request is not None:
+        inm = request.headers.get("if-none-match")
+        if inm is not None:
+            if _etag_matches(inm, etag):
+                return Response(status_code=304, headers=cond_headers)
+        else:
+            ims = request.headers.get("if-modified-since")
+            if ims and last_modified:
+                try:
+                    ims_dt = parsedate_to_datetime(ims)
+                    latest = rows[0].detected_at
+                    if int(latest.timestamp()) <= int(ims_dt.timestamp()):
+                        return Response(status_code=304, headers=cond_headers)
+                except (TypeError, ValueError):
+                    pass  # malformed date: serve the full response
 
     entries = []
     updated = None
@@ -190,12 +267,19 @@ async def export_changes_atom(
         "<id>urn:openskill:eco-changes</id>"
         "<title>OpenSkill Ecosystem Change Feed</title>"
         "<author><name>OpenSkill Studio</name></author>"
-        f"<updated>{updated or datetime.now(UTC).isoformat()}</updated>"
+        # R252: rel=self is the validator-recommended feed identity; the
+        # token is stripped so the credential never round-trips in the body
+        + (
+            f'<link rel="self" href="{_xml_text(_self_url(request))}"/>'
+            if request is not None
+            else ""
+        )
+        + f"<updated>{updated or datetime.now(UTC).isoformat()}</updated>"
         + "".join(entries)
         + "</feed>"
     )
     return Response(
-        content=xml, media_type="application/atom+xml", headers={"ETag": etag}
+        content=xml, media_type="application/atom+xml", headers=cond_headers
     )
 
 

@@ -11,6 +11,14 @@ in-product surface; none require shell access.
 groups:
   - name: ecosystem-intelligence
     rules:
+      - alert: EcoMetricsScrapeDown
+        expr: up{job="openskill-eco"} == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The eco metrics endpoint is not scrapeable"
+          runbook: "Every eco alert below goes blind while this fires. Check the API, then the admin feed token in scrape_configs (365-day expiry; a demoted/suspended admin also invalidates it) — mint a fresh one via GET /api/v1/ecosystem/export/feed-token."
+
       - alert: EcoSourcesStale
         expr: eco_sources_stale > 0
         for: 30m

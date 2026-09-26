@@ -2141,3 +2141,85 @@ suites 101/101.
 subject under test. A guard that correctly fails closed in production
 converts any environmental hiccup into a red build — pin the environment,
 not the guard.
+
+### 95.2 RFC 7232 list/weak/star matching (round 244)
+
+The §95 implementation compared `If-None-Match` by strict string equality —
+correct for a lone reader, wrong behind any proxy that merges validators
+into a comma list, for clients replaying weak (`W/`) forms, and for `*`.
+`_etag_matches()` now implements RFC 7232 §3.2 (list split, W/ strip — weak
+comparison is permitted for GET/304 — and `*`), shared by both surfaces.
+Killer: list-containing-ours 304, weak-ours 304, star 304, all-stale 200.
+
+### 95.3 If-Modified-Since for legacy pollers (round 245)
+
+Half the feed-polling world is a cron+curl script sending only
+`If-Modified-Since`. The Atom feed now emits `Last-Modified` (newest
+change's detected_at, RFC 5322 GMT) and honors IMS at second granularity;
+`If-None-Match` takes precedence when both are present (RFC 7232 §6), and a
+malformed date serves the full response rather than erroring. Killer covers
+304-on-match, 200-on-ancient, precedence, and malformed-date paths. ETag
+remains the strong validator — IMS is a compatibility rail, not the
+mechanism.
+
+## 98. Subscription URLs survive entity merges (round 246)
+
+**Gap.** §98-adjacent surfaces were merge-aware (watch items re-point,
+changes re-point) — but the Atom subscription URL pinned to
+`?entity_id=<duplicate>` lives in feed readers we don't control. After a
+merge every change belongs to the survivor, so those URLs became
+permanently empty feeds: the subscriber never errors, never notices, and
+never sees another change. The quietest possible failure.
+
+**Fix.** When an entity-filtered feed is EMPTY and a `supersedes`
+replacement edge exists from that entity, the endpoint 302-redirects to the
+survivor's feed with filters and token intact. The empty+edge conjunction
+keeps alive-but-superseded entities (which still have their own changes)
+serving their own feeds — a version succession must NOT hijack a
+subscription; only a merge (which drains the feed) triggers the redirect.
+
+**Killers.** Merge two entities → duplicate's feed 302s with Location
+carrying the survivor id and the severity filter; survivor's own feed still
+200s. Mutation audit: disabling the redirect branch and mismatching the
+edge type both fail (2/2 killed). Self-cleaning fixture (edge + both
+entities removed).
+
+**Rule.** Every identifier you hand external systems (subscription URLs,
+webhook payload ids, export cursors) must survive your own dedup/merge
+operations — grep for every surface that accepts the id as input whenever
+an operation rewrites identity.
+
+### 94.3 Prometheus can scrape now (round 247)
+
+The §94 audit question — "who actually presents the credential?" — applied
+to `/ops/metrics`: its only real consumer is a Prometheus scraper, which
+cannot refresh a 15-minute Bearer token. It now accepts the long-lived feed
+token via `?token=` through `get_scrape_admin`, with the role gate intact
+and LIVE: the token resolves to the user row, so a demoted admin's old
+token stops scraping immediately. Killer: admin feed token 200 with
+exposition text, member feed token 403, anonymous 401, human Bearer paths
+unchanged. Ops handbook documents the scrape_config shape.
+
+### 94.4 The feed page offers the feed (round 248)
+
+The change-feed page — the product's subscription surface — had no
+subscription entry point; only the catalog Inspect panel did. The page
+header now carries the Atom link with the ACTIVE severity/entity filters
+and the feed token baked in, so "what I'm looking at" is exactly "what I
+subscribe to". Unit killer pins href composition and filter reactivity.
+
+### 98.1 Redirect Location hardened (round 250)
+
+The §98 Location was built with a bare `str.replace(entity_id, successor)`
+over the whole URL — a JWT that happened to contain the 26-char id as a
+substring would have been corrupted. Now replaces only the exact
+`entity_id=<id>` query pair.
+
+### 95.4 rel=self, credential-free (round 252)
+
+The feed now carries the validator-recommended `<link rel="self">` — built
+from the request URL with the `?token=` credential STRIPPED, because feeds
+are re-shared and cached and the self link is exactly the field readers
+copy. Killer parses the document, requires the self link to keep the
+severity filter but never the token, and asserts the raw body contains no
+token substring at all.

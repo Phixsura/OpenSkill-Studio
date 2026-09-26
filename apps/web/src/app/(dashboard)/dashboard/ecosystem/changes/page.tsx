@@ -42,6 +42,20 @@ export default function ChangesPage() {
   const [hasMore, setHasMore] = useState(false);
 
   const filterKey = `${severity}|${showAcked}|${entity}`;
+  // R248: the feed page is THE subscription surface — offer the Atom link
+  // with the current filters and a feed-scoped token (readers can't Bearer)
+  const feedToken = useQuery({
+    queryKey: ["eco-feed-token"],
+    staleTime: Infinity,
+    queryFn: () => apiWithAuth<{ data: { token: string } }>("/ecosystem/export/feed-token"),
+  });
+  const atomHref = `/api/v1/ecosystem/export/changes.atom?${[
+    severity ? `severity=${severity}` : "",
+    entity ? `entity_id=${entity}` : "",
+    feedToken.data?.data.token ? `token=${feedToken.data.data.token}` : "",
+  ]
+    .filter(Boolean)
+    .join("&")}`;
   const { data, isLoading } = useQuery({
     queryKey: ["eco-changes", filterKey],
     queryFn: async () => {
@@ -97,7 +111,16 @@ export default function ChangesPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Change Feed</h1>
+      <h1 className="text-2xl font-bold">
+        Change Feed
+        <a
+          href={atomHref}
+          className="ml-3 text-xs font-normal text-blue-600 underline"
+          title="Atom feed with the current severity/entity filters — paste into any feed reader"
+        >
+          📡 subscribe (.atom)
+        </a>
+      </h1>
       {entity && (
         <p className="text-xs text-[hsl(var(--muted-foreground))]">
           filtered to entity <span className="font-mono">{entity.slice(0, 12)}…</span>

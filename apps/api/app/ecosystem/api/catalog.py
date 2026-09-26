@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.ecosystem.api.dashboard import _etag_matches
 from app.ecosystem.api.deps import eco_audit, get_feed_user, require_platform_admin
 from app.ecosystem.schemas import (
     BulkDecideRequest,
@@ -413,7 +414,7 @@ async def catalog_export(
     # honor conditional GET (the hash was already computed; the DB work
     # still happens, but the multi-MB transfer is skipped on a match).
     etag = f'"{content_hash}"'
-    if request is not None and request.headers.get("if-none-match") == etag:
+    if request is not None and _etag_matches(request.headers.get("if-none-match"), etag):
         return PlainResponse(status_code=304, headers={"ETag": etag})
     if response is not None:
         response.headers["ETag"] = etag

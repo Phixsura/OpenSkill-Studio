@@ -108,7 +108,18 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
 ## 9. Health
 
 `/ecosystem/ops/metrics` is Prometheus-scrapeable (per-metric TYPE lines);
-alert rules and per-alert runbooks live in ecosystem-alerts.md. Crons run
+Prometheus scrapes `/api/v1/ecosystem/ops/metrics` with an ADMIN feed
+token in the query string (R247) — access tokens expire in minutes:
+
+```yaml
+scrape_configs:
+  - job_name: openskill-eco
+    metrics_path: /api/v1/ecosystem/ops/metrics
+    params:
+      token: ["<admin feed token from GET /export/feed-token>"]
+```
+
+Alert rules and per-alert runbooks live in ecosystem-alerts.md. Crons run
 off-peak minutes — source sweep (4/19/34/49), impact SLA (26/56), rollout
 eval (11/41), stuck runs (53), telemetry window (58, hourly production
 aggregation + divergence comparison), availability probes for watched
