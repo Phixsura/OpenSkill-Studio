@@ -328,4 +328,34 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
     expect(body.field).toBe("license");
     expect(body.chosen_value).toBe("MIT");
   });
+
+  it("Inspect shows a merged-into banner linking to the survivor (R254)", async () => {
+    const SURV = "S".repeat(26);
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (/\/ecosystem\/catalog\/\w+\?limit/.test(path) && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: ENTITY,
+              canonical_name: "Old Dup",
+              lifecycle_status: "retired",
+              sunset_at: null,
+              aliases: [],
+              merged_into: SURV,
+            },
+          ],
+          meta: { total: 1 },
+        });
+      if (path.includes("/export/feed-token")) return Promise.resolve({ data: { token: "t" } });
+      if (path.includes("/scorecard")) return Promise.resolve({ data: { score: 1, checks: [] } });
+      return Promise.resolve({ data: [] });
+    });
+    render(<CatalogPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Inspect"));
+    await screen.findByText(/merged into another/);
+    const link = screen.getByText("open the surviving entity").closest("a")!;
+    expect(link.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/catalog?kind=models&entity=${SURV}`,
+    );
+  });
 });

@@ -619,6 +619,62 @@ class CatalogService:
         )
         moved["pending_resolutions"] = result.rowcount or 0
 
+        # R253: production evidence and benchmark history follow the survivor
+        # too — replacement scoring and leaderboards key on entity_id, so
+        # snapshots/runs left on the retired id would silently vanish from
+        # every comparison. Telemetry rows that would collide with an
+        # existing survivor window are dropped (the survivor's own aggregate
+        # wins); benchmark targets are JSONB and have no unique constraint.
+        from app.ecosystem.models.benchmark import BenchmarkRun
+        from app.ecosystem.models.graph import TelemetrySnapshot
+
+        snaps = list(
+            await self.db.scalars(
+                select(TelemetrySnapshot).where(
+                    TelemetrySnapshot.entity_kind == kind,
+                    TelemetrySnapshot.entity_id == source_id,
+                )
+            )
+        )
+        moved["telemetry_snapshots"] = 0
+        for snap in snaps:
+            collision = await self.db.scalar(
+                select(TelemetrySnapshot.id).where(
+                    TelemetrySnapshot.entity_kind == kind,
+                    TelemetrySnapshot.entity_id == target_id,
+                    TelemetrySnapshot.org_id.is_(None)
+                    if snap.org_id is None
+                    else TelemetrySnapshot.org_id == snap.org_id,
+                    TelemetrySnapshot.window_start == snap.window_start,
+                    TelemetrySnapshot.window_end == snap.window_end,
+                )
+            )
+            if collision:
+                await self.db.delete(snap)
+            else:
+                snap.entity_id = target_id
+                moved["telemetry_snapshots"] += 1
+
+        from sqlalchemy import Text, cast
+        from sqlalchemy import func as sa_func
+        from sqlalchemy.dialects.postgresql import ARRAY
+
+        result = await self.db.execute(
+            update(BenchmarkRun)
+            .where(
+                BenchmarkRun.target["entity_kind"].astext == kind,
+                BenchmarkRun.target["entity_id"].astext == source_id,
+            )
+            .values(
+                target=sa_func.jsonb_set(
+                    BenchmarkRun.target,
+                    cast(["entity_id"], ARRAY(Text)),
+                    sa_func.to_jsonb(cast(target_id, Text)),
+                )
+            )
+        )
+        moved["benchmark_runs"] = result.rowcount or 0
+
         # Watchers follow the survivor: re-point watch items so a user who
         # watched the duplicate keeps receiving the survivor's change events.
         # Lists already watching the survivor drop the now-duplicate item.

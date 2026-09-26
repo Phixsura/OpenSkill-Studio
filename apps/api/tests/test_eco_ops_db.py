@@ -410,7 +410,12 @@ async def test_r198_dead_handler_wiring(db):
     await WatchlistService(db).quick_watch(
         user.id, target_kind="model_version", target_id=watched.id
     )
-    n = await sweep_watched_availability(db)
+    # R263 anti-flake: the dev DB accumulates never-probed watch items whose
+    # NULL last_probe ties sort nondeterministically — with the default
+    # cap=200 the fresh entity can be truncated out. This test pins the
+    # WIRING (watched -> enqueued), not rotation fairness (§90.3 covers
+    # that), so sweep with a cap that covers the whole backlog.
+    n = await sweep_watched_availability(db, cap=100_000)
     assert n >= 1
     probe = await db.scalar(
         select(OutboxMessage).where(

@@ -442,3 +442,97 @@ async def test_concurrent_notify_watchers_is_exactly_once(db):
             if row:
                 row.lifecycle_status = "retired"
             await session.commit()
+
+
+async def test_merge_moves_telemetry_and_benchmark_history(db):
+    """Round-253 killer: replacement scoring and leaderboards key on
+    entity_id — telemetry snapshots and benchmark runs left on the retired
+    duplicate silently vanish from every comparison after a merge. They must
+    follow the survivor; a telemetry row whose window collides with an
+    existing survivor aggregate is dropped (survivor's own data wins)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ecosystem.models.benchmark import BenchmarkRun, BenchmarkSuite
+    from app.ecosystem.models.graph import TelemetrySnapshot
+    from app.ecosystem.services.catalog import CatalogService
+
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:6]
+    dup = AIModel(canonical_name=f"TmDup-{tag}", slug=f"td-{tag}")
+    survivor = AIModel(canonical_name=f"TmSurv-{tag}", slug=f"ts-{tag}")
+    db.add_all([dup, survivor])
+    await db.flush()
+
+    w0 = datetime(2026, 9, 1, tzinfo=UTC)
+    w1 = w0 + timedelta(hours=1)
+    w2 = w1 + timedelta(hours=1)
+    db.add_all([
+        # unique window: must MOVE to the survivor
+        TelemetrySnapshot(entity_kind="model", entity_id=dup.id,
+                          window_start=w0, window_end=w1,
+                          sample_size=25, metrics={"success_rate": 0.9}),
+        # colliding window: survivor already has this aggregate -> dup DROPPED
+        TelemetrySnapshot(entity_kind="model", entity_id=dup.id,
+                          window_start=w1, window_end=w2,
+                          sample_size=25, metrics={"success_rate": 0.5}),
+        TelemetrySnapshot(entity_kind="model", entity_id=survivor.id,
+                          window_start=w1, window_end=w2,
+                          sample_size=40, metrics={"success_rate": 0.8}),
+    ])
+    suite = BenchmarkSuite(key=f"merge-suite-{tag}", name="M", family="text_generation",
+                           capability_key="text.generate", created_by=admin.id)
+    db.add(suite)
+    await db.flush()
+    run = BenchmarkRun(
+        suite_id=suite.id, status="completed",
+        target={"entity_kind": "model", "entity_id": dup.id},
+        dimension_scores={"reliability": 0.7},
+        finished_at=datetime.now(UTC),
+    )
+    db.add(run)
+    await db.flush()
+
+    out = await CatalogService(db).merge_entities(
+        "model", dup.id, survivor.id, actor_id=admin.id
+    )
+    assert out["moved"]["telemetry_snapshots"] == 1
+    assert out["moved"]["benchmark_runs"] == 1
+
+    # nothing telemetry-wise left on the duplicate
+    stale = await db.scalar(
+        select(TelemetrySnapshot.id).where(TelemetrySnapshot.entity_id == dup.id)
+    )
+    assert stale is None
+    # survivor's colliding aggregate kept its own metrics
+    kept = await db.scalar(
+        select(TelemetrySnapshot).where(
+            TelemetrySnapshot.entity_id == survivor.id,
+            TelemetrySnapshot.window_start == w1,
+        )
+    )
+    assert kept.metrics["success_rate"] == 0.8
+    # the benchmark run now targets the survivor
+    await db.refresh(run)
+    assert run.target["entity_id"] == survivor.id
+    assert run.target["entity_kind"] == "model"
+
+
+async def test_single_entity_get_reports_merged_into(db):
+    """Round-254 killer: old deep links land on the merged-away duplicate —
+    the single-entity read must carry merged_into so the UI can hand the
+    operator the survivor. Non-retired entities carry null."""
+    from app.ecosystem.api.catalog import get_catalog_entity
+    from app.ecosystem.services.catalog import CatalogService
+
+    admin = await _mk_user(db, "admin")
+    tag = str(ULID()).lower()[:6]
+    dup = AIModel(canonical_name=f"MiDup-{tag}", slug=f"mi-{tag}")
+    survivor = AIModel(canonical_name=f"MiSurv-{tag}", slug=f"mis-{tag}")
+    db.add_all([dup, survivor])
+    await db.flush()
+    await CatalogService(db).merge_entities("model", dup.id, survivor.id, actor_id=admin.id)
+
+    out = await get_catalog_entity("models", dup.id, db=db, _user=None)
+    assert out["data"].merged_into == survivor.id
+    out2 = await get_catalog_entity("models", survivor.id, db=db, _user=None)
+    assert out2["data"].merged_into is None

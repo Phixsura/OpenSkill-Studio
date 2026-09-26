@@ -317,6 +317,9 @@ class CatalogEntityResponse(_Orm):
     # R220: curated facts (conflict arbitrations etc.) live in the `extra`
     # attribute (column "metadata") — expose them as `metadata`
     metadata: dict = Field(default_factory=dict, validation_alias="extra")
+    # R254: set on single-entity reads when a supersedes edge exists — old
+    # deep links land on the retired duplicate and the UI offers the survivor
+    merged_into: str | None = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True, extra="allow")
 

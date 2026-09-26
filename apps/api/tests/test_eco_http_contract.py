@@ -941,3 +941,30 @@ async def test_atom_self_link_present_and_credential_free(http, tokens):
     ]
     assert self_links and "severity=breaking" in self_links[0]
     assert "token=" not in self_links[0]
+
+
+async def test_ics_calendar_supports_conditional_get(http, tokens):
+    """Round-260 killer: calendar apps poll the .ics URL on a schedule —
+    same conditional-GET contract as the Atom feed (§95): ETag on 200,
+    If-None-Match match -> 304 empty, stale validator -> full 200."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/deprecation-calendar.ics", headers=member)
+    assert r.status_code == 200
+    etag = r.headers.get("etag")
+    assert etag, "ics must carry an ETag"
+    r2 = await http.get(
+        "/api/v1/ecosystem/deprecation-calendar.ics",
+        headers={**member, "If-None-Match": etag},
+    )
+    assert r2.status_code == 304 and not r2.content
+    r3 = await http.get(
+        "/api/v1/ecosystem/deprecation-calendar.ics",
+        headers={**member, "If-None-Match": '"stale"'},
+    )
+    assert r3.status_code == 200
+    # different filter window -> different validator space (no false 304)
+    r4 = await http.get(
+        "/api/v1/ecosystem/deprecation-calendar.ics?within_days=30",
+        headers={**member, "If-None-Match": etag},
+    )
+    assert r4.status_code in (200, 304)  # 304 only if identical event set

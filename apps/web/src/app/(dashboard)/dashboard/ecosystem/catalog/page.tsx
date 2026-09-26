@@ -50,6 +50,7 @@ interface Entity {
   sunset_at?: string | null;
   license?: string | null;
   metadata?: { curated?: Record<string, { value: string; decided_at: string }> };
+  merged_into?: string | null;
 }
 
 interface Conflict {
@@ -485,6 +486,17 @@ function CatalogInner() {
                   }`}
                 />
               ))}
+            </div>
+          )}
+          {selected.merged_into && (
+            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              This entity was merged into another —{" "}
+              <Link
+                href={`/dashboard/ecosystem/catalog?kind=${params.get("kind") ?? "models"}&entity=${selected.merged_into}`}
+                className="font-medium underline"
+              >
+                open the surviving entity
+              </Link>
             </div>
           )}
           {selected.metadata?.curated && Object.keys(selected.metadata.curated).length > 0 && (

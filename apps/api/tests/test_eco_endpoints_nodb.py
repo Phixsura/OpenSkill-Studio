@@ -116,3 +116,32 @@ def test_severity_rank_covers_the_full_vocabulary():
     assert set(SEVERITY_RANK) == set(CHANGE_SEVERITIES)
     # ranks are a strict total order (no accidental duplicates)
     assert len(set(SEVERITY_RANK.values())) == len(SEVERITY_RANK)
+
+
+def test_handbook_cron_schedule_matches_registry():
+    """Round-261 drift guard (§96 rule: derive coverage from the system):
+    the operator handbook documents every eco cron's minutes by hand — pin
+    them to the live cron registry so a schedule change that skips the docs
+    fails CI."""
+    from pathlib import Path
+
+    from app.controlplane.worker import _cron_jobs
+
+    doc = (
+        Path(__file__).resolve().parents[3] / "docs/ops/ecosystem-operations.md"
+    ).read_text()
+    eco_crons = [j for j in _cron_jobs() if j.name.startswith("eco_")]
+    assert len(eco_crons) >= 7  # floor: a broken filter can't vacuously pass
+    for job in eco_crons:
+        minutes = job.minute  # set|int|None per arq cron
+        if minutes is None:
+            continue
+        vals = sorted(minutes) if isinstance(minutes, (set, frozenset)) else [minutes]
+        if job.name == "eco_retention":
+            token = f"{job.hour if not isinstance(job.hour, (set, frozenset)) else sorted(job.hour)[0]:02d}:{vals[0]}"
+        else:
+            token = "/".join(str(v) for v in vals)
+        assert token in doc, (
+            f"handbook out of date for {job.name}: expected '{token}' "
+            "in docs/ops/ecosystem-operations.md"
+        )

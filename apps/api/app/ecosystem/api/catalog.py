@@ -103,7 +103,25 @@ async def get_catalog_entity(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    return {"data": await CatalogService(db).get(_kind(segment), entity_id)}
+    entity = await CatalogService(db).get(_kind(segment), entity_id)
+    payload = CatalogEntityResponse.model_validate(entity)
+    if entity.lifecycle_status == "retired":
+        # R254: an old deep link lands on the merged-away duplicate — tell
+        # the UI where the survivor lives (same signal the Atom 302 uses)
+        from sqlalchemy import select as _select
+
+        from app.ecosystem.models.replacement import ReplacementEdge
+
+        payload.merged_into = await db.scalar(
+            _select(ReplacementEdge.to_id)
+            .where(
+                ReplacementEdge.from_id == entity_id,
+                ReplacementEdge.edge_type == "supersedes",
+            )
+            .order_by(ReplacementEdge.created_at.desc())
+            .limit(1)
+        )
+    return {"data": payload}
 
 
 @router.patch("/catalog/{segment}/{entity_id}", response_model=DataResponse[CatalogEntityResponse])
@@ -228,6 +246,7 @@ async def deprecation_calendar(
 
 @router.get("/deprecation-calendar.ics", include_in_schema=True)
 async def deprecation_calendar_ics(
+    request: Request = None,
     within_days: int = Query(365, ge=1, le=730),
     db: AsyncSession = Depends(get_db),
     # R233: calendar apps subscribe by URL and cannot send Bearer headers —
@@ -239,6 +258,17 @@ async def deprecation_calendar_ics(
     from fastapi.responses import Response
 
     sunsets = await LifecycleService(db).upcoming_sunsets(within_days=within_days)
+    # R260: calendar apps poll on a schedule too — same conditional-GET
+    # contract as the Atom feed (§95). The window identity is the sorted
+    # (entity, date) set plus the filter.
+    from hashlib import sha256 as _sha256
+
+    ident = f"{within_days}:" + ",".join(
+        sorted(f"{i['entity_id']}@{i['sunset_at']}" for i in sunsets)
+    )
+    etag = f'"{_sha256(ident.encode()).hexdigest()[:32]}"'
+    if request is not None and _etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers={"ETag": etag})
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -274,7 +304,10 @@ async def deprecation_calendar_ics(
     return Response(
         content="\r\n".join(lines) + "\r\n",
         media_type="text/calendar",
-        headers={"Content-Disposition": 'attachment; filename="eco-deprecations.ics"'},
+        headers={
+            "Content-Disposition": 'attachment; filename="eco-deprecations.ics"',
+            "ETag": etag,
+        },
     )
 
 

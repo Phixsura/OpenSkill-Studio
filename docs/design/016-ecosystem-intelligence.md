@@ -2223,3 +2223,66 @@ are re-shared and cached and the self link is exactly the field readers
 copy. Killer parses the document, requires the self link to keep the
 severity filter but never the token, and asserts the raw body contains no
 token substring at all.
+
+### 98.2 Merge completeness: telemetry + benchmark history (round 253)
+
+Applying the §98 rule ("grep every surface that accepts the id whenever an
+operation rewrites identity") to merge itself found two orphaned reference
+classes: `TelemetrySnapshot(entity_kind, entity_id)` rows and
+`BenchmarkRun.target` JSONB. Both feed replacement scoring and
+leaderboards, so after a merge the survivor silently LOST the duplicate's
+production evidence and benchmark history. Snapshots now follow the
+survivor (window collisions drop the duplicate's row — the survivor's own
+aggregate wins); benchmark targets are rewritten via
+`jsonb_set(..., '{entity_id}'::text[], to_jsonb(<survivor>))` (the path
+argument needs an explicit text[] cast under asyncpg). Killer asserts the
+moved counts, zero stale rows, the surviving collision keeps its own
+metrics, and the run's JSONB now targets the survivor.
+
+### 98.3 Deep links follow the merge too (round 254)
+
+The web deep-link (`?entity=<old-id>`) lands on the retired duplicate. The
+single-entity read now carries `merged_into` (resolved from the supersedes
+edge, only for retired entities) and the Inspect panel shows an amber
+"merged into another — open the surviving entity" banner linking to the
+survivor's deep link. Backend killer: duplicate reports the survivor id,
+survivor reports null; web killer pins the banner and its href.
+
+### 97.1 Second flake class rooted out (round 255)
+
+Full runs #4–#6 kept tripping over `test_sweep_recovers_stalled_pending_run`
+(a workflow-runtime test that rides into the eco subset because "r**eco**vers"
+contains the substring) — its "fresh run must NOT be swept" half relied on
+`created_at` server-default now() surviving several API round-trips, which
+under full-suite machine load can exceed the grace window
+(`workflow_step_timeout_seconds`). The test now pins the fresh run's
+`created_at` to the sweep-side clock explicitly. Same §97 rule: pin the
+environment (time, DNS), not the guard.
+
+### 95.5 The calendar polls too (round 260)
+
+The .ics deprecation calendar — polled by calendar apps on their own
+schedule — was the last §95-class surface without a validator. ETag =
+hash(within_days + sorted (entity, sunset date) set); If-None-Match → 304.
+All three URL-subscribed surfaces (Atom, iCal, catalog export) now share
+the same conditional-GET contract.
+
+### 96.2 Cron schedule pinned to the registry (round 261)
+
+The handbook's cron table (§9) was hand-maintained — the §96 rule applied:
+a new guard walks the LIVE `_cron_jobs()` registry, and for every `eco_*`
+job asserts its minute set (formatted as the doc writes it, e.g. `4/19/34/49`
+or `03:41` for retention) appears in ecosystem-operations.md, with a ≥7
+floor so a broken filter can't vacuously pass. Schedule changes that skip
+the docs now fail CI.
+
+### 97.2 Third flake class: cap-truncated wiring assertion (round 263)
+
+`test_r198_dead_handler_wiring` failed in two of the last five full runs:
+the dev DB accumulates never-probed watch items whose NULL `last_probe`
+ties sort nondeterministically, and at the default `cap=200` the freshly
+watched entity can be truncated out of the sweep. The test pins WIRING
+(watched → probe enqueued), not rotation fairness (§90.3's killer owns
+that), so it now sweeps with `cap=100_000`. Flake taxonomy so far: network
+(DNS, §97), time (grace window, §97.1), and accumulated-data truncation
+(§97.2) — each fixed by pinning the environment the test actually assumes.

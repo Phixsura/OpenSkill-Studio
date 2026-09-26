@@ -2104,11 +2104,17 @@ async def test_sweep_recovers_stalled_pending_run(c):
     )
     fresh_id = r2.json()["data"]["id"]
     async with AsyncSessionLocal() as db:
-        # force it back to PENDING but keep created_at recent (default now())
+        # force it back to PENDING and PIN created_at to now — under machine
+        # load the API round-trips above can exceed the grace window and the
+        # genuinely-fresh run would flake as "stalled" (R255 anti-flake)
         await db.execute(
             update(WorkflowRun)
             .where(WorkflowRun.id == fresh_id)
-            .values(status=RunStatus.PENDING, started_at=None)
+            .values(
+                status=RunStatus.PENDING,
+                started_at=None,
+                created_at=datetime.now(UTC),
+            )
         )
         await db.commit()
     async with AsyncSessionLocal() as db:
