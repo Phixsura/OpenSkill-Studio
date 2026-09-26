@@ -2413,3 +2413,15 @@ A per-page sweep found the components page rendered its EmptyStates
 first paint that lies. Impact/Replacements tabs now render "Loading…"
 until the query settles; unit killer mounts with a never-resolving fetch
 and asserts Loading… is shown and the empty copy is NOT.
+
+### 90.10 Probe-coverage early warning (round 293)
+
+The availability sweep is capped (200/run at :14/:44 ≈ 9,600 probes/day) —
+if watched entities outgrow that throughput, per-entity staleness grows
+with NO signal anywhere. Two new gauges close the loop:
+`eco_availability_never_probed` (backlog of watched entities with zero
+probes) and `eco_availability_oldest_probe_hours` (worst staleness), plus
+an EcoProbeStarvation alert (>24h for 1h) whose runbook names the two
+remedies (raise the cap / add a cron slot). Killer asserts both gauges are
+present, typed, and non-negative on the scrape surface; the docs↔metrics
+parity guard picks the new names up automatically.

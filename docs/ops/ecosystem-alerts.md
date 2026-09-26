@@ -19,6 +19,14 @@ groups:
           summary: "The eco metrics endpoint is not scrapeable"
           runbook: "Every eco alert below goes blind while this fires. Check the API, then the admin feed token in scrape_configs (365-day expiry; a demoted/suspended admin or a feed-token rotation also invalidates it) — mint a fresh one via GET /api/v1/ecosystem/export/feed-token."
 
+      - alert: EcoProbeStarvation
+        expr: eco_availability_oldest_probe_hours > 24
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Oldest watched-entity probe is {{ $value }}h stale"
+          runbook: "Watched entities outgrew the sweep throughput (cap 200 per run at :14/:44 → ~9600/day). Raise the cap in sweep_watched_availability or add a second cron slot; eco_availability_never_probed shows the backlog of entities never probed at all."
+
       - alert: EcoOutboxDeadLetters
         expr: eco_outbox_failed > 0
         for: 15m
@@ -122,6 +130,8 @@ All from `overview()` flattened as `eco_<key>[_<subkey>]`, plus:
 | `eco_injection_flagged_unverified`          | flagged + unverified (advisory heuristics) |
 | `eco_changes_unacknowledged`                | change events awaiting ack                 |
 | `eco_outbox_pending` / `_failed`            | eco outbox backlog / dead letters          |
+| `eco_availability_never_probed`             | watched entities never probed              |
+| `eco_availability_oldest_probe_hours`       | staleness of the oldest probe              |
 | `eco_security_critical_open`                | unacked security-critical changes          |
 | `eco_security_advisories_open`              | structured advisories in `open`            |
 | `eco_pricing_unreviewed`                    | price observations awaiting reconcile      |

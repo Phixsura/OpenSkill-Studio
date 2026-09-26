@@ -147,6 +147,36 @@ async def ops_metrics(
             emit(key, value)
     emit("outbox_pending", outbox_pending)
     emit("outbox_failed", outbox_failed)
+    # R293: probe-coverage early warning — if watched entities outgrow the
+    # sweep throughput (cap × cadence), staleness grows silently. Emit the
+    # never-probed backlog and the oldest probe age so EcoProbeStarvation
+    # can fire before watchers miss a real flip.
+    from sqlalchemy import text as _sql
+
+    row = (
+        await db.execute(
+            _sql(
+                """
+                SELECT
+                  count(*) FILTER (WHERE p.last_probe IS NULL) AS never_probed,
+                  coalesce(
+                    max(extract(epoch FROM (now() - p.last_probe)) / 3600.0), 0
+                  ) AS oldest_hours
+                FROM (SELECT DISTINCT target_kind, target_id
+                      FROM eco_watch_items WHERE target_id IS NOT NULL) w
+                LEFT JOIN LATERAL (
+                  SELECT max(observed_at) AS last_probe
+                  FROM eco_availability_records r
+                  WHERE r.entity_kind = w.target_kind
+                    AND r.entity_id = w.target_id
+                    AND r.record_type = 'status'
+                ) p ON true
+                """
+            )
+        )
+    ).one()
+    emit("availability_never_probed", int(row.never_probed or 0))
+    emit("availability_oldest_probe_hours", round(float(row.oldest_hours or 0), 1))
     return PlainTextResponse(
         "\n".join(lines) + "\n",
         media_type="text/plain; version=0.0.4",

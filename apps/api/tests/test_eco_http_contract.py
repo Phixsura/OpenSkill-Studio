@@ -1125,3 +1125,20 @@ async def test_rotate_is_audited(http, tokens):
         assert row is not None
         assert row.after["generation"] == gen
     await engine.dispose()
+
+
+async def test_probe_coverage_metrics_emitted(http, tokens):
+    """Round-293 killer: if watched entities outgrow the sweep throughput,
+    staleness grows silently — the scrape surface must expose the
+    never-probed backlog and the oldest probe age (typed gauges, present
+    even when zero)."""
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
+    assert r.status_code == 200
+    for name in ("eco_availability_never_probed", "eco_availability_oldest_probe_hours"):
+        line = next(
+            (ln for ln in r.text.splitlines() if ln.startswith(f"{name} ")), None
+        )
+        assert line is not None, f"{name} missing from scrape"
+        assert float(line.split()[1]) >= 0
+        assert f"# TYPE {name} gauge" in r.text
