@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -208,6 +209,23 @@ class RolloutPlan(Base):
     )
 
     __table_args__ = (Index("ix_eco_rollouts_status", "status"),)
+
+
+class FeedTokenState(Base):
+    """R272 (§94.6): per-user feed-token generation. Feed tokens are
+    stateless JWTs — this single integer is the revocation lever: rotating
+    bumps it and every previously minted token (which embeds the old value)
+    stops validating. One row per user, created lazily."""
+
+    __tablename__ = "eco_feed_token_state"
+
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rotated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Watchlist(Base):

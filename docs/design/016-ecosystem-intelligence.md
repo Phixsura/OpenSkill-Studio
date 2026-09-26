@@ -2315,3 +2315,31 @@ surface is admin data. All four token surfaces now send
 §98 302 (private caching stays allowed, so the ETag revalidation contract
 is intact). Killer sweeps all four surfaces on both the 200 and the
 conditional path.
+
+### 94.6 Feed tokens are revocable now (round 272)
+
+**Gap.** Feed tokens are stateless 365-day JWTs — §94's own handbook
+admitted "old tokens expire, they are not revoked server-side". A leaked
+feed URL (pasted into the wrong reader, shared screenshot, log scrape) was
+irrevocable short of suspending the whole account.
+
+**Fix (GitHub "reset token" posture).** `eco_feed_token_state(user_id,
+generation)` (migration eco09) — one integer per user, created lazily.
+Tokens embed `gen`; `get_feed_user` rejects a mismatch. `POST
+/export/feed-token/rotate` bumps the generation under a row lock and
+returns a fresh token: every earlier token dies immediately, Bearer
+sessions are untouched, and re-minting without rotating keeps the current
+generation (multiple readers can share it deliberately).
+
+**Killers.** Old token 200 → rotate → old 401 / new 200 / re-mint 200 →
+second rotate kills the first replacement; Bearer unaffected. Mutation
+audit: neutering the gen check, freezing the bump, and minting without the
+generation each fail (3/3 killed).
+
+### 94.7 Self-service rotation in the UI (round 273)
+
+The revocation lever (§94.6) is reachable where the subscription anchors
+live: a "rotate feed token" button on the watchlists page POSTs the rotate
+endpoint and swaps the fresh token into the shared `eco-feed-token` query,
+so every anchor re-renders with the new credential instantly. Unit killer
+pins the POST and the anchor href swap.

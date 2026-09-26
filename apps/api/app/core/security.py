@@ -72,7 +72,7 @@ def create_access_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
 
 
-def create_feed_token(user_id: str) -> str:
+def create_feed_token(user_id: str, generation: int = 0) -> str:
     """R232: narrow-scope token for Atom feed URLs (GitHub private-feed
     posture). Feed readers cannot send Authorization headers, so the token
     travels in the query string — which is why it must NOT be an access
@@ -82,6 +82,10 @@ def create_feed_token(user_id: str) -> str:
     payload = {
         "sub": user_id,
         "type": "feed",
+        # R272: rotation lever — get_feed_user compares this to the user's
+        # current FeedTokenState.generation; a rotate bumps the stored value
+        # and every earlier token stops validating
+        "gen": generation,
         "iat": now,
         "exp": now + timedelta(days=365),
         "jti": str(ULID()),

@@ -157,13 +157,54 @@ async def ops_metrics(
 
 @router.get("/export/feed-token", response_model=dict)
 async def mint_feed_token(
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """R232: exchange a normal session for a narrow-scope feed token to
     embed in Atom URLs (feed readers cannot send Bearer headers)."""
     from app.core.security import create_feed_token
+    from app.ecosystem.models.replacement import FeedTokenState
 
-    return {"data": {"token": create_feed_token(user.id), "expires_in_days": 365}}
+    state = await db.get(FeedTokenState, user.id)
+    gen = state.generation if state else 0
+    return {
+        "data": {
+            "token": create_feed_token(user.id, generation=gen),
+            "expires_in_days": 365,
+        }
+    }
+
+
+@router.post("/export/feed-token/rotate", response_model=dict)
+async def rotate_feed_token(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R272 (§94.6): revoke every previously minted feed token for this user
+    (leaked feed URL, offboarded reader) by bumping the generation, then
+    hand back a fresh token. GitHub's "reset token" posture."""
+    from datetime import UTC, datetime
+
+    from app.core.security import create_feed_token
+    from app.ecosystem.models.replacement import FeedTokenState
+
+    state = await db.get(FeedTokenState, user.id, with_for_update=True)
+    if state is None:
+        state = FeedTokenState(user_id=user.id, generation=1)
+        db.add(state)
+    else:
+        state.generation += 1
+        state.rotated_at = datetime.now(UTC)
+    await db.flush()
+    gen = state.generation
+    await db.commit()
+    return {
+        "data": {
+            "token": create_feed_token(user.id, generation=gen),
+            "expires_in_days": 365,
+            "revoked_generations": gen,
+        }
+    }
 
 
 @router.get("/export/changes.atom", include_in_schema=True)

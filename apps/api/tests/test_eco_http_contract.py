@@ -1027,3 +1027,40 @@ async def test_token_surfaces_are_never_shared_cacheable(http, tokens):
             r304 = await http.get(url, headers={"If-None-Match": etag})
             assert r304.status_code == 304, url
             assert "private" in r304.headers.get("cache-control", ""), url
+
+
+async def test_feed_token_rotation_revokes_prior_tokens(http, tokens):
+    """Round-272 killer (§94.6): feed tokens are stateless 365-day JWTs — a
+    leaked feed URL was irrevocable short of suspending the account. Rotate
+    must kill EVERY previously minted token immediately, hand back a working
+    replacement, stack across rotations, and leave Bearer sessions alone."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    old_token = r.json()["data"]["token"]
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={old_token}")
+    assert r.status_code == 200  # works before rotation
+
+    r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=member)
+    assert r.status_code == 200
+    new_token = r.json()["data"]["token"]
+
+    # the leaked token is dead NOW — not in 365 days
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={old_token}")
+    assert r.status_code == 401
+    # the replacement works
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={new_token}")
+    assert r.status_code == 200
+    # re-minting WITHOUT rotating returns a token of the current generation
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    reminted = r.json()["data"]["token"]
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={reminted}")
+    assert r.status_code == 200
+    # a second rotation kills the first replacement too
+    r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=member)
+    assert r.json()["data"]["revoked_generations"] >= 2
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={new_token}")
+    assert r.status_code == 401
+    # Bearer session path is untouched by rotation
+    r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
+    assert r.status_code == 200

@@ -90,8 +90,11 @@ Impact analyses show blast radius with SLA deadlines (`eco_impact_open`).
   feed readers, which cannot send Bearer headers: mint a narrow-scope token
   via `GET /api/v1/ecosystem/export/feed-token` (365-day expiry, feed-only)
   and append it as `?token=`. The same token opens the read-only export/subscription surfaces: `changes.atom`, `deprecation-calendar.ics`, and `GET /export`. Access tokens are rejected in the query string
-  by design — a leaked feed URL only ever exposes the change feed. Rotate by
-  minting again; old tokens expire rather than being revoked server-side.
+  by design — a leaked feed URL only ever exposes the change feed. Revoke by rotating: `POST
+/api/v1/ecosystem/export/feed-token/rotate` kills every previously minted
+  token immediately (per-user generation counter) and returns a replacement;
+  plain re-minting keeps the current generation so multiple readers can share
+  one token deliberately.
 - Both polling surfaces honor conditional GET (R235): send back the
   response `ETag` as `If-None-Match` and a 304 saves the transfer. The
   export ETag equals the body's `content_hash`.

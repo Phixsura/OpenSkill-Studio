@@ -89,6 +89,17 @@ export default function WatchlistsPage() {
     queryClient.invalidateQueries({ queryKey: ["eco-watched-changes"] });
   };
 
+  // R273: self-service revocation — rotating kills every previously minted
+  // feed token (leaked URL) and the anchors below re-render with the new one
+  const rotateToken = useMutation({
+    mutationFn: () =>
+      apiWithAuth<{ data: { token: string } }>("/ecosystem/export/feed-token/rotate", {
+        method: "POST",
+      }),
+    onSuccess: (res) => {
+      queryClient.setQueryData(["eco-feed-token"], { data: { token: res.data.token } });
+    },
+  });
   const createList = useMutation({
     mutationFn: () =>
       apiWithAuth("/ecosystem/watchlists", {
@@ -340,6 +351,13 @@ export default function WatchlistsPage() {
             >
               📅 subscribe (.ics)
             </a>
+            <button
+              onClick={() => rotateToken.mutate()}
+              title="Revoke every previously shared feed/calendar URL and mint a fresh token"
+              className="ml-2 text-xs font-normal text-[hsl(var(--muted-foreground))] underline"
+            >
+              🔄 rotate feed token
+            </button>
             <a
               href={`/api/v1/ecosystem/export${
                 feedToken.data?.data.token ? `?token=${feedToken.data.data.token}` : ""

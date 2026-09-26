@@ -41,6 +41,15 @@ async def get_feed_user(
     user = await db.get(User, sub)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    # R272: rotation check — a token minted before the user's last rotate
+    # carries a stale generation and is dead, even though its signature and
+    # expiry are still valid. Missing state row means generation 0.
+    from app.ecosystem.models.replacement import FeedTokenState
+
+    state = await db.get(FeedTokenState, sub)
+    current_gen = state.generation if state else 0
+    if payload.get("gen", 0) != current_gen:
+        raise HTTPException(status_code=401, detail="Feed token has been rotated")
     return user
 
 

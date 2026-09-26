@@ -17,7 +17,7 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "The eco metrics endpoint is not scrapeable"
-          runbook: "Every eco alert below goes blind while this fires. Check the API, then the admin feed token in scrape_configs (365-day expiry; a demoted/suspended admin also invalidates it) — mint a fresh one via GET /api/v1/ecosystem/export/feed-token."
+          runbook: "Every eco alert below goes blind while this fires. Check the API, then the admin feed token in scrape_configs (365-day expiry; a demoted/suspended admin or a feed-token rotation also invalidates it) — mint a fresh one via GET /api/v1/ecosystem/export/feed-token."
 
       - alert: EcoOutboxDeadLetters
         expr: eco_outbox_failed > 0

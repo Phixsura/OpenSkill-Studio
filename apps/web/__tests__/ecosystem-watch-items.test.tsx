@@ -264,3 +264,22 @@ describe("Export anchors carry the feed token (R233)", () => {
     );
   });
 });
+
+describe("Feed-token rotation UI (R273)", () => {
+  it("rotate button POSTs and swaps the token in every anchor", async () => {
+    render(<WatchlistsPage />, { wrapper: wrapper() });
+    const ics = (await screen.findByText(/subscribe \(.ics\)/)).closest("a")!;
+    await waitFor(() => expect(ics.getAttribute("href")).toContain("token=ft-cal-token"));
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/ecosystem/export/feed-token/rotate" && init?.method === "POST")
+        return Promise.resolve({ data: { token: "ft-rotated" } });
+      return Promise.resolve({ data: [] });
+    });
+    fireEvent.click(screen.getByText(/rotate feed token/));
+    await waitFor(() =>
+      expect(ics.getAttribute("href")).toBe(
+        "/api/v1/ecosystem/deprecation-calendar.ics?token=ft-rotated",
+      ),
+    );
+  });
+});
