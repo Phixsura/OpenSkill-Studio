@@ -357,6 +357,11 @@ AVAILABILITY_PROBER = _mock_prober
 
 
 def set_availability_prober(prober) -> None:
+    """R283 security contract: a REAL prober makes outbound requests to
+    entity-derived URLs — it MUST route every URL through
+    app.ecosystem.security.validate_external_url (SSRF: schemes, private ranges,
+    DNS re-check) and honor the per-source timeout/size caps, exactly like
+    the sync fetchers. The default mock never touches the network."""
     global AVAILABILITY_PROBER
     AVAILABILITY_PROBER = prober
 
