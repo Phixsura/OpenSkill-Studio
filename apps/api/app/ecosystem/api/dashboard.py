@@ -185,9 +185,18 @@ async def rotate_feed_token(
     hand back a fresh token. GitHub's "reset token" posture."""
     from datetime import UTC, datetime
 
+    # R274: two concurrent first-ever rotations both see no row and both
+    # INSERT — PK violation 500. The advisory lock serializes get-or-create
+    # per user (same pattern as the source/consumer locks, §16).
+    from sqlalchemy import text as _sql_text
+
     from app.core.security import create_feed_token
     from app.ecosystem.models.replacement import FeedTokenState
 
+    await db.execute(
+        _sql_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"eco-feed-rotate:{user.id}"},
+    )
     state = await db.get(FeedTokenState, user.id, with_for_update=True)
     if state is None:
         state = FeedTokenState(user_id=user.id, generation=1)
@@ -197,6 +206,15 @@ async def rotate_feed_token(
         state.rotated_at = datetime.now(UTC)
     await db.flush()
     gen = state.generation
+    # R278: credential revocation is a security event — audit it (fail-safe,
+    # same posture as every eco admin action)
+    from app.ecosystem.api.deps import eco_audit
+
+    await eco_audit(
+        db, user, action="eco.feed_token_rotated",
+        target_type="eco_feed_token", target_id=user.id,
+        after={"generation": gen},
+    )
     await db.commit()
     return {
         "data": {

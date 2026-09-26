@@ -752,6 +752,7 @@ class CatalogService:
         conflicts: list[dict] = []
         tracked = CONFLICT_ARBITRABLE_FIELDS
         sources = list(latest_per_source.values())
+        entity = None  # R278: fetched once, not per conflicting field
         for field in tracked:
             values: dict[str, list[str]] = {}
             for obs in sources:
@@ -759,7 +760,8 @@ class CatalogService:
                 if val is not None:
                     values.setdefault(str(val), []).append(obs.source_id)
             if len(values) > 1:
-                entity = await self.get(kind, entity_id)
+                if entity is None:
+                    entity = await self.get(kind, entity_id)
                 curated = ((entity.extra or {}).get("curated") or {}).get(field)
                 conflicts.append({"field": field, "values": values, "curated": curated})
         return conflicts

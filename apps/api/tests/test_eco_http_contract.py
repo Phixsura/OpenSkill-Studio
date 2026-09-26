@@ -1064,3 +1064,64 @@ async def test_feed_token_rotation_revokes_prior_tokens(http, tokens):
     # Bearer session path is untouched by rotation
     r = await http.get("/api/v1/ecosystem/export/changes.atom", headers=member)
     assert r.status_code == 200
+
+
+async def test_first_rotate_race_is_serialized(http, tokens):
+    """Round-274 killer: two concurrent FIRST rotations both saw no state row
+    and both INSERTed — PK violation 500. The advisory lock must serialize
+    the get-or-create: both requests succeed and generations end distinct."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.api.dashboard import rotate_feed_token
+    from app.ecosystem.models.replacement import FeedTokenState
+    from tests.test_eco_services_db import _mk_user
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as setup:
+        user = await _mk_user(setup)
+        await setup.commit()
+        uid = user.id
+
+    async def one_rotate():
+        async with AsyncSessionLocal() as db:
+            out = await rotate_feed_token(db=db, user=await db.get(type(user), uid))
+            return out["data"]["revoked_generations"]
+
+    try:
+        gens = await asyncio.gather(*(one_rotate() for _ in range(8)))
+        # all succeeded (no PK 500) and were serialized: strictly 1..8
+        assert sorted(gens) == list(range(1, 9)), gens
+    finally:
+        async with AsyncSessionLocal() as db:
+            state = await db.get(FeedTokenState, uid)
+            if state:
+                await db.delete(state)
+            await db.commit()
+    await engine.dispose()
+
+
+async def test_rotate_is_audited(http, tokens):
+    """Round-278 killer: credential revocation is a security event — the
+    rotate must land in the immutable audit trail with the new generation."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.core.database import AsyncSessionLocal, engine
+
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=member)
+    assert r.status_code == 200
+    gen = r.json()["data"]["revoked_generations"]
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        row = await db.scalar(
+            _select(CommercialAuditEvent)
+            .where(CommercialAuditEvent.action == "eco.feed_token_rotated")
+            .order_by(CommercialAuditEvent.id.desc())
+            .limit(1)
+        )
+        assert row is not None
+        assert row.after["generation"] == gen
+    await engine.dispose()

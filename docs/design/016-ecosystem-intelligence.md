@@ -2343,3 +2343,26 @@ live: a "rotate feed token" button on the watchlists page POSTs the rotate
 endpoint and swaps the fresh token into the shared `eco-feed-token` query,
 so every anchor re-renders with the new credential instantly. Unit killer
 pins the POST and the anchor href swap.
+
+### 94.8 First-rotate get-or-create serialized (round 274)
+
+Two concurrent FIRST rotations both see no state row and both INSERT — a PK
+violation 500 in any multi-worker deployment. `pg_advisory_xact_lock` on
+`eco-feed-rotate:<user>` serializes the get-or-create (the §16 pattern).
+Killer: 8 concurrent rotations must all succeed with generations exactly
+1..8. Honest audit note: the lock-removal mutant SURVIVES in-process —
+a single asyncio event loop happens not to interleave the get/insert
+window — so like §94.2 this is recorded as an environment-limited
+equivalent mutant, not a kill; the property test still pins strict
+serialization, which a multi-process race would break.
+
+### 94.9 Rotation audited + the fail-safe's blind spot closed (round 278)
+
+Credential revocation now lands in the immutable audit trail
+(`eco.feed_token_rotated`, generation recorded). Shipping it exposed a
+systemic blind spot: `eco_audit` is fail-safe by design, so an action
+missing from `AUDIT_ACTIONS` doesn't error — it silently never lands
+(exactly how this audit first shipped, caught only by its killer). New §96
+guard scans every `eco_audit(action=...)` call-site literal in the package
+and requires registry membership (≥5 floor, mutation-verified). Also
+hoisted the per-field entity re-read in `conflicting_observations` (R278a).

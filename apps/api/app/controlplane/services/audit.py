@@ -79,6 +79,7 @@ AUDIT_ACTIONS = frozenset(
         "eco.advisory_status",
         # R115: previously-unaudited irreversible eco admin actions
         "eco.advisory_registered",
+        "eco.feed_token_rotated",
         "eco.entity_updated",
         "eco.edge_added",
         "eco.edge_removed",

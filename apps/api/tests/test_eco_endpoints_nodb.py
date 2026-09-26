@@ -145,3 +145,26 @@ def test_handbook_cron_schedule_matches_registry():
             f"handbook out of date for {job.name}: expected '{token}' "
             "in docs/ops/ecosystem-operations.md"
         )
+
+
+def test_every_eco_audit_action_is_registered():
+    """Round-278 systemic guard: eco_audit is fail-safe — an UNREGISTERED
+    action doesn't error, it silently never lands in the trail (exactly how
+    the rotate audit shipped broken). Scan every eco_audit(action=...) call
+    site and require the literal to be in AUDIT_ACTIONS."""
+    import re
+    from pathlib import Path
+
+    from app.controlplane.services.audit import AUDIT_ACTIONS
+
+    app_dir = Path(__file__).resolve().parents[1] / "app" / "ecosystem"
+    used: set[str] = set()
+    for path in app_dir.rglob("*.py"):
+        for m in re.finditer(r'action="(eco\.[a-z_.]+)"', path.read_text()):
+            used.add(m.group(1))
+    assert len(used) >= 5, f"call-site scan looks broken ({sorted(used)})"
+    unregistered = used - set(AUDIT_ACTIONS)
+    assert not unregistered, (
+        f"eco_audit actions never reach the trail (fail-safe swallows them): "
+        f"{sorted(unregistered)} — register in AUDIT_ACTIONS"
+    )
