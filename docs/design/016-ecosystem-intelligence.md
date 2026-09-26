@@ -2303,3 +2303,15 @@ side-by-side comparison is exactly where relative stability drives the
 decision. The compare page's uptime cells now render the same per-day
 worst-status strip (already-fetched daily data; no new requests). Unit
 killer pins per-day title tooltips and the uptime summary line.
+
+### 94.5 Query-token responses are never shared-cacheable (round 271)
+
+HTTP shared caches skip responses to requests bearing `Authorization` — but
+the whole point of §94 is that feed/calendar/export/metrics requests DON'T
+carry that header. Without an explicit directive, a CDN or corporate proxy
+may store a `?token=` 200 and replay it to other clients — and the metrics
+surface is admin data. All four token surfaces now send
+`Cache-Control: private, max-age=0, must-revalidate` on 200s, 304s and the
+§98 302 (private caching stays allowed, so the ETag revalidation contract
+is intact). Killer sweeps all four surfaces on both the 200 and the
+conditional path.

@@ -999,3 +999,31 @@ async def test_dead_lettered_eco_outbox_is_a_metric(http, tokens):
             await db.delete(row)
             await db.commit()
     await engine.dispose()
+
+
+async def test_token_surfaces_are_never_shared_cacheable(http, tokens):
+    """Round-271 killer: query-token requests carry NO Authorization header,
+    so without Cache-Control: private a CDN/corporate proxy may store these
+    responses and replay them to other clients (the metrics surface is admin
+    data). Every token-capable surface must say `private` on 200 AND on the
+    conditional/redirect paths."""
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=admin)
+    tok = r.json()["data"]["token"]
+
+    surfaces = [
+        f"/api/v1/ecosystem/export/changes.atom?token={tok}",
+        f"/api/v1/ecosystem/deprecation-calendar.ics?token={tok}",
+        f"/api/v1/ecosystem/export?token={tok}",
+        f"/api/v1/ecosystem/ops/metrics?token={tok}",
+    ]
+    for url in surfaces:
+        r = await http.get(url)
+        assert r.status_code == 200, url
+        cc = r.headers.get("cache-control", "")
+        assert "private" in cc, f"{url} -> Cache-Control: {cc!r}"
+        etag = r.headers.get("etag")
+        if etag:  # conditional path carries the directive too
+            r304 = await http.get(url, headers={"If-None-Match": etag})
+            assert r304.status_code == 304, url
+            assert "private" in r304.headers.get("cache-control", ""), url

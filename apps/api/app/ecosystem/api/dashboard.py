@@ -147,7 +147,12 @@ async def ops_metrics(
             emit(key, value)
     emit("outbox_pending", outbox_pending)
     emit("outbox_failed", outbox_failed)
-    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+    return PlainTextResponse(
+        "\n".join(lines) + "\n",
+        media_type="text/plain; version=0.0.4",
+        # R271: admin data reachable via a query token — never shared-cacheable
+        headers={"Cache-Control": "private, max-age=0, must-revalidate"},
+    )
 
 
 @router.get("/export/feed-token", response_model=dict)
@@ -220,7 +225,10 @@ async def export_changes_atom(
             location = str(request.url).replace(
                 f"entity_id={entity_id}", f"entity_id={successor}"
             )
-            return Response(status_code=302, headers={"Location": location})
+            return Response(
+                status_code=302,
+                headers={"Location": location, "Cache-Control": "private, max-age=0"},
+            )
 
     # R235: feed readers poll on a schedule — honor conditional GET. The
     # change stream is insert-only (retention trims oldest), so the window
@@ -239,7 +247,11 @@ async def export_changes_atom(
         if rows and rows[0].detected_at
         else None
     )
-    cond_headers = {"ETag": etag}
+    # R271: query-token requests carry no Authorization header, so shared
+    # caches (CDN, corporate proxies) would happily store and replay these
+    # responses to OTHER clients. Cache-Control: private confines caching to
+    # the requesting client while keeping the ETag revalidation contract.
+    cond_headers = {"ETag": etag, "Cache-Control": "private, max-age=0, must-revalidate"}
     if last_modified:
         cond_headers["Last-Modified"] = last_modified
     if request is not None:

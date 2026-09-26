@@ -267,8 +267,9 @@ async def deprecation_calendar_ics(
         sorted(f"{i['entity_id']}@{i['sunset_at']}" for i in sunsets)
     )
     etag = f'"{_sha256(ident.encode()).hexdigest()[:32]}"'
+    _cc = "private, max-age=0, must-revalidate"  # R271
     if request is not None and _etag_matches(request.headers.get("if-none-match"), etag):
-        return Response(status_code=304, headers={"ETag": etag})
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": _cc})
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -307,6 +308,7 @@ async def deprecation_calendar_ics(
         headers={
             "Content-Disposition": 'attachment; filename="eco-deprecations.ics"',
             "ETag": etag,
+            "Cache-Control": _cc,
         },
     )
 
@@ -447,10 +449,12 @@ async def catalog_export(
     # honor conditional GET (the hash was already computed; the DB work
     # still happens, but the multi-MB transfer is skipped on a match).
     etag = f'"{content_hash}"'
+    cc = "private, max-age=0, must-revalidate"  # R271: query-token responses
     if request is not None and _etag_matches(request.headers.get("if-none-match"), etag):
-        return PlainResponse(status_code=304, headers={"ETag": etag})
+        return PlainResponse(status_code=304, headers={"ETag": etag, "Cache-Control": cc})
     if response is not None:
         response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = cc
     return {
         "data": {
             "schema": "openskill.eco.catalog/v1",
