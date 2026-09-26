@@ -290,7 +290,7 @@ async def export_changes_atom(
             )
 
     # R235: feed readers poll on a schedule — honor conditional GET. The
-    # change stream is insert-only (retention trims oldest), so the window
+    # change stream is APPEND-ONLY (the ledger is never pruned, §16), so the window
     # is identified by (newest id, oldest id, row count) + the filters.
     window = f"{severity}:{entity_id}:{limit}:" + (
         f"{rows[0].id}:{rows[-1].id}:{len(rows)}" if rows else "empty"

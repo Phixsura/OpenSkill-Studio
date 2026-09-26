@@ -2056,7 +2056,7 @@ every subscriber and ourselves linearly with adoption.
 
 **Fix.** `/export`: `ETag: "<content_hash>"`, `If-None-Match` match → 304
 empty (DB work still happens; the transfer is what's saved). Atom: the
-change stream is insert-only with oldest-first retention, so the window is
+change stream is APPEND-ONLY (the ledger is never pruned — §16), so the window is
 identified by `(severity, entity_id, limit, newest id, oldest id, count)`
 hashed to a 32-hex ETag; matching poll → 304.
 
@@ -2366,3 +2366,13 @@ missing from `AUDIT_ACTIONS` doesn't error — it silently never lands
 guard scans every `eco_audit(action=...)` call-site literal in the package
 and requires registry membership (≥5 floor, mutation-verified). Also
 hoisted the per-field entity re-read in `conflicting_observations` (R278a).
+
+### 95.6 Cursor-durability audit (round 282)
+
+Audited the Kafka-style failure ("consumer resumes with an offset older
+than retention → silent gap"): it CANNOT happen here, because the
+observation/change ledgers are never pruned (§16 retention only trims
+redundant availability samples and old sync-run audit rows). §95's
+"retention trims oldest" phrasing was a documentation error and is
+corrected — the Atom window identity relies only on append-only inserts,
+which is strictly safer.

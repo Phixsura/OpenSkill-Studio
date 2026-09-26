@@ -353,10 +353,15 @@ export default function WatchlistsPage() {
             </a>
             <button
               onClick={() => rotateToken.mutate()}
+              disabled={rotateToken.isPending}
               title="Revoke every previously shared feed/calendar URL and mint a fresh token"
-              className="ml-2 text-xs font-normal text-[hsl(var(--muted-foreground))] underline"
+              className="ml-2 text-xs font-normal text-[hsl(var(--muted-foreground))] underline disabled:opacity-50"
             >
-              🔄 rotate feed token
+              {rotateToken.isPending
+                ? "rotating…"
+                : rotateToken.isSuccess
+                  ? "✅ rotated — old URLs are dead"
+                  : "🔄 rotate feed token"}
             </button>
             <a
               href={`/api/v1/ecosystem/export${
