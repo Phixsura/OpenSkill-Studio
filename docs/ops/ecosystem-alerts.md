@@ -19,6 +19,14 @@ groups:
           summary: "The eco metrics endpoint is not scrapeable"
           runbook: "Every eco alert below goes blind while this fires. Check the API, then the admin feed token in scrape_configs (365-day expiry; a demoted/suspended admin also invalidates it) — mint a fresh one via GET /api/v1/ecosystem/export/feed-token."
 
+      - alert: EcoOutboxDeadLetters
+        expr: eco_outbox_failed > 0
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $value }} eco outbox messages dead-lettered"
+          runbook: "Each failed row is a promised automation (notify/impact/probe/telemetry) that silently stopped. Inspect via GET /api/v1/platform/outbox/failed, fix the cause, then POST /api/v1/platform/outbox/{id}/requeue (idempotent handlers make requeue always safe); the payload is preserved verbatim."
+
       - alert: EcoSourcesStale
         expr: eco_sources_stale > 0
         for: 30m
@@ -113,6 +121,7 @@ All from `overview()` flattened as `eco_<key>[_<subkey>]`, plus:
 | `eco_observations_unverified`               | review debt (observations)                 |
 | `eco_injection_flagged_unverified`          | flagged + unverified (advisory heuristics) |
 | `eco_changes_unacknowledged`                | change events awaiting ack                 |
+| `eco_outbox_pending` / `_failed`            | eco outbox backlog / dead letters          |
 | `eco_security_critical_open`                | unacked security-critical changes          |
 | `eco_security_advisories_open`              | structured advisories in `open`            |
 | `eco_pricing_unreviewed`                    | price observations awaiting reconcile      |

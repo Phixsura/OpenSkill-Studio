@@ -2286,3 +2286,12 @@ watched entity can be truncated out of the sweep. The test pins WIRING
 that), so it now sweeps with `cap=100_000`. Flake taxonomy so far: network
 (DNS, §97), time (grace window, §97.1), and accumulated-data truncation
 (§97.2) — each fixed by pinning the environment the test actually assumes.
+
+### 90.8 Dead letters are a metric (round 264)
+
+`/ops/metrics` counted the eco outbox backlog but not its DEAD LETTERS —
+and a failed eco message is precisely the §90 failure mode (a promised
+automation that silently stopped) recurring at runtime instead of at
+wiring time. `eco_outbox_failed` is now emitted, alerted
+(EcoOutboxDeadLetters, critical, 15m) and runbooked; killer inserts a
+failed row and reads the gauge back through the scrape surface.

@@ -968,3 +968,34 @@ async def test_ics_calendar_supports_conditional_get(http, tokens):
         headers={**member, "If-None-Match": etag},
     )
     assert r4.status_code in (200, 304)  # 304 only if identical event set
+
+
+async def test_dead_lettered_eco_outbox_is_a_metric(http, tokens):
+    """Round-264 killer: a dead-lettered eco message is a promised
+    automation that silently stopped (§90 class) — it must surface as
+    eco_outbox_failed so the EcoOutboxDeadLetters alert can fire."""
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.core.database import AsyncSessionLocal, engine
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        row = OutboxMessage(
+            topic="eco.check_availability",
+            payload={"entity_kind": "model", "entity_id": "0" * 26},
+            status="failed",
+        )
+        db.add(row)
+        await db.commit()
+        try:
+            r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
+            assert r.status_code == 200
+            line = next(
+                ln for ln in r.text.splitlines()
+                if ln.startswith("eco_outbox_failed ")
+            )
+            assert float(line.split()[1]) >= 1
+        finally:
+            await db.delete(row)
+            await db.commit()
+    await engine.dispose()

@@ -124,4 +124,6 @@ off-peak minutes — source sweep (4/19/34/49), impact SLA (26/56), rollout
 eval (11/41), stuck runs (53), telemetry window (58, hourly production
 aggregation + divergence comparison), availability probes for watched
 entities (14/44), retention (03:41). The outbox dead-letters after max
-attempts and surfaces on the failed-outbox ops endpoint.
+attempts; dead letters are the `eco_outbox_failed` gauge
+(EcoOutboxDeadLetters alert), listed and requeued via
+`/api/v1/platform/outbox/failed` and `/api/v1/platform/outbox/{id}/requeue`.

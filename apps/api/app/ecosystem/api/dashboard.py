@@ -119,6 +119,16 @@ async def ops_metrics(
             .where(OutboxMessage.status == "pending", OutboxMessage.topic.like("eco.%"))
         )
     ) or 0
+    # R264: a dead-lettered eco message is a PROMISED AUTOMATION that
+    # silently stopped (§90 class) — it must be a metric, not just a row
+    # on the failed-outbox admin endpoint
+    outbox_failed = (
+        await db.scalar(
+            select(func.count())
+            .select_from(OutboxMessage)
+            .where(OutboxMessage.status == "failed", OutboxMessage.topic.like("eco.%"))
+        )
+    ) or 0
     lines: list[str] = []
 
     def emit(name: str, value) -> None:
@@ -136,6 +146,7 @@ async def ops_metrics(
         else:
             emit(key, value)
     emit("outbox_pending", outbox_pending)
+    emit("outbox_failed", outbox_failed)
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
