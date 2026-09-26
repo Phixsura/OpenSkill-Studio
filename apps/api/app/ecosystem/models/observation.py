@@ -142,6 +142,9 @@ class ChangeEvent(Base):
 
     __table_args__ = (
         Index("ix_eco_changes_type", "change_type", "detected_at"),
+        # eco10 (§99): the unfiltered newest-first paths (Atom firehose,
+        # dashboard feed) and the delta cursor's (detected_at, id) order
+        Index("ix_eco_changes_detected_id", "detected_at", "id"),
         Index("ix_eco_changes_severity", "severity", "acknowledged"),
         Index("ix_eco_changes_entity", "entity_kind", "canonical_entity_id"),
         # R137: watch feed reads by bare canonical_entity_id + recency

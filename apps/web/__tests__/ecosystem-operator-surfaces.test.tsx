@@ -146,3 +146,13 @@ describe("Operator surfaces (ADR-016 §52)", () => {
     expect(sourcesCard?.getAttribute("href")).toBe("/dashboard/ecosystem/sources");
   });
 });
+
+describe("Loading never reads as empty (R290)", () => {
+  it("Impact tab shows Loading… while the query is in flight", async () => {
+    api.mockImplementation(() => new Promise(() => {})); // never resolves
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Impact"));
+    expect(await screen.findByText("Loading…")).toBeDefined();
+    expect(screen.queryByText(/No impact analyses yet/)).toBeNull();
+  });
+});

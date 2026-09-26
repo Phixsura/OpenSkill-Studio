@@ -232,3 +232,41 @@ async def test_atom_feed_empty_result_still_valid_atom(db):
     updated = root.find(f"{ns}updated")
     assert updated is not None and updated.text  # non-empty timestamp
     assert root.find(f"{ns}author/{ns}name") is not None
+
+
+async def test_change_feed_order_is_deterministic_on_timestamp_ties(db):
+    """Round-289 killer: batch-inserted changes share server-default now() —
+    without an id tiebreak the feed order (and therefore the Atom ETag
+    window) flaps between identical queries. Same-timestamp rows must come
+    back newest-id-first, stably."""
+    from datetime import UTC, datetime
+
+    from app.ecosystem.services.dashboard import DashboardService
+    from tests.test_eco_services_db import _mk_source
+
+    source = await _mk_source(db)
+    obs = EcosystemObservation(
+        source_id=source.id, event_type="pricing_changed",
+        raw_hash="d" * 64, normalized={},
+    )
+    db.add(obs)
+    await db.flush()
+    ts = datetime(2026, 9, 27, 3, 0, tzinfo=UTC)
+    ids = []
+    for i in range(5):
+        c = ChangeEvent(
+            observation_id=obs.id, change_type="price",
+            field=f"tie-{i}", old_value={"v": i}, new_value={"v": i + 1},
+            severity="info", detected_at=ts,
+        )
+        db.add(c)
+        await db.flush()
+        ids.append(c.id)
+
+    svc = DashboardService(db)
+    first = [c.id for c in await svc.change_feed(limit=200)]
+    second = [c.id for c in await svc.change_feed(limit=200)]
+    assert first == second  # deterministic across identical queries
+    # within the tie: newest ULID first (descending id)
+    ours_in_feed = [i for i in first if i in set(ids)]
+    assert ours_in_feed == sorted(ids, reverse=True)

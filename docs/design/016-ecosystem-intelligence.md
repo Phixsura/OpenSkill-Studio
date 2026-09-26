@@ -2376,3 +2376,40 @@ redundant availability samples and old sync-run audit rows). §95's
 "retention trims oldest" phrasing was a documentation error and is
 corrected — the Atom window identity relies only on append-only inserts,
 which is strictly safer.
+
+## 99. The busiest queries had no index (round 287)
+
+**Gap.** An EXPLAIN audit of the change-ledger hot paths found that the two
+BUSIEST queries — the unfiltered newest-first page (Atom firehose, dashboard
+feed, polled by every reader) and the delta export's (detected_at, id)
+cursor scan — matched NO index: every existing index leads with a filter
+column (change_type / severity / entity). At today's row count the planner
+correctly seq-scans; at production scale both paths degrade to full-table
+sorts on the hottest table in the subsystem.
+
+**Fix.** `ix_eco_changes_detected_id (detected_at, id)` — migration eco10,
+built CONCURRENTLY (eco08 posture), declared on the model. Verified with
+`enable_seqscan=off`: newest-first becomes a bare Index Scan Backward (no
+sort node at all); the cursor scan uses the index via bitmap.
+
+**Rule.** Index audits must start from the QUERIES (what the endpoints
+actually order/filter by), not from the indexes — an index list that looks
+rich can still miss the one access path every poller hits.
+
+### 99.1 Deterministic feed order on timestamp ties (round 289)
+
+`change_feed` ordered by `detected_at DESC` alone — batch-inserted rows
+share server-default now(), so identical queries could return tied rows in
+different orders, making the Atom ETag window (first/last id) flap on
+unchanged data: readers would re-download identical feeds. Now
+`(detected_at DESC, id DESC)` — served directly by the §99 index. Killer:
+five same-timestamp rows come back identically across two queries,
+newest-ULID-first; tiebreak-removal mutant killed.
+
+### 99.2 Loading never reads as empty (round 290)
+
+A per-page sweep found the components page rendered its EmptyStates
+("No impact analyses yet") while the queries were still IN FLIGHT — a
+first paint that lies. Impact/Replacements tabs now render "Loading…"
+until the query settles; unit killer mounts with a never-resolving fetch
+and asserts Loading… is shown and the empty copy is NOT.

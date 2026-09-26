@@ -264,6 +264,12 @@ class DashboardService:
             # Served by ix_eco_changes_canonical (R137)
             query = query.where(ChangeEvent.canonical_entity_id == canonical_entity_id)
         rows = await self.db.scalars(
-            query.order_by(ChangeEvent.detected_at.desc()).limit(limit).offset(offset)
+            # R289: id tiebreak — same-timestamp rows (batch inserts share
+            # server-default now()) otherwise order nondeterministically,
+            # which makes the Atom ETag window flap on identical data.
+            # Served directly by ix_eco_changes_detected_id (eco10).
+            query.order_by(ChangeEvent.detected_at.desc(), ChangeEvent.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows)

@@ -170,7 +170,9 @@ export default function ComponentsPage() {
       )}
 
       {tab === "Impact" &&
-        ((impact.data?.data ?? []).length === 0 ? (
+        (impact.isLoading ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
+        ) : (impact.data?.data ?? []).length === 0 ? (
           <EmptyState icon="🎯" text="No impact analyses yet." />
         ) : (
           <div className="space-y-2">
@@ -232,7 +234,9 @@ export default function ComponentsPage() {
         ))}
 
       {tab === "Replacements" &&
-        ((candidates.data?.data ?? []).length === 0 ? (
+        (candidates.isLoading ? (
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
+        ) : (candidates.data?.data ?? []).length === 0 ? (
           <EmptyState icon="🔁" text="No replacement candidates yet." />
         ) : (
           <div className="space-y-2">
