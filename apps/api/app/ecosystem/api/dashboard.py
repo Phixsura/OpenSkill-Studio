@@ -368,9 +368,21 @@ async def export_changes_atom(
         summary = _xml_text(
             f"entity_kind={c.entity_kind or '?'} old={c.old_value} new={c.new_value}"
         )
+        # R294: rel=alternate gives readers an "open" target — the entity-
+        # filtered change-feed page (absolute URL derived from the request
+        # host; same-origin deployment per the proxy rewrite design)
+        alternate = ""
+        if request is not None and c.canonical_entity_id:
+            base = f"{request.url.scheme}://{request.url.netloc}"
+            alternate = (
+                f'<link rel="alternate" type="text/html" '
+                f'href="{base}/dashboard/ecosystem/changes'
+                f'?entity={c.canonical_entity_id}"/>'
+            )
         entries.append(
             f"<entry><id>urn:openskill:eco-change:{c.id}</id>"
             f"<title>{title}</title><updated>{detected}</updated>"
+            f"{alternate}"
             f"<summary>{summary}</summary></entry>"
         )
     xml = (

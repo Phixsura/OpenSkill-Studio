@@ -1142,3 +1142,68 @@ async def test_probe_coverage_metrics_emitted(http, tokens):
         assert line is not None, f"{name} missing from scrape"
         assert float(line.split()[1]) >= 0
         assert f"# TYPE {name} gauge" in r.text
+
+
+async def test_atom_entries_carry_alternate_links(http, tokens):
+    """Round-294 killer: entries for canonical entities must carry a
+    rel=alternate link to the entity-filtered change-feed page (absolute
+    URL, XML-parsed — the reader's "open" affordance)."""
+    import xml.etree.ElementTree as ET
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from tests.test_eco_services_db import _mk_source
+
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        from ulid import ULID as _ULID
+
+        tag = str(_ULID()).lower()[:6]
+        model = AIModel(canonical_name=f"AltGen-{tag}", slug=f"alt-{tag}")
+        db.add(model)
+        await db.flush()
+        source = await _mk_source(db)
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="pricing_changed",
+            raw_hash="e" * 64, normalized={},
+            canonical_entity_kind="model", canonical_entity_id=model.id,
+        )
+        db.add(obs)
+        await db.flush()
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="price",
+            field="alt-marker", old_value={"v": 1}, new_value={"v": 2},
+            severity="info", canonical_entity_id=model.id, entity_kind="model",
+        )
+        db.add(change)
+        await db.commit()
+        model_id, obs_id, change_id = model.id, obs.id, change.id
+
+        try:
+            r = await http.get(
+                f"/api/v1/ecosystem/export/changes.atom?entity_id={model_id}",
+                headers=member,
+            )
+            assert r.status_code == 200
+            root = ET.fromstring(r.text)
+            ns = "{http://www.w3.org/2005/Atom}"
+            alts = [
+                link.get("href")
+                for entry in root.findall(f"{ns}entry")
+                for link in entry.findall(f"{ns}link")
+                if link.get("rel") == "alternate"
+            ]
+            assert alts, "entries carry no alternate links"
+            assert all(
+                a.startswith("http")
+                and f"/dashboard/ecosystem/changes?entity={model_id}" in a
+                for a in alts
+            )
+        finally:
+            await db.delete(await db.get(ChangeEvent, change_id))
+            await db.delete(await db.get(EcosystemObservation, obs_id))
+            await db.delete(await db.get(AIModel, model_id))
+            await db.commit()
+    await engine.dispose()

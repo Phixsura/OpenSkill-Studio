@@ -2425,3 +2425,12 @@ an EcoProbeStarvation alert (>24h for 1h) whose runbook names the two
 remedies (raise the cap / add a cron slot). Killer asserts both gauges are
 present, typed, and non-negative on the scrape surface; the docs↔metrics
 parity guard picks the new names up automatically.
+
+### 95.7 Entries link back (round 294)
+
+Atom entries for canonical entities now carry
+`<link rel="alternate" type="text/html">` to the entity-filtered
+change-feed page (absolute URL from the request host — same-origin
+deployment per the proxy design). This is the reader's "open" affordance;
+without it a feed item is a dead end. Killer parses the feed and requires
+every entry's alternate to be absolute and to target the entity deep link.
