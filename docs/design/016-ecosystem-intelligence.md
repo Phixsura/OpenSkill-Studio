@@ -2677,3 +2677,12 @@ window_end and could pick the wrong org's aggregate) and replacement
 ranking (equal scores flapped). Every ORDER BY in the package now ends in
 the immutable id. Meta-lesson: a sweep's own search vocabulary is a hand
 list — derive it from the pattern (`order_by(...)`) instead.
+
+### 99.10 The sweep is a guard now (round 338)
+
+§99.9's meta-lesson applied to itself: a paren-balance-parsing CI guard now
+walks every `order_by(...)` expression in the package and requires the id
+tiebreak (trgm similarity exempt — unique per row). Building the guard
+found 5 MORE sites the two manual sweeps missed (the .asc() variants and
+the BenchmarkResult composite) — the guard's first run was itself the
+audit. 31+ expressions checked with a floor; regressions fail CI.

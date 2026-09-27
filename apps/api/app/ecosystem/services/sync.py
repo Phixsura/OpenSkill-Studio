@@ -249,7 +249,7 @@ class SyncService:
             await self.db.scalars(
                 select(RawSnapshot)
                 .where(RawSnapshot.source_id == source_id)
-                .order_by(RawSnapshot.fetched_at.asc())
+                .order_by(RawSnapshot.fetched_at.asc(), RawSnapshot.id.asc())
                 .limit(limit)
             )
         )

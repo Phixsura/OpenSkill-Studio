@@ -151,7 +151,7 @@ class PricingService:
                 PriceObservation.entity_id == entity_id,
                 PriceObservation.reconciliation_status.notin_(("rejected", "superseded")),
             )
-            .order_by(PriceObservation.observed_at.asc())
+            .order_by(PriceObservation.observed_at.asc(), PriceObservation.id.asc())
             .limit(500)
         )
         if unit:
@@ -492,7 +492,7 @@ class AvailabilityService:
                     AvailabilityRecord.entity_id == entity_id,
                     AvailabilityRecord.record_type == "status",
                 )
-                .order_by(AvailabilityRecord.observed_at.asc())
+                .order_by(AvailabilityRecord.observed_at.asc(), AvailabilityRecord.id.asc())
             )
         )
         now = datetime.now(UTC)

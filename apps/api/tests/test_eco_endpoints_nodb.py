@@ -276,3 +276,38 @@ def test_web_test_mock_paths_exist_in_the_route_table():
                 offenders.append(f"{f.name}: {lit}")
     assert checked >= 20, f"literal scan looks broken ({checked})"
     assert not offenders, f"mocked paths with no matching route: {offenders}"
+
+
+def test_every_orm_order_by_carries_the_id_tiebreak():
+    """Round-338 guard (§99.9 made permanent): every ORM order_by in the eco
+    package must end in the immutable id — timestamp/score ties otherwise
+    order nondeterministically, flapping ETags, audit histories and
+    "latest" selection. Derived from the code pattern, not a column list."""
+    import re
+    from pathlib import Path
+
+    pkg = Path(__file__).resolve().parents[1] / "app" / "ecosystem"
+    offenders = []
+    checked = 0
+    for f in pkg.rglob("*.py"):
+        src = f.read_text()
+        # collapse newlines so multi-line order_by chains are one match,
+        # then extract the argument list with a paren-balance walk (regex
+        # alone trips over the nested parens in .desc())
+        flat = re.sub(r"\s+", " ", src)
+        for m in re.finditer(r"\.order_by\(", flat):
+            depth = 1
+            i = m.end()
+            while i < len(flat) and depth:
+                depth += {"(": 1, ")": -1}.get(flat[i], 0)
+                i += 1
+            inner = flat[m.end() : i - 1]
+            checked += 1
+            if ".id" in inner or "similarity" in inner:
+                continue  # id tiebreak present, or trgm score (unique per row)
+            offenders.append(f"{f.name}: order_by({inner[:70]})")
+    assert checked >= 30, f"pattern scan looks broken ({checked})"
+    assert not offenders, (
+        "order_by without id tiebreak (nondeterministic on ties): "
+        f"{offenders}"
+    )

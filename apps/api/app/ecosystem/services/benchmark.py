@@ -792,7 +792,7 @@ class BenchmarkService:
         rows = await self.db.scalars(
             select(BenchmarkResult)
             .where(BenchmarkResult.run_id == run_id)
-            .order_by(BenchmarkResult.case_id, BenchmarkResult.repeat_index)
+            .order_by(BenchmarkResult.case_id, BenchmarkResult.repeat_index, BenchmarkResult.id)
         )
         return list(rows)
 
@@ -905,7 +905,7 @@ class BenchmarkService:
         query = (
             select(BenchmarkRun)
             .where(BenchmarkRun.status == "completed")
-            .order_by(BenchmarkRun.finished_at.asc())
+            .order_by(BenchmarkRun.finished_at.asc(), BenchmarkRun.id.asc())
             .limit(500)
         )
         if suite_id:
