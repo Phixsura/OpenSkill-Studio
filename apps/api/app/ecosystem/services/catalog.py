@@ -395,7 +395,7 @@ class CatalogService:
                     AvailabilityRecord.entity_id == entity_id,
                     AvailabilityRecord.record_type == "status",
                 )
-                .order_by(AvailabilityRecord.observed_at.desc())
+                .order_by(AvailabilityRecord.observed_at.desc(), AvailabilityRecord.id.desc())
                 .limit(1)
             )
             out.append(
@@ -758,7 +758,7 @@ class CatalogService:
                 EcosystemObservation.canonical_entity_id == entity_id,
                 EcosystemObservation.superseded_by_id.is_(None),
             )
-            .order_by(EcosystemObservation.observed_at.desc())
+            .order_by(EcosystemObservation.observed_at.desc(), EcosystemObservation.id.desc())
             .limit(200)
         )
         observations = list(rows)
@@ -847,7 +847,11 @@ class LifecycleService:
                 LifecycleTransition.entity_kind == kind,
                 LifecycleTransition.entity_id == entity_id,
             )
-            .order_by(LifecycleTransition.created_at)
+            # R326 (§99.1 class): same-timestamp transitions (rapid
+            # successive calls share server-default now()) order
+            # nondeterministically without the id tiebreak — the audit
+            # history must read in true insertion order.
+            .order_by(LifecycleTransition.created_at, LifecycleTransition.id)
         )
         return list(rows)
 

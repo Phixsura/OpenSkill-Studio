@@ -219,7 +219,7 @@ class DraftService:
             else ComponentDraft.org_id.is_(None)
         )
         rows = await self.db.scalars(
-            query.order_by(ComponentDraft.created_at.desc()).limit(limit).offset(offset)
+            query.order_by(ComponentDraft.created_at.desc(), ComponentDraft.id.desc()).limit(limit).offset(offset)
         )
         return list(rows)
 

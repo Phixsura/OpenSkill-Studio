@@ -196,7 +196,7 @@ class AdvisoryService:
         if severity:
             query = query.where(SecurityAdvisory.severity == severity)
         rows = await self.db.scalars(
-            query.order_by(SecurityAdvisory.created_at.desc()).limit(limit)
+            query.order_by(SecurityAdvisory.created_at.desc(), SecurityAdvisory.id.desc()).limit(limit)
         )
         return list(rows)
 

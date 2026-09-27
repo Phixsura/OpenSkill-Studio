@@ -2639,3 +2639,14 @@ expired trials — more than the R259 bounded batch (LIMIT 500 oldest-first)
 (cap truncation against accumulated data); same fix shape: the fixtures'
 expiry is pinned ANCIENT (10 years) so they always lead the oldest-first
 order. The R259 bounding itself is correct and untouched.
+
+### 99.8 Deterministic ordering swept package-wide (round 326)
+
+Run #24 caught the lifecycle audit history flapping on same-timestamp
+transitions — the §99.1 tie class again, in a read path whose ORDER is the
+product (an audit trail). Rather than fix one site, every timestamp-ordered
+read in the package gained the id tiebreak (11 sites: lifecycle history,
+latest-probe and latest-observation selection — where a tie could pick the
+WRONG "latest" — plus suite/run/advisory/source/sync-run/draft listings and
+both supersedes-edge lookups). ULIDs make (timestamp, id) equal true
+insertion order everywhere.

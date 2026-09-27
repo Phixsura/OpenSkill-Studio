@@ -107,7 +107,7 @@ class SourceService:
             select(func.count()).select_from(query.subquery())
         )
         rows = await self.db.scalars(
-            query.order_by(EcosystemSource.created_at.desc()).limit(limit).offset(offset)
+            query.order_by(EcosystemSource.created_at.desc(), EcosystemSource.id.desc()).limit(limit).offset(offset)
         )
         return list(rows), total or 0
 
@@ -195,7 +195,7 @@ class SourceService:
         rows = await self.db.scalars(
             select(SourceSyncRun)
             .where(SourceSyncRun.source_id == source_id)
-            .order_by(SourceSyncRun.started_at.desc())
+            .order_by(SourceSyncRun.started_at.desc(), SourceSyncRun.id.desc())
             .limit(limit)
         )
         return list(rows)

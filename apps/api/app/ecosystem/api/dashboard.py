@@ -305,7 +305,7 @@ async def export_changes_atom(
                 ReplacementEdge.from_id == entity_id,
                 ReplacementEdge.edge_type == "supersedes",
             )
-            .order_by(ReplacementEdge.created_at.desc())
+            .order_by(ReplacementEdge.created_at.desc(), ReplacementEdge.id.desc())
             .limit(1)
         )
         if successor:
