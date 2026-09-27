@@ -2704,3 +2704,10 @@ The comparison page — the §19 decision surface — was the one core page
 without a real-browser interaction test. e2e test 9 deep-links two REAL
 entities from the live catalog into `/compare?kind=&ids=` and requires both
 canonical names plus the Curated-facts and Availability rows to render.
+
+### 101.4 Filter flow in the browser (round 342)
+
+e2e test 10 types a real entity-name fragment into the §99.4 in-list filter
+and polls until every visible row matches — debounce, fetch, trgm index and
+render verified as one loop against the live stack. Functional flows now
+number 10 (+ axe at the moderate gate).

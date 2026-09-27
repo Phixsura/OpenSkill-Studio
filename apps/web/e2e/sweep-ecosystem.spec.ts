@@ -244,3 +244,28 @@ test("9 — compare renders a side-by-side table for two real entities", async (
   await page.getByText("Curated facts").waitFor({ timeout: 10_000 });
   await page.getByText("Availability").first().waitFor({ timeout: 10_000 });
 });
+
+test("10 — the in-list filter narrows the catalog against the live API", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const firstCell = page.locator("tbody tr td:first-child").first();
+  const hasRows = await firstCell.isVisible().catch(() => false);
+  if (!hasRows) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  const name = (await firstCell.innerText()).trim();
+  const fragment = name.split(/\s+/)[0]!.slice(0, 6);
+  await page.getByLabel("Filter list by name").fill(fragment);
+  // debounce (300ms) + fetch: every visible row must contain the fragment
+  await expect
+    .poll(
+      async () => {
+        const cells = await page.locator("tbody tr td:first-child").allInnerTexts();
+        return (
+          cells.length > 0 && cells.every((c) => c.toLowerCase().includes(fragment.toLowerCase()))
+        );
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+});
