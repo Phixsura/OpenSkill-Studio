@@ -6,6 +6,25 @@
   ADR-014 (control plane, `ProviderCostRate`, outbox), ADR-015 (talent capability ontology,
   workforce intelligence)
 
+## Hardening-campaign index (§90–§101)
+
+Sections §11–§89 chronicle the build-out; the sections below are the
+hardening campaign's major findings (subsections carry the per-round
+details):
+
+- §90 Dead-handler wiring — round 198
+- §91 Curated facts were invisible — round 220
+- §92 Atom feed: XML 1.0 legality of untrusted content (round 230)
+- §93 Severity filter whitelist — silent-empty is a lie (round 231)
+- §94 Feed tokens — the subscribe surface was end-to-end unusable (round 232)
+- §95 Conditional GET on the polling surfaces (round 235)
+- §96 Route-table auth sweep replaces the hand list (round 240)
+- §97 Fixture-domain DNS pinned — a real flake root-caused (round 243)
+- §98 Subscription URLs survive entity merges (round 246)
+- §99 The busiest queries had no index (round 287)
+- §100 Export pagination is snapshot-stable (round 295)
+- §101 The operator sweep DoS'd its own API (round 303)
+
 ## 1. Problem
 
 The platform can package, run, monetize, teach and match _existing_ AI capabilities, but it
@@ -2556,3 +2575,10 @@ The `search` list parameter §99.3 just made index-served had NO UI consumer
 debounced (300ms) in-list name filter wired to it — typing resets
 pagination and rides the trgm index. Unit killer: fake-timer debounce, the
 encoded search param (wildcards included) must reach the fetch.
+
+### 100.5 Resolution-key idempotence + campaign index (rounds 317–318)
+
+`normalize_name` gains a Hypothesis idempotence property (re-normalizing a
+stored key must never fork an identity), and ADR-016 gains a
+hardening-campaign index (§90–§101) so reviewers can navigate the 2,300-line
+document by finding.

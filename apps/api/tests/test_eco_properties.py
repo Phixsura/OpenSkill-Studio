@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 
 from app.ecosystem.security import EcoSecurityError, sanitize_text
 from app.ecosystem.services.adapters import ADAPTERS
+from app.ecosystem.services.resolution import normalize_name as _normalize_name
 from app.ecosystem.services.stats import (
     bradley_terry,
     cohen_kappa,
@@ -291,3 +292,12 @@ def test_escape_like_neutralizes_every_wildcard(text):
             continue
         assert ch not in ("%", "_"), (text, out)
         i += 1
+
+
+
+@given(st.text(max_size=400))
+def test_normalize_name_is_idempotent(text):
+    """R318: the resolution key must be stable — normalize(normalize(x)) ==
+    normalize(x), or re-normalizing stored keys would fork identities."""
+    once = _normalize_name(text)
+    assert _normalize_name(once) == once
