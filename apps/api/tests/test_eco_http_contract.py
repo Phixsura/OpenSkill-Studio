@@ -1281,3 +1281,15 @@ async def test_export_schema_v1_baseline_fields_are_stable(http, tokens):
     if doc["approved_prices"]:
         price_baseline = {"entity_kind", "entity_id", "unit", "price", "currency"}
         assert set(doc["approved_prices"][0]) >= price_baseline
+
+
+async def test_credential_responses_are_no_store(http, tokens):
+    """Round-345 killer: minted credentials must never land in any cache —
+    both the mint and the rotate responses carry Cache-Control: no-store."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    assert r.status_code == 200
+    assert "no-store" in r.headers.get("cache-control", "")
+    r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=member)
+    assert r.status_code == 200
+    assert "no-store" in r.headers.get("cache-control", "")

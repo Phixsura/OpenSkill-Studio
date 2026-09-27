@@ -2719,3 +2719,12 @@ dropdown and polls until every visible pill matches — 11 functional
 browser flows now cover render, watch lifecycle, quick-watch, deep links,
 search-hit, org badge, ack persistence, rotation revocation, compare, and
 both catalog filters.
+
+### 94.10 Credentials are no-store; overview latency measured (rounds 344–345)
+
+The mint and rotate responses now carry `Cache-Control: no-store` — a
+minted credential must never land in any cache layer (killer pins both
+endpoints). A performance probe on overview() (15+ serial counts, on the
+30s scrape path) measured 20ms locally — recorded as acceptable rather than
+rewritten: at a 30-second scrape interval, single-digit-RTT savings don't
+justify collapsing 15 readable counts into one opaque SQL.

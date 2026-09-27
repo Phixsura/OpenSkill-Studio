@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -179,6 +179,7 @@ async def ops_metrics(
 
 @router.get("/export/feed-token", response_model=dict)
 async def mint_feed_token(
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -189,6 +190,9 @@ async def mint_feed_token(
 
     state = await db.get(FeedTokenState, user.id)
     gen = state.generation if state else 0
+    if response is not None:
+        # R345: a minted credential must never land in ANY cache
+        response.headers["Cache-Control"] = "no-store"
     return {
         "data": {
             "token": create_feed_token(user.id, generation=gen),
@@ -199,6 +203,7 @@ async def mint_feed_token(
 
 @router.post("/export/feed-token/rotate", response_model=dict)
 async def rotate_feed_token(
+    response: Response = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -238,6 +243,8 @@ async def rotate_feed_token(
         after={"generation": gen},
     )
     await db.commit()
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"  # R345
     return {
         "data": {
             "token": create_feed_token(user.id, generation=gen),
