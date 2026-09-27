@@ -31,6 +31,11 @@ const OVERVIEW = {
   sources: { active: 3, paused: 1, error: 0 },
   discoveries_7d: 12,
   changes_unacknowledged: 4,
+  outbox_failed: 3,
+  injection_flagged_unverified: 0,
+  observations_unverified: 1,
+  availability_unreachable: 0,
+  sources_stale: 0,
   security_critical_open: 1,
   pricing_unreviewed: 2,
   resolution_pending: 5,
@@ -236,5 +241,16 @@ describe("Global search hit links", () => {
     expect(hit.closest("a")!.getAttribute("href")).toBe(
       `/dashboard/ecosystem/catalog?kind=model-versions&entity=${"S".repeat(26)}`,
     );
+  });
+
+  it("overview shows the dead-letters alert card (R332)", async () => {
+    api.mockImplementation((path: string) => {
+      if (path === "/ecosystem/dashboard") return Promise.resolve({ data: OVERVIEW });
+      return Promise.resolve({ data: [] });
+    });
+    render(<EcosystemOverviewPage />, { wrapper: wrapper() });
+    const label = await screen.findByText("Outbox dead letters");
+    // the value renders inside the same card as its label
+    expect(label.parentElement?.textContent).toContain("3");
   });
 });

@@ -652,3 +652,29 @@ async def test_overview_exposes_outbox_failed(db):
     out = await DashboardService(db).overview()
     assert "outbox_failed" in out
     assert isinstance(out["outbox_failed"], int)
+
+
+async def test_overview_serves_every_key_the_web_cards_read(db):
+    """Round-329 contract guard (§100.4 pattern): the overview page renders
+    `overview.<key>` fields — a key removed from overview() leaves the card
+    silently empty (TS only checks the web-side interface, not the API).
+    Every key the page reads must exist in the live overview() payload."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.services.dashboard import DashboardService
+
+    out = await DashboardService(db).overview()
+    flat_keys = set(out)
+    for k, v in out.items():
+        if isinstance(v, dict):
+            flat_keys |= {f"{k}.{sub}" for sub in v}
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/page.tsx"
+    ).read_text()
+    used = set(re.findall(r"overview\.([a-z0-9_]+(?:\.[a-z0-9_]+)?)", page))
+    assert len(used) >= 6, f"scan looks broken ({sorted(used)})"
+    missing = {u for u in used if u not in flat_keys and u.split(".")[0] not in flat_keys}
+    assert not missing, f"web reads overview keys the API no longer serves: {sorted(missing)}"

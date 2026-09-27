@@ -2658,3 +2658,11 @@ overview page now carries a "Outbox dead letters" alert card, fed by
 overview() (which the metrics endpoint flattens, so the duplicate manual
 emit was removed to keep the exposition single-valued). Killer pins the
 overview key; the R264 scrape killer still pins the gauge line.
+
+### 100.6 Overview keys pinned to the cards (round 329)
+
+The operator page renders `overview.<key>` — a key renamed/removed
+server-side leaves the card silently empty (TS checks only the web-side
+interface). Guard: every key the page reads (regex over the TSX, digits
+included — its own first bug was truncating `discoveries_7d`) must exist in
+the LIVE overview() payload; rename-mutation killed.
