@@ -1254,3 +1254,30 @@ async def test_rotation_is_per_user(http, tokens):
         f"/api/v1/ecosystem/export/changes.atom?token={member_token}"
     )
     assert r.status_code == 200
+
+
+async def test_export_schema_v1_baseline_fields_are_stable(http, tokens):
+    """Round-312 contract guard: the handbook promises ADDITIVE evolution
+    under openskill.eco.catalog/v1 — removing or renaming a field MUST bump
+    the version. Pin the v1 baseline key sets so a silent removal fails CI
+    and forces the bump."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/export", headers=member)
+    assert r.status_code == 200
+    doc = r.json()["data"]
+
+    assert doc["schema"] == "openskill.eco.catalog/v1"
+    top = {"schema", "generated_at", "content_hash", "entity_totals",
+           "truncated", "entities", "capability_mappings", "approved_prices"}
+    assert set(doc) >= top, sorted(top - set(doc))
+
+    entity_baseline = {"id", "canonical_name", "lifecycle_status",
+                       "external_ids", "aliases", "created_at"}
+    for segment, rows in doc["entities"].items():
+        for row in rows[:3]:
+            missing = entity_baseline - set(row)
+            assert not missing, f"{segment}: v1 baseline fields removed {missing}"
+
+    if doc["approved_prices"]:
+        price_baseline = {"entity_kind", "entity_id", "unit", "price", "currency"}
+        assert set(doc["approved_prices"][0]) >= price_baseline

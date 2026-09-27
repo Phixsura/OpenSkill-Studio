@@ -2528,3 +2528,11 @@ routes — so the gate now fails on moderate+ (stricter than the site-wide
 serious/critical baseline, at zero cost). Alongside: per-user rotation
 isolation killer (an admin's rotate must not kill a member's feed URL) and
 the catalog stability strip gets the same aria-label as compare's.
+
+### 100.4 The additive-evolution promise is CI-enforced (round 312)
+
+The handbook promises additive-only evolution under
+`openskill.eco.catalog/v1` — but nothing enforced it. New contract guard
+pins the v1 baseline key sets (top-level envelope, per-entity, per-price):
+removing or renaming any baseline field fails CI, forcing the version bump
+the contract requires. Additions stay free.
