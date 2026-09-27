@@ -2711,3 +2711,11 @@ e2e test 10 types a real entity-name fragment into the §99.4 in-list filter
 and polls until every visible row matches — debounce, fetch, trgm index and
 render verified as one loop against the live stack. Functional flows now
 number 10 (+ axe at the moderate gate).
+
+### 101.5 Status-dropdown flow (round 343)
+
+e2e test 11 selects the first row's own lifecycle pill in the §99.5
+dropdown and polls until every visible pill matches — 11 functional
+browser flows now cover render, watch lifecycle, quick-watch, deep links,
+search-hit, org badge, ack persistence, rotation revocation, compare, and
+both catalog filters.

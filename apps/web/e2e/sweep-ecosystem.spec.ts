@@ -269,3 +269,33 @@ test("10 — the in-list filter narrows the catalog against the live API", async
     )
     .toBe(true);
 });
+
+test("11 — the lifecycle dropdown filters the catalog against the live API", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const rowsBefore = await page
+    .locator("tbody tr")
+    .count()
+    .catch(() => 0);
+  if (rowsBefore === 0) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  // pick the first row's status pill text as a guaranteed-nonempty filter
+  const pill = (await page.locator("tbody tr td:nth-child(2)").first().innerText())
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  await page.getByLabel("Filter by lifecycle status").selectOption(pill);
+  await expect
+    .poll(
+      async () => {
+        const pills = await page.locator("tbody tr td:nth-child(2)").allInnerTexts();
+        return (
+          pills.length > 0 &&
+          pills.every((t) => t.trim().toLowerCase().replace(/\s+/g, "_") === pill)
+        );
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+});
