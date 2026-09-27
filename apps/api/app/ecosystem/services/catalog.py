@@ -48,7 +48,14 @@ class CatalogService:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        stable_order: bool = False,
     ):
+        """stable_order=True (R295): paginate by immutable id ASC — offset
+        pages under created_at DESC shift when rows are inserted mid-export,
+        DUPLICATING already-seen rows into later pages (and tied timestamps
+        order nondeterministically). With id ASC, concurrent inserts land at
+        the tail: an in-flight export never repeats or loses existing rows —
+        at worst it misses rows newer than its start (snapshot semantics)."""
         model = _model_for(kind)
         query = select(model)
         if lifecycle_status:
@@ -62,7 +69,11 @@ class CatalogService:
             )
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(model.created_at.desc()).limit(limit).offset(offset)
+            query.order_by(
+                model.id.asc() if stable_order else model.created_at.desc()
+            )
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), total or 0
 

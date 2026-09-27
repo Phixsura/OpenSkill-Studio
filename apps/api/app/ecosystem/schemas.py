@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ── Requests ────────────────────────────────────────────────────────
 
@@ -557,6 +557,22 @@ class EstimateRequest(BaseModel):
     entity_ids: list[str] = Field(..., min_length=1, max_length=20)
     # unit -> quantity, e.g. {"token_input": 1000000, "token_output": 200000}
     workload: dict[str, float] = Field(..., min_length=1, max_length=10)
+
+    @field_validator("workload")
+    @classmethod
+    def _workload_quantities_sane(cls, v: dict[str, float]) -> dict[str, float]:
+        # R296: a negative quantity yields a NEGATIVE estimate — comparison
+        # ordering flips and the advisory output becomes actively misleading.
+        # Non-finite values are already rejected at the JSON layer; guard
+        # them anyway for direct constructors.
+        import math
+
+        for unit, qty in v.items():
+            if not math.isfinite(qty) or qty < 0:
+                raise ValueError(
+                    f"workload[{unit!r}] must be a finite non-negative number"
+                )
+        return v
 
 
 class UpdateWatchlistRequest(BaseModel):

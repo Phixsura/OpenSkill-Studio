@@ -400,7 +400,9 @@ async def catalog_export(
         rows_all = []
         offset = 0
         while True:
-            rows, total = await svc.list_entities(kind, limit=500, offset=offset)
+            rows, total = await svc.list_entities(
+                kind, limit=500, offset=offset, stable_order=True
+            )
             rows_all.extend(rows)
             offset += len(rows)
             if offset >= total or not rows or offset >= 10_000:

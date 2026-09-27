@@ -1207,3 +1207,31 @@ async def test_atom_entries_carry_alternate_links(http, tokens):
             await db.delete(await db.get(AIModel, model_id))
             await db.commit()
     await engine.dispose()
+
+
+async def test_estimate_rejects_negative_workload(http, tokens):
+    """Round-296 killer: a negative quantity flips the estimate's sign and
+    ordering — the advisory output becomes actively misleading. 422 with the
+    machine envelope; zero stays legal (explicitly no usage of a unit)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.post(
+        "/api/v1/ecosystem/pricing/estimate",
+        json={
+            "entity_kind": "model",
+            "entity_ids": ["0" * 26],
+            "workload": {"token_input": -1000},
+        },
+        headers=member,
+    )
+    assert r.status_code == 422
+    assert "error" in r.json()
+    r = await http.post(
+        "/api/v1/ecosystem/pricing/estimate",
+        json={
+            "entity_kind": "model",
+            "entity_ids": ["0" * 26],
+            "workload": {"token_input": 0},
+        },
+        headers=member,
+    )
+    assert r.status_code != 422  # zero is a legal quantity

@@ -2434,3 +2434,33 @@ change-feed page (absolute URL from the request host — same-origin
 deployment per the proxy design). This is the reader's "open" affordance;
 without it a feed item is a dead end. Killer parses the feed and requires
 every entry's alternate to be absolute and to target the entity deep link.
+
+## 100. Export pagination is snapshot-stable (round 295)
+
+**Gap.** The catalog export pages through every kind with OFFSET under
+`created_at DESC`. A row inserted mid-export shifts every subsequent page:
+already-exported rows DUPLICATE into later pages (and tied created_at
+values order nondeterministically). The export is the integration currency
+— a duplicated entity corrupts every downstream diff and makes the
+content_hash unstable for identical logical content.
+
+**Fix.** `list_entities(stable_order=True)` orders by immutable `id ASC`
+(ULIDs are time-ordered): concurrent inserts land at the TAIL, so an
+in-flight export never repeats or loses a pre-existing row — at worst it
+misses rows newer than its own start, which is exactly snapshot semantics.
+The UI list keeps newest-first.
+
+**Killer.** Seven rows, page size 3, a row inserted after page one: every
+pre-existing row must appear exactly once across the pages (no dupes, no
+loss). Reverting to created_at DESC fails it (mutant killed).
+
+**Rule.** OFFSET pagination is only sound under an ordering where new rows
+cannot land before the cursor position — for anything exported or diffed,
+paginate by an immutable monotone key, never by a timestamp.
+
+### 100.1 Negative workloads rejected (round 296)
+
+`EstimateRequest.workload` accepted negative quantities — a sign flip turns
+the advisory estimate actively misleading (comparison ordering inverts).
+Field validator: quantities must be finite and ≥ 0 (zero stays legal — "no
+usage of this unit"). Killer: -1000 → 422 envelope, 0 → accepted.

@@ -536,3 +536,49 @@ async def test_single_entity_get_reports_merged_into(db):
     assert out["data"].merged_into == survivor.id
     out2 = await get_catalog_entity("models", survivor.id, db=db, _user=None)
     assert out2["data"].merged_into is None
+
+
+async def test_export_pagination_is_stable_under_concurrent_inserts(db):
+    """Round-295 killer: offset pages ordered by created_at DESC shift when
+    a row is inserted between page fetches — already-seen rows DUPLICATE
+    into later pages (the export is the integration currency; a duplicated
+    entity corrupts every downstream diff). With stable_order the pages
+    ordered by immutable id must contain every pre-existing row exactly
+    once, insert or no insert."""
+    from app.ecosystem.services.catalog import CatalogService
+
+    svc = CatalogService(db)
+    tag = str(ULID()).lower()[:6]
+    pre = []
+    for i in range(7):
+        m = AIModel(canonical_name=f"Page-{tag}-{i}", slug=f"pg-{tag}-{i}")
+        db.add(m)
+        await db.flush()
+        pre.append(m.id)
+
+    async def paged(page_size: int, insert_after_first_page: bool) -> list[str]:
+        seen: list[str] = []
+        offset = 0
+        first = True
+        while True:
+            rows, total = await svc.list_entities(
+                "model", limit=page_size, offset=offset, stable_order=True
+            )
+            seen += [r.id for r in rows]
+            offset += len(rows)
+            if first and insert_after_first_page:
+                mid = AIModel(
+                    canonical_name=f"Mid-{tag}", slug=f"mid-{tag}"
+                )
+                db.add(mid)
+                await db.flush()
+                first = False
+            if not rows or offset >= total + 1:  # +1: the mid-flight insert
+                break
+        return seen
+
+    seen = await paged(page_size=3, insert_after_first_page=True)
+    # every pre-existing row appears EXACTLY once
+    counts = {i: seen.count(i) for i in pre}
+    assert all(c == 1 for c in counts.values()), counts
+    assert len(seen) == len(set(seen)), "export pages duplicated rows"
