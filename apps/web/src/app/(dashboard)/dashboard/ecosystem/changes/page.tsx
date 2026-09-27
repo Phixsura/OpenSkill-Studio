@@ -20,6 +20,19 @@ interface ChangeEvent {
   acknowledged: boolean;
 }
 
+// R321: mirrors backend CHANGE_TYPES (see the §93.1-style parity guard)
+const CHANGE_TYPES = [
+  "price",
+  "limits",
+  "license",
+  "api",
+  "model_version",
+  "lifecycle",
+  "region",
+  "security",
+  "benchmark",
+];
+
 const SEVERITIES = [
   "info",
   "update_available",
@@ -35,13 +48,14 @@ export default function ChangesPage() {
   // the feed to one canonical entity
   const entity = useSearchParams().get("entity") ?? "";
   const [severity, setSeverity] = useState("");
+  const [changeType, setChangeType] = useState("");
   const [mutError, setMutError] = useState<string | null>(null);
   const [showAcked, setShowAcked] = useState(false);
   const [pages, setPages] = useState<ChangeEvent[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
 
-  const filterKey = `${severity}|${showAcked}|${entity}`;
+  const filterKey = `${severity}|${changeType}|${showAcked}|${entity}`;
   // R248: the feed page is THE subscription surface — offer the Atom link
   // with the current filters and a feed-scoped token (readers can't Bearer)
   const feedToken = useQuery({
@@ -64,6 +78,8 @@ export default function ChangesPage() {
         meta: { has_more: boolean; next_cursor: string | null };
       }>(
         `/ecosystem/changes?limit=50${severity ? `&severity=${severity}` : ""}${
+          changeType ? `&change_type=${changeType}` : ""
+        }${
           entity ? `&canonical_entity_id=${entity}` : ""
         }${showAcked ? "" : "&acknowledged=false"}`,
       );
@@ -81,6 +97,8 @@ export default function ChangesPage() {
       meta: { has_more: boolean; next_cursor: string | null };
     }>(
       `/ecosystem/changes?limit=50&cursor=${cursor}${
+        changeType ? `&change_type=${changeType}` : ""
+      }${
         severity ? `&severity=${severity}` : ""
       }${entity ? `&canonical_entity_id=${entity}` : ""}${showAcked ? "" : "&acknowledged=false"}`,
     );
@@ -142,6 +160,17 @@ export default function ChangesPage() {
           <option value="">All severities</option>
           {SEVERITIES.map((s) => (
             <option key={s}>{s}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by change type"
+          value={changeType}
+          onChange={(e) => setChangeType(e.target.value)}
+          className="rounded-md border bg-[hsl(var(--background))] px-3 py-2 text-sm"
+        >
+          <option value="">All types</option>
+          {CHANGE_TYPES.map((t) => (
+            <option key={t}>{t}</option>
           ))}
         </select>
         <label className="flex items-center gap-2 text-sm">

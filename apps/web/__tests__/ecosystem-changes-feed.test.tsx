@@ -188,3 +188,19 @@ describe("Feed-page Atom subscription (R248)", () => {
     );
   });
 });
+
+describe("Change-type filter (R321)", () => {
+  it("sends change_type and keeps it in the atom href-independent fetches", async () => {
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/changes")) return Promise.resolve({ data: [], meta: {} });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by change type"), {
+      target: { value: "security" },
+    });
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("change_type=security"))).toBe(true),
+    );
+  });
+});

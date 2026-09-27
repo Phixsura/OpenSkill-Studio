@@ -204,3 +204,23 @@ async def test_unknown_field_is_rejected_over_http(client):
     # order puts body parsing first only sometimes — accept either rejection
     assert r.status_code in (401, 422)
     assert r.status_code != 200
+
+
+def test_web_change_type_dropdown_matches_backend_vocabulary():
+    """Round-321 drift guard (§93.1 pattern): pin the web change-type
+    dropdown to CHANGE_TYPES."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.observation import CHANGE_TYPES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/changes/page.tsx"
+    )
+    m = re.search(r"const CHANGE_TYPES = \[(.*?)\];", page.read_text(), re.S)
+    assert m, "web changes page must declare const CHANGE_TYPES = [...]"
+    web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    assert web_values == set(CHANGE_TYPES), (
+        f"web {sorted(web_values)} != backend {sorted(CHANGE_TYPES)}"
+    )

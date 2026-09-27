@@ -2589,3 +2589,11 @@ Same class as §99.4: `lifecycle_status` was a supported list parameter with
 no UI consumer. The catalog list gains a status dropdown (options derived
 from the shared LIFECYCLE_STYLES map — no third vocabulary), resetting
 pagination on change. Unit killer pins the query param.
+
+### 99.6 Change-type filter + vocabulary pinned (round 321)
+
+Same missing-UI-consumer class: `/changes`' change_type parameter gains a
+dropdown on the feed page, mirrored to backend CHANGE_TYPES and pinned by a
+§93.1-style parity guard (the third pinned vocabulary: severities, ranks,
+change types). Param wired into both the first-page and cursor fetches;
+unit killer pins it.
