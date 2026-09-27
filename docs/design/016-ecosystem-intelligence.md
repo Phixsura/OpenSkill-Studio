@@ -2697,3 +2697,10 @@ own lesson en route: a bare `id` in the self-join was ambiguous, the
 fail-safe except swallowed the error into an empty result, and only the
 suite caught it — fail-safe wrappers hide SQL errors, so every raw-SQL
 change must run its suite before shipping.
+
+### 101.3 Compare gets its browser flow (round 341)
+
+The comparison page — the §19 decision surface — was the one core page
+without a real-browser interaction test. e2e test 9 deep-links two REAL
+entities from the live catalog into `/compare?kind=&ids=` and requires both
+canonical names plus the Curated-facts and Availability rows to render.

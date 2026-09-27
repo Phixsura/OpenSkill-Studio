@@ -218,3 +218,29 @@ test("8 — rotating the feed token swaps every subscription URL", async () => {
   );
   expect(res2.status()).toBe(200);
 });
+
+test("9 — compare renders a side-by-side table for two real entities", async () => {
+  await goto(page, "/dashboard/ecosystem/catalog");
+  const body = (await page.innerHTML("body")).toLowerCase();
+  if (!body.includes("inspect")) {
+    test.skip(true, "empty catalog on this stack");
+    return;
+  }
+  // grab two entity ids from the deep-linkable Inspect flow: use the API
+  // directly (the page's rows don't expose ids in the DOM)
+  const res = await page.request.get(`${API}/ecosystem/catalog/models?limit=2`, {
+    headers: auth.headers,
+  });
+  const rows = (await res.json()).data as { id: string; canonical_name: string }[];
+  if (rows.length < 2) {
+    test.skip(true, "fewer than two models on this stack");
+    return;
+  }
+  await goto(page, `/dashboard/ecosystem/compare?kind=model&ids=${rows[0]!.id},${rows[1]!.id}`);
+  // both canonical names render as table headers
+  await page.getByText(rows[0]!.canonical_name).first().waitFor({ timeout: 10_000 });
+  await page.getByText(rows[1]!.canonical_name).first().waitFor({ timeout: 10_000 });
+  // the curated-facts and availability rows exist
+  await page.getByText("Curated facts").waitFor({ timeout: 10_000 });
+  await page.getByText("Availability").first().waitFor({ timeout: 10_000 });
+});
