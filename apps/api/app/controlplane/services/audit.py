@@ -80,6 +80,7 @@ AUDIT_ACTIONS = frozenset(
         # R115: previously-unaudited irreversible eco admin actions
         "eco.advisory_registered",
         "eco.feed_token_rotated",
+        "eco.changes_bulk_unacknowledged",
         "eco.entity_updated",
         "eco.edge_added",
         "eco.edge_removed",

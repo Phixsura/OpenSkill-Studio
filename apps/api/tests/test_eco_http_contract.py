@@ -1383,3 +1383,56 @@ async def test_acknowledge_is_reversible(http, tokens):
             await db.delete(await db.get(EcosystemObservation, obs_id))
             await db.commit()
     await engine.dispose()
+
+
+async def test_bulk_unacknowledge_restores_batch(http, tokens):
+    """Round-348 killer: a mis-fired bulk-ack can't be undone one click at a
+    time — bulk-unacknowledge restores the batch idempotently, reports
+    missing ids, and lands in the audit trail (registered action — the
+    §94.9 guard would fail otherwise)."""
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from tests.test_eco_services_db import _mk_source
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        source = await _mk_source(db)
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="pricing_changed",
+            raw_hash="9" * 64, normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        ids = []
+        for i in range(3):
+            c = ChangeEvent(
+                observation_id=obs.id, change_type="price",
+                field=f"bulk-unack-{i}", old_value={}, new_value={"v": i},
+                severity="info", acknowledged=True,
+            )
+            db.add(c)
+            await db.flush()
+            ids.append(c.id)
+        await db.commit()
+
+        try:
+            r = await http.post(
+                "/api/v1/ecosystem/changes/bulk-unacknowledge",
+                json={"ids": [*ids, "0" * 26]},
+                headers=admin,
+            )
+            assert r.status_code == 200
+            out = r.json()["data"]
+            assert set(out["restored"]) == set(ids)
+            assert out["missing"] == ["0" * 26]
+            for cid in ids:
+                row = await db.get(ChangeEvent, cid)
+                await db.refresh(row)
+                assert row.acknowledged is False and row.acknowledged_by is None
+        finally:
+            for cid in ids:
+                await db.delete(await db.get(ChangeEvent, cid))
+            await db.delete(await db.get(EcosystemObservation, obs.id))
+            await db.commit()
+    await engine.dispose()

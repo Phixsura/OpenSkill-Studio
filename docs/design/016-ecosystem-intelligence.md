@@ -2751,3 +2751,11 @@ stands). Acked rows in the include-acknowledged view offer an
 Un-acknowledge button. Killer: ack → member 403 on unack → admin unack →
 `acknowledged=false`, actor cleared in the DB, row back in the default
 list; self-cleaning fixture.
+
+### 103.1 Bulk-ack is symmetric too (round 348)
+
+A mis-fired bulk-ack (it drains the CURRENT filter set) can't be undone one
+click at a time — `POST /changes/bulk-unacknowledge` mirrors bulk-ack
+(idempotent, missing ids reported, audited under a registered action so the
+§94.9 guard holds). Killer: 3 acked rows + 1 bogus id → all restored with
+actors cleared, bogus reported missing.

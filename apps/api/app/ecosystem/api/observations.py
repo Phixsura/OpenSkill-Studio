@@ -317,6 +317,35 @@ async def bulk_acknowledge_changes(
     return {"data": {"acknowledged": acknowledged, "missing": missing}}
 
 
+@router.post("/changes/bulk-unacknowledge", response_model=DataResponse[dict])
+async def bulk_unacknowledge_changes(
+    body: BulkIdsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """R348 (§103 symmetric): a mis-fired bulk-ack cannot be undone one
+    click at a time — same idempotent shape as bulk-acknowledge, audited."""
+    restored: list[str] = []
+    missing: list[str] = []
+    for change_id in body.ids:
+        change = await db.get(ChangeEvent, change_id)
+        if change is None:
+            missing.append(change_id)
+            continue
+        if change.acknowledged:
+            change.acknowledged = False
+            change.acknowledged_by = None
+        restored.append(change_id)
+    await eco_audit(
+        db, user, action="eco.changes_bulk_unacknowledged",
+        target_type="eco_change_event",
+        target_id=restored[0] if restored else "none",
+        after={"restored_count": len(restored), "missing_count": len(missing)},
+    )
+    await db.commit()
+    return {"data": {"restored": restored, "missing": missing}}
+
+
 @router.post("/changes/{change_id}/acknowledge", response_model=DataResponse[ChangeEventResponse])
 async def acknowledge_change(
     change_id: str,
