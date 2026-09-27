@@ -331,7 +331,7 @@ class CatalogService:
                         f"SELECT id, canonical_name, lifecycle_status, "  # noqa: S608 — table from fixed map
                         f"similarity(lower(canonical_name), :q) AS score "
                         f"FROM {table} WHERE lower(canonical_name) % :q "
-                        f"ORDER BY score DESC LIMIT :n"
+                        f"ORDER BY score DESC, id LIMIT :n"
                     ),
                     {"q": cleaned, "n": limit_per_kind},
                 )
@@ -451,7 +451,7 @@ class CatalogService:
                     f"WHERE a.lifecycle_status != 'retired' "
                     f"AND b.lifecycle_status != 'retired' "
                     f"AND similarity(lower(a.canonical_name), lower(b.canonical_name)) >= :t "
-                    f"ORDER BY score DESC LIMIT :n"
+                    f"ORDER BY score DESC, a.id LIMIT :n"
                 ),
                 {"t": threshold, "n": limit},
             )

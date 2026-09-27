@@ -2686,3 +2686,14 @@ tiebreak (trgm similarity exempt — unique per row). Building the guard
 found 5 MORE sites the two manual sweeps missed (the .asc() variants and
 the BenchmarkResult composite) — the guard's first run was itself the
 audit. 31+ expressions checked with a floor; regressions fail CI.
+
+### 99.11 Raw-SQL orderings too (round 340)
+
+The §99.10 guard only sees ORM expressions — the raw-SQL sites got the same
+treatment by hand: the availability sweep's NULL-probe ties now rotate
+deterministically (`, w.target_id`), and global-search / duplicate-scan /
+resolution similarity ties break on id. The duplicate-scan fix tripped its
+own lesson en route: a bare `id` in the self-join was ambiguous, the
+fail-safe except swallowed the error into an empty result, and only the
+suite caught it — fail-safe wrappers hide SQL errors, so every raw-SQL
+change must run its suite before shipping.

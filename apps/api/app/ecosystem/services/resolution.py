@@ -117,7 +117,7 @@ async def _similarity_candidate(
                 text(
                     f"SELECT id, similarity(lower(canonical_name), :n) AS sim "  # noqa: S608 — table from fixed map
                     f"FROM {table} WHERE lower(canonical_name) % :n "
-                    f"ORDER BY sim DESC LIMIT 1"
+                    f"ORDER BY sim DESC, id LIMIT 1"
                 ),
                 {"n": normalized},
             )
@@ -128,7 +128,7 @@ async def _similarity_candidate(
                     "SELECT entity_id, similarity(alias_normalized, :n) AS sim "
                     "FROM eco_entity_aliases "
                     "WHERE entity_kind = :k AND alias_normalized % :n "
-                    "ORDER BY sim DESC LIMIT 1"
+                    "ORDER BY sim DESC, id LIMIT 1"
                 ),
                 {"n": normalized, "k": entity_kind},
             )

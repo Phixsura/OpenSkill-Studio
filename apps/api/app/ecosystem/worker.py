@@ -550,7 +550,7 @@ async def sweep_watched_availability(db: AsyncSession, *, cap: int = 200) -> int
                 AND r.entity_id = w.target_id
                 AND r.record_type = 'status'
             ) p ON true
-            ORDER BY p.last_probe ASC NULLS FIRST
+            ORDER BY p.last_probe ASC NULLS FIRST, w.target_id
             LIMIT :cap
             """
         ),
