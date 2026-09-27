@@ -2597,3 +2597,12 @@ dropdown on the feed page, mirrored to backend CHANGE_TYPES and pinned by a
 §93.1-style parity guard (the third pinned vocabulary: severities, ranks,
 change types). Param wired into both the first-page and cursor fetches;
 unit killer pins it.
+
+### 99.7 The runbook's filter exists now (round 322)
+
+The injection runbook instructs "Discoveries → filter injection-flagged" —
+but the UI had no such filter (API supported it; the overview card alerts
+on it). A checkbox now wires `injection_flagged=true` into the discoveries
+fetch, making the runbook step executable. Unit killer pins the param.
+Rule: every runbook step that names a UI action must have a test proving
+the action exists.

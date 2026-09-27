@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -190,5 +190,17 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body.source_id).toBe(SRC);
     expect(body.text).toContain("GPT-9");
+  });
+});
+
+describe("Injection-flagged filter (R322)", () => {
+  it("checkbox sends injection_flagged=true (the runbook step exists now)", async () => {
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByLabelText(/injection-flagged only/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("injection_flagged=true"))).toBe(
+        true,
+      ),
+    );
   });
 });

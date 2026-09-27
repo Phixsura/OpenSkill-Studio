@@ -46,6 +46,9 @@ interface ResolutionCandidate {
 export default function DiscoveriesPage() {
   const queryClient = useQueryClient();
   const [eventType, setEventType] = useState("");
+  // R322: the injection runbook says "Discoveries -> filter injection-flagged"
+  // - the filter has to actually exist
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [payloadFor, setPayloadFor] = useState<string | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
 
@@ -59,10 +62,12 @@ export default function DiscoveriesPage() {
       ),
   });
   const observations = useQuery({
-    queryKey: ["eco-observations", eventType],
+    queryKey: ["eco-observations", eventType, flaggedOnly],
     queryFn: () =>
       apiWithAuth<{ data: Observation[] }>(
-        `/ecosystem/observations?limit=50${eventType ? `&event_type=${eventType}` : ""}`,
+        `/ecosystem/observations?limit=50${eventType ? `&event_type=${eventType}` : ""}${
+          flaggedOnly ? "&injection_flagged=true" : ""
+        }`,
       ),
   });
   const resolutions = useQuery({
@@ -281,6 +286,14 @@ export default function DiscoveriesPage() {
               <option key={t}>{t}</option>
             ))}
           </select>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={flaggedOnly}
+              onChange={(e) => setFlaggedOnly(e.target.checked)}
+            />
+            ⚠️ injection-flagged only
+          </label>
         </div>
         {rows.length === 0 ? (
           <EmptyState icon="🔭" text="No observations yet — sync a source." />
