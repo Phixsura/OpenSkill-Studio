@@ -2536,3 +2536,15 @@ The handbook promises additive-only evolution under
 pins the v1 baseline key sets (top-level envelope, per-entity, per-price):
 removing or renaming any baseline field fails CI, forcing the version bump
 the contract requires. Additions stay free.
+
+### 99.3 The search indexes were never used (round 313)
+
+The §99 rule ("audit from the queries") re-applied to search: eco03 built
+GIN trgm indexes on lower(canonical_name) across all seven kind tables —
+but the UI list search used bare `ILIKE`, which CANNOT use an expression
+index, so every search seq-scanned since the indexes were born (verified:
+seqscan-off EXPLAIN refuses the index for bare ILIKE, hits it for
+lower() LIKE). The query is rewritten to the semantically identical
+lower() LIKE lower() form; global_search already used trgm similarity
+correctly. Killer pins both the plan (index referenced) and the behavior
+(case-insensitive match survives the rewrite).

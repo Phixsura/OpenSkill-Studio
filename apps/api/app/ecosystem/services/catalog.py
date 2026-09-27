@@ -64,8 +64,14 @@ class CatalogService:
             cleaned = sanitize_text(search, 200) or ""
             from app.ecosystem.security import escape_like
 
+            # R313: bare ILIKE cannot use the eco03 trgm indexes (they are
+            # expression indexes on lower(canonical_name)) — the UI search
+            # seq-scanned every kind table since day one. lower() LIKE
+            # lower() is semantically identical and hits the GIN index.
             query = query.where(
-                model.canonical_name.ilike(f"%{escape_like(cleaned)}%", escape="\\")
+                func.lower(model.canonical_name).like(
+                    f"%{escape_like(cleaned.lower())}%", escape="\\"
+                )
             )
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(

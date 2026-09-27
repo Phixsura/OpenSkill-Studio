@@ -582,3 +582,37 @@ async def test_export_pagination_is_stable_under_concurrent_inserts(db):
     counts = {i: seen.count(i) for i in pre}
     assert all(c == 1 for c in counts.values()), counts
     assert len(seen) == len(set(seen)), "export pages duplicated rows"
+
+
+async def test_catalog_search_uses_the_trgm_index(db):
+    """Round-313 killer: bare ILIKE cannot use the eco03 expression indexes
+    (gin on lower(canonical_name)) — the UI search seq-scanned every kind
+    table since day one. Pin the plan: with seqscan disabled, the search
+    query's EXPLAIN must reference the trgm index. Also pin behavior:
+    case-insensitive matching and literal % handling survive the rewrite."""
+    from sqlalchemy import text as _sql
+
+    from app.ecosystem.services.catalog import CatalogService
+
+    svc = CatalogService(db)
+    tag = str(ULID()).lower()[:6]
+    m = AIModel(canonical_name=f"TrGm-Search-{tag}", slug=f"tg-{tag}")
+    db.add(m)
+    await db.flush()
+
+    rows, total = await svc.list_entities("model", search=f"gm-search-{tag}")
+    assert any(r.id == m.id for r in rows)  # case-insensitive hit
+
+    await db.execute(_sql("SET enable_seqscan = off"))
+    plan = "\n".join(
+        (
+            await db.execute(
+                _sql(
+                    "EXPLAIN SELECT * FROM eco_ai_models "
+                    "WHERE lower(canonical_name) LIKE '%gen%'"
+                )
+            )
+        ).scalars()
+    )
+    await db.execute(_sql("SET enable_seqscan = on"))
+    assert "ix_eco_ai_models_name_trgm" in plan, plan
