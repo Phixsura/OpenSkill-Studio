@@ -119,16 +119,9 @@ async def ops_metrics(
             .where(OutboxMessage.status == "pending", OutboxMessage.topic.like("eco.%"))
         )
     ) or 0
-    # R264: a dead-lettered eco message is a PROMISED AUTOMATION that
-    # silently stopped (§90 class) — it must be a metric, not just a row
-    # on the failed-outbox admin endpoint
-    outbox_failed = (
-        await db.scalar(
-            select(func.count())
-            .select_from(OutboxMessage)
-            .where(OutboxMessage.status == "failed", OutboxMessage.topic.like("eco.%"))
-        )
-    ) or 0
+    # R264/R328: eco_outbox_failed now arrives via overview() (the operator
+    # workspace shows it too) — no separate emit here or the exposition
+    # would carry the gauge twice
     lines: list[str] = []
 
     def emit(name: str, value) -> None:
@@ -146,7 +139,6 @@ async def ops_metrics(
         else:
             emit(key, value)
     emit("outbox_pending", outbox_pending)
-    emit("outbox_failed", outbox_failed)
     # R293: probe-coverage early warning — if watched entities outgrow the
     # sweep throughput (cap × cadence), staleness grows silently. Emit the
     # never-probed backlog and the oldest probe age so EcoProbeStarvation

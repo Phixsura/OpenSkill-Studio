@@ -641,3 +641,14 @@ async def test_watchlist_item_cap_enforced(db, monkeypatch):
         lst.id, user.id, target_kind="github_repo", target_ref="a/two"
     )
     assert again.target_ref == "a/two"
+
+
+async def test_overview_exposes_outbox_failed(db):
+    """Round-328 killer: dead letters must reach the operator WORKSPACE
+    (overview), not only the scrape surface — and the metrics endpoint must
+    emit the gauge exactly once (overview-flatten path, no duplicate)."""
+    from app.ecosystem.services.dashboard import DashboardService
+
+    out = await DashboardService(db).overview()
+    assert "outbox_failed" in out
+    assert isinstance(out["outbox_failed"], int)

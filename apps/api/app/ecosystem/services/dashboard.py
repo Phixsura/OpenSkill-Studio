@@ -176,8 +176,22 @@ class DashboardService:
         """Ecosystem health snapshot for the operator workspace."""
         from app.ecosystem.models.advisory import SecurityAdvisory as _SecurityAdvisory
         week_ago = datetime.now(UTC) - timedelta(days=7)
+        from sqlalchemy import func as _f
+
+        from app.controlplane.models.outbox import OutboxMessage as _Outbox
+
+        outbox_failed = (
+            await self.db.scalar(
+                select(_f.count())
+                .select_from(_Outbox)
+                .where(_Outbox.status == "failed", _Outbox.topic.like("eco.%"))
+            )
+        ) or 0
         return {
             "availability_unreachable": await self._unreachable_entity_count(),
+            # R328: dead letters are §90's failure mode at runtime — the
+            # operator workspace must show them, not only the scrape surface
+            "outbox_failed": outbox_failed,
             "sources_stale": await self._stale_source_count(),
             "sources": {
                 "active": await self._count(

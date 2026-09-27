@@ -13,6 +13,7 @@ interface Overview {
   discoveries_7d: number;
   observations_unverified: number;
   injection_flagged_unverified: number;
+  outbox_failed: number;
   changes_unacknowledged: number;
   security_critical_open: number;
   pricing_unreviewed: number;
@@ -120,6 +121,11 @@ export default function EcosystemOverviewPage() {
               label="Unverified observations"
               value={overview.observations_unverified}
               alert={overview.observations_unverified > 50}
+            />
+            <StatCard
+              label="Outbox dead letters"
+              value={overview.outbox_failed}
+              alert={overview.outbox_failed > 0}
             />
             <StatCard
               label="Injection-flagged (advisory)"

@@ -2650,3 +2650,11 @@ latest-probe and latest-observation selection — where a tie could pick the
 WRONG "latest" — plus suite/run/advisory/source/sync-run/draft listings and
 both supersedes-edge lookups). ULIDs make (timestamp, id) equal true
 insertion order everywhere.
+
+### 90.11 Dead letters reach the operator workspace (round 328)
+
+`eco_outbox_failed` (§90.8) lived only on the scrape surface — the operator
+overview page now carries a "Outbox dead letters" alert card, fed by
+overview() (which the metrics endpoint flattens, so the duplicate manual
+emit was removed to keep the exposition single-valued). Killer pins the
+overview key; the R264 scrape killer still pins the gauge line.
