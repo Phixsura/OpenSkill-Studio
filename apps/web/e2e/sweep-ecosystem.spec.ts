@@ -20,6 +20,8 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { createOrg, loginInBrowser, registerUser, type AuthContext } from "./helpers";
 
+const API = process.env.E2E_API_URL || "http://localhost:8000/api/v1";
+
 const PASSWORD = process.env.E2E_TEST_PASSWORD || "TestPass123!";
 const TS = Date.now();
 
@@ -188,4 +190,31 @@ test("7 — acknowledging a change persists across the include-acknowledged togg
   await page.waitForTimeout(1500);
   const after = (await page.innerHTML("body")).toLowerCase();
   expect(after).not.toContain("application error");
+});
+
+test("8 — rotating the feed token swaps every subscription URL", async () => {
+  await goto(page, "/dashboard/ecosystem/watchlists");
+  const ics = page.getByText("📅 subscribe (.ics)");
+  await ics.waitFor({ state: "visible", timeout: 10_000 });
+  // wait for the minted token to land in the href
+  await expect
+    .poll(async () => (await ics.getAttribute("href")) ?? "", { timeout: 10_000 })
+    .toMatch(/token=/);
+  const before = (await ics.getAttribute("href"))!;
+  await page.getByText(/rotate feed token/).dispatchEvent("click");
+  await expect
+    .poll(async () => (await ics.getAttribute("href")) ?? "", { timeout: 10_000 })
+    .not.toBe(before);
+  const after = (await ics.getAttribute("href"))!;
+  expect(after).toMatch(/token=/);
+  // full-stack revocation: the OLD token is dead against the live API
+  const oldToken = before.split("token=")[1]!;
+  const res = await page.request.get(`${API}/ecosystem/deprecation-calendar.ics?token=${oldToken}`);
+  expect(res.status()).toBe(401);
+  // ...and the NEW one works
+  const newToken = after.split("token=")[1]!;
+  const res2 = await page.request.get(
+    `${API}/ecosystem/deprecation-calendar.ics?token=${newToken}`,
+  );
+  expect(res2.status()).toBe(200);
 });

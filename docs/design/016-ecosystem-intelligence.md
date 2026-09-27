@@ -2511,3 +2511,12 @@ backlog bounded; killer holds 40 concurrent gate entries to a peak ≤ 8
 **Rule.** Fire-and-forget dispatch over an unbounded work list is a
 self-DoS: bound the LIST and gate the WORKERS, and treat a transient that
 recurs on the same test as a production signal, not noise.
+
+### 101.1 Spawn-site sweep + rotation e2e (rounds 304–307)
+
+The §101 pattern swept across every background-spawn site: webhook
+deliveries (per-event bounded, no DB sessions, SSRF re-checked) and email
+sends (SMTP only) are safe; only the advance dispatcher needed the gate.
+And the §94.6 revocation loop is now proven in a REAL browser against the
+live API (e2e test 8): rotate click → every subscription anchor swaps
+tokens → the old token 401s, the new one 200s.
