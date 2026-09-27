@@ -2582,3 +2582,10 @@ encoded search param (wildcards included) must reach the fetch.
 stored key must never fork an identity), and ADR-016 gains a
 hardening-campaign index (§90–§101) so reviewers can navigate the 2,300-line
 document by finding.
+
+### 99.5 Status filter reaches the UI too (round 319)
+
+Same class as §99.4: `lifecycle_status` was a supported list parameter with
+no UI consumer. The catalog list gains a status dropdown (options derived
+from the shared LIFECYCLE_STYLES map — no third vocabulary), resetting
+pagination on change. Unit killer pins the query param.

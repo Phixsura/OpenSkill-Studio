@@ -114,6 +114,7 @@ function CatalogInner() {
   const [error, setError] = useState<string | null>(null);
   // R316: in-list filter (debounced) — served by the trgm index (§99.3)
   const [listFilter, setListFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [debouncedFilter, setDebouncedFilter] = useState("");
   useEffect(() => {
     const t = setTimeout(() => {
@@ -131,12 +132,12 @@ function CatalogInner() {
   }, [listFilter]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-catalog", segment, offset, debouncedFilter],
+    queryKey: ["eco-catalog", segment, offset, debouncedFilter, statusFilter],
     queryFn: async () => {
       const res = await apiWithAuth<{ data: Entity[]; meta: { total: number } }>(
         `/ecosystem/catalog/${segment}?limit=100&offset=${offset}${
           debouncedFilter ? `&search=${encodeURIComponent(debouncedFilter)}` : ""
-        }`,
+        }${statusFilter ? `&lifecycle_status=${statusFilter}` : ""}`,
       );
       setPages((prev) => (offset === 0 ? [res.data] : [...prev, res.data]));
       return res;
@@ -296,6 +297,23 @@ function CatalogInner() {
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Model / Tool Catalog</h1>
       <EcosystemNav />
+      <select
+        aria-label="Filter by lifecycle status"
+        value={statusFilter}
+        onChange={(e) => {
+          setStatusFilter(e.target.value);
+          setOffset(0);
+          setPages([]);
+        }}
+        className="mr-2 rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+      >
+        <option value="">All statuses</option>
+        {Object.keys(LIFECYCLE_STYLES).map((sVal) => (
+          <option key={sVal} value={sVal}>
+            {sVal}
+          </option>
+        ))}
+      </select>
       <input
         aria-label="Filter list by name"
         placeholder="Filter this list by name…"

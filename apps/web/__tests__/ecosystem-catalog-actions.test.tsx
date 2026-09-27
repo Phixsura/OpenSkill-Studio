@@ -383,4 +383,17 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
       vi.useRealTimers();
     }
   });
+
+  it("status filter sends lifecycle_status and resets pagination (R319)", async () => {
+    render(<CatalogPage />, { wrapper: wrapper() });
+    await screen.findByText("Verified Gen");
+    fireEvent.change(screen.getByLabelText("Filter by lifecycle status"), {
+      target: { value: "deprecated" },
+    });
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("lifecycle_status=deprecated"))).toBe(
+        true,
+      ),
+    );
+  });
 });
