@@ -2483,3 +2483,31 @@ the newest models). All request models now inherit `_StrictReq`
 `*Request` class in the schemas module (≥25 floor) requiring the forbid
 config — new models can't regress. Wire killer: a typo'd watchlist field is
 rejected, never half-applied.
+
+## 101. The operator sweep DoS'd its own API (round 303)
+
+**Gap (root cause of the campaign's only recurring transient).** The
+platform-wide sweep endpoint dispatched an advance loop for EVERY stalled
+run with no cap, and the stalled scan itself was unbounded. Against an
+accumulated backlog (dev DB: 452 RUNNING + 21 PENDING orphaned runs;
+production equivalent: any incident that strands runs), one sweep spawned
+hundreds of concurrent advance loops, each opening its own DB sessions —
+exhausting the 15-connection pool. This is exactly the QueuePool transient
+that hit 6+ full regressions (always in `test_admin_sweep_endpoint`, always
+standalone-green): not test flake, a REAL production defect surfaced by the
+accumulated dev data.
+
+**Fix.** (a) The stalled scan is bounded (`ORDER BY created_at LIMIT 500` —
+oldest first; the next cron pass takes the remainder). (b) A per-event-loop
+semaphore (`_ADVANCE_CONCURRENCY = 8`) bounds concurrent advance bodies;
+dispatch stays fire-and-forget, execution queues. Cross-boundary note: this
+touches the issue-10 workflow runtime, justified as the root-cause fix for
+a defect this epic's regression cadence exposed and measured.
+
+**Evidence.** The workflow suite dropped from ~142s to 70s with the
+backlog bounded; killer holds 40 concurrent gate entries to a peak ≤ 8
+(widening the gate to 10k is killed) and pins the LIMIT in the source.
+
+**Rule.** Fire-and-forget dispatch over an unbounded work list is a
+self-DoS: bound the LIST and gate the WORKERS, and treat a transient that
+recurs on the same test as a production signal, not noise.

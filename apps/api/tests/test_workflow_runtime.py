@@ -2621,3 +2621,34 @@ async def test_idempotent_retry_survives_quota_and_suspension(c):
         tenant.status = TenantStatus.ACTIVE
         await db.commit()
     await invalidate_cache(tenant_id)
+
+
+async def test_advance_concurrency_is_bounded(c):
+    """R303 killer: the platform sweep once spawned an advance loop per
+    stalled run with NO cap — hundreds of concurrent loops exhausted the
+    connection pool (the operator sweep DoS'd its own API). The gate must
+    hold concurrent advance bodies at _ADVANCE_CONCURRENCY."""
+    import asyncio
+
+    from app.services import workflow_runtime as wr
+
+    peak = 0
+    active = 0
+
+    async def fake_advance():
+        nonlocal peak, active
+        async with wr._advance_gate():
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.05)
+            active -= 1
+
+    await asyncio.gather(*(fake_advance() for _ in range(40)))
+    assert peak <= wr._ADVANCE_CONCURRENCY, peak
+    assert peak >= 2  # sanity: it did run concurrently
+
+    # and the stalled scan is bounded (LIMIT in the compiled SQL)
+    import inspect
+
+    src = inspect.getsource(wr.sweep_stale)
+    assert ".limit(500)" in src or "limit(500)" in src
