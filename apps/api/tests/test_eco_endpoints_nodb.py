@@ -224,3 +224,55 @@ def test_web_change_type_dropdown_matches_backend_vocabulary():
     assert web_values == set(CHANGE_TYPES), (
         f"web {sorted(web_values)} != backend {sorted(CHANGE_TYPES)}"
     )
+
+
+def test_web_test_mock_paths_exist_in_the_route_table():
+    """Round-324 drift guard (§96): web unit tests mock apiWithAuth by PATH
+    STRING — a renamed endpoint keeps those tests green while the real page
+    404s (the compare-path bug class, R226). Every /ecosystem path literal
+    mocked in web tests must prefix-match a real route (path params
+    wildcarded)."""
+    import re
+    from pathlib import Path
+
+    from app.main import app as _app
+
+    def _walk(router):
+        for rt in getattr(router, "routes", []):
+            if type(rt).__name__ == "_IncludedRouter":
+                yield from _walk(rt.original_router)
+            elif hasattr(rt, "path"):
+                yield rt.path
+            elif hasattr(rt, "routes"):
+                yield from _walk(rt)
+
+    route_paths = [
+        path
+        for path in _walk(_app.router)
+        if isinstance(path, str) and path.startswith("/ecosystem")
+    ]
+    route_res = [
+        re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path) + "$")
+        for path in route_paths
+    ]
+    assert len(route_res) >= 60
+
+    tests_dir = Path(__file__).resolve().parents[2] / "web/__tests__"
+    offenders = []
+    checked = 0
+    for f in tests_dir.glob("ecosystem-*.test.tsx"):
+        for lit in re.findall(r'"(/ecosystem/[A-Za-z0-9_\-/]+)"', f.read_text()):
+            checked += 1
+            ok = any(rx.match(lit) for rx in route_res) or any(
+                # prefix-style mocks (path.startsWith("/ecosystem/x/")) are
+                # fine as long as they prefix a REAL route at a SEGMENT
+                # boundary (else /compare would match a renamed /compare-v2)
+                rp == lit
+                or rp.startswith(lit if lit.endswith("/") else lit + "/")
+                or rp.startswith(lit + "?")
+                for rp in route_paths
+            )
+            if not ok:
+                offenders.append(f"{f.name}: {lit}")
+    assert checked >= 20, f"literal scan looks broken ({checked})"
+    assert not offenders, f"mocked paths with no matching route: {offenders}"

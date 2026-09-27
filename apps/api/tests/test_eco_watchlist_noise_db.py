@@ -616,3 +616,28 @@ async def test_catalog_search_uses_the_trgm_index(db):
     )
     await db.execute(_sql("SET enable_seqscan = on"))
     assert "ix_eco_ai_models_name_trgm" in plan, plan
+
+
+async def test_watchlist_item_cap_enforced(db, monkeypatch):
+    """Round-323 killer: a single list could grow unboundedly — every item
+    joins the availability sweep, the notify fan-out and merge repoints, so
+    depth is a one-user amplification lever (R172 capped breadth). At the
+    cap, adds 422 with ECO_WATCHLIST_FULL; dedupe re-adds still succeed."""
+    import app.ecosystem.services.watchlists as wl
+
+    monkeypatch.setattr(wl, "WATCHLIST_ITEM_CAP", 2)
+    user = await _mk_user(db)
+    svc = WatchlistService(db)
+    lst = await svc.create(owner_id=user.id, name=f"cap-{str(ULID()).lower()[:6]}")
+
+    await svc.add_item(lst.id, user.id, target_kind="github_repo", target_ref="a/one")
+    await svc.add_item(lst.id, user.id, target_kind="github_repo", target_ref="a/two")
+    with pytest.raises(AppError) as exc:
+        await svc.add_item(lst.id, user.id, target_kind="github_repo", target_ref="a/three")
+    assert exc.value.code == "ECO_WATCHLIST_FULL"
+    assert exc.value.status_code == 422
+    # dedupe path is NOT blocked by the cap (existing item returned)
+    again = await svc.add_item(
+        lst.id, user.id, target_kind="github_repo", target_ref="a/two"
+    )
+    assert again.target_ref == "a/two"

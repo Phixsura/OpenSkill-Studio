@@ -2606,3 +2606,36 @@ on it). A checkbox now wires `injection_flagged=true` into the discoveries
 fetch, making the runbook step executable. Unit killer pins the param.
 Rule: every runbook step that names a UI action must have a test proving
 the action exists.
+
+## 102. Per-list item cap (round 323)
+
+**Gap.** R172 capped how many LISTS an owner can have, but a single list's
+ITEM count was unbounded — and every item joins the availability sweep, the
+notify fan-out and merge repoints, so depth was a one-user amplification
+lever on three hot paths.
+
+**Fix.** `WATCHLIST_ITEM_CAP = 1000` enforced in add_item (both the direct
+add and quick-watch paths flow through it): at the cap, 422
+`ECO_WATCHLIST_FULL` naming the remedy; the dedupe path (re-adding an
+existing item) is deliberately NOT blocked. Killer (cap monkeypatched to 2)
+pins the 422, the code/status pair, and the dedupe exemption;
+check-removal mutant killed.
+
+### 96.3 Web mock-paths pinned to the route table (round 324)
+
+Web unit tests mock `apiWithAuth` by path string — a renamed endpoint keeps
+those tests green while the real page 404s (the R226 compare-path bug
+class). New §96 guard: every `/ecosystem/...` literal in web test files
+must full-match a real route (params wildcarded) or prefix one at a segment
+boundary (startsWith-style mocks). First run immediately surfaced the
+boundary subtlety itself — a naive prefix rule let a renamed `/compare-v2`
+satisfy a `/compare` mock; tightened and mutation-verified (rename killed).
+
+### 97.3 Fourth accumulated-data flake (round 325)
+
+Run #23 broke two trial-expiry tests: the dev DB has accumulated 1,614
+expired trials — more than the R259 bounded batch (LIMIT 500 oldest-first)
+— so a day-old fixture never sorts into the batch. Same class as §97.2
+(cap truncation against accumulated data); same fix shape: the fixtures'
+expiry is pinned ANCIENT (10 years) so they always lead the oldest-first
+order. The R259 bounding itself is correct and untouched.

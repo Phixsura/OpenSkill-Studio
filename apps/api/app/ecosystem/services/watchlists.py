@@ -9,6 +9,8 @@ from app.ecosystem.models.replacement import WATCH_TARGET_KINDS, WatchItem, Watc
 from app.ecosystem.security import sanitize_text
 from app.exceptions import AppError
 
+WATCHLIST_ITEM_CAP = 1000  # R323: bounds fan-out/sweep amplification per list
+
 
 class WatchlistService:
     def __init__(self, db: AsyncSession):
@@ -124,6 +126,23 @@ class WatchlistService:
         )
         if existing:
             return existing
+        # R323: per-list item cap — every item joins the availability sweep,
+        # the notify fan-out and merge repoints; an unbounded list is a
+        # single-user amplification lever (the per-owner LIST cap R172
+        # bounded breadth, this bounds depth)
+        from sqlalchemy import func as _func
+
+        n_items = await self.db.scalar(
+            select(_func.count())
+            .select_from(WatchItem)
+            .where(WatchItem.watchlist_id == watchlist_id)
+        )
+        if (n_items or 0) >= WATCHLIST_ITEM_CAP:
+            raise AppError(
+                "ECO_WATCHLIST_FULL",
+                f"Watchlist is at its {WATCHLIST_ITEM_CAP}-item cap; split into more lists",
+                422,
+            )
         item = WatchItem(
             watchlist_id=watchlist_id,
             target_kind=target_kind,
