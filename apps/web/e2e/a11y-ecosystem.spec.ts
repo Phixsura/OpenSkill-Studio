@@ -27,8 +27,11 @@ async function scan(page: Page, name: string) {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
     });
   });
+  // R310: the eco surface measured CLEAN at moderate too — gate there
+  // (stricter than the site-wide serious/critical baseline, for free)
   const serious = results.violations.filter(
-    (v: { impact: string }) => v.impact === "serious" || v.impact === "critical",
+    (v: { impact: string }) =>
+      v.impact === "serious" || v.impact === "critical" || v.impact === "moderate",
   );
   if (serious.length) {
     console.log(`\n[a11y] ${name}: ${serious.length} serious/critical violations`);

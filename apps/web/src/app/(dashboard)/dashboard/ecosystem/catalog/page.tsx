@@ -467,6 +467,7 @@ function CatalogInner() {
             <div
               className="mb-3 flex items-center gap-0.5"
               title="Daily worst probe status (StatusGator-style)"
+              aria-label="30-day stability strip"
             >
               <span className="mr-1 text-xs text-[hsl(var(--muted-foreground))]">
                 {uptime.data.data.uptime_pct != null

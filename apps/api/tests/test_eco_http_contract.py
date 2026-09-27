@@ -1235,3 +1235,22 @@ async def test_estimate_rejects_negative_workload(http, tokens):
         headers=member,
     )
     assert r.status_code != 422  # zero is a legal quantity
+
+
+async def test_rotation_is_per_user(http, tokens):
+    """Round-308 killer: rotation must revoke ONLY the rotating user's
+    tokens — an admin's rotate must not kill a member's feed URL (the
+    generation counter is per-user, not global)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+
+    r = await http.get("/api/v1/ecosystem/export/feed-token", headers=member)
+    member_token = r.json()["data"]["token"]
+    r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=admin)
+    assert r.status_code == 200
+
+    # member's token survives the admin's rotation
+    r = await http.get(
+        f"/api/v1/ecosystem/export/changes.atom?token={member_token}"
+    )
+    assert r.status_code == 200

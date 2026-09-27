@@ -2520,3 +2520,11 @@ sends (SMTP only) are safe; only the advance dispatcher needed the gate.
 And the §94.6 revocation loop is now proven in a REAL browser against the
 live API (e2e test 8): rotate click → every subscription anchor swaps
 tokens → the old token 401s, the new one 200s.
+
+### 101.2 A11y gate raised to moderate (rounds 308–310)
+
+Measured the eco surface at axe's moderate level — CLEAN across all 12
+routes — so the gate now fails on moderate+ (stricter than the site-wide
+serious/critical baseline, at zero cost). Alongside: per-user rotation
+isolation killer (an admin's rotate must not kill a member's feed URL) and
+the catalog stability strip gets the same aria-label as compare's.
