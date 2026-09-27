@@ -865,7 +865,7 @@ class LifecycleService:
         rows = await self.db.scalars(
             select(ModelVersion)
             .where(ModelVersion.sunset_at.isnot(None), ModelVersion.sunset_at <= horizon)
-            .order_by(ModelVersion.sunset_at)
+            .order_by(ModelVersion.sunset_at, ModelVersion.id)
             .limit(200)
         )
         return [

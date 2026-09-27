@@ -138,7 +138,7 @@ class RolloutService:
         query = select(RolloutPlan)
         if status:
             query = query.where(RolloutPlan.status == status)
-        rows = await self.db.scalars(query.order_by(RolloutPlan.created_at.desc()).limit(limit))
+        rows = await self.db.scalars(query.order_by(RolloutPlan.created_at.desc(), RolloutPlan.id.desc()).limit(limit))
         return list(rows)
 
     def _check_transition(self, plan: RolloutPlan, to_status: str) -> None:

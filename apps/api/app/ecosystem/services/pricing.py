@@ -104,7 +104,7 @@ class PricingService:
                 PriceObservation.reconciliation_status == reconciliation_status
             )
         rows = await self.db.scalars(
-            query.order_by(PriceObservation.observed_at.desc()).limit(limit).offset(offset)
+            query.order_by(PriceObservation.observed_at.desc(), PriceObservation.id.desc()).limit(limit).offset(offset)
         )
         return list(rows)
 
@@ -118,7 +118,7 @@ class PricingService:
                 PriceObservation.entity_id == entity_id,
                 PriceObservation.reconciliation_status.notin_(("rejected", "superseded")),
             )
-            .order_by(PriceObservation.observed_at.desc())
+            .order_by(PriceObservation.observed_at.desc(), PriceObservation.id.desc())
             .limit(200)
         )
         best: dict[str, dict] = {}
@@ -588,6 +588,6 @@ class AvailabilityService:
         if record_type:
             query = query.where(AvailabilityRecord.record_type == record_type)
         rows = await self.db.scalars(
-            query.order_by(AvailabilityRecord.observed_at.desc()).limit(limit)
+            query.order_by(AvailabilityRecord.observed_at.desc(), AvailabilityRecord.id.desc()).limit(limit)
         )
         return list(rows)

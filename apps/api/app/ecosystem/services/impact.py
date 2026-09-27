@@ -188,7 +188,7 @@ class ImpactService:
         items = await self.db.scalars(
             select(ImpactItem)
             .where(ImpactItem.analysis_id == analysis_id)
-            .order_by(ImpactItem.depth, ImpactItem.node_kind)
+            .order_by(ImpactItem.depth, ImpactItem.node_kind, ImpactItem.id)
         )
         return analysis, list(items)
 
@@ -208,7 +208,7 @@ class ImpactService:
                 raise AppError("VALIDATION_ERROR", "Unknown classification", 422)
             query = query.where(ImpactAnalysis.classification == classification)
         rows = await self.db.scalars(
-            query.order_by(ImpactAnalysis.computed_at.desc()).limit(limit).offset(offset)
+            query.order_by(ImpactAnalysis.computed_at.desc(), ImpactAnalysis.id.desc()).limit(limit).offset(offset)
         )
         return list(rows)
 

@@ -226,7 +226,7 @@ class ResolutionService:
         if entity_kind:
             query = query.where(ResolutionCandidate.entity_kind == entity_kind)
         rows = await self.db.scalars(
-            query.order_by(ResolutionCandidate.created_at).limit(limit).offset(offset)
+            query.order_by(ResolutionCandidate.created_at, ResolutionCandidate.id).limit(limit).offset(offset)
         )
         return list(rows)
 

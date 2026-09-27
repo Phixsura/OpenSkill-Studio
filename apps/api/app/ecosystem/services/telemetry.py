@@ -200,7 +200,7 @@ class TelemetryService:
         else:
             query = query.where(TelemetrySnapshot.org_id.is_(None))
         rows = await self.db.scalars(
-            query.order_by(TelemetrySnapshot.window_end.desc()).limit(limit)
+            query.order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc()).limit(limit)
         )
         return list(rows)
 
@@ -220,7 +220,7 @@ class TelemetryService:
                 TelemetrySnapshot.entity_id == entity_id,
                 TelemetrySnapshot.org_id.is_(None),
             )
-            .order_by(TelemetrySnapshot.window_end.desc())
+            .order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc())
             .limit(1)
         )
         if not snap:
@@ -254,7 +254,7 @@ class TelemetryService:
                 EcosystemObservation.canonical_entity_kind == entity_kind,
                 EcosystemObservation.canonical_entity_id == entity_id,
             )
-            .order_by(EcosystemObservation.observed_at.desc())
+            .order_by(EcosystemObservation.observed_at.desc(), EcosystemObservation.id.desc())
             .limit(1)
         )
         if not obs:

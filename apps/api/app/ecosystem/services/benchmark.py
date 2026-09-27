@@ -32,7 +32,7 @@ async def latest_completed_run(
     runs = await db.scalars(
         select(BenchmarkRun)
         .where(BenchmarkRun.status == "completed")
-        .order_by(BenchmarkRun.finished_at.desc())
+        .order_by(BenchmarkRun.finished_at.desc(), BenchmarkRun.id.desc())
         .limit(200)
     )
     for run in runs:
@@ -381,7 +381,7 @@ class BenchmarkService:
         rows = await self.db.scalars(
             select(BenchmarkCase)
             .where(BenchmarkCase.suite_id == suite_id)
-            .order_by(BenchmarkCase.sort_order)
+            .order_by(BenchmarkCase.sort_order, BenchmarkCase.id)
         )
         return list(rows)
 
@@ -571,7 +571,7 @@ class BenchmarkService:
                 BenchmarkRun.status == "completed",
                 BenchmarkRun.id != run.id,
             )
-            .order_by(BenchmarkRun.finished_at.desc())
+            .order_by(BenchmarkRun.finished_at.desc(), BenchmarkRun.id.desc())
             .limit(100)
         )
         for candidate in older:
@@ -824,7 +824,7 @@ class BenchmarkService:
                 return {"dimension": dimension, "rows": []}
             query = query.where(BenchmarkRun.suite_id.in_(suite_ids))
         runs = await self.db.scalars(
-            query.order_by(BenchmarkRun.finished_at.desc()).limit(500)
+            query.order_by(BenchmarkRun.finished_at.desc(), BenchmarkRun.id.desc()).limit(500)
         )
         latest_per_target: dict[tuple, BenchmarkRun] = {}
         for run in runs:

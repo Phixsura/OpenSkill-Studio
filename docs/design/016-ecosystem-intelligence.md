@@ -2666,3 +2666,14 @@ server-side leaves the card silently empty (TS checks only the web-side
 interface). Guard: every key the page reads (regex over the TSX, digits
 included — its own first bug was truncating `discoveries_7d`) must exist in
 the LIVE overview() payload; rename-mutation killed.
+
+### 99.9 Tiebreak sweep completed — and re-audited (round 336)
+
+The §99.8 sweep's own grep vocabulary missed columns (window_end,
+computed_at, score, finished_at, sort_order, sunset_at) — a re-audit from
+the ORDER BY expressions themselves (not a column-name list) found 15 more
+sites, including latest-telemetry-snapshot selection (multi-org rows tie on
+window_end and could pick the wrong org's aggregate) and replacement
+ranking (equal scores flapped). Every ORDER BY in the package now ends in
+the immutable id. Meta-lesson: a sweep's own search vocabulary is a hand
+list — derive it from the pattern (`order_by(...)`) instead.

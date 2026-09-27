@@ -88,7 +88,7 @@ class WatchlistService:
 
     async def list_for_owner(self, owner_id: str) -> list[Watchlist]:
         rows = await self.db.scalars(
-            select(Watchlist).where(Watchlist.owner_id == owner_id).order_by(Watchlist.created_at)
+            select(Watchlist).where(Watchlist.owner_id == owner_id).order_by(Watchlist.created_at, Watchlist.id)
         )
         return list(rows)
 
@@ -257,7 +257,7 @@ class WatchlistService:
         rows = await self.db.scalars(
             select(ChangeEvent)
             .where(ChangeEvent.canonical_entity_id.in_(target_floor))
-            .order_by(ChangeEvent.detected_at.desc())
+            .order_by(ChangeEvent.detected_at.desc(), ChangeEvent.id.desc())
             .limit(limit * 3)
         )
         out = []

@@ -239,7 +239,7 @@ class ReplacementService:
                 TelemetrySnapshot.entity_id == cand_id,
                 TelemetrySnapshot.org_id.is_(None),
             )
-            .order_by(TelemetrySnapshot.window_end.desc())
+            .order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc())
             .limit(1)
         )
         reliability = float((snap.metrics or {}).get("success_rate", 0.5)) if snap else 0.5
@@ -305,7 +305,7 @@ class ReplacementService:
         if status:
             query = query.where(ReplacementCandidate.status == status)
         rows = await self.db.scalars(
-            query.order_by(ReplacementCandidate.score.desc()).limit(limit)
+            query.order_by(ReplacementCandidate.score.desc(), ReplacementCandidate.id.desc()).limit(limit)
         )
         return list(rows)
 

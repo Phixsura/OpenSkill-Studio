@@ -53,7 +53,7 @@ class SignalsService:
                     TelemetrySnapshot.entity_id == mapping.entity_id,
                     TelemetrySnapshot.org_id.is_(None),
                 )
-                .order_by(TelemetrySnapshot.window_end.desc())
+                .order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc())
                 .limit(1)
             )
             from app.ecosystem.services.benchmark import latest_dimension_scores
