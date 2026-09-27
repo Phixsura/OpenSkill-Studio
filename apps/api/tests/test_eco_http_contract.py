@@ -1320,3 +1320,66 @@ async def test_atom_supports_change_type_filter(http, tokens):
     assert r_sec.status_code == 200
     # different filters must not share a cache validator
     assert r_price.headers["etag"] != r_sec.headers["etag"]
+
+
+async def test_acknowledge_is_reversible(http, tokens):
+    """Round-347 killer: a mis-click ack on a security_critical change had
+    no recovery path. Un-ack must restore the row to the default (unacked)
+    view and clear the actor; member role stays locked out of both."""
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from tests.test_eco_services_db import _mk_source
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        source = await _mk_source(db)
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="security_advisory",
+            raw_hash="f" * 64, normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="security",
+            field="unack-marker", old_value={}, new_value={"cve": "X"},
+            severity="security_critical",
+        )
+        db.add(change)
+        await db.commit()
+        change_id, obs_id = change.id, obs.id
+
+        try:
+            r = await http.post(
+                f"/api/v1/ecosystem/changes/{change_id}/acknowledge", headers=admin
+            )
+            assert r.status_code == 200 and r.json()["data"]["acknowledged"] is True
+
+            r = await http.post(
+                f"/api/v1/ecosystem/changes/{change_id}/unacknowledge", headers=member
+            )
+            assert r.status_code == 403  # same gate as ack
+
+            r = await http.post(
+                f"/api/v1/ecosystem/changes/{change_id}/unacknowledge", headers=admin
+            )
+            assert r.status_code == 200
+            body = r.json()["data"]
+            assert body["acknowledged"] is False
+            # acknowledged_by isn't in the response model — verify in the DB
+            await db.refresh(change)
+            assert change.acknowledged_by is None
+
+            # back in the default (unacked) list
+            r = await http.get(
+                "/api/v1/ecosystem/changes?acknowledged=false&limit=200",
+                headers=admin,
+            )
+            assert any(c["id"] == change_id for c in r.json()["data"])
+        finally:
+            await db.delete(await db.get(ChangeEvent, change_id))
+            await db.delete(await db.get(EcosystemObservation, obs_id))
+            await db.commit()
+    await engine.dispose()

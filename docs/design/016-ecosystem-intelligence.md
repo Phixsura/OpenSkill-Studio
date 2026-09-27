@@ -2738,3 +2738,16 @@ endpoint (whitelisted per §93 → 422 naming the vocabulary; served by
 ix_eco_changes_type; keyed into the ETag window so different types never
 share validators) and the page's subscribe link carries it. Killer:
 unknown 422, two types 200 with distinct ETags.
+
+## 103. Acknowledgement is reversible (round 347)
+
+**Gap.** Ack was a one-way door: a mis-click on a security_critical change
+removed it from the default view with NO recovery path short of raw SQL —
+alerting systems universally pair ack with un-ack for exactly this reason.
+
+**Fix.** `POST /changes/{id}/unacknowledge` (same admin gate as ack)
+restores the row and clears `acknowledged_by` (the prior ack no longer
+stands). Acked rows in the include-acknowledged view offer an
+Un-acknowledge button. Killer: ack → member 403 on unack → admin unack →
+`acknowledged=false`, actor cleared in the DB, row back in the default
+list; self-cleaning fixture.

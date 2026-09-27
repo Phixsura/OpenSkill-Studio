@@ -108,6 +108,12 @@ export default function ChangesPage() {
     setHasMore(Boolean(res.meta?.has_more));
   };
 
+  const unacknowledge = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`/ecosystem/changes/${id}/unacknowledge`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-changes"] }),
+    onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
+  });
   const acknowledge = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth(`/ecosystem/changes/${id}/acknowledge`, { method: "POST" }),
@@ -221,12 +227,20 @@ export default function ChangesPage() {
                   {fmtDate(c.detected_at)}
                 </div>
               </div>
-              {!c.acknowledged && (
+              {!c.acknowledged ? (
                 <button
                   onClick={() => acknowledge.mutate(c.id)}
                   className="rounded-md border px-3 py-1 text-xs hover:bg-[hsl(var(--secondary))]"
                 >
                   Acknowledge
+                </button>
+              ) : (
+                <button
+                  onClick={() => unacknowledge.mutate(c.id)}
+                  title="Restore this change to the unacknowledged view (R347: mis-clicks are recoverable)"
+                  className="rounded-md border px-3 py-1 text-xs text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--secondary))]"
+                >
+                  Un-acknowledge
                 </button>
               )}
             </div>

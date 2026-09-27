@@ -204,3 +204,44 @@ describe("Change-type filter (R321)", () => {
     );
   });
 });
+
+describe("Un-acknowledge (R347)", () => {
+  it("acked rows offer Un-acknowledge and it POSTs the unack endpoint", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith("/ecosystem/changes?"))
+        return Promise.resolve({
+          data: [
+            {
+              id: "C".repeat(26),
+              change_type: "security",
+              field: "cve",
+              severity: "security_critical",
+              detected_at: "2026-09-27T00:00:00Z",
+              acknowledged: true,
+              entity_kind: "model",
+              old_value: null,
+              new_value: { cve: "X" },
+            },
+          ],
+          meta: {},
+        });
+      if (init?.method === "POST") return Promise.resolve({ data: {} });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ChangesPage />, { wrapper: wrapper() });
+    fireEvent.click(
+      (await screen.findByLabelText(/Include acknowledged/i).catch?.(() => null)) ??
+        (await screen.findByText(/Include acknowledged/)).closest("label")!.querySelector("input")!,
+    );
+    fireEvent.click(await screen.findByText("Un-acknowledge"));
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) =>
+            String(c[0]).endsWith(`/changes/${"C".repeat(26)}/unacknowledge`) &&
+            (c[1] as RequestInit)?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+  });
+});

@@ -330,3 +330,25 @@ async def acknowledge_change(
     change.acknowledged_by = user.id
     await db.commit()
     return {"data": change}
+
+
+@router.post(
+    "/changes/{change_id}/unacknowledge",
+    response_model=DataResponse[ChangeEventResponse],
+)
+async def unacknowledge_change(
+    change_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """R347: acknowledgement was irreversible — a mis-click on a
+    security_critical change removed it from the default view with no
+    recovery path short of raw SQL. Un-ack restores it (and clears the
+    actor, since the prior ack no longer stands)."""
+    change = await db.get(ChangeEvent, change_id)
+    if not change:
+        raise AppError("NOT_FOUND", "Change event not found", 404)
+    change.acknowledged = False
+    change.acknowledged_by = None
+    await db.commit()
+    return {"data": change}
