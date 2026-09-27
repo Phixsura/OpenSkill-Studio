@@ -358,4 +358,29 @@ describe("Catalog actions wiring (ADR-016 §12 UI)", () => {
       `/dashboard/ecosystem/catalog?kind=models&entity=${SURV}`,
     );
   });
+
+  it("list filter debounces and sends the search param (R316)", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<CatalogPage />, { wrapper: wrapper() });
+      await vi.waitFor(() =>
+        expect(
+          api.mock.calls.some((c) => /\/ecosystem\/catalog\/\w+\?limit/.test(String(c[0]))),
+        ).toBe(true),
+      );
+      fireEvent.change(screen.getByLabelText("Filter list by name"), {
+        target: { value: "Gen%_X" },
+      });
+      await vi.advanceTimersByTimeAsync(350);
+      await vi.waitFor(() =>
+        expect(
+          api.mock.calls.some((c) =>
+            String(c[0]).includes(`search=${encodeURIComponent("Gen%_X")}`),
+          ),
+        ).toBe(true),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

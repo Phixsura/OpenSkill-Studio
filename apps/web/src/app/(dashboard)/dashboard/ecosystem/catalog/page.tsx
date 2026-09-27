@@ -112,12 +112,31 @@ function CatalogInner() {
   const [offset, setOffset] = useState(0);
   const [pages, setPages] = useState<Entity[][]>([]);
   const [error, setError] = useState<string | null>(null);
+  // R316: in-list filter (debounced) — served by the trgm index (§99.3)
+  const [listFilter, setListFilter] = useState("");
+  const [debouncedFilter, setDebouncedFilter] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => {
+      // no-op on mount / unchanged value: resetting pages here raced the
+      // deep-link Inspect flow (pages cleared 300ms after load)
+      setDebouncedFilter((prev) => {
+        if (prev !== listFilter) {
+          setOffset(0);
+          setPages([]);
+        }
+        return listFilter;
+      });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [listFilter]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-catalog", segment, offset],
+    queryKey: ["eco-catalog", segment, offset, debouncedFilter],
     queryFn: async () => {
       const res = await apiWithAuth<{ data: Entity[]; meta: { total: number } }>(
-        `/ecosystem/catalog/${segment}?limit=100&offset=${offset}`,
+        `/ecosystem/catalog/${segment}?limit=100&offset=${offset}${
+          debouncedFilter ? `&search=${encodeURIComponent(debouncedFilter)}` : ""
+        }`,
       );
       setPages((prev) => (offset === 0 ? [res.data] : [...prev, res.data]));
       return res;
@@ -277,6 +296,13 @@ function CatalogInner() {
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold">Model / Tool Catalog</h1>
       <EcosystemNav />
+      <input
+        aria-label="Filter list by name"
+        placeholder="Filter this list by name…"
+        value={listFilter}
+        onChange={(e) => setListFilter(e.target.value)}
+        className="w-64 rounded-md border bg-[hsl(var(--background))] px-3 py-1.5 text-sm"
+      />
       <div className="flex flex-wrap gap-2">
         {KINDS.map((k) => (
           <button

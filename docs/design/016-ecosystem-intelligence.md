@@ -2548,3 +2548,11 @@ lower() LIKE). The query is rewritten to the semantically identical
 lower() LIKE lower() form; global_search already used trgm similarity
 correctly. Killer pins both the plan (index referenced) and the behavior
 (case-insensitive match survives the rewrite).
+
+### 99.4 The list filter reaches the UI (round 316)
+
+The `search` list parameter §99.3 just made index-served had NO UI consumer
+(only the cross-kind global search box existed). The catalog list gains a
+debounced (300ms) in-list name filter wired to it — typing resets
+pagination and rides the trgm index. Unit killer: fake-timer debounce, the
+encoded search param (wildcards included) must reach the fetch.
