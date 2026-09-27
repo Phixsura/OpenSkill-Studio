@@ -5,6 +5,8 @@ Practical day-to-day guide for platform operators. Design rationale lives in
 [ecosystem-alerts.md](./ecosystem-alerts.md). Everything below is under
 `/dashboard/ecosystem` (platform-admin actions marked ⚙).
 
+> Dev entry point: `make test-eco` runs the ecosystem test subset (~90s, needs `make infra-up`).
+
 ## 1. Connect a source ⚙
 
 Sources → Register source. Pick the adapter (HuggingFace, GitHub releases,
