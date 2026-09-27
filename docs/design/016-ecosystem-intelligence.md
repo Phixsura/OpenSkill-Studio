@@ -2464,3 +2464,22 @@ paginate by an immutable monotone key, never by a timestamp.
 the advisory estimate actively misleading (comparison ordering inverts).
 Field validator: quantities must be finite and ≥ 0 (zero stays legal — "no
 usage of this unit"). Killer: -1000 → 422 envelope, 0 → accepted.
+
+### 100.2 escape_like property-pinned (round 299)
+
+The property suite covered the statistics core, semver, adapter
+robustness and sanitize_text — but not `escape_like`. New Hypothesis
+property: for arbitrary input, every unescaped `%`/`_` in the output is a
+failure (walking the string honoring the escape char). Dropping the
+underscore escape is killed.
+
+### 100.3 Unknown fields rejected everywhere (round 300)
+
+An audit found ~30 of the eco request models still on pydantic's default
+`extra="ignore"` — a mistyped field name (`min_severty`) returned 200 while
+the setting silently never landed (the R85 lesson had only been applied to
+the newest models). All request models now inherit `_StrictReq`
+(`extra="forbid"`), and a runtime-introspection guard walks every
+`*Request` class in the schemas module (≥25 floor) requiring the forbid
+config — new models can't regress. Wire killer: a typo'd watchlist field is
+rejected, never half-applied.

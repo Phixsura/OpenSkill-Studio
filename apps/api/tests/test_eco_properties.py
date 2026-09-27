@@ -273,3 +273,21 @@ def test_parse_version_total_over_arbitrary_text(raw):
     assert out is None or (
         isinstance(out, tuple) and len(out) == 3 and all(isinstance(n, int) for n in out)
     )
+
+
+@given(st.text(max_size=200))
+def test_escape_like_neutralizes_every_wildcard(text):
+    """R299: every % and _ in user search input must come out escaped —
+    an unescaped wildcard turns a search term into a pattern (and a
+    pathological one into a scan amplifier)."""
+    from app.ecosystem.security import escape_like
+
+    out = escape_like(text)
+    i = 0
+    while i < len(out):
+        ch = out[i]
+        if ch == "\\":
+            i += 2  # escape consumes the next char
+            continue
+        assert ch not in ("%", "_"), (text, out)
+        i += 1

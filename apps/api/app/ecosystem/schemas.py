@@ -8,7 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # ── Requests ────────────────────────────────────────────────────────
 
 
-class CreateSourceRequest(BaseModel):
+class _StrictReq(BaseModel):
+    """R300: every request model rejects unknown fields — the pydantic
+    default (extra="ignore") silently DROPS a mistyped field name, so a
+    client typo (min_severty) returns 200 while the setting never lands."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CreateSourceRequest(_StrictReq):
     name: str = Field(min_length=1, max_length=200)
     source_type: str = Field(max_length=40)
     trust_level: str = Field(max_length=20)
@@ -20,7 +28,7 @@ class CreateSourceRequest(BaseModel):
     robots_compliant: bool = True
 
 
-class UpdateSourceRequest(BaseModel):
+class UpdateSourceRequest(_StrictReq):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     trust_level: str | None = None
     # §11.5: a dead/replaced vendor is a config change — swap the adapter
@@ -35,12 +43,12 @@ class UpdateSourceRequest(BaseModel):
     robots_compliant: bool | None = None
 
 
-class SyncSourceRequest(BaseModel):
+class SyncSourceRequest(_StrictReq):
     # Manual/analyst payload (bypasses fetch); bounded upstream by security guard
     payload: dict | list | None = None
 
 
-class ManualObservationRequest(BaseModel):
+class ManualObservationRequest(_StrictReq):
     source_id: str = Field(min_length=26, max_length=26)
     event_type: str = Field(max_length=40)
     entity_kind: str | None = Field(default=None, max_length=30)
@@ -49,29 +57,29 @@ class ManualObservationRequest(BaseModel):
     provenance_url: str | None = Field(default=None, max_length=2000)
 
 
-class UpdateCatalogEntityRequest(BaseModel):
+class UpdateCatalogEntityRequest(_StrictReq):
     canonical_name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
     aliases: list[str] | None = Field(default=None, max_length=50)
     external_ids: dict | None = Field(default=None, max_length=50)
 
 
-class ConfirmResolutionRequest(BaseModel):
+class ConfirmResolutionRequest(_StrictReq):
     target_entity_id: str | None = Field(default=None, min_length=26, max_length=26)
 
 
-class BulkIdsRequest(BaseModel):
+class BulkIdsRequest(_StrictReq):
     """ADR-016 §11.1 bulk review operations (≤100 per call)."""
 
     ids: list[str] = Field(min_length=1, max_length=100)
 
 
-class BulkDecideRequest(BaseModel):
+class BulkDecideRequest(_StrictReq):
     ids: list[str] = Field(min_length=1, max_length=100)
     decision: str = Field(max_length=10)  # confirm | reject
 
 
-class ResolveConflictRequest(BaseModel):
+class ResolveConflictRequest(_StrictReq):
     """§14 curation: arbitrate one conflicting field with provenance."""
 
     field: str = Field(max_length=40)
@@ -79,7 +87,7 @@ class ResolveConflictRequest(BaseModel):
     winning_source_id: str | None = Field(default=None, min_length=26, max_length=26)
 
 
-class LLMExtractRequest(BaseModel):
+class LLMExtractRequest(_StrictReq):
     """§14: LLM-assisted extraction from untrusted free text (HITL — every
     resulting observation still requires human verification)."""
 
@@ -88,13 +96,13 @@ class LLMExtractRequest(BaseModel):
     entity_kind: str = Field(default="model", max_length=30)
 
 
-class LifecycleTransitionRequest(BaseModel):
+class LifecycleTransitionRequest(_StrictReq):
     to_status: str = Field(max_length=20)
     reason: str | None = Field(default=None, max_length=40)
     note: str | None = Field(default=None, max_length=2000)
 
 
-class UpsertMappingRequest(BaseModel):
+class UpsertMappingRequest(_StrictReq):
     entity_kind: str = Field(max_length=30)
     entity_id: str = Field(min_length=26, max_length=26)
     capability_key: str = Field(max_length=64)
@@ -105,13 +113,13 @@ class UpsertMappingRequest(BaseModel):
     force: bool = False
 
 
-class ReconcilePriceRequest(BaseModel):
+class ReconcilePriceRequest(_StrictReq):
     decision: str = Field(max_length=20)  # approve | reject | under_review
     provider_key: str | None = Field(default=None, max_length=50)
     model_or_service: str | None = Field(default=None, max_length=200)
 
 
-class CreateSuiteRequest(BaseModel):
+class CreateSuiteRequest(_StrictReq):
     key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=200)
     family: str = Field(max_length=40)
@@ -124,7 +132,7 @@ class CreateSuiteRequest(BaseModel):
     repeat_count: int = Field(default=3, ge=1, le=10)
 
 
-class UpdateSuiteRequest(BaseModel):
+class UpdateSuiteRequest(_StrictReq):
     name: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     rubric: list | None = None
@@ -135,7 +143,7 @@ class UpdateSuiteRequest(BaseModel):
     status: str | None = None
 
 
-class CreateCaseRequest(BaseModel):
+class CreateCaseRequest(_StrictReq):
     name: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=20000)
     reference_assets: list = Field(default_factory=list)
@@ -144,26 +152,26 @@ class CreateCaseRequest(BaseModel):
     sort_order: int = 0
 
 
-class CreateRunRequest(BaseModel):
+class CreateRunRequest(_StrictReq):
     target: dict
     budget_usd_cap: float | None = Field(default=None, gt=0, le=10000)
     seed_settings: dict = Field(default_factory=dict)
     execute_now: bool = False
 
 
-class CreateReviewBatchRequest(BaseModel):
+class CreateReviewBatchRequest(_StrictReq):
     suite_id: str = Field(min_length=26, max_length=26)
     run_ids: list[str] = Field(min_length=2, max_length=8)
     reviewer_ids: list[str] = Field(min_length=1, max_length=20)
     blind: bool = True
 
 
-class SubmitReviewRequest(BaseModel):
+class SubmitReviewRequest(_StrictReq):
     scores: dict[str, float]
     comment: str | None = Field(default=None, max_length=4000)
 
 
-class AddEdgeRequest(BaseModel):
+class AddEdgeRequest(_StrictReq):
     from_kind: str = Field(max_length=40)
     from_id: str = Field(min_length=1, max_length=26)
     to_kind: str = Field(max_length=40)
@@ -173,23 +181,23 @@ class AddEdgeRequest(BaseModel):
     org_scoped: bool = False
 
 
-class ComputeImpactRequest(BaseModel):
+class ComputeImpactRequest(_StrictReq):
     change_event_id: str = Field(min_length=26, max_length=26)
 
 
-class GenerateCandidatesRequest(BaseModel):
+class GenerateCandidatesRequest(_StrictReq):
     deprecated_kind: str = Field(max_length=40)
     deprecated_id: str = Field(min_length=26, max_length=26)
     weights: dict[str, float] | None = None
     limit: int = Field(default=10, ge=1, le=50)
 
 
-class DecisionRequest(BaseModel):
+class DecisionRequest(_StrictReq):
     decision: str = Field(max_length=20)
     note: str | None = Field(default=None, max_length=2000)
 
 
-class CreateDraftRequest(BaseModel):
+class CreateDraftRequest(_StrictReq):
     draft_type: str = Field(max_length=40)
     title: str = Field(min_length=1, max_length=300)
     payload: dict
@@ -198,16 +206,16 @@ class CreateDraftRequest(BaseModel):
     org_id: str | None = None
 
 
-class UpdateDraftPayloadRequest(BaseModel):
+class UpdateDraftPayloadRequest(_StrictReq):
     payload: dict
 
 
-class GenerateWorkflowDraftRequest(BaseModel):
+class GenerateWorkflowDraftRequest(_StrictReq):
     external_workflow_id: str = Field(min_length=26, max_length=26)
     org_id: str | None = None
 
 
-class GenerateSkillUpdateDraftRequest(BaseModel):
+class GenerateSkillUpdateDraftRequest(_StrictReq):
     target_pack_id: str = Field(min_length=26, max_length=26)
     deprecated_kind: str = Field(max_length=40)
     deprecated_id: str = Field(min_length=26, max_length=26)
@@ -215,7 +223,7 @@ class GenerateSkillUpdateDraftRequest(BaseModel):
     affected: list = Field(default_factory=list)
 
 
-class CreateRolloutRequest(BaseModel):
+class CreateRolloutRequest(_StrictReq):
     replacement_candidate_id: str = Field(min_length=26, max_length=26)
     scope_type: str = Field(max_length=30)
     scope_ref: str | None = None
@@ -223,12 +231,12 @@ class CreateRolloutRequest(BaseModel):
     guardrails: dict | None = None
 
 
-class CreateWatchlistRequest(BaseModel):
+class CreateWatchlistRequest(_StrictReq):
     name: str = Field(min_length=1, max_length=200)
     org_id: str | None = None
 
 
-class AddWatchItemRequest(BaseModel):
+class AddWatchItemRequest(_StrictReq):
     target_kind: str = Field(max_length=30)
     target_id: str | None = Field(default=None, min_length=26, max_length=26)
     target_ref: str | None = Field(default=None, max_length=300)
@@ -548,10 +556,8 @@ class LifecycleTransitionResponse(_Orm):
 class GenericData(BaseModel):
     data: Any
 
-class EstimateRequest(BaseModel):
+class EstimateRequest(_StrictReq):
     """Workload cost estimate across entities (advisory, never a quote)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     entity_kind: str = Field(..., max_length=30)
     entity_ids: list[str] = Field(..., min_length=1, max_length=20)
@@ -575,27 +581,22 @@ class EstimateRequest(BaseModel):
         return v
 
 
-class UpdateWatchlistRequest(BaseModel):
+class UpdateWatchlistRequest(_StrictReq):
     """Noise controls: severity threshold + snooze (ADR-016 §24)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     min_severity: str | None = Field(default=None, max_length=30)
     muted_until: datetime | None = None
     clear_mute: bool = False
 
 
-class QuickWatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class QuickWatchRequest(_StrictReq):
 
     target_kind: str = Field(max_length=30)
     target_id: str = Field(min_length=26, max_length=26)
 
 
-class CreateAdvisoryRequest(BaseModel):
+class CreateAdvisoryRequest(_StrictReq):
     """Structured security advisory registration (ADR-016 §38)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     advisory_ref: str = Field(min_length=1, max_length=100)
     title: str = Field(min_length=1, max_length=300)
