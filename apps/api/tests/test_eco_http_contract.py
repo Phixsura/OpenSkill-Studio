@@ -1293,3 +1293,30 @@ async def test_credential_responses_are_no_store(http, tokens):
     r = await http.post("/api/v1/ecosystem/export/feed-token/rotate", headers=member)
     assert r.status_code == 200
     assert "no-store" in r.headers.get("cache-control", "")
+
+
+async def test_atom_supports_change_type_filter(http, tokens):
+    """Round-346 killer: the feed page filters by change type — the Atom
+    subscription must honor the same dimension (whitelisted per §93; unknown
+    values 422; the ETag window keys on the filter so different types never
+    share validators)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+
+    r = await http.get(
+        "/api/v1/ecosystem/export/changes.atom?change_type=nonsense",
+        headers=member,
+    )
+    assert r.status_code == 422
+    assert "allowed" in r.json()["error"]["message"]
+
+    r_price = await http.get(
+        "/api/v1/ecosystem/export/changes.atom?change_type=price", headers=member
+    )
+    assert r_price.status_code == 200
+    r_sec = await http.get(
+        "/api/v1/ecosystem/export/changes.atom?change_type=security",
+        headers=member,
+    )
+    assert r_sec.status_code == 200
+    # different filters must not share a cache validator
+    assert r_price.headers["etag"] != r_sec.headers["etag"]

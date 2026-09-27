@@ -2728,3 +2728,13 @@ endpoints). A performance probe on overview() (15+ serial counts, on the
 30s scrape path) measured 20ms locally — recorded as acceptable rather than
 rewritten: at a 30-second scrape interval, single-digit-RTT savings don't
 justify collapsing 15 readable counts into one opaque SQL.
+
+### 95.8 Subscriptions filter by type too (round 346)
+
+The feed page filters by severity, type and entity — but the Atom
+subscription only supported two of the three, so "subscribe to what I'm
+looking at" silently dropped the type dimension. `change_type` joins the
+endpoint (whitelisted per §93 → 422 naming the vocabulary; served by
+ix_eco_changes_type; keyed into the ETag window so different types never
+share validators) and the page's subscribe link carries it. Killer:
+unknown 422, two types 200 with distinct ETags.

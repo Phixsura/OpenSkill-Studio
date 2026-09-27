@@ -258,6 +258,7 @@ async def rotate_feed_token(
 async def export_changes_atom(
     request: Request = None,
     severity: str | None = None,
+    change_type: str | None = None,
     entity_id: Annotated[str | None, Query(min_length=26, max_length=26)] = None,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -285,8 +286,25 @@ async def export_changes_atom(
         return escape(_xml_illegal.sub("", value))
 
     _check_severity(severity, CHANGE_SEVERITIES)
+    # R346: the feed page filters by type — subscriptions must too (same
+    # whitelist posture as §93)
+    from app.ecosystem.models.observation import CHANGE_TYPES
+
+    if change_type is not None and change_type not in CHANGE_TYPES:
+        from app.exceptions import AppError
+
+        raise AppError(
+            "VALIDATION_ERROR",
+            f"Unknown change_type {change_type!r}; allowed: "
+            f"{', '.join(sorted(CHANGE_TYPES))}",
+            422,
+        )
     rows = await DashboardService(db).change_feed(
-        severity=severity, canonical_entity_id=entity_id, limit=limit, offset=0
+        severity=severity,
+        change_type=change_type,
+        canonical_entity_id=entity_id,
+        limit=limit,
+        offset=0,
     )
     # R246: a merge re-points every change to the survivor, which would turn
     # long-lived subscription URLs (?entity_id=<duplicate>) into permanently
@@ -321,7 +339,7 @@ async def export_changes_atom(
     # R235: feed readers poll on a schedule — honor conditional GET. The
     # change stream is APPEND-ONLY (the ledger is never pruned, §16), so the window
     # is identified by (newest id, oldest id, row count) + the filters.
-    window = f"{severity}:{entity_id}:{limit}:" + (
+    window = f"{severity}:{change_type}:{entity_id}:{limit}:" + (
         f"{rows[0].id}:{rows[-1].id}:{len(rows)}" if rows else "empty"
     )
     etag = f'"{sha256(window.encode()).hexdigest()[:32]}"'

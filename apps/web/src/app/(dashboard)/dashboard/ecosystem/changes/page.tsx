@@ -65,6 +65,7 @@ export default function ChangesPage() {
   });
   const atomHref = `/api/v1/ecosystem/export/changes.atom?${[
     severity ? `severity=${severity}` : "",
+    changeType ? `change_type=${changeType}` : "",
     entity ? `entity_id=${entity}` : "",
     feedToken.data?.data.token ? `token=${feedToken.data.data.token}` : "",
   ]

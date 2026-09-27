@@ -267,6 +267,7 @@ class DashboardService:
         self,
         *,
         severity: str | None = None,
+        change_type: str | None = None,
         canonical_entity_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -274,6 +275,9 @@ class DashboardService:
         query = select(ChangeEvent)
         if severity:
             query = query.where(ChangeEvent.severity == severity)
+        if change_type:
+            # R346: served by ix_eco_changes_type (change_type, detected_at)
+            query = query.where(ChangeEvent.change_type == change_type)
         if canonical_entity_id:
             # Served by ix_eco_changes_canonical (R137)
             query = query.where(ChangeEvent.canonical_entity_id == canonical_entity_id)
