@@ -2122,3 +2122,41 @@ async def test_capability_mapping_lists_are_stably_ordered(db):
     second = [m.capability_key for m in await svc.list_for_entity("model", model.id)]
     assert first == ["audio_generation", "image_generation", "video_generation"]
     assert first == second
+
+
+async def test_create_batch_rejects_ghost_and_duplicate_reviewers(db):
+    """Round-359 killer: a ghost reviewer's reviews can never be submitted —
+    the batch would be UNCOMPLETABLE by construction (the quiet twin of the
+    §104 wedge). Ghost ids and duplicates are 422 at creation; a valid batch
+    still creates."""
+    admin = await _mk_user(db, "admin")
+    r1 = await _mk_user(db)
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    runs = []
+    for _ in range(2):
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": str(ULID())}
+        )
+        runs.append(await bench.execute_run(run.id))
+    blind = BlindReviewService(db)
+
+    with pytest.raises(AppError) as exc:
+        await blind.create_batch(
+            suite_id=suite.id, run_ids=[r.id for r in runs],
+            reviewer_ids=[r1.id, "0" * 26], created_by=admin.id,
+        )
+    assert exc.value.code == "VALIDATION_ERROR"
+
+    with pytest.raises(AppError) as exc:
+        await blind.create_batch(
+            suite_id=suite.id, run_ids=[r.id for r in runs],
+            reviewer_ids=[r1.id, r1.id], created_by=admin.id,
+        )
+    assert "Duplicate" in exc.value.message
+
+    batch = await blind.create_batch(
+        suite_id=suite.id, run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id], created_by=admin.id,
+    )
+    assert batch.status == "open"

@@ -2821,3 +2821,12 @@ reshuffled between refreshes — the same instability that complicated
 §104's killer setup) and both capability-mapping lists. All ordered now
 (alias/key/entity + id); set-semantic internal reads (merge moves,
 stat inputs, stale counters) are deliberately left unordered.
+
+### 104.1 Uncompletable batches prevented at creation (round 359)
+
+The quiet twin of §104's wedge: create_batch accepted arbitrary
+reviewer_ids — a typo'd or offboarded reviewer id created reviews nobody
+could ever submit, making the batch UNCOMPLETABLE by construction. Every
+reviewer must now be a real, active user (and duplicates are rejected —
+they'd double-assign the same person). Killer: ghost id 422, duplicate 422,
+valid batch still opens.

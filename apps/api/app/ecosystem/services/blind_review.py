@@ -39,6 +39,19 @@ class BlindReviewService:
             raise AppError("VALIDATION_ERROR", f"Batch needs 2..{len(_ALIAS_LABELS)} runs", 422)
         if not reviewer_ids:
             raise AppError("VALIDATION_ERROR", "Batch needs at least one reviewer", 422)
+        if len(set(reviewer_ids)) != len(reviewer_ids):
+            raise AppError("VALIDATION_ERROR", "Duplicate reviewer ids", 422)
+        # R359: a ghost reviewer's reviews can never be submitted — the batch
+        # would be UNCOMPLETABLE by construction (the quiet twin of §104's
+        # wedge). Every reviewer must be a real, active user at creation.
+        from app.models.user import User as _User
+
+        for rid in reviewer_ids:
+            reviewer = await self.db.get(_User, rid)
+            if reviewer is None or not reviewer.is_active:
+                raise AppError(
+                    "VALIDATION_ERROR", f"Reviewer {rid} not found or inactive", 422
+                )
         runs: list[BenchmarkRun] = []
         for run_id in run_ids:
             run = await self.db.get(BenchmarkRun, run_id)
