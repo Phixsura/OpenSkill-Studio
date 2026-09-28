@@ -66,6 +66,14 @@ class SourceService:
                     "store credentials by reference, never inline",
                     422,
                 )
+        # R364 (R97 pattern): screen BEFORE the uniqueness probe — a
+        # control-char variant of an existing name would bypass dedupe and
+        # create a visually identical twin source
+        from app.ecosystem.security import sanitize_text as _sanitize
+
+        name = _sanitize(name, 200) or ""
+        if not name:
+            raise AppError("VALIDATION_ERROR", "Source name required", 422)
         existing = await self.db.scalar(
             select(EcosystemSource).where(EcosystemSource.name == name)
         )

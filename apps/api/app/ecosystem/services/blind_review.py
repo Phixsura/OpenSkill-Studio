@@ -41,6 +41,11 @@ class BlindReviewService:
             raise AppError("VALIDATION_ERROR", "Batch needs at least one reviewer", 422)
         if len(set(reviewer_ids)) != len(reviewer_ids):
             raise AppError("VALIDATION_ERROR", "Duplicate reviewer ids", 422)
+        if len(reviewer_ids) > 20:
+            # R363 (§102 class): reviews = reviewers × runs × cases — an
+            # unbounded panel is a row-explosion lever, and 20 humans is
+            # already beyond any real inter-rater design
+            raise AppError("VALIDATION_ERROR", "At most 20 reviewers per batch", 422)
         # R359: a ghost reviewer's reviews can never be submitted — the batch
         # would be UNCOMPLETABLE by construction (the quiet twin of §104's
         # wedge). Every reviewer must be a real, active user at creation.

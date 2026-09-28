@@ -2869,3 +2869,16 @@ histories fall back to the unit/contract killers), flip back, and the
 default view still offers Acknowledge. En route the test surfaced the
 merged view's paging reality: on stacks with history the freshly acked row
 can sit beyond page one — the leg degrades gracefully instead of flaking.
+
+### 104.2 Reviewer panels are bounded (round 363)
+
+Reviews multiply as reviewers × runs × cases — the reviewer panel had no
+cap (the §102 depth-lever class). 20 max (already beyond any real
+inter-rater design); killer: 21 → 422, 20 → creates.
+
+### 105.2 Source-name twins deduped (round 364)
+
+The R97 lesson (screen BEFORE the uniqueness probe) applied to source
+names: a control-char variant of an existing name bypassed dedupe and
+created a visually identical twin source. Names sanitize first; killer:
+`name` vs `name\x00` → ECO_SOURCE_EXISTS.

@@ -2220,3 +2220,44 @@ async def test_concurrent_first_mapping_upserts_adopt_the_winner(db):
                 await s.delete(obj)
             await s.commit()
     await engine.dispose()
+
+
+async def test_create_batch_caps_the_reviewer_panel(db):
+    """Round-363 killer (§102 class): reviews = reviewers × runs × cases —
+    an unbounded panel is a row-explosion lever. 21 reviewers → 422; 20 real
+    ones still create."""
+    admin = await _mk_user(db, "admin")
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    runs = []
+    for _ in range(2):
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": str(ULID())}
+        )
+        runs.append(await bench.execute_run(run.id))
+    reviewers = [await _mk_user(db) for _ in range(21)]
+    blind = BlindReviewService(db)
+
+    with pytest.raises(AppError) as exc:
+        await blind.create_batch(
+            suite_id=suite.id, run_ids=[r.id for r in runs],
+            reviewer_ids=[u.id for u in reviewers], created_by=admin.id,
+        )
+    assert "20" in exc.value.message
+
+    batch = await blind.create_batch(
+        suite_id=suite.id, run_ids=[r.id for r in runs],
+        reviewer_ids=[u.id for u in reviewers[:20]], created_by=admin.id,
+    )
+    assert batch.status == "open"
+
+
+async def test_source_name_control_char_twin_is_deduped(db):
+    """Round-364 killer (R97 pattern): a control-char variant of an existing
+    source name must NOT create a visually identical twin — sanitize before
+    the uniqueness probe."""
+    base = f"Twin-{str(ULID()).lower()[:8]}"
+    await _mk_source(db, name=base)
+    with pytest.raises(AppError) as exc:
+        await _mk_source(db, name=f"{base}\x00")
+    assert exc.value.code == "ECO_SOURCE_EXISTS"
