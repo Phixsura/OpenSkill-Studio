@@ -30,6 +30,10 @@ _INPUT_SQLSTATES = frozenset(
         # datetime filter param was a 500 vector.
         "22000",  # data_exception (generic — asyncpg client-side encode faults)
         "22008",  # datetime_field_overflow (server-side variant)
+        # R368: user-supplied reference ids (e.g. source_observation_id on
+        # the mapping upsert) reach FK columns — a bogus id is bad INPUT,
+        # not a server fault; every unscreened surface 500'd on it
+        "23503",  # foreign_key_violation (dangling user-supplied reference)
     }
 )
 

@@ -2897,3 +2897,19 @@ would forge WHERE an arbitrated value came from. Unknown sources now 404;
 `chosen_value` itself stays free-form BY DESIGN (analysts may know both
 sources are wrong; `decided_by` carries accountability) — the design intent
 is now written down instead of implicit.
+
+## 106. Dangling references were a 500 class (round 368)
+
+**Gap.** The §105.4 audit generalized: several request models accept
+reference ids that land directly on FK columns (mapping upsert's
+source_observation_id, …). A bogus id raised ForeignKeyViolation — sqlstate
+23503 was NOT in the R88 backstop, so every unscreened surface 500'd on bad
+input that is plainly the CLIENT's fault.
+
+**Fix.** 23503 joins the backstop's input-sqlstate set: any dangling
+user-supplied reference now yields the clean 422 envelope platform-wide
+(per-endpoint 404 screens remain welcome for better messages — §105.4's
+explicit check stands as the exemplar).
+
+**Killer.** HTTP mapping upsert with a bogus observation id → 422 envelope;
+removing 23503 from the set restores the 500 (mutant killed).

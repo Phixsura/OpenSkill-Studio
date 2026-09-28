@@ -1453,3 +1453,41 @@ async def test_export_is_gzip_compressed_for_accepting_clients(http, tokens):
     assert "gzip" in (r.headers.get("content-encoding", "") or ""), (
         r.headers.get("content-encoding")
     )
+
+
+async def test_dangling_reference_ids_are_422_not_500(http, tokens):
+    """Round-368 killer: user-supplied reference ids reach FK columns — a
+    bogus source_observation_id on the mapping upsert raised an uncaught
+    ForeignKeyViolation 500. The R88 backstop now maps 23503 to a clean 422
+    envelope for EVERY such surface."""
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.catalog import AIModel
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        from ulid import ULID as _ULID
+
+        model = AIModel(canonical_name=f"FkHttp-{str(_ULID()).lower()[:6]}",
+                        slug=f"fh-{str(_ULID()).lower()}")
+        db.add(model)
+        await db.commit()
+        model_id = model.id
+        try:
+            r = await http.post(
+                "/api/v1/ecosystem/capability-mappings",
+                json={
+                    "entity_kind": "model", "entity_id": model_id,
+                    "capability_key": "image_generation",
+                    "source_observation_id": "0" * 26,
+                },
+                headers=admin,
+            )
+            assert r.status_code == 422, (r.status_code, r.text[:200])
+            assert r.json()["error"]["code"]
+        finally:
+            obj = await db.get(AIModel, model_id)
+            if obj:
+                await db.delete(obj)
+            await db.commit()
+    await engine.dispose()
