@@ -2759,3 +2759,11 @@ click at a time — `POST /changes/bulk-unacknowledge` mirrors bulk-ack
 (idempotent, missing ids reported, audited under a registered action so the
 §94.9 guard holds). Killer: 3 acked rows + 1 bogus id → all restored with
 actors cleared, bogus reported missing.
+
+### 101.6 Component tabs are shareable (round 349)
+
+The components page's five tabs (Impact / Replacements / Drafts / Rollouts /
+Graph) were local state — a pasted link always landed on Impact. The active
+tab now syncs to `?tab=` (whitelisted against TABS, router.replace without
+scroll), matching the catalog page's deep-link posture. Killer:
+`?tab=Drafts` renders the Drafts empty-state with no click.

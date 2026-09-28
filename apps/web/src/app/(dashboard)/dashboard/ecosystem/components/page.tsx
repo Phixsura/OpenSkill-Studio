@@ -4,6 +4,8 @@ import Link from "next/link";
 /** Components workspace: impact, replacement candidates, drafts, rollouts (Parts I/J/K/M). */
 
 import { useState } from "react";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -58,8 +60,26 @@ interface Rollout {
 const TABS = ["Impact", "Replacements", "Drafts", "Rollouts", "Graph"] as const;
 
 export default function ComponentsPage() {
+  return (
+    <Suspense>
+      <ComponentsInner />
+    </Suspense>
+  );
+}
+
+function ComponentsInner() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Impact");
+  const router = useRouter();
+  const params = useSearchParams();
+  const urlTab = params.get("tab");
+  const [tab, setTabState] = useState<(typeof TABS)[number]>(
+    TABS.includes(urlTab as (typeof TABS)[number]) ? (urlTab as (typeof TABS)[number]) : "Impact",
+  );
+  // R349: the active tab is shareable state — operators paste links
+  const setTab = (t: (typeof TABS)[number]) => {
+    setTabState(t);
+    router.replace(`/dashboard/ecosystem/components?tab=${t}`, { scroll: false });
+  };
   const [payloadOpen, setPayloadOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

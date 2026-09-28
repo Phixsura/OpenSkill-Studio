@@ -10,10 +10,11 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -154,5 +155,19 @@ describe("Loading never reads as empty (R290)", () => {
     fireEvent.click(await screen.findByText("Impact"));
     expect(await screen.findByText("Loading…")).toBeDefined();
     expect(screen.queryByText(/No impact analyses yet/)).toBeNull();
+  });
+});
+
+describe("Tab deep links (R349)", () => {
+  it("?tab=Drafts opens the Drafts tab directly", async () => {
+    searchParams = new URLSearchParams("tab=Drafts");
+    try {
+      api.mockImplementation(() => Promise.resolve({ data: [] }));
+      render(<ComponentsPage />, { wrapper: wrapper() });
+      // the Drafts empty-state renders without any click
+      expect(await screen.findByText(/No component drafts/i)).toBeDefined();
+    } finally {
+      searchParams = new URLSearchParams();
+    }
   });
 });

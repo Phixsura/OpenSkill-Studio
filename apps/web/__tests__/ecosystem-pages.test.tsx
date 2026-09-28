@@ -8,7 +8,11 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard/ecosystem" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/ecosystem",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import BenchmarksPage from "@/app/(dashboard)/dashboard/ecosystem/benchmarks/page";
