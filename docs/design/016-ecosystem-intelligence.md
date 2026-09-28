@@ -2932,3 +2932,11 @@ LIFECYCLE_STATUSES → 422 naming the vocabulary; and the web status dropdown
 (derived from LIFECYCLE_STYLES) is CI-pinned to the backend set — the third
 pinned vocabulary after severities and change types. Killers: typo 422 /
 valid 200 over HTTP, plus the parity guard.
+
+### 106.3 Axe staging made durable (round 372)
+
+The a11y suite loaded axe-core from a /tmp staging that the OS cleans —
+this session's reboot broke the suite at injectAxe, not at any violation.
+axe-core is a devDependency now (node_modules is already AXE_PATHS' first
+choice); verified green with the /tmp copy deleted. §97 rule again: pin the
+environment.
