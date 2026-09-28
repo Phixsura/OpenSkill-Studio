@@ -95,10 +95,12 @@ class CapabilityMappingService:
 
     async def list_for_entity(self, entity_kind: str, entity_id: str) -> list[CapabilityMapping]:
         rows = await self.db.scalars(
-            select(CapabilityMapping).where(
+            select(CapabilityMapping)
+            .where(
                 CapabilityMapping.entity_kind == entity_kind,
                 CapabilityMapping.entity_id == entity_id,
             )
+            .order_by(CapabilityMapping.capability_key, CapabilityMapping.id)
         )
         return list(rows)
 
@@ -106,9 +108,9 @@ class CapabilityMappingService:
         self, capability_key: str, *, min_evidence: str | None = None
     ) -> list[CapabilityMapping]:
         rows = await self.db.scalars(
-            select(CapabilityMapping).where(
-                CapabilityMapping.capability_key == capability_key
-            )
+            select(CapabilityMapping)
+            .where(CapabilityMapping.capability_key == capability_key)
+            .order_by(CapabilityMapping.entity_kind, CapabilityMapping.entity_id, CapabilityMapping.id)
         )
         mappings = list(rows)
         if min_evidence:

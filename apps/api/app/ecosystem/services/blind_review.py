@@ -97,10 +97,14 @@ class BlindReviewService:
         if reviewer_id not in (batch.reviewer_ids or []):
             raise AppError("NOT_FOUND", "Review batch not found", 404)  # no oracle
         reviews = await self.db.scalars(
-            select(BenchmarkReview).where(
+            select(BenchmarkReview)
+            .where(
                 BenchmarkReview.batch_id == batch_id,
                 BenchmarkReview.reviewer_id == reviewer_id,
             )
+            # R356: a reviewer's task list must not reshuffle between
+            # refreshes (unordered reads bit R354's killer setup too)
+            .order_by(BenchmarkReview.alias_label, BenchmarkReview.id)
         )
         out = []
         for review in reviews:

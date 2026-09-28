@@ -2811,3 +2811,13 @@ Operators had last-success timestamps but did interval math in their heads
 proven when a legacy test fixture crashed the first render with an Invalid
 time value). Killer renders one overdue and one fresh source and pins both
 states.
+
+### 99.12 Unordered user-facing lists (rounds 356–357)
+
+The §99.10 guard checks existing order_by expressions for tiebreaks — it
+cannot see queries with NO ordering at all. A manual sweep of multi-row
+selects found three user-facing ones: a reviewer's assignment list (which
+reshuffled between refreshes — the same instability that complicated
+§104's killer setup) and both capability-mapping lists. All ordered now
+(alias/key/entity + id); set-semantic internal reads (merge moves,
+stat inputs, stale counters) are deliberately left unordered.
