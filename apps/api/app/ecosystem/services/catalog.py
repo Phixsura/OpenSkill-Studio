@@ -59,6 +59,17 @@ class CatalogService:
         model = _model_for(kind)
         query = select(model)
         if lifecycle_status:
+            # R371 (§93 class): an unknown status silently returned an empty
+            # list — a typo reads as "no verified entities"
+            from app.ecosystem.models.catalog import LIFECYCLE_STATUSES
+
+            if lifecycle_status not in LIFECYCLE_STATUSES:
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    f"Unknown lifecycle_status {lifecycle_status!r}; allowed: "
+                    f"{', '.join(sorted(LIFECYCLE_STATUSES))}",
+                    422,
+                )
             query = query.where(model.lifecycle_status == lifecycle_status)
         if search:
             cleaned = sanitize_text(search, 200) or ""

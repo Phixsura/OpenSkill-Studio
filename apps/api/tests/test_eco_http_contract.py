@@ -1522,3 +1522,20 @@ async def test_csv_defuses_tab_and_cr_prefixes(http, tokens):
             await db.delete(row)
             await db.commit()
     await engine.dispose()
+
+
+async def test_lifecycle_filter_whitelist_over_http(http, tokens):
+    """Round-371 killer (authed): unknown status 422 naming the vocabulary;
+    a valid one still filters."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get(
+        "/api/v1/ecosystem/catalog/models?lifecycle_status=vrified",
+        headers=member,
+    )
+    assert r.status_code == 422
+    assert "allowed" in r.json()["error"]["message"]
+    r = await http.get(
+        "/api/v1/ecosystem/catalog/models?lifecycle_status=verified",
+        headers=member,
+    )
+    assert r.status_code == 200

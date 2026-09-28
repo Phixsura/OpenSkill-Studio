@@ -2923,3 +2923,12 @@ prefix back through the endpoint. Also recorded: unique-violation 23505 is
 DELIBERATELY not in the §106 backstop — every legitimate duplicate has an
 explicit 409 handler, and an unhandled 23505 usually means a missed race
 that SHOULD surface loudly rather than be laundered into a 422.
+
+### 106.2 Lifecycle filter whitelisted; third vocabulary pinned (round 371)
+
+`lifecycle_status` on the catalog list was the last enum filter accepting
+arbitrary strings (silent-empty on a typo — §93 class). Whitelisted against
+LIFECYCLE_STATUSES → 422 naming the vocabulary; and the web status dropdown
+(derived from LIFECYCLE_STYLES) is CI-pinned to the backend set — the third
+pinned vocabulary after severities and change types. Killers: typo 422 /
+valid 200 over HTTP, plus the parity guard.

@@ -311,3 +311,34 @@ def test_every_orm_order_by_carries_the_id_tiebreak():
         "order_by without id tiebreak (nondeterministic on ties): "
         f"{offenders}"
     )
+
+
+def test_web_lifecycle_dropdown_matches_backend_vocabulary():
+    """Round-371 drift guard (§93.1 pattern, third vocabulary): the catalog
+    status dropdown derives from LIFECYCLE_STYLES — pin it to the backend
+    LIFECYCLE_STATUSES so the §371 whitelist never 422s the UI."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.catalog import LIFECYCLE_STATUSES
+
+    lib = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/lib.ts"
+    ).read_text()
+    m = re.search(r"LIFECYCLE_STYLES[^=]*= \{(.*?)\};", lib, re.S)
+    assert m
+    web_values = set(re.findall(r"^  ([a-z_]+):", m.group(1), re.M))
+    assert web_values == set(LIFECYCLE_STATUSES), (
+        f"web {sorted(web_values)} != backend {sorted(LIFECYCLE_STATUSES)}"
+    )
+
+
+async def test_lifecycle_filter_rejects_unknown_status(client):
+    """Round-371 killer: ?lifecycle_status=typo must 422 (was silent-empty)."""
+    r = await client.get(
+        "/api/v1/ecosystem/catalog/models?lifecycle_status=vrified",
+        headers={"Authorization": "Bearer bogus"},
+    )
+    assert r.status_code in (401, 422)
+    assert r.status_code != 200
