@@ -199,6 +199,17 @@ class BenchmarkService:
             raise AppError("VALIDATION_ERROR", f"Unknown benchmark family: {family}", 422)
         if not 1 <= repeat_count <= 10:
             raise AppError("VALIDATION_ERROR", "repeat_count must be 1..10", 422)
+        # R365 (R97/§105.2 pattern): keys are machine identifiers — restrict
+        # to a safe slug charset BEFORE the uniqueness probe so control-char
+        # or lookalike variants can't twin an existing suite
+        import re as _re
+
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", key or ""):
+            raise AppError(
+                "VALIDATION_ERROR",
+                "Suite key must be a lowercase slug ([a-z0-9._-], max 64)",
+                422,
+            )
         if await self.db.scalar(select(BenchmarkSuite).where(BenchmarkSuite.key == key)):
             raise AppError("ECO_SUITE_EXISTS", "Suite key already exists", 409)
         suite = BenchmarkSuite(

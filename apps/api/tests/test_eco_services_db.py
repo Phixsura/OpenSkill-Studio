@@ -2261,3 +2261,24 @@ async def test_source_name_control_char_twin_is_deduped(db):
     with pytest.raises(AppError) as exc:
         await _mk_source(db, name=f"{base}\x00")
     assert exc.value.code == "ECO_SOURCE_EXISTS"
+
+
+async def test_suite_keys_are_slug_validated(db):
+    """Round-365 killer: suite keys are machine identifiers — control-char,
+    uppercase or lookalike variants must 422 BEFORE the uniqueness probe
+    (§105.2 twin class)."""
+    admin = await _mk_user(db, "admin")
+    svc = BenchmarkService(db)
+    for bad in ("Key-Upper", "has space", "nul\x00key", "-leading", ""):
+        with pytest.raises(AppError) as exc:
+            await svc.create_suite(
+                key=bad, name="X", family="ecommerce_hero",
+                capability_key="image_generation", created_by=admin.id,
+            )
+        assert exc.value.code == "VALIDATION_ERROR", bad
+    good = await svc.create_suite(
+        key=f"slug-ok.{str(ULID()).lower()[:6]}", name="X",
+        family="ecommerce_hero", capability_key="image_generation",
+        created_by=admin.id,
+    )
+    assert good.status == "draft"

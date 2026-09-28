@@ -2882,3 +2882,10 @@ The R97 lesson (screen BEFORE the uniqueness probe) applied to source
 names: a control-char variant of an existing name bypassed dedupe and
 created a visually identical twin source. Names sanitize first; killer:
 `name` vs `name\x00` → ECO_SOURCE_EXISTS.
+
+### 105.3 Suite keys are slugs (round 365)
+
+Suite keys are machine identifiers (export/import round-trips key on them)
+— now restricted to a lowercase slug charset BEFORE the uniqueness probe,
+closing the §105.2 twin class for the benchmark surface. Killer: uppercase,
+space, NUL, leading-dash and empty all 422; a real slug still creates.
