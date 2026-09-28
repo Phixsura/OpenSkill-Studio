@@ -2774,3 +2774,10 @@ Same §101.6 class: the benchmarks page's selected suite (which pre-filters
 the runs list) was local state. `?suite=<id>` now deep-links it
 (router.replace, no scroll). Killer: mounting with the param fetches runs
 pre-filtered by suite_id with no click.
+
+### 101.8 Reconcile queue filter is shareable (round 351)
+
+Third §101.6-class fix: the pricing reconcile status filter syncs to
+`?status=` so "here's the unreviewed queue" is a pasteable link. Deep-link
+sweep across pages is now complete: catalog (kind/entity/filters), changes
+(entity), components (tab), benchmarks (suite), pricing (status).

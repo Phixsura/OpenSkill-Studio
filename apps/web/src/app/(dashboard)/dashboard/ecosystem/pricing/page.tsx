@@ -1,7 +1,8 @@
 "use client";
 /** Pricing observations + reconciliation into the billing catalog (Part E). */
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -21,8 +22,23 @@ interface PriceObservation {
 }
 
 export default function PricingPage() {
+  return (
+    <Suspense>
+      <PricingInner />
+    </Suspense>
+  );
+}
+
+function PricingInner() {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState("unreviewed");
+  const router = useRouter();
+  const params = useSearchParams();
+  const [status, setStatusState] = useState(params.get("status") ?? "unreviewed");
+  // R351: the reconcile queue filter is shareable state
+  const setStatus = (v: string) => {
+    setStatusState(v);
+    router.replace(`/dashboard/ecosystem/pricing?status=${v}`, { scroll: false });
+  };
   const [error, setError] = useState<string | null>(null);
   const [providerKey, setProviderKey] = useState("");
 
