@@ -2282,3 +2282,31 @@ async def test_suite_keys_are_slug_validated(db):
         created_by=admin.id,
     )
     assert good.status == "draft"
+
+
+async def test_resolve_conflict_validates_provenance_source(db):
+    """Round-366 killer: the curated overlay records WHERE the arbitrated
+    value came from — a bogus winning_source_id would forge provenance.
+    Unknown source → 404; a real one lands in the overlay. (chosen_value
+    itself stays free-form BY DESIGN: analysts may know both sources are
+    wrong — decided_by carries accountability.)"""
+    admin = await _mk_user(db, "admin")
+    source = await _mk_source(db)
+    model = AIModel(canonical_name=f"Prov-{str(ULID()).lower()[:6]}",
+                    slug=f"pv-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    svc = CatalogService(db)
+
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_conflict(
+            "model", model.id, field="license", chosen_value="MIT",
+            winning_source_id="0" * 26, actor_id=admin.id,
+        )
+    assert exc.value.code == "NOT_FOUND"
+
+    out = await svc.resolve_conflict(
+        "model", model.id, field="license", chosen_value="MIT",
+        winning_source_id=source.id, actor_id=admin.id,
+    )
+    assert out["source_id"] == source.id  # return is the per-field overlay

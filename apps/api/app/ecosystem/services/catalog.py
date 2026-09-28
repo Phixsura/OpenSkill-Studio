@@ -129,6 +129,13 @@ class CatalogService:
                 "VALIDATION_ERROR", f"Field {field!r} is not conflict-arbitrable", 422
             )
         entity = await self.get(kind, entity_id)
+        if winning_source_id is not None:
+            # R366: the curated overlay records provenance — a bogus source
+            # id would forge WHERE the arbitrated value came from
+            from app.ecosystem.models.source import EcosystemSource
+
+            if await self.db.get(EcosystemSource, winning_source_id) is None:
+                raise AppError("NOT_FOUND", "winning_source_id not found", 404)
         cleaned = sanitize_text(str(chosen_value), 300)
         curated = dict((entity.extra or {}).get("curated", {}))
         curated[field] = {

@@ -2889,3 +2889,11 @@ Suite keys are machine identifiers (export/import round-trips key on them)
 — now restricted to a lowercase slug charset BEFORE the uniqueness probe,
 closing the §105.2 twin class for the benchmark surface. Killer: uppercase,
 space, NUL, leading-dash and empty all 422; a real slug still creates.
+
+### 105.4 Curated provenance can't be forged (round 366)
+
+`resolve_conflict` recorded any `winning_source_id` verbatim — a bogus id
+would forge WHERE an arbitrated value came from. Unknown sources now 404;
+`chosen_value` itself stays free-form BY DESIGN (analysts may know both
+sources are wrong; `decided_by` carries accountability) — the design intent
+is now written down instead of implicit.
