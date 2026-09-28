@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
@@ -68,8 +69,24 @@ class CapabilityMappingService:
                 mapping.verified_by = actor_id
                 mapping.verified_at = datetime.now(UTC)
             self.db.add(mapping)
-            await self.db.flush()
-            return mapping
+            try:
+                await self.db.flush()
+            except IntegrityError:
+                # R360 (R127 pattern): lost the concurrent first-insert race —
+                # uq_eco_cap_mapping caught it; adopt the winner and apply
+                # this call's payload through the normal update branch below.
+                await self.db.rollback()
+                existing = await self.db.scalar(
+                    select(CapabilityMapping).where(
+                        CapabilityMapping.entity_kind == entity_kind,
+                        CapabilityMapping.entity_id == entity_id,
+                        CapabilityMapping.capability_key == capability_key,
+                    )
+                )
+                if existing is None:  # pragma: no cover — hostile schemas only
+                    raise
+            else:
+                return mapping
 
         # Evidence order is total: downgrades require force + admin (§3.4)
         if EVIDENCE_RANK[evidence_level] < EVIDENCE_RANK[existing.evidence_level] and not (

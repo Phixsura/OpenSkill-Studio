@@ -2160,3 +2160,63 @@ async def test_create_batch_rejects_ghost_and_duplicate_reviewers(db):
         reviewer_ids=[r1.id], created_by=admin.id,
     )
     assert batch.status == "open"
+
+
+async def test_concurrent_first_mapping_upserts_adopt_the_winner(db):
+    """Round-360 race killer (R127 pattern): two concurrent FIRST upserts of
+    the same (entity, capability) both see no row and both INSERT — the
+    unique constraint fired an UNCAUGHT IntegrityError (500). Both calls
+    must now succeed, exactly one row survives, and the loser's payload
+    lands via the update branch."""
+    import asyncio
+
+    from sqlalchemy import func as _f
+    from sqlalchemy import select as _sel
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.mapping import CapabilityMapping
+    from app.ecosystem.services.capability_mapping import CapabilityMappingService
+
+    admin = await _mk_user(db, "admin")
+    await _mk_capability_tag(db, "image_generation")
+    model = AIModel(canonical_name=f"RaceMap-{str(ULID()).lower()[:6]}",
+                    slug=f"rm-{str(ULID()).lower()}")
+    db.add(model)
+    await db.commit()
+    model_id = model.id
+
+    async def one_upsert(conf: float):
+        await engine.dispose(close=False)
+        async with AsyncSessionLocal() as s:
+            svc = CapabilityMappingService(s)
+            m = await svc.upsert(
+                entity_kind="model", entity_id=model_id,
+                capability_key="image_generation",
+                evidence_level="vendor_claimed", confidence=conf,
+                actor_id=admin.id,
+            )
+            await s.commit()
+            return m.id
+
+    try:
+        ids = await asyncio.gather(one_upsert(0.4), one_upsert(0.6))
+        assert len(set(ids)) == 1  # both adopted the same surviving row
+        async with AsyncSessionLocal() as s:
+            n = await s.scalar(
+                _sel(_f.count()).select_from(CapabilityMapping).where(
+                    CapabilityMapping.entity_id == model_id
+                )
+            )
+            assert n == 1
+    finally:
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _del
+
+            await s.execute(
+                _del(CapabilityMapping).where(CapabilityMapping.entity_id == model_id)
+            )
+            obj = await s.get(AIModel, model_id)
+            if obj:
+                await s.delete(obj)
+            await s.commit()
+    await engine.dispose()

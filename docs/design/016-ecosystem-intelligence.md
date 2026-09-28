@@ -2830,3 +2830,20 @@ could ever submit, making the batch UNCOMPLETABLE by construction. Every
 reviewer must now be a real, active user (and duplicates are rejected —
 they'd double-assign the same person). Killer: ghost id 422, duplicate 422,
 valid batch still opens.
+
+## 105. Mapping upsert first-insert race (round 360)
+
+**Gap.** Two concurrent FIRST upserts of the same (entity, capability) both
+saw no row and both INSERTed — `uq_eco_cap_mapping` fired an UNCAUGHT
+IntegrityError: a 500 on the capability-mapping write path (which the sync
+pipeline and drafts both drive). The R127 adopt-the-winner pattern existed
+for watch items but was never applied here.
+
+**Fix.** Catch → rollback → re-read the winner → fall through to the normal
+update branch, so the loser's payload (confidence, io_spec, evidence) still
+lands under the evidence-order rules.
+
+**Killer.** Two committed sessions gather-upsert the same key: both succeed,
+both return the SAME row id, exactly one row survives. The catch-removal
+mutant fails on the first run — like §104, this race is deterministic
+enough to gate CI.
