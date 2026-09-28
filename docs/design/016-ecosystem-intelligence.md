@@ -2847,3 +2847,16 @@ lands under the evidence-order rules.
 both return the SAME row id, exactly one row survives. The catch-removal
 mutant fails on the first run — like §104, this race is deterministic
 enough to gate CI.
+
+### 105.1 The other unique writers audited (round 361)
+
+Post-§105 sweep of every UniqueConstraint writer: observations/raw
+snapshots are serialized by architecture (one in-flight sync per source via
+the outbox; the §16 consumer lock), benchmark reviews are created inside a
+single create_batch transaction, aliases handle duplicates explicitly in
+merge, and watch items / feed-token state / watchlists already carry their
+R127/advisory protections. The capability-mapping upsert was the one
+select-then-insert reachable from CONCURRENT callers (sync pipeline +
+drafts + admin API) — §105 closed it. No further changes; adding rollback
+catches inside batch ingest loops would jeopardize sibling rows for a race
+the architecture already prevents.
