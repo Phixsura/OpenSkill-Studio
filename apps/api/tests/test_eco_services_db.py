@@ -2096,3 +2096,29 @@ async def test_last_two_submits_racing_still_complete_the_batch(db):
                     await s.delete(obj)
             await s.commit()
     await engine.dispose()
+
+
+async def test_capability_mapping_lists_are_stably_ordered(db):
+    """Round-358 killer for §99.12: an entity's mappings come back ordered
+    by capability_key (stable across identical calls), and a reviewer-facing
+    surface never depends on insertion order."""
+    from app.ecosystem.services.capability_mapping import CapabilityMappingService
+
+    admin = await _mk_user(db, "admin")
+    model = AIModel(canonical_name=f"MapOrd-{str(ULID()).lower()[:6]}",
+                    slug=f"mo-{str(ULID()).lower()}")
+    db.add(model)
+    await db.flush()
+    svc = CapabilityMappingService(db)
+    # insert deliberately out of key order (tags seeded first)
+    for key in ("video_generation", "audio_generation", "image_generation"):
+        await _mk_capability_tag(db, key)
+    for key in ("video_generation", "audio_generation", "image_generation"):
+        await svc.upsert(
+            entity_kind="model", entity_id=model.id, capability_key=key,
+            evidence_level="vendor_claimed", actor_id=admin.id,
+        )
+    first = [m.capability_key for m in await svc.list_for_entity("model", model.id)]
+    second = [m.capability_key for m in await svc.list_for_entity("model", model.id)]
+    assert first == ["audio_generation", "image_generation", "video_generation"]
+    assert first == second
