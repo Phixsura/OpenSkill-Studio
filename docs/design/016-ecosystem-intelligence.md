@@ -2781,3 +2781,24 @@ Third §101.6-class fix: the pricing reconcile status filter syncs to
 `?status=` so "here's the unreviewed queue" is a pasteable link. Deep-link
 sweep across pages is now complete: catalog (kind/entity/filters), changes
 (entity), components (tab), benchmarks (suite), pricing (status).
+
+## 104. The last two reviewers could wedge the batch forever (round 354)
+
+**Gap.** `submit()` flips the batch to complete when no pending reviews
+remain — but two LAST reviewers committing concurrently each ran that check
+before the other committed (READ COMMITTED), so each saw the other's row as
+pending and NEITHER flipped. The batch stayed open with every review
+submitted: reveal 409 forever, no operator remedy. Unlike most of the
+campaign's races this one has no IntegrityError to catch — it's a pure
+lost-signal race.
+
+**Fix (§16 pattern).** `pg_advisory_xact_lock` on
+`eco-review-submit:<batch>` at the top of submit: the lock releases at
+commit, so the second submit re-reads a committed world and flips the
+batch.
+
+**Killer.** Both reviewers' last reviews submitted via `asyncio.gather` on
+separate committed sessions → batch MUST end complete (self-cleaning). The
+lock-removal mutant fails on the FIRST run — the race reproduces
+deterministically enough to gate CI, unlike §94.8's environment-limited
+one.

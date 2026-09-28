@@ -1999,3 +1999,100 @@ async def test_curated_facts_reach_compare_and_entity_responses(db):
     rows = await svc.compare_entities("model", [a.id, b.id])
     row_a = next(r for r in rows if r["entity_id"] == a.id)
     assert row_a["metadata"]["curated"]["license"]["value"] == "MIT"
+
+
+async def test_last_two_submits_racing_still_complete_the_batch(db):
+    """Round-354 race killer: two LAST reviewers committing concurrently
+    each saw the other's row as pending (READ COMMITTED), so neither flipped
+    the batch — reveal stayed 409 forever. The per-batch advisory lock
+    serializes submits; the batch MUST end complete."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.benchmark import (
+        BenchmarkReview,
+        BenchmarkRun,
+        ReviewBatch,
+    )
+    from app.ecosystem.services.blind_review import BlindReviewService
+
+    admin = await _mk_user(db, "admin")
+    r1 = await _mk_user(db)
+    r2 = await _mk_user(db)
+    suite = await _mk_suite_with_cases(db, admin, n_cases=1)
+    bench = BenchmarkService(db)
+    runs = []
+    for _ in range(2):
+        run = await bench.create_run(
+            suite.id, target={"entity_kind": "model_version", "entity_id": str(ULID())}
+        )
+        runs.append(await bench.execute_run(run.id))
+    blind = BlindReviewService(db)
+    batch = await blind.create_batch(
+        suite_id=suite.id, run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+    )
+    # deterministic review rows straight from the DB (assignments_for has
+    # no stable order): submit each reviewer's first serially, keep the
+    # second as their pending "last"
+    from sqlalchemy import select
+
+    last: dict[str, str] = {}
+    for reviewer in (r1, r2):
+        rows = list(
+            await db.scalars(
+                select(BenchmarkReview)
+                .where(
+                    BenchmarkReview.batch_id == batch.id,
+                    BenchmarkReview.reviewer_id == reviewer.id,
+                )
+                .order_by(BenchmarkReview.id)
+            )
+        )
+        assert len(rows) >= 2
+        for row in rows[:-1]:
+            await blind.submit(row.id, reviewer_id=reviewer.id,
+                               scores={"quality": 3})
+        last[reviewer.id] = rows[-1].id
+    await db.commit()
+    batch_id = batch.id
+
+    async def submit_last(reviewer_id: str, review_id: str):
+        await engine.dispose(close=False)
+        async with AsyncSessionLocal() as s:
+            svc = BlindReviewService(s)
+            await svc.submit(review_id, reviewer_id=reviewer_id, scores={"quality": 4})
+            await s.commit()
+
+    try:
+        await asyncio.gather(
+            submit_last(r1.id, last[r1.id]),
+            submit_last(r2.id, last[r2.id]),
+        )
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import select as _sel
+
+            rows = (
+                await s.scalars(
+                    _sel(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id)
+                )
+            ).all()
+            debug = [(r.id[-6:], r.submitted_at is not None) for r in rows]
+            fresh = await s.get(ReviewBatch, batch_id)
+            assert fresh.status == "complete", (fresh.status, debug)
+    finally:
+        async with AsyncSessionLocal() as s:
+            from sqlalchemy import delete as _delete
+
+            await s.execute(
+                _delete(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id)
+            )
+            b = await s.get(ReviewBatch, batch_id)
+            if b:
+                await s.delete(b)
+            for r in runs:
+                obj = await s.get(BenchmarkRun, r.id)
+                if obj:
+                    await s.delete(obj)
+            await s.commit()
+    await engine.dispose()

@@ -1436,3 +1436,20 @@ async def test_bulk_unacknowledge_restores_batch(http, tokens):
             await db.delete(await db.get(EcosystemObservation, obs.id))
             await db.commit()
     await engine.dispose()
+
+
+async def test_export_is_gzip_compressed_for_accepting_clients(http, tokens):
+    """Round-352 killer: the multi-MB catalog export must actually compress
+    — GZipMiddleware is configured but nothing ever asserted it applies to
+    this surface (a middleware-ordering regression would silently ship
+    uncompressed megabytes to every poller)."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get(
+        "/api/v1/ecosystem/export",
+        headers={**member, "Accept-Encoding": "gzip"},
+    )
+    assert r.status_code == 200
+    # httpx transparently decompresses; the original encoding is recorded
+    assert "gzip" in (r.headers.get("content-encoding", "") or ""), (
+        r.headers.get("content-encoding")
+    )

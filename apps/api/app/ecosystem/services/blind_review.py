@@ -124,6 +124,17 @@ class BlindReviewService:
         review = await self.db.get(BenchmarkReview, review_id)
         if not review or review.reviewer_id != reviewer_id:
             raise AppError("NOT_FOUND", "Review not found", 404)
+        # R354 (§16 pattern): serialize submits per batch — two LAST
+        # reviewers committing concurrently each saw the other's row as
+        # pending under READ COMMITTED, so NEITHER flipped the batch to
+        # complete and reveal was 409 forever. The xact lock releases at
+        # commit, so the second submit re-reads a committed world.
+        from sqlalchemy import text as _sql
+
+        await self.db.execute(
+            _sql("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"eco-review-submit:{review.batch_id}"},
+        )
         if review.submitted_at is not None:
             raise AppError("ECO_INVALID_TRANSITION", "Review already submitted", 409)
         clean_scores = {}
