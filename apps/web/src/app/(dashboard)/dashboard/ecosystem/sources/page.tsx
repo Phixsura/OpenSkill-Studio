@@ -28,6 +28,7 @@ interface Source {
   adapter_key: string;
   status: string;
   last_success_at: string | null;
+  sync_interval_minutes: number;
   consecutive_failures: number;
   robots_compliant: boolean;
 }
@@ -260,6 +261,26 @@ export default function SourcesPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-[hsl(var(--muted-foreground))]">
                     {fmtDate(s.last_success_at)}
+                    {(() => {
+                      // R355: operators shouldn't do interval math — show
+                      // when the next sync is due, red when overdue
+                      if (
+                        !s.last_success_at ||
+                        s.status !== "active" ||
+                        !Number.isFinite(s.sync_interval_minutes)
+                      )
+                        return null;
+                      const due =
+                        new Date(s.last_success_at).getTime() + s.sync_interval_minutes * 60_000;
+                      const overdue = Date.now() > due;
+                      return (
+                        <div className={`text-xs ${overdue ? "font-medium text-red-600" : ""}`}>
+                          {overdue
+                            ? "⚠ sync overdue"
+                            : `next ≈ ${fmtDate(new Date(due).toISOString())}`}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="space-x-2 px-4 py-3 text-sm">
                     <button

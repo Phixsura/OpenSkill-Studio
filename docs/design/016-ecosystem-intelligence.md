@@ -2802,3 +2802,12 @@ separate committed sessions → batch MUST end complete (self-cleaning). The
 lock-removal mutant fails on the FIRST run — the race reproduces
 deterministically enough to gate CI, unlike §94.8's environment-limited
 one.
+
+### 101.9 Next-sync visibility (round 355)
+
+Operators had last-success timestamps but did interval math in their heads
+— active sources now show "next ≈ <time>" or a red "⚠ sync overdue" line
+(guarded against missing interval data; the guard's own necessity was
+proven when a legacy test fixture crashed the first render with an Invalid
+time value). Killer renders one overdue and one fresh source and pins both
+states.

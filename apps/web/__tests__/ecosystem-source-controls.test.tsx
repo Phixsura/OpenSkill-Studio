@@ -128,3 +128,47 @@ describe("Source operator controls (ADR-016 §11 UI)", () => {
     expect(body.adapter_key).toBe("huggingface");
   });
 });
+
+describe("Next-sync visibility (R355)", () => {
+  it("overdue active sources show the warning; fresh ones show next-due", async () => {
+    const past = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    api.mockImplementation((path: string) => {
+      if (path.startsWith("/ecosystem/sources"))
+        return Promise.resolve({
+          data: [
+            {
+              id: "s1",
+              name: "Overdue Src",
+              source_type: "provider_api",
+              trust_level: "official",
+              base_url: null,
+              adapter_key: "json_catalog",
+              status: "active",
+              last_success_at: past,
+              consecutive_failures: 0,
+              robots_compliant: true,
+              sync_interval_minutes: 60,
+            },
+            {
+              id: "s2",
+              name: "Fresh Src",
+              source_type: "provider_api",
+              trust_level: "official",
+              base_url: null,
+              adapter_key: "json_catalog",
+              status: "active",
+              last_success_at: recent,
+              consecutive_failures: 0,
+              robots_compliant: true,
+              sync_interval_minutes: 1440,
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<SourcesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/sync overdue/)).toBeDefined();
+    expect(screen.getByText(/next ≈/)).toBeDefined();
+  });
+});
