@@ -1491,3 +1491,34 @@ async def test_dangling_reference_ids_are_422_not_500(http, tokens):
                 await db.delete(obj)
             await db.commit()
     await engine.dispose()
+
+
+async def test_csv_defuses_tab_and_cr_prefixes(http, tokens):
+    """Round-370 killer: OWASP's full formula-injection trigger set includes
+    leading tab/CR (some spreadsheets strip whitespace before interpreting).
+    A reason starting with tab-equals must come out prefixed."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.core.database import AsyncSessionLocal, engine
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        row = CommercialAuditEvent(
+            actor_user_id=None, actor_type="platform",
+            action="eco.lifecycle_transitioned",
+            target_type="probe", target_id="csv-tab-probe",
+            reason="\t=2+5",
+        )
+        db.add(row)
+        await db.commit()
+        try:
+            r = await http.get("/api/v1/ecosystem/audit.csv?limit=50", headers=admin)
+            assert r.status_code == 200
+            line = next(
+                ln for ln in r.text.splitlines() if "csv-tab-probe" in ln
+            )
+            assert "'\t" in line, line
+        finally:
+            await db.delete(row)
+            await db.commit()
+    await engine.dispose()

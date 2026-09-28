@@ -556,7 +556,9 @@ async def eco_audit_trail_csv(
 
     def _cell(value) -> str:
         text = _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value or "")
-        return f"'{text}" if text[:1] in ("=", "+", "-", "@") else text
+        # R370: OWASP's full trigger set includes tab and CR — some
+        # spreadsheets strip leading whitespace before interpreting
+        return f"'{text}" if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
 
     buf = io.StringIO()
     writer = csv.writer(buf)

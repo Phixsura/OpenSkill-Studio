@@ -2913,3 +2913,13 @@ explicit check stands as the exemplar).
 
 **Killer.** HTTP mapping upsert with a bogus observation id → 422 envelope;
 removing 23503 from the set restores the 500 (mutant killed).
+
+### 106.1 CSV trigger set completed; 23505 deliberately excluded (rounds 369–370)
+
+The audit CSV's formula-defusing prefix set gains tab and CR (OWASP's full
+trigger list — some spreadsheets strip leading whitespace before
+interpreting); killer plants a tab-equals reason and reads the quoted
+prefix back through the endpoint. Also recorded: unique-violation 23505 is
+DELIBERATELY not in the §106 backstop — every legitimate duplicate has an
+explicit 409 handler, and an unhandled 23505 usually means a missed race
+that SHOULD surface loudly rather than be laundered into a 422.
