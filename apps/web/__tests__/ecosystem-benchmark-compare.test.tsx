@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,10 +8,11 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/benchmarks",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -87,5 +88,23 @@ describe("Benchmark comparison wiring (ADR-016 §16 UI)", () => {
     );
     expect(call).toBeDefined();
     expect(call![0]).toBe(`/ecosystem/benchmark/runs/compare?ids=${DONE1},${DONE2}`);
+  });
+});
+
+describe("Suite deep link (R350)", () => {
+  it("?suite=<id> pre-filters the runs list without a click", async () => {
+    searchParams = new URLSearchParams(`suite=${"S".repeat(26)}`);
+    try {
+      api.mockImplementation(() => Promise.resolve({ data: [] }));
+      render(<BenchmarksPage />, { wrapper: wrapper() });
+      // the runs list is fetched pre-filtered by the deep-linked suite
+      await waitFor(() =>
+        expect(
+          api.mock.calls.some((c) => String(c[0]).includes(`suite_id=${"S".repeat(26)}`)),
+        ).toBe(true),
+      );
+    } finally {
+      searchParams = new URLSearchParams();
+    }
   });
 });

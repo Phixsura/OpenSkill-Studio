@@ -1,7 +1,8 @@
 "use client";
 /** Benchmark Lab: suites, runs, dimension comparison (Part F). */
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill, StatWithCI } from "../components";
@@ -85,7 +86,25 @@ const FAMILIES = [
 ];
 
 export default function BenchmarksPage() {
-  const [selectedSuite, setSelectedSuite] = useState<string | null>(null);
+  return (
+    <Suspense>
+      <BenchmarksInner />
+    </Suspense>
+  );
+}
+
+function BenchmarksInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const [selectedSuite, setSelectedSuiteState] = useState<string | null>(params.get("suite"));
+  // R350: the selected suite is shareable state (leaderboard links)
+  const setSelectedSuite = (id: string | null) => {
+    setSelectedSuiteState(id);
+    router.replace(
+      id ? `/dashboard/ecosystem/benchmarks?suite=${id}` : "/dashboard/ecosystem/benchmarks",
+      { scroll: false },
+    );
+  };
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [portableDoc, setPortableDoc] = useState<string | null>(null);
   const [importText, setImportText] = useState("");

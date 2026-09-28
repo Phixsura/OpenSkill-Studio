@@ -2767,3 +2767,10 @@ Graph) were local state — a pasted link always landed on Impact. The active
 tab now syncs to `?tab=` (whitelisted against TABS, router.replace without
 scroll), matching the catalog page's deep-link posture. Killer:
 `?tab=Drafts` renders the Drafts empty-state with no click.
+
+### 101.7 Benchmark suite selection is shareable (round 350)
+
+Same §101.6 class: the benchmarks page's selected suite (which pre-filters
+the runs list) was local state. `?suite=<id>` now deep-links it
+(router.replace, no scroll). Killer: mounting with the param fetches runs
+pre-filtered by suite_id with no click.
