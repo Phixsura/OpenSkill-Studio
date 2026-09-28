@@ -2860,3 +2860,12 @@ select-then-insert reachable from CONCURRENT callers (sync pipeline +
 drafts + admin API) — §105 closed it. No further changes; adding rollback
 catches inside batch ingest loops would jeopardize sibling rows for a race
 the architecture already prevents.
+
+### 103.2 Un-ack in the browser (round 362)
+
+e2e test 7 now closes the §103 loop live: ack a row, flip to the merged
+view, un-ack (when the acked row surfaces on the first merged page — deep
+histories fall back to the unit/contract killers), flip back, and the
+default view still offers Acknowledge. En route the test surfaced the
+merged view's paging reality: on stacks with history the freshly acked row
+can sit beyond page one — the leg degrades gracefully instead of flaking.

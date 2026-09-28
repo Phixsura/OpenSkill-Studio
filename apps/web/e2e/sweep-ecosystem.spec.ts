@@ -190,6 +190,25 @@ test("7 — acknowledging a change persists across the include-acknowledged togg
   await page.waitForTimeout(1500);
   const after = (await page.innerHTML("body")).toLowerCase();
   expect(after).not.toContain("application error");
+  // R362: the §103 loop closes in a real browser — un-ack a row in the
+  // merged view (the just-acked one may sit deep on stacks with history)
+  const unackButtons = page.getByText("Un-acknowledge", { exact: true });
+  const anyUnack = await unackButtons
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (anyUnack) {
+    await unackButtons.first().dispatchEvent("click");
+    await page.waitForTimeout(1500);
+    const post = (await page.innerHTML("body")).toLowerCase();
+    expect(post).not.toContain("application error");
+  }
+  await page.getByText("Include acknowledged").click(); // back to default view
+  await page
+    .getByText("Acknowledge", { exact: true })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
 });
 
 test("8 — rotating the feed token swaps every subscription URL", async () => {
