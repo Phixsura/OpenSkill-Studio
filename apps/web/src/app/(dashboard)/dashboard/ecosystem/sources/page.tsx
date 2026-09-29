@@ -1,7 +1,8 @@
 "use client";
 /** External source registry (ADR-016 Part A). */
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -63,13 +64,28 @@ interface SourceHealth {
 }
 
 export default function SourcesPage() {
+  return (
+    <Suspense>
+      <SourcesInner />
+    </Suspense>
+  );
+}
+
+function SourcesInner() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const params = useSearchParams();
   const [healthFor, setHealthFor] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   // R378: mirrors backend SOURCE_STATUSES (parity-guarded)
   const SOURCE_STATUSES = ["active", "paused", "error", "archived"];
-  const [statusFilter, setStatusFilter] = useState("");
+  // R393 (R351 precedent): the status filter is shareable state
+  const [statusFilter, setStatusFilterState] = useState(params.get("status") ?? "");
+  const setStatusFilter = (v: string) => {
+    setStatusFilterState(v);
+    router.replace(`/dashboard/ecosystem/sources${v ? `?status=${v}` : ""}`, { scroll: false });
+  };
   // R387: sources list is server-paginated (limit 50) — without offset the
   // page silently truncated at 50 rows with no signal (meta.total was dropped)
   const [offset, setOffset] = useState(0);

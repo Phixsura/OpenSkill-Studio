@@ -8,10 +8,11 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/components",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -264,5 +265,18 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
       ),
     );
     expect(await screen.findByText("100 of 120")).toBeTruthy();
+  });
+
+  it("?tab=Drafts&status=published deep-links the filtered tab (R393)", async () => {
+    searchParams = new URLSearchParams("tab=Drafts&status=published");
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/drafts?limit=50&offset=0&status=published",
+        ),
+      ).toBe(true),
+    );
+    searchParams = new URLSearchParams();
   });
 });

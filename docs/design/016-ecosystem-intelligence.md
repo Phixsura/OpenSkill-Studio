@@ -3231,6 +3231,24 @@ from the router filename. With this, every eco list surface either carries
 offset+total meta or follows the §13 cursor: the truncation class is closed
 by construction, and the derived scan is re-runnable to prove it.
 
+### 106.21 Round 393 — every filter is shareable URL state
+
+The codebase's own precedents (R349 `?tab=`, R350 `?suite=`, R351 pricing
+`?status=`) establish that operator filters are deep-linkable — but the nine
+dropdowns added in §106.7–§106.9 were all local component state: a filtered
+view could not be pasted into a ticket or handed to a teammate. Now URL-backed
+across all four pages:
+
+- sources `?status=`, security `?status=` (both gained the Suspense +
+  `useSearchParams` wrapper the pricing page already used);
+- benchmarks `?suite=&suite_status=&run_status=` compose in one URL;
+- components `?tab=X&status=Y` — the single `status` param scopes to the
+  active tab, seeds only that tab's filter on load, and follows tab switches.
+
+Killers: seeded params must reach the fetch URL (`?status=paused` →
+`&status=paused` in the request), and changing a filter must
+`router.replace` the canonical URL. e2e 12/12 on the rebuilt bundle.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

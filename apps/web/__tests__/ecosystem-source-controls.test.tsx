@@ -8,10 +8,12 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+const replaceSpy = vi.fn();
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/sources",
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: replaceSpy, push: vi.fn() }),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -227,3 +229,23 @@ function sourceAt(i: number) {
     sync_interval_minutes: 1440,
   };
 }
+
+describe("Status filter is shareable URL state (R393)", () => {
+  it("?status= in the URL seeds the filter and changing it rewrites the URL", async () => {
+    searchParams = new URLSearchParams("status=paused");
+    api.mockImplementation(() =>
+      Promise.resolve({ data: [], meta: { total: 0, limit: 50, offset: 0 } }),
+    );
+    render(<SourcesPage />, { wrapper: wrapper() });
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("&status=paused"))).toBe(true),
+    );
+    fireEvent.change(await screen.findByLabelText("Filter by source status"), {
+      target: { value: "error" },
+    });
+    expect(replaceSpy).toHaveBeenCalledWith("/dashboard/ecosystem/sources?status=error", {
+      scroll: false,
+    });
+    searchParams = new URLSearchParams();
+  });
+});

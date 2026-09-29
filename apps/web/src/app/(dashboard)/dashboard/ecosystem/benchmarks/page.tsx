@@ -97,13 +97,18 @@ function BenchmarksInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [selectedSuite, setSelectedSuiteState] = useState<string | null>(params.get("suite"));
-  // R350: the selected suite is shareable state (leaderboard links)
+  // R350/R393: suite selection AND status filters are shareable state
+  const syncBenchUrl = (suite: string | null, suiteSt: string, runSt: string) => {
+    const q = new URLSearchParams();
+    if (suite) q.set("suite", suite);
+    if (suiteSt) q.set("suite_status", suiteSt);
+    if (runSt) q.set("run_status", runSt);
+    const qs = q.toString();
+    router.replace(`/dashboard/ecosystem/benchmarks${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
   const setSelectedSuite = (id: string | null) => {
     setSelectedSuiteState(id);
-    router.replace(
-      id ? `/dashboard/ecosystem/benchmarks?suite=${id}` : "/dashboard/ecosystem/benchmarks",
-      { scroll: false },
-    );
+    syncBenchUrl(id, suiteStatusFilter, runStatusFilter);
   };
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [portableDoc, setPortableDoc] = useState<string | null>(null);
@@ -153,8 +158,16 @@ function BenchmarksInner() {
   // R381: mirror backend SUITE_STATUSES / RUN_STATUSES (parity-guarded)
   const SUITE_STATUSES = ["draft", "active", "archived"];
   const RUN_STATUSES = ["queued", "running", "completed", "failed", "cancelled"];
-  const [suiteStatusFilter, setSuiteStatusFilter] = useState("");
-  const [runStatusFilter, setRunStatusFilter] = useState("");
+  const [suiteStatusFilter, setSuiteStatusFilterState] = useState(params.get("suite_status") ?? "");
+  const [runStatusFilter, setRunStatusFilterState] = useState(params.get("run_status") ?? "");
+  const setSuiteStatusFilter = (v: string) => {
+    setSuiteStatusFilterState(v);
+    syncBenchUrl(selectedSuite, v, runStatusFilter);
+  };
+  const setRunStatusFilter = (v: string) => {
+    setRunStatusFilterState(v);
+    syncBenchUrl(selectedSuite, suiteStatusFilter, v);
+  };
   const [suiteOffset, setSuiteOffset] = useState(0);
   const [suitePages, setSuitePages] = useState<Suite[][]>([]);
   const suites = useQuery({

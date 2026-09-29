@@ -160,3 +160,26 @@ describe("Run list pagination (R388)", () => {
     expect(await screen.findByText("100 of 120")).toBeTruthy();
   });
 });
+
+describe("Status filters are shareable URL state (R393)", () => {
+  it("?suite_status=&run_status= seed both filters", async () => {
+    searchParams = new URLSearchParams("suite_status=archived&run_status=failed");
+    api.mockImplementation(() =>
+      Promise.resolve({ data: [], meta: { total: 0, limit: 50, offset: 0 } }),
+    );
+    render(<BenchmarksPage />, { wrapper: wrapper() });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) =>
+          String(c[0]).includes("/ecosystem/benchmark/suites?limit=50&offset=0&status=archived"),
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]).includes("runs?limit=50&offset=0&status=failed")),
+      ).toBe(true),
+    );
+    searchParams = new URLSearchParams();
+  });
+});

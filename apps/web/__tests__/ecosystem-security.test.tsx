@@ -8,8 +8,12 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+const replaceSpy = vi.fn();
+let searchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/ecosystem/security",
+  useRouter: () => ({ replace: replaceSpy, push: vi.fn() }),
+  useSearchParams: () => searchParams,
 }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
@@ -165,5 +169,23 @@ describe("Ecosystem security advisories page (ADR-016 §38)", () => {
         api.mock.calls.some((c) => String(c[0]).includes("advisories?limit=100&status=mitigated")),
       ).toBe(true),
     );
+  });
+});
+
+describe("Advisory status filter is shareable URL state (R393)", () => {
+  it("?status= seeds the filter and changing it rewrites the URL", async () => {
+    searchParams = new URLSearchParams("status=mitigated");
+    api.mockImplementation(() => Promise.resolve({ data: [] }));
+    render(<SecurityPage />, { wrapper: wrapper() });
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("&status=mitigated"))).toBe(true),
+    );
+    fireEvent.change(await screen.findByLabelText("Filter by advisory status"), {
+      target: { value: "open" },
+    });
+    expect(replaceSpy).toHaveBeenCalledWith("/dashboard/ecosystem/security?status=open", {
+      scroll: false,
+    });
+    searchParams = new URLSearchParams();
   });
 });

@@ -75,10 +75,28 @@ function ComponentsInner() {
   const [tab, setTabState] = useState<(typeof TABS)[number]>(
     TABS.includes(urlTab as (typeof TABS)[number]) ? (urlTab as (typeof TABS)[number]) : "Impact",
   );
-  // R349: the active tab is shareable state — operators paste links
+  // R349/R393: the active tab AND its status filter are shareable state
+  const initStatus = params.get("status") ?? "";
+  const initialTab = TABS.includes(urlTab as (typeof TABS)[number])
+    ? (urlTab as (typeof TABS)[number])
+    : "Impact";
+  const writeUrl = (t: string, st: string) => {
+    router.replace(`/dashboard/ecosystem/components?tab=${t}${st ? `&status=${st}` : ""}`, {
+      scroll: false,
+    });
+  };
   const setTab = (t: (typeof TABS)[number]) => {
     setTabState(t);
-    router.replace(`/dashboard/ecosystem/components?tab=${t}`, { scroll: false });
+    writeUrl(
+      t,
+      {
+        Impact: impactFilter,
+        Replacements: candidateFilter,
+        Drafts: draftFilter,
+        Rollouts: rolloutFilter,
+        Graph: "",
+      }[t],
+    );
   };
   const [payloadOpen, setPayloadOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +128,13 @@ function ComponentsInner() {
   const IMPACT_STATUSES = ["open", "acknowledged", "resolved"];
   const CANDIDATE_STATUSES = ["proposed", "under_review", "approved", "rejected"];
   const DRAFT_STATUSES = ["draft", "in_review", "approved", "rejected", "published"];
-  const [candidateFilter, setCandidateFilter] = useState("");
+  const [candidateFilter, setCandidateFilterState] = useState(
+    initialTab === "Replacements" ? initStatus : "",
+  );
+  const setCandidateFilter = (v: string) => {
+    setCandidateFilterState(v);
+    writeUrl("Replacements", v);
+  };
   // R391: all four lifecycle lists paginate (dev DB already holds 200-700 rows each)
   const [impactOffset, set_impactOffset] = useState(0);
   const [impactPages, set_impactPages] = useState<ImpactAnalysis[][]>([]);
@@ -120,10 +144,24 @@ function ComponentsInner() {
   const [draftsPages, set_draftsPages] = useState<Draft[][]>([]);
   const [rolloutsOffset, set_rolloutsOffset] = useState(0);
   const [rolloutsPages, set_rolloutsPages] = useState<Rollout[][]>([]);
-  const [draftFilter, setDraftFilter] = useState("");
+  const [draftFilter, setDraftFilterState] = useState(initialTab === "Drafts" ? initStatus : "");
+  const setDraftFilter = (v: string) => {
+    setDraftFilterState(v);
+    writeUrl("Drafts", v);
+  };
   const ROLLOUT_STATUSES = ["draft", "running", "evaluating", "promoted", "rejected", "aborted"];
-  const [impactFilter, setImpactFilter] = useState("");
-  const [rolloutFilter, setRolloutFilter] = useState("");
+  const [impactFilter, setImpactFilterState] = useState(initialTab === "Impact" ? initStatus : "");
+  const setImpactFilter = (v: string) => {
+    setImpactFilterState(v);
+    writeUrl("Impact", v);
+  };
+  const [rolloutFilter, setRolloutFilterState] = useState(
+    initialTab === "Rollouts" ? initStatus : "",
+  );
+  const setRolloutFilter = (v: string) => {
+    setRolloutFilterState(v);
+    writeUrl("Rollouts", v);
+  };
   const impact = useQuery({
     queryKey: ["eco-impact", impactFilter, impactOffset],
     queryFn: async () => {

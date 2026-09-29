@@ -3,7 +3,8 @@
 import Link from "next/link";
 /** Security advisory registry (ADR-016 §38, Snyk/Dependabot bar). */
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EcosystemNav, EmptyState, Pill } from "../components";
@@ -51,12 +52,27 @@ const MATCH_LABEL: Record<string, string> = {
 };
 
 export default function SecurityPage() {
+  return (
+    <Suspense>
+      <SecurityInner />
+    </Suspense>
+  );
+}
+
+function SecurityInner() {
+  const router = useRouter();
+  const params = useSearchParams();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   // R379: mirrors backend ADVISORY_STATUSES (parity-guarded)
   const ADVISORY_STATUSES = ["open", "mitigated", "dismissed"];
-  const [statusFilter, setStatusFilter] = useState("");
+  // R393 (R351 precedent): the status filter is shareable state
+  const [statusFilter, setStatusFilterState] = useState(params.get("status") ?? "");
+  const setStatusFilter = (v: string) => {
+    setStatusFilterState(v);
+    router.replace(`/dashboard/ecosystem/security${v ? `?status=${v}` : ""}`, { scroll: false });
+  };
   const [form, setForm] = useState({
     advisory_ref: "",
     title: "",
