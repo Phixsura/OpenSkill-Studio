@@ -119,9 +119,10 @@ async def list_impact(
     _user: User = Depends(get_current_user),
 ):
     from app.ecosystem.api.deps import check_enum
-    from app.ecosystem.models.graph import IMPACT_STATUSES
+    from app.ecosystem.models.graph import IMPACT_CLASSIFICATIONS, IMPACT_STATUSES
 
     check_enum(status, IMPACT_STATUSES, "status")
+    check_enum(classification, IMPACT_CLASSIFICATIONS, "classification")
     return {
         "data": await ImpactService(db).list(
             status=status, classification=classification, limit=limit, offset=offset

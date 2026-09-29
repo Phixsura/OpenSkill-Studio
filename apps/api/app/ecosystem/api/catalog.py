@@ -613,6 +613,10 @@ async def list_mappings(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+    check_enum(entity_kind, frozenset(CATALOG_KIND_TO_MODEL), "entity_kind")
     svc = CapabilityMappingService(db)
     if capability_key:
         return {

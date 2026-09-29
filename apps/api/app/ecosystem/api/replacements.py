@@ -56,6 +56,9 @@ async def list_candidates(
     from app.ecosystem.models.replacement import CANDIDATE_STATUSES
 
     check_enum(status, CANDIDATE_STATUSES, "status")
+    from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+    check_enum(deprecated_kind, frozenset(CATALOG_KIND_TO_MODEL), "deprecated_kind")
     return {
         "data": await ReplacementService(db).list_candidates(
             deprecated_kind=deprecated_kind,

@@ -1567,3 +1567,56 @@ async def test_all_enum_filters_reject_unknown_values(http, tokens):
         assert "allowed" in r.json()["error"]["message"], bad
         r = await http.get(good, headers=member)
         assert r.status_code == 200, (good, r.status_code)
+
+
+async def test_second_sweep_enum_filters_reject_unknown_values(http, tokens):
+    """Round-382 killer: the R376 guard's name set itself was incomplete —
+    source_type/classification/deprecated_kind/event_type/entity_kind escaped
+    the first sweep. All seven surfaces now 422 on typos and 200 on valid
+    values."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    cases = [
+        ("/api/v1/ecosystem/sources?source_type=githb",
+         "/api/v1/ecosystem/sources?source_type=github_repo"),
+        ("/api/v1/ecosystem/impact/analyses?classification=braking",
+         "/api/v1/ecosystem/impact/analyses?classification=breaking"),
+        ("/api/v1/ecosystem/replacements/candidates?deprecated_kind=modle",
+         "/api/v1/ecosystem/replacements/candidates?deprecated_kind=model_version"),
+        ("/api/v1/ecosystem/observations?event_type=model_release",
+         "/api/v1/ecosystem/observations?event_type=model_released"),
+        ("/api/v1/ecosystem/pricing/observations?entity_kind=modle",
+         "/api/v1/ecosystem/pricing/observations?entity_kind=model_version"),
+        ("/api/v1/ecosystem/pricing/availability?entity_kind=modle",
+         "/api/v1/ecosystem/pricing/availability?entity_kind=model_version"),
+        ("/api/v1/ecosystem/capability-mappings?entity_kind=modle&entity_id=X",
+         "/api/v1/ecosystem/capability-mappings?entity_kind=model_version&entity_id=X"),
+    ]
+    for bad, good in cases:
+        r = await http.get(bad, headers=member)
+        assert r.status_code == 422, (bad, r.status_code, r.text[:120])
+        assert "allowed" in r.json()["error"]["message"], bad
+        r = await http.get(good, headers=member)
+        assert r.status_code == 200, (good, r.status_code, r.text[:120])
+
+
+async def test_shadowed_talent_static_routes_are_reachable_again(http, tokens):
+    """Round-383 killer: /talent/capabilities/{capability_id} registered BEFORE
+    eight static single-segment GETs, so /version, /autocomplete, /mappings,
+    ... all resolved to get_capability and 404'd ("Capability not found").
+    The pre-existing "requires auth" tests asserted status in
+    (200, 401, 404, ...) — green over dead endpoints. These are exact:
+    each revived endpoint answers 200 with its own payload shape."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/talent/capabilities/version", headers=member)
+    assert r.status_code == 200, (r.status_code, r.text[:120])
+    assert "version" in str(r.json()["data"]).lower()
+    r = await http.get("/api/v1/talent/capabilities/autocomplete?q=py", headers=member)
+    assert r.status_code == 200, (r.status_code, r.text[:120])
+    assert isinstance(r.json()["data"], list)
+    r = await http.get("/api/v1/talent/capabilities/frequency", headers=member)
+    assert r.status_code == 200, (r.status_code, r.text[:120])
+    # ninth dead route lived in a second router: /credential-pathways/my-progress
+    # was shadowed by /credential-pathways/{pathway_id} ("Pathway not found").
+    r = await http.get("/api/v1/talent/credential-pathways/my-progress", headers=member)
+    assert r.status_code == 200, (r.status_code, r.text[:120])
+    assert isinstance(r.json()["data"], list)

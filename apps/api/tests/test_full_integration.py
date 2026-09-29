@@ -2321,7 +2321,11 @@ async def test_username_collision_and_format(c):
     h2, _ = await _auth(c)
     import uuid as _uuid
 
-    uname = f"taken{_uuid.uuid4().hex[:6]}"
+    # R386: 6 hex chars collided for real once ~1200 taken* rows accumulated
+    # in the shared dev DB (birthday growth — same time-bomb class as the
+    # sweep-timeout in ADR-016 §106.12). 16 chars keeps username <=40 and the
+    # collision probability negligible for the DB's lifetime.
+    uname = f"taken{_uuid.uuid4().hex[:16]}"
     assert (
         await c.put("/api/v1/portfolio/username", json={"username": uname}, headers=h1)
     ).status_code == 200

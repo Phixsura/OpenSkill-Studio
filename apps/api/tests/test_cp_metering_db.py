@@ -863,7 +863,10 @@ async def test_seat_sweep_isolates_one_bad_org(db, monkeypatch):
 
     monkeypatch.setattr(metering, "emit_usage", flaky_emit)
     # Must NOT raise despite the poison org.
-    emitted = await metering.sweep_seats(db, for_month=month)
+    # R384: narrow to this test's own orgs (R258's org_ids exists precisely to
+    # make sweeps hermetic — sweeping the whole shared dev DB grows without
+    # bound as test orgs accumulate and eventually breaches the 300s timeout).
+    emitted = await metering.sweep_seats(db, for_month=month, org_ids=orgs)
     await db.flush()
     monkeypatch.undo()
 

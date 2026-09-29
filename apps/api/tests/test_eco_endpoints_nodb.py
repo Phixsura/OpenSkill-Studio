@@ -380,6 +380,18 @@ def test_every_enum_named_filter_is_whitelisted():
         "status", "family", "severity", "change_type", "draft_type",
         "lifecycle_status", "trust_level", "evidence_level", "decision",
         "record_type", "reconciliation_status",
+        # R382: names the first sweep missed — closed write-path vocabularies
+        "source_type", "classification", "deprecated_kind", "event_type",
+        "entity_kind",
+    }
+    # R382 exemptions: entity_kind values on these surfaces are NOT closed to
+    # catalog kinds — observations/resolution rows carry adapter-fed kinds and
+    # telemetry stores "provider_offering" — so a whitelist would reject
+    # legitimate stored values. Silent-empty is the correct semantic there.
+    exempt = {
+        "observations.py:list_observations(entity_kind)",
+        "catalog.py:list_resolution_candidates(entity_kind)",
+        "graph.py:list_telemetry(entity_kind)",
     }
     offenders = []
     checked = 0
@@ -393,6 +405,8 @@ def test_every_enum_named_filter_is_whitelisted():
             for pm in re.finditer(r"(\w+): str \| None = None", params):
                 pname = pm.group(1)
                 if pname not in enumish:
+                    continue
+                if f"{f.name}:{fname}({pname})" in exempt:
                     continue
                 checked += 1
                 guarded = (
@@ -485,4 +499,104 @@ def test_web_remaining_status_dropdowns_match_backend_vocabularies():
         m = re.search(rf"const {const} = \[(.*?)\];", page, re.S)
         assert m, (rel, const)
         assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), (rel, const)
+
+
+
+def test_no_static_route_is_shadowed_by_an_earlier_dynamic_route():
+    """Round-383 (§106.10 fallout made permanent): FastAPI matches routes in
+    registration order, so a static path registered AFTER a dynamic sibling
+    (e.g. /catalog/capability-mappings after /catalog/{segment}) would be
+    unreachable — every request resolves to the dynamic route with the static
+    segment as its parameter. Walk the real route table and prove no GET/POST
+    static path is match-shadowed by an earlier dynamic one with a different
+    endpoint."""
+    import re
+
+    from app.main import app
+
+    def _walk(router):
+        for rt in getattr(router, "routes", []):
+            if type(rt).__name__ == "_IncludedRouter":
+                yield from _walk(rt.original_router)
+            elif hasattr(rt, "path") and hasattr(rt, "methods"):
+                yield rt
+            elif hasattr(rt, "routes"):
+                yield from _walk(rt)
+
+    routes = list(_walk(app.router))
+    shadowed = []
+    for i, r in enumerate(routes):
+        if "{" in r.path:
+            continue  # only static paths can be shadowed this way
+        # does any EARLIER dynamic route's regex match this static path?
+        for earlier in routes[:i]:
+            if "{" not in earlier.path:
+                continue
+            if not (r.methods & earlier.methods):
+                continue
+            pattern = getattr(earlier, "path_regex", None)
+            if pattern is None:
+                pattern = re.compile(
+                    "^" + re.sub(r"\{[^}]+\}", "[^/]+", earlier.path) + "$"
+                )
+            if pattern.match(r.path):
+                shadowed.append(f"{r.path} shadowed by {earlier.path}")
+    assert not shadowed, sorted(set(shadowed))
+    # exact duplicates are dead routes too: same (method, path) registered
+    # twice means the second endpoint never runs.
+    from collections import Counter
+
+    pairs = Counter(
+        (m, r.path) for r in routes for m in r.methods - {"HEAD", "OPTIONS"}
+    )
+    dupes = {k: v for k, v in pairs.items() if v > 1}
+    assert not dupes, dupes
+    # non-vacuity: the walk saw a real route table, and the detector fires on
+    # a synthetic shadow (a static path registered after a matching dynamic
+    # one) — so an all-green run means "checked and clean", not "checked
+    # nothing".
+    assert len(routes) > 150, len(routes)
+    assert sum("{" in r.path for r in routes) > 40
+    from fastapi import FastAPI
+
+    synth = FastAPI()
+
+    @synth.get("/api/x/{seg}")
+    async def _dyn(seg: str):  # pragma: no cover
+        return {}
+
+    @synth.get("/api/x/static")
+    async def _stat():  # pragma: no cover
+        return {}
+
+    sroutes = [r for r in synth.routes if getattr(r, "path", "").startswith("/api/")]
+    hits = [
+        (d.path, st.path)
+        for i, st in enumerate(sroutes)
+        if "{" not in st.path
+        for d in sroutes[:i]
+        if "{" in d.path and d.path_regex.match(st.path)
+    ]
+    assert hits == [("/api/x/{seg}", "/api/x/static")], hits
+
+def test_web_reconciliation_dropdown_matches_backend_vocabulary():
+    """Round-385 (thirteenth vocabulary): pricing page reconciliation-status
+    filter pinned to RECONCILIATION_STATUSES (it was the only wired dropdown
+    left unpinned — its inline literal matched by coincidence, not CI)."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.mapping import RECONCILIATION_STATUSES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/pricing/page.tsx"
+    ).read_text()
+    m = re.search(
+        r'aria-label="Filter by reconciliation status"[\s\S]*?\{\[(.*?)\]\.map',
+        page,
+    )
+    assert m, "reconciliation dropdown literal not found"
+    web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    assert web_values == set(RECONCILIATION_STATUSES)
 

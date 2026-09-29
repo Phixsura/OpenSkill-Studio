@@ -3009,6 +3009,104 @@ list pill), changes `severity`+`change_type` and catalog `lifecycle_status`
 secondary panel keyed by entity, not a browse surface). This is now a derived
 list, not a memory claim.
 
+### 106.10 Round 382 — the guard's NAME SET was itself incomplete (second sweep)
+
+§106.6's pattern guard derives coverage from the code, but its enum-semantic
+name set was hand-written — and hand-written lists are exactly what §99.9
+distrusts. A sweep of every `str | None = None` api param OUTSIDE the set
+found five more enum-semantic names with closed write-path vocabularies whose
+list filters were silent-empty on typos:
+
+| filter            | surface(s)                                         | vocabulary                                                                       |
+| ----------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `source_type`     | sources list                                       | `SOURCE_TYPES` (create-only guard before)                                        |
+| `classification`  | impact list                                        | `IMPACT_CLASSIFICATIONS`                                                         |
+| `deprecated_kind` | candidates list                                    | `CATALOG_KIND_TO_MODEL`                                                          |
+| `event_type`      | observations list                                  | `OBSERVATION_EVENT_TYPES` (create guarded, list not)                             |
+| `entity_kind`     | price-obs, availability, capability-mappings lists | `CATALOG_KIND_TO_MODEL` (all three write paths already reject non-catalog kinds) |
+
+All seven call sites now `check_enum`; the guard's name set gained the five
+names, with three DOCUMENTED exemptions where the stored vocabulary is
+genuinely open (observations/resolution rows carry adapter-fed kinds;
+telemetry stores `provider_offering`) — a whitelist there would reject
+legitimate stored values, so silent-empty is the correct semantic and the
+exemption list says why. Guard mutation-verified (stripping one check_enum →
+red naming the site). Seven-surface HTTP killer; its own first run corrected
+a wrong URL (`/catalog/capability-mappings` is shadowed by
+`/catalog/{segment}` — the real route is `/capability-mappings`).
+
+### 106.11 Round 383 — route-shadowing guard; nine dead talent endpoints revived
+
+§106.10's wrong-URL stumble (`/catalog/capability-mappings` matched
+`/catalog/{segment}`) generalizes: FastAPI matches routes in REGISTRATION
+ORDER, so a static path registered after a dynamic sibling is unreachable.
+New §96-style guard walks the real route table (recursing
+`_IncludedRouter.original_router`) and fails on any static route
+match-shadowed by an earlier same-method dynamic route.
+
+Guard lifecycle proved §97/§99.9 twice over:
+
+1. Its FIRST version passed **vacuously** — `app.routes` top-level holds
+   mounted router wrappers, so the scan saw 0 routes. Non-vacuity floors
+   (>150 routes, >40 dynamic) + an inline synthetic-shadow self-test caught
+   that; the fixed walk then went red on REAL findings.
+2. The findings: `/talent/capabilities/{capability_id}` registered before
+   EIGHT static single-segment GETs (`/mappings`, `/autocomplete`,
+   `/frequency`, `/cooccurrence`, `/industries`, `/version`,
+   `/edge-strength`, `/search-analytics`) — all dead; an empirical probe
+   returned 404 "Capability not found" for `/autocomplete?q=py`. The suite
+   stayed green over them because the pre-existing "requires auth" tests
+   assert `status_code in (200, 401, 404, 405, 422, 429)` — a tuple wide
+   enough to pass on anything (eco tests audited: narrow tuples only, all
+   deliberate). No web surface called the dead endpoints, so this was
+   API-contract-only breakage on the base branch.
+
+A second router had the same disease: `/talent/credential-pathways/my-progress`
+was shadowed by `/{pathway_id}` (every call answered 404 "Pathway not found") —
+nine dead endpoints total, found only because the guard re-ran after the first
+fix instead of trusting the (truncated) first failure list.
+
+Fix: `get_capability` moved below the static routes with a comment pinning
+why; exact-status killers (200 + payload shape) for three revived endpoints.
+
+### 106.12 Round 384 — full-run #48's timeout was data-volume growth, not flake
+
+Regression #48 broke the 24-run clean streak: `test_seat_sweep_isolates_one_
+bad_org` hit its 300s pytest-timeout — and failed standalone too, so not
+contention. Root cause: R258 added `org_ids` narrowing to the sweeps
+precisely to "make tests hermetic", but THIS test never adopted it — it swept
+every org with student members in the shared dev DB, a set that grows with
+every test run. The runtime curve finally crossed the timeout. Fix per §97
+(pin the environment, never weaken the guard): the test now passes
+`org_ids=orgs` (302s → 3s); its poison-isolation assertions are unchanged.
+Audit: the only other sweep call in tests already narrows. Lesson appended to
+the flake doctrine: an unbounded query over SHARED MUTABLE test data is a
+time bomb, not a flake — reruns get slower monotonically, so "it passed on
+retry" never applies.
+
+### 106.13 Round 385 — thirteenth vocabulary pinned
+
+The pricing page's reconciliation-status dropdown was the only wired filter
+whose option list matched the backend by coincidence rather than CI — its
+values were an inline literal, unpinned. Now pinned to
+`RECONCILIATION_STATUSES` (guard mutation-verified: one edited option value →
+red). All thirteen web dropdown vocabularies are now CI-pinned.
+
+### 106.14 Round 386 — the second accumulation bomb in two runs: birthday collisions
+
+Full-run #49 failed a DIFFERENT test than #48: `test_username_collision_and_
+format` got 409 on its FIRST username set — `taken{6 hex}` collided with one
+of the 1,205 `taken*` rows accumulated in the shared dev DB (measured). Six
+hex chars = 16.7M values; with N accumulated rows the per-run collision odds
+are N/16.7M and RISE monotonically — the same time-bomb shape as §106.12's
+sweep, expressed as a birthday problem instead of a runtime curve. Fix:
+16-hex suffixes at every test site whose value lands under a GLOBAL unique
+constraint (username, PackCategory slug ×2, public pack slug); org-scoped
+names (cohorts, categories-within-org) keep short suffixes since each test
+creates a fresh org. Doctrine addition to §97: on a shared mutable dev DB,
+any fixed-width random identifier under a global unique constraint is a
+scheduled failure — width must price in the DB's lifetime, not one run.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

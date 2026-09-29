@@ -51,6 +51,9 @@ async def list_sources(
     from app.ecosystem.models.source import SOURCE_STATUSES
 
     check_enum(status, SOURCE_STATUSES, "status")
+    from app.ecosystem.models.source import SOURCE_TYPES
+
+    check_enum(source_type, SOURCE_TYPES, "source_type")
     sources, total = await SourceService(db).list_sources(
         status=status, source_type=source_type, limit=limit, offset=offset
     )

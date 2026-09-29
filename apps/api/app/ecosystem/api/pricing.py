@@ -32,6 +32,9 @@ async def list_price_observations(
     from app.ecosystem.models.mapping import RECONCILIATION_STATUSES
 
     check_enum(reconciliation_status, RECONCILIATION_STATUSES, "reconciliation_status")
+    from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+    check_enum(entity_kind, frozenset(CATALOG_KIND_TO_MODEL), "entity_kind")
     rows = await PricingService(db).list(
         entity_kind=entity_kind,
         entity_id=entity_id,
@@ -113,6 +116,9 @@ async def list_availability(
     from app.ecosystem.models.mapping import AVAILABILITY_RECORD_TYPES
 
     check_enum(record_type, AVAILABILITY_RECORD_TYPES, "record_type")
+    from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+    check_enum(entity_kind, frozenset(CATALOG_KIND_TO_MODEL), "entity_kind")
     rows = await AvailabilityService(db).list(
         entity_kind=entity_kind, entity_id=entity_id, record_type=record_type, limit=limit
     )

@@ -53,6 +53,9 @@ async def list_observations(
 ):
     """Append-only feed → ULID cursor pagination (§13): stable under concurrent
     inserts, unlike offset pages which shift as new observations land."""
+    from app.ecosystem.api.deps import check_enum
+
+    check_enum(event_type, OBSERVATION_EVENT_TYPES, "event_type")
     query = select(EcosystemObservation)
     if source_id:
         query = query.where(EcosystemObservation.source_id == source_id)
