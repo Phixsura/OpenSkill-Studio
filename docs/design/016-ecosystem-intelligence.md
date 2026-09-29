@@ -2959,6 +2959,33 @@ Guards:
   styles/benchmark families;
 - e2e 12/12 re-verified against the rebuilt bundle.
 
+### 106.8 Rounds 379–380 — every whitelisted status filter is now reachable from the UI
+
+§106.7's class ("backend filter whitelisted but unreachable from the web")
+had three more members:
+
+- **security page** (R379): advisories could have their status _changed_ but
+  the list could not be _filtered_ by it — added a `Filter by advisory status`
+  dropdown wired to `?status=` (sixth pinned vocabulary,
+  `ADVISORY_STATUSES`).
+- **components page** (R380): the Impact and Rollouts tabs listed everything
+  unconditionally — added per-tab status dropdowns wired to
+  `/ecosystem/impact/analyses?status=` and `/ecosystem/rollouts?status=`
+  (seventh & eighth pinned vocabularies, `IMPACT_STATUSES` /
+  `ROLLOUT_STATUSES`; the latter imports from `models/replacement.py`, where
+  the rollout model actually lives — the guard's import path was itself
+  corrected by its first red run).
+
+Two incidental fix-of-fix lessons: the filter state could not be named
+`impactStatus` (the page already binds that name to the status-transition
+mutation — tsc caught the collision), and the old rollout tests' bare
+`findByText(/[Pp]romote/)` matcher became ambiguous once an
+`<option>promoted</option>` existed — scoped to `findByRole("button", ...)`.
+
+Unit tests drive each dropdown and assert the exact fetch URL; e2e 12/12
+re-verified against the rebuilt bundle. With these, all 13 whitelisted
+enum filters that have a corresponding web list surface are operable.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

@@ -106,9 +106,17 @@ function ComponentsInner() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["eco-impact"] }),
     onError: (e) => setError(e instanceof ApiError ? e.message : "Status change failed"),
   });
+  // R380: mirror backend IMPACT_STATUSES / ROLLOUT_STATUSES (parity-guarded)
+  const IMPACT_STATUSES = ["open", "acknowledged", "resolved"];
+  const ROLLOUT_STATUSES = ["draft", "running", "evaluating", "promoted", "rejected", "aborted"];
+  const [impactFilter, setImpactFilter] = useState("");
+  const [rolloutFilter, setRolloutFilter] = useState("");
   const impact = useQuery({
-    queryKey: ["eco-impact"],
-    queryFn: () => apiWithAuth<{ data: ImpactAnalysis[] }>("/ecosystem/impact/analyses"),
+    queryKey: ["eco-impact", impactFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: ImpactAnalysis[] }>(
+        `/ecosystem/impact/analyses${impactFilter ? `?status=${impactFilter}` : ""}`,
+      ),
   });
   const candidates = useQuery({
     queryKey: ["eco-candidates"],
@@ -119,8 +127,11 @@ function ComponentsInner() {
     queryFn: () => apiWithAuth<{ data: Draft[] }>("/ecosystem/drafts"),
   });
   const rollouts = useQuery({
-    queryKey: ["eco-rollouts"],
-    queryFn: () => apiWithAuth<{ data: Rollout[] }>("/ecosystem/rollouts"),
+    queryKey: ["eco-rollouts", rolloutFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Rollout[] }>(
+        `/ecosystem/rollouts${rolloutFilter ? `?status=${rolloutFilter}` : ""}`,
+      ),
   });
 
   const invalidateAll = () => {
@@ -182,6 +193,32 @@ function ComponentsInner() {
             {t}
           </button>
         ))}
+        {tab === "Impact" && (
+          <select
+            aria-label="Filter by impact status"
+            value={impactFilter}
+            onChange={(e) => setImpactFilter(e.target.value)}
+            className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {IMPACT_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
+        )}
+        {tab === "Rollouts" && (
+          <select
+            aria-label="Filter by rollout status"
+            value={rolloutFilter}
+            onChange={(e) => setRolloutFilter(e.target.value)}
+            className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {ROLLOUT_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
+        )}
       </div>
       {error && (
         <div className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-700">

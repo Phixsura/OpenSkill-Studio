@@ -424,3 +424,42 @@ def test_web_source_status_dropdown_matches_backend_vocabulary():
     assert m
     web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
     assert web_values == set(SOURCE_STATUSES)
+
+def test_web_advisory_status_dropdown_matches_backend_vocabulary():
+    """Round-379 (sixth vocabulary): security page advisory-status filter
+    pinned to ADVISORY_STATUSES."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.advisory import ADVISORY_STATUSES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/security/page.tsx"
+    ).read_text()
+    m = re.search(r"const ADVISORY_STATUSES = \[(.*?)\];", page, re.S)
+    assert m
+    web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    assert web_values == set(ADVISORY_STATUSES)
+
+def test_web_lifecycle_tab_dropdowns_match_backend_vocabularies():
+    """Round-380 (seventh & eighth vocabularies): components-page impact and
+    rollout status filters pinned to IMPACT_STATUSES / ROLLOUT_STATUSES."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.graph import IMPACT_STATUSES
+    from app.ecosystem.models.replacement import ROLLOUT_STATUSES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/components/page.tsx"
+    ).read_text()
+    for const, vocab in (
+        ("IMPACT_STATUSES", IMPACT_STATUSES),
+        ("ROLLOUT_STATUSES", ROLLOUT_STATUSES),
+    ):
+        m = re.search(rf"const {const} = \[(.*?)\];", page, re.S)
+        assert m, const
+        assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), const
+

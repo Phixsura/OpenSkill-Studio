@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -151,6 +151,19 @@ describe("Ecosystem security advisories page (ADR-016 §38)", () => {
     const link = await screen.findByText("changes");
     expect(link.closest("a")!.getAttribute("href")).toBe(
       `/dashboard/ecosystem/changes?entity=${"A".repeat(26)}`,
+    );
+  });
+
+  it("status dropdown refetches with ?status= (R379)", async () => {
+    api.mockImplementation(() => Promise.resolve({ data: [] }));
+    render(<SecurityPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by advisory status"), {
+      target: { value: "mitigated" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]).includes("advisories?limit=100&status=mitigated")),
+      ).toBe(true),
     );
   });
 });

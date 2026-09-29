@@ -54,6 +54,9 @@ export default function SecurityPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // R379: mirrors backend ADVISORY_STATUSES (parity-guarded)
+  const ADVISORY_STATUSES = ["open", "mitigated", "dismissed"];
+  const [statusFilter, setStatusFilter] = useState("");
   const [form, setForm] = useState({
     advisory_ref: "",
     title: "",
@@ -64,8 +67,11 @@ export default function SecurityPage() {
   });
 
   const advisories = useQuery({
-    queryKey: ["eco-advisories"],
-    queryFn: () => apiWithAuth<{ data: Advisory[] }>("/ecosystem/security/advisories?limit=100"),
+    queryKey: ["eco-advisories", statusFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Advisory[] }>(
+        `/ecosystem/security/advisories?limit=100${statusFilter ? `&status=${statusFilter}` : ""}`,
+      ),
   });
   const affected = useQuery({
     queryKey: ["eco-advisory-affected", expanded],
@@ -115,7 +121,20 @@ export default function SecurityPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Security Advisories</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Security Advisories</h1>
+        <select
+          aria-label="Filter by advisory status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+        >
+          <option value="">All statuses</option>
+          {ADVISORY_STATUSES.map((st) => (
+            <option key={st}>{st}</option>
+          ))}
+        </select>
+      </div>
       <EcosystemNav />
       <p className="text-sm text-[hsl(var(--muted-foreground))]">
         Structured advisories (CVE/GHSA/vendor). Registration emits one security change event — it

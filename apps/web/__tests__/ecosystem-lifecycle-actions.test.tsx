@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -121,7 +121,7 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
   it("evaluating rollout promote POSTs decide with decision=promote", async () => {
     render(<ComponentsPage />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByText("Rollouts"));
-    fireEvent.click(await screen.findByText(/[Pp]romote/));
+    fireEvent.click(await screen.findByRole("button", { name: /[Pp]romote/ }));
     await new Promise((r) => setTimeout(r, 0));
     const call = api.mock.calls.find(
       (c) =>
@@ -152,7 +152,7 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     });
     render(<ComponentsPage />, { wrapper: wrapper() });
     fireEvent.click(await screen.findByText("Rollouts"));
-    fireEvent.click(await screen.findByText(/[Pp]romote/));
+    fireEvent.click(await screen.findByRole("button", { name: /[Pp]romote/ }));
     expect(await screen.findByText(/Guardrails not satisfied/)).toBeDefined();
   });
 
@@ -179,6 +179,27 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     const link = await screen.findByText("changes");
     expect(link.closest("a")!.getAttribute("href")).toBe(
       `/dashboard/ecosystem/changes?entity=${"R".repeat(26)}`,
+    );
+  });
+
+  it("impact and rollout status dropdowns refetch with ?status= (R380)", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by impact status"), {
+      target: { value: "resolved" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/impact/analyses?status=resolved"),
+      ).toBe(true),
+    );
+    fireEvent.click(await screen.findByText("Rollouts"));
+    fireEvent.change(await screen.findByLabelText("Filter by rollout status"), {
+      target: { value: "promoted" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/rollouts?status=promoted"),
+      ).toBe(true),
     );
   });
 });
