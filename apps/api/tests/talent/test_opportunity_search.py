@@ -116,11 +116,83 @@ async def test_search_escapes_like_metacharacters(db):
     await db.flush()
 
     svc = OpportunitySearchService(db)
-    rows, _more = await svc.search(q=f"{marker} 50%")
+    rows, _more, _cur = await svc.search(q=f"{marker} 50%")
     ids = {o.id for o in rows}
     assert lit.id in ids, "literal '50%' row must match"
     assert trap.id not in ids, "'%' must not act as a wildcard (matched '50x')"
 
-    rows, _more = await svc.search(q=f"{marker} 50_")
+    rows, _more, _cur = await svc.search(q=f"{marker} 50_")
     ids = {o.id for o in rows}
     assert trap.id not in ids and lit.id not in ids, "'_' must not match any single char"
+
+@pytest.mark.asyncio
+async def test_deadline_cursor_pages_cover_everything(db):
+    """R395 killer: `id < cursor` under a DEADLINE ordering dropped arbitrary
+    rows on page 2 (any id above the floor vanished regardless of deadline).
+    The composite keyset must walk every row exactly once — including a
+    later-created row with an earlier deadline, and the null-deadline tail."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.talent.models.employer import Opportunity
+    from tests.test_cp_marketplace_db import _mk_org, _mk_user
+
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    marker = str(ULID()).lower()
+    now = datetime.now(UTC)
+    # creation order: far deadline, NEAR deadline (created later => higher id),
+    # null deadline — under the old code the near-deadline row (highest id)
+    # disappeared from page 2 because page 1 set the id floor below it.
+    opps = []
+    for i, deadline in enumerate([now + timedelta(days=30), now + timedelta(days=1), None]):
+        o = Opportunity(
+            employer_org_id=org.id, title=f"{marker} opp {i}",
+            opportunity_type="contract", status="open",
+            application_deadline=deadline,
+        )
+        db.add(o)
+        await db.flush()  # distinct, increasing ULIDs
+        opps.append(o)
+
+    svc = OpportunitySearchService(db)
+    seen: list[str] = []
+    cursor = None
+    for _ in range(5):
+        items, has_more, cursor = await svc.search(
+            q=marker, sort="deadline", cursor=cursor, limit=1
+        )
+        seen.extend(o.id for o in items)
+        if not has_more:
+            break
+    assert seen == [opps[1].id, opps[0].id, opps[2].id], (
+        "deadline pages must cover near-deadline first, far second, null last — no skips"
+    )
+    assert len(seen) == len(set(seen)), "no duplicates across pages"
+
+
+@pytest.mark.asyncio
+async def test_saved_opportunity_search_actually_runs(db):
+    """R395 companion: running a saved opportunity search crashed on EVERY
+    call (service built without db + positional arg into a keyword-only
+    signature) — green tests never exercised the path."""
+    from app.talent.models.employer import Opportunity
+    from app.talent.services.saved_searches import SavedSearchService
+    from tests.test_cp_marketplace_db import _mk_org, _mk_user
+
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    marker = str(ULID()).lower()
+    db.add(Opportunity(
+        employer_org_id=org.id, title=f"{marker} saved-search target",
+        opportunity_type="contract", status="open",
+    ))
+    await db.flush()
+
+    svc = SavedSearchService(db)
+    saved = await svc.create(
+        org_id=org.id, name="find them", search_type="opportunity",
+        search_criteria={"q": marker}, created_by=user.id,
+    )
+    out = await svc.run_search(saved.id)
+    assert out["result_count"] == 1
+    assert out["results"][0]["title"] == f"{marker} saved-search target"

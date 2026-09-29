@@ -252,20 +252,26 @@ async def test_change_feed_order_is_deterministic_on_timestamp_ties(db):
     db.add(obs)
     await db.flush()
     ts = datetime(2026, 9, 27, 3, 0, tzinfo=UTC)
+    # R396 hermeticity: the pinned tie-timestamp is a PAST constant on an
+    # append-only shared table — once 200+ newer changes accumulated, these
+    # rows fell off the unfiltered page (§106.12's law applied to a §97 pin).
+    # Scope the feed to our own canonical entity: same ORDER BY, same tie,
+    # immune to accumulation.
+    entity = str(ULID())
     ids = []
     for i in range(5):
         c = ChangeEvent(
             observation_id=obs.id, change_type="price",
             field=f"tie-{i}", old_value={"v": i}, new_value={"v": i + 1},
-            severity="info", detected_at=ts,
+            severity="info", detected_at=ts, canonical_entity_id=entity,
         )
         db.add(c)
         await db.flush()
         ids.append(c.id)
 
     svc = DashboardService(db)
-    first = [c.id for c in await svc.change_feed(limit=200)]
-    second = [c.id for c in await svc.change_feed(limit=200)]
+    first = [c.id for c in await svc.change_feed(canonical_entity_id=entity, limit=200)]
+    second = [c.id for c in await svc.change_feed(canonical_entity_id=entity, limit=200)]
     assert first == second  # deterministic across identical queries
     # within the tie: newest ULID first (descending id)
     ours_in_feed = [i for i in first if i in set(ids)]

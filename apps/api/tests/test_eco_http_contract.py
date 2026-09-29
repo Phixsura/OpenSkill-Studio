@@ -1732,3 +1732,133 @@ async def test_all_operational_lists_carry_pagination_meta(http, tokens):
             ids1 = {x["id"] for x in body["data"]}
             ids2 = {x["id"] for x in r2.json()["data"]}
             assert not (ids1 & ids2), f"{url}: offset pages overlap"
+
+
+async def test_hire_generates_private_outcome_event(http):
+    """Round-395 killer: auto_generate_placement_event existed since the
+    passport rounds but NOTHING called it — hiring produced a Placement and a
+    webhook but no outcome event, so the passport timeline silently missed
+    every hire. The hire transition must now record a private job_started
+    event pointing at the placement."""
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import create_access_token
+    from app.talent.models.application import Application, Placement
+    from app.talent.models.employer import Opportunity
+    from app.talent.models.internship import OutcomeEvent
+    from tests.test_cp_marketplace_db import _mk_org, _mk_user
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        applicant = await _mk_user(db)
+        employer = await _mk_user(db)
+        org = await _mk_org(db, employer)
+        opp = Opportunity(
+            employer_org_id=org.id, title=f"Hire target {applicant.id[:8]}",
+            opportunity_type="contract", status="open",
+        )
+        db.add(opp)
+        await db.flush()
+        application = Application(
+            opportunity_id=opp.id, user_id=applicant.id, status="accepted",
+        )
+        db.add(application)
+        await db.commit()
+        app_id, applicant_id = application.id, applicant.id
+        employer_token = create_access_token(
+            employer.id, employer.email, employer.role.value
+        )
+
+    r = await http.patch(
+        f"/api/v1/talent/applications/{app_id}/status",
+        json={"status": "hired"},
+        headers={"Authorization": f"Bearer {employer_token}"},
+    )
+    assert r.status_code == 200, (r.status_code, r.text[:200])
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        placement = await db.scalar(
+            _select(Placement).where(Placement.application_id == app_id)
+        )
+        assert placement is not None, "hire must create the placement"
+        event = await db.scalar(
+            _select(OutcomeEvent).where(
+                OutcomeEvent.source_type == "placement",
+                OutcomeEvent.source_id == placement.id,
+            )
+        )
+        assert event is not None, "hire must auto-generate the outcome event"
+        assert event.user_id == applicant_id
+        assert event.event_type == "job_started"
+        assert event.visibility == "private", "auto events default to private"
+    await engine.dispose()
+
+
+async def test_concurrent_hire_race_is_serialized(http):
+    """Round-396 killer: two racing accepted→hired transitions both passed the
+    state-machine check; the loser hit the placements unique constraint and
+    500'd (23505 is deliberately unhandled). The row lock must serialize them:
+    exactly one 200, the loser a clean 422, ONE placement, ONE outcome event.
+    Reproduces FIRST-RUN via committed-session gather (§104 pattern)."""
+    import asyncio
+
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal, engine
+    from app.core.security import create_access_token
+    from app.talent.models.application import Application, Placement
+    from app.talent.models.employer import Opportunity
+    from app.talent.models.internship import OutcomeEvent
+    from tests.test_cp_marketplace_db import _mk_org, _mk_user
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        applicant = await _mk_user(db)
+        employer = await _mk_user(db)
+        org = await _mk_org(db, employer)
+        opp = Opportunity(
+            employer_org_id=org.id, title=f"Race target {applicant.id[:8]}",
+            opportunity_type="contract", status="open",
+        )
+        db.add(opp)
+        await db.flush()
+        application = Application(
+            opportunity_id=opp.id, user_id=applicant.id, status="accepted",
+        )
+        db.add(application)
+        await db.commit()
+        app_id = application.id
+        token = create_access_token(employer.id, employer.email, employer.role.value)
+
+    hdrs = {"Authorization": f"Bearer {token}"}
+    r1, r2 = await asyncio.gather(
+        http.patch(f"/api/v1/talent/applications/{app_id}/status",
+                   json={"status": "hired"}, headers=hdrs),
+        http.patch(f"/api/v1/talent/applications/{app_id}/status",
+                   json={"status": "hired"}, headers=hdrs),
+    )
+    codes = sorted([r1.status_code, r2.status_code])
+    assert codes == [200, 422], (codes, r1.text[:120], r2.text[:120])
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        n_place = await db.scalar(
+            _select(_func.count()).select_from(Placement).where(
+                Placement.application_id == app_id
+            )
+        )
+        assert n_place == 1, "exactly one placement"
+        placement = await db.scalar(
+            _select(Placement).where(Placement.application_id == app_id)
+        )
+        n_events = await db.scalar(
+            _select(_func.count()).select_from(OutcomeEvent).where(
+                OutcomeEvent.source_type == "placement",
+                OutcomeEvent.source_id == placement.id,
+            )
+        )
+        assert n_events == 1, "exactly one outcome event"
+    await engine.dispose()

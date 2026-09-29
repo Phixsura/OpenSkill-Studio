@@ -170,7 +170,7 @@ async def list_opportunities(
 
     svc = OpportunitySearchService(db)
     cap_ids = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
-    items, has_more = await svc.search(
+    items, has_more, next_cursor = await svc.search(
         q=q,
         capability_ids=cap_ids,
         opportunity_type=opportunity_type,
@@ -180,7 +180,6 @@ async def list_opportunities(
         cursor=cursor,
         limit=limit,
     )
-    next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
         data=[OpportunityResponse.model_validate(o) for o in items],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),

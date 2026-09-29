@@ -3262,6 +3262,64 @@ contain none). Fixed with the same inline escaping; DB killer creates literal
 "50%" and trap "50x" rows and proves the query only matches the literal
 (mutation-verified: unescaping the pattern → red).
 
+### 106.23 Round 395 — cursor predicate must match the sort order; a dead code path revived
+
+Two real defects in opportunity search (talent domain, PR-adjacent — same
+cross-domain precedent as §106.11):
+
+1. **Cursor/sort mismatch.** Pagination filtered `id < cursor` regardless of
+   sort. Under `sort=deadline` (reachable from the UI's sort dropdown +
+   Load more), page 2 dropped EVERY row whose id sat above the last page's
+   floor — wrong results, silently. Under `newest`, tied `created_at`
+   orderings could skip rows. Fix: newest/relevance order strictly by id
+   (ULIDs are creation-ordered, so this IS newest-first) making `id <
+cursor` exact; deadline uses a composite keyset token
+   (`d|<deadline>|<id>` / `n|<id>` for the null tail) whose predicate matches
+   the `(deadline asc nulls_last, id desc)` order. Killer walks
+   single-row pages over an interleaved fixture (later-created row with
+   earlier deadline + null tail) and asserts exact coverage; mutation
+   (restoring the id-floor predicate) → red.
+2. **Saved opportunity searches crashed on every call** — the service was
+   constructed without its db and `self.db` was passed positionally into a
+   keyword-only signature (TypeError x2). Nothing caught it; the suite was
+   green because no test exercised the path (§106.11's shallow-green disease
+   again). Fixed + a killer that saves a search, runs it, and asserts the
+   created opportunity comes back.
+
+### 106.24 Round 395b — the hire path never generated its outcome event
+
+The §106.23 crash led to a derived audit (service methods with zero
+references): `auto_generate_placement_event` — designed in the passport
+rounds to record a private `job_started` outcome event whenever a placement
+begins — was never CALLED from anywhere. Hiring created the Placement and
+emitted the webhook, but the applicant's passport timeline silently missed
+every hire. Wired at the only placement-creation site (the `hired`
+transition), defaulting to private per the method's own contract. Killer
+drives accepted→hired over HTTP as an employer-org member and asserts the
+placement-linked `job_started` event exists, belongs to the applicant, and is
+private. Lesson: an orphaned method whose docstring says "when X happens" is
+a missing FEATURE, not dead code — grep for callers before assuming either.
+
+### 106.25 Round 396 — hire transitions serialized; a §97 pin meets the §106.12 law
+
+1. **Transition race.** The application state machine read the row unlocked
+   (its own NOTE admitted it) — two racing accepted→hired requests both
+   passed the check; the loser 500'd on the placements unique constraint
+   (23505 deliberately unhandled). `with_for_update` on the application row
+   serializes: the loser re-reads committed "hired" and gets the state
+   machine's clean 422. Killer gathers two hires and asserts [200, 422] +
+   exactly one placement + one outcome event; the lock-removal mutant does
+   NOT reproduce in-process (ASGI gather doesn't interleave that window) —
+   recorded as an environment-limited equivalent per the §94.6/§105 rule,
+   with the killer kept as the contract gate.
+2. **Full-run #57's failure was a §97 pin aging into a §106.12 bomb**: the
+   §99 tie-determinism test pins `detected_at` to a PAST constant on the
+   append-only changes table; once 200+ newer rows accumulated, the pinned
+   rows fell off the unfiltered feed page. Fixed by scoping the feed to the
+   test's own `canonical_entity_id` — same ORDER BY, same tie, immune to
+   accumulation. Doctrine: a pinned PAST timestamp plus an UNFILTERED page
+   read is scheduled to fail; pin the time AND scope the read.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29
