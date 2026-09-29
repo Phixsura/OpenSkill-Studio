@@ -3320,6 +3320,16 @@ a missing FEATURE, not dead code — grep for callers before assuming either.
    accumulation. Doctrine: a pinned PAST timestamp plus an UNFILTERED page
    read is scheduled to fail; pin the time AND scope the read.
 
+### 106.26 Round 397 — talent search filters adopt the §106.2 posture (campaign end)
+
+`GET /talent/opportunities` accepted arbitrary `opportunity_type` /
+`location_mode` / `status` strings (silent-empty on typos) and silently fell
+back to `newest` for an unknown `sort`. Four vocabularies pinned as constants
+beside the model whose column comments define them; the endpoint 422s naming
+the allowed values via the shared `check_enum`. Killer sweeps all four
+bad/good pairs. This closes the hardening campaign at §106.26 — final
+verification for the closing push is full regression #59.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

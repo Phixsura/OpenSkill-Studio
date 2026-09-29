@@ -166,7 +166,21 @@ async def list_opportunities(
     Supports full-text search (q), faceted filters (opportunity_type,
     location_mode, capabilities), and sort (newest, deadline, relevance).
     """
+    from app.ecosystem.api.deps import check_enum
+    from app.talent.models.employer import (
+        OPPORTUNITY_LOCATION_MODES,
+        OPPORTUNITY_SORTS,
+        OPPORTUNITY_STATUSES,
+        OPPORTUNITY_TYPES,
+    )
     from app.talent.services.opportunity_search import OpportunitySearchService
+
+    # R397 (§106.2 posture): a typo'd filter must 422 naming the vocabulary,
+    # never silently return [] (or silently fall back to newest for sort)
+    check_enum(opportunity_type, OPPORTUNITY_TYPES, "opportunity_type")
+    check_enum(location_mode, OPPORTUNITY_LOCATION_MODES, "location_mode")
+    check_enum(status, OPPORTUNITY_STATUSES, "status")
+    check_enum(sort, OPPORTUNITY_SORTS, "sort")
 
     svc = OpportunitySearchService(db)
     cap_ids = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None

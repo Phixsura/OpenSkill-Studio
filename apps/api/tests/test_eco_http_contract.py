@@ -1862,3 +1862,26 @@ async def test_concurrent_hire_race_is_serialized(http):
         )
         assert n_events == 1, "exactly one outcome event"
     await engine.dispose()
+
+
+async def test_opportunity_filters_reject_unknown_values(http, tokens):
+    """Round-397 killer: a typo'd opportunity filter silently returned []
+    (and an unknown sort silently fell back to newest). All four vocabularies
+    now 422 naming the allowed values; the valid twins still 200."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    cases = [
+        ("/api/v1/talent/opportunities?opportunity_type=fulltime",
+         "/api/v1/talent/opportunities?opportunity_type=full_time"),
+        ("/api/v1/talent/opportunities?location_mode=remot",
+         "/api/v1/talent/opportunities?location_mode=remote"),
+        ("/api/v1/talent/opportunities?status=opn",
+         "/api/v1/talent/opportunities?status=open"),
+        ("/api/v1/talent/opportunities?sort=newst",
+         "/api/v1/talent/opportunities?sort=newest"),
+    ]
+    for bad, good in cases:
+        r = await http.get(bad, headers=member)
+        assert r.status_code == 422, (bad, r.status_code, r.text[:120])
+        assert "allowed" in r.json()["error"]["message"], bad
+        r = await http.get(good, headers=member)
+        assert r.status_code == 200, (good, r.status_code, r.text[:120])
