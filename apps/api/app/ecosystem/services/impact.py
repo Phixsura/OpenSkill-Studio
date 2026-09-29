@@ -213,7 +213,9 @@ class ImpactService:
         return list(rows)
 
     async def set_status(self, analysis_id: str, status: str) -> ImpactAnalysis:
-        if status not in ("open", "acknowledged", "resolved"):
+        from app.ecosystem.models.graph import IMPACT_STATUSES
+
+        if status not in IMPACT_STATUSES:
             raise AppError("VALIDATION_ERROR", f"Unknown status: {status}", 422)
         analysis = await self.db.get(ImpactAnalysis, analysis_id)
         if not analysis:

@@ -2975,3 +2975,14 @@ The web FAMILIES dropdown feeds the leaderboard's family filter — which the
 §106.4 sweep missed (it guarded the SUITES list only). Leaderboard now
 checks BENCHMARK_FAMILIES too, and the web list is the fourth CI-pinned
 vocabulary, guaranteeing the UI can never send a 422able value.
+
+### 106.6 The enum-filter guard — whose first run was the audit again (round 376)
+
+§106.4's lesson made permanent: a CI guard scans every api-layer optional
+str param with an enum-semantic NAME and requires a whitelist check in the
+same function body. Its FIRST RUN caught seven more (impact/candidate/
+source status, reconciliation_status, record_type, plus two whose guards
+lived only in the service layer) — the third §99.10-style guard whose
+construction was itself the audit. IMPACT_STATUSES extracted from an inline
+tuple to a model constant en route. Thirteen enum filters now share one
+posture: typo → 422 naming the vocabulary.

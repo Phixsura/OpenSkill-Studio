@@ -28,6 +28,10 @@ async def list_price_observations(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.mapping import RECONCILIATION_STATUSES
+
+    check_enum(reconciliation_status, RECONCILIATION_STATUSES, "reconciliation_status")
     rows = await PricingService(db).list(
         entity_kind=entity_kind,
         entity_id=entity_id,
@@ -105,6 +109,10 @@ async def list_availability(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.mapping import AVAILABILITY_RECORD_TYPES
+
+    check_enum(record_type, AVAILABILITY_RECORD_TYPES, "record_type")
     rows = await AvailabilityService(db).list(
         entity_kind=entity_kind, entity_id=entity_id, record_type=record_type, limit=limit
     )

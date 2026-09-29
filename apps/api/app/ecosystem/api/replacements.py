@@ -52,6 +52,10 @@ async def list_candidates(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.replacement import CANDIDATE_STATUSES
+
+    check_enum(status, CANDIDATE_STATUSES, "status")
     return {
         "data": await ReplacementService(db).list_candidates(
             deprecated_kind=deprecated_kind,

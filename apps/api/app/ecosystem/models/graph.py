@@ -50,6 +50,8 @@ CONSTRAINT_TYPES = frozenset(
     }
 )
 
+IMPACT_STATUSES = frozenset({"open", "acknowledged", "resolved"})
+
 IMPACT_CLASSIFICATIONS = frozenset(
     {
         "informational",

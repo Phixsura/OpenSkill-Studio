@@ -47,6 +47,10 @@ async def list_sources(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.source import SOURCE_STATUSES
+
+    check_enum(status, SOURCE_STATUSES, "status")
     sources, total = await SourceService(db).list_sources(
         status=status, source_type=source_type, limit=limit, offset=offset
     )

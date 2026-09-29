@@ -363,3 +363,47 @@ def test_web_family_dropdown_matches_backend_vocabulary():
     assert web_values == set(BENCHMARK_FAMILIES), (
         f"web {sorted(web_values)} != backend {sorted(BENCHMARK_FAMILIES)}"
     )
+
+
+def test_every_enum_named_filter_is_whitelisted():
+    """Round-376 guard (§106.4 made permanent): any api-layer optional str
+    param whose NAME is enum-semantic (status/family/severity/change_type/
+    draft_type/lifecycle_status/...) must be guarded in the same function
+    body — check_enum, _check_severity, or an explicit `not in <VOCAB>`
+    check. A new filter added without one fails CI instead of silently
+    returning [] on typos."""
+    import re
+    from pathlib import Path
+
+    api = Path(__file__).resolve().parents[1] / "app" / "ecosystem" / "api"
+    enumish = {
+        "status", "family", "severity", "change_type", "draft_type",
+        "lifecycle_status", "trust_level", "evidence_level", "decision",
+        "record_type", "reconciliation_status",
+    }
+    offenders = []
+    checked = 0
+    for f in api.glob("*.py"):
+        src = f.read_text()
+        # split into function bodies (async def ... until next def at col 0/4)
+        for m in re.finditer(
+            r"async def (\w+)\(([^)]*)\)[\s\S]*?(?=\n@|\nasync def |\ndef |\Z)", src
+        ):
+            fname, params, body = m.group(1), m.group(2), m.group(0)
+            for pm in re.finditer(r"(\w+): str \| None = None", params):
+                pname = pm.group(1)
+                if pname not in enumish:
+                    continue
+                checked += 1
+                guarded = (
+                    f"check_enum({pname}" in body
+                    or f"_check_severity({pname}" in body
+                    or re.search(rf"{pname} not in [A-Z_]+", body)
+                    or re.search(rf"if {pname} is not None and {pname} not in", body)
+                )
+                if not guarded:
+                    offenders.append(f"{f.name}:{fname}({pname})")
+    assert checked >= 10, f"scan looks broken ({checked})"
+    assert not offenders, (
+        f"enum-named filters without a whitelist guard: {offenders}"
+    )

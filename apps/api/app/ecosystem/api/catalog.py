@@ -86,6 +86,10 @@ async def list_catalog(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.catalog import LIFECYCLE_STATUSES
+
+    check_enum(lifecycle_status, LIFECYCLE_STATUSES, "lifecycle_status")
     rows, total = await CatalogService(db).list_entities(
         _kind(segment), lifecycle_status=lifecycle_status, search=search,
         limit=limit, offset=offset,

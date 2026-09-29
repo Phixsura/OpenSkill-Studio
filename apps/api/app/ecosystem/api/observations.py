@@ -258,6 +258,10 @@ async def list_changes(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.observation import CHANGE_TYPES
+
+    check_enum(change_type, CHANGE_TYPES, "change_type")
     from app.ecosystem.api.dashboard import _check_severity
     from app.ecosystem.models.observation import CHANGE_SEVERITIES
 
