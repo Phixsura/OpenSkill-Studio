@@ -3177,6 +3177,19 @@ immutable `CommercialAuditEvent` naming the exact target id.
    critical. Pinned to its own source's observation (join on observation_id).
    Same class as §106.12/§106.14: shared-DB tests must select THEIR OWN rows.
 
+### 106.18 Round 390 — cursor Load-more failures no longer vanish
+
+Both cursor-based Load-more handlers (changes page and the §106.15 discoveries
+one) were raw `async` onClick callbacks: a failed fetch became an unhandled
+promise rejection — console noise, no user feedback, button still armed.
+Offset-based Load-mores (catalog/sources/runs) are immune because they route
+through react-query. Fix: try/catch surfacing into the pages' existing
+mutation-error banner. Killer mocks a rejected `cursor=` fetch and asserts the
+banner shows the ApiError message (its own first red: the test file's ApiError
+was mocked but never imported, so the fixture threw ReferenceError and the
+fallback text rendered instead — assert the exact message, not just "an
+error showed").
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

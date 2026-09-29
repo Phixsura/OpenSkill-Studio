@@ -93,19 +93,24 @@ export default function ChangesPage() {
 
   const loadMore = async () => {
     if (!cursor) return;
-    const res = await apiWithAuth<{
-      data: ChangeEvent[];
-      meta: { has_more: boolean; next_cursor: string | null };
-    }>(
-      `/ecosystem/changes?limit=50&cursor=${cursor}${
-        changeType ? `&change_type=${changeType}` : ""
-      }${
-        severity ? `&severity=${severity}` : ""
-      }${entity ? `&canonical_entity_id=${entity}` : ""}${showAcked ? "" : "&acknowledged=false"}`,
-    );
-    setPages((prev) => [...prev, res.data]);
-    setCursor(res.meta?.next_cursor ?? null);
-    setHasMore(Boolean(res.meta?.has_more));
+    try {
+      const res = await apiWithAuth<{
+        data: ChangeEvent[];
+        meta: { has_more: boolean; next_cursor: string | null };
+      }>(
+        `/ecosystem/changes?limit=50&cursor=${cursor}${
+          changeType ? `&change_type=${changeType}` : ""
+        }${
+          severity ? `&severity=${severity}` : ""
+        }${entity ? `&canonical_entity_id=${entity}` : ""}${showAcked ? "" : "&acknowledged=false"}`,
+      );
+      setPages((prev) => [...prev, res.data]);
+      setCursor(res.meta?.next_cursor ?? null);
+      setHasMore(Boolean(res.meta?.has_more));
+    } catch (e) {
+      // R390: a raw async onClick swallows rejections — surface like mutations
+      setMutError(e instanceof ApiError ? e.message : "Failed to load more");
+    }
   };
 
   const unacknowledge = useMutation({

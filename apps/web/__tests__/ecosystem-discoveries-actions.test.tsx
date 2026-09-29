@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import DiscoveriesPage from "@/app/(dashboard)/dashboard/ecosystem/discoveries/page";
-import { apiWithAuth } from "@/lib/api";
+import { ApiError, apiWithAuth } from "@/lib/api";
 
 const api = vi.mocked(apiWithAuth);
 
@@ -231,5 +231,21 @@ describe("Observation feed cursor pagination (R387)", () => {
     expect(await screen.findByText("pageref-99")).toBeTruthy();
     // exhausted: no further Load more
     expect(screen.queryByText("Load more")).toBeNull();
+  });
+
+  it("a failed Load more surfaces in the error banner instead of vanishing (R390)", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/observations?") && !init) {
+        if (String(path).includes("cursor=")) return Promise.reject(new ApiError("boom", 500));
+        return Promise.resolve({
+          data: [obs("O1".padEnd(26, "x"), false)],
+          meta: { has_more: true, next_cursor: "CUR" },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Load more"));
+    expect(await screen.findByText("boom")).toBeTruthy();
   });
 });

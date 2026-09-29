@@ -86,17 +86,22 @@ export default function DiscoveriesPage() {
 
   const loadMoreObservations = async () => {
     if (!obsCursor) return;
-    const res = await apiWithAuth<{
-      data: Observation[];
-      meta: { has_more: boolean; next_cursor: string | null };
-    }>(
-      `/ecosystem/observations?limit=50&cursor=${obsCursor}${
-        eventType ? `&event_type=${eventType}` : ""
-      }${flaggedOnly ? "&injection_flagged=true" : ""}`,
-    );
-    setObsPages((prev) => [...prev, res.data]);
-    setObsCursor(res.meta?.next_cursor ?? null);
-    setObsHasMore(Boolean(res.meta?.has_more));
+    try {
+      const res = await apiWithAuth<{
+        data: Observation[];
+        meta: { has_more: boolean; next_cursor: string | null };
+      }>(
+        `/ecosystem/observations?limit=50&cursor=${obsCursor}${
+          eventType ? `&event_type=${eventType}` : ""
+        }${flaggedOnly ? "&injection_flagged=true" : ""}`,
+      );
+      setObsPages((prev) => [...prev, res.data]);
+      setObsCursor(res.meta?.next_cursor ?? null);
+      setObsHasMore(Boolean(res.meta?.has_more));
+    } catch (e) {
+      // R390: a raw async onClick swallows rejections — surface like mutations
+      setMutError(e instanceof ApiError ? e.message : "Failed to load more");
+    }
   };
   const resolutions = useQuery({
     queryKey: ["eco-resolutions"],
