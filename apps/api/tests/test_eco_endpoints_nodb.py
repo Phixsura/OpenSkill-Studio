@@ -342,3 +342,24 @@ async def test_lifecycle_filter_rejects_unknown_status(client):
     )
     assert r.status_code in (401, 422)
     assert r.status_code != 200
+
+
+def test_web_family_dropdown_matches_backend_vocabulary():
+    """Round-374 drift guard (fourth vocabulary): the benchmarks page's
+    FAMILIES list feeds the now-whitelisted leaderboard filter — pin it to
+    BENCHMARK_FAMILIES so the UI can never send a 422able value."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.benchmark import BENCHMARK_FAMILIES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/benchmarks/page.tsx"
+    ).read_text()
+    m = re.search(r"const FAMILIES = \[(.*?)\];", page, re.S)
+    assert m
+    web_values = set(re.findall(r'"([a-z0-9_]+)"', m.group(1)))
+    assert web_values == set(BENCHMARK_FAMILIES), (
+        f"web {sorted(web_values)} != backend {sorted(BENCHMARK_FAMILIES)}"
+    )

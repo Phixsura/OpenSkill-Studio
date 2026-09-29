@@ -2968,3 +2968,10 @@ rollout status all accepted arbitrary strings. A shared `check_enum` helper
 vocabularies; one parameterized killer sweeps typo→422 / valid→200 across
 all six surfaces. Meta-rule reaffirmed (§99.9): never assert "the last one"
 from memory — re-derive the list from the pattern.
+
+### 106.5 Leaderboard family + fourth vocabulary (round 374)
+
+The web FAMILIES dropdown feeds the leaderboard's family filter — which the
+§106.4 sweep missed (it guarded the SUITES list only). Leaderboard now
+checks BENCHMARK_FAMILIES too, and the web list is the fourth CI-pinned
+vocabulary, guaranteeing the UI can never send a 422able value.

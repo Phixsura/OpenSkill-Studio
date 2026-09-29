@@ -157,6 +157,10 @@ async def benchmark_leaderboard(
 ):
     """§15 (LMArena/AA): latest completed run per target, rankable by any
     preserved dimension — never a collapsed universal score."""
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.benchmark import BENCHMARK_FAMILIES
+
+    check_enum(family, BENCHMARK_FAMILIES, "family")
     return {
         "data": await BenchmarkService(db).leaderboard(
             family=family, suite_id=suite_id, dimension=dimension, limit=limit
