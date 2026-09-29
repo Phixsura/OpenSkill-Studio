@@ -463,3 +463,26 @@ def test_web_lifecycle_tab_dropdowns_match_backend_vocabularies():
         assert m, const
         assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), const
 
+def test_web_remaining_status_dropdowns_match_backend_vocabularies():
+    """Round-381 (ninth-twelfth vocabularies): suite/run (benchmarks page) and
+    candidate/draft (components page) status filters pinned to their backend
+    frozensets."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.benchmark import RUN_STATUSES, SUITE_STATUSES
+    from app.ecosystem.models.replacement import CANDIDATE_STATUSES, DRAFT_STATUSES
+
+    eco = Path(__file__).resolve().parents[2] / "web/src/app/(dashboard)/dashboard/ecosystem"
+    cases = [
+        ("benchmarks/page.tsx", "SUITE_STATUSES", SUITE_STATUSES),
+        ("benchmarks/page.tsx", "RUN_STATUSES", RUN_STATUSES),
+        ("components/page.tsx", "CANDIDATE_STATUSES", CANDIDATE_STATUSES),
+        ("components/page.tsx", "DRAFT_STATUSES", DRAFT_STATUSES),
+    ]
+    for rel, const, vocab in cases:
+        page = (eco / rel).read_text()
+        m = re.search(rf"const {const} = \[(.*?)\];", page, re.S)
+        assert m, (rel, const)
+        assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), (rel, const)
+

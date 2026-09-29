@@ -202,4 +202,28 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
       ).toBe(true),
     );
   });
+
+  it("candidate and draft status dropdowns refetch with ?status= (R381)", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Replacements"));
+    fireEvent.change(await screen.findByLabelText("Filter by candidate status"), {
+      target: { value: "approved" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/replacements/candidates?status=approved",
+        ),
+      ).toBe(true),
+    );
+    fireEvent.click(await screen.findByText("Drafts"));
+    fireEvent.change(await screen.findByLabelText("Filter by draft status"), {
+      target: { value: "published" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/drafts?status=published"),
+      ).toBe(true),
+    );
+  });
 });

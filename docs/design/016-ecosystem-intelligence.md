@@ -2986,6 +2986,29 @@ Unit tests drive each dropdown and assert the exact fetch URL; e2e 12/12
 re-verified against the rebuilt bundle. With these, all 13 whitelisted
 enum filters that have a corresponding web list surface are operable.
 
+### 106.9 Round 381 — the §99.9 rule catches §106.8's own "all operable" claim
+
+§106.8 closed with "all 13 whitelisted enum filters that have a corresponding
+web list surface are operable" — asserted from memory, exactly what §99.9
+forbids. Re-deriving from the route/page cross-product found four more list
+surfaces with unwired whitelisted filters:
+
+- benchmarks page: **suites** `?status=` and **runs** `&status=` (composable
+  with the existing suite drill-down);
+- components page: **candidates** `?status=` and **drafts** `?status=`
+  (per-tab dropdowns beside the Impact/Rollouts ones from R380).
+
+All four wired the same way (dropdown → query key → URL), with unit tests
+asserting the exact fetch URLs and a four-way parity guard pinning
+`SUITE_STATUSES` / `RUN_STATUSES` / `CANDIDATE_STATUSES` / `DRAFT_STATUSES`
+(ninth–twelfth vocabularies). e2e 12/12 on the rebuilt bundle.
+
+Deliberately NOT wired: drafts `draft_type` (two values, both visible in the
+list pill), changes `severity`+`change_type` and catalog `lifecycle_status`
+(already wired pre-campaign), pricing `record_type` (availability table is a
+secondary panel keyed by entity, not a browse surface). This is now a derived
+list, not a memory claim.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

@@ -108,6 +108,10 @@ function ComponentsInner() {
   });
   // R380: mirror backend IMPACT_STATUSES / ROLLOUT_STATUSES (parity-guarded)
   const IMPACT_STATUSES = ["open", "acknowledged", "resolved"];
+  const CANDIDATE_STATUSES = ["proposed", "under_review", "approved", "rejected"];
+  const DRAFT_STATUSES = ["draft", "in_review", "approved", "rejected", "published"];
+  const [candidateFilter, setCandidateFilter] = useState("");
+  const [draftFilter, setDraftFilter] = useState("");
   const ROLLOUT_STATUSES = ["draft", "running", "evaluating", "promoted", "rejected", "aborted"];
   const [impactFilter, setImpactFilter] = useState("");
   const [rolloutFilter, setRolloutFilter] = useState("");
@@ -119,12 +123,18 @@ function ComponentsInner() {
       ),
   });
   const candidates = useQuery({
-    queryKey: ["eco-candidates"],
-    queryFn: () => apiWithAuth<{ data: Candidate[] }>("/ecosystem/replacements/candidates"),
+    queryKey: ["eco-candidates", candidateFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Candidate[] }>(
+        `/ecosystem/replacements/candidates${candidateFilter ? `?status=${candidateFilter}` : ""}`,
+      ),
   });
   const drafts = useQuery({
-    queryKey: ["eco-drafts"],
-    queryFn: () => apiWithAuth<{ data: Draft[] }>("/ecosystem/drafts"),
+    queryKey: ["eco-drafts", draftFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Draft[] }>(
+        `/ecosystem/drafts${draftFilter ? `?status=${draftFilter}` : ""}`,
+      ),
   });
   const rollouts = useQuery({
     queryKey: ["eco-rollouts", rolloutFilter],
@@ -202,6 +212,32 @@ function ComponentsInner() {
           >
             <option value="">All statuses</option>
             {IMPACT_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
+        )}
+        {tab === "Replacements" && (
+          <select
+            aria-label="Filter by candidate status"
+            value={candidateFilter}
+            onChange={(e) => setCandidateFilter(e.target.value)}
+            className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {CANDIDATE_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
+        )}
+        {tab === "Drafts" && (
+          <select
+            aria-label="Filter by draft status"
+            value={draftFilter}
+            onChange={(e) => setDraftFilter(e.target.value)}
+            className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {DRAFT_STATUSES.map((st) => (
               <option key={st}>{st}</option>
             ))}
           </select>

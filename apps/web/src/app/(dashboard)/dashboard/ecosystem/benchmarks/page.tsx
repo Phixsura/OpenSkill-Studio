@@ -150,9 +150,17 @@ function BenchmarksInner() {
       ),
   });
 
+  // R381: mirror backend SUITE_STATUSES / RUN_STATUSES (parity-guarded)
+  const SUITE_STATUSES = ["draft", "active", "archived"];
+  const RUN_STATUSES = ["queued", "running", "completed", "failed", "cancelled"];
+  const [suiteStatusFilter, setSuiteStatusFilter] = useState("");
+  const [runStatusFilter, setRunStatusFilter] = useState("");
   const suites = useQuery({
-    queryKey: ["eco-suites"],
-    queryFn: () => apiWithAuth<{ data: Suite[] }>("/ecosystem/benchmark/suites"),
+    queryKey: ["eco-suites", suiteStatusFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Suite[] }>(
+        `/ecosystem/benchmark/suites${suiteStatusFilter ? `?status=${suiteStatusFilter}` : ""}`,
+      ),
   });
   const [drillRun, setDrillRun] = useState<string | null>(null);
   const results = useQuery({
@@ -162,10 +170,10 @@ function BenchmarksInner() {
       apiWithAuth<{ data: RunResult[] }>(`/ecosystem/benchmark/runs/${drillRun}/results`),
   });
   const runs = useQuery({
-    queryKey: ["eco-runs", selectedSuite],
+    queryKey: ["eco-runs", selectedSuite, runStatusFilter],
     queryFn: () =>
       apiWithAuth<{ data: Run[] }>(
-        `/ecosystem/benchmark/runs?limit=50${selectedSuite ? `&suite_id=${selectedSuite}` : ""}`,
+        `/ecosystem/benchmark/runs?limit=50${selectedSuite ? `&suite_id=${selectedSuite}` : ""}${runStatusFilter ? `&status=${runStatusFilter}` : ""}`,
       ),
   });
 
@@ -286,7 +294,20 @@ function BenchmarksInner() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Suites</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Suites</h2>
+          <select
+            aria-label="Filter by suite status"
+            value={suiteStatusFilter}
+            onChange={(e) => setSuiteStatusFilter(e.target.value)}
+            className="rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {SUITE_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
+        </div>
         {(suites.data?.data ?? []).length === 0 ? (
           <EmptyState icon="🧪" text="No benchmark suites yet." />
         ) : (
@@ -363,6 +384,17 @@ function BenchmarksInner() {
           <h2 className="text-lg font-semibold">
             Runs {selectedSuite ? "(filtered by suite)" : ""}
           </h2>
+          <select
+            aria-label="Filter by run status"
+            value={runStatusFilter}
+            onChange={(e) => setRunStatusFilter(e.target.value)}
+            className="ml-auto mr-2 rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+          >
+            <option value="">All statuses</option>
+            {RUN_STATUSES.map((st) => (
+              <option key={st}>{st}</option>
+            ))}
+          </select>
           <button
             disabled={compareIds.length < 2 || compare.isPending}
             onClick={() => compare.mutate()}

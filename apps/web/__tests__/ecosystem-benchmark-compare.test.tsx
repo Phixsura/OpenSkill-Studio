@@ -108,3 +108,27 @@ describe("Suite deep link (R350)", () => {
     }
   });
 });
+
+describe("Suite/run status filters (R381)", () => {
+  it("suite and run status dropdowns refetch with ?status= / &status=", async () => {
+    render(<BenchmarksPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by suite status"), {
+      target: { value: "archived" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/benchmark/suites?status=archived"),
+      ).toBe(true),
+    );
+    fireEvent.change(await screen.findByLabelText("Filter by run status"), {
+      target: { value: "failed" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) =>
+          String(c[0]).includes("/ecosystem/benchmark/runs?limit=50&status=failed"),
+        ),
+      ).toBe(true),
+    );
+  });
+});
