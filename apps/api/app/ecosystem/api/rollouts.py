@@ -36,6 +36,10 @@ async def list_rollouts(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.replacement import ROLLOUT_STATUSES
+
+    check_enum(status, ROLLOUT_STATUSES, "status")
     return {"data": await RolloutService(db).list(status=status, limit=limit)}
 
 

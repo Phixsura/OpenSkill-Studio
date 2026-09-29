@@ -2957,3 +2957,14 @@ test is a production signal (§101); screen input before uniqueness probes
 (R97/§105); and one input-sqlstate backstop beats per-endpoint whack-a-mole
 (§106). Future work continues from the themed index at the top of this
 document.
+
+### 106.4 "The last one" was six short (round 373)
+
+§106.2 claimed lifecycle_status was the last unwhitelisted enum filter — a
+systematic re-scan of every str filter param proved it six short: suite
+family, suite status, run status, advisory status, draft type/status, and
+rollout status all accepted arbitrary strings. A shared `check_enum` helper
+(the §93 posture generalized) now guards all of them against their model
+vocabularies; one parameterized killer sweeps typo→422 / valid→200 across
+all six surfaces. Meta-rule reaffirmed (§99.9): never assert "the last one"
+from memory — re-derive the list from the pattern.

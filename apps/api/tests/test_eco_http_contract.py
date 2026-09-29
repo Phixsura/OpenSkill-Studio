@@ -1539,3 +1539,31 @@ async def test_lifecycle_filter_whitelist_over_http(http, tokens):
         headers=member,
     )
     assert r.status_code == 200
+
+
+async def test_all_enum_filters_reject_unknown_values(http, tokens):
+    """Round-373 killer: §106.2's "last one" claim was WRONG — six more
+    enum-semantic filters accepted arbitrary strings (silent-empty on typos).
+    All whitelisted now via the shared check_enum; each surface: typo → 422
+    naming the vocabulary, valid value → 200."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    cases = [
+        ("/api/v1/ecosystem/benchmark/suites?family=txt_gen",
+         "/api/v1/ecosystem/benchmark/suites?family=ecommerce_hero"),
+        ("/api/v1/ecosystem/benchmark/suites?status=activ",
+         "/api/v1/ecosystem/benchmark/suites?status=active"),
+        ("/api/v1/ecosystem/benchmark/runs?status=don",
+         "/api/v1/ecosystem/benchmark/runs?status=completed"),
+        ("/api/v1/ecosystem/security/advisories?status=opn",
+         "/api/v1/ecosystem/security/advisories?status=open"),
+        ("/api/v1/ecosystem/drafts?status=draf",
+         "/api/v1/ecosystem/drafts?status=draft"),
+        ("/api/v1/ecosystem/rollouts?status=runing",
+         "/api/v1/ecosystem/rollouts?status=running"),
+    ]
+    for bad, good in cases:
+        r = await http.get(bad, headers=member)
+        assert r.status_code == 422, (bad, r.status_code, r.text[:120])
+        assert "allowed" in r.json()["error"]["message"], bad
+        r = await http.get(good, headers=member)
+        assert r.status_code == 200, (good, r.status_code)

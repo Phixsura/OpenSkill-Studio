@@ -12,6 +12,17 @@ from app.api.deps import get_db as _get_db
 from app.models.user import User, UserRole
 
 
+def check_enum(value: str | None, allowed: frozenset[str], name: str) -> None:
+    """R373 (§93/§106.2 generalized): every enum-semantic filter must reject
+    unknown values — a typo that silently returns [] always resolves against
+    the user."""
+    if value is not None and value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown {name} {value!r}; allowed: {', '.join(sorted(allowed))}",
+        )
+
+
 async def get_feed_user(
     bearer: str | None = Depends(oauth2_scheme_optional),
     token: str | None = Query(None, description="Feed token (?token=...)"),

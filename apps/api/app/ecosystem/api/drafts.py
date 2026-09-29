@@ -75,6 +75,11 @@ async def list_drafts(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.replacement import DRAFT_STATUSES, DRAFT_TYPES
+
+    check_enum(draft_type, DRAFT_TYPES, "draft_type")
+    check_enum(status, DRAFT_STATUSES, "status")
     # Cross-tenant guard: an arbitrary org_id would expose that org's drafts
     # (payloads included) — membership (or platform admin) is required
     if org_id is not None and user.role != UserRole.ADMIN:

@@ -40,9 +40,11 @@ async def list_advisories(
     _user: User = Depends(get_current_user),
 ):
     from app.ecosystem.api.dashboard import _check_severity
-    from app.ecosystem.models.advisory import ADVISORY_SEVERITIES
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.advisory import ADVISORY_SEVERITIES, ADVISORY_STATUSES
 
     _check_severity(severity, ADVISORY_SEVERITIES)
+    check_enum(status, ADVISORY_STATUSES, "status")
     return {
         "data": await AdvisoryService(db).list(status=status, severity=severity, limit=limit)
     }

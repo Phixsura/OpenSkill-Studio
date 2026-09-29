@@ -44,6 +44,11 @@ async def list_suites(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.benchmark import BENCHMARK_FAMILIES, SUITE_STATUSES
+
+    check_enum(family, BENCHMARK_FAMILIES, "family")
+    check_enum(status, SUITE_STATUSES, "status")
     return {"data": await BenchmarkService(db).list_suites(family=family, status=status, limit=limit)}
 
 
@@ -184,6 +189,10 @@ async def list_runs(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.benchmark import RUN_STATUSES
+
+    check_enum(status, RUN_STATUSES, "status")
     return {"data": await BenchmarkService(db).list_runs(suite_id=suite_id, status=status, limit=limit)}
 
 
