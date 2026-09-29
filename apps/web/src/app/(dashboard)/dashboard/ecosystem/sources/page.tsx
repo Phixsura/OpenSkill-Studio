@@ -67,6 +67,9 @@ export default function SourcesPage() {
   const [healthFor, setHealthFor] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  // R378: mirrors backend SOURCE_STATUSES (parity-guarded)
+  const SOURCE_STATUSES = ["active", "paused", "error", "archived"];
+  const [statusFilter, setStatusFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
@@ -78,8 +81,11 @@ export default function SourcesPage() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-sources"],
-    queryFn: () => apiWithAuth<{ data: Source[] }>("/ecosystem/sources"),
+    queryKey: ["eco-sources", statusFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Source[] }>(
+        `/ecosystem/sources${statusFilter ? `?status=${statusFilter}` : ""}`,
+      ),
   });
   const health = useQuery({
     queryKey: ["eco-source-health", healthFor],
@@ -143,6 +149,17 @@ export default function SourcesPage() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">External Sources</h1>
+        <select
+          aria-label="Filter by source status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="ml-auto mr-2 rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
+        >
+          <option value="">All statuses</option>
+          {SOURCE_STATUSES.map((st) => (
+            <option key={st}>{st}</option>
+          ))}
+        </select>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm text-[hsl(var(--primary-foreground))]"

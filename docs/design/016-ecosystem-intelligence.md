@@ -2941,6 +2941,24 @@ axe-core is a devDependency now (node_modules is already AXE_PATHS' first
 choice); verified green with the /tmp copy deleted. §97 rule again: pin the
 environment.
 
+### 106.7 Round 378 — sources page gains a status filter; fifth vocabulary pinned
+
+§106.4 whitelisted `GET /ecosystem/sources?status=` on the backend, but the web
+sources page never exposed it — the only server-side filter in the sources
+domain was unreachable from the UI. Round 378 adds a `Filter by source status`
+dropdown (All/active/paused/error/archived) wired into the query key, so
+switching status refetches with `?status=<value>`.
+
+Guards:
+
+- web unit test drives the dropdown and asserts the fetch URL carries
+  `sources?status=paused`;
+- `test_web_source_status_dropdown_matches_backend_vocabulary` becomes the
+  fifth CI-pinned vocabulary (web `SOURCE_STATUSES` literal ↔ backend
+  `SOURCE_STATUSES`), same pattern as severities/change types/lifecycle
+  styles/benchmark families;
+- e2e 12/12 re-verified against the rebuilt bundle.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

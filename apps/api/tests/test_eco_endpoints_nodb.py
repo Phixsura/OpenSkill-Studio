@@ -407,3 +407,20 @@ def test_every_enum_named_filter_is_whitelisted():
     assert not offenders, (
         f"enum-named filters without a whitelist guard: {offenders}"
     )
+
+def test_web_source_status_dropdown_matches_backend_vocabulary():
+    """Round-378 (fifth vocabulary): sources page status filter pinned to
+    SOURCE_STATUSES."""
+    import re
+    from pathlib import Path
+
+    from app.ecosystem.models.source import SOURCE_STATUSES
+
+    page = (
+        Path(__file__).resolve().parents[2]
+        / "web/src/app/(dashboard)/dashboard/ecosystem/sources/page.tsx"
+    ).read_text()
+    m = re.search(r"const SOURCE_STATUSES = \[(.*?)\];", page, re.S)
+    assert m
+    web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    assert web_values == set(SOURCE_STATUSES)

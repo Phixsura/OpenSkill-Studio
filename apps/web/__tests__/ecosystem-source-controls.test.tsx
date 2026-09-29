@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -170,5 +170,18 @@ describe("Next-sync visibility (R355)", () => {
     render(<SourcesPage />, { wrapper: wrapper() });
     expect(await screen.findByText(/sync overdue/)).toBeDefined();
     expect(screen.getByText(/next ≈/)).toBeDefined();
+  });
+});
+
+describe("Source status filter (R378)", () => {
+  it("dropdown sends ?status= to the list endpoint", async () => {
+    api.mockImplementation(() => Promise.resolve({ data: [] }));
+    render(<SourcesPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by source status"), {
+      target: { value: "paused" },
+    });
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("sources?status=paused"))).toBe(true),
+    );
   });
 });
