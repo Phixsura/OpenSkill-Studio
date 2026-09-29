@@ -45,7 +45,10 @@ class OpportunitySearchService:
             # Split into words for AND-style matching
             words = sanitized.split()
             for word in words[:5]:  # limit to 5 search terms
-                pattern = f"%{word}%"
+                # R394: escape LIKE metacharacters — a raw `_`/`%` in the query
+                # acts as a wildcard ("a_b" matched "aXb"; "%%" matched all)
+                escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                pattern = f"%{escaped}%"
                 query = query.where(
                     or_(
                         Opportunity.title.ilike(pattern),

@@ -1,5 +1,8 @@
 """Opportunity search service tests — pure logic where possible."""
 
+import pytest
+from ulid import ULID
+
 from app.talent.services.opportunity_search import OpportunitySearchService
 
 
@@ -75,3 +78,49 @@ class TestSearchQuerySanitization:
         assert "location_mode" in params
         assert "capabilities" in params
         assert "sort" in params
+
+# ── Round-394 killer (issue #35 hardening): LIKE metacharacters ──────
+
+
+@pytest.fixture
+async def db():
+    from app.core.database import AsyncSessionLocal, engine
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_search_escapes_like_metacharacters(db):
+    """R394: raw user words reached ILIKE unescaped — "50_" matched "50x",
+    "%" matched everything. Escaped now: wildcard characters in the query
+    are literals."""
+    from app.talent.models.employer import Opportunity
+    from tests.test_cp_marketplace_db import _mk_org, _mk_user
+
+    user = await _mk_user(db)
+    org = await _mk_org(db, user)
+    marker = str(ULID()).lower()
+    lit = Opportunity(
+        employer_org_id=org.id, title=f"{marker} 50% off promo build",
+        opportunity_type="contract", status="open",
+    )
+    trap = Opportunity(
+        employer_org_id=org.id, title=f"{marker} 50x off promo build",
+        opportunity_type="contract", status="open",
+    )
+    db.add_all([lit, trap])
+    await db.flush()
+
+    svc = OpportunitySearchService(db)
+    rows, _more = await svc.search(q=f"{marker} 50%")
+    ids = {o.id for o in rows}
+    assert lit.id in ids, "literal '50%' row must match"
+    assert trap.id not in ids, "'%' must not act as a wildcard (matched '50x')"
+
+    rows, _more = await svc.search(q=f"{marker} 50_")
+    ids = {o.id for o in rows}
+    assert trap.id not in ids and lit.id not in ids, "'_' must not match any single char"

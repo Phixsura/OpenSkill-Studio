@@ -3249,6 +3249,19 @@ Killers: seeded params must reach the fetch URL (`?status=paused` →
 `&status=paused` in the request), and changing a filter must
 `router.replace` the canonical URL. e2e 12/12 on the rebuilt bundle.
 
+### 106.22 Round 394 — LIKE metacharacters in opportunity search
+
+A repo-wide sweep for `ilike(`/`like(` without escaping found ONE remaining
+user-input site: talent opportunity search built its per-word patterns as
+`f"%{word}%"` raw — a `_` in the query matched any character ("50_" matched
+"50x") and `%` matched everything (also a free CPU-amplifier:
+"%a%b%c%" patterns). Every other search surface already escaped (eco catalog
+and advisories via `escape_like`, registry and skills inline since their own
+hardening rounds; capability-id filters strip wildcards from ULIDs, which
+contain none). Fixed with the same inline escaping; DB killer creates literal
+"50%" and trap "50x" rows and proves the query only matches the literal
+(mutation-verified: unescaping the pattern → red).
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

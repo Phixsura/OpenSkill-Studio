@@ -318,3 +318,18 @@ test("11 — the lifecycle dropdown filters the catalog against the live API", a
     )
     .toBe(true);
 });
+
+test("12 — filter deep-links restore the filtered view (R393)", async () => {
+  // components: ?tab=Drafts&status=draft must land on the Drafts tab with the
+  // dropdown pre-set — a pasted link reproduces the operator's exact view.
+  await goto(page, "/dashboard/ecosystem/components?tab=Drafts&status=draft");
+  await expect(page.getByLabel("Filter by draft status")).toHaveValue("draft");
+  // sources: ?status=active seeds the dropdown and the request carries it
+  await goto(page, "/dashboard/ecosystem/sources?status=active");
+  await expect(page.getByLabel("Filter by source status")).toHaveValue("active");
+  // and changing the filter rewrites the URL (shareable both directions)
+  await page.getByLabel("Filter by source status").selectOption("paused");
+  await expect
+    .poll(async () => page.url().includes("status=paused"), { timeout: 5_000 })
+    .toBe(true);
+});
