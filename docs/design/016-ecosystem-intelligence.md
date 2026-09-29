@@ -3330,6 +3330,13 @@ the allowed values via the shared `check_enum`. Killer sweeps all four
 bad/good pairs. This closes the hardening campaign at §106.26 — final
 verification for the closing push is full regression #59.
 
+Full-run #59's single failure was the THIRD §106.12 accumulation bomb: the
+R209 sweep-fairness test's cap=500 hedge was outgrown by the never-probed
+backlog (tiebreak `target_id ASC` means new fixtures always sort behind it) —
+the cap is now effectively unbounded, which is safe because the batch size
+equals the watched-entity count. Final state: #59 = 6379/6380 with that one
+root-fixed; eco subset 583 green on the closing tree.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

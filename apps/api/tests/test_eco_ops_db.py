@@ -537,9 +537,13 @@ async def test_availability_sweep_prefers_least_recently_probed(db):
         )
     await AvailabilityService(db).probe_status("model_version", probed.id)
 
-    # cap high enough to cover this test's two entities among pre-existing
-    # watched fixtures; the PROBED one must sort behind every never-probed one
-    n = await sweep_watched_availability(db, cap=500)
+    # R397 (§106.12 law): the never-probed backlog on the shared dev DB grows
+    # with every run and the tiebreak is target_id ASC — NEW fixtures always
+    # sort behind it, so any fixed cap eventually starves them (cap=500 died
+    # at ~600 accumulated watched entities). The batch size equals the number
+    # of watched entities (hundreds), so an effectively-unbounded cap keeps
+    # the ordering property under test without a scheduled failure.
+    n = await sweep_watched_availability(db, cap=1_000_000)
     assert n >= 2
     msgs = list(await db.scalars(
         select(OutboxMessage)
