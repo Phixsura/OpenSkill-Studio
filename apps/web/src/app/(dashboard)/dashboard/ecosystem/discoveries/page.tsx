@@ -53,6 +53,11 @@ export default function DiscoveriesPage() {
   const [mutError, setMutError] = useState<string | null>(null);
 
   const [llmSourceId, setLlmSourceId] = useState("");
+  // R387: observations feed is append-only + cursor-paginated (§13) — the page
+  // silently showed only the newest 50 with no way to go deeper
+  const [obsPages, setObsPages] = useState<Observation[][]>([]);
+  const [obsCursor, setObsCursor] = useState<string | null>(null);
+  const [obsHasMore, setObsHasMore] = useState(false);
   const [llmText, setLlmText] = useState("");
   const sources = useQuery({
     queryKey: ["eco-sources-for-extract"],
@@ -63,13 +68,36 @@ export default function DiscoveriesPage() {
   });
   const observations = useQuery({
     queryKey: ["eco-observations", eventType, flaggedOnly],
-    queryFn: () =>
-      apiWithAuth<{ data: Observation[] }>(
+    queryFn: async () => {
+      const res = await apiWithAuth<{
+        data: Observation[];
+        meta: { has_more: boolean; next_cursor: string | null };
+      }>(
         `/ecosystem/observations?limit=50${eventType ? `&event_type=${eventType}` : ""}${
           flaggedOnly ? "&injection_flagged=true" : ""
         }`,
-      ),
+      );
+      setObsPages([res.data]);
+      setObsCursor(res.meta?.next_cursor ?? null);
+      setObsHasMore(Boolean(res.meta?.has_more));
+      return res;
+    },
   });
+
+  const loadMoreObservations = async () => {
+    if (!obsCursor) return;
+    const res = await apiWithAuth<{
+      data: Observation[];
+      meta: { has_more: boolean; next_cursor: string | null };
+    }>(
+      `/ecosystem/observations?limit=50&cursor=${obsCursor}${
+        eventType ? `&event_type=${eventType}` : ""
+      }${flaggedOnly ? "&injection_flagged=true" : ""}`,
+    );
+    setObsPages((prev) => [...prev, res.data]);
+    setObsCursor(res.meta?.next_cursor ?? null);
+    setObsHasMore(Boolean(res.meta?.has_more));
+  };
   const resolutions = useQuery({
     queryKey: ["eco-resolutions"],
     queryFn: () => apiWithAuth<{ data: ResolutionCandidate[] }>("/ecosystem/resolution-candidates"),
@@ -131,7 +159,7 @@ export default function DiscoveriesPage() {
   });
 
   const pending = resolutions.data?.data ?? [];
-  const rows = observations.data?.data ?? [];
+  const rows = obsPages.flat();
 
   return (
     <div className="space-y-6 p-6">
@@ -368,6 +396,16 @@ export default function DiscoveriesPage() {
                 ))}
               </tbody>
             </table>
+            {obsHasMore && (
+              <div className="border-t px-4 py-2 text-sm">
+                <button
+                  onClick={loadMoreObservations}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>

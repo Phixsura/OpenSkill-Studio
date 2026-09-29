@@ -41,7 +41,7 @@ beforeEach(() => {
 describe("Operator surfaces (ADR-016 §52)", () => {
   it("source History panel shows sync runs with errors", async () => {
     api.mockImplementation((path: string) => {
-      if (path === "/ecosystem/sources")
+      if (path.startsWith("/ecosystem/sources?"))
         return Promise.resolve({
           data: [
             {

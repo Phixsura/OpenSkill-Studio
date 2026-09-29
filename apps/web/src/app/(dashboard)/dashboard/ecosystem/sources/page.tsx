@@ -70,6 +70,10 @@ export default function SourcesPage() {
   // R378: mirrors backend SOURCE_STATUSES (parity-guarded)
   const SOURCE_STATUSES = ["active", "paused", "error", "archived"];
   const [statusFilter, setStatusFilter] = useState("");
+  // R387: sources list is server-paginated (limit 50) — without offset the
+  // page silently truncated at 50 rows with no signal (meta.total was dropped)
+  const [offset, setOffset] = useState(0);
+  const [pages, setPages] = useState<Source[][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
@@ -81,12 +85,16 @@ export default function SourcesPage() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-sources", statusFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Source[] }>(
-        `/ecosystem/sources${statusFilter ? `?status=${statusFilter}` : ""}`,
-      ),
+    queryKey: ["eco-sources", statusFilter, offset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Source[]; meta: { total: number } }>(
+        `/ecosystem/sources?limit=50&offset=${offset}${statusFilter ? `&status=${statusFilter}` : ""}`,
+      );
+      setPages((prev) => (offset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const total = data?.meta?.total ?? 0;
   const health = useQuery({
     queryKey: ["eco-source-health", healthFor],
     enabled: Boolean(healthFor),
@@ -99,7 +107,13 @@ export default function SourcesPage() {
       apiWithAuth<{ data: SyncRun[] }>(`/ecosystem/sources/${historyFor}/sync-runs?limit=20`),
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["eco-sources"] });
+  const invalidate = () => {
+    // R387: collapse back to page one — refetching stale offsets would race
+    // the accumulated pages state
+    setOffset(0);
+    setPages([]);
+    queryClient.invalidateQueries({ queryKey: ["eco-sources"] });
+  };
 
   const createSource = useMutation({
     mutationFn: () =>
@@ -143,7 +157,7 @@ export default function SourcesPage() {
     onSuccess: invalidate,
   });
 
-  const sources = data?.data ?? [];
+  const sources = pages.flat();
 
   return (
     <div className="space-y-6 p-6">
@@ -152,7 +166,11 @@ export default function SourcesPage() {
         <select
           aria-label="Filter by source status"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setOffset(0);
+            setPages([]);
+          }}
           className="ml-auto mr-2 rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
         >
           <option value="">All statuses</option>
@@ -342,6 +360,19 @@ export default function SourcesPage() {
               ))}
             </tbody>
           </table>
+          <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-[hsl(var(--muted-foreground))]">
+            <span>
+              {sources.length} of {total}
+            </span>
+            {sources.length < total && (
+              <button
+                onClick={() => setOffset(sources.length)}
+                className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+              >
+                Load more
+              </button>
+            )}
+          </div>
         </div>
       )}
       {historyFor && (

@@ -47,7 +47,8 @@ function source(status: string) {
 
 function mockSources(status: string) {
   api.mockImplementation((path: string, init?: RequestInit) => {
-    if (path === "/ecosystem/sources" && !init) return Promise.resolve({ data: [source(status)] });
+    if (path.startsWith("/ecosystem/sources?") && !init)
+      return Promise.resolve({ data: [source(status)], meta: { total: 1, limit: 50, offset: 0 } });
     return Promise.resolve({ data: {} });
   });
 }
@@ -181,7 +182,48 @@ describe("Source status filter (R378)", () => {
       target: { value: "paused" },
     });
     await waitFor(() =>
-      expect(api.mock.calls.some((c) => String(c[0]).includes("sources?status=paused"))).toBe(true),
+      expect(
+        api.mock.calls.some((c) =>
+          String(c[0]).includes("sources?limit=50&offset=0&status=paused"),
+        ),
+      ).toBe(true),
     );
   });
 });
+
+describe("Source list pagination (R387)", () => {
+  it("shows count-of-total and Load more fetches the next offset", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/sources?") && !init) {
+        const offset = Number(new URLSearchParams(String(path).split("?")[1]).get("offset"));
+        return Promise.resolve({
+          data: Array.from({ length: 50 }, (_, i) => ({
+            ...sourceAt(offset + i),
+          })),
+          meta: { total: 120, limit: 50, offset },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<SourcesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("50 of 120")).toBeTruthy();
+    fireEvent.click(screen.getByText("Load more"));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("limit=50&offset=50"))).toBe(true),
+    );
+    expect(await screen.findByText("100 of 120")).toBeTruthy();
+  });
+});
+
+function sourceAt(i: number) {
+  return {
+    id: `S${String(i).padStart(24, "0")}`,
+    name: `Source ${i}`,
+    source_type: "github_repo",
+    trust_level: "community",
+    status: "active",
+    last_success_at: null,
+    consecutive_failures: 0,
+    sync_interval_minutes: 1440,
+  };
+}

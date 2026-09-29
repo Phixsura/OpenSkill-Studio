@@ -3107,6 +3107,30 @@ creates a fresh org. Doctrine addition to §97: on a shared mutable dev DB,
 any fixed-width random identifier under a global unique constraint is a
 scheduled failure — width must price in the DB's lifetime, not one run.
 
+### 106.15 Round 387 — silent server-side truncation on two list surfaces
+
+The catalog page paginates (offset + "N of total" + Load more) and the changes
+page follows the §13 ULID cursor — but two sibling surfaces dropped their
+pagination metadata on the floor:
+
+- **sources page**: fetched with the default `limit=50` and IGNORED
+  `meta.total` — an operator with 51+ sources saw 50 rows and no signal that
+  anything was missing. Now offset-paginated with "N of total" + Load more
+  (catalog pattern); the status-filter change and any mutation reset to page
+  one (refetching stale offsets would race the accumulated pages state).
+- **discoveries page**: fetched the newest 50 observations and ignored
+  `meta.has_more`/`next_cursor` entirely, so the append-only feed's history
+  was unreachable from the UI. Now follows the cursor (changes-page pattern),
+  Load more disappears when exhausted.
+
+Killers: sources — 120 rows mocked → "50 of 120", Load more → `offset=50` →
+"100 of 120"; discoveries — Load more → `cursor=CUR` sent, second page
+rendered, button gone when `has_more=false`. Two pre-existing mocks matched
+the bare URL (`path === "/ecosystem/sources"`) and went silently empty when
+the page started sending `?limit=50&offset=0` — segment-boundary lesson from
+§102 applied to mocks: match `startsWith("…?")`, not equality on a URL that
+legitimately grows parameters.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

@@ -204,3 +204,32 @@ describe("Injection-flagged filter (R322)", () => {
     );
   });
 });
+
+describe("Observation feed cursor pagination (R387)", () => {
+  it("Load more follows next_cursor and appends the next page", async () => {
+    const pageObs = (i: number) => ({
+      ...obs(`P${String(i).padStart(25, "0")}`, false),
+      external_ref: `pageref-${i}`,
+    });
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/observations?") && !init) {
+        const cursor = new URLSearchParams(String(path).split("?")[1]).get("cursor");
+        const base = cursor ? 50 : 0;
+        return Promise.resolve({
+          data: Array.from({ length: 50 }, (_, i) => pageObs(base + i)),
+          meta: { has_more: !cursor, next_cursor: cursor ? null : "CUR" },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<DiscoveriesPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("pageref-0")).toBeTruthy();
+    fireEvent.click(await screen.findByText("Load more"));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("cursor=CUR"))).toBe(true),
+    );
+    expect(await screen.findByText("pageref-99")).toBeTruthy();
+    // exhausted: no further Load more
+    expect(screen.queryByText("Load more")).toBeNull();
+  });
+});
