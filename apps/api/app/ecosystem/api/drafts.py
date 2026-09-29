@@ -129,6 +129,15 @@ async def update_draft(
 
 async def _transition(draft_id: str, to_status: str, db: AsyncSession, user: User):
     draft = await DraftService(db).transition(draft_id, to_status=to_status, actor_id=user.id)
+    # R389: approval decisions are audit-worthy like publishes (§14 parity);
+    # "published" audits in its own route with the published_ref.
+    action = {"approved": "eco.draft_approved", "rejected": "eco.draft_rejected"}.get(to_status)
+    if action:
+        await eco_audit(
+            db, user, action=action,
+            target_type="eco_component_draft", target_id=draft_id,
+            after={"status": to_status},
+        )
     await db.commit()
     return {"data": draft}
 

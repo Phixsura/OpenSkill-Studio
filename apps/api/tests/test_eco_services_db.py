@@ -245,8 +245,15 @@ async def test_security_advisory_creates_critical_change(db):
     assert run.changes_detected == 1
     from sqlalchemy import select
 
+    # R389 hermeticity: pin to THIS run's observation — an unqualified
+    # "any security change" select grabs arbitrary rows from the shared dev DB
     change = await db.scalar(
-        select(ChangeEvent).where(ChangeEvent.change_type == "security")
+        select(ChangeEvent)
+        .join(EcosystemObservation, ChangeEvent.observation_id == EcosystemObservation.id)
+        .where(
+            ChangeEvent.change_type == "security",
+            EcosystemObservation.source_id == source.id,
+        )
     )
     assert change.severity == "security_critical"
 

@@ -126,9 +126,35 @@ describe("Suite/run status filters (R381)", () => {
     await waitFor(() =>
       expect(
         api.mock.calls.some((c) =>
-          String(c[0]).includes("/ecosystem/benchmark/runs?limit=50&status=failed"),
+          String(c[0]).includes("/ecosystem/benchmark/runs?limit=50&offset=0&status=failed"),
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe("Run list pagination (R388)", () => {
+  it("shows count-of-total and Load more fetches offset=50", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/benchmark/runs?") && !init) {
+        const offset = Number(new URLSearchParams(String(path).split("?")[1]).get("offset"));
+        return Promise.resolve({
+          data: Array.from({ length: 50 }, (_, i) =>
+            run(`R${String(offset + i).padStart(25, "0")}`, "completed"),
+          ),
+          meta: { total: 120, limit: 50, offset },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<BenchmarksPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("50 of 120")).toBeTruthy();
+    fireEvent.click(screen.getByText("Load more"));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("runs?limit=50&offset=50"))).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("100 of 120")).toBeTruthy();
   });
 });

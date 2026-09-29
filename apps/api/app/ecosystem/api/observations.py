@@ -245,6 +245,10 @@ async def verify_observation(
     obs.human_verified = True
     obs.verified_by = user.id
     obs.verified_at = datetime.now(UTC)
+    await eco_audit(
+        db, user, action="eco.observation_verified",
+        target_type="eco_observation", target_id=obs_id,
+    )
     await db.commit()
     return {"data": obs}
 
@@ -364,6 +368,10 @@ async def acknowledge_change(
         raise AppError("NOT_FOUND", "Change event not found", 404)
     change.acknowledged = True
     change.acknowledged_by = user.id
+    await eco_audit(
+        db, user, action="eco.change_acknowledged",
+        target_type="eco_change_event", target_id=change_id,
+    )
     await db.commit()
     return {"data": change}
 
@@ -386,5 +394,9 @@ async def unacknowledge_change(
         raise AppError("NOT_FOUND", "Change event not found", 404)
     change.acknowledged = False
     change.acknowledged_by = None
+    await eco_audit(
+        db, user, action="eco.change_unacknowledged",
+        target_type="eco_change_event", target_id=change_id,
+    )
     await db.commit()
     return {"data": change}

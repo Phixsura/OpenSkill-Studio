@@ -578,6 +578,11 @@ async def confirm_resolution(
         actor_id=user.id,
         target_entity_id=body.target_entity_id if body else None,
     )
+    await eco_audit(
+        db, user, action="eco.resolution_confirmed",
+        target_type="eco_resolution_candidate", target_id=candidate_id,
+        after={"entity_id": entity_id},
+    )
     await db.commit()
     return {
         "data": {
@@ -597,6 +602,10 @@ async def reject_resolution(
     user: User = Depends(require_platform_admin),
 ):
     candidate = await ResolutionService(db).reject(candidate_id, actor_id=user.id)
+    await eco_audit(
+        db, user, action="eco.resolution_rejected",
+        target_type="eco_resolution_candidate", target_id=candidate_id,
+    )
     await db.commit()
     return {"data": candidate}
 

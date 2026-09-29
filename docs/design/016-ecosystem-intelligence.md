@@ -3131,6 +3131,52 @@ the page started sending `?limit=50&offset=0` — segment-boundary lesson from
 §102 applied to mocks: match `startsWith("…?")`, not equality on a URL that
 legitimately grows parameters.
 
+### 106.16 Round 388 — runs list gains real pagination (backend + UI)
+
+§106.15 fixed surfaces that DROPPED pagination metadata; the runs list had
+none to drop — `GET /benchmark/runs` was hard-capped at `le=100` with no
+offset, on the domain's highest-churn table (every benchmark execution adds a
+row). Backend: `list_runs` returns `(page, total)` with `.offset()`;
+the route emits `meta {total, limit, offset}` (response_model switched off
+`DataResponse`, which silently STRIPS a meta key — the killer's first red was
+`KeyError: 'meta'` for exactly that reason). UI: "N of total" + Load more on
+the benchmarks page; suite drill-down toggle and status filter both reset the
+accumulated pages. Contract killer: meta shape, non-overlapping offset pages,
+offset-past-end → `[]` with the true total intact.
+
+### 106.17 Round 389 — single-action audit parity
+
+The §14 audit posture had a systematic hole: every BULK admin action was
+audited (`bulk-verify`, `bulk-acknowledge`, `bulk-unacknowledge`,
+`bulk-decide`), and so were the heavyweight decisions (rollout decide,
+advisory transition, publish) — but the SINGLE-item variants of the same
+actions left no trail. An admin who verified observations one at a time, or
+approved a replacement candidate, was invisible to the audit log while a
+bulk operator was recorded. Nine sites gained `eco_audit` (all registered,
+enforced by the existing call-site-scan guard):
+
+resolution confirm/reject, observation verify, change ack/un-ack, candidate
+decide, draft approve/reject (inside `_transition`, so publish keeps its own
+richer audit), impact status set.
+
+Killer drives ack → un-ack → verify over HTTP and asserts each lands an
+immutable `CommercialAuditEvent` naming the exact target id.
+
+### 106.17a Round 389 fallout — two doctrine reinforcements
+
+1. Full-run #51 red-flagged `test_every_eco_audit_action_is_registered` — but
+   only because R389's edits landed MID-RUN: that guard reads source FILES at
+   test time while the registry module was imported at collection. Rule: no
+   production-source edits while a full regression runs when any guard reads
+   files live (the §97 "no concurrent pytest" rule generalizes to concurrent
+   EDITS).
+2. The R389 killer's fixture (a `security`/`minor` ChangeEvent) exposed an
+   under-constrained pre-existing test: `select(ChangeEvent).where(change_type
+== "security")` grabs an ARBITRARY row from the shared dev DB — it passed
+   for ~380 rounds only because every prior security row happened to be
+   critical. Pinned to its own source's observation (join on observation_id).
+   Same class as §106.12/§106.14: shared-DB tests must select THEIR OWN rows.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

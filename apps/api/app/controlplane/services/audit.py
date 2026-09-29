@@ -91,6 +91,16 @@ AUDIT_ACTIONS = frozenset(
         "eco.changes_bulk_acknowledged",
         "eco.resolutions_bulk_decided",
         "eco.suite_imported",
+        # R389 single-action parity with the audited bulk/sibling variants
+        "eco.resolution_confirmed",
+        "eco.resolution_rejected",
+        "eco.observation_verified",
+        "eco.change_acknowledged",
+        "eco.change_unacknowledged",
+        "eco.candidate_decided",
+        "eco.draft_approved",
+        "eco.draft_rejected",
+        "eco.impact_status_set",
         # revenue share / settlements
         "revshare.rule_activated",
         "revshare.rule_retired",

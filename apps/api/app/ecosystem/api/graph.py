@@ -156,6 +156,11 @@ async def set_impact_status(
     _user: User = Depends(require_platform_admin),
 ):
     analysis = await ImpactService(db).set_status(analysis_id, status)
+    await eco_audit(
+        db, _user, action="eco.impact_status_set",
+        target_type="eco_impact_analysis", target_id=analysis_id,
+        after={"status": status},
+    )
     await db.commit()
     return {"data": analysis}
 

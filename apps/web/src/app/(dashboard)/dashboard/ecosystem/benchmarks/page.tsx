@@ -169,13 +169,22 @@ function BenchmarksInner() {
     queryFn: () =>
       apiWithAuth<{ data: RunResult[] }>(`/ecosystem/benchmark/runs/${drillRun}/results`),
   });
+  // R388: runs are the highest-churn list — paginate instead of silently
+  // truncating at 50
+  const [runOffset, setRunOffset] = useState(0);
+  const [runPages, setRunPages] = useState<Run[][]>([]);
   const runs = useQuery({
-    queryKey: ["eco-runs", selectedSuite, runStatusFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Run[] }>(
-        `/ecosystem/benchmark/runs?limit=50${selectedSuite ? `&suite_id=${selectedSuite}` : ""}${runStatusFilter ? `&status=${runStatusFilter}` : ""}`,
-      ),
+    queryKey: ["eco-runs", selectedSuite, runStatusFilter, runOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Run[]; meta: { total: number } }>(
+        `/ecosystem/benchmark/runs?limit=50&offset=${runOffset}${selectedSuite ? `&suite_id=${selectedSuite}` : ""}${runStatusFilter ? `&status=${runStatusFilter}` : ""}`,
+      );
+      setRunPages((prev) => (runOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const runRows = runPages.flat();
+  const runTotal = runs.data?.meta?.total ?? 0;
 
   const compare = useMutation({
     mutationFn: () =>
@@ -315,7 +324,11 @@ function BenchmarksInner() {
             {(suites.data?.data ?? []).map((s) => (
               <button
                 key={s.id}
-                onClick={() => setSelectedSuite(selectedSuite === s.id ? null : s.id)}
+                onClick={() => {
+                  setSelectedSuite(selectedSuite === s.id ? null : s.id);
+                  setRunOffset(0);
+                  setRunPages([]);
+                }}
                 className={`rounded-lg border p-4 text-left shadow-sm ${
                   selectedSuite === s.id
                     ? "border-[hsl(var(--primary))] bg-[hsl(var(--secondary))]"
@@ -387,7 +400,11 @@ function BenchmarksInner() {
           <select
             aria-label="Filter by run status"
             value={runStatusFilter}
-            onChange={(e) => setRunStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setRunStatusFilter(e.target.value);
+              setRunOffset(0);
+              setRunPages([]);
+            }}
             className="ml-auto mr-2 rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -403,7 +420,7 @@ function BenchmarksInner() {
             Compare selected ({compareIds.length})
           </button>
         </div>
-        {(runs.data?.data ?? []).length === 0 ? (
+        {runRows.length === 0 ? (
           <EmptyState icon="🏁" text="No runs yet." />
         ) : (
           <div className="overflow-x-auto rounded-lg border shadow-sm">
@@ -421,7 +438,7 @@ function BenchmarksInner() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {(runs.data?.data ?? []).map((r) => (
+                {runRows.map((r) => (
                   <tr key={r.id} className="bg-[hsl(var(--card))]">
                     <td className="px-4 py-3">
                       <input
@@ -469,6 +486,19 @@ function BenchmarksInner() {
                 ))}
               </tbody>
             </table>
+            <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {runRows.length} of {runTotal}
+              </span>
+              {runRows.length < runTotal && (
+                <button
+                  onClick={() => setRunOffset(runRows.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         )}
         {drillRun && (

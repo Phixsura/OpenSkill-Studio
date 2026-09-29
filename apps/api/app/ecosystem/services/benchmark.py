@@ -10,7 +10,7 @@ import statistics
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.benchmark import (
@@ -789,15 +789,27 @@ class BenchmarkService:
         return run
 
     async def list_runs(
-        self, *, suite_id: str | None = None, status: str | None = None, limit: int = 50
-    ) -> list[BenchmarkRun]:
+        self,
+        *,
+        suite_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[BenchmarkRun], int]:
+        """R388: runs are the highest-churn list — return (page, total) so the
+        UI can paginate instead of silently truncating."""
         query = select(BenchmarkRun)
         if suite_id:
             query = query.where(BenchmarkRun.suite_id == suite_id)
         if status:
             query = query.where(BenchmarkRun.status == status)
-        rows = await self.db.scalars(query.order_by(BenchmarkRun.created_at.desc(), BenchmarkRun.id.desc()).limit(limit))
-        return list(rows)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
+        rows = await self.db.scalars(
+            query.order_by(BenchmarkRun.created_at.desc(), BenchmarkRun.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(rows), int(total or 0)
 
     async def list_results(self, run_id: str) -> list[BenchmarkResult]:
         rows = await self.db.scalars(

@@ -185,11 +185,12 @@ async def benchmark_score_history(
     return {"data": out}
 
 
-@router.get("/runs", response_model=DataResponse[list[RunResponse]])
+@router.get("/runs", response_model=dict)
 async def list_runs(
     suite_id: str | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -197,7 +198,13 @@ async def list_runs(
     from app.ecosystem.models.benchmark import RUN_STATUSES
 
     check_enum(status, RUN_STATUSES, "status")
-    return {"data": await BenchmarkService(db).list_runs(suite_id=suite_id, status=status, limit=limit)}
+    runs, total = await BenchmarkService(db).list_runs(
+        suite_id=suite_id, status=status, limit=limit, offset=offset
+    )
+    return {
+        "data": [RunResponse.model_validate(r).model_dump() for r in runs],
+        "meta": {"total": total, "limit": limit, "offset": offset},
+    }
 
 
 @router.get("/runs/compare", response_model=DataResponse[dict])

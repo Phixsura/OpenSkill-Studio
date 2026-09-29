@@ -1620,3 +1620,86 @@ async def test_shadowed_talent_static_routes_are_reachable_again(http, tokens):
     r = await http.get("/api/v1/talent/credential-pathways/my-progress", headers=member)
     assert r.status_code == 200, (r.status_code, r.text[:120])
     assert isinstance(r.json()["data"], list)
+
+
+async def test_run_list_pagination_meta_and_offset(http, tokens):
+    """Round-388: runs list gained offset + meta.total (highest-churn list was
+    hard-capped at 100 with no pagination). Contract: meta reflects the true
+    filtered total; offset pages never overlap; offset past the end is []."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    r = await http.get("/api/v1/ecosystem/benchmark/runs?limit=2", headers=member)
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["meta"]) == {"total", "limit", "offset"}
+    total = body["meta"]["total"]
+    assert body["meta"]["limit"] == 2 and body["meta"]["offset"] == 0
+    assert len(body["data"]) == min(2, total)
+    if total > 2:
+        r2 = await http.get(
+            "/api/v1/ecosystem/benchmark/runs?limit=2&offset=2", headers=member
+        )
+        ids1 = {x["id"] for x in body["data"]}
+        ids2 = {x["id"] for x in r2.json()["data"]}
+        assert not (ids1 & ids2), "offset pages must not overlap"
+    r3 = await http.get(
+        f"/api/v1/ecosystem/benchmark/runs?limit=2&offset={total + 100}", headers=member
+    )
+    assert r3.json()["data"] == []
+    assert r3.json()["meta"]["total"] == total
+
+
+async def test_single_admin_actions_are_audited(http, tokens):
+    """Round-389 killer: bulk verify/ack/unack and sibling decisions were
+    audited but their SINGLE-item variants were not — a one-at-a-time admin
+    left no trail. Ack, un-ack and verify must each land an immutable audit
+    row naming the exact target."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.core.database import AsyncSessionLocal, engine
+    from app.ecosystem.models.observation import ChangeEvent, EcosystemObservation
+    from tests.test_eco_services_db import _mk_source
+
+    admin = {"Authorization": f"Bearer {tokens['admin']}"}
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        source = await _mk_source(db)
+        obs = EcosystemObservation(
+            source_id=source.id, event_type="security_advisory",
+            raw_hash="a" * 64, normalized={},
+        )
+        db.add(obs)
+        await db.flush()
+        change = ChangeEvent(
+            observation_id=obs.id, change_type="security",
+            field="audit-marker", old_value={}, new_value={},
+            severity="minor",
+        )
+        db.add(change)
+        await db.commit()
+        change_id, obs_id = change.id, obs.id
+
+    for url, action, target in [
+        (f"/api/v1/ecosystem/changes/{change_id}/acknowledge",
+         "eco.change_acknowledged", change_id),
+        (f"/api/v1/ecosystem/changes/{change_id}/unacknowledge",
+         "eco.change_unacknowledged", change_id),
+        (f"/api/v1/ecosystem/observations/{obs_id}/verify",
+         "eco.observation_verified", obs_id),
+    ]:
+        r = await http.post(url, headers=admin)
+        assert r.status_code == 200, (url, r.status_code, r.text[:120])
+        await engine.dispose(close=False)
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
+                _select(CommercialAuditEvent)
+                .where(
+                    CommercialAuditEvent.action == action,
+                    CommercialAuditEvent.target_id == target,
+                )
+                .order_by(CommercialAuditEvent.id.desc())
+                .limit(1)
+            )
+            assert row is not None, f"{action} left no audit row"
+    await engine.dispose()
