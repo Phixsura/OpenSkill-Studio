@@ -59,7 +59,7 @@ beforeEach(() => {
         data: [obs("O1".padEnd(26, "x"), false), obs("O2".padEnd(26, "x"), true)],
       });
     if (path === "/ecosystem/sources" && !init) return Promise.resolve({ data: [] });
-    if (path === "/ecosystem/resolution-candidates" && !init)
+    if (path.startsWith("/ecosystem/resolution-candidates?") && !init)
       return Promise.resolve({
         data: [
           {
@@ -133,7 +133,7 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
 
   it("merge candidates link to their target entity in the catalog", async () => {
     api.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === "/ecosystem/resolution-candidates" && !init)
+      if (path.startsWith("/ecosystem/resolution-candidates?") && !init)
         return Promise.resolve({
           data: [
             {
@@ -170,7 +170,7 @@ describe("Discoveries review actions (ADR-016 §11 UI)", () => {
         });
       if (path.startsWith("/ecosystem/observations?") && !init)
         return Promise.resolve({ data: [] });
-      if (path === "/ecosystem/resolution-candidates" && !init)
+      if (path.startsWith("/ecosystem/resolution-candidates?") && !init)
         return Promise.resolve({ data: [] });
       return Promise.resolve({ data: [] });
     });

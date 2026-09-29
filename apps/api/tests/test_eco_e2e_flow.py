@@ -136,7 +136,7 @@ async def test_full_discovery_to_rollout_e2e(db):
 
     # 3. Observations + resolution candidates created; human confirms both
     resolution = ResolutionService(db)
-    pending = await resolution.list_pending(entity_kind="model_version")
+    pending, _total = await resolution.list_pending(entity_kind="model_version")
     ours = [c for c in pending if c.proposed_payload.get("official_id", "").startswith("visiongen")]
     assert len(ours) == 2
     entity_ids = {}

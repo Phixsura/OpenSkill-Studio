@@ -84,7 +84,7 @@ async def test_bulk_decide_partial_failure_does_not_abort(db):
     run = await SyncService(db, fetcher=_fetcher_for(body)).run_sync(source.id)
     assert run.observations_created == 2
     svc = ResolutionService(db)
-    pending = [c for c in await svc.list_pending(entity_kind="model_version")]
+    pending = [c for c in (await svc.list_pending(entity_kind="model_version"))[0]]
     ids = [c.id for c in pending[:2]] + ["0" * 26]
     decided, failed = [], []
     for candidate_id in ids:

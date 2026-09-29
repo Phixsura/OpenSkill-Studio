@@ -9,7 +9,7 @@ supersession are audit-tracked.
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
@@ -93,7 +93,7 @@ class PricingService:
         reconciliation_status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[PriceObservation]:
+    ) -> tuple[list[PriceObservation], int]:
         query = select(PriceObservation)
         if entity_kind:
             query = query.where(PriceObservation.entity_kind == entity_kind)
@@ -103,10 +103,11 @@ class PricingService:
             query = query.where(
                 PriceObservation.reconciliation_status == reconciliation_status
             )
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
             query.order_by(PriceObservation.observed_at.desc(), PriceObservation.id.desc()).limit(limit).offset(offset)
         )
-        return list(rows)
+        return list(rows), int(total or 0)
 
     async def latest_prices(self, entity_kind: str, entity_id: str) -> dict[str, dict]:
         """Latest price per unit for one entity — approved rows win over

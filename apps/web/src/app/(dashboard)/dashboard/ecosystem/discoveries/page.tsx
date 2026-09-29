@@ -103,12 +103,24 @@ export default function DiscoveriesPage() {
       setMutError(e instanceof ApiError ? e.message : "Failed to load more");
     }
   };
+  // R392: 188 pending resolutions in dev already exceed one page — paginate
+  const [resOffset, setResOffset] = useState(0);
+  const [resPages, setResPages] = useState<ResolutionCandidate[][]>([]);
   const resolutions = useQuery({
-    queryKey: ["eco-resolutions"],
-    queryFn: () => apiWithAuth<{ data: ResolutionCandidate[] }>("/ecosystem/resolution-candidates"),
+    queryKey: ["eco-resolutions", resOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: ResolutionCandidate[]; meta: { total: number } }>(
+        `/ecosystem/resolution-candidates?limit=50&offset=${resOffset}`,
+      );
+      setResPages((prev) => (resOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const resTotal = resolutions.data?.meta?.total ?? 0;
 
   const invalidate = () => {
+    setResOffset(0);
+    setResPages([]);
     queryClient.invalidateQueries({ queryKey: ["eco-observations"] });
     queryClient.invalidateQueries({ queryKey: ["eco-resolutions"] });
   };
@@ -163,7 +175,7 @@ export default function DiscoveriesPage() {
     onError: (e) => setMutError(e instanceof ApiError ? e.message : "Action failed"),
   });
 
-  const pending = resolutions.data?.data ?? [];
+  const pending = resPages.flat();
   const rows = obsPages.flat();
 
   return (
@@ -242,6 +254,19 @@ export default function DiscoveriesPage() {
                 </div>
               </div>
             ))}
+            <div className="flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {pending.length} of {resTotal}
+              </span>
+              {pending.length < resTotal && (
+                <button
+                  onClick={() => setResOffset(pending.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         )}
       </section>

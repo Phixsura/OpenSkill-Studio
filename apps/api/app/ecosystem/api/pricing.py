@@ -18,7 +18,7 @@ from app.schemas.base import DataResponse
 router = APIRouter(prefix="/ecosystem/pricing", tags=["Ecosystem — Pricing"])
 
 
-@router.get("/observations", response_model=DataResponse[list[PriceObservationResponse]])
+@router.get("/observations", response_model=dict)
 async def list_price_observations(
     entity_kind: str | None = None,
     entity_id: str | None = None,
@@ -35,14 +35,17 @@ async def list_price_observations(
     from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
 
     check_enum(entity_kind, frozenset(CATALOG_KIND_TO_MODEL), "entity_kind")
-    rows = await PricingService(db).list(
+    rows, total = await PricingService(db).list(
         entity_kind=entity_kind,
         entity_id=entity_id,
         reconciliation_status=reconciliation_status,
         limit=limit,
         offset=offset,
     )
-    return {"data": rows}
+    return {
+        "data": [PriceObservationResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
+    }
 
 
 @router.post(

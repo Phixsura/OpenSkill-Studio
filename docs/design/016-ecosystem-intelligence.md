@@ -3216,6 +3216,21 @@ started sending `?limit=50&offset=0` — all converted to
 FALLBACK text instead of the real message — mocks of typed errors must mirror
 the constructor signature.
 
+### 106.20 Round 392 — the last two meta-less lists (pricing, resolutions)
+
+A derived scan (offset-capable GET routes whose body lacks `"meta"`) found the
+final two: price observations (268 rows in dev, page cap 100) and pending
+resolution candidates (188 rows, cap 50) — both now return
+`meta {total, limit, offset}` with count + Load more on the pricing page and
+the discoveries review queue. The killer's first red repeated §106.10's URL
+trap verbatim (`/catalog/resolution-candidates` — the route lives at
+`/resolution-candidates`); the route-shadow guard can't catch that class
+(nothing is shadowed — the test simply guessed a prefix), so the rule is
+procedural: copy list-endpoint URLs from the route table, never compose them
+from the router filename. With this, every eco list surface either carries
+offset+total meta or follows the §13 cursor: the truncation class is closed
+by construction, and the derived scan is re-runnable to prove it.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29

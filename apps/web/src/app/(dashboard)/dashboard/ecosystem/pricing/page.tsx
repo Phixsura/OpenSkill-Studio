@@ -37,18 +37,27 @@ function PricingInner() {
   // R351: the reconcile queue filter is shareable state
   const setStatus = (v: string) => {
     setStatusState(v);
+    setOffset(0);
+    setPages([]);
     router.replace(`/dashboard/ecosystem/pricing?status=${v}`, { scroll: false });
   };
   const [error, setError] = useState<string | null>(null);
   const [providerKey, setProviderKey] = useState("");
 
+  // R392: 268 price observations already exceed one page in dev — paginate
+  const [offset, setOffset] = useState(0);
+  const [pages, setPages] = useState<PriceObservation[][]>([]);
   const { data, isLoading } = useQuery({
-    queryKey: ["eco-pricing", status],
-    queryFn: () =>
-      apiWithAuth<{ data: PriceObservation[] }>(
-        `/ecosystem/pricing/observations?limit=100${status ? `&reconciliation_status=${status}` : ""}`,
-      ),
+    queryKey: ["eco-pricing", status, offset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: PriceObservation[]; meta: { total: number } }>(
+        `/ecosystem/pricing/observations?limit=100&offset=${offset}${status ? `&reconciliation_status=${status}` : ""}`,
+      );
+      setPages((prev) => (offset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const total = data?.meta?.total ?? 0;
 
   const reconcile = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: string }) =>
@@ -66,7 +75,7 @@ function PricingInner() {
     onError: (e) => setError(e instanceof ApiError ? e.message : "Reconciliation failed"),
   });
 
-  const rows = data?.data ?? [];
+  const rows = pages.flat();
 
   return (
     <div className="space-y-6 p-6">
@@ -161,6 +170,19 @@ function PricingInner() {
               ))}
             </tbody>
           </table>
+          <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-[hsl(var(--muted-foreground))]">
+            <span>
+              {rows.length} of {total}
+            </span>
+            {rows.length < total && (
+              <button
+                onClick={() => setOffset(rows.length)}
+                className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+              >
+                Load more
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

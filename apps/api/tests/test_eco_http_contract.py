@@ -1717,6 +1717,8 @@ async def test_all_operational_lists_carry_pagination_meta(http, tokens):
         "/api/v1/ecosystem/drafts?limit=1",
         "/api/v1/ecosystem/rollouts?limit=1",
         "/api/v1/ecosystem/impact/analyses?limit=1",
+        "/api/v1/ecosystem/pricing/observations?limit=1",
+        "/api/v1/ecosystem/resolution-candidates?limit=1",
     ]:
         r = await http.get(url, headers=member)
         assert r.status_code == 200, (url, r.status_code, r.text[:120])

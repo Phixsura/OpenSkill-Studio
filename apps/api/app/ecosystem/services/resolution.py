@@ -13,7 +13,7 @@ import re
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import (
@@ -221,14 +221,15 @@ class ResolutionService:
 
     async def list_pending(
         self, *, entity_kind: str | None = None, limit: int = 50, offset: int = 0
-    ) -> list[ResolutionCandidate]:
+    ) -> tuple[list[ResolutionCandidate], int]:
         query = select(ResolutionCandidate).where(ResolutionCandidate.status == "pending")
         if entity_kind:
             query = query.where(ResolutionCandidate.entity_kind == entity_kind)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
             query.order_by(ResolutionCandidate.created_at, ResolutionCandidate.id).limit(limit).offset(offset)
         )
-        return list(rows)
+        return list(rows), int(total or 0)
 
     async def confirm(
         self, candidate_id: str, *, actor_id: str, target_entity_id: str | None = None

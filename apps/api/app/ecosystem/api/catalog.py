@@ -477,7 +477,7 @@ async def catalog_export(
 
 
 @router.get(
-    "/resolution-candidates", response_model=DataResponse[list[ResolutionCandidateResponse]]
+    "/resolution-candidates", response_model=dict
 )
 async def list_resolution_candidates(
     entity_kind: str | None = None,
@@ -486,10 +486,12 @@ async def list_resolution_candidates(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    rows, total = await ResolutionService(db).list_pending(
+        entity_kind=entity_kind, limit=limit, offset=offset
+    )
     return {
-        "data": await ResolutionService(db).list_pending(
-            entity_kind=entity_kind, limit=limit, offset=offset
-        )
+        "data": [ResolutionCandidateResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
     }
 
 
