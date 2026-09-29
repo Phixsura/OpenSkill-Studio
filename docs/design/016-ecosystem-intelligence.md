@@ -2940,3 +2940,20 @@ this session's reboot broke the suite at injectAxe, not at any violation.
 axe-core is a devDependency now (node_modules is already AXE_PATHS' first
 choice); verified green with the /tmp copy deleted. §97 rule again: pin the
 environment.
+
+## 107. Campaign closure
+
+The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29
+(§11–§106.3). Final state: backend regression **6360 passed / 0 failed**
+(21 consecutive zero-failure full runs after the §101/§97 root fixes ended
+the transient era), eco subset 566, web unit 637, 11 functional browser
+flows + axe at the moderate gate, migrations eco01–eco10 round-trip
+verified, ~70 targeted mutants killed (environment-limited equivalents
+documented, never claimed). The recurring rules that earned their keep:
+derive coverage from the system, never hand lists (§96); pin the test
+environment, never weaken the guard (§97); audit from the queries and the
+call sites, not from name lists (§99.9); a transient that recurs on one
+test is a production signal (§101); screen input before uniqueness probes
+(R97/§105); and one input-sqlstate backstop beats per-endpoint whack-a-mole
+(§106). Future work continues from the themed index at the top of this
+document.
