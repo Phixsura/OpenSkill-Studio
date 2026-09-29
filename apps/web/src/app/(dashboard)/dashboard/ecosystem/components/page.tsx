@@ -111,40 +111,80 @@ function ComponentsInner() {
   const CANDIDATE_STATUSES = ["proposed", "under_review", "approved", "rejected"];
   const DRAFT_STATUSES = ["draft", "in_review", "approved", "rejected", "published"];
   const [candidateFilter, setCandidateFilter] = useState("");
+  // R391: all four lifecycle lists paginate (dev DB already holds 200-700 rows each)
+  const [impactOffset, set_impactOffset] = useState(0);
+  const [impactPages, set_impactPages] = useState<ImpactAnalysis[][]>([]);
+  const [candidatesOffset, set_candidatesOffset] = useState(0);
+  const [candidatesPages, set_candidatesPages] = useState<Candidate[][]>([]);
+  const [draftsOffset, set_draftsOffset] = useState(0);
+  const [draftsPages, set_draftsPages] = useState<Draft[][]>([]);
+  const [rolloutsOffset, set_rolloutsOffset] = useState(0);
+  const [rolloutsPages, set_rolloutsPages] = useState<Rollout[][]>([]);
   const [draftFilter, setDraftFilter] = useState("");
   const ROLLOUT_STATUSES = ["draft", "running", "evaluating", "promoted", "rejected", "aborted"];
   const [impactFilter, setImpactFilter] = useState("");
   const [rolloutFilter, setRolloutFilter] = useState("");
   const impact = useQuery({
-    queryKey: ["eco-impact", impactFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: ImpactAnalysis[] }>(
-        `/ecosystem/impact/analyses${impactFilter ? `?status=${impactFilter}` : ""}`,
-      ),
+    queryKey: ["eco-impact", impactFilter, impactOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: ImpactAnalysis[]; meta: { total: number } }>(
+        `/ecosystem/impact/analyses?limit=50&offset=${impactOffset}${impactFilter ? `&status=${impactFilter}` : ""}`,
+      );
+      set_impactPages((prev) => (impactOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
   const candidates = useQuery({
-    queryKey: ["eco-candidates", candidateFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Candidate[] }>(
-        `/ecosystem/replacements/candidates${candidateFilter ? `?status=${candidateFilter}` : ""}`,
-      ),
+    queryKey: ["eco-candidates", candidateFilter, candidatesOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Candidate[]; meta: { total: number } }>(
+        `/ecosystem/replacements/candidates?limit=50&offset=${candidatesOffset}${candidateFilter ? `&status=${candidateFilter}` : ""}`,
+      );
+      set_candidatesPages((prev) => (candidatesOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
   const drafts = useQuery({
-    queryKey: ["eco-drafts", draftFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Draft[] }>(
-        `/ecosystem/drafts${draftFilter ? `?status=${draftFilter}` : ""}`,
-      ),
+    queryKey: ["eco-drafts", draftFilter, draftsOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Draft[]; meta: { total: number } }>(
+        `/ecosystem/drafts?limit=50&offset=${draftsOffset}${draftFilter ? `&status=${draftFilter}` : ""}`,
+      );
+      set_draftsPages((prev) => (draftsOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
   const rollouts = useQuery({
-    queryKey: ["eco-rollouts", rolloutFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Rollout[] }>(
-        `/ecosystem/rollouts${rolloutFilter ? `?status=${rolloutFilter}` : ""}`,
-      ),
+    queryKey: ["eco-rollouts", rolloutFilter, rolloutsOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Rollout[]; meta: { total: number } }>(
+        `/ecosystem/rollouts?limit=50&offset=${rolloutsOffset}${rolloutFilter ? `&status=${rolloutFilter}` : ""}`,
+      );
+      set_rolloutsPages((prev) => (rolloutsOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
 
+  const impactRows = impactPages.flat();
+  const impactTotal = impact.data?.meta?.total ?? 0;
+  const candidatesRows = candidatesPages.flat();
+  const candidatesTotal = candidates.data?.meta?.total ?? 0;
+  const draftsRows = draftsPages.flat();
+  const draftsTotal = drafts.data?.meta?.total ?? 0;
+  const rolloutsRows = rolloutsPages.flat();
+  const rolloutsTotal = rollouts.data?.meta?.total ?? 0;
+  const resetTabPages = () => {
+    set_impactOffset(0);
+    set_impactPages([]);
+    set_candidatesOffset(0);
+    set_candidatesPages([]);
+    set_draftsOffset(0);
+    set_draftsPages([]);
+    set_rolloutsOffset(0);
+    set_rolloutsPages([]);
+  };
   const invalidateAll = () => {
+    resetTabPages();
     for (const key of ["eco-impact", "eco-candidates", "eco-drafts", "eco-rollouts"]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
@@ -207,7 +247,11 @@ function ComponentsInner() {
           <select
             aria-label="Filter by impact status"
             value={impactFilter}
-            onChange={(e) => setImpactFilter(e.target.value)}
+            onChange={(e) => {
+              setImpactFilter(e.target.value);
+              set_impactOffset(0);
+              set_impactPages([]);
+            }}
             className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -220,7 +264,11 @@ function ComponentsInner() {
           <select
             aria-label="Filter by candidate status"
             value={candidateFilter}
-            onChange={(e) => setCandidateFilter(e.target.value)}
+            onChange={(e) => {
+              setCandidateFilter(e.target.value);
+              set_candidatesOffset(0);
+              set_candidatesPages([]);
+            }}
             className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -233,7 +281,11 @@ function ComponentsInner() {
           <select
             aria-label="Filter by draft status"
             value={draftFilter}
-            onChange={(e) => setDraftFilter(e.target.value)}
+            onChange={(e) => {
+              setDraftFilter(e.target.value);
+              set_draftsOffset(0);
+              set_draftsPages([]);
+            }}
             className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -246,7 +298,11 @@ function ComponentsInner() {
           <select
             aria-label="Filter by rollout status"
             value={rolloutFilter}
-            onChange={(e) => setRolloutFilter(e.target.value)}
+            onChange={(e) => {
+              setRolloutFilter(e.target.value);
+              set_rolloutsOffset(0);
+              set_rolloutsPages([]);
+            }}
             className="ml-auto rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -265,11 +321,11 @@ function ComponentsInner() {
       {tab === "Impact" &&
         (impact.isLoading ? (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
-        ) : (impact.data?.data ?? []).length === 0 ? (
+        ) : impactRows.length === 0 ? (
           <EmptyState icon="🎯" text="No impact analyses yet." />
         ) : (
           <div className="space-y-2">
-            {(impact.data?.data ?? []).map((a) => (
+            {impactRows.map((a) => (
               <div key={a.id} className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <Pill value={a.classification} styles={SEVERITY_STYLES} />
@@ -323,17 +379,30 @@ function ComponentsInner() {
                 </div>
               </div>
             ))}
+            <div className="flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {impactRows.length} of {impactTotal}
+              </span>
+              {impactRows.length < impactTotal && (
+                <button
+                  onClick={() => set_impactOffset(impactRows.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
       {tab === "Replacements" &&
         (candidates.isLoading ? (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
-        ) : (candidates.data?.data ?? []).length === 0 ? (
+        ) : candidatesRows.length === 0 ? (
           <EmptyState icon="🔁" text="No replacement candidates yet." />
         ) : (
           <div className="space-y-2">
-            {(candidates.data?.data ?? []).map((c) => (
+            {candidatesRows.map((c) => (
               <div key={c.id} className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-medium">
@@ -377,18 +446,31 @@ function ComponentsInner() {
                 </ul>
               </div>
             ))}
+            <div className="flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {candidatesRows.length} of {candidatesTotal}
+              </span>
+              {candidatesRows.length < candidatesTotal && (
+                <button
+                  onClick={() => set_candidatesOffset(candidatesRows.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
       {tab === "Drafts" &&
-        ((drafts.data?.data ?? []).length === 0 ? (
+        (draftsRows.length === 0 ? (
           <EmptyState
             icon="📝"
             text="No component drafts. External discoveries generate drafts only — never auto-published."
           />
         ) : (
           <div className="space-y-2">
-            {(drafts.data?.data ?? []).map((d) => (
+            {draftsRows.map((d) => (
               <div
                 key={d.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm"
@@ -461,18 +543,31 @@ function ComponentsInner() {
                 )}
               </div>
             ))}
+            <div className="flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {draftsRows.length} of {draftsTotal}
+              </span>
+              {draftsRows.length < draftsTotal && (
+                <button
+                  onClick={() => set_draftsOffset(draftsRows.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
       {tab === "Rollouts" &&
-        ((rollouts.data?.data ?? []).length === 0 ? (
+        (rolloutsRows.length === 0 ? (
           <EmptyState
             icon="🚦"
             text="No rollout plans. Replacements roll out through explicit canary validation."
           />
         ) : (
           <div className="space-y-2">
-            {(rollouts.data?.data ?? []).map((r) => (
+            {rolloutsRows.map((r) => (
               <div key={r.id} className="rounded-lg border bg-[hsl(var(--card))] p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-medium">
@@ -569,6 +664,19 @@ function ComponentsInner() {
                 )}
               </div>
             ))}
+            <div className="flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+              <span>
+                {rolloutsRows.length} of {rolloutsTotal}
+              </span>
+              {rolloutsRows.length < rolloutsTotal && (
+                <button
+                  onClick={() => set_rolloutsOffset(rolloutsRows.length)}
+                  className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
           </div>
         ))}
       {tab === "Graph" && (

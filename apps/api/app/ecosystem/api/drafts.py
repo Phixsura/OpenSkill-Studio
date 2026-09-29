@@ -65,7 +65,7 @@ async def generate_skill_update_draft(
     return {"data": draft}
 
 
-@router.get("", response_model=DataResponse[list[DraftResponse]])
+@router.get("", response_model=dict)
 async def list_drafts(
     draft_type: str | None = None,
     status: str | None = None,
@@ -86,10 +86,12 @@ async def list_drafts(
         from app.api.deps import require_org_member
 
         await require_org_member(org_id, user, db)
+    rows, total = await DraftService(db).list(
+        draft_type=draft_type, status=status, org_id=org_id, limit=limit, offset=offset
+    )
     return {
-        "data": await DraftService(db).list(
-            draft_type=draft_type, status=status, org_id=org_id, limit=limit, offset=offset
-        )
+        "data": [DraftResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
     }
 
 

@@ -8,7 +8,7 @@ code — ComfyUI graphs are parsed declaratively.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL, ExternalWorkflow
@@ -205,7 +205,7 @@ class DraftService:
         org_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[ComponentDraft]:
+    ) -> tuple[list[ComponentDraft], int]:
         from sqlalchemy import or_
 
         query = select(ComponentDraft)
@@ -218,10 +218,11 @@ class DraftService:
             if org_id
             else ComponentDraft.org_id.is_(None)
         )
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
             query.order_by(ComponentDraft.created_at.desc(), ComponentDraft.id.desc()).limit(limit).offset(offset)
         )
-        return list(rows)
+        return list(rows), int(total or 0)
 
     async def transition(
         self, draft_id: str, *, to_status: str, actor_id: str, org_id: str | None = None

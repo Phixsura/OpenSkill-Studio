@@ -43,12 +43,13 @@ async def generate_candidates(
     }
 
 
-@router.get("/candidates", response_model=DataResponse[list[ReplacementCandidateResponse]])
+@router.get("/candidates", response_model=dict)
 async def list_candidates(
     deprecated_kind: str | None = None,
     deprecated_id: str | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -59,13 +60,16 @@ async def list_candidates(
     from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
 
     check_enum(deprecated_kind, frozenset(CATALOG_KIND_TO_MODEL), "deprecated_kind")
+    rows, total = await ReplacementService(db).list_candidates(
+        deprecated_kind=deprecated_kind,
+        deprecated_id=deprecated_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
     return {
-        "data": await ReplacementService(db).list_candidates(
-            deprecated_kind=deprecated_kind,
-            deprecated_id=deprecated_id,
-            status=status,
-            limit=limit,
-        )
+        "data": [ReplacementCandidateResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
     }
 
 

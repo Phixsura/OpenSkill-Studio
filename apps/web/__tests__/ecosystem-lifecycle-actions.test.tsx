@@ -52,9 +52,9 @@ function candidate(id: string, hardCompatible: boolean) {
 beforeEach(() => {
   vi.clearAllMocks();
   api.mockImplementation((path: string, init?: RequestInit) => {
-    if (path === "/ecosystem/replacements/candidates" && !init)
+    if (path.startsWith("/ecosystem/replacements/candidates?") && !init)
       return Promise.resolve({ data: [candidate(GOOD, true), candidate(BAD, false)] });
-    if (path === "/ecosystem/drafts" && !init)
+    if (path.startsWith("/ecosystem/drafts?") && !init)
       return Promise.resolve({
         data: [
           {
@@ -69,7 +69,7 @@ beforeEach(() => {
           },
         ],
       });
-    if (path === "/ecosystem/rollouts" && !init)
+    if (path.startsWith("/ecosystem/rollouts?") && !init)
       return Promise.resolve({
         data: [
           {
@@ -133,7 +133,7 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
 
   it("a refused rollout decision surfaces its ApiError in the banner", async () => {
     api.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === "/ecosystem/rollouts" && !init)
+      if (path.startsWith("/ecosystem/rollouts?") && !init)
         return Promise.resolve({
           data: [
             {
@@ -158,7 +158,7 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
 
   it("impact analyses deep-link their root entity to the change feed", async () => {
     api.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === "/ecosystem/impact/analyses" && !init)
+      if (path.startsWith("/ecosystem/impact/analyses?") && !init)
         return Promise.resolve({
           data: [
             {
@@ -189,7 +189,9 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     });
     await waitFor(() =>
       expect(
-        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/impact/analyses?status=resolved"),
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/impact/analyses?limit=50&offset=0&status=resolved",
+        ),
       ).toBe(true),
     );
     fireEvent.click(await screen.findByText("Rollouts"));
@@ -198,7 +200,9 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     });
     await waitFor(() =>
       expect(
-        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/rollouts?status=promoted"),
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/rollouts?limit=50&offset=0&status=promoted",
+        ),
       ).toBe(true),
     );
   });
@@ -212,7 +216,8 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     await waitFor(() =>
       expect(
         api.mock.calls.some(
-          (c) => String(c[0]) === "/ecosystem/replacements/candidates?status=approved",
+          (c) =>
+            String(c[0]) === "/ecosystem/replacements/candidates?limit=50&offset=0&status=approved",
         ),
       ).toBe(true),
     );
@@ -222,8 +227,42 @@ describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
     });
     await waitFor(() =>
       expect(
-        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/drafts?status=published"),
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/drafts?limit=50&offset=0&status=published",
+        ),
       ).toBe(true),
     );
+  });
+
+  it("drafts tab paginates: count-of-total and Load more fetches offset=50 (R391)", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/drafts?") && !init) {
+        const offset = Number(new URLSearchParams(String(path).split("?")[1]).get("offset"));
+        return Promise.resolve({
+          data: Array.from({ length: 50 }, (_, i) => ({
+            id: `D${String(offset + i).padStart(25, "0")}`,
+            draft_type: "workflow_pack",
+            title: `Draft ${offset + i}`,
+            status: "draft",
+            payload: {},
+            validation: { valid: true, errors: [] },
+            published_ref: null,
+            created_at: "2026-09-20T00:00:00Z",
+          })),
+          meta: { total: 120, limit: 50, offset },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Drafts"));
+    expect(await screen.findByText("50 of 120")).toBeTruthy();
+    fireEvent.click(screen.getByText("Load more"));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("drafts?limit=50&offset=50"))).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("100 of 120")).toBeTruthy();
   });
 });

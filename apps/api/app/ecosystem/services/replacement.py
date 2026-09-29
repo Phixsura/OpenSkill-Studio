@@ -9,7 +9,7 @@ human can approve one.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL, ModelVersion
@@ -296,7 +296,8 @@ class ReplacementService:
         deprecated_id: str | None = None,
         status: str | None = None,
         limit: int = 50,
-    ) -> list[ReplacementCandidate]:
+        offset: int = 0,
+    ) -> tuple[list[ReplacementCandidate], int]:
         query = select(ReplacementCandidate)
         if deprecated_kind:
             query = query.where(ReplacementCandidate.deprecated_kind == deprecated_kind)
@@ -304,10 +305,13 @@ class ReplacementService:
             query = query.where(ReplacementCandidate.deprecated_id == deprecated_id)
         if status:
             query = query.where(ReplacementCandidate.status == status)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(ReplacementCandidate.score.desc(), ReplacementCandidate.id.desc()).limit(limit)
+            query.order_by(ReplacementCandidate.score.desc(), ReplacementCandidate.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
-        return list(rows)
+        return list(rows), int(total or 0)
 
     async def decide(
         self, candidate_id: str, *, decision: str, actor_id: str

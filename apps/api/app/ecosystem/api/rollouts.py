@@ -29,10 +29,11 @@ async def create_rollout(
     return {"data": plan}
 
 
-@router.get("", response_model=DataResponse[list[RolloutResponse]])
+@router.get("", response_model=dict)
 async def list_rollouts(
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -40,7 +41,11 @@ async def list_rollouts(
     from app.ecosystem.models.replacement import ROLLOUT_STATUSES
 
     check_enum(status, ROLLOUT_STATUSES, "status")
-    return {"data": await RolloutService(db).list(status=status, limit=limit)}
+    rows, total = await RolloutService(db).list(status=status, limit=limit, offset=offset)
+    return {
+        "data": [RolloutResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
+    }
 
 
 @router.get("/{plan_id}", response_model=DataResponse[RolloutResponse])

@@ -199,7 +199,7 @@ class ImpactService:
         classification: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[ImpactAnalysis]:
+    ) -> tuple[list[ImpactAnalysis], int]:
         query = select(ImpactAnalysis)
         if status:
             query = query.where(ImpactAnalysis.status == status)
@@ -207,10 +207,11 @@ class ImpactService:
             if classification not in IMPACT_CLASSIFICATIONS:
                 raise AppError("VALIDATION_ERROR", "Unknown classification", 422)
             query = query.where(ImpactAnalysis.classification == classification)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
             query.order_by(ImpactAnalysis.computed_at.desc(), ImpactAnalysis.id.desc()).limit(limit).offset(offset)
         )
-        return list(rows)
+        return list(rows), int(total or 0)
 
     async def set_status(self, analysis_id: str, status: str) -> ImpactAnalysis:
         from app.ecosystem.models.graph import IMPACT_STATUSES

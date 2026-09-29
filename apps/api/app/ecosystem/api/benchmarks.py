@@ -36,11 +36,12 @@ async def create_suite(
     return {"data": suite}
 
 
-@router.get("/suites", response_model=DataResponse[list[SuiteResponse]])
+@router.get("/suites", response_model=dict)
 async def list_suites(
     family: str | None = None,
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -49,7 +50,13 @@ async def list_suites(
 
     check_enum(family, BENCHMARK_FAMILIES, "family")
     check_enum(status, SUITE_STATUSES, "status")
-    return {"data": await BenchmarkService(db).list_suites(family=family, status=status, limit=limit)}
+    suites, total = await BenchmarkService(db).list_suites(
+        family=family, status=status, limit=limit, offset=offset
+    )
+    return {
+        "data": [SuiteResponse.model_validate(x).model_dump() for x in suites],
+        "meta": {"total": total, "limit": limit, "offset": offset},
+    }
 
 
 @router.post("/suites/import", response_model=DataResponse[SuiteResponse], status_code=201)

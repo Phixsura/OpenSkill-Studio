@@ -85,7 +85,7 @@ describe("Operator surfaces (ADR-016 §52)", () => {
 
   it("impact analyses expose acknowledge/resolve actions", async () => {
     api.mockImplementation((path: string, init?: RequestInit) => {
-      if (path === "/ecosystem/impact/analyses" && !init)
+      if (path.startsWith("/ecosystem/impact/analyses?") && !init)
         return Promise.resolve({
           data: [
             {

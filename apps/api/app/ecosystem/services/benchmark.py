@@ -236,15 +236,25 @@ class BenchmarkService:
         return suite
 
     async def list_suites(
-        self, *, family: str | None = None, status: str | None = None, limit: int = 50
-    ) -> list[BenchmarkSuite]:
+        self,
+        *,
+        family: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[BenchmarkSuite], int]:
         query = select(BenchmarkSuite)
         if family:
             query = query.where(BenchmarkSuite.family == family)
         if status:
             query = query.where(BenchmarkSuite.status == status)
-        rows = await self.db.scalars(query.order_by(BenchmarkSuite.created_at.desc(), BenchmarkSuite.id.desc()).limit(limit))
-        return list(rows)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
+        rows = await self.db.scalars(
+            query.order_by(BenchmarkSuite.created_at.desc(), BenchmarkSuite.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(rows), int(total or 0)
 
     async def update_suite(self, suite_id: str, updates: dict) -> BenchmarkSuite:
         suite = await self.get_suite(suite_id)

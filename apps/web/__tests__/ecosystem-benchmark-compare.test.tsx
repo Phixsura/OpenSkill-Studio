@@ -117,7 +117,9 @@ describe("Suite/run status filters (R381)", () => {
     });
     await waitFor(() =>
       expect(
-        api.mock.calls.some((c) => String(c[0]) === "/ecosystem/benchmark/suites?status=archived"),
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/benchmark/suites?limit=50&offset=0&status=archived",
+        ),
       ).toBe(true),
     );
     fireEvent.change(await screen.findByLabelText("Filter by run status"), {

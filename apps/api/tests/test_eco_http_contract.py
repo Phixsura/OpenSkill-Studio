@@ -1703,3 +1703,30 @@ async def test_single_admin_actions_are_audited(http, tokens):
             )
             assert row is not None, f"{action} left no audit row"
     await engine.dispose()
+
+
+async def test_all_operational_lists_carry_pagination_meta(http, tokens):
+    """Round-391: suites/candidates/drafts/rollouts/impact all silently
+    truncated at their default limit (dev DB already holds 223-683 rows of
+    each). Every operational list now carries meta{total,limit,offset} and
+    honors offset."""
+    member = {"Authorization": f"Bearer {tokens['member']}"}
+    for url in [
+        "/api/v1/ecosystem/benchmark/suites?limit=1",
+        "/api/v1/ecosystem/replacements/candidates?limit=1",
+        "/api/v1/ecosystem/drafts?limit=1",
+        "/api/v1/ecosystem/rollouts?limit=1",
+        "/api/v1/ecosystem/impact/analyses?limit=1",
+    ]:
+        r = await http.get(url, headers=member)
+        assert r.status_code == 200, (url, r.status_code, r.text[:120])
+        body = r.json()
+        assert set(body["meta"]) == {"total", "limit", "offset"}, url
+        total = body["meta"]["total"]
+        assert len(body["data"]) == min(1, total), url
+        if total > 1:
+            r2 = await http.get(f"{url}&offset=1", headers=member)
+            assert r2.status_code == 200, url
+            ids1 = {x["id"] for x in body["data"]}
+            ids2 = {x["id"] for x in r2.json()["data"]}
+            assert not (ids1 & ids2), f"{url}: offset pages overlap"

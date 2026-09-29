@@ -109,7 +109,7 @@ async def compute_impact(
     return {"data": analysis}
 
 
-@router.get("/impact/analyses", response_model=DataResponse[list[ImpactAnalysisResponse]])
+@router.get("/impact/analyses", response_model=dict)
 async def list_impact(
     status: str | None = None,
     classification: str | None = None,
@@ -123,10 +123,12 @@ async def list_impact(
 
     check_enum(status, IMPACT_STATUSES, "status")
     check_enum(classification, IMPACT_CLASSIFICATIONS, "classification")
+    rows, total = await ImpactService(db).list(
+        status=status, classification=classification, limit=limit, offset=offset
+    )
     return {
-        "data": await ImpactService(db).list(
-            status=status, classification=classification, limit=limit, offset=offset
-        )
+        "data": [ImpactAnalysisResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
     }
 
 

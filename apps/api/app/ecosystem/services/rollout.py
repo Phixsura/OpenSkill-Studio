@@ -7,7 +7,7 @@ recommendation and NEVER rewrites existing production bindings.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ecosystem.models.replacement import (
@@ -134,12 +134,19 @@ class RolloutService:
             raise AppError("NOT_FOUND", "Rollout plan not found", 404)
         return plan
 
-    async def list(self, *, status: str | None = None, limit: int = 50) -> list[RolloutPlan]:
+    async def list(
+        self, *, status: str | None = None, limit: int = 50, offset: int = 0
+    ) -> tuple[list[RolloutPlan], int]:
         query = select(RolloutPlan)
         if status:
             query = query.where(RolloutPlan.status == status)
-        rows = await self.db.scalars(query.order_by(RolloutPlan.created_at.desc(), RolloutPlan.id.desc()).limit(limit))
-        return list(rows)
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
+        rows = await self.db.scalars(
+            query.order_by(RolloutPlan.created_at.desc(), RolloutPlan.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(rows), int(total or 0)
 
     def _check_transition(self, plan: RolloutPlan, to_status: str) -> None:
         if to_status not in _STATUS_FLOW.get(plan.status, set()):

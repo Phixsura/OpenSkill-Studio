@@ -13,7 +13,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
+vi.mock("@/lib/api", () => ({
+  apiWithAuth: vi.fn(),
+  ApiError: class extends Error {
+    constructor(_status: number, _code: string, message: string) {
+      super(message);
+    }
+  },
+}));
 
 import DiscoveriesPage from "@/app/(dashboard)/dashboard/ecosystem/discoveries/page";
 import { ApiError, apiWithAuth } from "@/lib/api";
@@ -236,7 +243,8 @@ describe("Observation feed cursor pagination (R387)", () => {
   it("a failed Load more surfaces in the error banner instead of vanishing (R390)", async () => {
     api.mockImplementation((path: string, init?: RequestInit) => {
       if (String(path).startsWith("/ecosystem/observations?") && !init) {
-        if (String(path).includes("cursor=")) return Promise.reject(new ApiError("boom", 500));
+        if (String(path).includes("cursor="))
+          return Promise.reject(new ApiError(500, "ECO_ERROR", "boom"));
         return Promise.resolve({
           data: [obs("O1".padEnd(26, "x"), false)],
           meta: { has_more: true, next_cursor: "CUR" },

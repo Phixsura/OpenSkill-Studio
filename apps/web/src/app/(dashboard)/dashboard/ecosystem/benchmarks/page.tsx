@@ -155,13 +155,20 @@ function BenchmarksInner() {
   const RUN_STATUSES = ["queued", "running", "completed", "failed", "cancelled"];
   const [suiteStatusFilter, setSuiteStatusFilter] = useState("");
   const [runStatusFilter, setRunStatusFilter] = useState("");
+  const [suiteOffset, setSuiteOffset] = useState(0);
+  const [suitePages, setSuitePages] = useState<Suite[][]>([]);
   const suites = useQuery({
-    queryKey: ["eco-suites", suiteStatusFilter],
-    queryFn: () =>
-      apiWithAuth<{ data: Suite[] }>(
-        `/ecosystem/benchmark/suites${suiteStatusFilter ? `?status=${suiteStatusFilter}` : ""}`,
-      ),
+    queryKey: ["eco-suites", suiteStatusFilter, suiteOffset],
+    queryFn: async () => {
+      const res = await apiWithAuth<{ data: Suite[]; meta: { total: number } }>(
+        `/ecosystem/benchmark/suites?limit=50&offset=${suiteOffset}${suiteStatusFilter ? `&status=${suiteStatusFilter}` : ""}`,
+      );
+      setSuitePages((prev) => (suiteOffset === 0 ? [res.data] : [...prev, res.data]));
+      return res;
+    },
   });
+  const suiteRows = suitePages.flat();
+  const suiteTotal = suites.data?.meta?.total ?? 0;
   const [drillRun, setDrillRun] = useState<string | null>(null);
   const results = useQuery({
     queryKey: ["eco-run-results", drillRun],
@@ -308,7 +315,11 @@ function BenchmarksInner() {
           <select
             aria-label="Filter by suite status"
             value={suiteStatusFilter}
-            onChange={(e) => setSuiteStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setSuiteStatusFilter(e.target.value);
+              setSuiteOffset(0);
+              setSuitePages([]);
+            }}
             className="rounded-md border bg-[hsl(var(--background))] px-2 py-1.5 text-sm"
           >
             <option value="">All statuses</option>
@@ -317,11 +328,11 @@ function BenchmarksInner() {
             ))}
           </select>
         </div>
-        {(suites.data?.data ?? []).length === 0 ? (
+        {suiteRows.length === 0 ? (
           <EmptyState icon="🧪" text="No benchmark suites yet." />
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {(suites.data?.data ?? []).map((s) => (
+            {suiteRows.map((s) => (
               <button
                 key={s.id}
                 onClick={() => {
@@ -357,6 +368,19 @@ function BenchmarksInner() {
             ))}
           </div>
         )}
+        <div className="mt-2 flex items-center justify-between text-sm text-[hsl(var(--muted-foreground))]">
+          <span>
+            {suiteRows.length} of {suiteTotal}
+          </span>
+          {suiteRows.length < suiteTotal && (
+            <button
+              onClick={() => setSuiteOffset(suiteRows.length)}
+              className="rounded-md border px-3 py-1 hover:bg-[hsl(var(--secondary))]"
+            >
+              Load more
+            </button>
+          )}
+        </div>
       </section>
 
       <section className="space-y-2">

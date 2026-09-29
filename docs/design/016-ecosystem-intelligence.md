@@ -3190,6 +3190,32 @@ was mocked but never imported, so the fixture threw ReferenceError and the
 fallback text rendered instead — assert the exact message, not just "an
 error showed").
 
+### 106.19 Round 391 — pagination made uniform across every operational list
+
+§106.15/§106.16 fixed truncation surface-by-surface; a row-count measurement
+of the dev DB showed the remaining unpaginated lists are NOT theoretical:
+suites 223, candidates 364, drafts 683, rollouts 266 — all past their default
+limit=50 TODAY. Uniform treatment:
+
+- backend: `list_suites` / `list_candidates` / rollouts `list` / impact
+  `list` / drafts `list` all return `(page, total)` and honor `offset`; the
+  five routes emit `meta {total, limit, offset}` (each switched off
+  `DataResponse`, which strips meta — §106.16's lesson applied five times);
+- web: suites section and all four components-page tabs show "N of total" +
+  Load more; every filter change, suite-drill toggle, and mutation
+  invalidation resets to page one;
+- killers: backend sweeps all five endpoints for meta shape + non-overlapping
+  offset pages; web drives the drafts tab (biggest backlog) through
+  offset=50.
+
+Mock-hygiene fallout (the §106.15 lesson again, now in five more files): every
+`path === "<bare list URL>"` matcher went silently empty the moment the page
+started sending `?limit=50&offset=0` — all converted to
+`startsWith("…?")`. One mocked ApiError class also collapsed the real
+3-arg constructor into `Error(status)`, which made a killer assert the
+FALLBACK text instead of the real message — mocks of typed errors must mirror
+the constructor signature.
+
 ## 107. Campaign closure
 
 The hardening campaign ran ~372 review rounds across 2026-09-22 → 09-29
