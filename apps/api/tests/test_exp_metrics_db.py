@@ -1868,3 +1868,41 @@ async def test_workflow_runs_latency_cuped_per_unit(db):
     assert arm["cov_sum"] == pytest.approx(200.0)
     assert arm["cov_xy_sum"] == pytest.approx(500.0 * 200.0)
     assert arm["_aggregation"] == "per_unit"
+
+
+async def test_segment_multi_org_user_attributed_deterministically(db):
+    """A user in TWO orgs lands in exactly ONE slice (min org_id) — the
+    slices stay a partition, never double-counting a unit."""
+    from app.experiments.models import MetricSnapshot
+    from app.models.organization import OrgMember, OrgRole
+
+    _t1, org1 = await _mk_org(db)
+    _t2, org2 = await _mk_org(db)
+    first_org = min([org1, org2], key=lambda o: o.id)
+    exp, _ = await _mk_running_spec(db, {"segments": ["org"]})
+    asvc = AssignmentService(db)
+    user = await _mk_admin(db)
+    db.add(OrgMember(org_id=org1.id, user_id=user.id, role=OrgRole.STUDENT))
+    db.add(OrgMember(org_id=org2.id, user_id=user.id, role=OrgRole.STUDENT))
+    await db.flush()
+    assert await asvc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id=user.id
+    ) is not None
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    seg_rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.segment != "",
+                    MetricSnapshot.metric_key == "exposure_rate",
+                )
+            )
+        ).scalars()
+    )
+    segments = {r.segment for r in seg_rows}
+    assert segments == {f"org:{first_org.id}"}
+    assert sum(int(r.denominator or 0) for r in seg_rows) == 1

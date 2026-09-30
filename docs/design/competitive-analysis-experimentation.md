@@ -15,10 +15,15 @@ pre-balance, novelty decay, A/A probe, cross-experiment interaction),
 global holdout groups, Thompson bandit suggestions (advisory), switchback
 design (epoch windows + washout), post-stratification (time-stratified
 inverse-variance pooling), meta-analysis corpus priors + shrinkage, launch
-checklist, async apply, org-admin read delegation. Still open by choice:
-triggered-analysis denominators (ITT kept, honesty-warned), DiD/ITS,
-hourly guardrail lane, TS client hook, segment breakdowns (needs a snapshot
-dimension), full KM, multi-covariate CUPED, synthetic control.
+checklist, async apply, org-admin read delegation. Closed later the same day (round-10 second half): triggered/exposed-only
+denominators (applied, dilution honestly warned), DiD change-score for
+observational runs, segment breakdowns (org dimension), the useExperiment
+TS hook + self-serve endpoints, and CUPED covariates on three sources
+(projects, cost_ledger, workflow_runs). The "hourly guardrail lane" was
+already satisfied: guardrail evaluation runs every 10 minutes on live
+sliding windows (only ANALYSIS windows are daily). Still open by choice:
+ITS, full KM time-to-event, multi-covariate CUPED, synthetic control,
+write-side org delegation.
 
 ## 1. Feature matrix (industry standard vs ADR-017 v1)
 
