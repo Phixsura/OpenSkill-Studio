@@ -101,3 +101,39 @@ describe("Analysis view (ADR-017 §10)", () => {
     expect(screen.getByText("2/4")).toBeTruthy();
   });
 });
+
+describe("Analysis decision-support extras (v2 round 10)", () => {
+  it("renders time-stratified and corpus-shrunk context lines", async () => {
+    const payload = analysisPayload();
+    const metrics = (
+      payload.data as { metrics: Record<string, { comparisons: Record<string, object> }> }
+    ).metrics;
+    metrics.exposure_rate.comparisons.treatment = {
+      effect: 0.05,
+      ci: [0.01, 0.09],
+      p: 0.02,
+      time_stratified: { effect: 0.048, se: 0.01, ci: [0.03, 0.07], strata: 5 },
+      corpus_prior: { n_experiments: 4, mean: 0.02, sd: 0.01 },
+      shrunk_effect: 0.031,
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/Time-stratified: 0\.0480 over 5 windows/)).toBeTruthy();
+    expect(
+      screen.getByText(/Corpus-shrunk: 0\.0310 \(prior of 4 decided experiments\)/),
+    ).toBeTruthy();
+  });
+
+  it("renders the new health warnings verbatim", async () => {
+    api.mockResolvedValue(
+      analysisPayload({
+        warnings: ["PRE_BALANCE_SUSPECT", "NOVELTY_EFFECT_DECAY_SUSPECT"],
+      }),
+    );
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/PRE_BALANCE_SUSPECT/)).toBeTruthy();
+    expect(screen.getByText(/NOVELTY_EFFECT_DECAY_SUSPECT/)).toBeTruthy();
+  });
+});

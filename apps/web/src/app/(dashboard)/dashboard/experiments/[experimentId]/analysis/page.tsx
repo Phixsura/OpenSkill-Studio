@@ -26,6 +26,9 @@ interface Comparison {
   insufficient_data?: boolean;
   caveat?: string;
   cuped?: { effect: number; ci: [number, number]; variance_reduction_pct: number };
+  corpus_prior?: { n_experiments: number; mean: number; sd: number };
+  shrunk_effect?: number;
+  time_stratified?: { effect: number; se: number; ci: [number, number]; strata: number };
 }
 
 interface AnalysisResult {
@@ -185,6 +188,18 @@ export default function AnalysisPage() {
                                 <div className="text-xs text-violet-700">
                                   CUPED: {fmtNum(c.cuped.effect)} (−
                                   {c.cuped.variance_reduction_pct.toFixed(0)}% var)
+                                </div>
+                              ) : null}
+                              {c.time_stratified ? (
+                                <div className="text-xs text-sky-700">
+                                  Time-stratified: {fmtNum(c.time_stratified.effect)} over{" "}
+                                  {c.time_stratified.strata} windows
+                                </div>
+                              ) : null}
+                              {c.corpus_prior && c.shrunk_effect != null ? (
+                                <div className="text-xs text-amber-700">
+                                  Corpus-shrunk: {fmtNum(c.shrunk_effect)} (prior of{" "}
+                                  {c.corpus_prior.n_experiments} decided experiments)
                                 </div>
                               ) : null}
                             </>

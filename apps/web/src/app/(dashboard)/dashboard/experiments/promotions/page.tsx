@@ -39,7 +39,13 @@ function PromotionsInner() {
   });
 
   const act = useMutation({
-    mutationFn: ({ id, action }: { id: string; action: "approve" | "reject" | "apply" }) =>
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "approve" | "reject" | "apply" | "apply?background=true";
+    }) =>
       apiWithAuth(`/experiments/promotion-drafts/${id}/${action}`, { method: "POST", body: "{}" }),
     onSuccess: () => {
       setError(null);
@@ -96,7 +102,10 @@ function PromotionsInner() {
                   <td className="py-1 pr-3">
                     <Pill value={d.status} styles={STATUS_STYLES} />
                   </td>
-                  <td className="py-1 pr-3 text-xs">{d.applied_ref ?? "—"}</td>
+                  <td className="py-1 pr-3 text-xs">
+                    {d.applied_ref ?? "—"}
+                    {d.apply_error ? <div className="text-rose-700">{d.apply_error}</div> : null}
+                  </td>
                   <td className="py-1 pr-3 text-xs text-slate-500">{fmtDate(d.created_at)}</td>
                   <td className="py-1 pr-3">
                     <div className="flex gap-1">
@@ -119,13 +128,28 @@ function PromotionsInner() {
                         </>
                       ) : null}
                       {d.status === "approved" ? (
-                        <button
-                          type="button"
-                          className="rounded border px-2 py-0.5 text-xs"
-                          onClick={() => act.mutate({ id: d.id, action: "apply" })}
-                        >
-                          Apply
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-0.5 text-xs"
+                            onClick={() => act.mutate({ id: d.id, action: "apply" })}
+                          >
+                            Apply
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-0.5 text-xs"
+                            title="Queue through the worker; failures land in apply_error and are retryable"
+                            onClick={() =>
+                              act.mutate({ id: d.id, action: "apply?background=true" })
+                            }
+                          >
+                            Apply async
+                          </button>
+                        </>
+                      ) : null}
+                      {d.status === "applying" ? (
+                        <span className="text-xs text-slate-500">queued…</span>
                       ) : null}
                     </div>
                   </td>
