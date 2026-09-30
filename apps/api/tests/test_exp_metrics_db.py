@@ -1588,7 +1588,7 @@ async def test_segment_rows_only_when_opted_in(db):
     await MetricService(db).ensure_seed_definitions()
     exp, _ = await _mk_running(db)  # no segments in spec
     asvc = AssignmentService(db)
-    for i in range(4):
+    for _i in range(4):
         user = await _mk_admin(db)
         db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
         await db.flush()
