@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from app.core.rate_limit import rate_limit
 from app.experiments.api.assignments import router as assignments_router
 from app.experiments.api.experiments import router as experiments_router_module
+from app.experiments.api.guardrails import router as guardrails_router
 from app.experiments.api.layers import router as layers_router
 from app.experiments.api.metrics import router as metrics_router
 
@@ -20,4 +21,5 @@ experiments_router = APIRouter(dependencies=[Depends(rate_limit(120, 60))])
 experiments_router.include_router(layers_router)
 experiments_router.include_router(metrics_router)
 experiments_router.include_router(assignments_router)
+experiments_router.include_router(guardrails_router)
 experiments_router.include_router(experiments_router_module)

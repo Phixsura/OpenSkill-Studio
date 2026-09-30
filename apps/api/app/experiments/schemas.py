@@ -257,6 +257,10 @@ class CreateAllocationRequest(_StrictReq):
     slice_end: int = Field(ge=0, le=9999)
 
 
+class IncidentRequest(_StrictReq):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class CreateMetricDefinitionRequest(_StrictReq):
     key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_]{2,63}$")
     title: str = Field(min_length=1, max_length=200)
@@ -367,6 +371,23 @@ class MetricSnapshotResponse(BaseModel):
     cov_xy_sum: float | None
     provenance: dict
     computed_at: datetime
+
+
+class GuardrailEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    experiment_id: str
+    guardrail_key: str
+    metric_key: str | None
+    observed: float | None
+    threshold: float | None
+    window_start: datetime | None
+    window_end: datetime | None
+    action: str
+    auto: bool
+    detail: dict
+    created_at: datetime
 
 
 class ExperimentEventResponse(BaseModel):

@@ -46,6 +46,37 @@ async def handle_compute_snapshots(db: AsyncSession, payload: dict) -> None:
     )
 
 
+@register_handler("exp.evaluate_guardrails")
+async def handle_evaluate_guardrails(db: AsyncSession, payload: dict) -> None:
+    from app.experiments.services.guardrails import GuardrailService
+
+    summary = await GuardrailService(db).evaluate_experiment(payload["experiment_id"])
+    if summary.get("breaches"):
+        log.warning("exp_guardrail_sweep_paused", **summary)
+
+
+GUARDRAIL_SWEEP_CAP = 50
+
+
+async def sweep_experiment_guardrails(
+    db: AsyncSession, *, cap: int = GUARDRAIL_SWEEP_CAP
+) -> int:
+    """Enqueue guardrail evaluation for running experiments, oldest-checked
+    first (nulls first) up to cap — the handler stamps last_guardrail_check_at
+    so a backlog can never starve any experiment (§106.26 fairness law)."""
+    q = (
+        select(Experiment.id)
+        .where(Experiment.status == "running")
+        .order_by(Experiment.last_guardrail_check_at.asc().nulls_first(), Experiment.id.asc())
+        .limit(cap)
+    )
+    enqueued = 0
+    for (experiment_id,) in (await db.execute(q)).all():
+        enqueue(db, "exp.evaluate_guardrails", {"experiment_id": experiment_id})
+        enqueued += 1
+    return enqueued
+
+
 def previous_utc_day(now: datetime | None = None) -> tuple[datetime, datetime]:
     now = now or datetime.now(UTC)
     today = datetime.combine(now.date(), time.min, tzinfo=UTC)

@@ -9,6 +9,12 @@ from app.experiments.models.experiment import (
     ExperimentLayerAllocation,
     ExperimentVersion,
 )
+from app.experiments.models.guardrail import (
+    GUARDRAIL_ACTIONS,
+    INCIDENT_GUARDRAIL_KEY,
+    SRM_GUARDRAIL_KEY,
+    GuardrailEvent,
+)
 from app.experiments.models.metric import (
     METRIC_DIRECTIONS,
     METRIC_KINDS,
@@ -20,6 +26,10 @@ from app.experiments.models.metric import (
 
 __all__ = [
     "EXPERIMENT_EVENT_TYPES",
+    "GUARDRAIL_ACTIONS",
+    "INCIDENT_GUARDRAIL_KEY",
+    "SRM_GUARDRAIL_KEY",
+    "GuardrailEvent",
     "LAYER_TOTAL_SLICES",
     "METRIC_DIRECTIONS",
     "METRIC_KINDS",

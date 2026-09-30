@@ -57,6 +57,11 @@ class Experiment(Base):
     analysis_close_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Sweep-fairness stamp: guardrail sweeps take the oldest-checked first
+    # and stamp after processing (§106.26 — caps must not starve a backlog)
+    last_guardrail_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

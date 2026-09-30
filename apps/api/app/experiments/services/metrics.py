@@ -138,6 +138,13 @@ async def _source_workflow_runs(
                 "sum_value": sum(durations),
                 "sum_sq": sum(d * d for d in durations),
             }
+        elif measure == "failure_rate":
+            failed = sum(1 for status, _s, _f in rows if status == RunStatus.FAILED)
+            result[variant] = {
+                "n": len(rows),
+                "numerator": failed,
+                "denominator": len(rows),
+            }
         else:
             completed = sum(1 for status, _s, _f in rows if status == RunStatus.COMPLETED)
             result[variant] = {
