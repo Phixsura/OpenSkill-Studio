@@ -776,6 +776,36 @@ v2 round 10 (2026-10-01, batches 3–15) — the backlog cleared in one sweep:
   verified equivalent and ledgered in-test (incl. round(chi2,3→4) being
   mathematically equivalent: chi2 = integer/200).
 
+Round-10 continuation (same day, batches 16-32) — the marathon's second half:
+
+- **Builder**: design/allocation dropdowns + switchback window/washout
+  inputs (spec submit carries the config); DESIGNS/ALLOCATION_MODES
+  parity-pinned. Console: bandit banner, segment picker, apply_error rows.
+- **Triggered analysis applied** (§4.7): exposed-only rosters at snapshot
+  time (as_of-pinned), provenance analysis_population=exposed;
+  TRIGGERED_ANALYSIS_UNAPPLIED retired for TRIGGERED_DILUTION_UNCORRECTED
+  - TRIGGERED_SNAPSHOTS_MIXED_POPULATION.
+- **Self-serve surface** (§7 client-SDK class): POST /experiments/self/
+  resolve + /exposures (caller IS the unit) + the useExperiment TS hook.
+- **DiD for observational analyses** (§10): change-score estimate from
+  per-unit covariate sufficient stats, parallel-trends caveat.
+- **CUPED extended to cost_ledger**; **segment breakdowns** (§4.8,
+  exp08a00008): org-dimension snapshot slices (opt-in, top-20 cap),
+  run(?segment=...) informational slices that never burn looks or ground
+  decisions; whole-population aggregation strictly excludes slices.
+- **Defects #28–#31 (adversarial passes)**: switchback false-SRM (skip both
+  SRM checks for time-randomized designs); switchback silently ignoring
+  per-unit holdout_bp (now honored, sticky holdout rows); interaction
+  pair-cap starvation (ISO-week rotation, §106.26); exposures-source
+  numerators not intersected with the passed population (overstated every
+  segment/exposed-only slice). Plus version-mixing fixed in the window
+  passes and the salt truncation extracted into version_salt_of (one
+  definition for resolution and window attribution).
+- **Verification**: mutation waves 2-4 (holdouts/interaction 45/51, new
+  sources 32/55 after fixing THREE symmetric-fixture collisions, window
+  core 24/27) with every survivor classified; DiD fuzz totality; live E2E
+  52 checks including the self-serve walls.
+
 Remaining (explicitly deferred): per-unit repeated-measures for every
 source, CUPED covariates beyond projects/revision_count, segment-dimension
 breakdowns (needs a snapshot dimension), full KM time-to-event, write-side
