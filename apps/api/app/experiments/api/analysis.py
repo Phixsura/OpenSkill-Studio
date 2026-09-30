@@ -27,3 +27,28 @@ async def run_analysis(
     payload = await AnalysisService(db).run(experiment_id, actor=user, segment=segment)
     await db.commit()
     return {"data": payload}
+
+
+@router.get("/{experiment_id}/segments", response_model=dict)
+async def list_segments(
+    experiment_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Distinct snapshot segments available for breakdown analysis (§4.8)."""
+    from sqlalchemy import select
+
+    from app.experiments.models import MetricSnapshot
+
+    rows = (
+        await db.execute(
+            select(MetricSnapshot.segment)
+            .where(
+                MetricSnapshot.experiment_id == experiment_id,
+                MetricSnapshot.segment != "",
+            )
+            .distinct()
+            .order_by(MetricSnapshot.segment)
+        )
+    ).scalars()
+    return {"data": list(rows)}

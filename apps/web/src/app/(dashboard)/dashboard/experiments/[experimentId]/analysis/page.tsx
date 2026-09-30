@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { ErrorBanner, ExperimentsNav, SectionCard } from "../../components";
 import { fmtNum } from "../../lib";
@@ -80,13 +80,22 @@ export default function AnalysisPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [segment, setSegment] = useState("");
+
+  const segments = useQuery({
+    queryKey: ["experiment-segments", experimentId],
+    queryFn: () => apiWithAuth<{ data: string[] }>(`/experiments/${experimentId}/segments`),
+  });
 
   const run = useMutation({
     mutationFn: () =>
-      apiWithAuth<{ data: AnalysisResult }>(`/experiments/${experimentId}/analysis`, {
-        method: "POST",
-        body: "{}",
-      }),
+      apiWithAuth<{ data: AnalysisResult }>(
+        `/experiments/${experimentId}/analysis${segment ? `?segment=${encodeURIComponent(segment)}` : ""}`,
+        {
+          method: "POST",
+          body: "{}",
+        },
+      ),
     onSuccess: (res) => {
       setError(null);
       setResult(res.data);
@@ -104,14 +113,31 @@ export default function AnalysisPage() {
           </Link>{" "}
           · Analysis
         </h1>
-        <button
-          type="button"
-          disabled={run.isPending}
-          onClick={() => run.mutate()}
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {run.isPending ? "Running…" : "Run analysis"}
-        </button>
+        <div className="flex items-center gap-2">
+          {(segments.data?.data ?? []).length > 0 ? (
+            <select
+              aria-label="Segment"
+              className="rounded-md border px-2 py-1.5 text-sm"
+              value={segment}
+              onChange={(e) => setSegment(e.target.value)}
+            >
+              <option value="">whole population</option>
+              {(segments.data?.data ?? []).map((seg) => (
+                <option key={seg} value={seg}>
+                  {seg}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <button
+            type="button"
+            disabled={run.isPending}
+            onClick={() => run.mutate()}
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {run.isPending ? "Running…" : "Run analysis"}
+          </button>
+        </div>
       </div>
       <ErrorBanner message={error} />
       {result ? (
