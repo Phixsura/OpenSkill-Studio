@@ -617,8 +617,10 @@ async def test_validate_target_error_contract(db):
     # generic branch (pack_recommendation): oversize + blank refs
     await expect("VALIDATION_ERROR", 422, "pack_recommendation", "x" * 65, {})
     await expect("VALIDATION_ERROR", 422, "pack_recommendation", "   ", {})
-    # generic branch happy path: a plain ref passes draft-time validation
+    # generic branch happy path: plain refs pass, INCLUDING the 64-char
+    # boundary (len > 64 rejects; len == 64 is legal)
     await svc._validate_target("pack_recommendation", "a" * 26, {})
+    await svc._validate_target("pack_recommendation", "x" * 64, {})
 
 
 async def test_unwired_targets_are_only_presentation_pair(db):

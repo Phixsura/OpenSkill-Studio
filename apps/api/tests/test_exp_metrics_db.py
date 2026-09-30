@@ -536,6 +536,11 @@ async def test_cost_ledger_source_org_and_tenant_units(db):
         db, "cost_ledger", definition_key="cost_usd", units=[tenant.id], unit_type="tenant",
     )
     assert by_tenant["treatment"]["sum_value"] == pytest.approx(0.75)
+    # wrong unit type: exactly the zero-sample shape, never a bogus query
+    wrong = await _run_source(
+        db, "cost_ledger", definition_key="cost_usd", units=[org.id], unit_type="user",
+    )
+    assert wrong["treatment"] == {"n": 0}
 
 
 async def test_registry_source_pack_adoption(db):
@@ -553,6 +558,15 @@ async def test_registry_source_pack_adoption(db):
     assert result["treatment"] == {"n": 1, "numerator": 2, "denominator": 1}
 
 
+# Mutation-survivor ledger (metric sources): the per-source half-open window
+# boundary pairs (>= window_start / < window_end in workflow_runs, projects,
+# cost_ledger, client_briefs, registry, eco_telemetry) are template copies of
+# the exposures-pinned contract (test_source_window_boundaries_half_open) —
+# per-source boundary fixtures repeat the same predicate without adding
+# information. promotion._validate_target's weights-sum tolerance boundary
+# (abs(total-1.0) exactly == 1e-6) is not constructible in floats.
+
+
 async def test_workflow_runs_source_all_measures(db):
     """success_rate, failure_rate and latency_ms (with cap) over real runs —
     the latency branch had no direct coverage."""
@@ -568,11 +582,13 @@ async def test_workflow_runs_source_all_measures(db):
     await db.flush()
     window_start, _ = _today_window()
     t0 = window_start + timedelta(hours=1)
+    # 3 completed / 1 failed: asymmetric so status==COMPLETED vs != is
+    # distinguishable (2C+1F+1X collides: completed == not-completed == 2)
     runs = [
         (RunStatus.COMPLETED, t0, t0 + timedelta(milliseconds=100)),
         (RunStatus.COMPLETED, t0, t0 + timedelta(milliseconds=300)),
-        (RunStatus.FAILED, t0, t0 + timedelta(milliseconds=10_000)),  # capped below
-        (RunStatus.CANCELLED, t0, None),  # no finished_at → excluded from latency
+        (RunStatus.COMPLETED, t0, None),  # no finished_at → excluded from latency
+        (RunStatus.FAILED, t0, t0 + timedelta(milliseconds=10_000)),
     ]
     for status, started, finished in runs:
         db.add(
@@ -588,7 +604,7 @@ async def test_workflow_runs_source_all_measures(db):
         db, "workflow_runs", definition_key="run_success_rate",
         units=units, unit_type="workflow_installation",
     )
-    assert success["treatment"] == {"n": 4, "numerator": 2, "denominator": 4}
+    assert success["treatment"] == {"n": 4, "numerator": 3, "denominator": 4}
     failure = await _run_source(
         db, "workflow_runs", definition_key="run_failure_rate",
         units=units, unit_type="workflow_installation",
@@ -676,6 +692,15 @@ async def test_eco_telemetry_source_weighted_success(db):
             window_start=window_start + timedelta(hours=1),
             window_end=window_start + timedelta(hours=2),
             sample_size=300, metrics={"success_rate": 0.5},
+        )
+    )
+    # rows without a success_rate (or zero samples) are skipped, not crashed
+    db.add(
+        TelemetrySnapshot(
+            entity_kind="provider_offering", entity_id=offering_id,
+            window_start=window_start + timedelta(hours=2),
+            window_end=window_start + timedelta(hours=3),
+            sample_size=999, metrics={"latency_p50_ms": 12},
         )
     )
     await db.flush()
