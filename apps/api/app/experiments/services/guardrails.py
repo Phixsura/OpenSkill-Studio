@@ -171,7 +171,35 @@ class GuardrailService:
         if exp.status != "running":
             summary["skipped"] = True
             return summary
-        spec = await self._spec(exp)
+        try:
+            spec = await self._spec(exp)
+        except Exception:  # noqa: BLE001 — poison-spec resilience
+            # An unparseable spec means guardrails CANNOT be evaluated — a
+            # running experiment without working guardrails is unsafe, so
+            # pause it (never leave it silently unguarded while the handler
+            # dead-letters and retries forever).
+            log.error("experiment_spec_unparseable", experiment_id=experiment_id)
+            self.db.add(
+                GuardrailEvent(
+                    experiment_id=experiment_id,
+                    guardrail_key="__spec_invalid__",
+                    action="paused",
+                    auto=True,
+                    detail={"reason": "spec failed to parse — guardrails cannot run"},
+                )
+            )
+            from app.experiments.services.experiments import ExperimentService
+
+            await ExperimentService(self.db).transition(
+                experiment_id,
+                to_status="paused",
+                actor=_system_actor(),
+                reason="spec unparseable — guardrails cannot run",
+            )
+            exp.last_guardrail_check_at = now
+            await self.db.flush()
+            summary["breaches"] = [{"metric_key": "__spec_invalid__"}]
+            return summary
         if spec is None:
             summary["skipped"] = True
             return summary

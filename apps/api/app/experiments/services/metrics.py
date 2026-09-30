@@ -517,7 +517,11 @@ class MetricService:
         ).scalar_one_or_none()
         if latest is None:
             return [], ""
-        spec = ExperimentSpec.model_validate(latest.spec)
+        try:
+            spec = ExperimentSpec.model_validate(latest.spec)
+        except Exception:  # noqa: BLE001 — poison-spec: skip, never dead-letter forever
+            log.error("exp_snapshot_spec_unparseable", experiment_id=exp.id)
+            return [], ""
         keys = [*spec.metrics.primary, *spec.metrics.secondary]
         keys.extend(g.metric_key for g in spec.metrics.guardrails)
         # Preserve order, drop duplicates

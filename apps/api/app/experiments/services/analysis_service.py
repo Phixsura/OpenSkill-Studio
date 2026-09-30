@@ -53,7 +53,12 @@ class AnalysisService:
         ).scalar_one_or_none()
         if latest is None:
             raise AppError("EXPERIMENT_SPEC_INVALID", "Experiment has no spec version", 422)
-        return ExperimentSpec.model_validate(latest.spec)
+        try:
+            return ExperimentSpec.model_validate(latest.spec)
+        except Exception as exc:  # noqa: BLE001 — typed 422 beats a raw 500
+            raise AppError(
+                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
+            ) from exc
 
     async def _aggregate_metric(
         self, experiment_id: str, metric_key: str

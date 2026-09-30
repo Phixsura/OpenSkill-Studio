@@ -230,6 +230,74 @@ async def test_srm_quiet_below_min_sample(db):
     assert "srm" not in summary
 
 
+async def test_unparseable_spec_pauses_instead_of_dead_lettering(db):
+    """Poison-spec resilience: if a stored spec stops parsing (schema drift,
+    bad data repair), guardrails CANNOT run — the experiment must be paused
+    with __spec_invalid__, never left silently unguarded while the handler
+    dead-letters forever."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentVersion
+
+    exp, _ = await _mk_running(db)
+    await db.execute(
+        _update(ExperimentVersion)
+        .where(ExperimentVersion.experiment_id == exp.id)
+        .values(spec={"totally": "corrupt"})
+    )
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert summary["breaches"][0]["metric_key"] == "__spec_invalid__"
+    exp_row = await db.get(Experiment, exp.id)
+    assert exp_row.status == "paused"
+    assert exp_row.last_guardrail_check_at is not None
+    events = await GuardrailService(db).list_events(exp.id)
+    assert any(e.guardrail_key == "__spec_invalid__" and e.action == "paused" for e in events)
+
+
+async def test_closure_sweep_survives_poison_spec(db):
+    """One unparseable spec must not stall the closure batch for everyone."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentVersion
+    from app.experiments.worker import sweep_experiment_closures
+
+    poison, _ = await _mk_running(db)
+    healthy, _ = await _mk_running(db)
+    now = datetime.now(UTC)
+    (await db.get(Experiment, poison.id)).started_at = now - timedelta(days=40)
+    (await db.get(Experiment, healthy.id)).started_at = now - timedelta(days=40)
+    await db.execute(
+        _update(ExperimentVersion)
+        .where(ExperimentVersion.experiment_id == poison.id)
+        .values(spec={"totally": "corrupt"})
+    )
+    await db.flush()
+    closed = await sweep_experiment_closures(db)
+    assert closed >= 1
+    assert (await db.get(Experiment, healthy.id)).status == "completed"
+    assert (await db.get(Experiment, poison.id)).status == "running"  # skipped, logged
+
+
+def test_terminal_statuses_match_live_key_partial_index():
+    """Parity guard: the live-key partial index WHERE clause and
+    security.TERMINAL_STATUSES must name the same set — a new terminal
+    status added to one but not the other silently breaks key reuse or
+    uniqueness."""
+    from app.experiments.models.experiment import Experiment as ExpModel
+    from app.experiments.security import TERMINAL_STATUSES
+
+    index = next(
+        idx for idx in ExpModel.__table__.indexes if idx.name == "uq_experiments_live_key"
+    )
+    where_sql = str(index.dialect_options["postgresql"]["where"])
+    for status in TERMINAL_STATUSES:
+        assert f"'{status}'" in where_sql, f"{status} missing from live-key index WHERE"
+    import re
+
+    quoted = set(re.findall(r"'([a-z_]+)'", where_sql))
+    assert quoted == set(TERMINAL_STATUSES)
+
+
 # ── Manual incident ──────────────────────────────────────────────────
 
 

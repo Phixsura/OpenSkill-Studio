@@ -708,3 +708,22 @@ Hardening round 4 (same day):
   is created, the Console archives the spec-less orphan (which would
   otherwise hold the live-unique key hostage with no repair surface) before
   surfacing the error.
+
+Hardening round 5 (same day):
+
+- **Poison-spec resilience** across every stored-spec consumer. Specs are
+  validated at write, but schema drift / bad data repair can make an old
+  version unparseable — previously: guardrail evaluation crashed and
+  dead-lettered forever while the experiment kept RUNNING WITHOUT GUARDRAILS;
+  the closure sweep crashed the whole batch on one poison row; analysis,
+  decisions and preview raw-500'd. Now: guardrails PAUSE the experiment with
+  a `__spec_invalid__` event (an unguardable running experiment is unsafe by
+  definition), sweeps skip-and-log the poison row, and the API surfaces a
+  typed EXPERIMENT_SPEC_INVALID 422.
+- **Terminal-set parity guard**: security.TERMINAL_STATUSES and the
+  live-key partial index WHERE clause are test-pinned to the same set —
+  adding a terminal status to one but not the other silently breaks key
+  reuse or uniqueness.
+- Reserved column note: `promotion_drafts.apply_error` is currently unused —
+  synchronous applies roll back on failure; the column is reserved for a
+  future async apply path.

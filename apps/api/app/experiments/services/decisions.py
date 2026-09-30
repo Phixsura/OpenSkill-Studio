@@ -101,7 +101,12 @@ class DecisionService:
                 )
             )
         ).scalar_one()
-        spec = ExperimentSpec.model_validate(latest.spec)
+        try:
+            spec = ExperimentSpec.model_validate(latest.spec)
+        except Exception as exc:  # noqa: BLE001 — typed 422 beats a raw 500
+            raise AppError(
+                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
+            ) from exc
         if decision == "promote" and spec.analysis_type != "randomized":
             # Stricter than the draft-time gate on purpose (§2 posture)
             raise AppError(

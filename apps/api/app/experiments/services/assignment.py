@@ -192,7 +192,12 @@ class AssignmentService:
         latest = versions[-1]
         # version 1's hash is the stable randomization salt (§6)
         version_salt = versions[0].spec_hash[:8]
-        return ExperimentSpec.model_validate(latest.spec), version_salt
+        try:
+            return ExperimentSpec.model_validate(latest.spec), version_salt
+        except Exception as exc:  # noqa: BLE001 — poison spec: typed, not a 500
+            raise AppError(
+                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
+            ) from exc
 
     async def _existing(
         self, experiment_id: str, unit_type: str, unit_id: str

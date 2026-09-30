@@ -191,7 +191,11 @@ async def sweep_experiment_closures(
         ).scalar_one_or_none()
         if version is None:
             continue
-        max_days = ExperimentSpec.model_validate(version.spec).stop_policy.max_days
+        try:
+            max_days = ExperimentSpec.model_validate(version.spec).stop_policy.max_days
+        except Exception:  # noqa: BLE001 — one poison spec must not stall the batch
+            log.error("exp_closure_spec_unparseable", experiment_id=experiment_id)
+            continue
         if started_at + timedelta(days=max_days) > now:
             continue
         await ExperimentService(db).transition(
