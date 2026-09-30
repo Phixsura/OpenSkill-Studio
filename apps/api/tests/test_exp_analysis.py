@@ -681,3 +681,42 @@ def test_pool_stratified_extreme_value_paths():
     # every e*weight finite but their SUM overflows with a finite
     # weight_total: the pooled effect would be inf — refused as a whole
     assert pool_stratified([(9e307, 0.7071), (9e307, 0.7071)]) is None
+
+
+# ── did_estimate (v2 batch 28, quasi-experiments) ────────────────────
+
+
+def test_did_estimate_change_score_math():
+    """Hand-computed golden: control changes 1→2 (Δ=1), treatment 1→4 (Δ=3)
+    with tiny within-arm variance → DiD effect 2, significant."""
+    from app.experiments.services.analysis import did_estimate
+
+    def _arm(pre: list[float], post: list[float]) -> dict:
+        n = len(pre)
+        return {
+            "n": n, "sum": sum(post), "sum_sq": sum(v * v for v in post),
+            "cov_sum": sum(pre), "cov_sum_sq": sum(v * v for v in pre),
+            "cov_xy_sum": sum(a * b for a, b in zip(pre, post, strict=True)),
+        }
+
+    control = _arm(pre=[1.0, 1.1, 0.9, 1.0], post=[2.0, 2.1, 1.9, 2.0])
+    treatment = _arm(pre=[1.0, 0.9, 1.1, 1.0], post=[4.0, 3.9, 4.1, 4.0])
+    result = did_estimate(control, treatment)
+    assert abs(result["effect"] - 2.0) < 1e-9
+    assert result["p"] < 0.001
+    assert result["ci"][0] < 2.0 < result["ci"][1]
+
+
+def test_did_estimate_totality():
+    from app.experiments.services.analysis import did_estimate
+
+    assert did_estimate({}, {}) is None  # missing sufficient stats
+    tiny = {"n": 1, "sum": 1.0, "sum_sq": 1.0, "cov_sum": 1.0,
+            "cov_sum_sq": 1.0, "cov_xy_sum": 1.0}
+    assert did_estimate(tiny, tiny) is None  # n < 2
+    # zero-variance arms: exact effect, degenerate CI, p None (not a crash)
+    flat = {"n": 3, "sum": 6.0, "sum_sq": 12.0, "cov_sum": 3.0,
+            "cov_sum_sq": 3.0, "cov_xy_sum": 6.0}
+    result = did_estimate(flat, flat)
+    assert result["effect"] == 0.0
+    assert result["p"] is None

@@ -62,6 +62,47 @@ def thompson_weights(
     return {"p_best": p_best, "suggested_weights_bp": weights, "draws": draws}
 
 
+def did_estimate(control: dict, treatment: dict) -> dict | None:
+    """Difference-in-differences from per-unit sufficient stats (§10 v2,
+    quasi-experiments): each arm carries the post-period outcome (sum,
+    sum_sq) and the PRE-period covariate of the same metric (cov_*) — DiD is
+    the fixed-theta=1 change score (y − x), so the arm variance comes from
+    Var(y) + Var(x) − 2·Cov(x, y), all derivable from the sufficient stats.
+    Association-grade: the parallel-trends assumption is the caller's caveat."""
+    required = ("n", "sum", "sum_sq", "cov_sum", "cov_sum_sq", "cov_xy_sum")
+    for arm in (control, treatment):
+        if any(arm.get(k) is None for k in required):
+            return None
+    n1, n2 = control["n"], treatment["n"]
+    if n1 < 2 or n2 < 2:
+        return None
+
+    def _change_stats(arm: dict) -> tuple[float, float]:
+        n = arm["n"]
+        mean = arm["sum"] / n - arm["cov_sum"] / n
+        # Var(y-x) via sums: Σ(y-x)² = Σy² - 2Σxy + Σx²
+        sum_sq_change = arm["sum_sq"] - 2.0 * arm["cov_xy_sum"] + arm["cov_sum_sq"]
+        var = (sum_sq_change - n * mean * mean) / (n - 1)
+        return mean, max(var, 0.0)
+
+    mean1, var1 = _change_stats(control)
+    mean2, var2 = _change_stats(treatment)
+    effect = mean2 - mean1
+    se = math.sqrt(var1 / n1 + var2 / n2)
+    if not (math.isfinite(effect) and math.isfinite(se)):
+        return None
+    if se <= 0:
+        return {"effect": effect, "se": 0.0, "ci": [effect, effect], "p": None}
+    z = effect / se
+    return {
+        "effect": effect,
+        "se": se,
+        "ci": [effect - 1.959963984540054 * se, effect + 1.959963984540054 * se],
+        "z": z,
+        "p": 2.0 * norm_sf(abs(z)),
+    }
+
+
 def pool_stratified(strata: list[tuple[float, float]]) -> dict | None:
     """Inverse-variance pooling of per-stratum effects (post-stratification,
     §4.6 v2): effect = Σ(e_i/se_i²)/Σ(1/se_i²), se = sqrt(1/Σ(1/se_i²)).

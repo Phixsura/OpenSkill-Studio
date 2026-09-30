@@ -545,3 +545,29 @@ async def test_fixed_allocation_has_no_bandit_block(db):
     await _populate(db, exp)
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "bandit" not in result
+
+
+async def test_observational_analysis_attaches_did(db):
+    """Observational + per-unit covariates → a DiD change-score block with
+    the parallel-trends caveat; randomized analyses never carry one."""
+    exp, admin = await _mk_running(
+        db,
+        analysis_type="observational",
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "revision_count", "control", ws,
+                     n=50, sum_value=100.0, sum_sq=220.0,
+                     cov_sum=50.0, cov_sum_sq=60.0, cov_xy_sum=105.0))
+    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
+                     n=50, sum_value=200.0, sum_sq=830.0,
+                     cov_sum=50.0, cov_sum_sq=60.0, cov_xy_sum=205.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert result["causal_claim"] is False
+    did = result["metrics"]["revision_count"]["comparisons"]["treatment"]["did"]
+    # control Δ = 2-1 = 1, treatment Δ = 4-1 = 3 → DiD = 2
+    assert abs(did["effect"] - 2.0) < 1e-9
+    assert "parallel-trends" in did["caveat"]

@@ -529,6 +529,39 @@ class AnalysisService:
                 warnings.append("NOVELTY_EFFECT_DECAY_SUSPECT")
                 break
 
+        if spec.analysis_type == "observational":
+            # Quasi-experiment support (§10 v2): where per-unit pre-period
+            # covariates exist, attach a DiD change-score estimate. Still an
+            # association — parallel trends is an assumption, not a test.
+            for key in spec.metrics.primary:
+                entry = metrics_out.get(key)
+                if not entry or not entry.get("comparisons"):
+                    continue
+                aggregated, _mixed = await self._aggregate_metric(experiment_id, key)
+                control_arm = aggregated.get(control_key)
+                if not control_arm:
+                    continue
+                for variant_key, comparison in entry["comparisons"].items():
+                    arm = aggregated.get(variant_key)
+                    if not arm:
+                        continue
+                    did = stats.did_estimate(
+                        {"n": control_arm.get("n"), "sum": control_arm.get("sum_value"),
+                         "sum_sq": control_arm.get("sum_sq"),
+                         "cov_sum": control_arm.get("cov_sum"),
+                         "cov_sum_sq": control_arm.get("cov_sum_sq"),
+                         "cov_xy_sum": control_arm.get("cov_xy_sum")},
+                        {"n": arm.get("n"), "sum": arm.get("sum_value"),
+                         "sum_sq": arm.get("sum_sq"), "cov_sum": arm.get("cov_sum"),
+                         "cov_sum_sq": arm.get("cov_sum_sq"),
+                         "cov_xy_sum": arm.get("cov_xy_sum")},
+                    )
+                    if did is not None:
+                        comparison["did"] = {
+                            **did,
+                            "caveat": "parallel-trends assumed; association only",
+                        }
+
         if spec.variance_reduction is not None:
             any_cuped = any(
                 "cuped" in comparison
