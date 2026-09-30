@@ -87,10 +87,7 @@ async def _source_exposures(
     event count pushes the rate past 1.0 and false-fires lte guardrails),
     denominator = assigned units (ITT). Fully internal — always available."""
     q = (
-        select(
-            ExperimentAssignment.variant_key,
-            func.count(func.distinct(ExperimentExposure.assignment_id)),
-        )
+        select(ExperimentAssignment.variant_key, ExperimentAssignment.unit_id)
         .join(ExperimentExposure, ExperimentExposure.assignment_id == ExperimentAssignment.id)
         .where(
             ExperimentExposure.experiment_id == experiment.id,
@@ -98,22 +95,27 @@ async def _source_exposures(
             ExperimentExposure.occurred_at < window_end,
             ExperimentAssignment.is_holdout.is_(False),
         )
-        .group_by(ExperimentAssignment.variant_key)
+        .distinct()
     )
-    counts = dict((await db.execute(q)).all())
+    exposed: dict[str, set[str]] = {}
+    for variant_key, unit_id in (await db.execute(q)).all():
+        exposed.setdefault(variant_key, set()).add(unit_id)
     # Switchback (§4.5): assignment rows carry the placeholder variant —
     # exposures in the window belong to the variant that owned the window
     # (the single key compute passes in)
     from app.experiments.services.assignment import SWITCHBACK_PLACEHOLDER
 
-    placeholder_count = counts.pop(SWITCHBACK_PLACEHOLDER, None)
-    if placeholder_count is not None and len(variant_units) == 1:
+    placeholder_units = exposed.pop(SWITCHBACK_PLACEHOLDER, None)
+    if placeholder_units is not None and len(variant_units) == 1:
         only = next(iter(variant_units))
-        counts[only] = counts.get(only, 0) + placeholder_count
+        exposed[only] = exposed.get(only, set()) | placeholder_units
+    # Numerators are intersected with the POPULATION each variant was called
+    # with (defect #31): segment slices and exposed-only rosters pass a
+    # subset — counting all exposed units overstated every slice's numerator
     return {
         variant: {
             "n": len(units),
-            "numerator": counts.get(variant, 0),
+            "numerator": len(exposed.get(variant, set()) & set(units)),
             "denominator": len(units),
         }
         for variant, units in variant_units.items()
@@ -1178,6 +1180,39 @@ class MetricService:
         else:
             switchback_washout_applied = None
             source_window_start = window_start
+        # §4.8 segment breakdown: org rows for user-unit experiments that
+        # opted in — capped to the biggest 20 orgs by enrolled units so a
+        # long org tail cannot blow up the sweep (accumulation-bomb law)
+        segment_units: dict[str, dict[str, list[str]]] = {}
+        spec_segments: list[str] = []
+        if latest is not None:
+            try:
+                spec_segments = ExperimentSpec.model_validate(latest.spec).segments
+            except Exception:  # noqa: BLE001
+                spec_segments = []
+        if "org" in spec_segments and unit_type == "user":
+            from app.models.organization import OrgMember
+
+            all_units = sorted({u for units in variant_units.values() for u in units})
+            rows = (
+                await self.db.execute(
+                    select(OrgMember.user_id, func.min(OrgMember.org_id))
+                    .where(OrgMember.user_id.in_(all_units))
+                    .group_by(OrgMember.user_id)
+                )
+            ).all()
+            user_org = dict(rows)
+            by_org: dict[str, set[str]] = {}
+            for user_id, org_id in user_org.items():
+                by_org.setdefault(org_id, set()).add(user_id)
+            top_orgs = sorted(by_org, key=lambda o: (-len(by_org[o]), o))[:20]
+            for org_id in top_orgs:
+                members = by_org[org_id]
+                segment_units[f"org:{org_id}"] = {
+                    variant: [u for u in units if u in members]
+                    for variant, units in variant_units.items()
+                }
+
         written = 0
         for key in metric_keys:
             definition = definitions.get(key)
@@ -1195,76 +1230,111 @@ class MetricService:
                     source=source_name,
                 )
                 continue
-            stats = await source(
-                self.db,
-                experiment=exp,
-                definition=definition,
-                variant_units=variant_units,
-                window_start=source_window_start,
-                window_end=window_end,
-                unit_type=unit_type,
-                variance_reduction=variance_reduction,
-            )
-            # Provenance records what actually happened — no robustness-knob
-            # claims here (a source that applies capping/winsorization must
-            # be the one to say so; stamping definition.winsorize_pct made
-            # provenance assert an adjustment no source performs yet)
-            provenance = {
-                "query_version": definition.query_version,
-                "computed_at": datetime.now(UTC).isoformat(),
-                "source": source_name,
-            }
-            if switchback_washout_applied is not None:
-                provenance["washout_minutes"] = switchback_washout_applied
-            if exposed_only:
-                provenance["analysis_population"] = "exposed"
-            for variant_key, values in stats.items():
-                values = dict(values)
-                # Meta flags from the source (not snapshot columns): a source
-                # that actually adjusted its values says so in provenance
-                variant_provenance = provenance
-                if values.pop("_winsorized", False):
-                    variant_provenance = {
-                        **variant_provenance,
-                        "winsorize_pct": float(definition.winsorize_pct),
-                    }
-                aggregation = values.pop("_aggregation", None)
-                if aggregation is not None:
-                    variant_provenance = {
-                        **variant_provenance,
-                        "aggregation": aggregation,
-                    }
-                row = {
-                    "experiment_id": experiment_id,
-                    "metric_key": key,
-                    "variant_key": variant_key,
-                    "window_start": window_start,
-                    "window_end": window_end,
-                    "provenance": variant_provenance,
-                    **values,
-                }
-                insert = pg_insert(MetricSnapshot).values(**row)
-                update_cols = {
-                    c: insert.excluded[c]
-                    for c in (
-                        "window_end",
-                        "n",
-                        "numerator",
-                        "denominator",
-                        "sum_value",
-                        "sum_sq",
-                        "cov_sum",
-                        "cov_sum_sq",
-                        "cov_xy_sum",
-                        "provenance",
-                    )
-                    if c in row
-                }
-                insert = insert.on_conflict_do_update(
-                    constraint="uq_experiment_metric_snapshots_window", set_=update_cols
+            populations = [("", variant_units)] + [
+                (seg, seg_units) for seg, seg_units in segment_units.items()
+            ]
+            for segment, population in populations:
+                stats = await source(
+                    self.db,
+                    experiment=exp,
+                    definition=definition,
+                    variant_units=population,
+                    window_start=source_window_start,
+                    window_end=window_end,
+                    unit_type=unit_type,
+                    variance_reduction=variance_reduction,
                 )
-                await self.db.execute(insert)
-                written += 1
+                written += await self._write_snapshots(
+                    experiment_id=experiment_id,
+                    metric_key=key,
+                    segment=segment,
+                    stats=stats,
+                    definition=definition,
+                    source_name=source_name,
+                    window_start=window_start,
+                    window_end=window_end,
+                    switchback_washout_applied=switchback_washout_applied,
+                    exposed_only=exposed_only,
+                )
+        return written
+
+    async def _write_snapshots(
+        self,
+        *,
+        experiment_id: str,
+        metric_key: str,
+        segment: str,
+        stats: dict,
+        definition,
+        source_name: str,
+        window_start,
+        window_end,
+        switchback_washout_applied,
+        exposed_only: bool,
+    ) -> int:
+        written = 0
+        # Provenance records what actually happened — no robustness-knob
+        # claims here (a source that applies capping/winsorization must
+        # be the one to say so; stamping definition.winsorize_pct made
+        # provenance assert an adjustment no source performs yet)
+        key = metric_key
+        provenance = {
+            "query_version": definition.query_version,
+            "computed_at": datetime.now(UTC).isoformat(),
+            "source": source_name,
+        }
+        if switchback_washout_applied is not None:
+            provenance["washout_minutes"] = switchback_washout_applied
+        if exposed_only:
+            provenance["analysis_population"] = "exposed"
+        for variant_key, values in stats.items():
+            values = dict(values)
+            # Meta flags from the source (not snapshot columns): a source
+            # that actually adjusted its values says so in provenance
+            variant_provenance = provenance
+            if values.pop("_winsorized", False):
+                variant_provenance = {
+                    **variant_provenance,
+                    "winsorize_pct": float(definition.winsorize_pct),
+                }
+            aggregation = values.pop("_aggregation", None)
+            if aggregation is not None:
+                variant_provenance = {
+                    **variant_provenance,
+                    "aggregation": aggregation,
+                }
+            row = {
+                "experiment_id": experiment_id,
+                "metric_key": key,
+                "segment": segment,
+                "variant_key": variant_key,
+                "window_start": window_start,
+                "window_end": window_end,
+                "provenance": variant_provenance,
+                **values,
+            }
+            insert = pg_insert(MetricSnapshot).values(**row)
+            update_cols = {
+                c: insert.excluded[c]
+                for c in (
+                    "window_end",
+                    "n",
+                    "numerator",
+                    "denominator",
+                    "sum_value",
+                    "sum_sq",
+                    "cov_sum",
+                    "cov_sum_sq",
+                    "cov_xy_sum",
+                    "provenance",
+                )
+                if c in row
+            }
+            insert = insert.on_conflict_do_update(
+                constraint="uq_experiment_metric_snapshots_window", set_=update_cols
+            )
+            await self.db.execute(insert)
+            written += 1
         return written
 
     async def list_snapshots(

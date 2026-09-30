@@ -571,3 +571,54 @@ async def test_observational_analysis_attaches_did(db):
     # control Δ = 2-1 = 1, treatment Δ = 4-1 = 3 → DiD = 2
     assert abs(did["effect"] - 2.0) < 1e-9
     assert "parallel-trends" in did["caveat"]
+
+
+async def test_segment_analysis_is_informational_slice(db):
+    """run(segment=...) aggregates ONLY that slice, claims no causality,
+    consumes no OF look, and writes no analysis_look event; the default run
+    never mixes segment rows in."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentEvent
+
+    exp, admin = await _mk_running(db, sequential="obrien_fleming")
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    for segment, control_num, treatment_num in (
+        ("", 50, 70), ("org:AAAA", 10, 30), ("org:BBBB", 40, 40),
+    ):
+        for variant, numerator in (("control", control_num), ("treatment", treatment_num)):
+            db.add(MetricSnapshot(
+                experiment_id=exp.id, metric_key="exposure_rate",
+                variant_key=variant, segment=segment, window_start=ws,
+                window_end=ws + timedelta(days=1),
+                n=200, numerator=numerator, denominator=200,
+                provenance={"query_version": 1},
+            ))
+    await db.flush()
+
+    slice_result = await AnalysisService(db).run(
+        exp.id, actor=admin, segment="org:AAAA"
+    )
+    assert slice_result["segment"] == "org:AAAA"
+    assert slice_result["causal_claim"] is False
+    comparison = slice_result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert abs(comparison["effect"] - 0.10) < 1e-9  # (30-10)/200
+
+    # no look event, no budget burn from the slice
+    looks = list(
+        (
+            await db.execute(
+                _select(ExperimentEvent).where(
+                    ExperimentEvent.experiment_id == exp.id,
+                    ExperimentEvent.event_type == "analysis_look",
+                )
+            )
+        ).scalars()
+    )
+    assert looks == []
+
+    # the default run sees ONLY the whole-population rows
+    full = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = full["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert abs(comparison["effect"] - 0.10) < 1e-9  # (70-50)/200, segments excluded
+    assert "segment" not in full

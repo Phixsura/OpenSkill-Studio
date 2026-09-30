@@ -61,16 +61,19 @@ class AnalysisService:
             ) from exc
 
     async def _aggregate_metric(
-        self, experiment_id: str, metric_key: str
+        self, experiment_id: str, metric_key: str, segment: str = ""
     ) -> tuple[dict[str, dict], bool]:
         """Sum sufficient stats across windows per variant, restricted to the
-        HIGHEST query_version present; returns (per-variant stats, mixed?)."""
+        HIGHEST query_version present; returns (per-variant stats, mixed?).
+        segment '' is the whole population — segment rows are a DISJOINT
+        breakdown and must never mix into the top-level aggregate."""
         rows = list(
             (
                 await self.db.execute(
                     select(MetricSnapshot).where(
                         MetricSnapshot.experiment_id == experiment_id,
                         MetricSnapshot.metric_key == metric_key,
+                        MetricSnapshot.segment == segment,
                     )
                 )
             ).scalars()
@@ -113,6 +116,7 @@ class AnalysisService:
                     select(MetricSnapshot).where(
                         MetricSnapshot.experiment_id == experiment_id,
                         MetricSnapshot.metric_key == metric_key,
+                        MetricSnapshot.segment == "",
                     )
                 )
             ).scalars()
@@ -221,6 +225,7 @@ class AnalysisService:
                     select(MetricSnapshot).where(
                         MetricSnapshot.experiment_id == experiment_id,
                         MetricSnapshot.metric_key == metric_key,
+                        MetricSnapshot.segment == "",
                     )
                 )
             ).scalars()
@@ -349,7 +354,13 @@ class AnalysisService:
             }
         return result
 
-    async def run(self, experiment_id: str, *, actor: User) -> dict:
+    async def run(
+        self, experiment_id: str, *, actor: User, segment: str | None = None
+    ) -> dict:
+        """segment (§4.8): analyze one breakdown slice ('org:<id>'). Segment
+        analyses are informational — they consume NO sequential look budget,
+        record NO analysis_look event (so a decision can never reference
+        them), and skip the corpus/bandit/novelty extras."""
         exp = await self.db.get(Experiment, experiment_id)
         if not exp:
             raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
@@ -364,7 +375,7 @@ class AnalysisService:
         # Sequential look budget (O'Brien-Fleming only; mSPRT peeks freely)
         look_number = None
         boundary_z = None
-        if spec.sequential == "obrien_fleming":
+        if segment is None and spec.sequential == "obrien_fleming":
             used = (
                 await self.db.execute(
                     select(func.count()).where(
@@ -411,6 +422,7 @@ class AnalysisService:
                 await self.db.execute(
                     select(func.count()).where(
                         MetricSnapshot.experiment_id == experiment_id,
+                        MetricSnapshot.segment == "",
                         ~MetricSnapshot.provenance.has_key("analysis_population"),
                     )
                 )
@@ -425,7 +437,9 @@ class AnalysisService:
         for role, keys in (("primary", spec.metrics.primary), ("secondary", spec.metrics.secondary)):
             for key in keys:
                 definition = definitions.get(key)
-                aggregated, mixed = await self._aggregate_metric(experiment_id, key)
+                aggregated, mixed = await self._aggregate_metric(
+                    experiment_id, key, segment=segment or ""
+                )
                 if mixed and "SNAPSHOT_VERSION_MIXED" not in warnings:
                     warnings.append("SNAPSHOT_VERSION_MIXED")
                 entry: dict = {"role": role}
@@ -486,6 +500,24 @@ class AnalysisService:
                         secondary_ps[f"{key}:{variant_key}"] = comparison["p"]
                 entry["comparisons"] = comparisons
                 metrics_out[key] = entry
+
+        if segment is not None:
+            payload = {
+                "experiment_id": experiment_id,
+                "experiment_key": exp.key,
+                "segment": segment,
+                "engine": spec.stats_engine,
+                "analysis_type": spec.analysis_type,
+                "causal_claim": False,
+                "caveat": "Segment breakdown — informational slice, no decision basis.",
+                "control": control_key,
+                "metrics": metrics_out,
+                "warnings": warnings,
+            }
+            payload["result_hash"] = result_hash(
+                {k: payload[k] for k in ("metrics", "engine", "analysis_type", "control")}
+            )
+            return payload
 
         # Post-stratification by time (§4.6 v2): per-window effects pooled
         # by inverse variance — robust to enrollment drift and time trends

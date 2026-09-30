@@ -1448,3 +1448,76 @@ async def test_learning_paths_completion_window_boundaries(db):
 # completion-boundary test — same class round 6 ledgered for the original
 # seven sources. unit_type early-return Eq flips are pinned by each source's
 # wrong-unit-type zero-sample assertion.
+
+
+# ── Segment breakdown (v2 batch 30, §4.8) ────────────────────────────
+
+
+async def test_segment_breakdown_org_rows_and_whole_population_intact(db):
+    """Opting into the org segment writes per-org snapshot rows WITHOUT
+    touching the whole-population rows (segment='') — a slice, never a mix."""
+    from app.models.organization import OrgMember, OrgRole
+
+    _tenant1, org_a = await _mk_org(db)
+    _tenant2, org_b = await _mk_org(db)
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="SEG", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["segments"] = ["org"]
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+
+    asvc = AssignmentService(db)
+    users = []
+    for i in range(12):
+        user = await _mk_admin(db)
+        users.append(user)
+        org = org_a if i < 8 else org_b
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
+    await db.flush()
+    for i, user in enumerate(users):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
+        assert r is not None
+        if i % 2 == 0:
+            await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=user.id
+            )
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    from app.experiments.models import MetricSnapshot
+
+    rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.metric_key == "exposure_rate",
+                )
+            )
+        ).scalars()
+    )
+    whole = [r for r in rows if r.segment == ""]
+    seg_a = [r for r in rows if r.segment == f"org:{org_a.id}"]
+    seg_b = [r for r in rows if r.segment == f"org:{org_b.id}"]
+    assert sum(int(r.denominator or 0) for r in whole) == 12
+    assert sum(int(r.denominator or 0) for r in seg_a) == 8
+    assert sum(int(r.denominator or 0) for r in seg_b) == 4
+    # the slices partition the whole — numerators add up too
+    assert sum(int(r.numerator or 0) for r in seg_a) + sum(
+        int(r.numerator or 0) for r in seg_b
+    ) == sum(int(r.numerator or 0) for r in whole)
+    return exp, admin, org_a

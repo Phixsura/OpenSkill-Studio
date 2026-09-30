@@ -142,6 +142,9 @@ class ExperimentSpec(_StrictReq):
     stats_engine: str = Field(default="frequentist", max_length=12)
     sequential: str = Field(default="msprt", max_length=16)
     variance_reduction: VarianceReductionSpec | None = None
+    # §4.8 v2: opt-in snapshot breakdown dimensions ("org" only for now,
+    # user units only — the mapping is OrgMember)
+    segments: list[str] = Field(default_factory=list, max_length=3)
     trigger: TriggerSpec = Field(default_factory=TriggerSpec)
     stop_policy: StopPolicySpec = Field(default_factory=StopPolicySpec)
     analysis_type: str = Field(default="randomized", max_length=14)
@@ -199,6 +202,11 @@ class ExperimentSpec(_StrictReq):
         keys = [v.key for v in self.variants]
         if len(set(keys)) != len(keys):
             raise ValueError("variant keys must be unique")
+        for dimension in self.segments:
+            if dimension != "org":
+                raise ValueError(f"unknown segment dimension: {dimension}")
+        if self.segments and self.unit_type != "user":
+            raise ValueError("segments require user units (org mapping)")
         if self.design == "switchback" and self.switchback is None:
             raise ValueError("switchback design requires a switchback config")
         if self.design != "switchback" and self.switchback is not None:

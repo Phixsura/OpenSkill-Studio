@@ -71,6 +71,10 @@ class MetricSnapshot(Base):
     )
     metric_key: Mapped[str] = mapped_column(String(64))
     variant_key: Mapped[str] = mapped_column(String(40))
+    # Segment dimension (§4.8 v2): '' = the whole population (the ONLY rows
+    # top-level aggregation may read — segment rows would double-count);
+    # 'org:<id>' = the per-org breakdown for user-unit experiments
+    segment: Mapped[str] = mapped_column(String(64), default="", server_default="")
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     n: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
@@ -91,6 +95,7 @@ class MetricSnapshot(Base):
         UniqueConstraint(
             "experiment_id",
             "metric_key",
+            "segment",
             "variant_key",
             "window_start",
             name="uq_experiment_metric_snapshots_window",
