@@ -9,7 +9,7 @@ Uses PostgreSQL-compatible text search:
 
 from __future__ import annotations
 
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.talent.models.employer import Opportunity
@@ -45,7 +45,10 @@ class OpportunitySearchService:
             # Split into words for AND-style matching
             words = sanitized.split()
             for word in words[:5]:  # limit to 5 search terms
-                pattern = f"%{word}%"
+                # R394: escape LIKE metacharacters — a raw `_`/`%` in the query
+                # acts as a wildcard ("a_b" matched "aXb"; "%%" matched all)
+                escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                pattern = f"%{escaped}%"
                 query = query.where(
                     or_(
                         Opportunity.title.ilike(pattern),
@@ -75,22 +78,46 @@ class OpportunitySearchService:
             if cap_conditions:
                 query = query.where(or_(*cap_conditions))
 
-        # Cursor pagination
-        if cursor:
-            query = query.where(Opportunity.id < cursor)
-
-        # Sort
+        # R395: the cursor predicate must match the SORT ORDER — `id < cursor`
+        # under a deadline ordering dropped arbitrary rows on page 2 (any id
+        # above the last page's floor vanished regardless of deadline), and
+        # under created_at ordering tied timestamps could skip rows. Newest/
+        # relevance now order strictly by id (ULIDs are time-ordered, so this
+        # IS newest-first); deadline uses a composite keyset token.
         if sort == "deadline":
+            if cursor:
+                from datetime import datetime as _dt
+
+                kind, _, rest = cursor.partition("|")
+                if kind == "d":
+                    iso, _, last_id = rest.partition("|")
+                    pivot = _dt.fromisoformat(iso)
+                    query = query.where(
+                        or_(
+                            Opportunity.application_deadline > pivot,
+                            and_(
+                                Opportunity.application_deadline == pivot,
+                                Opportunity.id < last_id,
+                            ),
+                            Opportunity.application_deadline.is_(None),
+                        )
+                    )
+                elif kind == "n":
+                    query = query.where(
+                        Opportunity.application_deadline.is_(None),
+                        Opportunity.id < rest,
+                    )
+                else:  # legacy bare-id cursor: best-effort id floor
+                    query = query.where(Opportunity.id < cursor)
             query = query.order_by(
                 Opportunity.application_deadline.asc().nulls_last(),
-                Opportunity.created_at.desc(),
+                Opportunity.id.desc(),
             )
-        elif sort == "relevance" and q:
-            # For relevance, prefer title matches over description matches
-            # Use a simple heuristic: title-matched first, then by created_at
-            query = query.order_by(Opportunity.created_at.desc())
-        else:  # newest
-            query = query.order_by(Opportunity.created_at.desc())
+        else:  # newest / relevance — strict ULID order == creation order
+            if cursor:
+                last_id = cursor.rpartition("|")[2]
+                query = query.where(Opportunity.id < last_id)
+            query = query.order_by(Opportunity.id.desc())
 
         # Fetch limit+1 for has_more detection
         query = query.limit(limit + 1)
@@ -102,4 +129,15 @@ class OpportunitySearchService:
         if has_more:
             items = items[:limit]
 
-        return items, has_more
+        next_cursor = None
+        if has_more and items:
+            last = items[-1]
+            if sort == "deadline":
+                next_cursor = (
+                    f"d|{last.application_deadline.isoformat()}|{last.id}"
+                    if last.application_deadline is not None
+                    else f"n|{last.id}"
+                )
+            else:
+                next_cursor = last.id
+        return items, has_more, next_cursor

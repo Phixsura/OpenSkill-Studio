@@ -205,6 +205,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         🧠 Capabilities
       </NavLink>
       <NavLink
+        href="/dashboard/ecosystem"
+        active={pathname.startsWith("/dashboard/ecosystem")}
+        onClick={closeSidebar}
+      >
+        🌐 Ecosystem
+      </NavLink>
+      <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}
         onClick={closeSidebar}

@@ -49,7 +49,7 @@ async def _release(db, manifest, version="1.0.0"):
     )
     await db.flush()
     pack = SkillPack(
-        owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:8]}", created_by=owner.id
+        owner_org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:16]}", created_by=owner.id
     )
     db.add(pack)
     await db.flush()

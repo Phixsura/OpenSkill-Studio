@@ -1,0 +1,97 @@
+"""Replacement candidates endpoints (Part J)."""
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user, get_db
+from app.ecosystem.api.deps import require_platform_admin
+from app.ecosystem.schemas import (
+    DecisionRequest,
+    GenerateCandidatesRequest,
+    ReplacementCandidateResponse,
+)
+from app.ecosystem.services.replacement import ReplacementService
+from app.models.user import User
+from app.schemas.base import DataResponse
+
+router = APIRouter(prefix="/ecosystem/replacements", tags=["Ecosystem — Replacements"])
+
+
+@router.post("/candidates/generate", response_model=DataResponse[dict], status_code=201)
+async def generate_candidates(
+    body: GenerateCandidatesRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    compatible, incompatible = await ReplacementService(db).generate_candidates(
+        deprecated_kind=body.deprecated_kind,
+        deprecated_id=body.deprecated_id,
+        weights=body.weights,
+        limit=body.limit,
+    )
+    await db.commit()
+    # Hard incompatibilities live in a SEPARATE list — never interleaved
+    return {
+        "data": {
+            "ranked": [
+                ReplacementCandidateResponse.model_validate(c).model_dump() for c in compatible
+            ],
+            "incompatible": [
+                ReplacementCandidateResponse.model_validate(c).model_dump() for c in incompatible
+            ],
+        }
+    }
+
+
+@router.get("/candidates", response_model=dict)
+async def list_candidates(
+    deprecated_kind: str | None = None,
+    deprecated_id: str | None = None,
+    status: str | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    from app.ecosystem.api.deps import check_enum
+    from app.ecosystem.models.replacement import CANDIDATE_STATUSES
+
+    check_enum(status, CANDIDATE_STATUSES, "status")
+    from app.ecosystem.models.catalog import CATALOG_KIND_TO_MODEL
+
+    check_enum(deprecated_kind, frozenset(CATALOG_KIND_TO_MODEL), "deprecated_kind")
+    rows, total = await ReplacementService(db).list_candidates(
+        deprecated_kind=deprecated_kind,
+        deprecated_id=deprecated_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "data": [ReplacementCandidateResponse.model_validate(x).model_dump() for x in rows],
+        "meta": {"total": total, "limit": limit, "offset": offset},
+    }
+
+
+@router.post(
+    "/candidates/{candidate_id}/decide",
+    response_model=DataResponse[ReplacementCandidateResponse],
+)
+async def decide_candidate(
+    candidate_id: str,
+    body: DecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    candidate = await ReplacementService(db).decide(
+        candidate_id, decision=body.decision, actor_id=user.id
+    )
+    from app.ecosystem.api.deps import eco_audit
+
+    await eco_audit(
+        db, user, action="eco.candidate_decided",
+        target_type="eco_replacement_candidate", target_id=candidate_id,
+        after={"decision": body.decision},
+    )
+    await db.commit()
+    return {"data": candidate}

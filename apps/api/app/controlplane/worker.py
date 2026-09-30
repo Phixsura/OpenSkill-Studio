@@ -61,6 +61,7 @@ def load_handlers() -> None:
     import app.controlplane.services.rating  # noqa: F401
     import app.controlplane.services.revenue_share  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
+    import app.ecosystem.worker  # noqa: F401 — eco.* topics (ADR-016)
 
 
 def _worker_id() -> str:
@@ -271,6 +272,90 @@ async def _poll_outbox(ctx: dict) -> None:
             log.info("outbox_processed", count=n)
 
 
+async def _eco_sync_sweep(ctx: dict) -> None:
+    """Continuous discovery (ADR-016 Part A): enqueue syncs for due sources."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_due_sources
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_due_sources(db)
+        if n:
+            await db.commit()
+            log.info("eco_sources_enqueued", count=n)
+
+
+async def _eco_retention(ctx: dict) -> None:
+    """§16: prune redundant availability probes / old sync audit rows."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import prune_ecosystem_history
+
+    async with AsyncSessionLocal() as db:
+        pruned = await prune_ecosystem_history(db)
+        if any(pruned.values()):
+            await db.commit()
+            log.info("eco_history_pruned", **pruned)
+
+
+async def _eco_stuck_runs(ctx: dict) -> None:
+    """ADR-016 §47: close zombie benchmark runs left by dead workers."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_stuck_runs
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_stuck_runs(db)
+        if n:
+            await db.commit()
+            log.warning("eco_stuck_runs_closed", count=n)
+
+
+async def _eco_rollout_eval(ctx: dict) -> None:
+    """ADR-016 §36: auto-evaluate running rollouts; decisions stay human."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_rollout_evaluations
+
+    async with AsyncSessionLocal() as db:
+        out = await sweep_rollout_evaluations(db)
+        if out["evaluated"]:
+            await db.commit()
+            log.info("eco_rollouts_evaluated", **out)
+
+
+async def _eco_impact_sla(ctx: dict) -> None:
+    """ADR-016 §25: escalate open impact analyses past their deadline."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_overdue_impacts
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_overdue_impacts(db)
+        if n:
+            await db.commit()
+            log.warning("eco_impacts_escalated", count=n)
+
+
+async def _eco_telemetry_sweep(ctx: dict) -> None:
+    """ADR-016 §28/R198: hourly production-telemetry aggregation window."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_telemetry_window
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_telemetry_window(db)
+        if n:
+            await db.commit()
+            log.info("eco_telemetry_window_enqueued", count=n)
+
+
+async def _eco_availability_sweep(ctx: dict) -> None:
+    """ADR-016 §11.3/R198: probe watched entities independently of syncs."""
+    from app.core.database import AsyncSessionLocal
+    from app.ecosystem.worker import sweep_watched_availability
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_watched_availability(db)
+        if n:
+            await db.commit()
+            log.info("eco_availability_probes_enqueued", count=n)
+
+
 async def _reap_outbox(ctx: dict) -> None:
     from app.core.database import AsyncSessionLocal
 
@@ -399,6 +484,14 @@ def _cron_jobs() -> list:
         # Outbox poll every 15s (arq cron supports second-level sets).
         cron(_poll_outbox, second={0, 15, 30, 45}, name="cp_outbox_poll"),
         cron(_reap_outbox, minute=set(range(0, 60, 10)), second=5, name="cp_outbox_reaper"),
+        # ADR-016 Part A: continuous external discovery — sweep due sources
+        cron(_eco_sync_sweep, minute={4, 19, 34, 49}, name="eco_sync_sweep"),
+        cron(_eco_retention, hour=3, minute=41, timeout=1800, name="eco_retention"),
+        cron(_eco_impact_sla, minute={26, 56}, name="eco_impact_sla"),
+        cron(_eco_rollout_eval, minute={11, 41}, name="eco_rollout_eval"),
+        cron(_eco_stuck_runs, minute=53, name="eco_stuck_runs"),
+        cron(_eco_telemetry_sweep, minute=58, name="eco_telemetry_sweep"),
+        cron(_eco_availability_sweep, minute={14, 44}, name="eco_availability_sweep"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);

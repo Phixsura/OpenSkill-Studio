@@ -166,11 +166,25 @@ async def list_opportunities(
     Supports full-text search (q), faceted filters (opportunity_type,
     location_mode, capabilities), and sort (newest, deadline, relevance).
     """
+    from app.ecosystem.api.deps import check_enum
+    from app.talent.models.employer import (
+        OPPORTUNITY_LOCATION_MODES,
+        OPPORTUNITY_SORTS,
+        OPPORTUNITY_STATUSES,
+        OPPORTUNITY_TYPES,
+    )
     from app.talent.services.opportunity_search import OpportunitySearchService
+
+    # R397 (§106.2 posture): a typo'd filter must 422 naming the vocabulary,
+    # never silently return [] (or silently fall back to newest for sort)
+    check_enum(opportunity_type, OPPORTUNITY_TYPES, "opportunity_type")
+    check_enum(location_mode, OPPORTUNITY_LOCATION_MODES, "location_mode")
+    check_enum(status, OPPORTUNITY_STATUSES, "status")
+    check_enum(sort, OPPORTUNITY_SORTS, "sort")
 
     svc = OpportunitySearchService(db)
     cap_ids = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
-    items, has_more = await svc.search(
+    items, has_more, next_cursor = await svc.search(
         q=q,
         capability_ids=cap_ids,
         opportunity_type=opportunity_type,
@@ -180,7 +194,6 @@ async def list_opportunities(
         cursor=cursor,
         limit=limit,
     )
-    next_cursor = items[-1].id if has_more and items else None
     return CursorListResponse(
         data=[OpportunityResponse.model_validate(o) for o in items],
         meta=CursorMeta(next_cursor=next_cursor, has_more=has_more),

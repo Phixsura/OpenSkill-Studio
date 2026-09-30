@@ -16,7 +16,7 @@ from app.models.user import User, UserRole, UserStatus
 
 async def _user(db, role=UserRole.STUDENT):
     u = User(
-        email=f"fin-{uuid.uuid4().hex[:8]}@test.com",
+        email=f"fin-{uuid.uuid4().hex[:16]}@test.com",
         password_hash=hash_password("Test123!"),
         display_name="Final",
         role=role,
@@ -78,7 +78,7 @@ async def test_auth_reset_password_full_flow(db):
     from app.models.user import PasswordResetToken
     from app.services.auth import AuthService
 
-    email = f"rst-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"rst-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "Reset")
     await db.flush()
@@ -107,7 +107,7 @@ async def test_auth_verify_email_expired(db):
     from app.models.user import EmailVerificationToken
     from app.services.auth import AuthService, TokenInvalidError
 
-    email = f"vex-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"vex-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     await svc.register(email, "Valid123!", "VerExp")
     await db.flush()
@@ -130,7 +130,7 @@ async def test_auth_verify_email_expired(db):
 async def test_auth_resend_already_verified(db):
     from app.services.auth import AuthService
 
-    email = f"rv-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"rv-{uuid.uuid4().hex[:16]}@test.com"
     svc = AuthService(db)
     reg = await svc.register(email, "Valid123!", "ResVer")
     reg.user.email_verified = True

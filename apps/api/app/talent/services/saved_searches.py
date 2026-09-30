@@ -154,9 +154,11 @@ class SavedSearchService:
         """Run an opportunity search using the search service."""
         from app.talent.services.opportunity_search import OpportunitySearchService
 
-        svc = OpportunitySearchService()
-        items, _has_more = await svc.search(
-            self.db,
+        # R395: this path crashed on EVERY call — the service was built without
+        # its db and `self.db` was passed positionally into a keyword-only
+        # signature. Running a saved opportunity search always raised TypeError.
+        svc = OpportunitySearchService(self.db)
+        items, _has_more, _cursor = await svc.search(
             q=criteria.get("q"),
             capability_ids=criteria.get("capability_ids"),
             opportunity_type=criteria.get("opportunity_type"),

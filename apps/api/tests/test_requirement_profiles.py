@@ -29,7 +29,7 @@ async def c():
 
 
 def _email():
-    return f"rp-{uuid.uuid4().hex[:8]}@test.com"
+    return f"rp-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -42,7 +42,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"RP-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"RP-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 

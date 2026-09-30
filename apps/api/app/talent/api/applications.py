@@ -278,9 +278,17 @@ async def transition_application(
       - Candidate may only withdraw their own application.
       - Employer org members may perform employer-side transitions.
     """
-    app, opp = await _load_app_and_opp(db, app_id)
-    # NOTE: For strict serialization, use db.get(Application, app_id, with_for_update=True)
-    # Current approach relies on DB-level unique constraints for safety.
+    # R396: serialize concurrent transitions on the same application — two
+    # racing accepted→hired requests both passed the state check and the
+    # loser 500'd on the placements unique constraint (23505 is deliberately
+    # unhandled, §106). The row lock makes the second request re-read the
+    # committed "hired" state and fail the state machine with a clean 422.
+    app = await db.get(Application, app_id, with_for_update=True)
+    if not app:
+        raise HTTPException(404, "Application not found")
+    opp = await db.get(Opportunity, app.opportunity_id)
+    if not opp:
+        raise HTTPException(404, "Application not found")
 
     # Validate transition is allowed by state machine
     allowed = APPLICATION_TRANSITIONS.get(app.status, [])
@@ -331,6 +339,20 @@ async def transition_application(
             placement_source="platform_match" if app.match_run_id else "direct_apply",
         )
         db.add(placement)
+        await db.flush()
+        # R395: this auto-generation existed since the passport rounds but was
+        # never wired — hires produced no outcome event. Private by default;
+        # the user opts into visibility.
+        from datetime import UTC, datetime
+
+        from app.talent.services.talent_pool import OutcomeEventService
+
+        await OutcomeEventService(db).auto_generate_placement_event(
+            user_id=app.user_id,
+            placement_id=placement.id,
+            event_type="job_started",
+            occurred_at=datetime.now(UTC),
+        )
 
     await db.commit()
 

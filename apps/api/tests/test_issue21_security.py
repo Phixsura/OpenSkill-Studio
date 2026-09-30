@@ -27,7 +27,7 @@ async def c():
 
 
 def _email():
-    return f"sec-{uuid.uuid4().hex[:8]}@test.com"
+    return f"sec-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -40,7 +40,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"S-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"S-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 
@@ -137,7 +137,7 @@ async def test_match_results_exclude_inaccessible_entities(c):
     scenario = f"exclusive-scenario-{uuid.uuid4().hex}"
     r = await c.post(
         f"/api/v1/orgs/{o1}/workflow-packs",
-        json={"name": f"Hidden Pack {uuid.uuid4().hex[:8]}"},
+        json={"name": f"Hidden Pack {uuid.uuid4().hex[:16]}"},
         headers=h1,
     )
     hidden_id = r.json()["data"]["id"]

@@ -183,6 +183,25 @@ def _upstream_ids(step_id: str, steps: dict, edges: list) -> set[str]:
 _pending_tasks: set[asyncio.Task] = set()
 
 
+# R303 (ADR-016 §101): the platform-wide sweep dispatches EVERY stalled run
+# at once — against an accumulated backlog (hundreds of orphaned runs) that
+# spawned hundreds of concurrent advance loops, each opening DB sessions,
+# and exhausted the connection pool (the operator sweep DoS'd its own API).
+# A per-event-loop semaphore bounds concurrent advance loops; dispatch stays
+# fire-and-forget, execution queues.
+_ADVANCE_GATES: dict[int, asyncio.Semaphore] = {}
+_ADVANCE_CONCURRENCY = 8
+
+
+def _advance_gate() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    gate = _ADVANCE_GATES.get(loop_id)
+    if gate is None:
+        gate = asyncio.Semaphore(_ADVANCE_CONCURRENCY)
+        _ADVANCE_GATES[loop_id] = gate
+    return gate
+
+
 def _track(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _pending_tasks.add(task)
@@ -905,12 +924,13 @@ async def advance_run(run_id: str) -> None:
     from app.core.database import AsyncSessionLocal
 
     try:
-        for _ in range(200):  # hard bound: no infinite loops (≤50 steps × retries)
-            async with AsyncSessionLocal() as db:
-                progressed = await _advance_once(db, run_id)
-                await db.commit()
-            if not progressed:
-                break
+        async with _advance_gate():  # R303: bounded concurrent advance loops
+            for _ in range(200):  # hard bound: no infinite loops (≤50 steps × retries)
+                async with AsyncSessionLocal() as db:
+                    progressed = await _advance_once(db, run_id)
+                    await db.commit()
+                if not progressed:
+                    break
     except Exception:
         log.exception("workflow_advance_crashed", run_id=run_id)
 
@@ -1866,10 +1886,18 @@ async def sweep_stale(db: AsyncSession, org_id: str | None = None) -> dict:
         )
         .scalar_subquery()
     )
-    stalled_q = select(WorkflowRun.id).where(
-        WorkflowRun.status.in_([RunStatus.PENDING, RunStatus.RUNNING]),
-        WorkflowRun.created_at < grace,
-        WorkflowRun.id.notin_(live_lease),
+    stalled_q = (
+        select(WorkflowRun.id)
+        .where(
+            WorkflowRun.status.in_([RunStatus.PENDING, RunStatus.RUNNING]),
+            WorkflowRun.created_at < grace,
+            WorkflowRun.id.notin_(live_lease),
+        )
+        # R303: bounded — an unbounded backlog (orphaned runs accumulate in
+        # dev/incident scenarios) must not turn one sweep into a thundering
+        # herd; the next cron pass picks up the remainder.
+        .order_by(WorkflowRun.created_at)
+        .limit(500)
     )
     if org_id:
         stalled_q = stalled_q.where(WorkflowRun.org_id == org_id)

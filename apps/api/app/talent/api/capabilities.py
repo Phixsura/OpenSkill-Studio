@@ -106,24 +106,6 @@ async def create_capability(
     return DataResponse(data=CapabilityResponse.model_validate(cap))
 
 
-@router.get(
-    "/{capability_id}",
-    response_model=DataResponse[CapabilityResponse],
-    summary="Get capability detail",
-    description="Returns full capability details including edges and taxonomy mappings.",
-)
-async def get_capability(
-    capability_id: str,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    svc = CapabilityService(db)
-    cap = await svc.get_capability(capability_id)
-    if not cap:
-        raise HTTPException(404, "Capability not found")
-    return DataResponse(data=CapabilityResponse.model_validate(cap))
-
-
 @router.patch(
     "/{capability_id}",
     response_model=DataResponse[CapabilityResponse],
@@ -589,3 +571,27 @@ async def submit_match_feedback(
     if errors:
         raise HTTPException(422, errors[0])
     return DataResponse(data={"submitted": True, "rating": body["rating"]})
+
+# NOTE (issue #35 R383): this catch-all MUST register after every static
+# single-segment GET above (/mappings, /autocomplete, /frequency,
+# /cooccurrence, /industries, /version, /edge-strength, /search-analytics) —
+# FastAPI matches in registration order, so defining it earlier made all of
+# them unreachable (each resolved here as capability_id and 404'd). A route
+# guard in tests/test_eco_endpoints_nodb.py pins the order.
+@router.get(
+    "/{capability_id}",
+    response_model=DataResponse[CapabilityResponse],
+    summary="Get capability detail",
+    description="Returns full capability details including edges and taxonomy mappings.",
+)
+async def get_capability(
+    capability_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    svc = CapabilityService(db)
+    cap = await svc.get_capability(capability_id)
+    if not cap:
+        raise HTTPException(404, "Capability not found")
+    return DataResponse(data=CapabilityResponse.model_validate(cap))
+

@@ -31,7 +31,7 @@ async def c():
 
 
 def _email():
-    return f"adminreg-{uuid.uuid4().hex[:8]}@test.com"
+    return f"adminreg-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _admin_headers(c):
@@ -56,7 +56,7 @@ async def _admin_headers(c):
 
 
 async def _category(c, h, parent_id=None, **overrides):
-    unique = uuid.uuid4().hex[:8]
+    unique = uuid.uuid4().hex[:16]
     body = {
         "name": f"Cat {unique}",
         "slug": f"cat-{unique}",
@@ -190,7 +190,7 @@ async def test_sort_order_bounded_create_and_update(c):
     """sort_order past int32 (2**40) previously reached the Integer column
     and 500ed with asyncpg integer-out-of-range."""
     h = await _admin_headers(c)
-    unique = uuid.uuid4().hex[:8]
+    unique = uuid.uuid4().hex[:16]
     r = await c.post(
         "/api/v1/admin/pack-categories",
         json={"name": f"Big {unique}", "slug": f"big-{unique}", "sort_order": 2**40},

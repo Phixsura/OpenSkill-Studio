@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"cov-{uuid.uuid4().hex[:8]}@test.com"
+    return f"cov-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -50,7 +50,7 @@ async def _auth(c):
 
 async def _org(c, h):
     """Create org, return org_id."""
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -2321,7 +2321,11 @@ async def test_username_collision_and_format(c):
     h2, _ = await _auth(c)
     import uuid as _uuid
 
-    uname = f"taken{_uuid.uuid4().hex[:6]}"
+    # R386: 6 hex chars collided for real once ~1200 taken* rows accumulated
+    # in the shared dev DB (birthday growth — same time-bomb class as the
+    # sweep-timeout in ADR-016 §106.12). 16 chars keeps username <=40 and the
+    # collision probability negligible for the DB's lifetime.
+    uname = f"taken{_uuid.uuid4().hex[:16]}"
     assert (
         await c.put("/api/v1/portfolio/username", json={"username": uname}, headers=h1)
     ).status_code == 200
@@ -3422,7 +3426,7 @@ async def test_private_profile_hides_item_detail(c):
     """When a profile is private, the public item-detail endpoint must 404 —
     it was leaking items even though profile + list were hidden (bug #99)."""
     h, _ = await _auth(c)
-    un = f"user{uuid.uuid4().hex[:8]}"
+    un = f"user{uuid.uuid4().hex[:16]}"
     assert (
         await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
     ).status_code == 200
@@ -3751,7 +3755,7 @@ async def test_skill_badges_sync_from_progress(c):
     assert badges[0]["completed"] is True
 
     # badge shows on public profile, and hiding removes it
-    un = f"user{uuid.uuid4().hex[:8]}"
+    un = f"user{uuid.uuid4().hex[:16]}"
     await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
     skills = (await c.get(f"/api/v1/u/{un}")).json()["data"]["skills"]
     assert any(s["name"] == "Badge Skill" for s in skills)
@@ -3768,7 +3772,7 @@ async def test_show_score_masks_public_score(c):
     endpoints — it was returned verbatim, making the privacy toggle a no-op
     (bug #107)."""
     h, _ = await _auth(c)
-    un = f"user{uuid.uuid4().hex[:8]}"
+    un = f"user{uuid.uuid4().hex[:16]}"
     await c.put("/api/v1/portfolio/username", json={"username": un}, headers=h)
     oid = await _org(c, h)
     p = (

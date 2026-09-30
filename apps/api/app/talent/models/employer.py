@@ -58,6 +58,18 @@ class EmployerProfile(Base):
     )
 
 
+# R397: closed vocabularies for search filters (mirrors the column comments)
+OPPORTUNITY_TYPES = frozenset(
+    {
+        "internship", "full_time", "part_time", "contract", "freelance",
+        "project_role", "apprenticeship", "campus_project",
+    }
+)
+OPPORTUNITY_LOCATION_MODES = frozenset({"remote", "onsite", "hybrid"})
+OPPORTUNITY_STATUSES = frozenset({"draft", "open", "closed", "filled", "cancelled"})
+OPPORTUNITY_SORTS = frozenset({"newest", "deadline", "relevance"})
+
+
 class Opportunity(Base):
     """A structured internship/job/project-role posting."""
 

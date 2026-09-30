@@ -278,7 +278,7 @@ async def test_register_and_login_long_password_not_500(client):
     # event loop — same hygiene the other client-fixture tests in this file use.
     await engine.dispose()
 
-    email = f"pw72-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"pw72-{_uuid.uuid4().hex[:16]}@test.com"
     longpw = "Aa1" + "x" * 90
     r = await client.post(
         "/api/v1/auth/register",
@@ -345,7 +345,7 @@ async def test_refresh_reuse_within_grace_window_succeeds(client):
     mint a fresh pair, not force a logout."""
     import uuid as _uuid
 
-    email = f"grace-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"grace-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Grace"},
@@ -382,7 +382,7 @@ async def test_revoke_current_session_clears_cookie(client):
 
     await engine.dispose()
 
-    email = f"revoke-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"revoke-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Revoke"},
@@ -416,7 +416,7 @@ async def test_revoke_other_session_keeps_cookie(client):
 
     await engine.dispose()
 
-    email = f"revoke2-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"revoke2-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Revoke2"},
@@ -458,7 +458,7 @@ async def test_refresh_reuse_after_grace_window_rejected(client):
     # to their own (closed) event loops ("attached to a different loop")
     await engine.dispose()
 
-    email = f"grace2-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"grace2-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Grace2"},
@@ -503,7 +503,7 @@ async def test_logout_kills_rotation_predecessor_within_grace(client):
 
     await engine.dispose()
 
-    email = f"revive-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"revive-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Revive"},
@@ -551,7 +551,7 @@ async def test_change_password_kills_rotation_predecessor_within_grace(client):
 
     await engine.dispose()
 
-    email = f"cpwd-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"cpwd-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Cpwd"},
@@ -616,7 +616,7 @@ async def test_revoke_session_kills_rotation_predecessor_within_grace(client):
 
     await engine.dispose()
 
-    email = f"revrevive-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"revrevive-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "RevRevive"},
@@ -681,11 +681,11 @@ async def test_auth_core_boundaries_r401(client):
     # (3) unknown email → 401 not 500
     r = await client.post(
         "/api/v1/auth/login",
-        json={"email": f"ghost-{_uuid.uuid4().hex[:8]}@x.com", "password": "whatever123!"},
+        json={"email": f"ghost-{_uuid.uuid4().hex[:16]}@x.com", "password": "whatever123!"},
     )
     assert r.status_code == 401
 
-    email = f"r401-{_uuid.uuid4().hex[:8]}@test.com"
+    email = f"r401-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "R401"},
@@ -742,7 +742,7 @@ async def test_auth_core_boundaries_r401(client):
     assert r3.status_code == 401, "past the grace window the replay is dead"
 
     # (1) INACTIVE user: a live refresh token stops working
-    email2 = f"r401b-{_uuid.uuid4().hex[:8]}@test.com"
+    email2 = f"r401b-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email2, "password": "TestPass123!", "display_name": "R401b"},
@@ -759,7 +759,7 @@ async def test_auth_core_boundaries_r401(client):
     assert r4.status_code == 401, "a deactivated account must not refresh"
 
     # (4) explicit logout is immediately final — no grace revival
-    email3 = f"r401c-{_uuid.uuid4().hex[:8]}@test.com"
+    email3 = f"r401c-{_uuid.uuid4().hex[:16]}@test.com"
     r = await client.post(
         "/api/v1/auth/register",
         json={"email": email3, "password": "TestPass123!", "display_name": "R401c"},
@@ -810,7 +810,7 @@ async def test_auth_core_boundaries_r401(client):
 
     async with AsyncSessionLocal() as dbs:
         pw_less = User(
-            email=f"oauth-{_uuid.uuid4().hex[:8]}@x.com",
+            email=f"oauth-{_uuid.uuid4().hex[:16]}@x.com",
             display_name="OAuth Only",
             password_hash=None,
         )

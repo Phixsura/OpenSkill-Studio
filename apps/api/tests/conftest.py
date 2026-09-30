@@ -36,3 +36,23 @@ async def client():
 
     # Restore original lifespan
     app.router.lifespan_context = original_lifespan
+
+@pytest.fixture(autouse=True)
+def _pin_example_dns(monkeypatch):
+    """R243 anti-flake: eco test sources use example.com, and the SSRF guard
+    re-resolves it on every sync — under machine load a real DNS timeout
+    fail-closes into ECO_SSRF_BLOCKED and flakes unrelated tests. Pin the
+    fixture domain to a fixed public IP without touching the network;
+    every other hostname (SSRF matrix, rebinding stubs) resolves as before.
+    """
+    import socket as _socket
+
+    real = _socket.getaddrinfo
+
+    def pinned(host, *args, **kwargs):
+        if isinstance(host, str) and host.rstrip(".").endswith("example.com"):
+            return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+        return real(host, *args, **kwargs)
+
+    monkeypatch.setattr(_socket, "getaddrinfo", pinned)
+

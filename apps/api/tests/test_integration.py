@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _unique_email():
-    return f"test-{uuid.uuid4().hex[:8]}@integration.com"
+    return f"test-{uuid.uuid4().hex[:16]}@integration.com"
 
 
 @pytest_asyncio.fixture

@@ -82,14 +82,14 @@ async def _member(db, org, svc_org, role=UserRole.STUDENT):
 async def _skill(db, org):
     from app.models.skill import Skill, SkillCategory
 
-    cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:8]}")
+    cat = SkillCategory(org_id=org.id, name="C", slug=f"c-{uuid.uuid4().hex[:16]}")
     db.add(cat)
     await db.flush()
     s = Skill(
         org_id=org.id,
         category_id=cat.id,
         name=f"S {uuid.uuid4().hex[:4]}",
-        slug=f"s-{uuid.uuid4().hex[:8]}",
+        slug=f"s-{uuid.uuid4().hex[:16]}",
         description="dddddddddd",
     )
     db.add(s)

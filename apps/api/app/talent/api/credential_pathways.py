@@ -86,6 +86,27 @@ async def list_pathways(
     )
 
 
+# NOTE (issue #35 R383): static /my-progress must register BEFORE the
+# /{pathway_id} catch-all below or it is unreachable (route order guard
+# in tests/test_eco_endpoints_nodb.py pins this).
+@router.get(
+    "/credential-pathways/my-progress",
+    response_model=DataResponse[list[PathwayProgressResponse]],
+    summary="List My Progress",
+)
+async def list_my_progress(
+    org_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all pathways with my progress."""
+    from app.talent.services.credential_pathways import CredentialPathwayService
+
+    svc = CredentialPathwayService(db)
+    progress_list = await svc.list_user_pathway_progress(user.id, org_id=org_id)
+    return DataResponse(data=[PathwayProgressResponse(**p) for p in progress_list])
+
+
 @router.get(
     "/credential-pathways/{pathway_id}",
     response_model=DataResponse[PathwayResponse],
@@ -152,24 +173,6 @@ async def check_progress(
     svc = CredentialPathwayService(db)
     progress = await svc.check_pathway_completion(user.id, pathway_id)
     return DataResponse(data=PathwayProgressResponse(**progress))
-
-
-@router.get(
-    "/credential-pathways/my-progress",
-    response_model=DataResponse[list[PathwayProgressResponse]],
-    summary="List My Progress",
-)
-async def list_my_progress(
-    org_id: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """List all pathways with my progress."""
-    from app.talent.services.credential_pathways import CredentialPathwayService
-
-    svc = CredentialPathwayService(db)
-    progress_list = await svc.list_user_pathway_progress(user.id, org_id=org_id)
-    return DataResponse(data=[PathwayProgressResponse(**p) for p in progress_list])
 
 
 @router.post(

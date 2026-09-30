@@ -27,7 +27,7 @@ async def c():
 
 
 def _email():
-    return f"wfi-{uuid.uuid4().hex[:8]}@test.com"
+    return f"wfi-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -40,7 +40,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"I-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"I-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 
@@ -686,7 +686,7 @@ async def test_registry_releases_no_manifest(c):
 async def test_registry_search_and_output_type_filter(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    marker = uuid.uuid4().hex[:8]
+    marker = uuid.uuid4().hex[:16]
     r = await c.post(
         f"/api/v1/orgs/{oid}/workflow-packs",
         json={"name": f"Searchable {marker}", "summary": "video pipeline"},

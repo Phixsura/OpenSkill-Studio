@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"feat-{uuid.uuid4().hex[:8]}@test.com"
+    return f"feat-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -42,7 +42,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -159,7 +159,7 @@ async def test_registry_preview_tolerates_hostile_manifest_shapes(c):
     oid = await _org(c, h)
     # Create a real pack + release, then overwrite the release manifest with a
     # hostile shape directly (simulating any producer of a malformed manifest).
-    pid = await _published_public_pack(c, h, oid, pack_name=f"Hostile {_uuid.uuid4().hex[:6]}")
+    pid = await _published_public_pack(c, h, oid, pack_name=f"Hostile {_uuid.uuid4().hex[:16]}")
 
     hostile = {
         "skills": [
@@ -581,7 +581,7 @@ async def test_reject_pack(c):
 async def test_pending_pack_excluded_from_registry(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = uuid.uuid4().hex[:8]
+    unique = uuid.uuid4().hex[:16]
     pid = await _published_public_pack(c, h, oid, f"Pending-{unique}")
     await _set_review_status(pid, "pending")
 
@@ -605,7 +605,7 @@ async def test_list_categories(c):
     from app.core.database import AsyncSessionLocal
     from app.models.pack_category import PackCategory
 
-    unique = uuid.uuid4().hex[:6]
+    unique = uuid.uuid4().hex[:16]  # R386: slug is globally unique
     async with AsyncSessionLocal() as session:
         cat = PackCategory(
             name=f"AI Skills {unique}",
@@ -625,7 +625,7 @@ async def test_list_categories(c):
 async def test_filter_by_category(c):
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    unique = uuid.uuid4().hex[:6]
+    unique = uuid.uuid4().hex[:16]  # R386: slug is globally unique
     pid = await _published_public_pack(c, h, oid, f"CatFilter-{unique}")
 
     # Create category and assign pack to it via DB

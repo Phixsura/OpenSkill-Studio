@@ -241,7 +241,9 @@ async def test_suspension_blocks_consumption(db):
 async def test_trial_expiry_downgrade(db):
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
-    tenant.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    # §97.2-class: must sort into the bounded oldest-first batch even
+    # against an accumulated expired-trial backlog
+    tenant.trial_ends_at = datetime.now(UTC) - timedelta(days=3650)
     await db.flush()
     n = await tenant_svc.expire_trials(db)
     assert n >= 1
@@ -897,8 +899,8 @@ async def test_expire_trials_isolates_one_bad_tenant(db, monkeypatch):
     healthy_owner = await _mk_user(db)
     poison = await _mk_tenant(db, poison_owner)
     healthy = await _mk_tenant(db, healthy_owner)
-    poison.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
-    healthy.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    poison.trial_ends_at = datetime.now(UTC) - timedelta(days=3650)
+    healthy.trial_ends_at = datetime.now(UTC) - timedelta(days=3651)
     await db.flush()
     poison_id = poison.id
 

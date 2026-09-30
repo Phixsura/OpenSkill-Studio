@@ -54,7 +54,7 @@ async def _org(db):
 
 async def _adapter(db, credential_fields=None, is_active=True):
     a = ProviderAdapter(
-        key=f"mock-{uuid.uuid4().hex[:8]}",
+        key=f"mock-{uuid.uuid4().hex[:16]}",
         name="Mock",
         credential_fields=credential_fields or ["api_key"],
         is_active=is_active,

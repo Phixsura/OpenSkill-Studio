@@ -7,7 +7,10 @@ const config: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/:path*`,
+        // API_PROXY_URL: server-only override for the rewrite target (e2e/staging
+        // stacks) — unlike NEXT_PUBLIC_API_URL it is never inlined into the
+        // client bundle, so connect-src 'self' CSP still holds.
+        destination: `${process.env.API_PROXY_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/:path*`,
       },
     ];
   },

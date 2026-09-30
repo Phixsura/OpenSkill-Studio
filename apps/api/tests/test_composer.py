@@ -27,7 +27,7 @@ async def c():
 
 
 def _email():
-    return f"cmp-{uuid.uuid4().hex[:8]}@test.com"
+    return f"cmp-{uuid.uuid4().hex[:16]}@test.com"
 
 
 async def _auth(c):
@@ -40,7 +40,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"C-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"C-{uuid.uuid4().hex[:16]}"}, headers=h)
     return r.json()["data"]["id"]
 
 
@@ -980,7 +980,7 @@ async def test_unresolvable_prereq_slug_surfaces_gap(c):
     from app.core.database import AsyncSessionLocal
     from app.models.skill_pack import SkillPack
 
-    missing_slug = f"ghost-prereq-{uuid.uuid4().hex[:8]}"
+    missing_slug = f"ghost-prereq-{uuid.uuid4().hex[:16]}"
     async with AsyncSessionLocal() as db:
         pack = await db.get(SkillPack, pack_id)
         pack.prerequisite_packs = [missing_slug]
@@ -1192,7 +1192,7 @@ async def test_production_multipack_chain_with_output_type(c):
 
     h, _ = await _auth(c)
     oid = await _org(c, h)
-    scen = "pcchain" + _uuid.uuid4().hex[:8]  # unique scenario isolates from shared-DB packs
+    scen = "pcchain" + _uuid.uuid4().hex[:16]  # unique scenario isolates from shared-DB packs
 
     async def mk(name, inputs, outputs):
         r = await c.post(f"/api/v1/orgs/{oid}/workflow-packs", json={"name": name}, headers=h)

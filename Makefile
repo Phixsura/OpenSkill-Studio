@@ -1,4 +1,4 @@
-.PHONY: dev build test lint install infra-up infra-down db-migrate help
+.PHONY: dev build test test-eco lint install infra-up infra-down db-migrate help
 
 # ─── Install ─────────────────────────────────────────────
 install:                          ## Install all dependencies
@@ -58,6 +58,9 @@ lint-fix:                         ## Fix lint issues
 
 test:                             ## Run all tests
 	pnpm test
+
+test-eco:                         ## Ecosystem-intelligence subset (issue #35; ~90s, needs infra-up)
+	cd apps/api && uv run pytest tests/ -q -k "eco"
 
 type-check:                       ## TypeScript type check
 	pnpm type-check

@@ -39,6 +39,8 @@ VALID_EVENT_TYPES = frozenset(
         "outreach.sent",
         "outreach.responded",
         "talent_pool.member_added",
+        # Ecosystem intelligence (Issue #35, ADR-016 §13)
+        "ecosystem.change",
     }
 )
 

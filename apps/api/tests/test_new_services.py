@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 def _email():
-    return f"nsvc-{uuid.uuid4().hex[:8]}@test.com"
+    return f"nsvc-{uuid.uuid4().hex[:16]}@test.com"
 
 
 @pytest_asyncio.fixture
@@ -45,7 +45,7 @@ async def _auth(c):
 
 
 async def _org(c, h):
-    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:8]}"}, headers=h)
+    r = await c.post("/api/v1/orgs", json={"name": f"T-{uuid.uuid4().hex[:16]}"}, headers=h)
     assert r.status_code == 201, f"Org creation failed: {r.json()}"
     return r.json()["data"]["id"]
 
@@ -1253,7 +1253,7 @@ async def test_forgot_password_latency_not_an_email_oracle(c, monkeypatch):
 
     from app.services import auth as auth_mod
 
-    email = f"oracle-{uuid.uuid4().hex[:8]}@test.com"
+    email = f"oracle-{uuid.uuid4().hex[:16]}@test.com"
     r = await c.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "TestPass123!", "display_name": "Oracle"},
@@ -1276,7 +1276,7 @@ async def test_forgot_password_latency_not_an_email_oracle(c, monkeypatch):
 
     t0 = time.monotonic()
     r = await c.post(
-        "/api/v1/auth/forgot-password", json={"email": f"nouser-{uuid.uuid4().hex[:8]}@test.com"}
+        "/api/v1/auth/forgot-password", json={"email": f"nouser-{uuid.uuid4().hex[:16]}@test.com"}
     )
     ghost_elapsed = time.monotonic() - t0
     assert r.status_code in (200, 204)

@@ -1,0 +1,282 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+let searchParams = new URLSearchParams();
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/ecosystem/components",
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useSearchParams: () => searchParams,
+}));
+vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
+
+import ComponentsPage from "@/app/(dashboard)/dashboard/ecosystem/components/page";
+import { ApiError, apiWithAuth } from "@/lib/api";
+
+const ApiErrorCtor = ApiError as unknown as new (message: string) => Error;
+
+const api = vi.mocked(apiWithAuth);
+
+function wrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+  return Wrapper;
+}
+
+const GOOD = "C1".padEnd(26, "g");
+const BAD = "C2".padEnd(26, "b");
+const DRAFT = "D1".padEnd(26, "d");
+const PLAN = "P1".padEnd(26, "p");
+
+function candidate(id: string, hardCompatible: boolean) {
+  return {
+    id,
+    deprecated_kind: "model_version",
+    deprecated_id: "X".repeat(26),
+    candidate_id: "Y".repeat(26),
+    score: 0.8,
+    hard_compatible: hardCompatible,
+    hard_failures: hardCompatible ? [] : [{ code: "modality", detail: "text vs image" }],
+    explanation: [{ factor: "score", text: "better" }],
+    status: "proposed",
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.mockImplementation((path: string, init?: RequestInit) => {
+    if (path.startsWith("/ecosystem/replacements/candidates?") && !init)
+      return Promise.resolve({ data: [candidate(GOOD, true), candidate(BAD, false)] });
+    if (path.startsWith("/ecosystem/drafts?") && !init)
+      return Promise.resolve({
+        data: [
+          {
+            id: DRAFT,
+            draft_type: "workflow_pack",
+            title: "Migrate pack",
+            status: "in_review",
+            payload: {},
+            validation: { valid: true, errors: [] },
+            published_ref: null,
+            created_at: "2026-09-20T00:00:00Z",
+          },
+        ],
+      });
+    if (path.startsWith("/ecosystem/rollouts?") && !init)
+      return Promise.resolve({
+        data: [
+          {
+            id: PLAN,
+            scope_type: "benchmark_only",
+            status: "evaluating",
+            guardrails: { min_samples: 5 },
+            comparison: { sample_size: 10, regressions: [] },
+            created_at: "2026-09-20T00:00:00Z",
+          },
+        ],
+      });
+    return Promise.resolve({ data: [] });
+  });
+});
+
+describe("Component lifecycle actions (ADR-016 §21/§22 UI)", () => {
+  it("hard-incompatible candidates are never approvable; compatible ones POST the decision", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Replacements"));
+    expect(await screen.findByText(/never approvable/)).toBeDefined();
+    // Only ONE Approve button (the compatible candidate)
+    const approves = screen.getAllByText("Approve");
+    expect(approves).toHaveLength(1);
+    fireEvent.click(approves[0]!);
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === `/ecosystem/replacements/candidates/${GOOD}/decide` &&
+        (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call![1] as RequestInit).body as string).decision).toBe("approve");
+  });
+
+  it("in-review draft approve POSTs to the draft action endpoint", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Drafts"));
+    fireEvent.click(await screen.findByText("Approve"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      api.mock.calls.some(
+        (c) =>
+          c[0] === `/ecosystem/drafts/${DRAFT}/approve` && (c[1] as RequestInit)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("evaluating rollout promote POSTs decide with decision=promote", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Rollouts"));
+    fireEvent.click(await screen.findByRole("button", { name: /[Pp]romote/ }));
+    await new Promise((r) => setTimeout(r, 0));
+    const call = api.mock.calls.find(
+      (c) =>
+        c[0] === `/ecosystem/rollouts/${PLAN}/decide` && (c[1] as RequestInit)?.method === "POST",
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call![1] as RequestInit).body as string).decision).toBe("promote");
+  });
+
+  it("a refused rollout decision surfaces its ApiError in the banner", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith("/ecosystem/rollouts?") && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: PLAN,
+              scope_type: "benchmark_only",
+              status: "evaluating",
+              guardrails: {},
+              comparison: { sample_size: 1 },
+              created_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      if ((init as RequestInit)?.method === "POST")
+        return Promise.reject(new ApiErrorCtor("Guardrails not satisfied: min_samples"));
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Rollouts"));
+    fireEvent.click(await screen.findByRole("button", { name: /[Pp]romote/ }));
+    expect(await screen.findByText(/Guardrails not satisfied/)).toBeDefined();
+  });
+
+  it("impact analyses deep-link their root entity to the change feed", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith("/ecosystem/impact/analyses?") && !init)
+        return Promise.resolve({
+          data: [
+            {
+              id: "IMP".padEnd(26, "i"),
+              root_kind: "model_version",
+              root_id: "R".repeat(26),
+              classification: "breaking",
+              status: "open",
+              deadline_at: null,
+              summary: {},
+              computed_at: "2026-09-20T00:00:00Z",
+            },
+          ],
+        });
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    const link = await screen.findByText("changes");
+    expect(link.closest("a")!.getAttribute("href")).toBe(
+      `/dashboard/ecosystem/changes?entity=${"R".repeat(26)}`,
+    );
+  });
+
+  it("impact and rollout status dropdowns refetch with ?status= (R380)", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Filter by impact status"), {
+      target: { value: "resolved" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/impact/analyses?limit=50&offset=0&status=resolved",
+        ),
+      ).toBe(true),
+    );
+    fireEvent.click(await screen.findByText("Rollouts"));
+    fireEvent.change(await screen.findByLabelText("Filter by rollout status"), {
+      target: { value: "promoted" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/rollouts?limit=50&offset=0&status=promoted",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("candidate and draft status dropdowns refetch with ?status= (R381)", async () => {
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Replacements"));
+    fireEvent.change(await screen.findByLabelText("Filter by candidate status"), {
+      target: { value: "approved" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) =>
+            String(c[0]) === "/ecosystem/replacements/candidates?limit=50&offset=0&status=approved",
+        ),
+      ).toBe(true),
+    );
+    fireEvent.click(await screen.findByText("Drafts"));
+    fireEvent.change(await screen.findByLabelText("Filter by draft status"), {
+      target: { value: "published" },
+    });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/drafts?limit=50&offset=0&status=published",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("drafts tab paginates: count-of-total and Load more fetches offset=50 (R391)", async () => {
+    api.mockImplementation((path: string, init?: RequestInit) => {
+      if (String(path).startsWith("/ecosystem/drafts?") && !init) {
+        const offset = Number(new URLSearchParams(String(path).split("?")[1]).get("offset"));
+        return Promise.resolve({
+          data: Array.from({ length: 50 }, (_, i) => ({
+            id: `D${String(offset + i).padStart(25, "0")}`,
+            draft_type: "workflow_pack",
+            title: `Draft ${offset + i}`,
+            status: "draft",
+            payload: {},
+            validation: { valid: true, errors: [] },
+            published_ref: null,
+            created_at: "2026-09-20T00:00:00Z",
+          })),
+          meta: { total: 120, limit: 50, offset },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Drafts"));
+    expect(await screen.findByText("50 of 120")).toBeTruthy();
+    fireEvent.click(screen.getByText("Load more"));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).includes("drafts?limit=50&offset=50"))).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("100 of 120")).toBeTruthy();
+  });
+
+  it("?tab=Drafts&status=published deep-links the filtered tab (R393)", async () => {
+    searchParams = new URLSearchParams("tab=Drafts&status=published");
+    render(<ComponentsPage />, { wrapper: wrapper() });
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) => String(c[0]) === "/ecosystem/drafts?limit=50&offset=0&status=published",
+        ),
+      ).toBe(true),
+    );
+    searchParams = new URLSearchParams();
+  });
+});

@@ -66,7 +66,7 @@ async def _pack(db, org, name, **kw):
     )
     defaults.update(kw)
     p = WorkflowPack(
-        owner_org_id=org.id, name=name, slug=f"{name.lower()}-{uuid.uuid4().hex[:8]}", **defaults
+        owner_org_id=org.id, name=name, slug=f"{name.lower()}-{uuid.uuid4().hex[:16]}", **defaults
     )
     db.add(p)
     await db.flush()

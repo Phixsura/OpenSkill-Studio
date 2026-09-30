@@ -51,7 +51,9 @@ def _parse_semver(version: str) -> tuple:
         pre_key: tuple = (1,)
     else:
         identifiers = tuple(
-            (0, int(ident), "") if ident.isdigit() else (1, 0, ident)
+            # isascii guard: Unicode digits (e.g. superscript ¹) pass isdigit()
+            # but crash int() — R254 Hypothesis counterexample
+            (0, int(ident), "") if ident.isascii() and ident.isdigit() else (1, 0, ident)
             for ident in prerelease.split(".")
         )
         pre_key = (0, *identifiers)
