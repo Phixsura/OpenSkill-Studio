@@ -92,6 +92,54 @@ class AnalysisService:
                 arm[field] = (arm[field] or 0) + float(value)
         return aggregated, mixed
 
+    async def _time_strata(
+        self, experiment_id: str, metric_key: str, control_key: str
+    ) -> dict[str, list[tuple[float, float]]]:
+        """Per-window (effect, se) strata per treatment variant, using the
+        same engine the pooled comparison uses for the metric's shape."""
+        rows = list(
+            (
+                await self.db.execute(
+                    select(MetricSnapshot).where(
+                        MetricSnapshot.experiment_id == experiment_id,
+                        MetricSnapshot.metric_key == metric_key,
+                    )
+                )
+            ).scalars()
+        )
+        by_window: dict = {}
+        for row in rows:
+            by_window.setdefault(row.window_start, {})[row.variant_key] = row
+        strata: dict[str, list[tuple[float, float]]] = {}
+        for _ws, variants in sorted(by_window.items()):
+            control = variants.get(control_key)
+            if control is None:
+                continue
+            for variant_key, row in variants.items():
+                if variant_key == control_key:
+                    continue
+                if control.denominator and row.denominator:
+                    result = stats.analyze_binary(
+                        float(control.numerator or 0), float(control.denominator),
+                        float(row.numerator or 0), float(row.denominator),
+                    )
+                elif (control.n or 0) >= 2 and (row.n or 0) >= 2:
+                    result = stats.welch_from_stats(
+                        float(control.n), float(control.sum_value or 0),
+                        float(control.sum_sq or 0),
+                        float(row.n), float(row.sum_value or 0),
+                        float(row.sum_sq or 0),
+                    )
+                else:
+                    continue
+                if result.get("insufficient_data"):
+                    continue
+                effect, se = result.get("effect"), result.get("se")
+                if effect is None or se is None:
+                    continue
+                strata.setdefault(variant_key, []).append((effect, se))
+        return strata
+
     async def _corpus_prior(
         self, exp, metric_key: str, exclude_experiment_id: str
     ) -> dict | None:
@@ -413,6 +461,20 @@ class AnalysisService:
                         secondary_ps[f"{key}:{variant_key}"] = comparison["p"]
                 entry["comparisons"] = comparisons
                 metrics_out[key] = entry
+
+        # Post-stratification by time (§4.6 v2): per-window effects pooled
+        # by inverse variance — robust to enrollment drift and time trends
+        # that bias the naive pooled estimate. Informational alongside the
+        # primary estimate.
+        for key in spec.metrics.primary:
+            entry = metrics_out.get(key)
+            if not entry or not entry.get("comparisons"):
+                continue
+            strata_map = await self._time_strata(experiment_id, key, control_key)
+            for variant_key, comparison in entry["comparisons"].items():
+                pooled = stats.pool_stratified(strata_map.get(variant_key, []))
+                if pooled is not None:
+                    comparison["time_stratified"] = pooled
 
         # Meta-analysis corpus prior (§11 v2): effects this DOMAIN has
         # historically seen on the SAME primary metric, from decided

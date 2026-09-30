@@ -421,3 +421,40 @@ async def test_analysis_look_records_primary_effects(db):
     recorded = event.payload["primary_effects"]["exposure_rate"]["treatment"]
     assert recorded["effect"] is not None
     assert recorded["se"] is not None
+
+
+# ── Time-stratified estimate (v2 batch 8) ────────────────────────────
+
+
+async def test_time_stratified_estimate_on_primary(db):
+    """Two windows with a consistent lift → time_stratified pooled effect
+    close to the naive one, with both windows counted; a single window
+    yields no stratified estimate."""
+    exp, admin = await _mk_running(db)
+    base_ws = datetime(2026, 9, 1, tzinfo=UTC)
+    for day in range(2):
+        ws = base_ws + timedelta(days=day)
+        db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
+                         n=200, numerator=50, denominator=200))
+        db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
+                         n=200, numerator=70, denominator=200))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    stratified = comparison["time_stratified"]
+    assert stratified["strata"] == 2
+    assert abs(stratified["effect"] - 0.10) < 0.01
+    assert stratified["se"] < comparison["se"] * 1.05  # pooling never blows up se
+
+
+async def test_time_stratified_absent_with_one_window(db):
+    exp, admin = await _mk_running(db)
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
+                     n=200, numerator=50, denominator=200))
+    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
+                     n=200, numerator=70, denominator=200))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert "time_stratified" not in comparison

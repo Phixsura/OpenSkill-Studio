@@ -523,3 +523,32 @@ def test_bayes_binary_expected_loss_asymmetric_pinned():
     z0 = diff / se
     el = se * math.exp(-z0 * z0 / 2.0) / math.sqrt(2 * math.pi) - diff * norm_sf(z0)
     assert r["expected_loss"] == pytest.approx(max(0.0, el), abs=1e-12)
+
+
+# ── pool_stratified (v2 batch 8, post-stratification by time) ────────
+
+
+def test_pool_stratified_inverse_variance_math():
+    from app.experiments.services.analysis import pool_stratified
+
+    # two strata, equal se → plain average; tighter stratum dominates
+    equal = pool_stratified([(0.10, 0.02), (0.20, 0.02)])
+    assert abs(equal["effect"] - 0.15) < 1e-12
+    assert equal["strata"] == 2
+    skewed = pool_stratified([(0.10, 0.01), (0.20, 0.10)])
+    assert abs(skewed["effect"] - 0.10) < 0.005  # tight stratum dominates
+    # pooled se is tighter than any single stratum
+    assert skewed["se"] < 0.01
+    assert 0.0 <= skewed["p"] <= 1.0
+    assert skewed["ci"][0] < skewed["effect"] < skewed["ci"][1]
+
+
+def test_pool_stratified_totality():
+    from app.experiments.services.analysis import pool_stratified
+
+    assert pool_stratified([]) is None
+    assert pool_stratified([(0.1, 0.02)]) is None  # one stratum = no pooling
+    # non-finite / non-positive se strata are dropped, not crashed on
+    assert pool_stratified([(0.1, 0.0), (float("inf"), 0.1), (0.2, float("nan"))]) is None
+    ok = pool_stratified([(0.1, 0.0), (0.1, 0.02), (0.2, 0.02)])
+    assert ok is not None and ok["strata"] == 2

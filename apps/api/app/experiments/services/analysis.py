@@ -27,6 +27,31 @@ def norm_sf(x: float) -> float:
     return 0.5 * math.erfc(x / math.sqrt(2.0))
 
 
+def pool_stratified(strata: list[tuple[float, float]]) -> dict | None:
+    """Inverse-variance pooling of per-stratum effects (post-stratification,
+    §4.6 v2): effect = Σ(e_i/se_i²)/Σ(1/se_i²), se = sqrt(1/Σ(1/se_i²)).
+    Strata with non-finite or non-positive se are dropped; needs >= 2 usable
+    strata to differ meaningfully from the pooled estimate."""
+    usable = [
+        (e, se)
+        for e, se in strata
+        if math.isfinite(e) and math.isfinite(se) and se > 0
+    ]
+    if len(usable) < 2:
+        return None
+    weight_total = sum(1.0 / (se * se) for _e, se in usable)
+    effect = sum(e / (se * se) for e, se in usable) / weight_total
+    se = math.sqrt(1.0 / weight_total)
+    z = effect / se
+    return {
+        "effect": effect,
+        "se": se,
+        "ci": [effect - 1.959963984540054 * se, effect + 1.959963984540054 * se],
+        "p": 2.0 * norm_sf(abs(z)),
+        "strata": len(usable),
+    }
+
+
 def chi2_sf(x: float, df: int) -> float:
     """Chi-square survival function via the Wilson-Hilferty cube-root normal
     approximation — good to ~1e-3 in the alerting tail for df >= 1, which is
@@ -206,6 +231,7 @@ def analyze_binary(
         "relative": (effect / p1) if p1 > 0 else None,
         "ci": list(ci),
         "z": z,
+        "se": se,
         "p": p_value,
         "control": {"rate": p1, "ci": [l1, u1], "n": control_n},
         "treatment": {"rate": p2, "ci": [l2, u2], "n": treatment_n},
