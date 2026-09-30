@@ -77,6 +77,41 @@ async def sweep_experiment_guardrails(
     return enqueued
 
 
+EXPOSURE_RETENTION_DAYS = 400
+PRUNE_BATCH_CAP = 50_000
+
+
+async def prune_experiment_history(
+    db: AsyncSession, *, now: datetime | None = None, cap: int = PRUNE_BATCH_CAP
+) -> dict:
+    """Retention (ADR-017 §13, deviation documented in §18): raw exposures of
+    ARCHIVED experiments older than 400 days are DELETED (no cold table yet)
+    — their aggregates live on in metric snapshots, and archived experiments
+    are outside every analysis path. Live/terminal-but-analyzable experiments
+    keep their full exposure trail. Batch-capped (oldest first via ULID id)."""
+    from sqlalchemy import delete
+
+    from app.experiments.models import ExperimentExposure
+
+    now = now or datetime.now(UTC)
+    cutoff = now - timedelta(days=EXPOSURE_RETENTION_DAYS)
+    target_ids = (
+        select(ExperimentExposure.id)
+        .join(Experiment, Experiment.id == ExperimentExposure.experiment_id)
+        .where(Experiment.status == "archived", ExperimentExposure.occurred_at < cutoff)
+        .order_by(ExperimentExposure.id.asc())
+        .limit(cap)
+        .scalar_subquery()
+    )
+    result = await db.execute(
+        delete(ExperimentExposure).where(ExperimentExposure.id.in_(target_ids))
+    )
+    pruned = result.rowcount or 0
+    if pruned:
+        log.info("exp_exposures_pruned", count=pruned)
+    return {"exposures": pruned}
+
+
 def previous_utc_day(now: datetime | None = None) -> tuple[datetime, datetime]:
     now = now or datetime.now(UTC)
     today = datetime.combine(now.date(), time.min, tzinfo=UTC)

@@ -666,3 +666,27 @@ Hardening round 2 (same day):
 - **Spec size cap 64 KB** before parsing (oversized-input class).
 - **Guardrail auto-pause notifies the experiment owner** (fail-safe: a
   notification hiccup never fails the pause — the eco_audit posture).
+
+Hardening round 3 (same day):
+
+- **CRITICAL — the generic transition endpoint could mint promoted/rejected**
+  with user-supplied to_status, bypassing the DecisionRecord, the approver
+  and the hash gate entirely (the literal `to_status="promoted"` source scan
+  cannot see user input). The service now refuses those statuses outside the
+  decision path (422 EXPERIMENT_DECISION_REQUIRED); the internal
+  `_via_decision=True` token may only be spent by decisions.py (source-scan
+  pinned); the Console routes promote/reject through the decision flow.
+- **Surface keys were one-shot forever** — the global unique on
+  `experiments.key` meant an archived surface experiment blocked that surface
+  for the platform's lifetime. Migration exp06: key is unique among LIVE
+  experiments only (partial index excluding promoted/rejected/archived);
+  resolution binds to the single non-terminal experiment.
+- **prune_experiment_history implemented** (was promised, missing): archived
+  experiments' raw exposures older than 400 days are deleted batch-capped
+  (deviation from the cold-table plan — snapshots retain the aggregates);
+  registered as the exp_retention cron.
+- Console nav entry is platform-role gated; the detail page no longer offers
+  promote/reject buttons (decision flow hint instead).
+- Documented limitation: cross-window aggregation treats unit-window
+  observations as independent (repeated measures) — per-unit aggregation is
+  v2 work alongside the clustered analysis paths.

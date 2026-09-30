@@ -173,6 +173,57 @@ async def test_extend_pushes_close_date_and_stays_analyzed(db):
     )
 
 
+async def test_direct_transition_to_promoted_refused(db):
+    """The generic transition endpoint must never mint promoted/rejected —
+    those are decision outcomes (approver + verified hash), otherwise the
+    registry is optional and the hash gate decorative."""
+    exp, admin, result_hash = await _mk_analyzed(db)
+    svc = ExperimentService(db)
+    for status in ("promoted", "rejected"):
+        with pytest.raises(AppError) as e:
+            await svc.transition(exp.id, to_status=status, actor=admin)
+        assert e.value.code == "EXPERIMENT_DECISION_REQUIRED"
+    # the decision path still works
+    await _promote(db, exp, admin, result_hash)
+    assert (await svc.get(exp.id)).status == "promoted"
+
+
+async def test_surface_key_reusable_after_terminal(db):
+    """Keys are unique among LIVE experiments only — archiving releases the
+    surface key for the next experiment; resolution binds to the live one."""
+    from app.experiments.services.assignment import AssignmentService, forget_missing_key
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    key = exp.key
+    await _promote(db, exp, admin, result_hash)  # terminal: promoted
+    svc = ExperimentService(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    second = await svc.create(
+        key=key, title="second run on the surface", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    assert second.id != exp.id
+    await svc.create_version(second.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=second.id, slice_start=0, slice_end=9999
+    )
+    for status in ("review", "scheduled", "running"):
+        await svc.transition(second.id, to_status=status, actor=admin)
+    await svc.set_ramp(second.id, ramp_bp=10_000, actor=admin)
+    forget_missing_key(key)
+    resolved = await AssignmentService(db).resolve(
+        experiment_key=key, unit_type="user", unit_id="reuse-1"
+    )
+    assert resolved is not None  # binds to the LIVE experiment
+    # ...but a second LIVE experiment on the key is still refused
+    with pytest.raises(AppError) as e:
+        await svc.create(
+            key=key, title="third", domain="learning",
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+    assert e.value.code == "EXPERIMENT_KEY_TAKEN"
+
+
 async def test_observational_cannot_promote(db):
     exp, admin, result_hash = await _mk_analyzed(db, analysis_type="observational")
     with pytest.raises(AppError) as e:

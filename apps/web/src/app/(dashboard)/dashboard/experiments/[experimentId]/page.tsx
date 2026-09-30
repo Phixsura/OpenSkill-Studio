@@ -81,7 +81,13 @@ export default function ExperimentDetailPage() {
 
   const experiment = data?.data;
   if (!experiment) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
-  const nextStatuses = ALLOWED_TRANSITIONS[experiment.status] ?? [];
+  // promoted/rejected are OUTCOMES of a recorded decision (approver +
+  // verified analysis hash) — the server refuses them on the generic
+  // transition endpoint, so don't offer them as buttons here
+  const nextStatuses = (ALLOWED_TRANSITIONS[experiment.status] ?? []).filter(
+    (s) => s !== "promoted" && s !== "rejected",
+  );
+  const decisionGated = experiment.status === "analyzed";
 
   const subpages = [
     { href: "assignments", label: "Assignments" },
@@ -150,7 +156,13 @@ export default function ExperimentDetailPage() {
 
       <SectionCard title="Lifecycle">
         <div className="flex flex-wrap items-center gap-2">
-          {nextStatuses.length === 0 ? (
+          {decisionGated ? (
+            <span className="mr-2 text-xs text-slate-500">
+              promote / reject are recorded as a decision (run the analysis, then create a decision
+              with its result hash)
+            </span>
+          ) : null}
+          {nextStatuses.length === 0 && !decisionGated ? (
             <span className="text-sm text-slate-500">Terminal status — no transitions.</span>
           ) : (
             nextStatuses.map((s) => (

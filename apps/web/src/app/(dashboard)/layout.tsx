@@ -211,13 +211,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         🌐 Ecosystem
       </NavLink>
-      <NavLink
-        href="/dashboard/experiments"
-        active={pathname.startsWith("/dashboard/experiments")}
-        onClick={closeSidebar}
-      >
-        🧪 Experiments
-      </NavLink>
+      {hasPlatformRole ? (
+        <NavLink
+          href="/dashboard/experiments"
+          active={pathname.startsWith("/dashboard/experiments")}
+          onClick={closeSidebar}
+        >
+          🧪 Experiments
+        </NavLink>
+      ) : null}
       <NavLink
         href="/dashboard/settings"
         active={pathname === "/dashboard/settings"}

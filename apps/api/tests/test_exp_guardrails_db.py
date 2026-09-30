@@ -319,3 +319,16 @@ def test_no_auto_promote_path_in_experiments_package():
     decisions_src = (pkg / "services" / "decisions.py").read_text(encoding="utf-8")
     assert "actor: User" in decisions_src
     assert "DECISION_HASH_MISMATCH" in decisions_src  # no decide-before-analyze
+    # Round 3: the LITERAL scan alone was insufficient — the generic
+    # transition endpoint passes USER-SUPPLIED to_status, so the service must
+    # refuse promoted/rejected outside the decision path, and the bypass
+    # token (_via_decision=True) may only be spent by decisions.py.
+    experiments_src = (pkg / "services" / "experiments.py").read_text(encoding="utf-8")
+    assert "EXPERIMENT_DECISION_REQUIRED" in experiments_src
+    spenders = [
+        path.name
+        for path in pkg.rglob("*.py")
+        if "_via_decision=True" in path.read_text(encoding="utf-8")
+        and path.name != "decisions.py"
+    ]
+    assert not spenders, f"_via_decision spent outside decisions.py: {spenders}"

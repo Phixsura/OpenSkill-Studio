@@ -133,9 +133,13 @@ class DecisionService:
                 409,
             ) from exc
         if decision == "promote":
-            await esvc.transition(experiment_id, to_status="promoted", actor=actor)
+            await esvc.transition(
+                experiment_id, to_status="promoted", actor=actor, _via_decision=True
+            )
         elif decision == "reject":
-            await esvc.transition(experiment_id, to_status="rejected", actor=actor)
+            await esvc.transition(
+                experiment_id, to_status="rejected", actor=actor, _via_decision=True
+            )
         elif decision == "extend" and exp.analysis_close_at is not None:
             exp.analysis_close_at = exp.analysis_close_at + timedelta(days=extend_days)
         await esvc._record_event(  # noqa: SLF001 — same package

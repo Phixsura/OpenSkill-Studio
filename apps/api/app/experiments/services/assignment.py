@@ -159,11 +159,20 @@ class AssignmentService:
 
     async def _load_or_none(self, experiment_key: str) -> Experiment | None:
         """Hot-path load: a surface with no experiment is the COMMON case —
-        negative-cached so product paths pay ~nothing (§7 hooks)."""
+        negative-cached so product paths pay ~nothing (§7 hooks). Keys are
+        unique among LIVE experiments only (terminal experiments release the
+        key), so resolution binds to the single non-terminal one."""
         if _key_known_missing(experiment_key):
             return None
+        from app.experiments.security import TERMINAL_STATUSES
+
         exp = (
-            await self.db.execute(select(Experiment).where(Experiment.key == experiment_key))
+            await self.db.execute(
+                select(Experiment).where(
+                    Experiment.key == experiment_key,
+                    Experiment.status.not_in(TERMINAL_STATUSES),
+                )
+            )
         ).scalar_one_or_none()
         if exp is None:
             _remember_missing(experiment_key)

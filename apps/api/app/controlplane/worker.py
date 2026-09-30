@@ -501,6 +501,18 @@ async def _exp_window_sweep(ctx: dict) -> None:
             log.info("exp_windows_enqueued", count=n)
 
 
+async def _exp_retention(ctx: dict) -> None:
+    """ADR-017 §13: prune archived experiments' raw exposures past retention."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import prune_experiment_history
+
+    async with AsyncSessionLocal() as db:
+        pruned = await prune_experiment_history(db)
+        if any(pruned.values()):
+            await db.commit()
+            log.info("exp_history_pruned", **pruned)
+
+
 async def _exp_closure_sweep(ctx: dict) -> None:
     """ADR-017 §13: auto-complete running experiments past max_days."""
     from app.core.database import AsyncSessionLocal
@@ -555,6 +567,7 @@ def _cron_jobs() -> list:
         cron(_exp_guardrail_sweep, minute={6, 16, 26, 36, 46, 56}, name="exp_guardrail_sweep"),
         cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
         cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
+        cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
         # P10: tls refresh
     ]
 

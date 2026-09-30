@@ -33,7 +33,10 @@ class Experiment(Base):
     __tablename__ = "experiments"
 
     id: Mapped[str] = ulid_pk()
-    key: Mapped[str] = mapped_column(String(64), unique=True)
+    # Unique among LIVE experiments only (partial index below): a surface key
+    # must be reusable after its experiment reaches a terminal status —
+    # global uniqueness would make every surface one-shot forever.
+    key: Mapped[str] = mapped_column(String(64))
     title: Mapped[str] = mapped_column(String(200))
     domain: Mapped[str] = mapped_column(String(20))
     # null = platform-wide; set = org-scoped (units must belong to the org)
@@ -73,6 +76,13 @@ class Experiment(Base):
         Index("ix_experiments_status_domain", "status", "domain"),
         Index("ix_experiments_layer", "layer_key"),
         Index("ix_experiments_scope_org", "scope_org_id"),
+        Index(
+            "uq_experiments_live_key",
+            "key",
+            unique=True,
+            postgresql_where="status NOT IN ('promoted', 'rejected', 'archived')",
+        ),
+        Index("ix_experiments_key", "key"),
     )
 
 

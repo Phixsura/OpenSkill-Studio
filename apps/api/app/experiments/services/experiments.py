@@ -327,10 +327,26 @@ class ExperimentService:
             )
 
     async def transition(
-        self, experiment_id: str, *, to_status: str, actor: User, reason: str | None = None
+        self,
+        experiment_id: str,
+        *,
+        to_status: str,
+        actor: User,
+        reason: str | None = None,
+        _via_decision: bool = False,
     ) -> Experiment:
         exp = await self._get_locked(experiment_id)
         self.check_transition(exp.status, to_status)
+        if to_status in ("promoted", "rejected") and not _via_decision:
+            # §2.2 hard gate: promoted/rejected exist ONLY as the outcome of a
+            # DecisionRecord (approver + verified analysis hash). The generic
+            # transition surface must never mint them — otherwise the
+            # decision registry is optional and the hash gate is decorative.
+            raise AppError(
+                "EXPERIMENT_DECISION_REQUIRED",
+                f"'{to_status}' is set by recording a decision, not by direct transition",
+                422,
+            )
         if to_status == "scheduled":
             await self._check_schedule_preconditions(exp, actor)
         now = datetime.now(UTC)

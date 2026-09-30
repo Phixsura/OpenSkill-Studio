@@ -315,6 +315,48 @@ async def test_closure_sweep_completes_past_max_days(db):
     assert (await ExperimentService(db).get(fresh_exp.id)).status == "running"
 
 
+async def test_prune_deletes_only_archived_old_exposures(db):
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from app.experiments.models import ExperimentExposure
+    from app.experiments.services.assignment import AssignmentService
+    from app.experiments.worker import prune_experiment_history
+
+    await MetricService(db).ensure_seed_definitions()
+    exp_live, _ = await _mk_running(db)
+    exp_old, admin_old = await _mk_running(db)
+    asvc = AssignmentService(db)
+    for exp in (exp_live, exp_old):
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="pr-1")
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id="pr-1")
+    # age both exposures far past retention; archive only one experiment
+    await db.execute(
+        select(ExperimentExposure)  # noqa: F841 — force flush ordering
+    )
+    from sqlalchemy import update as _update
+
+    await db.execute(
+        _update(ExperimentExposure)
+        .where(ExperimentExposure.experiment_id.in_((exp_live.id, exp_old.id)))
+        .values(occurred_at=_dt(2020, 1, 1, tzinfo=_UTC))
+    )
+    await ExperimentService(db).transition(exp_old.id, to_status="archived", actor=admin_old)
+    pruned = await prune_experiment_history(db)
+    assert pruned["exposures"] >= 1
+    remaining = list(
+        (
+            await db.execute(
+                select(ExperimentExposure.experiment_id).where(
+                    ExperimentExposure.experiment_id.in_((exp_live.id, exp_old.id))
+                )
+            )
+        ).scalars()
+    )
+    assert exp_old.id not in remaining  # archived + old → pruned
+    assert exp_live.id in remaining  # live experiments keep their trail
+
+
 async def test_exp_sweeps_registered_in_cron_table():
     """The §96 guard class: sweeps that exist but are never scheduled are
     dead code — pin all three experiment sweeps into the worker cron
@@ -322,7 +364,12 @@ async def test_exp_sweeps_registered_in_cron_table():
     from app.controlplane.worker import _cron_jobs
 
     names = {job.name for job in _cron_jobs()}
-    assert {"exp_guardrail_sweep", "exp_window_sweep", "exp_closure_sweep"} <= names
+    assert {
+        "exp_guardrail_sweep",
+        "exp_window_sweep",
+        "exp_closure_sweep",
+        "exp_retention",
+    } <= names
 
 
 async def test_sweep_skips_closed_analysis(db):
