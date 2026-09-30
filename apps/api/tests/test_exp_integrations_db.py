@@ -51,7 +51,17 @@ async def _mk_surface_experiment(
     db, *, key: str, domain: str, unit_type: str, treatment_config: dict
 ):
     """Running experiment on a well-known surface key: control weight 1bp,
-    treatment 9999bp — a resolved unit is a treatment unit with p=.9999."""
+    treatment 9999bp — a resolved unit is a treatment unit with p=.9999.
+
+    Surface keys are UNIQUE and other suites (the outbox-driving E2E) can
+    leak a committed row into the dev DB — delete any residue first, inside
+    this test's transaction (§106.25 accumulation law: never trust a shared
+    dev DB to be empty)."""
+    from sqlalchemy import delete
+
+    from app.experiments.models import Experiment
+
+    await db.execute(delete(Experiment).where(Experiment.key == key))
     await MetricService(db).ensure_seed_definitions()
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain=domain)

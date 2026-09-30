@@ -247,6 +247,16 @@ async def test_incident_pauses_immediately(db):
 
 
 async def test_sweep_oldest_checked_first_with_cap(db):
+    # §106.25 law: the shared dev DB accumulates committed RUNNING
+    # experiments from other suites; stamp them checked-now so this test's
+    # ancient/never-checked trio deterministically leads the capped batch.
+    from sqlalchemy import update
+
+    await db.execute(
+        update(Experiment)
+        .where(Experiment.status == "running")
+        .values(last_guardrail_check_at=datetime.now(UTC))
+    )
     exp_a, _ = await _mk_running(db)
     exp_b, _ = await _mk_running(db)
     exp_c, _ = await _mk_running(db)

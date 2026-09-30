@@ -1,10 +1,14 @@
 # ADR-017: Experimentation & Decision Intelligence Platform
 
-- **Status**: Proposed v2 (implementation plan; v2 folds in the competitive gap
-  closure from `competitive-analysis-experimentation.md` — CUPED, Bayesian dual
-  engine, mSPRT, winsorization/percentile metrics, triggered analysis, health
-  checks, global holdouts, interaction detection, scoped bandits, switchback
-  designs, post-stratification, DiD/ITS, meta-analysis)
+- **Status**: Accepted — phases exp01–exp09 implemented 2026-09-30 (core loop,
+  assignment/exposure, metrics+provenance, guardrails+SRM, statistical core
+  incl. CUPED/mSPRT/OF/BH/Bayesian, decision registry + promotion adapters,
+  six domain hooks, Experiment Console frontend, E2E). Remaining v2 items
+  (§10 switchback/bandit/post-stratification analysis paths, global holdout
+  groups §4.12, health-check suite §4.13 beyond SRM, hourly guardrail lane,
+  launch checklist, meta-analysis priors) and the learning_paths/evaluations/
+  billing/talent_outcomes metric sources are follow-up work — see
+  §18 Implementation notes.
 - **Issue**: #42
 - **Depends on**: ADR-010 (WorkflowRun telemetry), ADR-012 (`MatchingConfig` versioned rows),
   ADR-014 (control-plane transactional outbox `enqueue`, cost ledger/rating),
@@ -70,21 +74,21 @@ never float (metamorphic-money discipline).
 
 ### 4.1 `experiments`
 
-| column | type | constraint |
-|---|---|---|
-| id | String(26) | PK |
-| key | String(64) | unique, `^[a-z0-9][a-z0-9_-]{2,63}$` |
-| title | String(200) | not null |
-| domain | String(20) | enum: learning, assessment, workflow, matching, marketplace, operational, talent_flow |
-| scope_org_id | String(26) | FK organizations, nullable (null = platform-wide) |
-| layer_key | String(64) | FK experiment_layers.key, not null |
-| status | String(12) | lifecycle enum, see §5 |
-| current_version | Integer | default 0 |
-| owner_user_id | String(26) | FK users, not null |
-| risk_class | String(8) | low, medium, high — high requires platform-admin approval |
-| ramp_bp | Integer | 0–10000 basis points, default 0 |
-| holdout_bp | Integer | 0–1000 |
-| started_at / ended_at / analysis_close_at | timestamptz | nullable; analysis_close_at drives Part I |
+| column                                    | type        | constraint                                                                            |
+| ----------------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| id                                        | String(26)  | PK                                                                                    |
+| key                                       | String(64)  | unique, `^[a-z0-9][a-z0-9_-]{2,63}$`                                                  |
+| title                                     | String(200) | not null                                                                              |
+| domain                                    | String(20)  | enum: learning, assessment, workflow, matching, marketplace, operational, talent_flow |
+| scope_org_id                              | String(26)  | FK organizations, nullable (null = platform-wide)                                     |
+| layer_key                                 | String(64)  | FK experiment_layers.key, not null                                                    |
+| status                                    | String(12)  | lifecycle enum, see §5                                                                |
+| current_version                           | Integer     | default 0                                                                             |
+| owner_user_id                             | String(26)  | FK users, not null                                                                    |
+| risk_class                                | String(8)   | low, medium, high — high requires platform-admin approval                             |
+| ramp_bp                                   | Integer     | 0–10000 basis points, default 0                                                       |
+| holdout_bp                                | Integer     | 0–1000                                                                                |
+| started_at / ended_at / analysis_close_at | timestamptz | nullable; analysis_close_at drives Part I                                             |
 
 Indexes: `ix_experiments_status_domain (status, domain)`, `ix_experiments_layer (layer_key)`.
 
@@ -101,36 +105,54 @@ Rows are insert-only.
   "hypothesis": "Rubric wording B reduces revision count without hurting pass rate",
   "unit_type": "user",
   "population": {
-    "rules": [{"field": "cohort_id", "op": "in", "values": ["01H..."]}],
-    "exclusions": [{"field": "user_id", "op": "in_experiment_layer", "values": ["layer-x"]}]
+    "rules": [{ "field": "cohort_id", "op": "in", "values": ["01H..."] }],
+    "exclusions": [{ "field": "user_id", "op": "in_experiment_layer", "values": ["layer-x"] }]
   },
   "variants": [
-    {"key": "control", "name": "Current rubric", "weight_bp": 5000, "is_control": true, "config": {}},
-    {"key": "treatment", "name": "Rubric B", "weight_bp": 5000, "is_control": false,
-     "config": {"rubric_template_id": "01H..."}}
+    {
+      "key": "control",
+      "name": "Current rubric",
+      "weight_bp": 5000,
+      "is_control": true,
+      "config": {}
+    },
+    {
+      "key": "treatment",
+      "name": "Rubric B",
+      "weight_bp": 5000,
+      "is_control": false,
+      "config": { "rubric_template_id": "01H..." }
+    }
   ],
   "metrics": {
     "primary": ["project_approval_rate"],
     "secondary": ["revision_count", "time_to_completion_hours"],
     "guardrails": [
-      {"metric_key": "eval_cost_usd", "op": "lte", "threshold": 500.0, "window_hours": 24},
-      {"metric_key": "run_failure_rate", "op": "lte", "threshold": 0.15, "window_hours": 6}
+      { "metric_key": "eval_cost_usd", "op": "lte", "threshold": 500.0, "window_hours": 24 },
+      { "metric_key": "run_failure_rate", "op": "lte", "threshold": 0.15, "window_hours": 6 }
     ]
   },
-  "power": {"mde": 0.05, "alpha": 0.05, "power": 0.8, "estimated_n_per_variant": 380},
+  "power": { "mde": 0.05, "alpha": 0.05, "power": 0.8, "estimated_n_per_variant": 380 },
   "design": "parallel",
   "allocation_mode": "fixed",
   "stats_engine": "frequentist",
   "sequential": "msprt",
-  "variance_reduction": {"method": "cuped", "covariate_metric": "project_approval_rate",
-                         "lookback_days": 28},
-  "trigger": {"analysis_population": "exposed", "note": "triggered analysis; trigger must not be affected by treatment"},
-  "stop_policy": {"max_days": 28, "max_looks": 4},
+  "variance_reduction": {
+    "method": "cuped",
+    "covariate_metric": "project_approval_rate",
+    "lookback_days": 28
+  },
+  "trigger": {
+    "analysis_population": "exposed",
+    "note": "triggered analysis; trigger must not be affected by treatment"
+  },
+  "stop_policy": { "max_days": 28, "max_looks": 4 },
   "analysis_type": "randomized"
 }
 ```
 
 v2 spec fields:
+
 - `design` ∈ {parallel, cluster, **switchback**}. Switchback (marketplace /
   matching interference — the DoorDash/Lyft class problem): config
   `{"switch_unit": "org|region_key", "window_minutes": 60, "washout_minutes": 10}`;
@@ -333,21 +355,25 @@ forbidden under the immutable-spec rule).
 Resolution response example:
 
 ```json
-{"experiment_key": "rubric-wording-b", "variant_key": "treatment",
- "config": {"rubric_template_id": "01H..."}, "assigned_version": 1,
- "is_holdout": false}
+{
+  "experiment_key": "rubric-wording-b",
+  "variant_key": "treatment",
+  "config": { "rubric_template_id": "01H..." },
+  "assigned_version": 1,
+  "is_holdout": false
+}
 ```
 
 ## 7. Integration points (facade consumers)
 
-| Domain | hook | unit_type | variant.config meaning |
-|---|---|---|---|
-| Learning paths (Part F) | learning_path service, path-structure read | user / cohort | alternative pack order / prerequisite structure id |
-| Rubrics (assessment) | evaluation service, rubric-template pick | cohort | rubric_template_id |
-| Workflow/provider (Part G) | workflow_runtime step-binding resolution | workflow_installation | provider_offering_id / release_id — **still passes the R82 runtime capability re-check**; experiments never exempt |
-| Matching (Part H) | matching engine MatchingConfig read | organization | matching_config_id (existing versioned row); only soft-weight fields whitelisted — hard authorization/eligibility constraints are not experimentable |
-| Registry presentation | registry list ordering/badges | user | ordering strategy key |
-| Operational/cost | eco rollout / retry policy | tenant | policy parameters |
+| Domain                     | hook                                       | unit_type             | variant.config meaning                                                                                                                               |
+| -------------------------- | ------------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Learning paths (Part F)    | learning_path service, path-structure read | user / cohort         | alternative pack order / prerequisite structure id                                                                                                   |
+| Rubrics (assessment)       | evaluation service, rubric-template pick   | cohort                | rubric_template_id                                                                                                                                   |
+| Workflow/provider (Part G) | workflow_runtime step-binding resolution   | workflow_installation | provider_offering_id / release_id — **still passes the R82 runtime capability re-check**; experiments never exempt                                   |
+| Matching (Part H)          | matching engine MatchingConfig read        | organization          | matching_config_id (existing versioned row); only soft-weight fields whitelisted — hard authorization/eligibility constraints are not experimentable |
+| Registry presentation      | registry list ordering/badges              | user                  | ordering strategy key                                                                                                                                |
+| Operational/cost           | eco rollout / retry policy                 | tenant                | policy parameters                                                                                                                                    |
 
 Facade is the only entry point (eco facade discipline). Configs returned to a
 domain still pass ALL of that domain's existing validations and approval gates.
@@ -374,7 +400,7 @@ processing — the §106.26 accumulation-bomb lesson):
    path exists anywhere in the codebase** (asserted by a grep-level test).
 3. Built-in SRM check (not disableable): chi-square of assignment counts vs
    weights; p < 0.001 → `guardrail_events(action='alerted',
-   guardrail_key='__srm__')` + red banner in the analysis view.
+guardrail_key='__srm__')` + red banner in the analysis view.
 
 Built-in guardrail metrics: cost_usd (controlplane rating), run_failure_rate,
 p95_latency_ms (WorkflowRun), complaint_count, client_rejection_rate,
@@ -385,6 +411,7 @@ sufficient-stats query per running experiment); full analysis snapshots stay
 daily.
 
 v2 health-check suite (beyond SRM, persisted to `experiment_health_checks`):
+
 - **exposure_srm** — chi-square on exposure counts per variant; divergence from
   assignment ratios flags trigger bias for triggered analyses.
 - **aa_probe** — automated A/A: each layer keeps one synthetic 50/50 experiment
@@ -401,21 +428,21 @@ v2 health-check suite (beyond SRM, persisted to `experiment_health_checks`):
 
 ## 10. Statistical core (Part E — `services/analysis.py`, pure, zero I/O)
 
-| case | method | output |
-|---|---|---|
-| binary | two-proportion z + Wilson 95% CI; absolute + relative effect | `{"effect": 0.031, "ci": [0.004, 0.058], "p": 0.024, "relative": 0.078}` |
-| continuous | Welch t reconstructed from n/sum/sum_sq (no raw rows needed) | mean diff + CI |
-| rate | delta method over events/exposure_time | rate diff + CI |
-| time_to_event | windowed KM survival diff + Greenwood CI (no Cox — YAGNI) | 30/90d retention diff |
-| clustered (cohort/org units) | cluster-level means, then Welch t; n = cluster count (no pseudo-independence) | as above |
-| sequential | `obrien_fleming`: alpha-spending, look registry in `experiment_events`, over `max_looks` → 422 `EXPERIMENT_LOOKS_EXHAUSTED`; **`msprt` (v2, default)**: mixture SPRT always-valid CIs — peek freely, no look budget | adjusted boundary / always-valid CI |
-| multiplicity | Benjamini-Hochberg (FDR 0.05) across secondary metrics; each carries `passes_fdr` | |
-| **CUPED (v2)** | theta = cov_xy/cov_var from snapshot sufficient stats; adjusted Y − θ(X − mean(X)); reported as variance-reduction % alongside unadjusted result | tighter CI, both shown |
-| **Bayesian engine (v2)** | conjugate posteriors (Beta-Binomial for binary, Normal-inverse-gamma for continuous); reports P(beat control), expected loss, 95% credible interval; optional prior from meta-analysis corpus (§11), default weakly-informative | posterior summary |
-| **post-stratification (v2)** | small-n cohort/org experiments: strata-weighted effect over pre-registered strata (org size / cohort track) | stratified estimate + CI |
-| **switchback (v2)** | (unit × window) randomization, washout excluded, cluster-robust SE over switch units, balanced design validated at spec time | effect + robust CI |
-| **triggered (v2)** | exposed-only population; dilution-corrected extrapolation to assigned population shown next to triggered estimate; exposure-SRM gate | both estimates |
-| **quasi-experiments (v2)** | DiD (parallel-trends diagnostic plotted) and interrupted time series for `analysis_type=observational`; always `causal_claim:false`; synthetic control deferred | effect + caveat |
+| case                         | method                                                                                                                                                                                                                          | output                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| binary                       | two-proportion z + Wilson 95% CI; absolute + relative effect                                                                                                                                                                    | `{"effect": 0.031, "ci": [0.004, 0.058], "p": 0.024, "relative": 0.078}` |
+| continuous                   | Welch t reconstructed from n/sum/sum_sq (no raw rows needed)                                                                                                                                                                    | mean diff + CI                                                           |
+| rate                         | delta method over events/exposure_time                                                                                                                                                                                          | rate diff + CI                                                           |
+| time_to_event                | windowed KM survival diff + Greenwood CI (no Cox — YAGNI)                                                                                                                                                                       | 30/90d retention diff                                                    |
+| clustered (cohort/org units) | cluster-level means, then Welch t; n = cluster count (no pseudo-independence)                                                                                                                                                   | as above                                                                 |
+| sequential                   | `obrien_fleming`: alpha-spending, look registry in `experiment_events`, over `max_looks` → 422 `EXPERIMENT_LOOKS_EXHAUSTED`; **`msprt` (v2, default)**: mixture SPRT always-valid CIs — peek freely, no look budget             | adjusted boundary / always-valid CI                                      |
+| multiplicity                 | Benjamini-Hochberg (FDR 0.05) across secondary metrics; each carries `passes_fdr`                                                                                                                                               |                                                                          |
+| **CUPED (v2)**               | theta = cov_xy/cov_var from snapshot sufficient stats; adjusted Y − θ(X − mean(X)); reported as variance-reduction % alongside unadjusted result                                                                                | tighter CI, both shown                                                   |
+| **Bayesian engine (v2)**     | conjugate posteriors (Beta-Binomial for binary, Normal-inverse-gamma for continuous); reports P(beat control), expected loss, 95% credible interval; optional prior from meta-analysis corpus (§11), default weakly-informative | posterior summary                                                        |
+| **post-stratification (v2)** | small-n cohort/org experiments: strata-weighted effect over pre-registered strata (org size / cohort track)                                                                                                                     | stratified estimate + CI                                                 |
+| **switchback (v2)**          | (unit × window) randomization, washout excluded, cluster-robust SE over switch units, balanced design validated at spec time                                                                                                    | effect + robust CI                                                       |
+| **triggered (v2)**           | exposed-only population; dilution-corrected extrapolation to assigned population shown next to triggered estimate; exposure-SRM gate                                                                                            | both estimates                                                           |
+| **quasi-experiments (v2)**   | DiD (parallel-trends diagnostic plotted) and interrupted time series for `analysis_type=observational`; always `causal_claim:false`; synthetic control deferred                                                                 | effect + caveat                                                          |
 
 - Every result includes `practical_effect` (effect size + CI); the UI leads
   with CIs, not p-values.
@@ -557,3 +584,40 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   connectors (we are the warehouse).
 - Base branch: the epic depends on the eco facade, so implementation chains on
   the issue-35 branch (PR #36) until it merges.
+
+## 18. Implementation notes (exp01–exp09, 2026-09-30)
+
+Deviations from and refinements to the plan, discovered during implementation:
+
+- **Holdout uses its own salt** (`holdout:`), independent of the variant roll —
+  the plan's shared-roll formulation would have skewed variant proportions by
+  removing a contiguous low range of the roll space (§6).
+- **Guardrail evaluation clock is the DB's `clock_timestamp()`** — app-clock
+  windows vs DB-clock `occurred_at` skew made fresh exposures invisible (the
+  outbox R-fix class), and `now()` (transaction-frozen) equals same-transaction
+  write stamps, which the half-open window's strict `<` excludes (§9).
+- **Falsy-zero class**: `get("z") or get("t")` silently dropped sequential
+  fields when z was exactly 0.0 (§10 runner).
+- **Metric sources take `unit_type`** so a source never joins the wrong id
+  space; mismatches return zero-sample results (§8). Wired: exposures,
+  workflow_runs, projects, cost_ledger, client_briefs, registry,
+  eco_telemetry. Unwired (definitions are the contract): learning_paths
+  (progress is derived — needs its own aggregation), evaluations
+  (review-pipeline semantics), billing, talent_outcomes.
+- **Promotion apply adapters** create the target domain's own draft shape:
+  inactive MatchingConfig version, draft LearningPath, UNCONFIRMED
+  WorkflowStepBinding suggestion (never overwrites an existing binding —
+  SAVEPOINT-guarded 409), draft eco RolloutPlan via RolloutService (eco
+  hard-incompatible gate re-runs). pack_recommendation/pricing_presentation
+  refuse apply (EXPERIMENT_PROMOTION_UNWIRED) — no target draft store exists.
+- **Domain hooks bind to well-known surface keys** (one live experiment per
+  surface); the registry hook applies its override BEFORE the cache key so
+  cached pages never leak across variants; the binding hook re-runs the full
+  R82 capability re-check.
+- **Observational promote is refused at DECISION time** (stricter than the
+  planned draft-time gate).
+- **Mutation campaign** on the statistical core: 147/157 killed; the 10
+  survivors are documented equivalent/accuracy-level mutants (test file
+  carries the ledger).
+- Org-scoped operator routes (`/orgs/{org_id}/experiments`) are still
+  platform-admin only; org-admin delegation is follow-up work.
