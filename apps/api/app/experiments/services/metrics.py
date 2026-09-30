@@ -310,6 +310,61 @@ async def _source_cost_ledger(
         if not units or unit_type not in ("organization", "tenant"):
             result[variant] = {"n": 0}
             continue
+        if (
+            variance_reduction is not None
+            and variance_reduction.covariate_metric == definition.key
+        ):
+            # CUPED mode (§4.6 v2, same contract as projects): per-UNIT
+            # totals — y = unit's cost in the window, x = its cost in the
+            # pre-window lookback; every unit counts (ITT, zero when silent)
+            lookback_start = window_start - timedelta(
+                days=variance_reduction.lookback_days
+            )
+
+            async def _unit_costs(start, end, units=units):
+                if unit_type == "organization":
+                    q = (
+                        select(EvaluationTask.org_id, func.sum(EvaluationTask.cost_usd))
+                        .where(
+                            EvaluationTask.cost_usd.is_not(None),
+                            EvaluationTask.created_at >= start,
+                            EvaluationTask.created_at < end,
+                            EvaluationTask.org_id.in_(units),
+                        )
+                        .group_by(EvaluationTask.org_id)
+                    )
+                    return dict((await db.execute(q)).all())
+                from app.models.organization import Organization
+
+                q = (
+                    select(Organization.tenant_id, func.sum(EvaluationTask.cost_usd))
+                    .join(Organization, Organization.id == EvaluationTask.org_id)
+                    .where(
+                        EvaluationTask.cost_usd.is_not(None),
+                        EvaluationTask.created_at >= start,
+                        EvaluationTask.created_at < end,
+                        Organization.tenant_id.in_(units),
+                    )
+                    .group_by(Organization.tenant_id)
+                )
+                return dict((await db.execute(q)).all())
+
+            cur = await _unit_costs(window_start, window_end)
+            pre = await _unit_costs(lookback_start, window_start)
+            ys = [float(cur.get(u) or 0.0) for u in units]
+            xs = [float(pre.get(u) or 0.0) for u in units]
+            ys, winsorized = winsorize(ys, definition.winsorize_pct)
+            result[variant] = {
+                "n": len(units),
+                "sum_value": sum(ys),
+                "sum_sq": sum(v * v for v in ys),
+                "cov_sum": sum(xs),
+                "cov_sum_sq": sum(v * v for v in xs),
+                "cov_xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+                "_winsorized": winsorized,
+                "_aggregation": "per_unit",
+            }
+            continue
         q = select(EvaluationTask.cost_usd).where(
             EvaluationTask.cost_usd.is_not(None),
             EvaluationTask.created_at >= window_start,

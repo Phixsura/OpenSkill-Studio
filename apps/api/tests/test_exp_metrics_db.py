@@ -1332,3 +1332,56 @@ async def test_switchback_washout_excludes_head_of_window(db):
         exp.id, window_start=window_start, window_end=tiny_end
     )
     assert written == 0
+
+
+async def test_cost_ledger_cuped_per_unit_covariates(db):
+    """cost_ledger's CUPED mode: per-org totals with pre-window covariates
+    (ITT zero-fill), exact sufficient-stat goldens."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+    from decimal import Decimal
+
+    from app.experiments.models import MetricDefinition
+    from app.experiments.schemas import VarianceReductionSpec
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+    from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+
+    _tenant1, org1 = await _mk_org(db)
+    _tenant2, org2 = await _mk_org(db)
+    await MetricService(db).ensure_seed_definitions()
+    definition = (
+        await db.execute(
+            select(MetricDefinition).where(MetricDefinition.key == "internal_cost_usd")
+        )
+    ).scalar_one()
+    window_start, window_end = _today_window()
+    pre_at = window_start - timedelta(days=5)
+
+    def _task(org_id, cost, created_at):
+        return EvaluationTask(
+            org_id=org_id, type=EvalType.SUBMISSION_REVIEW,
+            status=EvalStatus.COMPLETED, cost_usd=Decimal(str(cost)),
+            created_at=created_at,
+        )
+
+    now = _dt.now(_UTC)
+    # org1: pre 3.0, window 5.0; org2: silent both periods (ITT zeros)
+    db.add(_task(org1.id, 3.0, pre_at))
+    db.add(_task(org1.id, 5.0, now))
+    await db.flush()
+    vr = VarianceReductionSpec(
+        method="cuped", covariate_metric="internal_cost_usd", lookback_days=28
+    )
+    stats = await SOURCE_REGISTRY["cost_ledger"](
+        db, experiment=None, definition=definition,
+        variant_units={"treatment": [org1.id, org2.id]},
+        window_start=window_start, window_end=window_end,
+        unit_type="organization", variance_reduction=vr,
+    )
+    arm = stats["treatment"]
+    assert arm["n"] == 2
+    assert arm["sum_value"] == 5.0
+    assert arm["cov_sum"] == 3.0
+    assert arm["cov_sum_sq"] == 9.0
+    assert arm["cov_xy_sum"] == 15.0
+    assert arm["_aggregation"] == "per_unit"
