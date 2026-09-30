@@ -586,3 +586,98 @@ def test_thompson_weights_totality():
     assert thompson_weights({"a": (5, 0), "b": (20, 10)}) is None
     ok = thompson_weights({"a": (5, 0), "b": (2, 10), "c": (8, 10)})
     assert ok is not None and set(ok["p_best"]) == {"b", "c"}
+
+
+# ── Round-10 mutation killers (analysis cores) ───────────────────────
+
+
+def test_chi2_sf_pins_in_pure_suite():
+    """Mutation-killer copies of the critical-value pins (the holdout suite
+    holds the originals, but the fast mutation lane only runs this file):
+    df=1 must be legal (Lt→LtE on the df guard flips it), x=0 inclusive
+    boundary, and the WH z-formula agrees with the alpha=0.001 table."""
+    from app.experiments.services.analysis import chi2_sf
+
+    for df, crit in ((1, 10.828), (4, 18.467), (9, 27.877)):
+        assert 0.0003 < chi2_sf(crit, df) < 0.003, df
+    assert chi2_sf(0.0, 3) == 1.0
+    assert 0.0 < chi2_sf(5e-324, 3) < 1.0  # strictly-positive x takes the WH path
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        chi2_sf(1.0, 0)
+
+
+def test_pool_stratified_weight_sum_overflow_returns_none():
+    """Two individually-finite huge weights whose SUM overflows must yield
+    None, not an inf-poisoned pooled effect (guards the weight_total
+    isfinite check — the ledger twin of fuzz defect #27)."""
+    from app.experiments.services.analysis import pool_stratified
+
+    tiny_se = 3.7e-155  # weight ≈ 7.3e308: finite alone, inf when doubled
+    assert pool_stratified([(0.0, tiny_se), (0.0, tiny_se)]) is None
+
+
+# Verified-equivalent survivors (ledger):
+# - thompson_weights `sample > best_sample` → GtE: beta samples are
+#   continuous; exact ties have measure zero under a seeded PRNG.
+# - pool_stratified `se > 0` after sqrt(1/weight_total): weight_total is
+#   finite and positive there, so the sqrt is always > 0 — unreachable flip.
+# - pool_stratified `weight_total <= 0` → Lt: weights are all positive, so
+#   the == 0 edge is unreachable (kept for defensive symmetry). The usable-
+#   filter And→Or / se Gt→GtE flips are equivalent too: a zero/denormal se
+#   or a non-finite effect is always caught again by the weight / e*weight /
+#   pooled-result finiteness gates downstream.
+# - aa_probe round(chi2, 3→4): chi2 is an integer/200, so it never has a
+#   fourth decimal digit — mathematically equivalent.
+
+
+def test_thompson_weights_golden_vector():
+    """Exact golden output for the default (draws=4000, seed=42) — a silent
+    change to either default, or to the posterior parameterization, shifts
+    these digits (the mutation lane's default-parameter killer)."""
+    from app.experiments.services.analysis import thompson_weights
+
+    result = thompson_weights({"a": (10, 100), "b": (11, 100)})
+    assert result["p_best"] == {"a": 0.4125, "b": 0.5875}
+    assert result["suggested_weights_bp"] == {"a": 4125, "b": 5875}
+    assert result["draws"] == 4000
+
+
+def test_thompson_weights_filter_exact():
+    """The usable-arm filter drops EXACTLY the corrupt arms: n == 0,
+    negative successes, successes > n — each boundary pinned."""
+    from app.experiments.services.analysis import thompson_weights
+
+    result = thompson_weights({
+        "zero_n": (0, 0),
+        "neg_s": (-1, 10),
+        "over_s": (11, 10),
+        "ok1": (2, 10),
+        "ok2": (5, 10),
+    })
+    assert set(result["p_best"]) == {"ok1", "ok2"}
+    # boundary inclusions: s == 0 and s == n are both legal
+    edge = thompson_weights({"all_fail": (0, 10), "all_pass": (10, 10)})
+    assert set(edge["p_best"]) == {"all_fail", "all_pass"}
+    assert edge["p_best"]["all_pass"] > 0.99
+
+
+def test_pool_stratified_extreme_value_paths():
+    from app.experiments.services.analysis import pool_stratified
+
+    # denormal se: weight overflows to inf and the stratum is DROPPED, never
+    # divided by zero (the se*se > 0 branch must stay strict)
+    result = pool_stratified([(1.0, 5e-324), (2.0, 1.0), (3.0, 1.0)])
+    assert result is not None and result["strata"] == 2
+    assert abs(result["effect"] - 2.5) < 1e-12
+
+    # huge effect x FINITE weight: e*weight alone overflows — that stratum
+    # is dropped while the sane ones still pool (weight ≈ 1.5, finite)
+    result = pool_stratified([(1.7e308, 0.8165), (1.0, 1.0), (2.0, 1.0)])
+    assert result is not None and result["strata"] == 2
+    assert abs(result["effect"] - 1.5) < 1e-12
+
+    # every e*weight finite but their SUM overflows with a finite
+    # weight_total: the pooled effect would be inf — refused as a whole
+    assert pool_stratified([(9e307, 0.7071), (9e307, 0.7071)]) is None

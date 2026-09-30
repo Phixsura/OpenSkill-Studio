@@ -241,3 +241,76 @@ def test_switchback_variant_deterministic_per_day_and_rotates():
         for d in range(30)
     ]
     assert other != mine
+
+
+# ── Round-10 mutation killers (assignment cores) ─────────────────────
+
+
+def test_aa_probe_internals_recompute_pinned():
+    """Recompute the probe's own report from its deciles: kills the chi2
+    exponent, the df, the rounding precision and the default-n mutants."""
+    from app.experiments.services.analysis import chi2_sf
+    from app.experiments.services.assignment import aa_probe
+
+    probe = aa_probe("aa-golden-layer")  # DEFAULT n
+    assert probe["n"] == 2000
+    expected = probe["n"] / 10.0
+    chi2 = sum((d - expected) ** 2 / expected for d in probe["deciles"])
+    assert probe["chi2"] == round(chi2, 3)
+    assert probe["p"] == chi2_sf(chi2, 9)
+
+
+def test_switchback_window_grid_and_default():
+    from datetime import UTC, datetime, timedelta
+
+    from app.experiments.schemas import ExperimentSpec
+    from app.experiments.services.assignment import switchback_variant
+
+    def _spec(design: str, switchback: dict | None) -> ExperimentSpec:
+        body = {
+            "hypothesis": "switchback grid boundaries",
+            "unit_type": "user",
+            "design": design,
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {"primary": ["exposure_rate"],
+                        "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                        "threshold": 100.0}]},
+        }
+        if switchback is not None:
+            body["switchback"] = switchback
+        return ExperimentSpec.model_validate(body)
+
+    spec5 = _spec("switchback", {"switch_unit": "x", "window_minutes": 5})
+    start = datetime(2026, 9, 1, tzinfo=UTC)  # epoch-aligned to the 5m grid
+    series = [
+        switchback_variant("grid-exp", "saltgold", spec5, start + timedelta(minutes=m))
+        for m in range(150)
+    ]
+    # constant inside every 5-minute window; both variants appear overall —
+    # a misaligned grid (minutes->seconds drift) splits some window
+    for w in range(30):
+        assert len(set(series[w * 5 : (w + 1) * 5])) == 1, w
+    assert set(series) == {"control", "treatment"}
+
+    # no switchback config (defensive default): the window is 1440 minutes.
+    # Find a day whose successor flips variant, then pin its edges.
+    pspec = _spec("parallel", None)
+    for d in range(30):
+        at = start + timedelta(days=d)
+        a = switchback_variant("grid-exp", "saltgold", pspec, at)
+        b = switchback_variant("grid-exp", "saltgold", pspec, at + timedelta(days=1))
+        if a != b:
+            assert switchback_variant(
+                "grid-exp", "saltgold", pspec, at + timedelta(minutes=1439)
+            ) == a
+            break
+    else:  # pragma: no cover — 30 fair coin flips all equal
+        raise AssertionError("no rotation in 30 days")
+
+
+# Verified-equivalent survivors (ledger):
+# - aa_probe `p_value >= 0.001` → Gt: p landing exactly on 0.001 has measure
+#   zero for real digests.
