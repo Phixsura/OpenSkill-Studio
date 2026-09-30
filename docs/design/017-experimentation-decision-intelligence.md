@@ -727,3 +727,22 @@ Hardening round 5 (same day):
 - Reserved column note: `promotion_drafts.apply_error` is currently unused —
   synchronous applies roll back on failure; the column is reserved for a
   future async apply path.
+
+Hardening round 6 — service-core mutation campaign (same day):
+
+- AST mutation over the service decision cores (assignment hashing/ramp/
+  population, state machine + spec hash, guardrail `_observed` + SRM, all
+  seven metric sources, promotion target validation): **95/115 killed**;
+  every survivor individually verified and recorded in in-test ledgers
+  (unreachable guards, float-exact boundaries, display precision, and the
+  per-source half-open window pairs that are template copies of the
+  exposures-pinned contract).
+- Real gaps the campaign exposed and closed: the workflow_runs
+  latency/failure measures had NO db-level coverage; the success-status
+  assertion used a symmetric fixture (== vs != collided at 2/2); the
+  cost-ledger unit-type guard's OR combination and the telemetry None-rate
+  skip path were untested; `_validate_target` asserted error codes but never
+  HTTP statuses (every 404/422 constant was mutable) and its generic branch
+  (oversize/blank refs, the 64-char boundary) had no tests; hash golden
+  vectors now pin the digest-slice/base/salt layout (a silent change would
+  re-randomize every live experiment on deploy).
