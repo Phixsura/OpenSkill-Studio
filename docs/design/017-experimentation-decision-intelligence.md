@@ -728,6 +728,59 @@ Hardening round 5 (same day):
   synchronous applies roll back on failure; the column is reserved for a
   future async apply path.
 
+v2 round 10 (2026-10-01, batches 3–15) — the backlog cleared in one sweep:
+
+- **Every declared metric source wired** (batch 3): learning_paths (derived
+  all-project-path completion + time-to-completion), evaluations
+  (SubmissionReview verdicts), talent_outcomes (Placement, observational
+  only), billing (tenant-keyed conversion/ARPU/retention/gross-margin; org
+  units refused — double-count), capabilities (score-snapshot gain vs
+  pre-window baseline). Unwired set pinned EMPTY; skip-not-crash re-proved
+  via a ghost definition.
+- **Health checks** (batch 4): PRE_BALANCE_SUSPECT (covariate Welch across
+  arms — pre-experiment covariates must not differ), NOVELTY_EFFECT_DECAY
+  _SUSPECT (early-half |z|>3 effect flipping/shrinking late; ≥4 windows),
+  aa_probe (deterministic decile χ² layer hash-health diagnostic,
+  GET /experiments/layers/{key}/aa-probe).
+- **Meta-analysis corpus priors** (batch 5): analysis_look events record
+  primary effects; ≥3 decided same-domain experiments on the metric yield
+  {n, mean, sd} + a normal-normal shrunk_effect. Informational.
+- **Async promotion apply** (batch 6): apply_async parks the draft in
+  'applying' + outbox handler; typed failure → back to 'approved' with
+  apply_error (retryable, consumed); crash → outbox retry; racing manual
+  action wins. ?background=true on the apply route.
+- **Org-admin read delegation** (batch 7): experiment_read_scope — org
+  owners/admins read experiments scoped to their orgs (list SQL-filtered,
+  uniform 404 outside scope); roleless users still 403; ALL writes and the
+  remaining operator reads stay platform-admin (deliberate non-goal).
+- **Time-stratified estimates** (batch 8): pool_stratified inverse-variance
+  pooling of per-window effects on primary comparisons (enrollment-drift
+  robustness); analyze_binary now exposes its pooled se.
+- **Console surfacing** (batch 9): stratified/corpus-shrunk lines, health
+  warnings, Apply-async button, apply_error surfaced, Holdouts tab.
+- **Bandit suggestions** (batch 10): thompson_weights (seeded Beta
+  Monte-Carlo) → top-level `bandit` block for allocation_mode=bandit
+  experiments; ADVISORY only — no auto-apply, ever.
+- **Switchback design real** (batch 11): epoch-aligned window_minutes
+  buckets randomized by the v1 salt (never re-randomized); placeholder
+  assignment rows keep the exposure FK + ITT roster; window computation
+  attributes the roster to the window's owner variant; exposures fold onto
+  it. Batch 12: washout_minutes APPLIED (head-of-window band excluded,
+  provenance-stamped; whole-window washout computes nothing).
+- **Verification deepened** (batches 13–15): 4 new Hypothesis totality
+  contracts (pool_stratified / thompson_weights / chi2_sf /
+  switchback_variant) — fuzz defect #27: pool_stratified divided by zero on
+  a DENORMAL se (se*se underflows; weights now must be finite themselves);
+  live E2E grew to 48 checks (holdout CRUD walls, aa-probe, delegation
+  boundary); AST mutation over the new cores 33/43 killed, all 10 survivors
+  verified equivalent and ledgered in-test (incl. round(chi2,3→4) being
+  mathematically equivalent: chi2 = integer/200).
+
+Remaining (explicitly deferred): per-unit repeated-measures for every
+source, CUPED covariates beyond projects/revision_count, segment-dimension
+breakdowns (needs a snapshot dimension), full KM time-to-event, write-side
+org delegation.
+
 v2 batch 2 (round 9, 2026-10-01) — second slice of the §18 backlog:
 
 - **Global holdout groups** (§4.12, migration exp07a00007): an active group

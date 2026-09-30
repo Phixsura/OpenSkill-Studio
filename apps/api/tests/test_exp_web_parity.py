@@ -46,6 +46,10 @@ def test_web_vocabularies_match_backend():
     assert _web_array("DECISIONS") == set(DECISIONS)
     assert _web_array("PROMOTION_STATUSES") == set(PROMOTION_STATUSES)
     assert _web_array("PROMOTION_TARGET_TYPES") == set(PROMOTION_TARGET_TYPES)
+    from app.experiments.security import ALLOCATION_MODES, DESIGNS
+
+    assert _web_array("DESIGNS") == set(DESIGNS)
+    assert _web_array("ALLOCATION_MODES") == set(ALLOCATION_MODES)
 
 
 def test_web_checklist_matches_backend():

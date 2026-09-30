@@ -39,6 +39,8 @@ export const UNIT_TYPES = [
 
 export const RISK_CLASSES = ["low", "medium", "high"] as const;
 export const STATS_ENGINES = ["frequentist", "bayesian"] as const;
+export const DESIGNS = ["parallel", "cluster", "switchback"] as const;
+export const ALLOCATION_MODES = ["fixed", "bandit"] as const;
 export const SEQUENTIAL_METHODS = ["none", "obrien_fleming", "msprt"] as const;
 export const ANALYSIS_TYPES = ["randomized", "observational"] as const;
 export const DECISIONS = ["promote", "reject", "inconclusive", "extend"] as const;

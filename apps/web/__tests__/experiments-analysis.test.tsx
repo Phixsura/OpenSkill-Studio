@@ -108,7 +108,7 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     const metrics = (
       payload.data as { metrics: Record<string, { comparisons: Record<string, object> }> }
     ).metrics;
-    metrics.exposure_rate.comparisons.treatment = {
+    metrics.exposure_rate!.comparisons.treatment = {
       effect: 0.05,
       ci: [0.01, 0.09],
       p: 0.02,

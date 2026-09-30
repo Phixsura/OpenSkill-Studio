@@ -10,7 +10,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { ErrorBanner, ExperimentsNav, SectionCard } from "../components";
 import {
+  ALLOCATION_MODES,
   ANALYSIS_TYPES,
+  DESIGNS,
   EXPERIMENT_DOMAINS,
   RISK_CLASSES,
   SEQUENTIAL_METHODS,
@@ -55,6 +57,10 @@ export default function NewExperimentPage() {
     guardrail_op: "lte",
     guardrail_threshold: "100",
     guardrail_window_hours: "24",
+    design: "parallel",
+    allocation_mode: "fixed",
+    switchback_window_minutes: "1440",
+    switchback_washout_minutes: "0",
   });
   const [variants, setVariants] = useState<VariantRow[]>([
     { key: "control", name: "Control", weight_bp: 5000, is_control: true, config: "{}" },
@@ -111,6 +117,17 @@ export default function NewExperimentPage() {
           stats_engine: spec.stats_engine,
           sequential: spec.sequential,
           analysis_type: spec.analysis_type,
+          design: spec.design,
+          allocation_mode: spec.allocation_mode,
+          ...(spec.design === "switchback"
+            ? {
+                switchback: {
+                  switch_unit: "platform_window",
+                  window_minutes: Number(spec.switchback_window_minutes),
+                  washout_minutes: Number(spec.switchback_washout_minutes),
+                },
+              }
+            : {}),
         };
         await apiWithAuth(`/experiments/${created.data.id}/versions`, {
           method: "POST",
@@ -433,6 +450,68 @@ export default function NewExperimentPage() {
 
       <SectionCard title="5 · Analysis engine">
         <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <label className={label} htmlFor="exp-design">
+              Design
+            </label>
+            <select
+              id="exp-design"
+              className={input}
+              value={spec.design}
+              onChange={(e) => setSpec({ ...spec, design: e.target.value })}
+            >
+              {DESIGNS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="exp-alloc">
+              Allocation
+            </label>
+            <select
+              id="exp-alloc"
+              className={input}
+              value={spec.allocation_mode}
+              onChange={(e) => setSpec({ ...spec, allocation_mode: e.target.value })}
+            >
+              {ALLOCATION_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+          {spec.design === "switchback" ? (
+            <>
+              <div>
+                <label className={label} htmlFor="exp-sb-window">
+                  Switch window (minutes)
+                </label>
+                <input
+                  id="exp-sb-window"
+                  type="number"
+                  className={input}
+                  value={spec.switchback_window_minutes}
+                  onChange={(e) => setSpec({ ...spec, switchback_window_minutes: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={label} htmlFor="exp-sb-washout">
+                  Washout (minutes)
+                </label>
+                <input
+                  id="exp-sb-washout"
+                  type="number"
+                  className={input}
+                  value={spec.switchback_washout_minutes}
+                  onChange={(e) => setSpec({ ...spec, switchback_washout_minutes: e.target.value })}
+                />
+              </div>
+            </>
+          ) : null}
           <div>
             <label className={label} htmlFor="exp-engine">
               Stats engine
