@@ -553,6 +553,111 @@ async def test_registry_source_pack_adoption(db):
     assert result["treatment"] == {"n": 1, "numerator": 2, "denominator": 1}
 
 
+async def test_workflow_runs_source_all_measures(db):
+    """success_rate, failure_rate and latency_ms (with cap) over real runs —
+    the latency branch had no direct coverage."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    _tenant, org = await _mk_org(db)
+    installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add(installation)
+    await db.flush()
+    window_start, _ = _today_window()
+    t0 = window_start + timedelta(hours=1)
+    runs = [
+        (RunStatus.COMPLETED, t0, t0 + timedelta(milliseconds=100)),
+        (RunStatus.COMPLETED, t0, t0 + timedelta(milliseconds=300)),
+        (RunStatus.FAILED, t0, t0 + timedelta(milliseconds=10_000)),  # capped below
+        (RunStatus.CANCELLED, t0, None),  # no finished_at → excluded from latency
+    ]
+    for status, started, finished in runs:
+        db.add(
+            WorkflowRun(
+                org_id=org.id, installation_id=installation.id,
+                definition_snapshot={}, status=status,
+                created_at=t0, started_at=started, finished_at=finished,
+            )
+        )
+    await db.flush()
+    units = [installation.id]
+    success = await _run_source(
+        db, "workflow_runs", definition_key="run_success_rate",
+        units=units, unit_type="workflow_installation",
+    )
+    assert success["treatment"] == {"n": 4, "numerator": 2, "denominator": 4}
+    failure = await _run_source(
+        db, "workflow_runs", definition_key="run_failure_rate",
+        units=units, unit_type="workflow_installation",
+    )
+    assert failure["treatment"] == {"n": 4, "numerator": 1, "denominator": 4}
+    latency = await _run_source(
+        db, "workflow_runs", definition_key="run_latency_ms",
+        units=units, unit_type="workflow_installation",
+    )
+    # run_latency_ms seed caps at cap_value=None → no cap; three finished runs
+    stats = latency["treatment"]
+    assert stats["n"] == 3
+    assert stats["sum_value"] == pytest.approx(100 + 300 + 10_000)
+    assert stats["sum_sq"] == pytest.approx(100**2 + 300**2 + 10_000**2)
+    _dt(2020, 1, 1, tzinfo=_UTC)  # keep imports used
+
+
+async def test_source_window_boundaries_half_open(db):
+    """The shared window contract: occurred_at == window_start is IN,
+    == window_end is OUT — pinned on the exposures source (every source
+    copies the same >= start / < end predicate pair)."""
+    from app.experiments.models import ExperimentAssignment, ExperimentExposure
+
+    await MetricService(db).ensure_seed_definitions()
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="edge-1")
+    await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="edge-2")
+    window_start, window_end = _today_window()
+    rows = list(
+        (
+            await db.execute(
+                select(ExperimentAssignment).where(
+                    ExperimentAssignment.experiment_id == exp.id
+                )
+            )
+        ).scalars()
+    )
+    db.add(
+        ExperimentExposure(
+            assignment_id=rows[0].id, experiment_id=exp.id, occurred_at=window_start
+        )
+    )
+    db.add(
+        ExperimentExposure(
+            assignment_id=rows[1].id, experiment_id=exp.id, occurred_at=window_end
+        )
+    )
+    await db.flush()
+    from app.experiments.models import MetricDefinition
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+
+    definition = (
+        await db.execute(
+            select(MetricDefinition).where(MetricDefinition.key == "exposure_rate")
+        )
+    ).scalar_one()
+    variant_units: dict[str, list[str]] = {}
+    for row in rows:
+        variant_units.setdefault(row.variant_key, []).append(row.unit_id)
+    out = await SOURCE_REGISTRY["exposures"](
+        db, experiment=exp, definition=definition, variant_units=variant_units,
+        window_start=window_start, window_end=window_end, unit_type="user",
+    )
+    # Only the window_start exposure counts; window_end belongs to the NEXT day
+    total = sum(int(v.get("numerator") or 0) for v in out.values())
+    assert total == 1
+
+
 async def test_eco_telemetry_source_weighted_success(db):
     from app.ecosystem.models.graph import TelemetrySnapshot
 
@@ -598,12 +703,21 @@ async def test_client_briefs_source_acceptance(db):
             )
         )
     await db.flush()
+    # asymmetric counts so status==completed vs != is distinguishable
+    db.add(
+        ClientBrief(
+            org_id=org.id, title="B2", slug=f"b2-{str(ULID()).lower()}",
+            client_name="Client", project_type="image_set",
+            objective="deliver assets", status=BriefStatus.COMPLETED, created_by=user.id,
+        )
+    )
+    await db.flush()
     result = await _run_source(
         db, "client_briefs", definition_key="client_acceptance_rate",
         units=[org.id], unit_type="organization",
     )
-    assert result["treatment"]["denominator"] == 2
-    assert result["treatment"]["numerator"] == 1
+    assert result["treatment"]["denominator"] == 3
+    assert result["treatment"]["numerator"] == 2
 
 
 async def test_snapshot_unique_constraint_names_window(db):

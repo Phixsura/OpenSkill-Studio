@@ -544,6 +544,83 @@ async def test_eco_rollout_apply_refuses_hard_incompatible(db):
     assert (await psvc.get(draft.id)).status == "approved"
 
 
+async def test_validate_target_error_contract(db):
+    """Every _validate_target failure mode with BOTH code and HTTP status
+    pinned (a mutated status constant must not survive), including the
+    generic-branch checks that had no coverage."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+    from app.models.provider import ProviderAdapter, ProviderConnection, ProviderModelOffering
+    from app.models.workflow_pack import WorkflowPackInstallation
+
+    svc = PromotionService(db)
+
+    async def expect(code: str, status: int, target_type: str, target_ref: str, payload: dict):
+        with pytest.raises(AppError) as e:
+            await svc._validate_target(target_type, target_ref, payload)
+        assert (e.value.code, e.value.status_code) == (code, status), (
+            target_type, e.value.code, e.value.status_code,
+        )
+
+    # unknown target type
+    await expect("VALIDATION_ERROR", 422, "bogus_target", "a" * 26, {})
+    # matching_config: missing row / bad weights shape / bad weight sum
+    await expect("EXPERIMENT_NOT_FOUND", 404, "matching_config", "m" * 26, {})
+    base = await _mk_matching_config(db)
+    await expect("VALIDATION_ERROR", 422, "matching_config", base.id, {"weights": {}})
+    await expect("VALIDATION_ERROR", 422, "matching_config", base.id, {"weights": "nope"})
+    await expect(
+        "VALIDATION_ERROR", 422, "matching_config", base.id,
+        {"weights": {"a": 0.5, "b": 0.6}},
+    )
+    # learning_path: missing row
+    await expect("EXPERIMENT_NOT_FOUND", 404, "learning_path", "l" * 26, {})
+    # workflow_binding: missing installation / missing fields / missing
+    # offering / cross-org offering
+    await expect("EXPERIMENT_NOT_FOUND", 404, "workflow_binding", "w" * 26, {})
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org_a = Organization(
+        name=f"a-{str(ULID()).lower()}", slug=f"a-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    org_b = Organization(
+        name=f"b-{str(ULID()).lower()}", slug=f"b-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add_all([org_a, org_b])
+    await db.flush()
+    installation = WorkflowPackInstallation(org_id=org_a.id, installed_version="1.0.0")
+    adapter = ProviderAdapter(key=f"mock-{str(ULID()).lower()[-8:]}", name="Mock")
+    db.add_all([installation, adapter])
+    await db.flush()
+    conn_b = ProviderConnection(org_id=org_b.id, adapter_id=adapter.id, name="c", status="active")
+    db.add(conn_b)
+    await db.flush()
+    offering_b = ProviderModelOffering(
+        connection_id=conn_b.id, capability_key="text.generate", model_name="m", is_active=True
+    )
+    db.add(offering_b)
+    await db.flush()
+    await expect(
+        "VALIDATION_ERROR", 422, "workflow_binding", installation.id, {"step_id": "s"}
+    )
+    await expect(
+        "EXPERIMENT_NOT_FOUND", 404, "workflow_binding", installation.id,
+        {"step_id": "s", "offering_id": "o" * 26},
+    )
+    await expect(  # offering belongs to org_b, installation to org_a (R3)
+        "VALIDATION_ERROR", 422, "workflow_binding", installation.id,
+        {"step_id": "s", "offering_id": offering_b.id},
+    )
+    # eco_rollout_policy: missing candidate
+    await expect("EXPERIMENT_NOT_FOUND", 404, "eco_rollout_policy", "e" * 26, {})
+    # generic branch (pack_recommendation): oversize + blank refs
+    await expect("VALIDATION_ERROR", 422, "pack_recommendation", "x" * 65, {})
+    await expect("VALIDATION_ERROR", 422, "pack_recommendation", "   ", {})
+    # generic branch happy path: a plain ref passes draft-time validation
+    await svc._validate_target("pack_recommendation", "a" * 26, {})
+
+
 async def test_unwired_targets_are_only_presentation_pair(db):
     """pack_recommendation / pricing_presentation stay explicitly unwired
     (no target-domain draft store) — pin the set so a new unwired target
