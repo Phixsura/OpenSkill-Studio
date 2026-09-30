@@ -417,3 +417,42 @@ async def test_switchback_honors_per_unit_holdout(db):
     assert row.is_holdout is True
     served = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=nonheld)
     assert served is not None and served.variant_key in ("control", "treatment")
+
+
+# ── Self-serve resolution surface (v2 batch 27, §7 client-SDK class) ──
+
+
+async def test_self_serve_resolve_is_sticky_and_self_scoped(db):
+    """The facade path the self-serve endpoints call: resolving as a user
+    creates the sticky assignment for THAT user only; an unknown key is the
+    default experience (None), never an error."""
+    from app.experiments import facade
+
+    exp, _ = await _mk_running(db)
+    user_id = "u" * 26
+    first = await facade.resolve_variant(
+        db, experiment_key=exp.key, unit_type="user", unit_id=user_id
+    )
+    assert first is not None
+    second = await facade.resolve_variant(
+        db, experiment_key=exp.key, unit_type="user", unit_id=user_id
+    )
+    assert second == first
+    rows = list(
+        (
+            await db.execute(
+                select(ExperimentAssignment).where(
+                    ExperimentAssignment.experiment_id == exp.id
+                )
+            )
+        ).scalars()
+    )
+    assert [r.unit_id for r in rows] == [user_id]
+    # unknown surface: default experience, no exception
+    assert await facade.resolve_variant(
+        db, experiment_key="surface-nothing-here", unit_type="user", unit_id=user_id
+    ) is None
+    # exposure through the facade for the same unit
+    assert await facade.record_exposure(
+        db, experiment_key=exp.key, unit_type="user", unit_id=user_id, dedup_key="d1"
+    )

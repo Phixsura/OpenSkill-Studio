@@ -340,6 +340,15 @@ class LayerResponse(BaseModel):
     created_at: datetime
 
 
+class SelfResolveRequest(_StrictReq):
+    experiment_key: str = Field(min_length=1, max_length=64)
+
+
+class SelfExposureRequest(_StrictReq):
+    experiment_key: str = Field(min_length=1, max_length=64)
+    dedup_key: str | None = Field(default=None, max_length=120)
+
+
 class CreateHoldoutGroupRequest(_StrictReq):
     key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{2,63}$")
     title: str = Field(min_length=1, max_length=200)

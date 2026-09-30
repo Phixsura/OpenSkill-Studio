@@ -60,3 +60,10 @@ async def experiment_read_scope(
     if not org_ids:
         raise AppError("FORBIDDEN", "Platform admin or org admin required", 403)
     return ReadScope(user, org_ids)
+
+
+async def require_self_serve_user(user: User = Depends(get_current_user)) -> User:
+    """Self-serve product surfaces (§7): the caller IS the unit — resolve and
+    exposure apply to user.id only, so plain authentication is the correct
+    gate (no cross-unit probing is possible by construction)."""
+    return user
