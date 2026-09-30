@@ -17,6 +17,7 @@ points call record_exposure() at the moment the variant takes effect.
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -115,6 +116,25 @@ def aa_probe(layer_key: str, *, n: int = 2000, unit_type: str = "user") -> dict:
         "p": p_value,
         "healthy": p_value >= 0.001,
     }
+
+
+SWITCHBACK_PLACEHOLDER = "__switchback__"
+
+
+def switchback_variant(
+    experiment_key: str, version_salt: str, spec: ExperimentSpec, at
+) -> str:
+    """Switchback design (§4.5 v2): the randomization unit is the TIME
+    WINDOW (spec.switchback.window_minutes, epoch-aligned) — every eligible
+    unit sees the same variant inside a window, and windows are randomized
+    by the same immutable version-1 salt (deterministic schedule, never
+    re-randomized). Weight_bp governs each variant's share of windows."""
+    window_minutes = spec.switchback.window_minutes if spec.switchback else 1440
+    bucket_index = int(at.timestamp() // 60 // window_minutes)
+    roll = _roll(
+        "variant", experiment_key, version_salt, "switchback", str(bucket_index)
+    )
+    return pick_variant(spec, roll)
 
 
 def pick_variant(spec: ExperimentSpec, roll: int) -> str:
@@ -333,6 +353,16 @@ class AssignmentService:
             result["eligible"] = False
             result["reason"] = f"outside ramp ({exp.ramp_bp}bp)"
             return result
+        if spec.design == "switchback":
+            # eligibility settled above; the variant belongs to the DAY
+            result["eligible"] = True
+            result["is_holdout"] = False
+            result["switchback"] = True
+            result["variant_key"] = switchback_variant(
+                exp.key, version_salt, spec, datetime.now(UTC)
+            )
+            result["assigned_version"] = exp.current_version
+            return result
         if holdout_roll(exp.key, unit_type, unit_id) < exp.holdout_bp:
             result["eligible"] = True
             result["is_holdout"] = True
@@ -355,6 +385,11 @@ class AssignmentService:
         if exp is None:
             return None
         spec, _ = await self._spec_and_salt(exp)
+
+        if spec.design == "switchback":
+            return await self._resolve_switchback(
+                exp, spec, unit_type=unit_type, unit_id=unit_id, context=context
+            )
 
         # Sticky first: an existing assignment keeps serving through
         # pause/completion (pause stops NEW entries only)
@@ -391,6 +426,58 @@ class AssignmentService:
         if row is None:  # pragma: no cover — unique constraint guarantees a row
             raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
         return self._to_resolved(exp, spec, row)
+
+    async def _resolve_switchback(
+        self,
+        exp: Experiment,
+        spec: ExperimentSpec,
+        *,
+        unit_type: str,
+        unit_id: str,
+        context: dict | None,
+    ) -> ResolvedVariant | None:
+        """Switchback resolution: no per-unit stickiness (the whole cohort
+        switches together, per §4.5) — a placeholder assignment row keeps the
+        exposure FK and the ITT roster, and the served variant is the DAY's.
+        Enrollment of NEW units still stops outside running."""
+        _, version_salt = await self._spec_and_salt(exp)
+        existing = await self._existing(exp.id, unit_type, unit_id)
+        if existing is None:
+            if exp.status != "running":
+                return None
+            computed = await self.compute(
+                experiment=exp, unit_type=unit_type, unit_id=unit_id, context=context
+            )
+            if not computed.get("eligible"):
+                return None
+            insert = (
+                pg_insert(ExperimentAssignment)
+                .values(
+                    experiment_id=exp.id,
+                    unit_type=unit_type,
+                    unit_id=unit_id,
+                    variant_key=SWITCHBACK_PLACEHOLDER,
+                    assigned_version=exp.current_version,
+                    bucket=computed["bucket"],
+                    is_holdout=False,
+                )
+                .on_conflict_do_nothing(constraint="uq_experiment_assignments_unit")
+            )
+            await self.db.execute(insert)
+            existing = await self._existing(exp.id, unit_type, unit_id)
+            if existing is None:  # pragma: no cover — unique constraint guarantees a row
+                raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
+        elif exp.status not in _SERVE_EXISTING_STATUSES:
+            return None
+        variant_key = switchback_variant(exp.key, version_salt, spec, datetime.now(UTC))
+        config = next((v.config for v in spec.variants if v.key == variant_key), {})
+        return ResolvedVariant(
+            experiment_key=exp.key,
+            variant_key=variant_key,
+            config=config,
+            assigned_version=existing.assigned_version,
+            is_holdout=False,
+        )
 
     async def record_exposure(
         self,

@@ -1210,3 +1210,53 @@ async def test_capabilities_source_gain_needs_baseline(db):
     )
     assert stats["treatment"]["n"] == 1
     assert abs(stats["treatment"]["sum_value"] - 0.25) < 1e-9
+
+
+# ── Switchback window attribution (v2 batch 11) ──────────────────────
+
+
+async def test_switchback_window_snapshots_land_on_day_variant(db):
+    """The whole roster's window stats land under the variant that owned the
+    day — cross-window aggregation then compares variant-days."""
+    from app.experiments.services.assignment import switchback_variant
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="SB", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["design"] = "switchback"
+    spec["switchback"] = {"switch_unit": "platform_day", "window_minutes": 1440}
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    asvc = AssignmentService(db)
+    for i in range(6):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"sbm-{i}")
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"sbm-{i}")
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    snapshots = await MetricService(db).list_snapshots(exp.id)
+    exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
+    assert len(exposure_rows) == 1  # one arm owns the whole day
+    versions = await svc.get_versions(exp.id)
+    from app.experiments.schemas import ExperimentSpec as _Spec
+
+    expected = switchback_variant(
+        exp.key, versions[0].spec_hash[:8], _Spec.model_validate(spec), window_start
+    )
+    assert exposure_rows[0].variant_key == expected
+    assert int(exposure_rows[0].denominator) == 6
+    assert int(exposure_rows[0].numerator) == 6

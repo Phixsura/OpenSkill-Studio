@@ -195,3 +195,49 @@ def test_population_exclusion_wins():
         ),
         ctx,
     )
+
+
+# ── Switchback day-variant (v2 batch 11, §4.5) ───────────────────────
+
+
+def test_switchback_variant_deterministic_per_day_and_rotates():
+    from datetime import UTC, datetime, timedelta
+
+    from app.experiments.schemas import ExperimentSpec
+    from app.experiments.services.assignment import switchback_variant
+
+    spec = ExperimentSpec.model_validate({
+        "hypothesis": "switchback determinism",
+        "unit_type": "user",
+        "design": "switchback",
+        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["exposure_rate"],
+                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                    "threshold": 100.0}]},
+    })
+    base_at = datetime(2026, 9, 1, 0, 30, tzinfo=UTC)
+    # same 1440-minute window (epoch-aligned) → same variant
+    a = switchback_variant("sb-exp", "saltgold", spec, base_at)
+    assert a == switchback_variant("sb-exp", "saltgold", spec,
+                                   base_at + timedelta(hours=11))
+    assert a in ("control", "treatment")
+    # across 30 days both variants appear (weights 50/50)
+    seen = {
+        switchback_variant("sb-exp", "saltgold", spec, base_at + timedelta(days=d))
+        for d in range(30)
+    }
+    assert seen == {"control", "treatment"}
+    # a different salt yields a different schedule somewhere in the month
+    other = [
+        switchback_variant("sb-exp", "othersalt", spec, base_at + timedelta(days=d))
+        for d in range(30)
+    ]
+    mine = [
+        switchback_variant("sb-exp", "saltgold", spec, base_at + timedelta(days=d))
+        for d in range(30)
+    ]
+    assert other != mine

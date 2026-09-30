@@ -331,3 +331,51 @@ async def test_concurrent_resolve_single_row(db):
             if owner_id:
                 await session.execute(delete(User).where(User.id == owner_id))
             await session.commit()
+
+
+# ── Switchback resolution (v2 batch 11, §4.5) ────────────────────────
+
+
+async def test_switchback_units_share_the_day_variant(db):
+    """All units get the DAY's variant (no per-unit split); the stored row is
+    the placeholder (exposure FK + ITT roster), never a served variant."""
+    exp, _ = await _mk_running(db, spec_overrides={"design": "switchback", "switchback": {"switch_unit": "platform_day", "window_minutes": 1440}})
+    svc = AssignmentService(db)
+    resolved = [
+        await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"sb-{i}")
+        for i in range(10)
+    ]
+    assert all(r is not None for r in resolved)
+    day_variants = {r.variant_key for r in resolved}
+    assert len(day_variants) == 1
+    assert day_variants < {"control", "treatment"}
+    rows = list(
+        (
+            await db.execute(
+                select(ExperimentAssignment).where(
+                    ExperimentAssignment.experiment_id == exp.id
+                )
+            )
+        ).scalars()
+    )
+    assert len(rows) == 10
+    assert {r.variant_key for r in rows} == {"__switchback__"}
+    # exposure records attach to the placeholder row
+    assert await svc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="sb-0"
+    )
+
+
+async def test_switchback_pause_stops_new_entries_only(db):
+    exp, admin = await _mk_running(db, spec_overrides={"design": "switchback", "switchback": {"switch_unit": "platform_day", "window_minutes": 1440}})
+    svc = AssignmentService(db)
+    before = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id="sb-x")
+    assert before is not None
+    await ExperimentService(db).transition(exp.id, to_status="paused", actor=admin)
+    # existing roster member keeps being served the day variant
+    still = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id="sb-x")
+    assert still is not None
+    # a NEW unit is refused
+    assert await svc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id="sb-new"
+    ) is None

@@ -101,6 +101,15 @@ async def _source_exposures(
         .group_by(ExperimentAssignment.variant_key)
     )
     counts = dict((await db.execute(q)).all())
+    # Switchback (§4.5): assignment rows carry the placeholder variant —
+    # exposures in the window belong to the variant that owned the window
+    # (the single key compute passes in)
+    from app.experiments.services.assignment import SWITCHBACK_PLACEHOLDER
+
+    placeholder_count = counts.pop(SWITCHBACK_PLACEHOLDER, None)
+    if placeholder_count is not None and len(variant_units) == 1:
+        only = next(iter(variant_units))
+        counts[only] = counts.get(only, 0) + placeholder_count
     return {
         variant: {
             "n": len(units),
@@ -1044,6 +1053,30 @@ class MetricService:
         variant_units = await self._variant_units(experiment_id, as_of=window_end)
         if not variant_units:
             return 0
+        # Switchback (§4.5): the whole roster belongs to the DAY's variant —
+        # per-window snapshots land under the variant that owned the window,
+        # so cross-window aggregation compares variant-days.
+        if latest is not None:
+            try:
+                parsed = ExperimentSpec.model_validate(latest.spec)
+            except Exception:  # noqa: BLE001 — poison spec handled downstream
+                parsed = None
+            if parsed is not None and parsed.design == "switchback":
+                from app.experiments.services.assignment import switchback_variant
+
+                versions_first = (
+                    await self.db.execute(
+                        select(ExperimentVersion.spec_hash)
+                        .where(ExperimentVersion.experiment_id == exp.id)
+                        .order_by(ExperimentVersion.version.asc())
+                        .limit(1)
+                    )
+                ).scalar_one()
+                day_variant = switchback_variant(
+                    exp.key, versions_first[:8], parsed, window_start
+                )
+                roster = sorted({u for units in variant_units.values() for u in units})
+                variant_units = {day_variant: roster}
         written = 0
         for key in metric_keys:
             definition = definitions.get(key)
