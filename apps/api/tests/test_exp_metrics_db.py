@@ -51,7 +51,7 @@ def _spec() -> dict:
         ],
         "metrics": {
             "primary": ["exposure_rate"],
-            "secondary": ["completion_rate"],  # learning_paths source unwired (exp09)
+            "secondary": ["completion_rate"],  # learning_paths derived source (batch 3)
             "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
         },
     }
@@ -69,7 +69,7 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db):
+async def _mk_running(db, *, extra_secondary: list[str] | None = None):
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
@@ -80,7 +80,10 @@ async def _mk_running(db):
         layer_key=layer.key,
         owner_user_id=admin.id,
     )
-    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    spec = _spec()
+    if extra_secondary:
+        spec["metrics"]["secondary"] = spec["metrics"].get("secondary", []) + extra_secondary
+    await svc.create_version(exp.id, spec=spec, actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -153,11 +156,13 @@ async def test_exposures_source_end_to_end_with_provenance(db):
     written = await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
     )
-    # exposure_rate + cost_usd guardrail (zero-sample for user units) per
-    # variant; the unwired learning_paths secondary is skipped
-    assert written == 4
+    # exposure_rate + completion_rate (wired in batch 3, zero completions)
+    # + cost_usd guardrail (zero-sample for user units), per variant
+    assert written == 6
     snapshots = await MetricService(db).list_snapshots(exp.id)
-    assert {s.metric_key for s in snapshots} == {"exposure_rate", "cost_usd"}
+    assert {s.metric_key for s in snapshots} == {
+        "exposure_rate", "completion_rate", "cost_usd"
+    }
     exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
     total_exposed = sum(int(s.numerator or 0) for s in exposure_rows)
     assert total_exposed == 15
@@ -262,16 +267,27 @@ async def test_holdout_units_excluded_from_itt_sets(db):
         exp.id, window_start=window_start, window_end=window_end
     )
     snapshots = await MetricService(db).list_snapshots(exp.id)
-    assert sum(int(s.denominator or 0) for s in snapshots) == 200 - held
+    exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
+    assert sum(int(s.denominator or 0) for s in exposure_rows) == 200 - held
 
 
-async def test_unwired_source_is_skipped_not_crashed(db):
-    """completion_rate's learning_paths source lands in exp09 (derived
-    progress) — computing today must skip it (logged) and still write the
-    wired metrics."""
-    assert "learning_paths" not in SOURCE_REGISTRY
-    await MetricService(db).ensure_seed_definitions()
-    exp, _ = await _mk_running(db)
+async def test_every_seed_source_is_wired_and_unwired_skips(db):
+    """v2 batch 3 closed the source gap: EVERY source a seed definition
+    declares is registered (the unwired set is pinned empty). The skip-not-
+    crash contract stays covered via a definition pointing at a source that
+    does not exist."""
+    from app.experiments.services.metrics import SEED_METRIC_DEFINITIONS
+
+    declared = {d["spec"].get("source") for d in SEED_METRIC_DEFINITIONS}
+    assert sorted(declared - set(SOURCE_REGISTRY)) == []
+
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+    await svc.create_definition(
+        key="ghost_metric", title="Ghost", kind="binary", domain="learning",
+        source_kind="service", spec={"source": "no_such_source"},
+    )
+    exp, _ = await _mk_running(db, extra_secondary=["ghost_metric"])
     asvc = AssignmentService(db)
     for i in range(20):  # enough units to land in both variants
         await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"skip-{i}")
@@ -279,7 +295,9 @@ async def test_unwired_source_is_skipped_not_crashed(db):
     written = await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
     )
-    assert written == 4  # exposure_rate + cost_usd guardrail × 2 variants
+    # exposure_rate + completion_rate (now wired, zero-completion) + cost_usd
+    # guardrail x 2 variants; ghost_metric skipped, not crashed
+    assert written == 6
 
 
 # ── Worker sweep ─────────────────────────────────────────────────────
@@ -918,3 +936,277 @@ async def test_cuped_covariates_end_to_end(db):
     comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
     assert "cuped" in comparison
     assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
+
+
+# ── Batch 3: newly wired sources (learning_paths / evaluations /
+#    talent_outcomes / billing / capabilities) ────────────────────────
+
+
+async def _mk_project(db, org):
+    from app.models.project import Project
+
+    project = Project(
+        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
+        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+    )
+    db.add(project)
+    await db.flush()
+    return project
+
+
+async def test_learning_paths_source_completion_and_duration(db):
+    """Completion = ALL required project items approved; completion time is
+    the LAST approval; paths with required non-project items are excluded."""
+    from app.models.learning_path import (
+        ContentStatus,
+        LearningPath,
+        LearningPathItem,
+        PathItemType,
+    )
+    from app.models.project import Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    finisher = await _mk_admin(db)
+    partial = await _mk_admin(db)
+    p1 = await _mk_project(db, org)
+    p2 = await _mk_project(db, org)
+    path = LearningPath(
+        org_id=org.id, name="Path", slug=f"lp-{str(ULID()).lower()}",
+        status=ContentStatus.PUBLISHED,
+    )
+    db.add(path)
+    await db.flush()
+    db.add(LearningPathItem(
+        path_id=path.id, item_type=PathItemType.PROJECT, project_id=p1.id,
+        sort_order=0, required=True))
+    db.add(LearningPathItem(
+        path_id=path.id, item_type=PathItemType.PROJECT, project_id=p2.id,
+        sort_order=1, required=True))
+    # A path with a required non-project item is not derivable — completing
+    # its project must NOT count
+    p3 = await _mk_project(db, org)
+    path2 = LearningPath(
+        org_id=org.id, name="Mixed", slug=f"lp-{str(ULID()).lower()}",
+        status=ContentStatus.PUBLISHED,
+    )
+    db.add(path2)
+    await db.flush()
+    db.add(LearningPathItem(
+        path_id=path2.id, item_type=PathItemType.PROJECT, project_id=p3.id,
+        sort_order=0, required=True))
+    db.add(LearningPathItem(
+        path_id=path2.id, item_type=PathItemType.SECTION, section_title="Theory",
+        sort_order=1, required=True))
+
+    window_start, window_end = _today_window()
+    early = window_start - timedelta(days=2)
+    # finisher: both required projects approved — first days ago, second now
+    db.add(Submission(org_id=org.id, project_id=p1.id, user_id=finisher.id,
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=early, updated_at=early))
+    db.add(Submission(org_id=org.id, project_id=p2.id, user_id=finisher.id,
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=early))  # updated_at defaults to now → in-window
+    # partial: only one of two approved → NOT complete
+    db.add(Submission(org_id=org.id, project_id=p1.id, user_id=partial.id,
+                      status=SubmissionStatus.APPROVED, version=1))
+    # partial completes the MIXED path's project — must not count
+    db.add(Submission(org_id=org.id, project_id=p3.id, user_id=partial.id,
+                      status=SubmissionStatus.APPROVED, version=1))
+    await db.flush()
+
+    completion = await _run_source(
+        db, "learning_paths", definition_key="completion_rate",
+        units=[finisher.id, partial.id], unit_type="user",
+    )
+    assert completion["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+    duration = await _run_source(
+        db, "learning_paths", definition_key="time_to_completion_hours",
+        units=[finisher.id, partial.id], unit_type="user",
+    )
+    assert duration["treatment"]["n"] == 1
+    assert duration["treatment"]["sum_value"] >= 40  # ≥ ~2 days in hours
+    # wrong unit type → zero-sample
+    empty = await _run_source(
+        db, "learning_paths", definition_key="completion_rate",
+        units=[org.id], unit_type="organization",
+    )
+    assert empty["treatment"] == {"n": 0}
+
+
+async def test_evaluations_source_review_pass_rate(db):
+    from app.models.project import (
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    project = await _mk_project(db, org)
+    sub = Submission(org_id=org.id, project_id=project.id, user_id=user.id,
+                     status=SubmissionStatus.APPROVED, version=1)
+    db.add(sub)
+    await db.flush()
+    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=90))
+    db.add(SubmissionReview(submission_id=sub.id,
+                            reviewer_type=ReviewerType.INSTRUCTOR,
+                            status=ReviewStatus.REVISION_REQUESTED, score=40))
+    # out-of-window review must not count
+    old = datetime.now(UTC) - timedelta(days=3)
+    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=95, created_at=old))
+    await db.flush()
+    stats = await _run_source(
+        db, "evaluations", definition_key="practical_pass_rate",
+        units=[user.id], unit_type="user",
+    )
+    assert stats["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+
+
+async def test_talent_outcomes_source_placements(db):
+    from app.talent.models.application import Application, Placement
+    from app.talent.models.employer import Opportunity
+
+    _tenant, org = await _mk_org(db)
+    placed = await _mk_admin(db)
+    cancelled = await _mk_admin(db)
+    silent = await _mk_admin(db)
+    opp = Opportunity(employer_org_id=org.id, title="Role",
+                      opportunity_type="contract", status="open")
+    db.add(opp)
+    await db.flush()
+
+    async def _placement(user, status):
+        application = Application(opportunity_id=opp.id, user_id=user.id,
+                                  status="hired")
+        db.add(application)
+        await db.flush()
+        db.add(Placement(application_id=application.id, opportunity_id=opp.id,
+                         user_id=user.id, employer_org_id=org.id, status=status))
+
+    await _placement(placed, "active")
+    await _placement(cancelled, "cancelled")
+    await db.flush()
+    stats = await _run_source(
+        db, "talent_outcomes", definition_key="placement_outcome_rate",
+        units=[placed.id, cancelled.id, silent.id], unit_type="user",
+    )
+    assert stats["treatment"] == {"n": 3, "numerator": 1, "denominator": 3}
+
+
+async def test_billing_source_tenant_measures(db):
+    from app.controlplane.models.billing import Invoice, Subscription
+    from app.controlplane.models.plan import PlanVersion, ProductPlan
+
+    user = await _mk_admin(db)
+    tenant_new, _org1 = await _mk_org(db)
+    tenant_old, org2 = await _mk_org(db)
+    tenant_churn, _org3 = await _mk_org(db)
+    now = datetime.now(UTC)
+    window_start, window_end = _today_window()
+    plan = ProductPlan(key=f"exp-{str(ULID()).lower()[:8]}", name="Exp")
+    db.add(plan)
+    await db.flush()
+    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
+                     entitlements={}, activated_at=now)
+    db.add(pv)
+    await db.flush()
+
+    def _invoice(tenant_id, total, paid_at):
+        return Invoice(tenant_id=tenant_id, currency="USD", status="paid",
+                       total_minor=total, paid_at=paid_at)
+
+    # tenant_new: FIRST paid invoice lands in-window → converts
+    db.add(_invoice(tenant_new.id, 5000, now))
+    # tenant_old: paid before the window AND in it → no conversion, has ARPU
+    db.add(_invoice(tenant_old.id, 10000, window_start - timedelta(days=30)))
+    db.add(_invoice(tenant_old.id, 20000, now))
+
+    def _sub(tenant_id, cancelled_at=None):
+        return Subscription(
+            tenant_id=tenant_id, plan_version_id=pv.id, status="active",
+            currency="USD", interval="month", seat_quantity=0,
+            current_period_start=window_start - timedelta(days=15),
+            current_period_end=window_start + timedelta(days=15),
+            provider="manual", created_by=user.id,
+            created_at=window_start - timedelta(days=15),
+            cancelled_at=cancelled_at,
+        )
+
+    db.add(_sub(tenant_old.id))
+    db.add(_sub(tenant_churn.id, cancelled_at=window_start + timedelta(hours=2)))
+    await db.flush()
+    units = [tenant_new.id, tenant_old.id, tenant_churn.id]
+
+    conversion = await _run_source(
+        db, "billing", definition_key="conversion_rate", units=units, unit_type="tenant",
+    )
+    assert conversion["treatment"] == {"n": 3, "numerator": 1, "denominator": 3}
+
+    arpu = await _run_source(
+        db, "billing", definition_key="arpu_usd", units=units, unit_type="tenant",
+    )
+    # 50.00 + 200.00 + 0.00 (ITT zero for silent tenant)
+    assert arpu["treatment"]["n"] == 3
+    assert arpu["treatment"]["sum_value"] == 250.0
+
+    retention = await _run_source(
+        db, "billing", definition_key="retention_rate", units=units, unit_type="tenant",
+    )
+    # at risk: tenant_old (retained) + tenant_churn (cancelled mid-window);
+    # tenant_new had no subscription at window start
+    assert retention["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+
+    margin = await _run_source(
+        db, "billing", definition_key="gross_margin_pct", units=units, unit_type="tenant",
+    )
+    # both revenue tenants, no eval cost → 100% margin each
+    assert margin["treatment"]["n"] == 2
+    assert margin["treatment"]["sum_value"] == 200.0
+    del org2  # revenue tenants only — org fixture unused beyond creation
+
+    # org units refused (would double-count tenant revenue)
+    empty = await _run_source(
+        db, "billing", definition_key="arpu_usd", units=[_org1.id],
+        unit_type="organization",
+    )
+    assert empty["treatment"] == {"n": 0}
+
+
+async def test_capabilities_source_gain_needs_baseline(db):
+    from app.talent.models.capability import Capability
+    from app.talent.models.scoring import CapabilityScoreSnapshot
+
+    _tenant, _org = await _mk_org(db)
+    grower = await _mk_admin(db)
+    newcomer = await _mk_admin(db)
+    cap = Capability(canonical_name=f"Cap {ULID()}", slug=f"cap-{str(ULID()).lower()}",
+                     category="technical")
+    db.add(cap)
+    await db.flush()
+    window_start, _window_end = _today_window()
+
+    def _snap(user, score, computed_at):
+        return CapabilityScoreSnapshot(
+            user_id=user.id, capability_id=cap.id, score=score, depth=score,
+            breadth=score, recency=score, velocity=score, confidence=score,
+            level=1, evidence_count=1, scoring_version="v1",
+            computed_at=computed_at,
+        )
+
+    # grower: baseline 0.40 → in-window 0.65 = gain 0.25
+    db.add(_snap(grower, 0.40, window_start - timedelta(days=10)))
+    db.add(_snap(grower, 0.65, window_start + timedelta(hours=1)))
+    # newcomer: first-ever score in-window — enrollment, not gain
+    db.add(_snap(newcomer, 0.90, window_start + timedelta(hours=1)))
+    await db.flush()
+    stats = await _run_source(
+        db, "capabilities", definition_key="capability_gain",
+        units=[grower.id, newcomer.id], unit_type="user",
+    )
+    assert stats["treatment"]["n"] == 1
+    assert abs(stats["treatment"]["sum_value"] - 0.25) < 1e-9

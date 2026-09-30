@@ -450,6 +450,406 @@ async def _source_eco_telemetry(
 
 # ── Seed definitions (Part C) ────────────────────────────────────────
 
+
+@register_source("learning_paths")
+async def _source_learning_paths(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+    variance_reduction=None,
+) -> SourceResult:
+    """Derived path completion over user units (no progress table — §18).
+
+    A path counts as DERIVABLE when every required item is a PROJECT: its
+    completion event for a user is the moment the last required project gets
+    an approved submission (approval time ≈ the earliest approved
+    submission's updated_at — the approval write bumps it). Paths with
+    required skill/workflow items are excluded from BOTH sides (that scope
+    is stamped in provenance via query_version; widening it is a
+    query_version bump, not a silent change).
+
+    completion_rate            binary: units with ≥1 completion in-window / units
+    time_to_completion_hours   continuous: first-submission → completion, per event
+    """
+    from app.models.learning_path import LearningPath, LearningPathItem, PathItemType
+    from app.models.project import Submission, SubmissionStatus
+
+    if unit_type != "user":
+        return {variant: {"n": 0} for variant in variant_units}
+
+    # Derivable paths: required items exist and are all projects
+    items_q = select(
+        LearningPathItem.path_id, LearningPathItem.item_type, LearningPathItem.project_id
+    ).where(LearningPathItem.required.is_(True))
+    if experiment is not None and experiment.scope_org_id:
+        items_q = items_q.join(
+            LearningPath, LearningPath.id == LearningPathItem.path_id
+        ).where(LearningPath.org_id == experiment.scope_org_id)
+    path_projects: dict[str, set[str]] = {}
+    underivable: set[str] = set()
+    for path_id, item_type, project_id in (await db.execute(items_q)).all():
+        if item_type == PathItemType.PROJECT and project_id:
+            path_projects.setdefault(path_id, set()).add(project_id)
+        else:
+            underivable.add(path_id)
+    paths = {pid: projs for pid, projs in path_projects.items() if pid not in underivable}
+    all_projects = set().union(*paths.values()) if paths else set()
+
+    measure = definition.key
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units or not paths:
+            result[variant] = (
+                {"n": len(units), "numerator": 0, "denominator": len(units)}
+                if measure == "completion_rate"
+                else {"n": 0}
+            )
+            continue
+        approved_rows = (
+            await db.execute(
+                select(
+                    Submission.user_id,
+                    Submission.project_id,
+                    func.min(Submission.updated_at),
+                )
+                .where(
+                    Submission.user_id.in_(units),
+                    Submission.project_id.in_(all_projects),
+                    Submission.status == SubmissionStatus.APPROVED,
+                )
+                .group_by(Submission.user_id, Submission.project_id)
+            )
+        ).all()
+        first_rows = (
+            await db.execute(
+                select(
+                    Submission.user_id,
+                    Submission.project_id,
+                    func.min(Submission.created_at),
+                )
+                .where(
+                    Submission.user_id.in_(units),
+                    Submission.project_id.in_(all_projects),
+                )
+                .group_by(Submission.user_id, Submission.project_id)
+            )
+        ).all()
+        approved_at = {(u, pr): ts for u, pr, ts in approved_rows}
+        first_at = {(u, pr): ts for u, pr, ts in first_rows}
+        completed_units: set[str] = set()
+        durations: list[float] = []
+        for user_id in units:
+            for _path_id, projects in paths.items():
+                times = [approved_at.get((user_id, pr)) for pr in projects]
+                if any(t is None for t in times):
+                    continue
+                completion = max(times)
+                if not window_start <= completion < window_end:
+                    continue
+                completed_units.add(user_id)
+                starts = [
+                    first_at[(user_id, pr)] for pr in projects if (user_id, pr) in first_at
+                ]
+                if starts:
+                    durations.append((completion - min(starts)).total_seconds() / 3600.0)
+        if measure == "completion_rate":
+            result[variant] = {
+                "n": len(units),
+                "numerator": len(completed_units),
+                "denominator": len(units),
+            }
+        else:  # time_to_completion_hours
+            durations, winsorized = winsorize(durations, definition.winsorize_pct)
+            result[variant] = {
+                "n": len(durations),
+                "sum_value": sum(durations),
+                "sum_sq": sum(d * d for d in durations),
+                "_winsorized": winsorized,
+            }
+    return result
+
+
+@register_source("evaluations")
+async def _source_evaluations(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+    variance_reduction=None,
+) -> SourceResult:
+    """Practical assessment pass over user units: SubmissionReview verdicts
+    written in-window (AI and instructor alike — the pipeline's own APPROVED
+    is the pass semantic, ADR-006/008), per-review binary."""
+    from app.models.project import ReviewStatus, Submission, SubmissionReview
+
+    if unit_type != "user":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        rows = (
+            await db.execute(
+                select(SubmissionReview.status)
+                .join(Submission, Submission.id == SubmissionReview.submission_id)
+                .where(
+                    Submission.user_id.in_(units),
+                    SubmissionReview.created_at >= window_start,
+                    SubmissionReview.created_at < window_end,
+                )
+            )
+        ).all()
+        passed = sum(1 for (status,) in rows if status == ReviewStatus.APPROVED)
+        result[variant] = {"n": len(rows), "numerator": passed, "denominator": len(rows)}
+    return result
+
+
+@register_source("talent_outcomes")
+async def _source_talent_outcomes(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+    variance_reduction=None,
+) -> SourceResult:
+    """Placement outcomes over user units (ADR-015 Placement records,
+    written when an application reaches hired). Binary-at-horizon per unit:
+    a unit converts when a non-cancelled placement lands in-window.
+    OBSERVATIONAL ONLY — employment decisions are never randomized
+    (ADR-017 §3); this metric exists for observational analyses and
+    guardrails, and its experiments are refused promotion at decision time."""
+    from app.talent.models.application import Placement
+
+    if unit_type != "user":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        placed = (
+            await db.execute(
+                select(func.count(func.distinct(Placement.user_id))).where(
+                    Placement.user_id.in_(units),
+                    Placement.status != "cancelled",
+                    Placement.created_at >= window_start,
+                    Placement.created_at < window_end,
+                )
+            )
+        ).scalar_one()
+        result[variant] = {"n": len(units), "numerator": placed, "denominator": len(units)}
+    return result
+
+
+@register_source("billing")
+async def _source_billing(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+    variance_reduction=None,
+) -> SourceResult:
+    """Commercial metrics over TENANT units only (billing is tenant-keyed;
+    org units would double-count a tenant's revenue across its orgs — the
+    unit-type guard refuses rather than mis-join, same rule as cost_ledger).
+
+    conversion_rate    binary: tenant's FIRST paid invoice ever lands in-window
+    arpu_usd           continuous: paid revenue per tenant in-window (ITT, zero
+                       for silent tenants)
+    retention_rate     binary-at-horizon: subscribed at window_start and not
+                       cancelled before window_end / subscribed at window_start
+    gross_margin_pct   continuous: (revenue - eval cost) / revenue per tenant
+                       with in-window revenue
+    """
+    from app.controlplane.models.billing import Invoice, Subscription
+    from app.models.evaluation import EvaluationTask
+    from app.models.organization import Organization
+
+    if unit_type != "tenant":
+        return {variant: {"n": 0} for variant in variant_units}
+    measure = definition.key
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        if measure == "conversion_rate":
+            first_paid = (
+                await db.execute(
+                    select(Invoice.tenant_id, func.min(Invoice.paid_at))
+                    .where(
+                        Invoice.tenant_id.in_(units),
+                        Invoice.status == "paid",
+                        Invoice.paid_at.is_not(None),
+                    )
+                    .group_by(Invoice.tenant_id)
+                )
+            ).all()
+            converted = sum(
+                1 for _tenant, ts in first_paid if window_start <= ts < window_end
+            )
+            result[variant] = {
+                "n": len(units), "numerator": converted, "denominator": len(units),
+            }
+        elif measure == "retention_rate":
+            subs = (
+                await db.execute(
+                    select(Subscription.tenant_id, Subscription.cancelled_at).where(
+                        Subscription.tenant_id.in_(units),
+                        Subscription.created_at <= window_start,
+                    )
+                )
+            ).all()
+            at_risk: dict[str, bool] = {}
+            for tenant_id, cancelled_at in subs:
+                if cancelled_at is not None and cancelled_at <= window_start:
+                    continue  # already churned before the window
+                retained = cancelled_at is None or cancelled_at >= window_end
+                # any still-retained subscription keeps the tenant retained
+                at_risk[tenant_id] = at_risk.get(tenant_id, False) or retained
+            result[variant] = {
+                "n": len(at_risk),
+                "numerator": sum(1 for kept in at_risk.values() if kept),
+                "denominator": len(at_risk),
+            }
+        elif measure in ("arpu_usd", "gross_margin_pct"):
+            paid_rows = (
+                await db.execute(
+                    select(Invoice.tenant_id, func.sum(Invoice.total_minor))
+                    .where(
+                        Invoice.tenant_id.in_(units),
+                        Invoice.status == "paid",
+                        Invoice.paid_at >= window_start,
+                        Invoice.paid_at < window_end,
+                    )
+                    .group_by(Invoice.tenant_id)
+                )
+            ).all()
+            revenue = {t: float(total or 0) / 100.0 for t, total in paid_rows}
+            if measure == "arpu_usd":
+                values = [revenue.get(t, 0.0) for t in units]
+            else:  # gross_margin_pct — only tenants with in-window revenue
+                cost_rows = (
+                    await db.execute(
+                        select(Organization.tenant_id, func.sum(EvaluationTask.cost_usd))
+                        .join(Organization, Organization.id == EvaluationTask.org_id)
+                        .where(
+                            Organization.tenant_id.in_(list(revenue)),
+                            EvaluationTask.cost_usd.is_not(None),
+                            EvaluationTask.created_at >= window_start,
+                            EvaluationTask.created_at < window_end,
+                        )
+                        .group_by(Organization.tenant_id)
+                    )
+                ).all() if revenue else []
+                cost = {t: float(c or 0) for t, c in cost_rows}
+                values = [
+                    (rev - cost.get(t, 0.0)) / rev * 100.0
+                    for t, rev in revenue.items()
+                    if rev > 0
+                ]
+            values, winsorized = winsorize(values, definition.winsorize_pct)
+            result[variant] = {
+                "n": len(values),
+                "sum_value": sum(values),
+                "sum_sq": sum(v * v for v in values),
+                "_winsorized": winsorized,
+            }
+        else:
+            result[variant] = {"n": 0}
+    return result
+
+
+
+@register_source("capabilities")
+async def _source_capabilities(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+    variance_reduction=None,
+) -> SourceResult:
+    """Capability gain over user units (ADR-015 score snapshots).
+
+    Per unit: mean over capabilities of (latest in-window composite score −
+    latest pre-window baseline), counting only capabilities that have BOTH a
+    baseline and an in-window snapshot — a first-ever score is enrollment,
+    not gain. Units with no measurable pair contribute nothing (n counts
+    units with a gain value)."""
+    from app.talent.models.scoring import CapabilityScoreSnapshot as Snap
+
+    if unit_type != "user":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        pre_rows = (
+            await db.execute(
+                select(Snap.user_id, Snap.capability_id, Snap.score, Snap.computed_at)
+                .where(Snap.user_id.in_(units), Snap.computed_at < window_start)
+                .order_by(Snap.computed_at.desc())
+            )
+        ).all()
+        cur_rows = (
+            await db.execute(
+                select(Snap.user_id, Snap.capability_id, Snap.score, Snap.computed_at)
+                .where(
+                    Snap.user_id.in_(units),
+                    Snap.computed_at >= window_start,
+                    Snap.computed_at < window_end,
+                )
+                .order_by(Snap.computed_at.desc())
+            )
+        ).all()
+        baseline: dict[tuple[str, str], float] = {}
+        for user_id, cap_id, score, _ts in pre_rows:  # desc — first seen wins
+            baseline.setdefault((user_id, cap_id), float(score))
+        latest: dict[tuple[str, str], float] = {}
+        for user_id, cap_id, score, _ts in cur_rows:
+            latest.setdefault((user_id, cap_id), float(score))
+        values: list[float] = []
+        for user_id in units:
+            gains = [
+                cur - baseline[key]
+                for key, cur in latest.items()
+                if key[0] == user_id and key in baseline
+            ]
+            if gains:
+                values.append(sum(gains) / len(gains))
+        values, winsorized = winsorize(values, definition.winsorize_pct)
+        result[variant] = {
+            "n": len(values),
+            "sum_value": sum(values),
+            "sum_sq": sum(v * v for v in values),
+            "_winsorized": winsorized,
+        }
+    return result
+
+
 SEED_METRIC_DEFINITIONS: list[dict] = [
     # Internal (always computable)
     {"key": "exposure_rate", "title": "Exposure rate", "kind": "rate", "domain": "operational",
