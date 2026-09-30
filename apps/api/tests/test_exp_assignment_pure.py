@@ -314,3 +314,12 @@ def test_switchback_window_grid_and_default():
 # Verified-equivalent survivors (ledger):
 # - aa_probe `p_value >= 0.001` → Gt: p landing exactly on 0.001 has measure
 #   zero for real digests.
+
+
+def test_version_salt_prefix_pinned():
+    """The shared salt truncation is exactly 8 hex chars — resolution and
+    window attribution both call this one helper."""
+    from app.experiments.services.assignment import SALT_PREFIX_LEN, version_salt_of
+
+    assert SALT_PREFIX_LEN == 8
+    assert version_salt_of("abcdef0123456789" * 4) == "abcdef01"

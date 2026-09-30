@@ -1146,7 +1146,10 @@ class MetricService:
             except Exception:  # noqa: BLE001 — poison spec handled downstream
                 parsed = None
             if parsed is not None and parsed.design == "switchback":
-                from app.experiments.services.assignment import switchback_variant
+                from app.experiments.services.assignment import (
+                    switchback_variant,
+                    version_salt_of,
+                )
 
                 versions_first = (
                     await self.db.execute(
@@ -1157,7 +1160,7 @@ class MetricService:
                     )
                 ).scalar_one()
                 day_variant = switchback_variant(
-                    exp.key, versions_first[:8], parsed, window_start
+                    exp.key, version_salt_of(versions_first), parsed, window_start
                 )
                 roster = sorted({u for units in variant_units.values() for u in units})
                 variant_units = {day_variant: roster}

@@ -68,6 +68,16 @@ def forget_missing_key(experiment_key: str) -> None:
     _MISSING_KEY_CACHE.pop(experiment_key, None)
 
 
+SALT_PREFIX_LEN = 8
+
+
+def version_salt_of(spec_hash: str) -> str:
+    """Version-1 randomization salt = the spec hash's first 8 hex chars —
+    ONE definition shared by resolution and window attribution; a silent
+    divergence would randomize the two sides differently."""
+    return spec_hash[:SALT_PREFIX_LEN]
+
+
 def _roll(salt: str, *parts: str) -> int:
     digest = hashlib.sha256(":".join((salt, *parts)).encode("utf-8")).hexdigest()
     return int(digest[:8], 16) % BUCKET_SPACE
@@ -243,7 +253,7 @@ class AssignmentService:
             raise AppError("EXPERIMENT_SPEC_INVALID", "Experiment has no spec version", 422)
         latest = versions[-1]
         # version 1's hash is the stable randomization salt (§6)
-        version_salt = versions[0].spec_hash[:8]
+        version_salt = version_salt_of(versions[0].spec_hash)
         try:
             return ExperimentSpec.model_validate(latest.spec), version_salt
         except Exception as exc:  # noqa: BLE001 — poison spec: typed, not a 500

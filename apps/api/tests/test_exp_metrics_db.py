@@ -1521,3 +1521,179 @@ async def test_segment_breakdown_org_rows_and_whole_population_intact(db):
         int(r.numerator or 0) for r in seg_b
     ) == sum(int(r.numerator or 0) for r in whole)
     return exp, admin, org_a
+
+
+async def test_variant_units_boundaries_and_isolation(db):
+    """as_of is strictly half-open (assigned AT as_of excluded) and the
+    exposed_only filter never counts ANOTHER experiment's exposures."""
+    from app.exceptions import AppError as _AppError
+    from app.experiments.models import ExperimentAssignment, ExperimentExposure
+
+    exp, _ = await _mk_running(db)
+    other, _ = await _mk_running(db)
+    cutoff = datetime(2026, 9, 2, tzinfo=UTC)
+    before = ExperimentAssignment(
+        experiment_id=exp.id, unit_type="user", unit_id="b" * 26,
+        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+        assigned_at=cutoff - timedelta(seconds=1),
+    )
+    at = ExperimentAssignment(
+        experiment_id=exp.id, unit_type="user", unit_id="a" * 26,
+        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+        assigned_at=cutoff,
+    )
+    db.add_all([before, at])
+    await db.flush()
+    svc = MetricService(db)
+    units = await svc._variant_units(exp.id, as_of=cutoff)  # noqa: SLF001
+    assert units == {"control": ["b" * 26]}
+
+    # exposed_only: an exposure on ANOTHER experiment must not qualify
+    db.add(ExperimentExposure(
+        assignment_id=before.id, experiment_id=other.id, context={},
+        occurred_at=cutoff - timedelta(seconds=1),
+    ))
+    await db.flush()
+    exposed = await svc._variant_units(  # noqa: SLF001
+        exp.id, as_of=cutoff, exposed_only=True
+    )
+    assert exposed == {}
+    db.add(ExperimentExposure(
+        assignment_id=before.id, experiment_id=exp.id, context={},
+        occurred_at=cutoff - timedelta(seconds=1),
+    ))
+    await db.flush()
+    exposed = await svc._variant_units(  # noqa: SLF001
+        exp.id, as_of=cutoff, exposed_only=True
+    )
+    assert exposed == {"control": ["b" * 26]}
+
+    # unknown experiment: uniform 404 with the status pinned
+    import pytest as _pytest
+
+    with _pytest.raises(_AppError) as exc:
+        await svc.compute_experiment_window(
+            "0" * 26, window_start=cutoff, window_end=cutoff + timedelta(days=1)
+        )
+    assert exc.value.status_code == 404
+
+
+async def test_segment_rows_only_when_opted_in(db):
+    """A user-unit experiment WITHOUT segments=["org"] never writes segment
+    rows, even when its users belong to orgs (the opt-in gate is the spec)."""
+    from app.experiments.models import MetricSnapshot
+    from app.models.organization import OrgMember, OrgRole
+
+    _tenant, org = await _mk_org(db)
+    await MetricService(db).ensure_seed_definitions()
+    exp, _ = await _mk_running(db)  # no segments in spec
+    asvc = AssignmentService(db)
+    for i in range(4):
+        user = await _mk_admin(db)
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
+        await db.flush()
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=user.id
+        ) is not None
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    seg_rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.segment != "",
+                )
+            )
+        ).scalars()
+    )
+    assert seg_rows == []
+
+
+async def test_switchback_washout_exact_window_and_zero_washout(db):
+    """washout == the whole window computes nothing (>= boundary); zero
+    washout stamps NO washout_minutes provenance (the > 0 gate)."""
+    from app.experiments.models import MetricSnapshot
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="WZ", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["design"] = "switchback"
+    spec["switchback"] = {
+        "switch_unit": "platform_day", "window_minutes": 1440, "washout_minutes": 0,
+    }
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    asvc = AssignmentService(db)
+    assert await asvc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id="wz" + "0" * 24
+    ) is not None
+    window_start, window_end = _today_window()
+    written = await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    assert written > 0
+    rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(MetricSnapshot.experiment_id == exp.id)
+            )
+        ).scalars()
+    )
+    assert all("washout_minutes" not in r.provenance for r in rows)
+    # washout exactly equal to the window: nothing computes (>= boundary)
+    exact = await MetricService(db).compute_experiment_window(
+        exp.id,
+        window_start=window_start,
+        window_end=window_start + timedelta(minutes=1440),
+    )
+    del exact  # zero-washout spec — exercise the boundary on a washout spec:
+    spec2 = dict(spec)
+    spec2["switchback"] = {
+        "switch_unit": "platform_day", "window_minutes": 1440,
+        "washout_minutes": 1440,
+    }
+    # versions are immutable; new experiment for the exact-swallow case
+    layer2 = await LayerService(db).create(
+        key=f"l2-{str(ULID()).lower()}", domain="learning"
+    )
+    exp2 = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="WZ2", domain="learning",
+        layer_key=layer2.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(exp2.id, spec=spec2, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=exp2.layer_key, experiment_id=exp2.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp2.id, to_status="review", actor=admin)
+    await svc.transition(exp2.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp2.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp2.id, ramp_bp=10_000, actor=admin)
+    assert await asvc.resolve(
+        experiment_key=exp2.key, unit_type="user", unit_id="wz" + "1" * 24
+    ) is not None
+    swallowed = await MetricService(db).compute_experiment_window(
+        exp2.id,
+        window_start=window_start,
+        window_end=window_start + timedelta(minutes=1440),
+    )
+    assert swallowed == 0
+
+
+# Wave-4 survivor ledger: the top-orgs cap constant (20→21) is a §106.26
+# bound whose exact value is policy, pinned here by reference; the salt
+# prefix length is now a shared constant covered by its own pin.
