@@ -80,12 +80,14 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
     from sqlalchemy import delete as _delete
 
     from app.core.database import AsyncSessionLocal, engine
-    from app.experiments.models import Experiment, ExperimentLayer
+    from app.experiments.models import Experiment, ExperimentLayer, HoldoutGroup
     from app.models.matching import MatchingConfig
 
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
         await db.execute(_delete(Experiment).where(Experiment.id.in_(experiment_ids)))
+        await db.execute(_delete(HoldoutGroup).where(HoldoutGroup.title.in_(
+            ["E2E holdout", "dup", "too big", "nope"])))
         await db.execute(_delete(ExperimentLayer).where(ExperimentLayer.key == layer_key))
         await db.execute(
             _delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
@@ -298,6 +300,50 @@ async def main() -> int:
               and any(d["id"] == decision_id for d in r.json()["data"]), r.text[:200])
         r = await c.get("/experiments/decisions/meta", headers=admin)
         check("corpus meta", r.status_code == 200 and r.json()["data"]["total"] >= 1,
+              r.text[:200])
+
+        # ── Round 10: holdout groups over HTTP ────────────────────────
+        hg_key = f"hg-{uid()}"
+        r = await c.post("/experiments/holdout-groups", headers=admin, json={
+            "key": hg_key, "title": "E2E holdout", "domain": "matching",
+            "holdout_bp": 500,
+        })
+        check("holdout group created", r.status_code == 201, r.text[:200])
+        group_id = r.json()["data"]["id"] if r.status_code == 201 else ""
+        r = await c.post("/experiments/holdout-groups", headers=admin, json={
+            "key": hg_key, "title": "dup", "domain": "matching", "holdout_bp": 100,
+        })
+        check("holdout dup key 409", r.status_code == 409, r.text[:200])
+        r = await c.post("/experiments/holdout-groups", headers=admin, json={
+            "key": f"hg-{uid()}", "title": "too big", "domain": "matching",
+            "holdout_bp": 2001,
+        })
+        check("holdout bp cap 422", r.status_code == 422, r.text[:200])
+        r = await c.get("/experiments/holdout-groups", headers=admin)
+        check("holdout list shows group",
+              r.status_code == 200
+              and any(g["key"] == hg_key for g in r.json()["data"]), r.text[:200])
+        r = await c.post(f"/experiments/holdout-groups/{group_id}/release",
+                         headers=admin, json={})
+        check("holdout released", r.status_code == 200
+              and r.json()["data"]["status"] == "released", r.text[:200])
+        r = await c.post("/experiments/holdout-groups", headers=student, json={
+            "key": f"hg-{uid()}", "title": "nope", "domain": "matching",
+            "holdout_bp": 100,
+        })
+        check("holdout create is admin-walled", r.status_code == 403, r.text[:200])
+
+        # ── Round 10: aa-probe diagnostic ─────────────────────────────
+        r = await c.get(f"/experiments/layers/{layer_key}/aa-probe?n=2000",
+                        headers=admin)
+        check("aa-probe healthy over HTTP",
+              r.status_code == 200 and r.json()["data"]["healthy"] is True,
+              r.text[:200])
+
+        # ── Round 10: org-admin delegation wall ───────────────────────
+        # student administers no org → reads refuse with 403 (not empty 200)
+        r = await c.get("/experiments", headers=student)
+        check("roleless reader still 403 after delegation", r.status_code == 403,
               r.text[:200])
 
     await cleanup(experiment_ids, layer_key, entity_type)
