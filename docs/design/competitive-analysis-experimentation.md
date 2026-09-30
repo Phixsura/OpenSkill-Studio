@@ -6,36 +6,50 @@ Amplitude), **Eppo / Datadog Experiments** (acquired 2025), **GrowthBook** (OSS)
 platforms (Microsoft ExP, Netflix XP, Uber/DoorDash switchbacks, Airbnb ERF,
 Spotify Confidence). Feeds ADR-017 v2.
 
+## 0. Status update (2026-10-01, v2 round 10)
+
+Every "close" row below has SHIPPED (ADR-017 §18 rounds 8-10): CUPED (with
+computed covariates for projects/revision_count and cost_ledger), dual
+engine, mSPRT, winsorization (applied), health checks (SRM, exposure-SRM,
+pre-balance, novelty decay, A/A probe, cross-experiment interaction),
+global holdout groups, Thompson bandit suggestions (advisory), switchback
+design (epoch windows + washout), post-stratification (time-stratified
+inverse-variance pooling), meta-analysis corpus priors + shrinkage, launch
+checklist, async apply, org-admin read delegation. Still open by choice:
+triggered-analysis denominators (ITT kept, honesty-warned), DiD/ITS,
+hourly guardrail lane, TS client hook, segment breakdowns (needs a snapshot
+dimension), full KM, multi-covariate CUPED, synthetic control.
+
 ## 1. Feature matrix (industry standard vs ADR-017 v1)
 
-| Capability | Statsig | Eppo | GrowthBook | ADR-017 v1 | v2 decision |
-|---|---|---|---|---|---|
-| Deterministic sticky bucketing | ✓ | ✓ | ✓ | ✓ | keep |
-| Mutually exclusive layers | ✓ | ✓ | ✓ (namespaces) | ✓ | keep |
-| SRM detection | ✓ | ✓ | ✓ | ✓ | keep |
-| Guardrails w/ auto-stop | ✓ | ✓ | ✓ | ✓ (pause-only) | keep (stricter than industry: never auto-promote) |
-| **CUPED variance reduction** | ✓ | ✓ CUPED++ | ✓ | ✗ | **close (P0)** — single pre-period covariate |
-| **Bayesian engine** (P(beat control), expected loss) | ✓ | ✓ | ✓ (dual engine) | ✗ | **close (P0)** — conjugate posteriors, dual engine |
-| **Always-valid sequential (mSPRT)** | ✓ | ✓ hybrid | ✓ | OF alpha-spending only | **close (P0)** — add mSPRT option |
-| **Winsorization / capping / percentile metrics** | ✓ | ✓ | ✓ | ✗ | **close (P0)** — per-metric-definition config |
-| **Triggered (exposed-only) analysis + dilution correction** | ✓ | ✓ | ✓ | exposure split existed, no analysis mode | **close (P0)** |
-| **Health checks: A/A, exposure/assignment mismatch, pre-balance, novelty (days-since-exposure)** | ✓ | ✓ | partial | SRM only | **close (P0)** |
-| **Global/team holdouts (cumulative impact)** | ✓ (~6mo holdouts) | ✓ | ✓ | per-experiment holdout_bp only | **close (P1)** — first-class holdout groups |
-| **Interaction detection across experiments** | ✓ (layers + checks) | partial | ✗ | ✗ | **close (P1)** — pairwise scan on overlapping non-same-layer pairs |
-| **Multi-armed bandit (Autotune-class)** | ✓ | ✗ | ✓ | deferred | **close (P1), scoped** — Thompson sampling, presentation/marketplace domains only |
-| **Switchback / cluster designs for interference** | ✗ (cluster only) | partial | ✗ | cluster only | **close (P1)** — switchback design for matching/marketplace (DoorDash/Lyft class problem, directly relevant to our matching domain) |
-| Stratified sampling / post-stratification | ✓ | ✓ | ✓ | ✗ | **close (P1)** — post-stratification for small-n cohort/org experiments |
-| **Quasi-experiments (DiD, ITS)** | ✗ | ✗ | ✗ | "observational" label only | **close (P1)** — DiD + interrupted time series with causal_claim:false; synthetic control deferred |
-| **Meta-analysis / experiment corpus priors** | ✓ Meta Analysis | ✓ | ✗ | decision registry only | **close (P2)** — win-rate + effect distributions from DecisionRecords, optional prior for Bayesian engine |
-| Org-level default guardrail policies | ✓ | ✓ | partial | per-experiment | **close (P2)** — platform guardrail policy auto-attach |
-| Launch checklist / review workflow | ✓ | ✓ | partial | review status only | **close (P2)** — structured checklist on review→scheduled |
-| Near-real-time guardrail lane | ✓ (minutes) | ✓ | partial | daily windows | **close (P2)** — hourly fast-lane for guardrail metrics; daily for analysis |
-| Client SDK ergonomics (hooks, exposure batching) | ✓ | ✓ | ✓ | facade only | **close (P2)** — `useExperiment` TS hook + batched exposure endpoint |
-| Warehouse-native metric connectors | ✓ | ✓ (core) | ✓ | n/a | **not building** — we ARE the data store; metric_definitions are our semantic layer |
-| Feature-flag CDN / edge SDKs / session replay | ✓ | ✗ | ✓ flags | ✗ | **not building** — out of scope for a B2B platform with in-process facade |
-| Identity resolution (anon→login graph) | ✓ | ✓ | ✓ | ✗ | **defer** — all our units are authenticated; note for public registry pages |
-| CUPED++ multi-covariate / ML covariates | ✗ | ✓ | ✗ | ✗ | **defer** — v1 single covariate, schema reserves list |
-| Synthetic control | internal-platform territory | ✗ | ✗ | ✗ | **defer** |
+| Capability                                                                                       | Statsig                     | Eppo      | GrowthBook      | ADR-017 v1                               | v2 decision                                                                                                                         |
+| ------------------------------------------------------------------------------------------------ | --------------------------- | --------- | --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Deterministic sticky bucketing                                                                   | ✓                           | ✓         | ✓               | ✓                                        | keep                                                                                                                                |
+| Mutually exclusive layers                                                                        | ✓                           | ✓         | ✓ (namespaces)  | ✓                                        | keep                                                                                                                                |
+| SRM detection                                                                                    | ✓                           | ✓         | ✓               | ✓                                        | keep                                                                                                                                |
+| Guardrails w/ auto-stop                                                                          | ✓                           | ✓         | ✓               | ✓ (pause-only)                           | keep (stricter than industry: never auto-promote)                                                                                   |
+| **CUPED variance reduction**                                                                     | ✓                           | ✓ CUPED++ | ✓               | ✗                                        | **close (P0)** — single pre-period covariate                                                                                        |
+| **Bayesian engine** (P(beat control), expected loss)                                             | ✓                           | ✓         | ✓ (dual engine) | ✗                                        | **close (P0)** — conjugate posteriors, dual engine                                                                                  |
+| **Always-valid sequential (mSPRT)**                                                              | ✓                           | ✓ hybrid  | ✓               | OF alpha-spending only                   | **close (P0)** — add mSPRT option                                                                                                   |
+| **Winsorization / capping / percentile metrics**                                                 | ✓                           | ✓         | ✓               | ✗                                        | **close (P0)** — per-metric-definition config                                                                                       |
+| **Triggered (exposed-only) analysis + dilution correction**                                      | ✓                           | ✓         | ✓               | exposure split existed, no analysis mode | **close (P0)**                                                                                                                      |
+| **Health checks: A/A, exposure/assignment mismatch, pre-balance, novelty (days-since-exposure)** | ✓                           | ✓         | partial         | SRM only                                 | **close (P0)**                                                                                                                      |
+| **Global/team holdouts (cumulative impact)**                                                     | ✓ (~6mo holdouts)           | ✓         | ✓               | per-experiment holdout_bp only           | **close (P1)** — first-class holdout groups                                                                                         |
+| **Interaction detection across experiments**                                                     | ✓ (layers + checks)         | partial   | ✗               | ✗                                        | **close (P1)** — pairwise scan on overlapping non-same-layer pairs                                                                  |
+| **Multi-armed bandit (Autotune-class)**                                                          | ✓                           | ✗         | ✓               | deferred                                 | **close (P1), scoped** — Thompson sampling, presentation/marketplace domains only                                                   |
+| **Switchback / cluster designs for interference**                                                | ✗ (cluster only)            | partial   | ✗               | cluster only                             | **close (P1)** — switchback design for matching/marketplace (DoorDash/Lyft class problem, directly relevant to our matching domain) |
+| Stratified sampling / post-stratification                                                        | ✓                           | ✓         | ✓               | ✗                                        | **close (P1)** — post-stratification for small-n cohort/org experiments                                                             |
+| **Quasi-experiments (DiD, ITS)**                                                                 | ✗                           | ✗         | ✗               | "observational" label only               | **close (P1)** — DiD + interrupted time series with causal_claim:false; synthetic control deferred                                  |
+| **Meta-analysis / experiment corpus priors**                                                     | ✓ Meta Analysis             | ✓         | ✗               | decision registry only                   | **close (P2)** — win-rate + effect distributions from DecisionRecords, optional prior for Bayesian engine                           |
+| Org-level default guardrail policies                                                             | ✓                           | ✓         | partial         | per-experiment                           | **close (P2)** — platform guardrail policy auto-attach                                                                              |
+| Launch checklist / review workflow                                                               | ✓                           | ✓         | partial         | review status only                       | **close (P2)** — structured checklist on review→scheduled                                                                           |
+| Near-real-time guardrail lane                                                                    | ✓ (minutes)                 | ✓         | partial         | daily windows                            | **close (P2)** — hourly fast-lane for guardrail metrics; daily for analysis                                                         |
+| Client SDK ergonomics (hooks, exposure batching)                                                 | ✓                           | ✓         | ✓               | facade only                              | **close (P2)** — `useExperiment` TS hook + batched exposure endpoint                                                                |
+| Warehouse-native metric connectors                                                               | ✓                           | ✓ (core)  | ✓               | n/a                                      | **not building** — we ARE the data store; metric_definitions are our semantic layer                                                 |
+| Feature-flag CDN / edge SDKs / session replay                                                    | ✓                           | ✗         | ✓ flags         | ✗                                        | **not building** — out of scope for a B2B platform with in-process facade                                                           |
+| Identity resolution (anon→login graph)                                                           | ✓                           | ✓         | ✓               | ✗                                        | **defer** — all our units are authenticated; note for public registry pages                                                         |
+| CUPED++ multi-covariate / ML covariates                                                          | ✗                           | ✓         | ✗               | ✗                                        | **defer** — v1 single covariate, schema reserves list                                                                               |
+| Synthetic control                                                                                | internal-platform territory | ✗         | ✗               | ✗                                        | **defer**                                                                                                                           |
 
 ## 2. Where we intentionally exceed industry baseline
 
