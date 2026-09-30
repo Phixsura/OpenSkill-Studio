@@ -121,6 +121,17 @@ async def test_holdout_group_create_validate_and_release(db):
     with pytest.raises(AppError) as exc:
         await svc.create(key="hg-bad-domain", title="x", domain="nope", holdout_bp=100)
     assert exc.value.code == "EXPERIMENT_DOMAIN_INVALID"
+    assert exc.value.status_code == 422
+    # bp boundaries: 1 and the max are legal; 0 is not
+    ok_low = await svc.create(key=f"hg-{str(ULID()).lower()}", title="lo",
+                              domain="learning", holdout_bp=1)
+    assert ok_low.holdout_bp == 1
+    ok_high = await svc.create(key=f"hg-{str(ULID()).lower()}", title="hi",
+                               domain="learning", holdout_bp=2000)
+    assert ok_high.holdout_bp == 2000
+    with pytest.raises(AppError) as exc:
+        await svc.create(key="hg-zero", title="x", domain="learning", holdout_bp=0)
+    assert exc.value.code == "EXPERIMENT_HOLDOUT_BP_INVALID"
     with pytest.raises(AppError) as exc:
         await svc.create(key="hg-bad-bp", title="x", domain="learning", holdout_bp=2001)
     assert exc.value.code == "EXPERIMENT_HOLDOUT_BP_INVALID"
@@ -144,6 +155,7 @@ async def test_holdout_group_create_validate_and_release(db):
     with pytest.raises(AppError) as exc:
         await svc.release("0" * 26)
     assert exc.value.code == "EXPERIMENT_HOLDOUT_NOT_FOUND"
+    assert exc.value.status_code == 404
 
 
 # ── Exclusion semantics ──────────────────────────────────────────────
@@ -519,3 +531,59 @@ async def test_interaction_pair_cap_rotates_weekly(db):
             await db.delete(ev)
         await db.flush()
     assert len(seen_pairs) == 3  # every week inspected a different pair
+
+
+async def test_holdout_group_cache_actually_caches(db):
+    """The 60s domain cache must serve the second lookup without a DB round
+    trip (a from-now-MINUS-ttl expiry would silently disable it)."""
+    from app.experiments.services.holdouts import active_holdout_groups
+
+    await HoldoutGroupService(db).create(
+        key=f"hg-{str(ULID()).lower()}", title="c", domain="learning", holdout_bp=100
+    )
+    first = await active_holdout_groups(db, "learning")
+    assert len(first) >= 1
+    calls = {"n": 0}
+    real_execute = db.execute
+
+    async def counting_execute(*args, **kwargs):
+        calls["n"] += 1
+        return await real_execute(*args, **kwargs)
+
+    db.execute = counting_execute  # type: ignore[method-assign]
+    try:
+        second = await active_holdout_groups(db, "learning")
+    finally:
+        db.execute = real_execute  # type: ignore[method-assign]
+    assert second == first
+    assert calls["n"] == 0  # served from cache
+
+
+async def test_interaction_alert_detail_and_min_boundary(db):
+    """Pins: df is (r-1)(c-1)=1 for 2x2, exactly one alert per pair per
+    sweep, and EXACTLY 100 shared units (the minimum) is enough."""
+    from app.experiments.worker import sweep_experiment_interactions
+
+    exp1, exp2 = await _mk_pair_with_shared_units(db, correlated=True, n=100)
+    alerts = await sweep_experiment_interactions(db, cap_pairs=500)
+    assert alerts == 1
+    event = (
+        await db.execute(
+            select(GuardrailEvent).where(
+                GuardrailEvent.experiment_id == exp1.id,
+                GuardrailEvent.guardrail_key == INTERACTION_GUARDRAIL_KEY,
+            )
+        )
+    ).scalar_one()
+    assert event.detail["df"] == 1
+    assert event.detail["shared_units"] == 100
+    assert event.detail["with"] == exp2.id
+
+
+# Verified-equivalent mutation survivors (ledger):
+# - cache TTL `>` vs `>=` and ends_at `>` vs `>=`: exact-instant boundaries,
+#   measure zero on real clocks.
+# - interaction `expected <= 0`: row/col totals of observed keys are always
+#   positive — defensive edge.
+# - `chi2_sf >= 0.001` and the 7-day `>=`: exact-boundary equivalents.
+# - round(chi2, 3→4): fully-correlated tables give integer chi2.
