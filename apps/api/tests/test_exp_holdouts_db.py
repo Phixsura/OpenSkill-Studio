@@ -395,3 +395,79 @@ async def test_interaction_sweep_registered_in_cron_table():
     from app.controlplane.worker import _cron_jobs
 
     assert "exp_interaction_sweep" in {job.name for job in _cron_jobs()}
+
+
+# ── Org-admin read delegation (v2 batch 7, §18) ──────────────────────
+
+
+async def _mk_org_admin(db):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization, OrgMember, OrgRole
+
+    user = User(
+        email=f"orgadm-{ULID()}@example.com", display_name="OA",
+        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name="delegated", slug=f"d-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.ADMIN))
+    await db.flush()
+    return user, org
+
+
+async def test_org_admin_read_scope_filters_and_uniform_404(db):
+    """An org admin reads ONLY experiments scoped to their orgs; a platform
+    experiment is a uniform 404 (no existence oracle) and the list never
+    shows it. A user with no org-admin role gets 403."""
+    from app.experiments.api.deps import experiment_read_scope
+    from app.experiments.services.experiments import ExperimentService
+
+    org_admin, org = await _mk_org_admin(db)
+    platform_exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    org_exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="Org exp", domain="learning",
+        layer_key=platform_exp.layer_key, owner_user_id=admin.id,
+        scope_org_id=org.id,
+    )
+
+    scope = await experiment_read_scope(user=org_admin, db=db)
+    assert scope.org_ids == [org.id]
+
+    rows, total, _cursor = await svc.list_experiments(scope_org_ids=scope.org_ids)
+    ids = {r.id for r in rows}
+    assert org_exp.id in ids
+    assert platform_exp.id not in ids
+    assert total == len(ids)
+
+    # scoped get: own org experiment readable; platform experiment = 404
+    got = await svc.get_scoped(org_exp.id, scope.org_ids)
+    assert got.id == org_exp.id
+    with pytest.raises(AppError) as e:
+        await svc.get_scoped(platform_exp.id, scope.org_ids)
+    assert e.value.code == "EXPERIMENT_NOT_FOUND"
+    assert e.value.status_code == 404
+
+    # platform admin scope is unrestricted
+    admin_scope = await experiment_read_scope(user=admin, db=db)
+    assert admin_scope.org_ids is None
+    assert (await svc.get_scoped(platform_exp.id, None)).id == platform_exp.id
+
+    # no org-admin role anywhere → 403, not an empty allow-list
+    nobody = User(
+        email=f"nobody-{ULID()}@example.com", display_name="N",
+        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(nobody)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await experiment_read_scope(user=nobody, db=db)
+    assert e.value.code == "FORBIDDEN"
+    assert e.value.status_code == 403

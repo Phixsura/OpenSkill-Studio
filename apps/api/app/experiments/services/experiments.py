@@ -83,6 +83,16 @@ class ExperimentService:
             )
         )
 
+    async def get_scoped(
+        self, experiment_id: str, scope_org_ids: list[str] | None
+    ) -> Experiment:
+        """Uniform 404 outside the caller's read scope (R89 — an org admin
+        must not be able to probe platform experiments' existence)."""
+        exp = await self.get(experiment_id)
+        if scope_org_ids is not None and exp.scope_org_id not in scope_org_ids:
+            raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
+        return exp
+
     async def get(self, experiment_id: str) -> Experiment:
         exp = await self.db.get(Experiment, experiment_id)
         if not exp:
@@ -173,6 +183,7 @@ class ExperimentService:
         domain: str | None = None,
         cursor: str | None = None,
         limit: int = 50,
+        scope_org_ids: list[str] | None = None,
     ) -> tuple[list[Experiment], int, str | None]:
         """Keyset pagination: newest-first strictly by ULID id (cursor
         predicate matches the sort order — the R395 lesson)."""
@@ -181,6 +192,10 @@ class ExperimentService:
             base = base.where(Experiment.status == status)
         if domain:
             base = base.where(Experiment.domain == domain)
+        if scope_org_ids is not None:
+            # org-admin delegation (§18): only experiments scoped to the
+            # caller's orgs — platform-wide experiments are NOT theirs to see
+            base = base.where(Experiment.scope_org_id.in_(scope_org_ids))
         total = (
             await self.db.execute(select(func.count()).select_from(base.subquery()))
         ).scalar_one()

@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.experiments.api.deps import check_enum, require_platform_admin
+from app.experiments.api.deps import (
+    ReadScope,
+    check_enum,
+    experiment_read_scope,
+    require_platform_admin,
+)
 from app.experiments.schemas import (
     CreateExperimentRequest,
     CreateVersionRequest,
@@ -49,12 +54,13 @@ async def list_experiments(
     cursor: str | None = Query(default=None, max_length=26),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
     check_enum(status, EXPERIMENT_STATUSES, "status")
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     rows, total, next_cursor = await ExperimentService(db).list_experiments(
-        status=status, domain=domain, cursor=cursor, limit=limit
+        status=status, domain=domain, cursor=cursor, limit=limit,
+        scope_org_ids=scope.org_ids,
     )
     return {
         "data": [ExperimentResponse.model_validate(x).model_dump() for x in rows],
@@ -66,9 +72,9 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    return {"data": await ExperimentService(db).get(experiment_id)}
+    return {"data": await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)}
 
 
 @router.post("/{experiment_id}/versions", response_model=DataResponse[VersionResponse], status_code=201)
@@ -87,8 +93,9 @@ async def create_version(
 async def list_versions(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await ExperimentService(db).get_versions(experiment_id)
     return {"data": [VersionResponse.model_validate(x).model_dump() for x in rows]}
 
@@ -129,7 +136,8 @@ async def list_events(
     experiment_id: str,
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await ExperimentService(db).list_events(experiment_id, limit=limit)
     return {"data": [ExperimentEventResponse.model_validate(x).model_dump() for x in rows]}
