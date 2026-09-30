@@ -257,6 +257,21 @@ class CreateAllocationRequest(_StrictReq):
     slice_end: int = Field(ge=0, le=9999)
 
 
+class CreateMetricDefinitionRequest(_StrictReq):
+    key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_]{2,63}$")
+    title: str = Field(min_length=1, max_length=200)
+    kind: str = Field(max_length=16)
+    domain: str = Field(max_length=20)
+    source_kind: str = Field(max_length=10)
+    query_version: int = Field(default=1, ge=1)
+    spec: dict[str, Any] = Field(default_factory=dict)
+    privacy_class: str = Field(default="aggregate_only", max_length=16)
+    direction: str = Field(default="increase_good", max_length=16)
+    winsorize_pct: float | None = Field(default=None, gt=0, lt=100)
+    cap_value: float | None = None
+    percentile: float | None = Field(default=None, gt=0, lt=100)
+
+
 # ── Responses ────────────────────────────────────────────────────────
 
 
@@ -312,6 +327,46 @@ class AllocationResponse(BaseModel):
     slice_start: int
     slice_end: int
     created_at: datetime
+
+
+class MetricDefinitionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    key: str
+    title: str
+    kind: str
+    domain: str
+    source_kind: str
+    query_version: int
+    spec: dict
+    privacy_class: str
+    direction: str
+    winsorize_pct: float | None
+    cap_value: float | None
+    percentile: float | None
+    created_at: datetime
+
+
+class MetricSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    experiment_id: str
+    metric_key: str
+    variant_key: str
+    window_start: datetime
+    window_end: datetime
+    n: int
+    numerator: float | None
+    denominator: float | None
+    sum_value: float | None
+    sum_sq: float | None
+    cov_sum: float | None
+    cov_sum_sq: float | None
+    cov_xy_sum: float | None
+    provenance: dict
+    computed_at: datetime
 
 
 class ExperimentEventResponse(BaseModel):

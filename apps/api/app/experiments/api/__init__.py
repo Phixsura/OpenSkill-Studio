@@ -11,10 +11,13 @@ from app.core.rate_limit import rate_limit
 from app.experiments.api.assignments import router as assignments_router
 from app.experiments.api.experiments import router as experiments_router_module
 from app.experiments.api.layers import router as layers_router
+from app.experiments.api.metrics import router as metrics_router
 
 experiments_router = APIRouter(dependencies=[Depends(rate_limit(120, 60))])
-# Static-prefix router first — /experiments/{experiment_id} would shadow
-# /experiments/layers if registered ahead of it.
+# Static-prefix routers first — /experiments/{experiment_id} would shadow
+# /experiments/layers and /experiments/metric-definitions if registered
+# ahead of them (§106.10 route-shadowing class).
 experiments_router.include_router(layers_router)
+experiments_router.include_router(metrics_router)
 experiments_router.include_router(assignments_router)
 experiments_router.include_router(experiments_router_module)

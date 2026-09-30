@@ -17,6 +17,8 @@ WRITE_ENDPOINTS = [
     ("post", "/api/v1/experiments/layers/learning-core/allocations", {}),
     ("post", f"/api/v1/experiments/{EXP_ID}/assignments:preview",
      {"unit_type": "user", "unit_id": "u" * 26}),
+    ("post", "/api/v1/experiments/metric-definitions", {}),
+    ("post", "/api/v1/experiments/metric-definitions/seed", {}),
 ]
 
 READ_ENDPOINTS = [
@@ -26,6 +28,8 @@ READ_ENDPOINTS = [
     f"/api/v1/experiments/{EXP_ID}/events",
     f"/api/v1/experiments/{EXP_ID}/assignments",
     f"/api/v1/experiments/{EXP_ID}/exposures/stats",
+    f"/api/v1/experiments/{EXP_ID}/metrics",
+    "/api/v1/experiments/metric-definitions",
     "/api/v1/experiments/layers",
     "/api/v1/experiments/layers/learning-core/allocations",
 ]
