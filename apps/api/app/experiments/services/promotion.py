@@ -66,6 +66,40 @@ class PromotionService:
             path = await self.db.get(LearningPath, target_ref)
             if not path:
                 raise AppError("EXPERIMENT_NOT_FOUND", "Learning path not found", 404)
+        elif target_type == "workflow_binding":
+            from app.models.workflow_pack import WorkflowPackInstallation
+
+            installation = await self.db.get(WorkflowPackInstallation, target_ref)
+            if not installation:
+                raise AppError("EXPERIMENT_NOT_FOUND", "Workflow installation not found", 404)
+            step_id = payload.get("step_id")
+            offering_id = payload.get("offering_id")
+            if not step_id or not offering_id:
+                raise AppError(
+                    "VALIDATION_ERROR", "workflow_binding requires step_id and offering_id", 422
+                )
+            from app.models.provider import ProviderConnection, ProviderModelOffering
+
+            offering = await self.db.get(ProviderModelOffering, offering_id)
+            if offering is None or not offering.is_active:
+                raise AppError("EXPERIMENT_NOT_FOUND", "Offering not found or inactive", 404)
+            conn = await self.db.get(ProviderConnection, offering.connection_id)
+            # The offering must belong to the installation's org (R3 —
+            # promotion never crosses the credential boundary)
+            if conn is None or conn.org_id != installation.org_id or conn.status != "active":
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    "Offering does not belong to the installation's org",
+                    422,
+                )
+        elif target_type == "eco_rollout_policy":
+            from app.ecosystem.models.replacement import ReplacementCandidate
+
+            candidate = await self.db.get(ReplacementCandidate, target_ref)
+            if not candidate:
+                raise AppError("EXPERIMENT_NOT_FOUND", "Replacement candidate not found", 404)
+            # RolloutService.create re-runs the full eco gates at apply
+            # (hard-incompatible refusal, retired/blocked entity guard)
         elif len(target_ref) > 64 or not target_ref.strip():
             raise AppError("VALIDATION_ERROR", "target_ref must be a non-empty reference", 422)
 
@@ -186,10 +220,16 @@ class PromotionService:
             return await self._apply_matching_config(draft)
         if draft.target_type == "learning_path":
             return await self._apply_learning_path(draft, actor)
+        if draft.target_type == "workflow_binding":
+            return await self._apply_workflow_binding(draft)
+        if draft.target_type == "eco_rollout_policy":
+            return await self._apply_eco_rollout(draft)
+        # pack_recommendation / pricing_presentation: no target-domain draft
+        # store exists yet — refusing explicitly beats applying into nothing
         raise AppError(
             "EXPERIMENT_PROMOTION_UNWIRED",
-            f"Apply adapter for {draft.target_type} lands with its domain "
-            "integration (exp07) — the draft stays approved",
+            f"No target-domain draft store for {draft.target_type} yet — "
+            "the draft stays approved",
             422,
         )
 
@@ -217,6 +257,56 @@ class PromotionService:
         self.db.add(new_config)
         await self.db.flush()
         return new_config.id
+
+    async def _apply_workflow_binding(self, draft: PromotionDraft) -> str:
+        """UNCONFIRMED WorkflowStepBinding suggestion (confirmed_by=None) —
+        exactly the domain's own draft shape (D5: install creates unconfirmed
+        suggestions; only a human confirmation makes them live). An existing
+        binding row for the installation+step is never overwritten."""
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models.workflow_pack import WorkflowPackInstallation
+        from app.models.workflow_run import WorkflowStepBinding
+
+        installation = await self.db.get(WorkflowPackInstallation, draft.target_ref)
+        binding = WorkflowStepBinding(
+            org_id=installation.org_id,
+            installation_id=installation.id,
+            step_id=draft.draft_payload["step_id"],
+            binding_mode="confirmed",
+            offering_id=draft.draft_payload["offering_id"],
+            reasons=[f"experiment promotion {draft.id}"],
+        )
+        try:
+            # SAVEPOINT: a unique-constraint loser must not poison the
+            # caller's transaction (the outbox handler's nested-block pattern)
+            async with self.db.begin_nested():
+                self.db.add(binding)
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                "DECISION_STATE_INVALID",
+                "A binding already exists for this installation+step — "
+                "review it in the workflow domain instead of overwriting",
+                409,
+            ) from exc
+        return binding.id
+
+    async def _apply_eco_rollout(self, draft: PromotionDraft) -> str:
+        """DRAFT eco RolloutPlan via the eco domain's own service — its gates
+        (hard-incompatible refusal, retired/blocked entity guard, guardrail
+        shape check) all re-run here; the plan starts in eco status draft and
+        every promote/reject stays an explicit eco-domain human decision."""
+        from app.ecosystem.services.rollout import RolloutService
+
+        payload = draft.draft_payload
+        plan = await RolloutService(self.db).create(
+            replacement_candidate_id=draft.target_ref,
+            scope_type=payload.get("scope_type", "benchmark_only"),
+            scope_ref=payload.get("scope_ref"),
+            guardrails=payload.get("guardrails"),
+        )
+        return plan.id
 
     async def _apply_learning_path(self, draft: PromotionDraft, actor: User) -> str:
         """NEW LearningPath in status draft — active curricula are never

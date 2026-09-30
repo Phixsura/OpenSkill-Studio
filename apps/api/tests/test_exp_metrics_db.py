@@ -49,7 +49,7 @@ def _spec() -> dict:
         ],
         "metrics": {
             "primary": ["exposure_rate"],
-            "secondary": ["project_approval_rate"],  # source unwired until exp07
+            "secondary": ["completion_rate"],  # learning_paths source unwired (exp09)
             "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
         },
     }
@@ -151,15 +151,17 @@ async def test_exposures_source_end_to_end_with_provenance(db):
     written = await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
     )
-    # exposure_rate for each variant; unwired sources skipped
-    assert written == 2
+    # exposure_rate + cost_usd guardrail (zero-sample for user units) per
+    # variant; the unwired learning_paths secondary is skipped
+    assert written == 4
     snapshots = await MetricService(db).list_snapshots(exp.id)
-    assert {s.metric_key for s in snapshots} == {"exposure_rate"}
-    total_exposed = sum(int(s.numerator or 0) for s in snapshots)
+    assert {s.metric_key for s in snapshots} == {"exposure_rate", "cost_usd"}
+    exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
+    total_exposed = sum(int(s.numerator or 0) for s in exposure_rows)
     assert total_exposed == 15
-    total_assigned = sum(int(s.denominator or 0) for s in snapshots)
+    total_assigned = sum(int(s.denominator or 0) for s in exposure_rows)
     assert total_assigned == 30
-    for s in snapshots:
+    for s in exposure_rows:
         assert s.provenance["source"] == "exposures"
         assert s.provenance["query_version"] == 1
 
@@ -214,9 +216,10 @@ async def test_holdout_units_excluded_from_itt_sets(db):
 
 
 async def test_unwired_source_is_skipped_not_crashed(db):
-    """project_approval_rate's source lands in exp07 — computing today must
-    skip it (logged) and still write the wired metrics."""
-    assert "projects" not in SOURCE_REGISTRY
+    """completion_rate's learning_paths source lands in exp09 (derived
+    progress) — computing today must skip it (logged) and still write the
+    wired metrics."""
+    assert "learning_paths" not in SOURCE_REGISTRY
     await MetricService(db).ensure_seed_definitions()
     exp, _ = await _mk_running(db)
     asvc = AssignmentService(db)
@@ -226,7 +229,7 @@ async def test_unwired_source_is_skipped_not_crashed(db):
     written = await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
     )
-    assert written == 2  # exposure_rate × 2 variants only
+    assert written == 4  # exposure_rate + cost_usd guardrail × 2 variants
 
 
 # ── Worker sweep ─────────────────────────────────────────────────────
@@ -273,6 +276,173 @@ async def test_sweep_skips_closed_analysis(db):
         ).scalars()
     )
     assert all(m.payload.get("experiment_id") != exp.id for m in rows)
+
+
+async def _mk_org(db):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    return tenant, org
+
+
+def _units(variant_units_flat: list[str]) -> dict[str, list[str]]:
+    return {"treatment": variant_units_flat}
+
+
+async def _run_source(db, source_name: str, *, definition_key: str, units, unit_type: str):
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+
+    await MetricService(db).ensure_seed_definitions()
+    definition = (
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == definition_key))
+    ).scalar_one()
+    window_start, window_end = _today_window()
+    return await SOURCE_REGISTRY[source_name](
+        db, experiment=None, definition=definition, variant_units=_units(units),
+        window_start=window_start, window_end=window_end, unit_type=unit_type,
+    )
+
+
+# ── exp07 wired sources ──────────────────────────────────────────────
+
+
+async def test_projects_source_approval_and_revisions(db):
+    from app.models.project import Project, Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    project = Project(
+        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
+        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+    )
+    db.add(project)
+    await db.flush()
+    for status, version in (
+        (SubmissionStatus.APPROVED, 3),  # 2 revisions
+        (SubmissionStatus.APPROVED, 1),
+        (SubmissionStatus.REJECTED, 2),  # 1 revision
+    ):
+        db.add(
+            Submission(org_id=org.id, project_id=project.id, user_id=user.id,
+                       status=status, version=version)
+        )
+    await db.flush()
+    approval = await _run_source(
+        db, "projects", definition_key="project_approval_rate",
+        units=[user.id], unit_type="user",
+    )
+    assert approval["treatment"] == {"n": 3, "numerator": 2, "denominator": 3}
+    revisions = await _run_source(
+        db, "projects", definition_key="revision_count", units=[user.id], unit_type="user",
+    )
+    assert revisions["treatment"]["n"] == 3
+    assert revisions["treatment"]["sum_value"] == 3  # (3-1)+(1-1)+(2-1)
+    # Wrong unit type → zero-sample, never a bogus join
+    empty = await _run_source(
+        db, "projects", definition_key="project_approval_rate",
+        units=[org.id], unit_type="organization",
+    )
+    assert empty["treatment"] == {"n": 0}
+
+
+async def test_cost_ledger_source_org_and_tenant_units(db):
+    from decimal import Decimal
+
+    from app.models.evaluation import EvalType, EvaluationTask
+
+    tenant, org = await _mk_org(db)
+    for cost in (Decimal("0.25"), Decimal("0.50")):
+        db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT, cost_usd=cost))
+    await db.flush()
+    by_org = await _run_source(
+        db, "cost_ledger", definition_key="cost_usd", units=[org.id],
+        unit_type="organization",
+    )
+    assert by_org["treatment"]["n"] == 2
+    assert by_org["treatment"]["sum_value"] == pytest.approx(0.75)
+    by_tenant = await _run_source(
+        db, "cost_ledger", definition_key="cost_usd", units=[tenant.id], unit_type="tenant",
+    )
+    assert by_tenant["treatment"]["sum_value"] == pytest.approx(0.75)
+
+
+async def test_registry_source_pack_adoption(db):
+    from app.models.skill_pack import SkillPackInstallation
+
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    db.add(SkillPackInstallation(org_id=org.id, installed_version="1.0.0", installed_by=user.id))
+    db.add(SkillPackInstallation(org_id=org.id, installed_version="1.1.0", installed_by=user.id))
+    await db.flush()
+    result = await _run_source(
+        db, "registry", definition_key="pack_adoption_rate", units=[org.id],
+        unit_type="organization",
+    )
+    assert result["treatment"] == {"n": 1, "numerator": 2, "denominator": 1}
+
+
+async def test_eco_telemetry_source_weighted_success(db):
+    from app.ecosystem.models.graph import TelemetrySnapshot
+
+    window_start, _ = _today_window()
+    offering_id = str(ULID())
+    db.add(
+        TelemetrySnapshot(
+            entity_kind="provider_offering", entity_id=offering_id,
+            window_start=window_start, window_end=window_start + timedelta(hours=1),
+            sample_size=100, metrics={"success_rate": 0.9},
+        )
+    )
+    db.add(
+        TelemetrySnapshot(
+            entity_kind="provider_offering", entity_id=offering_id,
+            window_start=window_start + timedelta(hours=1),
+            window_end=window_start + timedelta(hours=2),
+            sample_size=300, metrics={"success_rate": 0.5},
+        )
+    )
+    await db.flush()
+    result = await _run_source(
+        db, "eco_telemetry", definition_key="provider_reliability",
+        units=[offering_id], unit_type="provider_offering",
+    )
+    # weighted: (0.9·100 + 0.5·300) / 400 = 0.6
+    stats = result["treatment"]
+    assert stats["denominator"] == 400
+    assert stats["numerator"] / stats["denominator"] == pytest.approx(0.6)
+
+
+async def test_client_briefs_source_acceptance(db):
+    from app.models.client_brief import BriefStatus, ClientBrief
+
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    for status in (BriefStatus.COMPLETED, BriefStatus.REVIEW):
+        db.add(
+            ClientBrief(
+                org_id=org.id, title="B", slug=f"b-{str(ULID()).lower()}",
+                client_name="Client", project_type="image_set",
+                objective="deliver assets", status=status, created_by=user.id,
+            )
+        )
+    await db.flush()
+    result = await _run_source(
+        db, "client_briefs", definition_key="client_acceptance_rate",
+        units=[org.id], unit_type="organization",
+    )
+    assert result["treatment"]["denominator"] == 2
+    assert result["treatment"]["numerator"] == 1
 
 
 async def test_snapshot_unique_constraint_names_window(db):

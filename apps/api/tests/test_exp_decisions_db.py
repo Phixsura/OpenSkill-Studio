@@ -294,7 +294,7 @@ async def test_unwired_target_refuses_apply_explicitly(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="eco_rollout_policy", target_ref="a" * 26,
+        decision.id, target_type="pack_recommendation", target_ref="a" * 26,
         draft_payload={}, actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
@@ -339,6 +339,168 @@ async def test_learning_path_apply_creates_draft_path(db):
     assert new_path.status == ContentStatus.DRAFT  # never rewrites the live path
     assert new_path.name == "Improved ordering"
     assert (await db.get(LearningPath, base.id)).status == ContentStatus.PUBLISHED
+
+
+async def test_workflow_binding_apply_creates_unconfirmed_suggestion(db):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+    from app.models.provider import ProviderAdapter, ProviderConnection, ProviderModelOffering
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import WorkflowStepBinding
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    adapter = ProviderAdapter(key=f"mock-{str(ULID()).lower()[-8:]}", name="Mock")
+    db.add(adapter)
+    await db.flush()
+    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c", status="active")
+    db.add(conn)
+    await db.flush()
+    offering = ProviderModelOffering(
+        connection_id=conn.id, capability_key="text.generate", model_name="m", is_active=True
+    )
+    installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add_all([offering, installation])
+    await db.flush()
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type="workflow_binding", target_ref=installation.id,
+        draft_payload={"step_id": "step-1", "offering_id": offering.id}, actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    applied = await psvc.apply(draft.id, actor=admin)
+    binding = await db.get(WorkflowStepBinding, applied.applied_ref)
+    assert binding.confirmed_by is None  # UNCONFIRMED — a human must confirm (D5)
+    assert binding.offering_id == offering.id
+    assert binding.installation_id == installation.id
+
+
+async def test_workflow_binding_apply_never_overwrites_existing(db):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+    from app.models.provider import ProviderAdapter, ProviderConnection, ProviderModelOffering
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import WorkflowStepBinding
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    adapter = ProviderAdapter(key=f"mock-{str(ULID()).lower()[-8:]}", name="Mock")
+    db.add(adapter)
+    await db.flush()
+    conn = ProviderConnection(org_id=org.id, adapter_id=adapter.id, name="c", status="active")
+    db.add(conn)
+    await db.flush()
+    offering = ProviderModelOffering(
+        connection_id=conn.id, capability_key="text.generate", model_name="m", is_active=True
+    )
+    installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add_all([offering, installation])
+    await db.flush()
+    db.add(
+        WorkflowStepBinding(
+            org_id=org.id, installation_id=installation.id, step_id="step-1",
+            binding_mode="confirmed", offering_id=offering.id,
+        )
+    )
+    await db.flush()
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type="workflow_binding", target_ref=installation.id,
+        draft_payload={"step_id": "step-1", "offering_id": offering.id}, actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    with pytest.raises(AppError) as e:
+        await psvc.apply(draft.id, actor=admin)
+    assert e.value.status_code == 409
+    assert (await psvc.get(draft.id)).status == "approved"  # never silently applied
+
+
+async def test_eco_rollout_apply_creates_draft_plan(db):
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.replacement import ReplacementCandidate, RolloutPlan
+
+    entity = AIModel(canonical_name="Cand", slug=f"cand-{str(ULID()).lower()}")
+    db.add(entity)
+    await db.flush()
+    candidate = ReplacementCandidate(
+        deprecated_kind="model", deprecated_id="d" * 26,
+        candidate_kind="model", candidate_id=entity.id,
+        hard_compatible=True,
+    )
+    db.add(candidate)
+    await db.flush()
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type="eco_rollout_policy", target_ref=candidate.id,
+        draft_payload={"scope_type": "benchmark_only"}, actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    applied = await psvc.apply(draft.id, actor=admin)
+    plan = await db.get(RolloutPlan, applied.applied_ref)
+    assert plan is not None
+    assert plan.status == "draft"  # eco promote/reject stays an eco decision
+
+
+async def test_eco_rollout_apply_refuses_hard_incompatible(db):
+    """The eco domain's own gate re-runs at apply — promotion never bypasses
+    the hard-incompatible red line."""
+    from app.ecosystem.models.catalog import AIModel
+    from app.ecosystem.models.replacement import ReplacementCandidate
+
+    entity = AIModel(canonical_name="Bad", slug=f"bad-{str(ULID()).lower()}")
+    db.add(entity)
+    await db.flush()
+    candidate = ReplacementCandidate(
+        deprecated_kind="model", deprecated_id="d" * 26,
+        candidate_kind="model", candidate_id=entity.id,
+        hard_compatible=False,
+    )
+    db.add(candidate)
+    await db.flush()
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type="eco_rollout_policy", target_ref=candidate.id,
+        draft_payload={"scope_type": "benchmark_only"}, actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    with pytest.raises(AppError) as e:
+        await psvc.apply(draft.id, actor=admin)
+    assert e.value.code == "ECO_HARD_INCOMPATIBLE"
+    assert (await psvc.get(draft.id)).status == "approved"
+
+
+async def test_unwired_targets_are_only_presentation_pair(db):
+    """pack_recommendation / pricing_presentation stay explicitly unwired
+    (no target-domain draft store) — pin the set so a new unwired target
+    can't appear silently."""
+    from app.experiments.security import PROMOTION_TARGET_TYPES
+
+    wired = {"matching_config", "learning_path", "workflow_binding", "eco_rollout_policy"}
+    assert PROMOTION_TARGET_TYPES - wired == {"pack_recommendation", "pricing_presentation"}
 
 
 async def test_draft_registry_status_filter(db):

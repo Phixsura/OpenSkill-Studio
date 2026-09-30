@@ -212,6 +212,7 @@ class GuardrailService:
                 variant_units=variant_units,
                 window_start=window_start,
                 window_end=now,
+                unit_type=spec.unit_type,
             )
             combined: dict = {}
             for values in stats.values():

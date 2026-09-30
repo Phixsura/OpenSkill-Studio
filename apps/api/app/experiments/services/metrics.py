@@ -65,6 +65,7 @@ async def _source_exposures(
     variant_units: dict[str, list[str]],
     window_start: datetime,
     window_end: datetime,
+    unit_type: str = "",
 ) -> SourceResult:
     """Exposure rate per variant: numerator = exposure events in window,
     denominator = assigned units (ITT). Fully internal — always available."""
@@ -99,6 +100,7 @@ async def _source_workflow_runs(
     variant_units: dict[str, list[str]],
     window_start: datetime,
     window_end: datetime,
+    unit_type: str = "",
 ) -> SourceResult:
     """Production metrics over WorkflowRun for workflow_installation units.
 
@@ -155,6 +157,216 @@ async def _source_workflow_runs(
     return result
 
 
+@register_source("projects")
+async def _source_projects(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+) -> SourceResult:
+    """Learning outcomes over Submission (user units).
+
+    measure=approval_rate  → binary: approved / all submissions in window
+    measure=revision_count → continuous: per-submission (version - 1)
+    """
+    from app.models.project import Submission, SubmissionStatus
+
+    if unit_type != "user":
+        return {variant: {"n": 0} for variant in variant_units}
+    measure = definition.spec.get("measure", "approval_rate")
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        rows = (
+            await db.execute(
+                select(Submission.status, Submission.version).where(
+                    Submission.user_id.in_(units),
+                    Submission.created_at >= window_start,
+                    Submission.created_at < window_end,
+                )
+            )
+        ).all()
+        if measure == "revision_count":
+            revisions = [max(0, version - 1) for _status, version in rows]
+            result[variant] = {
+                "n": len(revisions),
+                "sum_value": sum(revisions),
+                "sum_sq": sum(r * r for r in revisions),
+            }
+        else:
+            approved = sum(1 for status, _v in rows if status == SubmissionStatus.APPROVED)
+            result[variant] = {"n": len(rows), "numerator": approved, "denominator": len(rows)}
+    return result
+
+
+@register_source("cost_ledger")
+async def _source_cost_ledger(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+) -> SourceResult:
+    """Internal cost (USD) from metered evaluation spend, per org/tenant
+    units. Money stays Decimal→float at the aggregate boundary only."""
+    from app.models.evaluation import EvaluationTask
+
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units or unit_type not in ("organization", "tenant"):
+            result[variant] = {"n": 0}
+            continue
+        q = select(EvaluationTask.cost_usd).where(
+            EvaluationTask.cost_usd.is_not(None),
+            EvaluationTask.created_at >= window_start,
+            EvaluationTask.created_at < window_end,
+        )
+        if unit_type == "organization":
+            q = q.where(EvaluationTask.org_id.in_(units))
+        else:  # tenant units → their orgs
+            from app.models.organization import Organization
+
+            q = q.join(Organization, Organization.id == EvaluationTask.org_id).where(
+                Organization.tenant_id.in_(units)
+            )
+        costs = [float(c) for (c,) in (await db.execute(q)).all()]
+        result[variant] = {
+            "n": len(costs),
+            "sum_value": sum(costs),
+            "sum_sq": sum(c * c for c in costs),
+        }
+    return result
+
+
+@register_source("client_briefs")
+async def _source_client_briefs(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+) -> SourceResult:
+    """Client acceptance per org unit: COMPLETED (client accepted the
+    deliverables) / all briefs touched in the window (updated_at —
+    acceptance is a late transition)."""
+    from app.models.client_brief import ClientBrief
+
+    if unit_type != "organization":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        rows = (
+            await db.execute(
+                select(ClientBrief.status).where(
+                    ClientBrief.org_id.in_(units),
+                    ClientBrief.updated_at >= window_start,
+                    ClientBrief.updated_at < window_end,
+                )
+            )
+        ).all()
+        accepted = sum(
+            1 for (status,) in rows if getattr(status, "value", status) == "completed"
+        )
+        result[variant] = {"n": len(rows), "numerator": accepted, "denominator": len(rows)}
+    return result
+
+
+@register_source("registry")
+async def _source_registry(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+) -> SourceResult:
+    """Pack adoption per org unit: installations created in the window over
+    the org count (rate)."""
+    from app.models.skill_pack import SkillPackInstallation
+
+    if unit_type != "organization":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        installs = (
+            await db.execute(
+                select(func.count()).where(
+                    SkillPackInstallation.org_id.in_(units),
+                    SkillPackInstallation.installed_at >= window_start,
+                    SkillPackInstallation.installed_at < window_end,
+                )
+            )
+        ).scalar_one()
+        result[variant] = {"n": len(units), "numerator": installs, "denominator": len(units)}
+    return result
+
+
+@register_source("eco_telemetry")
+async def _source_eco_telemetry(
+    db: AsyncSession,
+    *,
+    experiment: Experiment,
+    definition: MetricDefinition,
+    variant_units: dict[str, list[str]],
+    window_start: datetime,
+    window_end: datetime,
+    unit_type: str = "",
+) -> SourceResult:
+    """Provider reliability from eco TelemetrySnapshots (provider_offering
+    units): sample-weighted success — numerator Σ(success_rate·samples),
+    denominator Σ samples. Reads approved aggregates only (eco privacy
+    thresholds already applied at snapshot time)."""
+    from app.ecosystem.models.graph import TelemetrySnapshot
+
+    if unit_type != "provider_offering":
+        return {variant: {"n": 0} for variant in variant_units}
+    result: SourceResult = {}
+    for variant, units in variant_units.items():
+        if not units:
+            result[variant] = {"n": 0}
+            continue
+        rows = (
+            await db.execute(
+                select(TelemetrySnapshot.sample_size, TelemetrySnapshot.metrics).where(
+                    TelemetrySnapshot.entity_kind == "provider_offering",
+                    TelemetrySnapshot.entity_id.in_(units),
+                    TelemetrySnapshot.window_start >= window_start,
+                    TelemetrySnapshot.window_start < window_end,
+                )
+            )
+        ).all()
+        weighted = 0.0
+        samples = 0
+        for sample_size, metrics in rows:
+            rate = metrics.get("success_rate")
+            if rate is None or not sample_size:
+                continue
+            weighted += float(rate) * sample_size
+            samples += sample_size
+        result[variant] = {"n": samples, "numerator": weighted, "denominator": samples}
+    return result
+
+
 # ── Seed definitions (Part C) ────────────────────────────────────────
 
 SEED_METRIC_DEFINITIONS: list[dict] = [
@@ -169,18 +381,22 @@ SEED_METRIC_DEFINITIONS: list[dict] = [
      "domain": "workflow", "source_kind": "service",
      "spec": {"source": "workflow_runs", "measure": "latency_ms"},
      "direction": "decrease_good", "winsorize_pct": 99.9},
-    # Learning (sources wired in exp07 — definitions are the contract)
+    # Learning — path progress is DERIVED (no progress table); its
+    # aggregation source lands with the exp09 hardening pass
     {"key": "completion_rate", "title": "Path completion", "kind": "binary", "domain": "learning",
      "source_kind": "service", "spec": {"source": "learning_paths"}},
     {"key": "time_to_completion_hours", "title": "Time to completion (h)", "kind": "continuous",
      "domain": "learning", "source_kind": "service", "spec": {"source": "learning_paths"},
      "direction": "decrease_good"},
+    # Practical pass needs the review pipeline's semantics — exp09
     {"key": "practical_pass_rate", "title": "Practical assessment pass", "kind": "binary",
      "domain": "assessment", "source_kind": "service", "spec": {"source": "evaluations"}},
     {"key": "project_approval_rate", "title": "Project approval", "kind": "binary",
-     "domain": "learning", "source_kind": "service", "spec": {"source": "projects"}},
+     "domain": "learning", "source_kind": "service",
+     "spec": {"source": "projects", "measure": "approval_rate"}},
     {"key": "revision_count", "title": "Revision count", "kind": "continuous",
-     "domain": "learning", "source_kind": "service", "spec": {"source": "projects"},
+     "domain": "learning", "source_kind": "service",
+     "spec": {"source": "projects", "measure": "revision_count"},
      "direction": "decrease_good"},
     {"key": "capability_gain", "title": "Capability gain", "kind": "continuous",
      "domain": "learning", "source_kind": "service", "spec": {"source": "capabilities"}},
@@ -276,7 +492,8 @@ class MetricService:
             units.setdefault(variant_key, []).append(unit_id)
         return units
 
-    async def _experiment_metric_keys(self, exp: Experiment) -> list[str]:
+    async def _experiment_metric_keys(self, exp: Experiment) -> tuple[list[str], str]:
+        """(ordered unique metric keys, spec unit_type)."""
         latest = (
             await self.db.execute(
                 select(ExperimentVersion).where(
@@ -286,12 +503,12 @@ class MetricService:
             )
         ).scalar_one_or_none()
         if latest is None:
-            return []
+            return [], ""
         spec = ExperimentSpec.model_validate(latest.spec)
         keys = [*spec.metrics.primary, *spec.metrics.secondary]
         keys.extend(g.metric_key for g in spec.metrics.guardrails)
         # Preserve order, drop duplicates
-        return list(dict.fromkeys(keys))
+        return list(dict.fromkeys(keys)), spec.unit_type
 
     async def compute_experiment_window(
         self, experiment_id: str, *, window_start: datetime, window_end: datetime
@@ -301,7 +518,7 @@ class MetricService:
         exp = await self.db.get(Experiment, experiment_id)
         if not exp:
             raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
-        metric_keys = await self._experiment_metric_keys(exp)
+        metric_keys, unit_type = await self._experiment_metric_keys(exp)
         if not metric_keys:
             return 0
         definitions = {
@@ -339,6 +556,7 @@ class MetricService:
                 variant_units=variant_units,
                 window_start=window_start,
                 window_end=window_end,
+                unit_type=unit_type,
             )
             provenance = {
                 "query_version": definition.query_version,
