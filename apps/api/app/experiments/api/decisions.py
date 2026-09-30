@@ -9,7 +9,7 @@ NOTE (route shadowing, §106.10): /experiments/decisions and
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.experiments.api.deps import check_enum, require_platform_admin
 from app.experiments.models.decision import DECISIONS, PROMOTION_STATUSES
 from app.experiments.schemas import (
@@ -35,7 +35,7 @@ async def search_decisions(
     cursor: str | None = Query(default=None, max_length=26),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     check_enum(decision, DECISIONS, "decision")
@@ -52,7 +52,7 @@ async def search_decisions(
 async def decisions_meta(
     domain: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     return {"data": await DecisionService(db).meta(domain=domain)}
@@ -62,7 +62,7 @@ async def decisions_meta(
 async def get_decision(
     decision_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     return {"data": await DecisionService(db).get(decision_id)}
 
@@ -94,7 +94,7 @@ async def list_promotion_drafts(
     status: str | None = None,
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     check_enum(status, PROMOTION_STATUSES, "status")
     rows = await PromotionService(db).list_drafts(status=status, limit=limit)

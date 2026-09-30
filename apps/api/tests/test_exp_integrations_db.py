@@ -48,10 +48,12 @@ async def _mk_admin(db) -> User:
 
 
 async def _mk_surface_experiment(
-    db, *, key: str, domain: str, unit_type: str, treatment_config: dict
+    db, *, key: str, domain: str, unit_type: str, treatment_config: dict,
+    control_weight_bp: int = 1,
 ):
-    """Running experiment on a well-known surface key: control weight 1bp,
-    treatment 9999bp — a resolved unit is a treatment unit with p=.9999.
+    """Running experiment on a well-known surface key: control weight 1bp by
+    default, treatment 9999bp — a resolved unit is a treatment unit with
+    p=.9999 (pass control_weight_bp=9999 to flip).
 
     Surface keys are UNIQUE and other suites (the outbox-driving E2E) can
     leak a committed row into the dev DB — delete any residue first, inside
@@ -74,8 +76,9 @@ async def _mk_surface_experiment(
         "hypothesis": f"surface hook {key} applies overrides safely enough",
         "unit_type": unit_type,
         "variants": [
-            {"key": "control", "name": "C", "weight_bp": 1, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 9999,
+            {"key": "control", "name": "C", "weight_bp": control_weight_bp,
+             "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 10_000 - control_weight_bp,
              "config": treatment_config},
         ],
         "metrics": {
@@ -354,6 +357,55 @@ async def test_retry_policy_non_int_refused(db):
     )
     tenant_unit = await _treatment_unit(db, exp, "tenant", "tenx")
     assert await hooks.retry_policy_override(db, tenant_id=tenant_unit) is None
+
+
+async def test_control_arm_records_exposure_too(db):
+    """Exposure must cover BOTH arms at the decision point — a control unit
+    hitting the surface records an exposure with the default experience
+    (otherwise exposure-based metrics compare treatment-exposed against
+    control-never-exposed)."""
+    entity_type, _active, candidate = await _mk_matching_pair(db)
+    # control-heavy: resolved units are control with p=.9999
+    exp, _ = await _mk_surface_experiment(
+        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        unit_type="organization",
+        treatment_config={"matching_config_id": candidate.id},
+        control_weight_bp=9999,
+    )
+    asvc = AssignmentService(db)
+    control_unit = None
+    for i in range(20):
+        r = await asvc.resolve(
+            experiment_key=exp.key, unit_type="organization", unit_id=f"ctl-{i}"
+        )
+        if r is not None and r.variant_key == "control":
+            control_unit = f"ctl-{i}"
+            break
+    assert control_unit, "no control unit in 20 probes (p < 1e-60)"
+    before = await _exposures(db, exp.id)
+    result = await hooks.matching_config_override(
+        db, org_id=control_unit, target_entity_type=entity_type
+    )
+    assert result is None  # control serves the default experience
+    assert await _exposures(db, exp.id) == before + 1  # ...but IS exposed
+
+
+async def test_negative_cache_invalidated_on_create(db):
+    """resolve() on a missing key negative-caches it; creating an experiment
+    with that key must take effect immediately in-process."""
+    from app.experiments.services.assignment import forget_missing_key
+
+    key = f"surface-cache-{str(ULID()).lower()[-8:]}"
+    forget_missing_key(key)
+    asvc = AssignmentService(db)
+    assert await asvc.resolve(experiment_key=key, unit_type="user", unit_id="u1") is None
+    # key now negative-cached; creating the experiment must invalidate it
+    exp, _ = await _mk_surface_experiment(
+        db, key=key, domain="marketplace", unit_type="user",
+        treatment_config={"sort": "most_installed"},
+    )
+    resolved = await asvc.resolve(experiment_key=key, unit_type="user", unit_id="u1")
+    assert resolved is not None
 
 
 # ── Fail-safe: no experiment on a surface = pure control ─────────────

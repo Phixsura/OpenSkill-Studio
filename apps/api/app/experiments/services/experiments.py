@@ -148,6 +148,11 @@ class ExperimentService:
             await self.db.flush()
         except IntegrityError as exc:
             raise AppError("EXPERIMENT_KEY_TAKEN", f"Experiment key taken: {key}", 409) from exc
+        # A surface hook may have negative-cached this key as absent —
+        # invalidate so the new experiment takes effect immediately here
+        from app.experiments.services.assignment import forget_missing_key
+
+        forget_missing_key(key)
         await self._record_event(
             exp.id, event_type="created", actor_user_id=owner_user_id, payload={"key": key}
         )

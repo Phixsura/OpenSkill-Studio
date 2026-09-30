@@ -621,3 +621,30 @@ Deviations from and refinements to the plan, discovered during implementation:
   carries the ledger).
 - Org-scoped operator routes (`/orgs/{org_id}/experiments`) are still
   platform-admin only; org-admin delegation is follow-up work.
+
+Post-implementation hardening round (same day):
+
+- **Reads are platform-admin gated** (was: any authenticated user could read
+  specs, decisions, guardrail events, assignment diagnostics — the R88-91
+  authz class); a source-scan test pins that no experiments API module uses
+  plain `get_current_user`.
+- **Sweeps are actually scheduled**: exp_guardrail_sweep (10 min),
+  exp_window_sweep (daily 00:52 UTC) and exp_closure_sweep (hourly) are
+  registered in the worker cron table — previously they existed but never
+  ran; a test pins the three names into `_cron_jobs()` (§96 guard class).
+- **`sweep_experiment_closures`** auto-completes running experiments past
+  `stop_policy.max_days` (was missing entirely — max_days was decorative).
+- **Window sweep's analysis-close filter moved into SQL before the cap** —
+  a closed-analysis backlog could starve live experiments out of capped
+  slots (fourth accumulation-bomb shape).
+- **Both arms record exposures at the decision point** — hooks previously
+  exposed only treatment units, biasing every exposure-based comparison
+  (control units now log an `arm: control` exposure when the default
+  experience serves; invalid treatment overrides still record nothing).
+- **Missing-key negative cache (60s)** on the facade hot path: surfaces
+  without a live experiment cost ~zero after the first lookup and no longer
+  log per-request; `ExperimentService.create` invalidates the cache
+  in-process so a new surface experiment takes effect immediately.
+- ADR §4.2 example previously used a non-existent population op
+  (`in_experiment_layer`) — layer exclusivity is enforced by slice
+  allocation, not population rules.

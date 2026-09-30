@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.experiments.api.deps import check_enum, require_platform_admin
 from app.experiments.schemas import (
     CreateExperimentRequest,
@@ -49,7 +49,7 @@ async def list_experiments(
     cursor: str | None = Query(default=None, max_length=26),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     check_enum(status, EXPERIMENT_STATUSES, "status")
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
@@ -66,7 +66,7 @@ async def list_experiments(
 async def get_experiment(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     return {"data": await ExperimentService(db).get(experiment_id)}
 
@@ -87,7 +87,7 @@ async def create_version(
 async def list_versions(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     rows = await ExperimentService(db).get_versions(experiment_id)
     return {"data": [VersionResponse.model_validate(x).model_dump() for x in rows]}
@@ -125,7 +125,7 @@ async def list_events(
     experiment_id: str,
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     rows = await ExperimentService(db).list_events(experiment_id, limit=limit)
     return {"data": [ExperimentEventResponse.model_validate(x).model_dump() for x in rows]}

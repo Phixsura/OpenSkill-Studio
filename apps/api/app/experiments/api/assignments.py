@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.experiments.api.deps import require_platform_admin
 from app.experiments.schemas import PreviewAssignmentRequest
 from app.experiments.services.assignment import AssignmentService
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/experiments", tags=["Experiments — Assignments"])
 async def assignment_stats(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     await ExperimentService(db).get(experiment_id)
     return {"data": await AssignmentService(db).assignment_stats(experiment_id)}
@@ -46,7 +46,7 @@ async def preview_assignment(
 async def exposure_stats(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     await ExperimentService(db).get(experiment_id)
     return {"data": await AssignmentService(db).exposure_stats(experiment_id)}

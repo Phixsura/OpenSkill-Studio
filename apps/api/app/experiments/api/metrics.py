@@ -8,7 +8,7 @@ dynamic /experiments/{experiment_id} routes.
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.experiments.api.deps import check_enum, require_platform_admin
 from app.experiments.schemas import (
     CreateMetricDefinitionRequest,
@@ -41,7 +41,7 @@ async def create_metric_definition(
 async def list_metric_definitions(
     domain: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     rows = await MetricService(db).list_definitions(domain=domain)
@@ -65,7 +65,7 @@ async def list_metric_snapshots(
     metric_key: str | None = Query(default=None, max_length=64),
     limit: int = Query(200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     await ExperimentService(db).get(experiment_id)
     rows = await MetricService(db).list_snapshots(

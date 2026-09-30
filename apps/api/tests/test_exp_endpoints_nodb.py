@@ -96,3 +96,18 @@ async def test_transition_body_required(client):
     resp = await client.post(f"/api/v1/experiments/{EXP_ID}/transition", json={})
     assert resp.status_code in (401, 422)
     assert "error" in resp.json()
+
+
+def test_experiment_reads_are_admin_gated():
+    """R88-91 authz class: experiment specs, decisions, guardrail events and
+    assignment diagnostics are operator surfaces — no endpoint module may
+    fall back to plain get_current_user (any authenticated user)."""
+    from pathlib import Path
+
+    api_dir = Path(__file__).resolve().parents[1] / "app" / "experiments" / "api"
+    offenders = [
+        path.name
+        for path in api_dir.glob("*.py")
+        if path.name != "deps.py" and "get_current_user" in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, f"non-admin experiment reads: {offenders}"

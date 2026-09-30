@@ -15,6 +15,7 @@ points call record_exposure() at the moment the variant takes effect.
 """
 
 import hashlib
+import time
 from dataclasses import dataclass
 
 from sqlalchemy import func, select
@@ -36,6 +37,34 @@ BUCKET_SPACE = 10_000
 # Statuses in which an existing assignment keeps serving its variant
 # (pause stops NEW entries only; completed/analyzed serve until archived)
 _SERVE_EXISTING_STATUSES = frozenset({"running", "paused", "completed", "analyzed"})
+
+# Hot-path negative cache: surfaces WITHOUT a live experiment (the common
+# case for well-known surface keys) must cost ~zero after the first miss —
+# without this every registry search / matching run pays experiment lookups
+# and logs. Invalidated eagerly by ExperimentService.create (same-process);
+# a different process sees a new experiment within the TTL at worst.
+_MISSING_KEY_TTL_SECONDS = 60.0
+_MISSING_KEY_CACHE: dict[str, float] = {}
+
+
+def _key_known_missing(experiment_key: str) -> bool:
+    expiry = _MISSING_KEY_CACHE.get(experiment_key)
+    if expiry is None:
+        return False
+    if expiry < time.monotonic():
+        _MISSING_KEY_CACHE.pop(experiment_key, None)
+        return False
+    return True
+
+
+def _remember_missing(experiment_key: str) -> None:
+    _MISSING_KEY_CACHE[experiment_key] = time.monotonic() + _MISSING_KEY_TTL_SECONDS
+
+
+def forget_missing_key(experiment_key: str) -> None:
+    """Called on experiment creation so a new surface experiment takes effect
+    immediately in this process."""
+    _MISSING_KEY_CACHE.pop(experiment_key, None)
 
 
 def _roll(salt: str, *parts: str) -> int:
@@ -123,11 +152,21 @@ class AssignmentService:
         self.db = db
 
     async def _load(self, experiment_key: str) -> Experiment:
+        exp = await self._load_or_none(experiment_key)
+        if not exp:
+            raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
+        return exp
+
+    async def _load_or_none(self, experiment_key: str) -> Experiment | None:
+        """Hot-path load: a surface with no experiment is the COMMON case —
+        negative-cached so product paths pay ~nothing (§7 hooks)."""
+        if _key_known_missing(experiment_key):
+            return None
         exp = (
             await self.db.execute(select(Experiment).where(Experiment.key == experiment_key))
         ).scalar_one_or_none()
-        if not exp:
-            raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
+        if exp is None:
+            _remember_missing(experiment_key)
         return exp
 
     async def _spec_and_salt(self, exp: Experiment) -> tuple[ExperimentSpec, str]:
@@ -239,8 +278,12 @@ class AssignmentService:
     async def resolve(
         self, *, experiment_key: str, unit_type: str, unit_id: str, context: dict | None = None
     ) -> ResolvedVariant | None:
-        """Sticky, race-safe resolution (ADR-017 §6 steps 1–7)."""
-        exp = await self._load(experiment_key)
+        """Sticky, race-safe resolution (ADR-017 §6 steps 1–7). An unknown
+        key is the normal no-experiment-on-this-surface case → None, cheap,
+        no logging."""
+        exp = await self._load_or_none(experiment_key)
+        if exp is None:
+            return None
         spec, _ = await self._spec_and_salt(exp)
 
         # Sticky first: an existing assignment keeps serving through
@@ -291,7 +334,9 @@ class AssignmentService:
         """Append one exposure for an assigned unit. Returns False when the
         unit has no assignment (exposure without assignment is a caller bug —
         fail-safe, never crash the product path). Idempotent per dedup_key."""
-        exp = await self._load(experiment_key)
+        exp = await self._load_or_none(experiment_key)
+        if exp is None:
+            return False
         assignment = await self._existing(exp.id, unit_type, unit_id)
         if assignment is None:
             return False

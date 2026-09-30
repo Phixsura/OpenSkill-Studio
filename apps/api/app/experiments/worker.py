@@ -13,12 +13,12 @@ caps must price in DB lifetime, oldest-first ordering prevents starvation).
 from datetime import UTC, datetime, time, timedelta
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controlplane.models.outbox import enqueue
 from app.controlplane.worker import register_handler
-from app.experiments.models import Experiment
+from app.experiments.models import Experiment, ExperimentVersion
 
 log = structlog.get_logger()
 
@@ -90,19 +90,23 @@ async def sweep_experiment_windows(
     in its analysis life. Bounded; handler idempotency absorbs double-enqueue."""
     now = now or datetime.now(UTC)
     window_start, window_end = previous_utc_day(now)
+    # The analysis-close filter lives in SQL, BEFORE the cap: a backlog of
+    # analytically-closed experiments must never occupy capped slots and
+    # starve live ones (the fourth accumulation-bomb shape, §106.26 class).
     q = (
         select(Experiment.id)
         .where(
             Experiment.status.in_(_SNAPSHOT_STATUSES),
+            or_(
+                Experiment.analysis_close_at.is_(None),
+                Experiment.analysis_close_at > now,
+            ),
         )
         .order_by(Experiment.id.asc())
         .limit(cap)
     )
     enqueued = 0
     for (experiment_id,) in (await db.execute(q)).all():
-        exp = await db.get(Experiment, experiment_id)
-        if exp.analysis_close_at is not None and exp.analysis_close_at <= now:
-            continue
         enqueue(
             db,
             "exp.compute_snapshots",
@@ -114,3 +118,53 @@ async def sweep_experiment_windows(
         )
         enqueued += 1
     return enqueued
+
+
+CLOSURE_SWEEP_CAP = 200
+
+
+async def sweep_experiment_closures(
+    db: AsyncSession, *, now: datetime | None = None, cap: int = CLOSURE_SWEEP_CAP
+) -> int:
+    """Auto-complete running experiments past their spec's stop_policy
+    max_days (ADR-017 §13). Completing is always safe (it only stops NEW
+    enrollment and stamps ended_at/analysis_close_at) — promotion stays a
+    human decision. Bounded oldest-first; the transition is serialized by
+    the locked state machine, so a racing manual transition simply wins."""
+    from app.experiments.schemas import ExperimentSpec
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.guardrails import _system_actor
+
+    now = now or datetime.now(UTC)
+    rows = (
+        await db.execute(
+            select(Experiment.id, Experiment.started_at, Experiment.current_version)
+            .where(Experiment.status == "running", Experiment.started_at.is_not(None))
+            .order_by(Experiment.started_at.asc())
+            .limit(cap)
+        )
+    ).all()
+    closed = 0
+    for experiment_id, started_at, current_version in rows:
+        version = (
+            await db.execute(
+                select(ExperimentVersion).where(
+                    ExperimentVersion.experiment_id == experiment_id,
+                    ExperimentVersion.version == current_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            continue
+        max_days = ExperimentSpec.model_validate(version.spec).stop_policy.max_days
+        if started_at + timedelta(days=max_days) > now:
+            continue
+        await ExperimentService(db).transition(
+            experiment_id,
+            to_status="completed",
+            actor=_system_actor(),
+            reason=f"stop_policy.max_days ({max_days}) elapsed",
+        )
+        closed += 1
+        log.info("exp_auto_completed", experiment_id=experiment_id, max_days=max_days)
+    return closed

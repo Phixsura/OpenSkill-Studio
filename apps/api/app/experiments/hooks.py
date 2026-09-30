@@ -34,6 +34,15 @@ REGISTRY_SORTS = frozenset({"newest", "most_installed", "popular", "recently_upd
 RETRY_ATTEMPTS_MIN, RETRY_ATTEMPTS_MAX = 1, 10
 
 
+
+async def _expose(
+    db: AsyncSession, *, key: str, unit_type: str, unit_id: str, context: dict
+) -> None:
+    await facade.record_exposure(
+        db, experiment_key=key, unit_type=unit_type, unit_id=unit_id, context=context
+    )
+
+
 async def matching_config_override(
     db: AsyncSession, *, org_id: str, target_entity_type: str
 ):
@@ -52,6 +61,12 @@ async def matching_config_override(
         return None
     config_id = resolved.config.get("matching_config_id")
     if not config_id:
+        # Control arm (or a treatment without an override field): the default
+        # experience IS this unit's exposure — record it so the funnel and
+        # exposure-based metrics compare like with like (exposure must cover
+        # BOTH arms at the decision point).
+        await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
+                      unit_id=org_id, context={"surface": "matching", "arm": "control"})
         return None
     from app.models.matching import MatchingConfig
 
@@ -98,6 +113,9 @@ async def workflow_binding_override(
         return None
     offering_id = resolved.config.get("offering_id")
     if not offering_id:
+        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
+                      unit_id=installation_id,
+                      context={"surface": "workflow_binding", "arm": "control"})
         return None
     from app.models.provider import ProviderConnection, ProviderModelOffering
 
@@ -141,6 +159,10 @@ async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | Non
     if not resolved:
         return None
     sort = resolved.config.get("sort")
+    if sort is None:
+        await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                      unit_id=user_id, context={"surface": "registry", "arm": "control"})
+        return None
     if sort not in REGISTRY_SORTS:
         return None
     await facade.record_exposure(
@@ -173,6 +195,8 @@ async def cohort_path_override(
         return None
     path_id = resolved.config.get("alternative_path_id")
     if not path_id:
+        await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                      unit_id=cohort_id, context={"surface": "cohort_path", "arm": "control"})
         return None
     from app.models.learning_path import LearningPath
 
@@ -206,6 +230,10 @@ async def rubric_override(
     if not resolved:
         return None
     rubric = resolved.config.get("rubric")
+    if rubric is None:
+        await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
+                      unit_id=project_id, context={"surface": "rubric", "arm": "control"})
+        return None
     if not isinstance(rubric, list) or not rubric or not all(
         isinstance(item, dict) and item.get("criterion") for item in rubric
     ):
@@ -232,6 +260,10 @@ async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | No
     if not resolved:
         return None
     attempts = resolved.config.get("max_attempts")
+    if attempts is None:
+        await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
+                      unit_id=tenant_id, context={"surface": "retry_policy", "arm": "control"})
+        return None
     if not isinstance(attempts, int):
         return None
     clamped = max(RETRY_ATTEMPTS_MIN, min(RETRY_ATTEMPTS_MAX, attempts))

@@ -259,6 +259,72 @@ async def test_sweep_enqueues_yesterday_window_for_live_experiments(db):
     assert mine[0].payload["window_end"] == we.isoformat()
 
 
+async def test_sweep_closed_analysis_never_occupies_cap_slots(db):
+    """Fourth accumulation-bomb shape (§106.26): the close filter must live
+    in SQL BEFORE the cap — an older analytically-closed experiment must not
+    starve a live one out of a cap-1 sweep."""
+    # §106.25: push any pre-existing sweep-eligible experiments (committed
+    # residue in the shared dev DB) out of the window first — the in-txn
+    # UPDATE is rolled back with the test.
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status.in_(("running", "paused", "completed", "analyzed")))
+        .values(analysis_close_at=datetime.now(UTC) - timedelta(days=1))
+    )
+    old_exp, old_admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    await svc.transition(old_exp.id, to_status="completed", actor=old_admin)
+    old_exp.analysis_close_at = datetime.now(UTC) - timedelta(days=1)
+    await db.flush()
+    live_exp, _ = await _mk_running(db)  # newer id → loses an id-ordered cap-1
+    enqueued = await sweep_experiment_windows(db, cap=1)
+    assert enqueued == 1
+    from app.controlplane.models.outbox import OutboxMessage
+
+    rows = list(
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.topic == "exp.compute_snapshots",
+                    OutboxMessage.status == "pending",
+                )
+            )
+        ).scalars()
+    )
+    mine = {m.payload["experiment_id"] for m in rows} & {old_exp.id, live_exp.id}
+    assert mine == {live_exp.id}
+
+
+async def test_closure_sweep_completes_past_max_days(db):
+    from app.experiments.worker import sweep_experiment_closures
+
+    exp, admin = await _mk_running(db)  # spec default max_days=28
+    fresh_exp, _ = await _mk_running(db)
+    exp_row = await ExperimentService(db).get(exp.id)
+    exp_row.started_at = datetime.now(UTC) - timedelta(days=29)
+    await db.flush()
+    closed = await sweep_experiment_closures(db)
+    assert closed >= 1
+    assert (await ExperimentService(db).get(exp.id)).status == "completed"
+    assert (await ExperimentService(db).get(exp.id)).analysis_close_at is not None
+    # a fresh experiment is untouched
+    assert (await ExperimentService(db).get(fresh_exp.id)).status == "running"
+
+
+async def test_exp_sweeps_registered_in_cron_table():
+    """The §96 guard class: sweeps that exist but are never scheduled are
+    dead code — pin all three experiment sweeps into the worker cron
+    registry by name."""
+    from app.controlplane.worker import _cron_jobs
+
+    names = {job.name for job in _cron_jobs()}
+    assert {"exp_guardrail_sweep", "exp_window_sweep", "exp_closure_sweep"} <= names
+
+
 async def test_sweep_skips_closed_analysis(db):
     exp, admin = await _mk_running(db)
     svc = ExperimentService(db)

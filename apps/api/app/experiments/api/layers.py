@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_db
 from app.experiments.api.deps import require_platform_admin
 from app.experiments.schemas import (
     AllocationResponse,
@@ -32,7 +32,7 @@ async def create_layer(
 @router.get("", response_model=dict)
 async def list_layers(
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     rows = await LayerService(db).list_layers()
     return {"data": [LayerResponse.model_validate(x).model_dump() for x in rows]}
@@ -59,7 +59,7 @@ async def allocate_slices(
 async def list_allocations(
     layer_key: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
     rows = await LayerService(db).list_allocations(layer_key)
     return {"data": [AllocationResponse.model_validate(x).model_dump() for x in rows]}

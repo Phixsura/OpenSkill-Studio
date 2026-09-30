@@ -477,6 +477,42 @@ async def _sweep_workflow_runtime(ctx: dict) -> None:
         )
 
 
+async def _exp_guardrail_sweep(ctx: dict) -> None:
+    """ADR-017 §9: enqueue guardrail evaluation, oldest-checked first."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_guardrails
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_guardrails(db)
+        if n:
+            await db.commit()
+            log.info("exp_guardrails_enqueued", count=n)
+
+
+async def _exp_window_sweep(ctx: dict) -> None:
+    """ADR-017 §13: enqueue yesterday's UTC-day snapshot windows."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_windows
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_windows(db)
+        if n:
+            await db.commit()
+            log.info("exp_windows_enqueued", count=n)
+
+
+async def _exp_closure_sweep(ctx: dict) -> None:
+    """ADR-017 §13: auto-complete running experiments past max_days."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_closures
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_closures(db)
+        if n:
+            await db.commit()
+            log.info("exp_experiments_auto_completed", count=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -514,6 +550,11 @@ def _cron_jobs() -> list:
         # R66[2]: workflow sweeper (review due_at expiry + stalled-run
         # recovery) every 5 minutes — off-minute by design.
         cron(_sweep_workflow_runtime, minute=set(range(3, 60, 5)), name="cp_workflow_sweep"),
+        # ADR-017 experiments: guardrails every 10 min (off-minute),
+        # daily snapshot windows at 00:52 UTC, max_days closures hourly :21
+        cron(_exp_guardrail_sweep, minute={6, 16, 26, 36, 46, 56}, name="exp_guardrail_sweep"),
+        cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
+        cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
         # P10: tls refresh
     ]
 
