@@ -137,3 +137,22 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/NOVELTY_EFFECT_DECAY_SUSPECT/)).toBeTruthy();
   });
 });
+
+describe("Bandit suggestion banner", () => {
+  it("renders advisory weights and p(best)", async () => {
+    api.mockResolvedValue(
+      analysisPayload({
+        bandit: {
+          metric: "exposure_rate",
+          p_best: { control: 0.03, treatment: 0.97 },
+          suggested_weights_bp: { control: 300, treatment: 9700 },
+        },
+      }),
+    );
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/Bandit suggestion/)).toBeTruthy();
+    expect(screen.getByText(/treatment 97\.0%/)).toBeTruthy();
+    expect(screen.getByText(/advisory/)).toBeTruthy();
+  });
+});

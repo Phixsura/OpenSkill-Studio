@@ -39,6 +39,11 @@ interface AnalysisResult {
   caveat?: string;
   control: string;
   looks?: { used: number; max: number };
+  bandit?: {
+    metric: string;
+    p_best: Record<string, number>;
+    suggested_weights_bp: Record<string, number>;
+  };
   warnings: string[];
   result_hash: string;
   metrics: Record<
@@ -117,6 +122,19 @@ export default function AnalysisPage() {
               className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
             >
               <strong>Observational — no causal claim.</strong> {result.caveat}
+            </div>
+          ) : null}
+          {result.bandit ? (
+            <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+              <strong>Bandit suggestion</strong> (advisory — shipping weights is an operator
+              decision): on {result.bandit.metric},{" "}
+              {Object.entries(result.bandit.suggested_weights_bp)
+                .map(([k, v]) => `${k} ${(v / 100).toFixed(1)}%`)
+                .join(" / ")}
+              {" · p(best): "}
+              {Object.entries(result.bandit.p_best)
+                .map(([k, v]) => `${k} ${(v * 100).toFixed(1)}%`)
+                .join(" / ")}
             </div>
           ) : null}
           {result.warnings.map((w) => (
