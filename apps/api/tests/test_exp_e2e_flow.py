@@ -21,6 +21,7 @@ from app.core.database import AsyncSessionLocal
 from app.exceptions import AppError
 from app.experiments import facade, hooks
 from app.experiments.models import ExperimentEvent, MetricSnapshot
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.analysis_service import AnalysisService
 from app.experiments.services.decisions import DecisionService
 from app.experiments.services.experiments import ExperimentService
@@ -32,6 +33,7 @@ from app.experiments.worker import sweep_experiment_windows
 from app.models.matching import MatchingConfig
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -114,7 +116,10 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
 
     # ── 2 · Schedule → run → ramp ────────────────────────────────────
     for status in ("review", "scheduled", "running"):
-        await esvc.transition(exp.id, to_status=status, actor=admin)
+        await esvc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
 
     # ── 3 · Sticky assignment + the REAL matching hook + exposure ────

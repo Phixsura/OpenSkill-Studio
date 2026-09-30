@@ -728,6 +728,29 @@ Hardening round 5 (same day):
   synchronous applies roll back on failure; the column is reserved for a
   future async apply path.
 
+v2 batch 1 (round 8, 2026-10-01) — first slice of the §18 backlog:
+
+- **Launch checklist enforced** (§5 v2): review→scheduled requires every
+  required item affirmed (hypothesis peer-check, power, metrics review,
+  rollback owner; learner/talent domains add the ethics screen) — 422
+  EXPERIMENT_CHECKLIST_INCOMPLETE naming the missing items; the affirmation
+  is recorded in the transition audit event; Console renders the checklist
+  in review status; keys are web-parity-pinned.
+- **Exposure-SRM health check** (§4.13, trigger-bias detection): per-variant
+  exposed-unit counts are χ²-tested against assignment proportions every
+  guardrail sweep — divergence means the exposure decision is treatment-
+  affected, poisoning any exposed-only analysis. Alert-only
+  (`__exposure_srm__`), min 50 exposed, 24h suppression.
+- **Winsorization actually applied** (§4.6): a shared empirical-percentile
+  clamp now runs in the latency, revision-count and cost sources; provenance
+  carries winsorize_pct ONLY on snapshots whose source applied it (the
+  round-4 honesty rule, now with real application).
+- **Honesty warnings in analysis**: `TRIGGERED_ANALYSIS_UNAPPLIED` when the
+  spec requests exposed-only analysis (denominators are still ITT) and
+  `CUPED_COVARIATES_UNAVAILABLE` when variance_reduction is configured but
+  no source computed covariate aggregates — accepted-but-ignored knobs are
+  no longer silent.
+
 Hardening round 7 — fuzz layer + live-API E2E (2026-10-01):
 
 - **Hypothesis fuzz** (tests/test_exp_fuzz.py): every untrusted-input surface

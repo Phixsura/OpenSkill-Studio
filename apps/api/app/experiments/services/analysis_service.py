@@ -204,6 +204,10 @@ class AnalysisService:
         warnings: list[str] = []
         if spec.design in ("cluster", "switchback"):
             warnings.append("CLUSTERED_DESIGN_NAIVE_SE")
+        # Honesty warnings: spec knobs accepted but not (yet) applied must be
+        # surfaced, never silently ignored
+        if spec.trigger.analysis_population == "exposed":
+            warnings.append("TRIGGERED_ANALYSIS_UNAPPLIED")
 
         metrics_out: dict[str, dict] = {}
         secondary_ps: dict[str, float] = {}
@@ -248,6 +252,16 @@ class AnalysisService:
                         secondary_ps[f"{key}:{variant_key}"] = comparison["p"]
                 entry["comparisons"] = comparisons
                 metrics_out[key] = entry
+
+        if spec.variance_reduction is not None:
+            any_cuped = any(
+                "cuped" in comparison
+                for metric in metrics_out.values()
+                for comparison in (metric.get("comparisons") or {}).values()
+            )
+            if not any_cuped:
+                # Configured but no source computed covariate aggregates yet
+                warnings.append("CUPED_COVARIATES_UNAVAILABLE")
 
         if secondary_ps:
             fdr = stats.benjamini_hochberg(secondary_ps)

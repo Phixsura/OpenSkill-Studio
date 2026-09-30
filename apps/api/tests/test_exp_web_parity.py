@@ -48,6 +48,19 @@ def test_web_vocabularies_match_backend():
     assert _web_array("PROMOTION_TARGET_TYPES") == set(PROMOTION_TARGET_TYPES)
 
 
+def test_web_checklist_matches_backend():
+    from app.experiments.security import (
+        ETHICS_CHECKLIST_DOMAINS,
+        ETHICS_CHECKLIST_KEY,
+        LAUNCH_CHECKLIST_KEYS,
+    )
+
+    assert _web_array("LAUNCH_CHECKLIST_KEYS") == set(LAUNCH_CHECKLIST_KEYS)
+    assert _web_array("ETHICS_CHECKLIST_DOMAINS") == set(ETHICS_CHECKLIST_DOMAINS)
+    text = _LIB.read_text(encoding="utf-8")
+    assert f'ETHICS_CHECKLIST_KEY = "{ETHICS_CHECKLIST_KEY}"' in text
+
+
 def test_web_transition_table_matches_state_machine():
     text = _LIB.read_text(encoding="utf-8")
     match = re.search(

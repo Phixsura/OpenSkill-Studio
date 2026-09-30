@@ -15,6 +15,7 @@ from ulid import ULID
 from app.core.database import AsyncSessionLocal
 from app.exceptions import AppError
 from app.experiments.models import MetricSnapshot
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.analysis_service import AnalysisService
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
@@ -22,6 +23,7 @@ from app.experiments.services.layers import LayerService
 from app.experiments.services.metrics import MetricService
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -79,7 +81,7 @@ async def _mk_running(db, **spec_overrides):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     return exp, admin
@@ -180,6 +182,20 @@ async def test_mixed_query_version_warns(db):
     comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
     total_exposure = comparison["control"]["exposure"] + comparison["treatment"]["exposure"]
     assert total_exposure == 40
+
+
+async def test_honesty_warnings_for_unapplied_knobs(db):
+    """Spec knobs accepted but not yet applied must be SURFACED: triggered
+    (exposed-only) analysis and CUPED without covariate data both warn."""
+    exp, admin = await _mk_running(
+        db,
+        trigger={"analysis_population": "exposed"},
+        variance_reduction={"covariate_metric": "exposure_rate", "method": "cuped"},
+    )
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "TRIGGERED_ANALYSIS_UNAPPLIED" in result["warnings"]
+    assert "CUPED_COVARIATES_UNAVAILABLE" in result["warnings"]
 
 
 async def test_draft_experiment_cannot_analyze(db):

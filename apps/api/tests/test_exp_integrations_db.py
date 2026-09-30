@@ -16,6 +16,7 @@ from ulid import ULID
 from app.core.database import AsyncSessionLocal
 from app.experiments import hooks
 from app.experiments.models import ExperimentExposure
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
 from app.experiments.services.layers import LayerService
@@ -23,6 +24,7 @@ from app.experiments.services.metrics import MetricService
 from app.models.matching import MatchingConfig
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -91,7 +93,10 @@ async def _mk_surface_experiment(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
-        await svc.transition(exp.id, to_status=status, actor=admin)
+        await svc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     return exp, admin
 

@@ -9,7 +9,17 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../components";
-import { ALLOWED_TRANSITIONS, STATUS_STYLES, fmtDate, fmtPct, type Experiment } from "../lib";
+import {
+  ALLOWED_TRANSITIONS,
+  CHECKLIST_LABELS,
+  ETHICS_CHECKLIST_DOMAINS,
+  ETHICS_CHECKLIST_KEY,
+  LAUNCH_CHECKLIST_KEYS,
+  STATUS_STYLES,
+  fmtDate,
+  fmtPct,
+  type Experiment,
+} from "../lib";
 
 interface Version {
   id: string;
@@ -32,6 +42,7 @@ export default function ExperimentDetailPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [rampPct, setRampPct] = useState("");
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
   const { data } = useQuery({
     queryKey: ["experiment", experimentId],
@@ -56,7 +67,7 @@ export default function ExperimentDetailPage() {
     mutationFn: (to_status: string) =>
       apiWithAuth(`/experiments/${experimentId}/transition`, {
         method: "POST",
-        body: JSON.stringify({ to_status }),
+        body: JSON.stringify(to_status === "scheduled" ? { to_status, checklist } : { to_status }),
       }),
     onSuccess: () => {
       setError(null);
@@ -155,6 +166,28 @@ export default function ExperimentDetailPage() {
       </SectionCard>
 
       <SectionCard title="Lifecycle">
+        {experiment.status === "review" ? (
+          <div className="mb-3 rounded-md border border-sky-200 bg-sky-50 p-3">
+            <p className="mb-2 text-xs font-medium text-sky-900">
+              Launch checklist — every item must be affirmed to schedule (§5 v2)
+            </p>
+            {[
+              ...LAUNCH_CHECKLIST_KEYS,
+              ...((ETHICS_CHECKLIST_DOMAINS as readonly string[]).includes(experiment.domain)
+                ? [ETHICS_CHECKLIST_KEY]
+                : []),
+            ].map((key) => (
+              <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(checklist[key])}
+                  onChange={(e) => setChecklist({ ...checklist, [key]: e.target.checked })}
+                />
+                {CHECKLIST_LABELS[key] ?? key}
+              </label>
+            ))}
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           {decisionGated ? (
             <span className="mr-2 text-xs text-slate-500">

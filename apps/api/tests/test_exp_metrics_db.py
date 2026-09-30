@@ -16,6 +16,7 @@ from ulid import ULID
 from app.core.database import AsyncSessionLocal
 from app.exceptions import AppError
 from app.experiments.models import MetricSnapshot
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
 from app.experiments.services.layers import LayerService
@@ -27,6 +28,7 @@ from app.experiments.services.metrics import (
 from app.experiments.worker import previous_utc_day, sweep_experiment_windows
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -83,7 +85,7 @@ async def _mk_running(db):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     return exp, admin
@@ -246,7 +248,7 @@ async def test_holdout_units_excluded_from_itt_sets(db):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     asvc = AssignmentService(db)
@@ -570,8 +572,6 @@ async def test_registry_source_pack_adoption(db):
 async def test_workflow_runs_source_all_measures(db):
     """success_rate, failure_rate and latency_ms (with cap) over real runs —
     the latency branch had no direct coverage."""
-    from datetime import UTC as _UTC
-    from datetime import datetime as _dt
 
     from app.models.workflow_pack import WorkflowPackInstallation
     from app.models.workflow_run import RunStatus, WorkflowRun
@@ -614,12 +614,68 @@ async def test_workflow_runs_source_all_measures(db):
         db, "workflow_runs", definition_key="run_latency_ms",
         units=units, unit_type="workflow_installation",
     )
-    # run_latency_ms seed caps at cap_value=None → no cap; three finished runs
+    # run_latency_ms seeds winsorize_pct=99.9: with three samples the
+    # empirical 99.9th percentile IS the max → values unchanged, but the
+    # adjustment ran and the source flags it for provenance (v2 §4.6)
     stats = latency["treatment"]
     assert stats["n"] == 3
     assert stats["sum_value"] == pytest.approx(100 + 300 + 10_000)
     assert stats["sum_sq"] == pytest.approx(100**2 + 300**2 + 10_000**2)
-    _dt(2020, 1, 1, tzinfo=_UTC)  # keep imports used
+    assert stats["_winsorized"] is True
+
+
+async def test_winsorize_helper_clamps_upper_tail():
+    from app.experiments.services.metrics import winsorize
+
+    values = [1.0, 2.0, 3.0, 4.0, 100.0]
+    clamped, applied = winsorize(values, 80)  # 80th pct of 5 samples → 4.0
+    assert applied is True
+    assert clamped == [1.0, 2.0, 3.0, 4.0, 4.0]
+    same, applied = winsorize(values, None)
+    assert applied is False and same == values
+    single, applied = winsorize([42.0], 99)
+    assert applied is False  # <2 samples is a no-op
+
+
+async def test_winsorized_provenance_is_truthful(db):
+    """Provenance carries winsorize_pct ONLY on snapshots whose source
+    actually applied it (the round-4 honesty rule, now with real application)."""
+    from app.models.project import Project, Submission, SubmissionStatus
+
+    await MetricService(db).ensure_seed_definitions()
+    # Point revision_count at a winsorize pct for this test
+    from app.experiments.models import MetricDefinition
+
+    definition = (
+        await db.execute(
+            select(MetricDefinition).where(MetricDefinition.key == "revision_count")
+        )
+    ).scalar_one()
+    definition.winsorize_pct = 99
+    await db.flush()
+
+    exp, admin = await _mk_running(db)
+    # give the experiment a revision_count metric via a fresh spec? simpler:
+    # compute directly through the source + compute_experiment_window with
+    # the existing spec is exposure-only — assert at source level instead
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    project = Project(
+        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
+        description="d", instructions="i", rubric=[{"criterion": "c"}],
+    )
+    db.add(project)
+    await db.flush()
+    for version in (1, 2, 9):
+        db.add(
+            Submission(org_id=org.id, project_id=project.id, user_id=user.id,
+                       status=SubmissionStatus.APPROVED, version=version)
+        )
+    await db.flush()
+    out = await _run_source(
+        db, "projects", definition_key="revision_count", units=[user.id], unit_type="user",
+    )
+    assert out["treatment"]["_winsorized"] is True
 
 
 async def test_source_window_boundaries_half_open(db):

@@ -177,11 +177,27 @@ async def main() -> int:
                                "slice_end": 9999})
         check("allocate slices", r.status_code == 201, r.text[:200])
 
-        # ── Lifecycle over HTTP ────────────────────────────────────────
-        for to_status in ("review", "scheduled", "running"):
-            r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
-                             json={"to_status": to_status})
-            check(f"transition → {to_status}", r.status_code == 200, r.text[:200])
+        # ── Lifecycle over HTTP (incl. the launch checklist, §5 v2) ────
+        r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
+                         json={"to_status": "review"})
+        check("transition → review", r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
+                         json={"to_status": "scheduled"})
+        check("schedule without checklist refused",
+              r.status_code == 422
+              and r.json()["error"]["code"] == "EXPERIMENT_CHECKLIST_INCOMPLETE",
+              r.text[:200])
+        checklist = {
+            "hypothesis_peer_checked": True, "power_computed": True,
+            "metrics_reviewed": True, "rollback_owner_named": True,
+        }
+        r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
+                         json={"to_status": "scheduled", "checklist": checklist})
+        check("transition → scheduled (checklist affirmed)",
+              r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
+                         json={"to_status": "running"})
+        check("transition → running", r.status_code == 200, r.text[:200])
         r = await c.patch(f"/experiments/{exp_id}/ramp", headers=admin,
                           json={"ramp_bp": 10000})
         check("ramp to 100%", r.status_code == 200, r.text[:200])

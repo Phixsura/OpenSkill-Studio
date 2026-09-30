@@ -23,6 +23,7 @@ from app.experiments.models import (
     ExperimentAssignment,
     ExperimentEvent,
 )
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
 from app.experiments.services.guardrails import GuardrailService
@@ -34,6 +35,7 @@ from app.experiments.worker import (
 )
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -92,7 +94,7 @@ async def _mk_running(db, *, guardrails: list[dict] | None = None):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     return exp, admin
@@ -273,7 +275,10 @@ async def test_srm_runs_at_max_variant_count(db):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
-        await svc.transition(exp.id, to_status=status, actor=admin)
+        await svc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     # 120 units all in v0: gross mismatch across 10 arms (df = 9)
     for i in range(120):
         db.add(
@@ -322,6 +327,78 @@ def test_observed_scalar_all_aggregates():
     # explicit rate override on a continuous definition
     rate_override = SimpleNamespace(kind="continuous", spec={"guardrail_aggregate": "rate"})
     assert observed(rate_override, {"numerator": 1, "denominator": 2}) == pytest.approx(0.5)
+
+
+async def test_launch_checklist_required_to_schedule(db):
+    """§5 v2: scheduling without the affirmed checklist is refused with the
+    missing items named; learning-domain experiments also require the ethics
+    screen."""
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    import pytest as _pytest
+
+    from app.exceptions import AppError as _AppError
+
+    with _pytest.raises(_AppError) as e:
+        await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    assert e.value.code == "EXPERIMENT_CHECKLIST_INCOMPLETE"
+    assert "ethics_screened" in e.value.message  # learning domain
+    partial = {key: True for key in LAUNCH_CHECKLIST_KEYS}  # no ethics screen
+    with _pytest.raises(_AppError) as e:
+        await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=partial)
+    assert "ethics_screened" in e.value.message
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    assert (await svc.get(exp.id)).status == "scheduled"
+
+
+async def test_exposure_srm_alerts_on_trigger_bias(db):
+    """§4.13 v2: exposures concentrated in ONE arm while assignments are
+    balanced → __exposure_srm__ alert (never a pause) with dedup."""
+    from app.experiments.models.guardrail import EXPOSURE_SRM_GUARDRAIL_KEY
+
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    exposed = 0
+    for i in range(200):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"es-{i}")
+        if r is not None and r.variant_key == "treatment" and exposed < 80:
+            await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=f"es-{i}"
+            )
+            exposed += 1
+    assert exposed >= 60
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "exposure_srm" in summary
+    assert (await db.get(Experiment, exp.id)).status == "running"  # alert-only
+    events = await GuardrailService(db).list_events(exp.id)
+    hits = [e for e in events if e.guardrail_key == EXPOSURE_SRM_GUARDRAIL_KEY]
+    assert len(hits) == 1 and hits[0].action == "alerted"
+    # Dedup within the suppression window
+    await GuardrailService(db).evaluate_experiment(exp.id)
+    events = await GuardrailService(db).list_events(exp.id)
+    assert len([e for e in events if e.guardrail_key == EXPOSURE_SRM_GUARDRAIL_KEY]) == 1
+
+
+async def test_exposure_srm_quiet_when_proportional(db):
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    for i in range(120):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"ep-{i}")
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"ep-{i}")
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "exposure_srm" not in summary
 
 
 async def test_srm_quiet_below_min_sample(db):

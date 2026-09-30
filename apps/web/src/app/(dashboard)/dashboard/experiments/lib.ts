@@ -52,6 +52,25 @@ export const PROMOTION_TARGET_TYPES = [
   "pricing_presentation",
 ] as const;
 
+// §5 v2 launch checklist — mirrors security.LAUNCH_CHECKLIST_KEYS (parity-
+// guarded); domains touching learners/talent add the ethics screen.
+export const LAUNCH_CHECKLIST_KEYS = [
+  "hypothesis_peer_checked",
+  "power_computed",
+  "metrics_reviewed",
+  "rollback_owner_named",
+] as const;
+export const ETHICS_CHECKLIST_DOMAINS = ["learning", "assessment", "talent_flow"] as const;
+export const ETHICS_CHECKLIST_KEY = "ethics_screened";
+
+export const CHECKLIST_LABELS: Record<string, string> = {
+  hypothesis_peer_checked: "Hypothesis peer-checked",
+  power_computed: "Power / sample size computed",
+  metrics_reviewed: "Metrics & guardrails reviewed",
+  rollback_owner_named: "Rollback owner named",
+  ethics_screened: "Ethics screen completed (learner/talent domain)",
+};
+
 // Mirrors the backend state machine (_ALLOWED) so the console only offers
 // legal transitions; the server re-validates every one.
 export const ALLOWED_TRANSITIONS: Record<string, string[]> = {

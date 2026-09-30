@@ -53,6 +53,20 @@ def register_source(name: str):
     return wrap
 
 
+def winsorize(values: list[float], pct) -> tuple[list[float], bool]:
+    """Clamp the upper tail at the empirical pct-th percentile (v2 §4.6).
+    Returns (values, applied) — provenance records the adjustment only when
+    it actually happened. A pct of None (or <2 samples) is a no-op."""
+    if pct is None or len(values) < 2:
+        return values, False
+    import math
+
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, math.ceil(len(ordered) * float(pct) / 100.0) - 1))
+    cap = ordered[idx]
+    return [min(v, cap) for v in values], True
+
+
 # ── Built-in sources ─────────────────────────────────────────────────
 
 
@@ -140,10 +154,12 @@ async def _source_workflow_runs(
             cap = float(definition.cap_value) if definition.cap_value is not None else None
             if cap is not None:
                 durations = [min(d, cap) for d in durations]
+            durations, winsorized = winsorize(durations, definition.winsorize_pct)
             result[variant] = {
                 "n": len(durations),
                 "sum_value": sum(durations),
                 "sum_sq": sum(d * d for d in durations),
+                "_winsorized": winsorized,
             }
         elif measure == "failure_rate":
             failed = sum(1 for status, _s, _f in rows if status == RunStatus.FAILED)
@@ -198,11 +214,13 @@ async def _source_projects(
             )
         ).all()
         if measure == "revision_count":
-            revisions = [max(0, version - 1) for _status, version in rows]
+            revisions = [float(max(0, version - 1)) for _status, version in rows]
+            revisions, winsorized = winsorize(revisions, definition.winsorize_pct)
             result[variant] = {
                 "n": len(revisions),
                 "sum_value": sum(revisions),
                 "sum_sq": sum(r * r for r in revisions),
+                "_winsorized": winsorized,
             }
         else:
             approved = sum(1 for status, _v in rows if status == SubmissionStatus.APPROVED)
@@ -244,10 +262,12 @@ async def _source_cost_ledger(
                 Organization.tenant_id.in_(units)
             )
         costs = [float(c) for (c,) in (await db.execute(q)).all()]
+        costs, winsorized = winsorize(costs, definition.winsorize_pct)
         result[variant] = {
             "n": len(costs),
             "sum_value": sum(costs),
             "sum_sq": sum(c * c for c in costs),
+            "_winsorized": winsorized,
         }
     return result
 
@@ -586,13 +606,22 @@ class MetricService:
                 "source": source_name,
             }
             for variant_key, values in stats.items():
+                values = dict(values)
+                # Meta flags from the source (not snapshot columns): a source
+                # that actually adjusted its values says so in provenance
+                variant_provenance = provenance
+                if values.pop("_winsorized", False):
+                    variant_provenance = {
+                        **provenance,
+                        "winsorize_pct": float(definition.winsorize_pct),
+                    }
                 row = {
                     "experiment_id": experiment_id,
                     "metric_key": key,
                     "variant_key": variant_key,
                     "window_start": window_start,
                     "window_end": window_end,
-                    "provenance": provenance,
+                    "provenance": variant_provenance,
                     **values,
                 }
                 insert = pg_insert(MetricSnapshot).values(**row)

@@ -102,7 +102,11 @@ async def transition_experiment(
 ):
     check_enum(body.to_status, EXPERIMENT_STATUSES, "to_status")
     exp = await ExperimentService(db).transition(
-        experiment_id, to_status=body.to_status, actor=user, reason=body.reason
+        experiment_id,
+        to_status=body.to_status,
+        actor=user,
+        reason=body.reason,
+        checklist=body.checklist,
     )
     await db.commit()
     return {"data": exp}

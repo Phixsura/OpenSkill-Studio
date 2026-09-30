@@ -118,6 +118,24 @@ PROMOTION_TARGET_TYPES = frozenset(
 # domains; never for learning/assessment/matching/talent_flow (§4.2 v2).
 BANDIT_ALLOWED_DOMAINS = frozenset({"marketplace", "operational"})
 
+# §5 v2 launch checklist: every item must be affirmed to schedule. The web
+# console mirrors these keys (parity-guarded).
+LAUNCH_CHECKLIST_KEYS = (
+    "hypothesis_peer_checked",
+    "power_computed",
+    "metrics_reviewed",
+    "rollback_owner_named",
+)
+# Domains touching learners/talent additionally affirm the ethics screen
+ETHICS_CHECKLIST_DOMAINS = frozenset({"learning", "assessment", "talent_flow"})
+ETHICS_CHECKLIST_KEY = "ethics_screened"
+
+
+def required_checklist_keys(domain: str) -> tuple[str, ...]:
+    if domain in ETHICS_CHECKLIST_DOMAINS:
+        return (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)
+    return LAUNCH_CHECKLIST_KEYS
+
 
 def check_targeting_field(field: str) -> None:
     """Reject population rules keyed on forbidden or unknown fields."""

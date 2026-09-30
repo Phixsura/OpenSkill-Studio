@@ -284,7 +284,23 @@ class ExperimentService:
                 422,
             )
 
-    async def _check_schedule_preconditions(self, exp: Experiment, actor: User) -> None:
+    async def _check_schedule_preconditions(
+        self, exp: Experiment, actor: User, checklist: dict | None = None
+    ) -> None:
+        from app.experiments.security import required_checklist_keys
+
+        # §5 v2 launch checklist: every required item affirmed to schedule
+        missing = [
+            key
+            for key in required_checklist_keys(exp.domain)
+            if not (checklist or {}).get(key)
+        ]
+        if missing:
+            raise AppError(
+                "EXPERIMENT_CHECKLIST_INCOMPLETE",
+                f"Launch checklist incomplete: {', '.join(missing)}",
+                422,
+            )
         if exp.current_version < 1:
             raise AppError(
                 "EXPERIMENT_SPEC_INVALID", "Cannot schedule without a spec version", 422
@@ -333,6 +349,7 @@ class ExperimentService:
         to_status: str,
         actor: User,
         reason: str | None = None,
+        checklist: dict | None = None,
         _via_decision: bool = False,
     ) -> Experiment:
         exp = await self._get_locked(experiment_id)
@@ -348,7 +365,7 @@ class ExperimentService:
                 422,
             )
         if to_status == "scheduled":
-            await self._check_schedule_preconditions(exp, actor)
+            await self._check_schedule_preconditions(exp, actor, checklist)
         now = datetime.now(UTC)
         from_status = exp.status
         exp.status = to_status
@@ -364,7 +381,12 @@ class ExperimentService:
             exp.id,
             event_type="transition",
             actor_user_id=actor.id,
-            payload={"from": from_status, "to": to_status, "reason": reason},
+            payload={
+                "from": from_status,
+                "to": to_status,
+                "reason": reason,
+                **({"checklist": checklist} if checklist else {}),
+            },
         )
         await self.db.flush()
         return exp

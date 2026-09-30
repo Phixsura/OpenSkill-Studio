@@ -227,6 +227,8 @@ class CreateVersionRequest(_StrictReq):
 class TransitionRequest(_StrictReq):
     to_status: str = Field(max_length=12)
     reason: str | None = Field(default=None, max_length=1000)
+    # §5 v2: review→scheduled requires the launch checklist affirmed
+    checklist: dict[str, bool] = Field(default_factory=dict)
 
 
 class RampRequest(_StrictReq):

@@ -16,6 +16,7 @@ from ulid import ULID
 
 from app.core.database import AsyncSessionLocal
 from app.exceptions import AppError
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.analysis_service import AnalysisService
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.decisions import DecisionService
@@ -26,6 +27,7 @@ from app.experiments.services.promotion import PromotionService
 from app.models.matching import MatchingConfig
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -82,7 +84,10 @@ async def _mk_analyzed(db, **spec_overrides):
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
-        await svc.transition(exp.id, to_status=status, actor=admin)
+        await svc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     asvc = AssignmentService(db)
     for i in range(20):
@@ -94,7 +99,10 @@ async def _mk_analyzed(db, **spec_overrides):
         exp.id, window_start=start, window_end=start + timedelta(days=1)
     )
     for status in ("completed", "analyzed"):
-        await svc.transition(exp.id, to_status=status, actor=admin)
+        await svc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     analysis = await AnalysisService(db).run(exp.id, actor=admin)
     return exp, admin, analysis["result_hash"]
 
@@ -181,7 +189,10 @@ async def test_direct_transition_to_promoted_refused(db):
     svc = ExperimentService(db)
     for status in ("promoted", "rejected"):
         with pytest.raises(AppError) as e:
-            await svc.transition(exp.id, to_status=status, actor=admin)
+            await svc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
         assert e.value.code == "EXPERIMENT_DECISION_REQUIRED"
     # the decision path still works
     await _promote(db, exp, admin, result_hash)
@@ -208,7 +219,10 @@ async def test_surface_key_reusable_after_terminal(db):
         layer_key=layer.key, experiment_id=second.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
-        await svc.transition(second.id, to_status=status, actor=admin)
+        await svc.transition(
+            second.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     await svc.set_ramp(second.id, ramp_bp=10_000, actor=admin)
     forget_missing_key(key)
     resolved = await AssignmentService(db).resolve(

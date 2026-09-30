@@ -21,11 +21,13 @@ from app.experiments.models import (
     ExperimentLayer,
     ExperimentLayerAllocation,
 )
+from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
 from app.experiments.services.layers import LayerService
 from app.models.user import User, UserRole, UserStatus
 
+_CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
 @pytest.fixture
 async def db():
@@ -95,7 +97,7 @@ async def _mk_running(
         layer_key=layer.key, experiment_id=exp.id, slice_start=slice_start, slice_end=slice_end
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     if ramp_bp:
         await svc.set_ramp(exp.id, ramp_bp=ramp_bp, actor=admin)

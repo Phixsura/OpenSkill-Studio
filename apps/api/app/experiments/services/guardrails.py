@@ -26,6 +26,7 @@ from app.experiments.models import (
     MetricDefinition,
 )
 from app.experiments.models.guardrail import (
+    EXPOSURE_SRM_GUARDRAIL_KEY,
     INCIDENT_GUARDRAIL_KEY,
     SRM_GUARDRAIL_KEY,
     GuardrailEvent,
@@ -45,6 +46,9 @@ _CHI2_CRIT_P001 = {
 
 # SRM needs a sample before the ratio test means anything
 SRM_MIN_ASSIGNMENTS = 100
+
+# Exposure-SRM (§4.13 v2) needs a real exposed sample too
+EXPOSURE_SRM_MIN_EXPOSED = 50
 
 # Re-alert suppression: one open SRM alert per experiment per day
 _SRM_REALERT_HOURS = 24
@@ -119,6 +123,61 @@ class GuardrailService:
                 )
             )
             log.warning("experiment_srm_alert", experiment_id=exp.id, **detail)
+        return detail
+
+    async def check_exposure_srm(self, exp: Experiment) -> dict | None:
+        """§4.13 v2 (trigger-bias detection): per-variant EXPOSED-unit counts
+        must track assignment proportions — a divergence means the exposure
+        decision itself is affected by the treatment, which poisons any
+        exposed-only (triggered) analysis. Alert-only, 24h-suppressed."""
+        from app.experiments.services.assignment import AssignmentService
+
+        stats = await AssignmentService(self.db).exposure_stats(exp.id)
+        funnel = stats.get("funnel", {})
+        total_assigned = sum(v["assigned"] for v in funnel.values())
+        total_exposed = sum(v["exposed_units"] for v in funnel.values())
+        if total_exposed < EXPOSURE_SRM_MIN_EXPOSED or total_assigned <= 0:
+            return None
+        df = len(funnel) - 1
+        if df < 1 or df > 9:
+            return None
+        chi2 = 0.0
+        for row in funnel.values():
+            expected = total_exposed * row["assigned"] / total_assigned
+            if expected <= 0:
+                continue
+            chi2 += (row["exposed_units"] - expected) ** 2 / expected
+        if chi2 < _CHI2_CRIT_P001[df]:
+            return None
+        recent = (
+            await self.db.execute(
+                select(GuardrailEvent)
+                .where(
+                    GuardrailEvent.experiment_id == exp.id,
+                    GuardrailEvent.guardrail_key == EXPOSURE_SRM_GUARDRAIL_KEY,
+                    GuardrailEvent.created_at
+                    >= datetime.now(UTC) - timedelta(hours=_SRM_REALERT_HOURS),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        detail = {
+            "chi2": round(chi2, 3),
+            "df": df,
+            "funnel": {k: dict(v) for k, v in funnel.items()},
+            "total_exposed": total_exposed,
+        }
+        if recent is None:
+            self.db.add(
+                GuardrailEvent(
+                    experiment_id=exp.id,
+                    guardrail_key=EXPOSURE_SRM_GUARDRAIL_KEY,
+                    action="alerted",
+                    auto=True,
+                    detail=detail,
+                )
+            )
+            log.warning("experiment_exposure_srm_alert", experiment_id=exp.id, **detail)
         return detail
 
     # ── Guardrail metrics ────────────────────────────────────────────
@@ -207,6 +266,9 @@ class GuardrailService:
         srm = await self.check_srm(exp, spec)
         if srm is not None:
             summary["srm"] = srm
+        exposure_srm = await self.check_exposure_srm(exp)
+        if exposure_srm is not None:
+            summary["exposure_srm"] = exposure_srm
 
         msvc = MetricService(self.db)
         variant_units = await msvc._variant_units(experiment_id)  # noqa: SLF001 — same package
