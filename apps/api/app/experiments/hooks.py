@@ -1,0 +1,245 @@
+"""Domain integration hooks (ADR-017 §7, exp07).
+
+Each product surface has ONE well-known experiment key; creating a running
+experiment with that key controls that surface (one live experiment per
+surface — layer machinery multiplexes beyond that). Every hook:
+
+- resolves through the fail-safe facade (any error → control experience),
+- validates the override under the TARGET DOMAIN'S OWN invariants before
+  applying it (R79/R82/R83 gates are never bypassed by an experiment),
+- records an exposure only at the moment the override actually takes effect
+  (assignment ≠ exposure).
+
+Hard rule (§2.1): no hook exists for consequential employment actions.
+"""
+
+import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.experiments import facade
+
+log = structlog.get_logger()
+
+# Well-known surface keys (experiment.key values)
+SURFACE_MATCHING_CONFIG = "surface-matching-config"
+SURFACE_WORKFLOW_BINDING = "surface-workflow-binding"
+SURFACE_REGISTRY_ORDERING = "surface-registry-ordering"
+SURFACE_COHORT_PATH = "surface-cohort-path-structure"
+SURFACE_RUBRIC_WORDING = "surface-rubric-wording"
+SURFACE_RETRY_POLICY = "surface-workflow-retry-policy"
+
+# Existing registry sort vocabulary — an experiment may only pick among them
+REGISTRY_SORTS = frozenset({"newest", "most_installed", "popular", "recently_updated", "name"})
+
+RETRY_ATTEMPTS_MIN, RETRY_ATTEMPTS_MAX = 1, 10
+
+
+async def matching_config_override(
+    db: AsyncSession, *, org_id: str, target_entity_type: str
+):
+    """Part H: controlled test of an alternative (typically still-inactive)
+    MatchingConfig version. Soft weights/thresholds only by construction —
+    hard eligibility constraints live outside MatchingConfig and are not
+    experimentable. Unit: organization."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_MATCHING_CONFIG,
+        unit_type="organization",
+        unit_id=org_id,
+        context={"org_id": org_id},
+    )
+    if not resolved:
+        return None
+    config_id = resolved.config.get("matching_config_id")
+    if not config_id:
+        return None
+    from app.models.matching import MatchingConfig
+
+    candidate = await db.get(MatchingConfig, config_id)
+    # Domain validation: the candidate must target the SAME entity type
+    if candidate is None or candidate.target_entity_type != target_entity_type:
+        log.warning(
+            "experiment_matching_override_invalid",
+            config_id=config_id,
+            target_entity_type=target_entity_type,
+        )
+        return None
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_MATCHING_CONFIG,
+        unit_type="organization",
+        unit_id=org_id,
+        context={"surface": "matching", "config_id": config_id},
+    )
+    return candidate
+
+
+async def workflow_binding_override(
+    db: AsyncSession,
+    *,
+    installation_id: str | None,
+    org_id: str,
+    capability: str,
+    required_features: set[str],
+):
+    """Part G: provider/model alternative for a workflow step. The override
+    passes the FULL confirmed-rung defense-in-depth (R82): same org, active
+    connection, capability match, required features — an experiment never
+    exempts the credential path. Unit: workflow_installation."""
+    if not installation_id:
+        return None
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_WORKFLOW_BINDING,
+        unit_type="workflow_installation",
+        unit_id=installation_id,
+    )
+    if not resolved:
+        return None
+    offering_id = resolved.config.get("offering_id")
+    if not offering_id:
+        return None
+    from app.models.provider import ProviderConnection, ProviderModelOffering
+
+    offering = await db.get(ProviderModelOffering, offering_id)
+    if offering is None or not offering.is_active:
+        return None
+    conn = await db.get(ProviderConnection, offering.connection_id)
+    if (
+        conn is None
+        or conn.org_id != org_id
+        or conn.status != "active"
+        or offering.capability_key != capability
+        or not required_features <= set(offering.features or [])
+    ):
+        log.warning(
+            "experiment_binding_override_failed_capability_recheck",
+            offering_id=offering_id,
+            capability=capability,
+        )
+        return None
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_WORKFLOW_BINDING,
+        unit_type="workflow_installation",
+        unit_id=installation_id,
+        context={"surface": "workflow_binding", "offering_id": offering_id},
+    )
+    return offering
+
+
+async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | None:
+    """Marketplace presentation: ordering strategy for the registry list —
+    only among the EXISTING sort vocabulary. Unit: user (anonymous visitors
+    are never enrolled — identity resolution is out of scope)."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_REGISTRY_ORDERING,
+        unit_type="user",
+        unit_id=user_id,
+    )
+    if not resolved:
+        return None
+    sort = resolved.config.get("sort")
+    if sort not in REGISTRY_SORTS:
+        return None
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_REGISTRY_ORDERING,
+        unit_type="user",
+        unit_id=user_id,
+        context={"surface": "registry", "sort": sort},
+    )
+    return sort
+
+
+async def cohort_path_override(
+    db: AsyncSession, *, cohort_id: str, org_id: str
+) -> str | None:
+    """Part F: alternative learning-path structure for a cohort. The
+    alternative must be a real path in the SAME org (may be a draft produced
+    by a promotion — that is the controlled exposure of a candidate).
+    Recommendations never silently rewrite active curricula: the assigned
+    path rows are untouched; only this cohort's effective read is redirected.
+    Unit: cohort."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_COHORT_PATH,
+        unit_type="cohort",
+        unit_id=cohort_id,
+        context={"org_id": org_id},
+    )
+    if not resolved:
+        return None
+    path_id = resolved.config.get("alternative_path_id")
+    if not path_id:
+        return None
+    from app.models.learning_path import LearningPath
+
+    path = await db.get(LearningPath, path_id)
+    if path is None or path.org_id != org_id:
+        log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
+        return None
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_COHORT_PATH,
+        unit_type="cohort",
+        unit_id=cohort_id,
+        context={"surface": "cohort_path", "path_id": path_id},
+    )
+    return path_id
+
+
+async def rubric_override(
+    db: AsyncSession, *, project_id: str
+) -> list | dict | None:
+    """Part F: rubric-wording experiment, randomized per project (a rubric is
+    shared by every submission of the project — project is the natural
+    cluster). The override must be a plausible rubric shape: a non-empty list
+    of criterion objects. Unit: project."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_RUBRIC_WORDING,
+        unit_type="project",
+        unit_id=project_id,
+    )
+    if not resolved:
+        return None
+    rubric = resolved.config.get("rubric")
+    if not isinstance(rubric, list) or not rubric or not all(
+        isinstance(item, dict) and item.get("criterion") for item in rubric
+    ):
+        log.warning("experiment_rubric_override_invalid", project_id=project_id)
+        return None
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_RUBRIC_WORDING,
+        unit_type="project",
+        unit_id=project_id,
+        context={"surface": "rubric"},
+    )
+    return rubric
+
+
+async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | None:
+    """Operational: per-tenant step retry budget (clamped 1..10). Unit: tenant."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=SURFACE_RETRY_POLICY,
+        unit_type="tenant",
+        unit_id=tenant_id,
+    )
+    if not resolved:
+        return None
+    attempts = resolved.config.get("max_attempts")
+    if not isinstance(attempts, int):
+        return None
+    clamped = max(RETRY_ATTEMPTS_MIN, min(RETRY_ATTEMPTS_MAX, attempts))
+    await facade.record_exposure(
+        db,
+        experiment_key=SURFACE_RETRY_POLICY,
+        unit_type="tenant",
+        unit_id=tenant_id,
+        context={"surface": "retry_policy", "max_attempts": clamped},
+    )
+    return clamped

@@ -576,14 +576,21 @@ class WorkflowRuntimeService:
                 # minimum viable gate; actual is reconciled at settle).
                 await _credits.require_available(self.db, tenant.id, tenant.currency)
 
-        # Pre-create all step runs as PENDING
+        # Pre-create all step runs as PENDING. ADR-017 §7 (operational):
+        # per-tenant retry-budget experiment, clamped 1..10; fail-safe
+        # default stays 3.
+        from app.experiments import hooks as exp_hooks
+
+        step_max_attempts = (
+            await exp_hooks.retry_policy_override(self.db, tenant_id=tenant.id) or 3
+        )
         for step in definition.get("steps", []):
             self.db.add(
                 WorkflowStepRun(
                     run_id=run.id,
                     step_id=step["id"],
                     step_type=step["type"],
-                    max_attempts=3,
+                    max_attempts=step_max_attempts,
                 )
             )
         self.db.add(WorkflowRunEvent(run_id=run.id, event_type="run_created", payload={}))
@@ -1641,6 +1648,23 @@ async def _resolve_offering(
             if conn is not None and conn.org_id == run.org_id and conn.status == "active":
                 return offering
         return None  # pinned + unavailable = hard stop (allow_fallbacks:false)
+
+    # ADR-017 §7 (Part G): experiment override between the pinned and
+    # confirmed rungs — a pinned definition always wins; the override passes
+    # the full confirmed-rung capability re-check inside the hook (R82 —
+    # experiments never exempt the credential path). Fail-safe: invalid or
+    # unresolved → the ladder continues unchanged.
+    from app.experiments import hooks as exp_hooks
+
+    exp_offering = await exp_hooks.workflow_binding_override(
+        db,
+        installation_id=run.installation_id,
+        org_id=run.org_id,
+        capability=capability,
+        required_features=set(config.get("required_features", [])),
+    )
+    if exp_offering is not None:
+        return exp_offering
 
     # Org-confirmed binding for this installation+step. Only a row a human
     # actually confirmed counts — install creates UNCONFIRMED suggestion rows

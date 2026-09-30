@@ -3,8 +3,9 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user_optional, get_db
 from app.core.rate_limit import rate_limit
+from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
 from app.schemas.registry import PackPreviewResponse
 from app.schemas.skill_pack import (
@@ -45,6 +46,7 @@ async def search_registry(
     page: int = Query(default=1, ge=1, le=1_000_000),
     per_page: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_current_user_optional),
 ):
     """Search public skill packs with faceted filters. No authentication required.
 
@@ -63,6 +65,8 @@ async def search_registry(
         per_page,
         min_rating=min_rating,
         max_results=max_results,
+        # ADR-017 §7: presentation experiments enroll authenticated viewers only
+        viewer_user_id=viewer.id if viewer else None,
     )
     effective_per_page = min(per_page, max_results or 50)
     return ListResponse(
