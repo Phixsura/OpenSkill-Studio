@@ -379,3 +379,41 @@ async def test_switchback_pause_stops_new_entries_only(db):
     assert await svc.resolve(
         experiment_key=exp.key, unit_type="user", unit_id="sb-new"
     ) is None
+
+
+async def test_switchback_honors_per_unit_holdout(db):
+    """A held-out unit under switchback sees the DEFAULT experience while
+    the cohort switches (the holdout knob is real, never silently ignored);
+    ITT rosters exclude it (is_holdout row, sticky)."""
+    from app.experiments.services.assignment import holdout_roll
+
+    exp, _ = await _mk_running(
+        db, holdout_bp=2000,
+        spec_overrides={"design": "switchback",
+                        "switchback": {"switch_unit": "platform_day",
+                                       "window_minutes": 1440}},
+    )
+    svc = AssignmentService(db)
+    held = nonheld = None
+    i = 0
+    while held is None or nonheld is None:
+        uid = f"sbh{i:023d}"
+        if holdout_roll(exp.key, "user", uid) < 2000:
+            held = held or uid
+        else:
+            nonheld = nonheld or uid
+        i += 1
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=held) is None
+    # sticky: second resolve still None, and the row is a holdout row
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=held) is None
+    row = (
+        await db.execute(
+            select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == held,
+            )
+        )
+    ).scalar_one()
+    assert row.is_holdout is True
+    served = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=nonheld)
+    assert served is not None and served.variant_key in ("control", "treatment")

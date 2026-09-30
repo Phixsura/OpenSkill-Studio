@@ -353,8 +353,16 @@ class AssignmentService:
             result["eligible"] = False
             result["reason"] = f"outside ramp ({exp.ramp_bp}bp)"
             return result
+        if holdout_roll(exp.key, unit_type, unit_id) < exp.holdout_bp:
+            # per-unit holdout applies to switchback too: a held-out unit
+            # sees the default experience while the cohort switches — the
+            # long-term control band is a real knob, never silently ignored
+            result["eligible"] = True
+            result["is_holdout"] = True
+            result["variant_key"] = None
+            return result
         if spec.design == "switchback":
-            # eligibility settled above; the variant belongs to the DAY
+            # eligibility settled above; the variant belongs to the WINDOW
             result["eligible"] = True
             result["is_holdout"] = False
             result["switchback"] = True
@@ -362,11 +370,6 @@ class AssignmentService:
                 exp.key, version_salt, spec, datetime.now(UTC)
             )
             result["assigned_version"] = exp.current_version
-            return result
-        if holdout_roll(exp.key, unit_type, unit_id) < exp.holdout_bp:
-            result["eligible"] = True
-            result["is_holdout"] = True
-            result["variant_key"] = None
             return result
         roll = variant_roll(exp.key, version_salt, unit_type, unit_id)
         result["eligible"] = True
@@ -450,16 +453,17 @@ class AssignmentService:
             )
             if not computed.get("eligible"):
                 return None
+            is_holdout = bool(computed.get("is_holdout"))
             insert = (
                 pg_insert(ExperimentAssignment)
                 .values(
                     experiment_id=exp.id,
                     unit_type=unit_type,
                     unit_id=unit_id,
-                    variant_key=SWITCHBACK_PLACEHOLDER,
+                    variant_key="__holdout__" if is_holdout else SWITCHBACK_PLACEHOLDER,
                     assigned_version=exp.current_version,
                     bucket=computed["bucket"],
-                    is_holdout=False,
+                    is_holdout=is_holdout,
                 )
                 .on_conflict_do_nothing(constraint="uq_experiment_assignments_unit")
             )
@@ -469,6 +473,8 @@ class AssignmentService:
                 raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
         elif exp.status not in _SERVE_EXISTING_STATUSES:
             return None
+        if existing.is_holdout:
+            return None  # held-out units see the default experience, sticky
         variant_key = switchback_variant(exp.key, version_salt, spec, datetime.now(UTC))
         config = next((v.config for v in spec.variants if v.key == variant_key), {})
         return ResolvedVariant(
