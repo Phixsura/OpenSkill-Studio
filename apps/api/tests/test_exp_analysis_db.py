@@ -458,3 +458,49 @@ async def test_time_stratified_absent_with_one_window(db):
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
     assert "time_stratified" not in comparison
+
+
+# ── Bandit suggestion in analysis (v2 batch 10) ──────────────────────
+
+
+async def test_bandit_allocation_gets_thompson_suggestion(db):
+    # bandit gate: marketplace domain + low risk only
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="marketplace")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="B", domain="marketplace",
+        layer_key=layer.key, owner_user_id=admin.id, risk_class="low",
+    )
+    await svc.create_version(
+        exp.id, spec=_spec(allocation_mode="bandit"), actor=admin
+    )
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
+                     n=500, numerator=50, denominator=500))
+    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
+                     n=500, numerator=120, denominator=500))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    bandit = result["bandit"]
+    assert bandit["metric"] == "exposure_rate"
+    assert bandit["p_best"]["treatment"] > 0.9
+    assert sum(bandit["suggested_weights_bp"].values()) == 10_000
+    # advisory only: the experiment's live weights are untouched
+    versions = await svc.get_versions(exp.id)
+    weights = {v["key"]: v["weight_bp"] for v in versions[-1].spec["variants"]}
+    assert weights == {"control": 5000, "treatment": 5000}
+
+
+async def test_fixed_allocation_has_no_bandit_block(db):
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "bandit" not in result

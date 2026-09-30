@@ -552,3 +552,37 @@ def test_pool_stratified_totality():
     assert pool_stratified([(0.1, 0.0), (float("inf"), 0.1), (0.2, float("nan"))]) is None
     ok = pool_stratified([(0.1, 0.0), (0.1, 0.02), (0.2, 0.02)])
     assert ok is not None and ok["strata"] == 2
+
+
+# ── thompson_weights (v2 batch 10, bandit suggestion) ────────────────
+
+
+def test_thompson_weights_favor_the_better_arm():
+    from app.experiments.services.analysis import thompson_weights
+
+    result = thompson_weights({"control": (50, 1000), "treatment": (150, 1000)})
+    assert result["p_best"]["treatment"] > 0.99
+    assert result["suggested_weights_bp"]["treatment"] > 9900
+    assert sum(result["suggested_weights_bp"].values()) == 10_000
+    # deterministic: seeded Monte Carlo
+    again = thompson_weights({"control": (50, 1000), "treatment": (150, 1000)})
+    assert again == result
+
+
+def test_thompson_weights_uncertain_arms_split():
+    from app.experiments.services.analysis import thompson_weights
+
+    result = thompson_weights({"a": (10, 100), "b": (11, 100)})
+    assert 0.2 < result["p_best"]["a"] < 0.8
+    assert sum(result["suggested_weights_bp"].values()) == 10_000
+
+
+def test_thompson_weights_totality():
+    from app.experiments.services.analysis import thompson_weights
+
+    assert thompson_weights({}) is None
+    assert thompson_weights({"only": (5, 10)}) is None
+    # zero-n and corrupt arms dropped
+    assert thompson_weights({"a": (5, 0), "b": (20, 10)}) is None
+    ok = thompson_weights({"a": (5, 0), "b": (2, 10), "c": (8, 10)})
+    assert ok is not None and set(ok["p_best"]) == {"b", "c"}

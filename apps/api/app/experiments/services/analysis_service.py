@@ -520,6 +520,26 @@ class AnalysisService:
                 key, variant_key = combo.split(":", 1)
                 metrics_out[key]["comparisons"][variant_key]["passes_fdr"] = passes
 
+        # Bandit allocation suggestion (§4.4 v2): Thompson weights over the
+        # FIRST primary binary/rate metric. Advisory — shipping new weights
+        # stays an operator decision (no auto-apply, ADR-017 §3 posture).
+        if spec.allocation_mode == "bandit":
+            for key in spec.metrics.primary:
+                aggregated, _mixed = await self._aggregate_metric(experiment_id, key)
+                arms = {
+                    variant: (arm.get("numerator") or 0.0, arm.get("denominator") or 0.0)
+                    for variant, arm in aggregated.items()
+                    if arm.get("denominator")
+                }
+                suggestion = stats.thompson_weights(arms)
+                if suggestion is not None:
+                    payload_bandit = {"metric": key, **suggestion}
+                    break
+            else:
+                payload_bandit = None
+        else:
+            payload_bandit = None
+
         causal = spec.analysis_type == "randomized"
         payload: dict = {
             "experiment_id": experiment_id,
@@ -532,6 +552,8 @@ class AnalysisService:
             "metrics": metrics_out,
             "warnings": warnings,
         }
+        if payload_bandit is not None:
+            payload["bandit"] = payload_bandit
         if not causal:
             payload["caveat"] = (
                 "Observational analysis — associations only; no causal claim "

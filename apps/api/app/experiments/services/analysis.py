@@ -27,6 +27,41 @@ def norm_sf(x: float) -> float:
     return 0.5 * math.erfc(x / math.sqrt(2.0))
 
 
+def thompson_weights(
+    arms: dict[str, tuple[float, float]], *, draws: int = 4000, seed: int = 42
+) -> dict | None:
+    """Thompson-sampling allocation suggestion over binary arms (§4.4 v2,
+    allocation_mode=bandit): Beta(1+s, 1+f) posteriors, Monte-Carlo p(best)
+    per arm, weights in basis points summing to exactly 10000. Seeded — the
+    suggestion is deterministic for a given dataset. ADVISORY ONLY: nothing
+    auto-applies it; an operator ships new weights as a new version."""
+    import random
+
+    usable = {
+        key: (float(successes), float(n))
+        for key, (successes, n) in arms.items()
+        if n > 0 and 0 <= successes <= n
+    }
+    if len(usable) < 2:
+        return None
+    rng = random.Random(seed)
+    wins = dict.fromkeys(usable, 0)
+    for _ in range(draws):
+        best_key, best_sample = None, -1.0
+        for key, (successes, n) in usable.items():
+            sample = rng.betavariate(1.0 + successes, 1.0 + (n - successes))
+            if sample > best_sample:
+                best_key, best_sample = key, sample
+        wins[best_key] += 1
+    p_best = {key: count / draws for key, count in wins.items()}
+    weights = {key: round(p * 10_000) for key, p in p_best.items()}
+    # fix rounding drift onto the current best arm so Σ == 10000 exactly
+    drift = 10_000 - sum(weights.values())
+    top = max(weights, key=lambda k: weights[k])
+    weights[top] += drift
+    return {"p_best": p_best, "suggested_weights_bp": weights, "draws": draws}
+
+
 def pool_stratified(strata: list[tuple[float, float]]) -> dict | None:
     """Inverse-variance pooling of per-stratum effects (post-stratification,
     §4.6 v2): effect = Σ(e_i/se_i²)/Σ(1/se_i²), se = sqrt(1/Σ(1/se_i²)).
