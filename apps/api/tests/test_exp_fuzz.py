@@ -1,0 +1,192 @@
+"""Hypothesis fuzz layer for the experimentation cores (ADR-017 §18 round 7).
+
+Contract under fuzz: every untrusted-input surface either returns a normal
+value or raises a TYPED AppError — never any other exception. Pure decision
+functions are total over their domains.
+"""
+
+import math
+
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
+from app.exceptions import AppError
+from app.experiments.schemas import PopulationSpec
+from app.experiments.services.analysis import (
+    benjamini_hochberg,
+    msprt_always_valid_p,
+    obrien_fleming_boundary,
+)
+from app.experiments.services.assignment import evaluate_population
+from app.experiments.services.experiments import ExperimentService, canonical_spec_hash
+from app.experiments.services.guardrails import GuardrailService
+
+_FUZZ = settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+
+# JSON-ish scalar/compound values (no NaN in json.dumps paths — tested apart)
+_scalars = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(min_value=-(10**12), max_value=10**12),
+    st.floats(allow_nan=False, allow_infinity=False, width=32),
+    st.text(max_size=40),
+)
+_json_values = st.recursive(
+    _scalars,
+    lambda children: st.one_of(
+        st.lists(children, max_size=4),
+        st.dictionaries(st.text(max_size=12), children, max_size=4),
+    ),
+    max_leaves=12,
+)
+
+
+# ── Spec validation: parsed or typed AppError, nothing else ──────────
+
+
+@_FUZZ
+@given(spec=st.dictionaries(st.text(max_size=24), _json_values, max_size=8))
+def test_validate_spec_total_over_garbage(spec):
+    svc = ExperimentService(None)
+    try:
+        svc.validate_spec(spec, domain="learning", risk_class="medium")
+    except AppError as e:
+        assert e.status_code in (404, 409, 422)
+        assert e.code.isupper()
+
+
+@_FUZZ
+@given(
+    hypothesis_text=st.text(min_size=10, max_size=200),
+    field=st.text(min_size=1, max_size=30),
+    values=st.lists(_scalars.filter(lambda v: not isinstance(v, (dict, list))), max_size=5),
+)
+def test_validate_spec_population_rules_total(hypothesis_text, field, values):
+    """Arbitrary rule fields/values: either a valid spec or a typed 422 —
+    the ethics gate must never crash on adversarial field names."""
+    spec = {
+        "hypothesis": hypothesis_text,
+        "unit_type": "user",
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["m"]},
+        "population": {"rules": [{"field": field, "op": "eq", "values": values}]},
+    }
+    try:
+        ExperimentService(None).validate_spec(spec, domain="learning", risk_class="low")
+    except AppError as e:
+        assert e.code in ("EXPERIMENT_SPEC_INVALID", "EXPERIMENT_FORBIDDEN_TARGETING")
+        assert e.status_code == 422
+
+
+# ── Population evaluation is total: bool, never an exception ─────────
+
+_ops = st.sampled_from(["eq", "in", "not_in", "gte", "lte", "exists"])
+
+
+_rule_values = st.lists(
+    st.one_of(
+        st.booleans(),
+        st.integers(min_value=-(10**9), max_value=10**9),
+        st.floats(allow_nan=False, allow_infinity=False, width=32),
+        st.text(max_size=20),
+    ),
+    max_size=4,
+)
+
+
+@_FUZZ
+@given(
+    op=_ops,
+    values=_rule_values,  # schema domain (None etc. is a typed 422 — covered above)
+    context=st.dictionaries(st.text(max_size=12), _json_values, max_size=5),
+    field=st.sampled_from(["cohort_id", "plan_tier", "signup_after", "locale"]),
+)
+def test_evaluate_population_total(op, values, context, field):
+    population = PopulationSpec.model_validate(
+        {"rules": [{"field": field, "op": op, "values": values}]}
+    )
+    result = evaluate_population(population, context)
+    assert isinstance(result, bool)
+
+
+# ── Canonical hash: stable, order-independent, total on JSONables ────
+
+
+@_FUZZ
+@given(payload=st.dictionaries(st.text(max_size=12), _json_values, max_size=6))
+def test_canonical_hash_stable_and_order_free(payload):
+    h1 = canonical_spec_hash(payload)
+    h2 = canonical_spec_hash(dict(reversed(list(payload.items()))))
+    assert h1 == h2
+    assert len(h1) == 64
+
+
+# ── Guardrail observed scalar: float or None, never an exception ─────
+
+
+@_FUZZ
+@given(
+    kind=st.sampled_from(["binary", "rate", "continuous", "time_to_event"]),
+    aggregate=st.sampled_from([None, "rate", "sum", "mean"]),
+    combined=st.dictionaries(
+        st.sampled_from(["n", "numerator", "denominator", "sum_value", "sum_sq"]),
+        st.one_of(
+            st.none(),
+            st.integers(min_value=-(10**9), max_value=10**9),
+            st.floats(allow_nan=False, allow_infinity=False),
+        ),
+        max_size=5,
+    ),
+)
+def test_observed_total(kind, aggregate, combined):
+    from types import SimpleNamespace
+
+    spec = {} if aggregate is None else {"guardrail_aggregate": aggregate}
+    definition = SimpleNamespace(kind=kind, spec=spec)
+    out = GuardrailService._observed(definition, combined)
+    assert out is None or isinstance(out, float)
+    if out is not None:
+        assert math.isfinite(out)
+
+
+# ── Sequential helpers stay in range under fuzz ──────────────────────
+
+
+@_FUZZ
+@given(z=st.floats(allow_nan=False, allow_infinity=False, min_value=-40, max_value=40),
+       tau=st.floats(min_value=0.05, max_value=10))
+def test_msprt_p_in_unit_interval(z, tau):
+    p = msprt_always_valid_p(z, tau=tau)
+    assert 0.0 <= p <= 1.0
+
+
+@_FUZZ
+@given(k=st.integers(min_value=1, max_value=50), n=st.integers(min_value=1, max_value=50))
+def test_of_boundary_positive_and_monotone(k, n):
+    if k > n:
+        return
+    b = obrien_fleming_boundary(k, n)
+    assert b > 0
+    if k < n:
+        assert b >= obrien_fleming_boundary(k + 1, n)
+
+
+@_FUZZ
+@given(
+    ps=st.dictionaries(
+        st.text(min_size=1, max_size=8),
+        st.floats(min_value=0, max_value=1, allow_nan=False),
+        max_size=8,
+    )
+)
+def test_bh_total_and_monotone(ps):
+    out = benjamini_hochberg(ps)
+    assert set(out) == set(ps)
+    # Monotone: if a p-value passes, every smaller one passes too
+    passed = sorted(p for key, p in ps.items() if out[key])
+    failed = sorted(p for key, p in ps.items() if not out[key])
+    if passed and failed:
+        assert max(passed) <= min(failed) + 1e-12

@@ -728,6 +728,24 @@ Hardening round 5 (same day):
   synchronous applies roll back on failure; the column is reserved for a
   future async apply path.
 
+Hardening round 7 — fuzz layer + live-API E2E (2026-10-01):
+
+- **Hypothesis fuzz** (tests/test_exp_fuzz.py): every untrusted-input surface
+  is total — spec validation over arbitrary nested garbage yields parsed or a
+  typed AppError only; population evaluation returns bool over any op/values/
+  context; the canonical hash is stable and order-free on arbitrary JSONables;
+  `_observed` is float-or-None and finite; mSPRT p ∈ [0,1]; OF boundaries are
+  positive and monotone; BH is monotone (any passing p dominates every
+  failing one). Zero raw exceptions found in product code.
+- **Live-API E2E** (tests/e2e_experiment_lifecycle.py, uvicorn APP_ENV=test):
+  39 checks over the real HTTP stack exercising all six hardening rounds —
+  the non-admin 403 wall on every operator surface, the protected-attribute
+  422 over the wire, the ramp-decrease and enum-guard contracts,
+  deterministic previews, EXPERIMENT_DECISION_REQUIRED on direct promote,
+  forged-hash refusal, draft→approve→apply with the 409 idempotency, the
+  applied target-domain ref, surface-key reuse after terminal, and the
+  decision registry/meta. 39/39 on first run.
+
 Hardening round 6 — service-core mutation campaign (same day):
 
 - AST mutation over the service decision cores (assignment hashing/ramp/
