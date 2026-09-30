@@ -471,3 +471,51 @@ async def test_org_admin_read_scope_filters_and_uniform_404(db):
         await experiment_read_scope(user=nobody, db=db)
     assert e.value.code == "FORBIDDEN"
     assert e.value.status_code == 403
+
+
+async def test_interaction_pair_cap_rotates_weekly(db):
+    """§106.26 fairness (defect #30): with more cross-layer pairs than the
+    cap, different ISO weeks inspect DIFFERENT pairs — a fixed-order cap
+    would starve the tail forever."""
+    from datetime import UTC, datetime
+
+    from app.experiments.worker import sweep_experiment_interactions
+
+    # three experiments in three layers → 3 cross-layer pairs; cap = 1
+    exps = [await _mk_running(db) for _ in range(3)]
+    for exp, _admin in exps:
+        for i in range(120):
+            db.add(
+                ExperimentAssignment(
+                    experiment_id=exp.id, unit_type="user", unit_id=f"r{i:024d}",
+                    variant_key="control" if i % 2 == 0 else "treatment",
+                    assigned_version=1, bucket=0, is_holdout=False,
+                )
+            )
+    await db.flush()
+    # fully-correlated shared rosters → every inspected pair alerts; which
+    # experiments got events tells us which pair the week's window covered
+    seen_pairs = set()
+    for week_day in (datetime(2026, 1, 5, tzinfo=UTC),   # ISO week 2
+                     datetime(2026, 1, 12, tzinfo=UTC),  # ISO week 3
+                     datetime(2026, 1, 19, tzinfo=UTC)):  # ISO week 4
+        await sweep_experiment_interactions(db, cap_pairs=1, now=week_day)
+        events = list(
+            (
+                await db.execute(
+                    select(GuardrailEvent).where(
+                        GuardrailEvent.guardrail_key == "__interaction__",
+                        GuardrailEvent.experiment_id.in_([e.id for e, _a in exps]),
+                    )
+                )
+            ).scalars()
+        )
+        pair = frozenset(
+            (ev.experiment_id, ev.detail["with"]) for ev in events
+        )
+        seen_pairs.add(pair)
+        # reset for the next simulated week
+        for ev in events:
+            await db.delete(ev)
+        await db.flush()
+    assert len(seen_pairs) == 3  # every week inspected a different pair

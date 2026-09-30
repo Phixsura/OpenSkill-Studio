@@ -105,7 +105,7 @@ _INTERACTION_REALERT_HOURS = 7 * 24
 
 
 async def sweep_experiment_interactions(
-    db: AsyncSession, *, cap_pairs: int = INTERACTION_PAIR_CAP
+    db: AsyncSession, *, cap_pairs: int = INTERACTION_PAIR_CAP, now: datetime | None = None
 ) -> int:
     """Cross-experiment interaction scan (ADR-017 §4.13 v2, weekly).
 
@@ -133,14 +133,19 @@ async def sweep_experiment_interactions(
     ).all()
     a = aliased(ExperimentAssignment)
     b = aliased(ExperimentAssignment)
+    # §106.26 fairness: a fixed-order cap starves the tail pairs forever —
+    # rotate the capped window by ISO week so every pair gets its turn
+    cross_layer_pairs = [
+        (x, y)
+        for x, y in combinations(running, 2)
+        if x[2] != y[2]  # same layer = mutually exclusive by construction
+    ]
+    if not cross_layer_pairs:
+        return 0
+    start = (now or datetime.now(UTC)).isocalendar().week % len(cross_layer_pairs)
+    window = (cross_layer_pairs + cross_layer_pairs)[start : start + cap_pairs]
     alerts = 0
-    pairs_checked = 0
-    for (id1, key1, layer1), (id2, key2, layer2) in combinations(running, 2):
-        if layer1 == layer2:
-            continue  # same layer = mutually exclusive by construction
-        if pairs_checked >= cap_pairs:
-            break
-        pairs_checked += 1
+    for (id1, key1, _layer1), (id2, key2, _layer2) in window:
         rows = (
             await db.execute(
                 select(a.variant_key, b.variant_key, func.count())
