@@ -270,6 +270,24 @@ class GuardrailService:
                 experiment_id=experiment_id,
                 breaches=summary["breaches"],
             )
+            # Owner notification (Part D) — fail-safe: a notification hiccup
+            # must never fail the pause it describes (the eco_audit posture)
+            try:
+                from app.services.notification import NotificationService
+
+                await NotificationService(self.db).create(
+                    user_id=exp.owner_user_id,
+                    notification_type="experiment_guardrail",
+                    title=f"Experiment '{exp.title}' auto-paused by guardrail",
+                    body=(
+                        f"{summary['breaches'][0]['metric_key']} breached its "
+                        "threshold — review the guardrail dashboard."
+                    ),
+                    data={"experiment_id": experiment_id,
+                          "breaches": summary["breaches"]},
+                )
+            except Exception:  # noqa: BLE001 — additive, never blocking
+                log.warning("experiment_pause_notify_failed", experiment_id=experiment_id)
         exp.last_guardrail_check_at = now
         await self.db.flush()
         return summary

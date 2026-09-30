@@ -13,10 +13,19 @@ surface — layer machinery multiplexes beyond that). Every hook:
 Hard rule (§2.1): no hook exists for consequential employment actions.
 """
 
+from datetime import UTC, datetime
+
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.experiments import facade
+
+
+def _dedup_key(unit_type: str, unit_id: str) -> str:
+    """One exposure row per unit per UTC day (matches the snapshot windows) —
+    without this every surface hit writes a row (table-growth bomb class)."""
+    return f"{unit_type}:{unit_id}:{datetime.now(UTC).strftime('%Y%m%d')}"
+
 
 log = structlog.get_logger()
 
@@ -39,7 +48,8 @@ async def _expose(
     db: AsyncSession, *, key: str, unit_type: str, unit_id: str, context: dict
 ) -> None:
     await facade.record_exposure(
-        db, experiment_key=key, unit_type=unit_type, unit_id=unit_id, context=context
+        db, experiment_key=key, unit_type=unit_type, unit_id=unit_id,
+        dedup_key=_dedup_key(unit_type, unit_id), context=context,
     )
 
 
@@ -79,13 +89,8 @@ async def matching_config_override(
             target_entity_type=target_entity_type,
         )
         return None
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_MATCHING_CONFIG,
-        unit_type="organization",
-        unit_id=org_id,
-        context={"surface": "matching", "config_id": config_id},
-    )
+    await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
+                  unit_id=org_id, context={"surface": "matching", "config_id": config_id})
     return candidate
 
 
@@ -136,13 +141,8 @@ async def workflow_binding_override(
             capability=capability,
         )
         return None
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_WORKFLOW_BINDING,
-        unit_type="workflow_installation",
-        unit_id=installation_id,
-        context={"surface": "workflow_binding", "offering_id": offering_id},
-    )
+    await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
+                  unit_id=installation_id, context={"surface": "workflow_binding", "offering_id": offering_id})
     return offering
 
 
@@ -165,13 +165,8 @@ async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | Non
         return None
     if sort not in REGISTRY_SORTS:
         return None
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_REGISTRY_ORDERING,
-        unit_type="user",
-        unit_id=user_id,
-        context={"surface": "registry", "sort": sort},
-    )
+    await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                  unit_id=user_id, context={"surface": "registry", "sort": sort})
     return sort
 
 
@@ -204,13 +199,8 @@ async def cohort_path_override(
     if path is None or path.org_id != org_id:
         log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
         return None
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_COHORT_PATH,
-        unit_type="cohort",
-        unit_id=cohort_id,
-        context={"surface": "cohort_path", "path_id": path_id},
-    )
+    await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                  unit_id=cohort_id, context={"surface": "cohort_path", "path_id": path_id})
     return path_id
 
 
@@ -239,13 +229,8 @@ async def rubric_override(
     ):
         log.warning("experiment_rubric_override_invalid", project_id=project_id)
         return None
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_RUBRIC_WORDING,
-        unit_type="project",
-        unit_id=project_id,
-        context={"surface": "rubric"},
-    )
+    await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
+                  unit_id=project_id, context={"surface": "rubric"})
     return rubric
 
 
@@ -267,11 +252,6 @@ async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | No
     if not isinstance(attempts, int):
         return None
     clamped = max(RETRY_ATTEMPTS_MIN, min(RETRY_ATTEMPTS_MAX, attempts))
-    await facade.record_exposure(
-        db,
-        experiment_key=SURFACE_RETRY_POLICY,
-        unit_type="tenant",
-        unit_id=tenant_id,
-        context={"surface": "retry_policy", "max_attempts": clamped},
-    )
+    await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
+                  unit_id=tenant_id, context={"surface": "retry_policy", "max_attempts": clamped})
     return clamped

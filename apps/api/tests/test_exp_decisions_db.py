@@ -503,6 +503,104 @@ async def test_unwired_targets_are_only_presentation_pair(db):
     assert PROMOTION_TARGET_TYPES - wired == {"pack_recommendation", "pricing_presentation"}
 
 
+async def test_concurrent_apply_single_target_draft(db):
+    """Two racing applies must produce exactly ONE target-domain draft and
+    one PROMOTION_ALREADY_APPLIED loser (the draft row is FOR-UPDATE locked;
+    without it both pass the idempotency check and double-create)."""
+    import asyncio
+
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    base = await _mk_matching_config(db)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type="matching_config", target_ref=base.id,
+        draft_payload={"weights": {"skill_fit": 0.7, "history": 0.3}}, actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    draft_id, admin_id, entity_type = draft.id, admin.id, base.target_entity_type
+    await db.commit()  # racing sessions need committed state
+
+    async def apply_once():
+        async with AsyncSessionLocal() as session:
+            actor = await session.get(User, admin_id)
+            try:
+                await PromotionService(session).apply(draft_id, actor=actor)
+                await session.commit()
+                return "applied"
+            except AppError as e:
+                return e.code
+
+    try:
+        results = await asyncio.gather(apply_once(), apply_once())
+        assert sorted(results) == ["PROMOTION_ALREADY_APPLIED", "applied"], results
+        async with AsyncSessionLocal() as session:
+            versions = (
+                await session.execute(
+                    _select(_func.count()).where(
+                        MatchingConfig.target_entity_type == entity_type
+                    )
+                )
+            ).scalar_one()
+            assert versions == 2  # base + exactly ONE new draft version
+    finally:
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import delete as _delete
+
+            from app.experiments.models import Experiment, ExperimentLayer
+
+            exp_row = await session.get(Experiment, exp.id)
+            layer_key = exp_row.layer_key if exp_row else None
+            await session.execute(_delete(Experiment).where(Experiment.id == exp.id))
+            if layer_key:
+                await session.execute(
+                    _delete(ExperimentLayer).where(ExperimentLayer.key == layer_key)
+                )
+            await session.execute(
+                _delete(MatchingConfig).where(
+                    MatchingConfig.target_entity_type == entity_type
+                )
+            )
+            await session.execute(_delete(User).where(User.id == admin_id))
+            await session.commit()
+
+
+async def test_scope_org_missing_is_404_not_key_taken(db):
+    """A bogus scope_org_id must 404 — the FK violation was previously
+    swallowed by the IntegrityError→EXPERIMENT_KEY_TAKEN mapping."""
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    with pytest.raises(AppError) as e:
+        await ExperimentService(db).create(
+            key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+            layer_key=layer.key, owner_user_id=admin.id, scope_org_id="x" * 26,
+        )
+    assert e.value.code == "EXPERIMENT_NOT_FOUND"
+    assert e.value.status_code == 404
+
+
+async def test_oversized_spec_rejected(db):
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    exp = await ExperimentService(db).create(
+        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["population"] = {
+        "rules": [{"field": "cohort_id", "op": "in", "values": ["c" * 400] * 180}]
+    }
+    with pytest.raises(AppError) as e:
+        await ExperimentService(db).create_version(exp.id, spec=spec, actor=admin)
+    assert e.value.code == "EXPERIMENT_SPEC_INVALID"
+    assert "too large" in e.value.message
+
+
 async def test_draft_registry_status_filter(db):
     exp, admin, result_hash = await _mk_analyzed(db)
     decision = await _promote(db, exp, admin, result_hash)

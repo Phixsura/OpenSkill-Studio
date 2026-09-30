@@ -648,3 +648,21 @@ Post-implementation hardening round (same day):
 - ADR §4.2 example previously used a non-existent population op
   (`in_experiment_layer`) — layer exclusivity is enforced by slice
   allocation, not population rules.
+
+Hardening round 2 (same day):
+
+- **Promotion drafts are FOR-UPDATE locked** through approve/reject/apply —
+  two racing applies previously both passed the idempotency check and
+  double-created the target-domain draft (race test: exactly one applied +
+  one PROMOTION_ALREADY_APPLIED, exactly one new MatchingConfig version).
+- **Bogus scope_org_id is a 404** — the FK violation was swallowed by the
+  IntegrityError→EXPERIMENT_KEY_TAKEN mapping and misreported as a key
+  conflict.
+- **exposure_rate counts DISTINCT exposed units** — a raw event count pushed
+  the rate past 1.0 and false-fired lte guardrails.
+- **Exposures dedup per unit per UTC day** in every hook (`{unit}:{date}`
+  dedup_key, matching the snapshot windows) — control-arm exposure logging
+  otherwise wrote a row per page view (table-growth bomb class).
+- **Spec size cap 64 KB** before parsing (oversized-input class).
+- **Guardrail auto-pause notifies the experiment owner** (fail-safe: a
+  notification hiccup never fails the pause — the eco_audit posture).

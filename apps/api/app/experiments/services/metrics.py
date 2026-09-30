@@ -67,10 +67,15 @@ async def _source_exposures(
     window_end: datetime,
     unit_type: str = "",
 ) -> SourceResult:
-    """Exposure rate per variant: numerator = exposure events in window,
+    """Exposure rate per variant: numerator = DISTINCT exposed units in the
+    window (a unit hitting the surface five times is one exposed unit — a raw
+    event count pushes the rate past 1.0 and false-fires lte guardrails),
     denominator = assigned units (ITT). Fully internal — always available."""
     q = (
-        select(ExperimentAssignment.variant_key, func.count())
+        select(
+            ExperimentAssignment.variant_key,
+            func.count(func.distinct(ExperimentExposure.assignment_id)),
+        )
         .join(ExperimentExposure, ExperimentExposure.assignment_id == ExperimentAssignment.id)
         .where(
             ExperimentExposure.experiment_id == experiment.id,

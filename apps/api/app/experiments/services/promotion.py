@@ -148,8 +148,14 @@ class PromotionService:
         )
         return draft
 
-    async def get(self, draft_id: str) -> PromotionDraft:
-        draft = await self.db.get(PromotionDraft, draft_id)
+    async def get(self, draft_id: str, *, for_update: bool = False) -> PromotionDraft:
+        q = select(PromotionDraft).where(PromotionDraft.id == draft_id)
+        if for_update:
+            # Status changes serialize on the row — two concurrent applies
+            # must not both pass the idempotency check and double-create the
+            # target-domain draft (R396 transition-race class)
+            q = q.with_for_update()
+        draft = (await self.db.execute(q)).scalar_one_or_none()
         if not draft:
             raise AppError("EXPERIMENT_NOT_FOUND", "Promotion draft not found", 404)
         return draft
@@ -164,7 +170,7 @@ class PromotionService:
         return list((await self.db.execute(q)).scalars())
 
     async def approve(self, draft_id: str, *, actor: User) -> PromotionDraft:
-        draft = await self.get(draft_id)
+        draft = await self.get(draft_id, for_update=True)
         if draft.status != "draft":
             raise AppError(
                 "DECISION_STATE_INVALID", f"Cannot approve from status {draft.status}", 422
@@ -175,7 +181,7 @@ class PromotionService:
         return draft
 
     async def reject(self, draft_id: str, *, actor: User) -> PromotionDraft:
-        draft = await self.get(draft_id)
+        draft = await self.get(draft_id, for_update=True)
         if draft.status not in ("draft", "approved"):
             raise AppError(
                 "DECISION_STATE_INVALID", f"Cannot reject from status {draft.status}", 422
@@ -186,7 +192,7 @@ class PromotionService:
         return draft
 
     async def apply(self, draft_id: str, *, actor: User) -> PromotionDraft:
-        draft = await self.get(draft_id)
+        draft = await self.get(draft_id, for_update=True)
         if draft.status == "applied":
             raise AppError("PROMOTION_ALREADY_APPLIED", "Draft already applied", 409)
         if draft.status != "approved":

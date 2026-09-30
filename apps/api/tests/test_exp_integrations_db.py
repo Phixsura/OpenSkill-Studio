@@ -390,6 +390,33 @@ async def test_control_arm_records_exposure_too(db):
     assert await _exposures(db, exp.id) == before + 1  # ...but IS exposed
 
 
+async def test_exposures_dedup_per_unit_per_day(db):
+    """A unit hitting the surface repeatedly in one UTC day records exactly
+    ONE exposure row (table-growth bomb class) — and the exposure_rate source
+    counts DISTINCT units, so the rate can never exceed 1.0."""
+    exp, _ = await _mk_surface_experiment(
+        db, key=hooks.SURFACE_RETRY_POLICY, domain="operational",
+        unit_type="tenant", treatment_config={"max_attempts": 5},
+    )
+    tenant_unit = await _treatment_unit(db, exp, "tenant", "dedup")
+    for _ in range(4):
+        assert await hooks.retry_policy_override(db, tenant_id=tenant_unit) == 5
+    assert await _exposures(db, exp.id) == 1
+    # exposure_rate over the day window: distinct units / assigned <= 1.0
+    from datetime import UTC, datetime, time, timedelta
+
+    from app.experiments.services.metrics import MetricService
+
+    start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=start, window_end=start + timedelta(days=1)
+    )
+    snapshots = await MetricService(db).list_snapshots(exp.id, metric_key="exposure_rate")
+    for s in snapshots:
+        if s.denominator:
+            assert float(s.numerator) / float(s.denominator) <= 1.0
+
+
 async def test_negative_cache_invalidated_on_create(db):
     """resolve() on a missing key negative-caches it; creating an experiment
     with that key must take effect immediately in-process."""

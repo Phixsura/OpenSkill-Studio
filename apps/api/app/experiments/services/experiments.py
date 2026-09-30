@@ -122,6 +122,14 @@ class ExperimentService:
             )
         if risk_class not in RISK_CLASSES:
             raise AppError("VALIDATION_ERROR", f"Unknown risk_class: {risk_class}", 422)
+        if scope_org_id is not None:
+            # Validate the org up front — otherwise the FK violation at flush
+            # is swallowed by the IntegrityError→EXPERIMENT_KEY_TAKEN mapping
+            # below and misreports a missing org as a key conflict
+            from app.models.organization import Organization
+
+            if await self.db.get(Organization, scope_org_id) is None:
+                raise AppError("EXPERIMENT_NOT_FOUND", "Organization not found", 404)
         layer = (
             await self.db.execute(select(ExperimentLayer).where(ExperimentLayer.key == layer_key))
         ).scalar_one_or_none()
@@ -197,6 +205,19 @@ class ExperimentService:
     # ── versions (immutable specs) ───────────────────────────────────
 
     def validate_spec(self, spec: dict, *, domain: str, risk_class: str) -> ExperimentSpec:
+        # Size cap BEFORE parsing: an unbounded spec JSONB is a storage/DoS
+        # surface (the R98 oversized-input class) — 64 KB is generous for any
+        # legitimate design
+        try:
+            raw_size = len(
+                json.dumps(spec, separators=(",", ":"), ensure_ascii=False, default=str)
+            )
+        except (TypeError, ValueError) as exc:
+            raise AppError("EXPERIMENT_SPEC_INVALID", "Spec is not JSON-serializable", 422) from exc
+        if raw_size > 64_000:
+            raise AppError(
+                "EXPERIMENT_SPEC_INVALID", f"Spec too large ({raw_size} bytes > 64000)", 422
+            )
         try:
             parsed = ExperimentSpec.model_validate(spec)
         except pydantic.ValidationError as exc:
