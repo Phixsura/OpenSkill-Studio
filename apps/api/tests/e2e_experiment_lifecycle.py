@@ -340,6 +340,25 @@ async def main() -> int:
               r.status_code == 200 and r.json()["data"]["healthy"] is True,
               r.text[:200])
 
+        # ── Round 10: self-serve resolve/exposure (client-SDK class) ──
+        r = await c.post("/experiments/self/resolve", headers=student,
+                         json={"experiment_key": "surface-nothing-live"})
+        check("self-resolve unknown key = default experience",
+              r.status_code == 200 and r.json()["data"]["variant_key"] is None,
+              r.text[:200])
+        r = await c.post("/experiments/self/resolve", headers=student,
+                         json={"experiment_key": exp_key})
+        check("self-resolve live key returns a variant",
+              r.status_code == 200
+              and r.json()["data"]["variant_key"] in ("control", "treatment", None),
+              r.text[:200])
+        r = await c.post("/experiments/self/exposures", headers=student,
+                         json={"experiment_key": exp_key, "dedup_key": "e2e-self"})
+        check("self-exposure records or no-ops safely",
+              r.status_code == 201 and "recorded" in r.json()["data"], r.text[:200])
+        r = await c.post("/experiments/self/resolve", json={"experiment_key": exp_key})
+        check("self-resolve requires auth", r.status_code == 401, r.text[:200])
+
         # ── Round 10: org-admin delegation wall ───────────────────────
         # student administers no org → reads refuse with 403 (not empty 200)
         r = await c.get("/experiments", headers=student)

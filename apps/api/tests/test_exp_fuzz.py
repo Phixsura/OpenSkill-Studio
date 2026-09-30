@@ -281,3 +281,33 @@ def test_switchback_variant_total_and_stable(key, salt, minutes, window):
     v = switchback_variant(key, salt, spec, at)
     assert v in ("control", "treatment")
     assert v == switchback_variant(key, salt, spec, at)  # stable
+
+
+_arm_floats = st.floats(min_value=-1e12, max_value=1e12)
+
+
+@given(
+    control=st.fixed_dictionaries({
+        "n": st.integers(min_value=0, max_value=1000),
+        "sum": _arm_floats, "sum_sq": _arm_floats,
+        "cov_sum": _arm_floats, "cov_sum_sq": _arm_floats,
+        "cov_xy_sum": _arm_floats,
+    }),
+    treatment=st.fixed_dictionaries({
+        "n": st.integers(min_value=0, max_value=1000),
+        "sum": _arm_floats, "sum_sq": _arm_floats,
+        "cov_sum": _arm_floats, "cov_sum_sq": _arm_floats,
+        "cov_xy_sum": _arm_floats,
+    }),
+)
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+def test_did_estimate_total(control, treatment):
+    from app.experiments.services.analysis import did_estimate
+
+    result = did_estimate(control, treatment)
+    if result is not None:
+        assert math.isfinite(result["effect"])
+        assert math.isfinite(result["se"]) and result["se"] >= 0.0
+        if result["p"] is not None:
+            assert 0.0 <= result["p"] <= 1.0
+        assert result["ci"][0] <= result["effect"] <= result["ci"][1]
