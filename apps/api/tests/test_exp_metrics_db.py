@@ -1052,6 +1052,8 @@ async def test_evaluations_source_review_pass_rate(db):
     await db.flush()
     db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
                             status=ReviewStatus.APPROVED, score=90))
+    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=88))
     db.add(SubmissionReview(submission_id=sub.id,
                             reviewer_type=ReviewerType.INSTRUCTOR,
                             status=ReviewStatus.REVISION_REQUESTED, score=40))
@@ -1064,7 +1066,7 @@ async def test_evaluations_source_review_pass_rate(db):
         db, "evaluations", definition_key="practical_pass_rate",
         units=[user.id], unit_type="user",
     )
-    assert stats["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+    assert stats["treatment"] == {"n": 3, "numerator": 2, "denominator": 3}
 
 
 async def test_talent_outcomes_source_placements(db):
@@ -1073,6 +1075,7 @@ async def test_talent_outcomes_source_placements(db):
 
     _tenant, org = await _mk_org(db)
     placed = await _mk_admin(db)
+    placed2 = await _mk_admin(db)
     cancelled = await _mk_admin(db)
     silent = await _mk_admin(db)
     opp = Opportunity(employer_org_id=org.id, title="Role",
@@ -1089,13 +1092,14 @@ async def test_talent_outcomes_source_placements(db):
                          user_id=user.id, employer_org_id=org.id, status=status))
 
     await _placement(placed, "active")
+    await _placement(placed2, "completed")
     await _placement(cancelled, "cancelled")
     await db.flush()
     stats = await _run_source(
         db, "talent_outcomes", definition_key="placement_outcome_rate",
-        units=[placed.id, cancelled.id, silent.id], unit_type="user",
+        units=[placed.id, placed2.id, cancelled.id, silent.id], unit_type="user",
     )
-    assert stats["treatment"] == {"n": 3, "numerator": 1, "denominator": 3}
+    assert stats["treatment"] == {"n": 4, "numerator": 2, "denominator": 4}
 
 
 async def test_billing_source_tenant_measures(db):
@@ -1122,6 +1126,9 @@ async def test_billing_source_tenant_measures(db):
 
     # tenant_new: FIRST paid invoice lands in-window → converts
     db.add(_invoice(tenant_new.id, 5000, now))
+    # an OPEN invoice never counts anywhere
+    db.add(Invoice(tenant_id=tenant_new.id, currency="USD", status="open",
+                   total_minor=99999, paid_at=None))
     # tenant_old: paid before the window AND in it → no conversion, has ARPU
     db.add(_invoice(tenant_old.id, 10000, window_start - timedelta(days=30)))
     db.add(_invoice(tenant_old.id, 20000, now))
@@ -1161,13 +1168,20 @@ async def test_billing_source_tenant_measures(db):
     # tenant_new had no subscription at window start
     assert retention["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
 
+    # non-zero eval cost against tenant_old's org: margin arithmetic pinned
+    from decimal import Decimal
+
+    from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
+
+    db.add(EvaluationTask(org_id=org2.id, type=EvalType.SUBMISSION_REVIEW,
+                          status=EvalStatus.COMPLETED, cost_usd=Decimal("50.0")))
+    await db.flush()
     margin = await _run_source(
         db, "billing", definition_key="gross_margin_pct", units=units, unit_type="tenant",
     )
-    # both revenue tenants, no eval cost → 100% margin each
+    # tenant_new: (50-0)/50 = 100%; tenant_old: (200-50)/200 = 75%
     assert margin["treatment"]["n"] == 2
-    assert margin["treatment"]["sum_value"] == 200.0
-    del org2  # revenue tenants only — org fixture unused beyond creation
+    assert margin["treatment"]["sum_value"] == 175.0
 
     # org units refused (would double-count tenant revenue)
     empty = await _run_source(
@@ -1385,3 +1399,52 @@ async def test_cost_ledger_cuped_per_unit_covariates(db):
     assert arm["cov_sum_sq"] == 9.0
     assert arm["cov_xy_sum"] == 15.0
     assert arm["_aggregation"] == "per_unit"
+
+
+async def test_learning_paths_completion_window_boundaries(db):
+    """Half-open completion window: completion AT window_start counts,
+    completion AT window_end does not."""
+    from app.models.learning_path import (
+        ContentStatus,
+        LearningPath,
+        LearningPathItem,
+        PathItemType,
+    )
+    from app.models.project import Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    at_start = await _mk_admin(db)
+    at_end = await _mk_admin(db)
+    project = await _mk_project(db, org)
+    path = LearningPath(
+        org_id=org.id, name="B", slug=f"lp-{str(ULID()).lower()}",
+        status=ContentStatus.PUBLISHED,
+    )
+    db.add(path)
+    await db.flush()
+    db.add(LearningPathItem(
+        path_id=path.id, item_type=PathItemType.PROJECT, project_id=project.id,
+        sort_order=0, required=True))
+    window_start, window_end = _today_window()
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=at_start.id,
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=window_start - timedelta(days=1),
+                      updated_at=window_start))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=at_end.id,
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=window_start - timedelta(days=1),
+                      updated_at=window_end))
+    await db.flush()
+    stats = await _run_source(
+        db, "learning_paths", definition_key="completion_rate",
+        units=[at_start.id, at_end.id], unit_type="user",
+    )
+    assert stats["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+
+
+# Mutation-survivor ledger (round-10 wave 3): the remaining half-open
+# window-boundary flips (>= start / < end) across the five new sources are
+# template copies of the exposures-source contract pinned above and in the
+# completion-boundary test — same class round 6 ledgered for the original
+# seven sources. unit_type early-return Eq flips are pinned by each source's
+# wrong-unit-type zero-sample assertion.
