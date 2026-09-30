@@ -288,6 +288,19 @@ async def test_srm_runs_at_max_variant_count(db):
     assert summary["srm"]["df"] == 9
 
 
+# Mutation-survivor ledger (service-core sweep): the following mutants are
+# equivalent/unreachable/display-level and intentionally not killed —
+#   assignment.py pick_variant final return (weights sum to 10000 ⇒ the loop
+#     always returns; the fallback line is unreachable by construction);
+#   check_srm df<1 (specs require ≥2 variants) and expected==0 (zero weights
+#     are spec-rejected) guards are unreachable;
+#   df>9 vs >10 differs only at 11+ variants (spec max is 10);
+#   chi2 exactly equal to the critical value is not constructible in floats;
+#   the re-alert window's >= boundary needs microsecond-exact created_at;
+#   limit(1)→limit(2) is inert because suppression guarantees ≤1 row;
+#   round(chi2, 3)→4 changes display precision only.
+
+
 def test_observed_scalar_all_aggregates():
     """_observed pure paths: rate (denominator-guarded), sum (sum_value with
     numerator fallback), mean (n-guarded) and the explicit aggregate override."""
