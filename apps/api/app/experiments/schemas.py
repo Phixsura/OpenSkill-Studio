@@ -257,6 +257,22 @@ class CreateAllocationRequest(_StrictReq):
     slice_end: int = Field(ge=0, le=9999)
 
 
+class CreateDecisionRequest(_StrictReq):
+    decision: str = Field(max_length=14)
+    summary: str = Field(min_length=10, max_length=10_000)
+    analysis_result_hash: str = Field(min_length=64, max_length=64)
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+    segments: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    extend_days: int = Field(default=30, ge=1, le=365)
+
+
+class CreatePromotionDraftRequest(_StrictReq):
+    target_type: str = Field(max_length=30)
+    target_ref: str = Field(min_length=1, max_length=64)
+    draft_payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class IncidentRequest(_StrictReq):
     reason: str | None = Field(default=None, max_length=1000)
 
@@ -371,6 +387,41 @@ class MetricSnapshotResponse(BaseModel):
     cov_xy_sum: float | None
     provenance: dict
     computed_at: datetime
+
+
+class DecisionRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    experiment_id: str
+    experiment_version: int
+    decision: str
+    summary: str
+    domain: str
+    analysis_type: str
+    analysis_result_hash: str
+    uncertainty: dict
+    segments: dict
+    guardrail_outcome: dict
+    evidence: dict
+    approver_user_id: str
+    created_at: datetime
+
+
+class PromotionDraftResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    decision_record_id: str
+    target_type: str
+    target_ref: str
+    draft_payload: dict
+    status: str
+    approved_by: str | None
+    applied_at: datetime | None
+    applied_ref: str | None
+    apply_error: str | None
+    created_at: datetime
 
 
 class GuardrailEventResponse(BaseModel):

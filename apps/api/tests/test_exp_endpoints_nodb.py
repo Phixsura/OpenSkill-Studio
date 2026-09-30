@@ -22,6 +22,11 @@ WRITE_ENDPOINTS = [
     ("post", f"/api/v1/experiments/{EXP_ID}/guardrails/incident", {}),
     ("post", f"/api/v1/experiments/{EXP_ID}/guardrails/evaluate", {}),
     ("post", f"/api/v1/experiments/{EXP_ID}/analysis", {}),
+    ("post", f"/api/v1/experiments/{EXP_ID}/decisions", {}),
+    ("post", f"/api/v1/experiments/decisions/{EXP_ID}/promotion-drafts", {}),
+    ("post", f"/api/v1/experiments/promotion-drafts/{EXP_ID}/approve", {}),
+    ("post", f"/api/v1/experiments/promotion-drafts/{EXP_ID}/reject", {}),
+    ("post", f"/api/v1/experiments/promotion-drafts/{EXP_ID}/apply", {}),
 ]
 
 READ_ENDPOINTS = [
@@ -34,6 +39,10 @@ READ_ENDPOINTS = [
     f"/api/v1/experiments/{EXP_ID}/metrics",
     "/api/v1/experiments/metric-definitions",
     f"/api/v1/experiments/{EXP_ID}/guardrails/events",
+    "/api/v1/experiments/decisions",
+    "/api/v1/experiments/decisions/meta",
+    f"/api/v1/experiments/decisions/{EXP_ID}",
+    "/api/v1/experiments/promotion-drafts",
     "/api/v1/experiments/layers",
     "/api/v1/experiments/layers/learning-core/allocations",
 ]

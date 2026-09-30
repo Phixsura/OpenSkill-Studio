@@ -2,6 +2,13 @@
 
 from app.experiments.models.assignment import ExperimentAssignment, ExperimentExposure
 from app.experiments.models.audit import EXPERIMENT_EVENT_TYPES, ExperimentEvent
+from app.experiments.models.decision import (
+    DECISIONS,
+    PROMOTION_STATUSES,
+    TERMINAL_DECISIONS,
+    DecisionRecord,
+    PromotionDraft,
+)
 from app.experiments.models.experiment import (
     LAYER_TOTAL_SLICES,
     Experiment,
@@ -25,7 +32,12 @@ from app.experiments.models.metric import (
 )
 
 __all__ = [
+    "DECISIONS",
     "EXPERIMENT_EVENT_TYPES",
+    "PROMOTION_STATUSES",
+    "TERMINAL_DECISIONS",
+    "DecisionRecord",
+    "PromotionDraft",
     "GUARDRAIL_ACTIONS",
     "INCIDENT_GUARDRAIL_KEY",
     "SRM_GUARDRAIL_KEY",

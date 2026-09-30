@@ -284,11 +284,14 @@ async def test_handler_evaluates_and_stamps(db):
 
 def test_no_auto_promote_path_in_experiments_package():
     """Grep-level guarantee: nothing under app/experiments/ transitions to
-    'promoted' or creates promotion drafts automatically. The only place the
-    word may appear outside comments/vocabulary constants is the decisions
-    service (exp06), which requires an explicit human approver."""
+    'promoted' automatically. The SINGLE allowed site is
+    services/decisions.py (exp06): an explicit human decision — its create()
+    requires an actor (approver), status `analyzed`, and a verified
+    analysis_result_hash. Everything else (guardrails, worker, sweeps,
+    assignment, promotion apply) must never promote."""
     pkg = Path(__file__).resolve().parents[1] / "app" / "experiments"
     offenders = []
+    decision_sites = 0
     for path in pkg.rglob("*.py"):
         if path.name in ("security.py",):  # vocabulary constants live here
             continue
@@ -296,5 +299,13 @@ def test_no_auto_promote_path_in_experiments_package():
         for lineno, line in enumerate(text.splitlines(), 1):
             code = line.split("#", 1)[0]
             if 'to_status="promoted"' in code or "to_status='promoted'" in code:
-                offenders.append(f"{path.name}:{lineno}")
+                if path.name == "decisions.py":
+                    decision_sites += 1
+                else:
+                    offenders.append(f"{path.name}:{lineno}")
     assert not offenders, f"auto-promote path found: {offenders}"
+    # The human-decision site exists exactly once and is approver-gated
+    assert decision_sites == 1
+    decisions_src = (pkg / "services" / "decisions.py").read_text(encoding="utf-8")
+    assert "actor: User" in decisions_src
+    assert "DECISION_HASH_MISMATCH" in decisions_src  # no decide-before-analyze
