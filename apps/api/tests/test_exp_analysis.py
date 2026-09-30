@@ -21,6 +21,7 @@ from app.experiments.services.analysis import (
     beta_ppf,
     betainc,
     cuped_adjusted_welch,
+    moments_from_stats,
     msprt_always_valid_p,
     norm_cdf,
     norm_ppf,
@@ -295,3 +296,178 @@ def test_bayes_continuous_directions():
     assert r["p_beat_control"] > 0.5
     flipped = bayes_continuous(100, 1100, 12500, 100, 1000, 10500)
     assert flipped["p_beat_control"] == pytest.approx(1 - r["p_beat_control"], abs=1e-9)
+
+
+# ── Mutation-killer batch (survivor sweep round 1) ───────────────────
+
+
+def test_t_sf_rejects_zero_df():
+    with pytest.raises(ValueError):
+        t_sf(1.0, 0)
+
+
+def test_wilson_clamps_exactly_at_extremes():
+    assert wilson_ci(0, 5)[0] == 0.0
+    assert wilson_ci(5, 5)[1] == 1.0
+    lo, hi = wilson_ci(0, 5)
+    assert lo < hi
+
+
+def test_binary_treatment_side_zero_n_guard():
+    assert analyze_binary(5, 10, 0, 0) == {"insufficient_data": True}
+    assert analyze_binary(5, 10, 5, 0) == {"insufficient_data": True}
+
+
+def test_binary_zero_se_and_zero_control_rate():
+    # all-success both arms: pooled variance 0 → z defined as 0, p = 1
+    r = analyze_binary(10, 10, 10, 10)
+    assert r["z"] == 0.0 and r["p"] == pytest.approx(1.0)
+    # control rate 0 → relative is None, never a division
+    assert analyze_binary(0, 10, 5, 10)["relative"] is None
+
+
+def test_newcombe_bounds_recomputed_independently():
+    """Both Newcombe bounds pinned by explicit reconstruction from Wilson
+    pieces — any sign/exponent mutant in the source formula dies here."""
+    x1, n1, x2, n2 = 30, 90, 45, 80
+    r = analyze_binary(x1, n1, x2, n2)
+    p1, p2 = x1 / n1, x2 / n2
+    l1, u1 = wilson_ci(x1, n1)
+    l2, u2 = wilson_ci(x2, n2)
+    lo = (p2 - p1) - math.sqrt((p2 - l2) ** 2 + (u1 - p1) ** 2)
+    hi = (p2 - p1) + math.sqrt((u2 - p2) ** 2 + (p1 - l1) ** 2)
+    assert r["ci"][0] == pytest.approx(lo, abs=1e-12)
+    assert r["ci"][1] == pytest.approx(hi, abs=1e-12)
+
+
+def test_moments_single_observation():
+    assert moments_from_stats(1, 5, 25) == (5.0, 0.0)
+
+
+def test_welch_treatment_side_insufficient():
+    assert welch_from_stats(10, 50, 260, 1, 5, 25)["insufficient_data"] is True
+
+
+def test_welch_zero_variance_branch_exact():
+    # constants: {2,2,2} vs {3,3,3} — vars 0, effect 1, p 0, ci degenerate
+    r = welch_from_stats(3, 6, 12, 3, 9, 27)
+    assert r["effect"] == pytest.approx(1.0)
+    assert r["ci"] == [1.0, 1.0]
+    assert r["t"] == 0.0 and r["p"] == 0.0
+    assert r["df"] == 4  # n1 + n2 - 2
+    assert r["control"]["var"] == pytest.approx(0.0)
+    same = welch_from_stats(3, 6, 12, 3, 6, 12)
+    assert same["p"] == 1.0 and same["effect"] == 0.0
+
+
+def test_welch_asymmetric_df_and_ci_pinned():
+    """[1..5] vs [10,12,...,28]: v1=2.5, v2=36.667 — hand-derived
+    df = 4.16667² / (0.0625 + 1.493827) = 11.1553."""
+    r = welch_from_stats(5, 15, 55, 10, 190, 3940)
+    assert r["effect"] == pytest.approx(16.0)
+    assert r["df"] == pytest.approx(11.1553, abs=1e-3)
+    se = math.sqrt(2.5 / 5 + (330 / 9) / 10)
+    tcrit = t_ppf(0.975, r["df"])
+    assert r["ci"][0] == pytest.approx(16.0 - tcrit * se, abs=1e-6)
+    assert r["ci"][1] == pytest.approx(16.0 + tcrit * se, abs=1e-6)
+
+
+def test_rate_guards_each_side_and_zero_se():
+    assert analyze_rate(5, 10, 0, 0) == {"insufficient_data": True}
+    assert analyze_rate(0, 0, 5, 10) == {"insufficient_data": True}
+    r = analyze_rate(0, 100, 0, 100)
+    assert r["z"] == 0.0 and r["p"] == pytest.approx(1.0)
+    assert analyze_rate(0, 100, 5, 100)["relative"] is None
+
+
+def test_rate_ci_upper_bound_pinned():
+    r = analyze_rate(100, 1000, 150, 1000)
+    se = math.sqrt(100 / 1000**2 + 150 / 1000**2)
+    assert r["ci"][1] == pytest.approx(0.05 + Z_975 * se, abs=1e-12)
+
+
+def test_cuped_guards():
+    tiny = _arm_stats([1.0], [2.0])
+    big = _arm_stats([1.0, 2.0, 3.0], [2.0, 3.0, 4.0])
+    assert cuped_adjusted_welch(tiny, big) is None  # n<=1 arm
+    const_x_c = _arm_stats([2.0, 2.0, 2.0], [1.0, 2.0, 3.0])
+    const_x_t = _arm_stats([2.0, 2.0, 2.0], [2.0, 3.0, 4.0])
+    assert cuped_adjusted_welch(const_x_c, const_x_t) is None  # var(X)=0
+
+
+def test_cuped_matches_explicit_adjusted_values():
+    """The sufficient-stats path must equal welch over the explicitly
+    adjusted values Z = Y - theta(X - x̄) — kills any cross-sum mutant."""
+    xc = [1.0, 3.0, 5.0, 7.0]
+    yc = [2.1, 3.9, 6.2, 7.8]
+    xt = [2.0, 4.0, 6.0, 8.0]
+    yt = [3.2, 5.1, 6.8, 9.1]
+    r = cuped_adjusted_welch(_arm_stats(xc, yc), _arm_stats(xt, yt))
+    theta, xbar = r["theta"], (sum(xc) + sum(xt)) / 8.0
+    zc = [y - theta * (x - xbar) for x, y in zip(xc, yc, strict=True)]
+    zt = [y - theta * (x - xbar) for x, y in zip(xt, yt, strict=True)]
+    expected = welch_from_values(zc, zt)
+    assert r["effect"] == pytest.approx(expected["effect"], abs=1e-9)
+    assert r["t"] == pytest.approx(expected["t"], abs=1e-9)
+    assert r["df"] == pytest.approx(expected["df"], abs=1e-9)
+
+
+def test_cuped_constant_outcome_reports_zero_reduction():
+    yc = [5.0, 5.0, 5.0]
+    yt = [5.0, 5.0, 5.0]
+    r = cuped_adjusted_welch(
+        _arm_stats([1.0, 2.0, 3.0], yc), _arm_stats([1.5, 2.5, 3.5], yt)
+    )
+    assert r is not None
+    assert r["variance_reduction_pct"] == 0.0
+
+
+def test_bh_boundary_equality_passes():
+    assert benjamini_hochberg({"a": 0.05}, q=0.05) == {"a": True}
+
+
+def test_bayes_binary_guards_and_small_n_exact():
+    assert bayes_binary(5, 10, 0, 0) == {"insufficient_data": True}
+    assert bayes_binary(0, 0, 5, 10) == {"insufficient_data": True}
+    # (0/1) vs (1/1) with uniform prior: Beta(1,2) vs Beta(2,1),
+    # P(p2 > p1) = ∫ 2x(2x - x²) dx = 4/3 - 1/2 = 5/6
+    r = bayes_binary(0, 1, 1, 1)
+    assert r["p_beat_control"] == pytest.approx(5.0 / 6.0, abs=1e-3)
+    assert r["control"]["posterior_mean"] == pytest.approx(1.0 / 3.0, abs=1e-12)
+    assert r["treatment"]["posterior_mean"] == pytest.approx(2.0 / 3.0, abs=1e-12)
+    # Beta(2,1) cdf = x² → quantiles are sqrt(p)
+    assert r["treatment"]["ci"][0] == pytest.approx(math.sqrt(0.025), abs=1e-6)
+    assert r["treatment"]["ci"][1] == pytest.approx(math.sqrt(0.975), abs=1e-6)
+
+
+def test_bayes_binary_expected_loss_symmetric_pinned():
+    """50/100 both arms: diff=0 → EL = se/sqrt(2π) with
+    se = sqrt(2·51·51/(102²·103)) — hand-derived closed form."""
+    r = bayes_binary(50, 100, 50, 100)
+    var = 51.0 * 51.0 / (102.0**2 * 103.0)
+    se = math.sqrt(2.0 * var)
+    assert r["expected_loss"] == pytest.approx(se / math.sqrt(2 * math.pi), abs=1e-9)
+
+
+def test_bayes_continuous_zero_variance_branch():
+    up = bayes_continuous(3, 6, 12, 3, 9, 27)  # constants 2 vs 3
+    assert up["p_beat_control"] == 1.0 and up["expected_loss"] == 0.0
+    down = bayes_continuous(3, 9, 27, 3, 6, 12)
+    assert down["p_beat_control"] == 0.0
+    flat = bayes_continuous(3, 6, 12, 3, 6, 12)
+    assert flat["p_beat_control"] == 0.5
+
+
+def test_bayes_continuous_interval_and_loss_pinned():
+    n1, s1, ss1 = 100, 1000, 10500
+    n2, s2, ss2 = 100, 1100, 12500
+    r = bayes_continuous(n1, s1, ss1, n2, s2, ss2)
+    m1, v1 = moments_from_stats(n1, s1, ss1)
+    m2, v2 = moments_from_stats(n2, s2, ss2)
+    se = math.sqrt(v1 / n1 + v2 / n2)
+    diff = m2 - m1
+    assert r["credible_interval"][0] == pytest.approx(diff - Z_975 * se, abs=1e-9)
+    assert r["credible_interval"][1] == pytest.approx(diff + Z_975 * se, abs=1e-9)
+    z0 = diff / se
+    el = se * math.exp(-z0 * z0 / 2) / math.sqrt(2 * math.pi) - diff * norm_sf(z0)
+    assert r["expected_loss"] == pytest.approx(max(0.0, el), abs=1e-9)

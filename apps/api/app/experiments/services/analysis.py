@@ -226,7 +226,8 @@ def welch_from_stats(
         return {
             "effect": effect, "relative": (effect / m1) if m1 else None,
             "ci": [effect, effect], "t": 0.0, "df": n1 + n2 - 2, "p": 1.0 if effect == 0 else 0.0,
-            "control": {"mean": m1, "n": n1}, "treatment": {"mean": m2, "n": n2},
+            "control": {"mean": m1, "var": v1, "n": n1},
+            "treatment": {"mean": m2, "var": v2, "n": n2},
         }
     se = math.sqrt(se2)
     t = effect / se
