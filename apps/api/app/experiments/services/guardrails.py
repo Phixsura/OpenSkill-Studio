@@ -149,8 +149,21 @@ class GuardrailService:
     ) -> dict:
         """Evaluate every guardrail + SRM for one running experiment.
         Stamps last_guardrail_check_at even when nothing fires (sweep
-        fairness — §106.26). Returns a summary dict."""
-        now = now or datetime.now(UTC)
+        fairness — §106.26). Returns a summary dict.
+
+        The default clock is the DATABASE's clock_timestamp(): exposures
+        stamp occurred_at with the DB clock, so the sliding window must use
+        the same clock — app/DB skew otherwise makes freshly written
+        exposures invisible (the exact outbox R-fix class). clock_timestamp
+        (not now()): now() freezes at transaction start, which equals
+        occurred_at for same-transaction writes and the half-open window's
+        strict `< end` would exclude them."""
+        if now is None:
+            from sqlalchemy import func as _sql_func
+
+            now = (await self.db.execute(select(_sql_func.clock_timestamp()))).scalar_one()
+            if now.tzinfo is None:  # driver may hand back naive UTC
+                now = now.replace(tzinfo=UTC)
         exp = await self.db.get(Experiment, experiment_id)
         if not exp:
             raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)

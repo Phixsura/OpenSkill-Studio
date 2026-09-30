@@ -21,6 +21,7 @@ WRITE_ENDPOINTS = [
     ("post", "/api/v1/experiments/metric-definitions/seed", {}),
     ("post", f"/api/v1/experiments/{EXP_ID}/guardrails/incident", {}),
     ("post", f"/api/v1/experiments/{EXP_ID}/guardrails/evaluate", {}),
+    ("post", f"/api/v1/experiments/{EXP_ID}/analysis", {}),
 ]
 
 READ_ENDPOINTS = [

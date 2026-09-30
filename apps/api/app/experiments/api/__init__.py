@@ -8,6 +8,7 @@ register BEFORE the dynamic /experiments/{experiment_id} routes.
 from fastapi import APIRouter, Depends
 
 from app.core.rate_limit import rate_limit
+from app.experiments.api.analysis import router as analysis_router
 from app.experiments.api.assignments import router as assignments_router
 from app.experiments.api.experiments import router as experiments_router_module
 from app.experiments.api.guardrails import router as guardrails_router
@@ -22,4 +23,5 @@ experiments_router.include_router(layers_router)
 experiments_router.include_router(metrics_router)
 experiments_router.include_router(assignments_router)
 experiments_router.include_router(guardrails_router)
+experiments_router.include_router(analysis_router)
 experiments_router.include_router(experiments_router_module)
