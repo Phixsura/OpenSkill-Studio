@@ -22,6 +22,7 @@ from app.experiments.models import (
     Experiment,
     ExperimentAssignment,
     ExperimentEvent,
+    GuardrailEvent,
 )
 from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
@@ -590,3 +591,50 @@ def test_no_auto_promote_path_in_experiments_package():
         and path.name != "decisions.py"
     ]
     assert not spenders, f"_via_decision spent outside decisions.py: {spenders}"
+
+
+# ── Round-10 interaction defect #28: switchback must not false-SRM ───
+
+
+async def test_switchback_experiment_never_srm_alerts(db):
+    """Switchback assignments all carry the placeholder variant — a naive
+    SRM chi-square against the spec weights would ALWAYS fire. Defect #28:
+    SRM (and exposure-SRM) must skip switchback designs entirely."""
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="SB", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec(None)
+    spec["design"] = "switchback"
+    spec["switchback"] = {"switch_unit": "platform_day", "window_minutes": 1440}
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    from app.experiments.services.assignment import AssignmentService
+
+    asvc = AssignmentService(db)
+    for i in range(150):  # well past SRM_MIN_ASSIGNMENTS
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=f"sbsrm-{i:04d}"
+        ) is not None
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm" not in summary
+    events = list(
+        (
+            await db.execute(
+                select(GuardrailEvent).where(GuardrailEvent.experiment_id == exp.id)
+            )
+        ).scalars()
+    )
+    assert events == []
+    row = await db.get(Experiment, exp.id)
+    assert row.status == "running"

@@ -72,6 +72,11 @@ class GuardrailService:
     # ── SRM (built-in, alert-only) ───────────────────────────────────
 
     async def check_srm(self, exp: Experiment, spec: ExperimentSpec) -> dict | None:
+        if spec.design == "switchback":
+            # Defect #28: switchback rows all carry the placeholder variant —
+            # a chi-square against the spec weights would ALWAYS fire. The
+            # design randomizes TIME, not units; SRM does not apply.
+            return None
         counts_q = (
             select(ExperimentAssignment.variant_key, ExperimentAssignment.id)
             .where(
@@ -130,6 +135,9 @@ class GuardrailService:
         must track assignment proportions — a divergence means the exposure
         decision itself is affected by the treatment, which poisons any
         exposed-only (triggered) analysis. Alert-only, 24h-suppressed."""
+        spec = await self._spec(exp)
+        if spec is not None and spec.design == "switchback":
+            return None  # same reason as check_srm (defect #28)
         from app.experiments.services.assignment import AssignmentService
 
         stats = await AssignmentService(self.db).exposure_stats(exp.id)

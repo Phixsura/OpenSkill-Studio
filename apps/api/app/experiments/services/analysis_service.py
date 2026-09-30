@@ -92,6 +92,16 @@ class AnalysisService:
                 arm[field] = (arm[field] or 0) + float(value)
         return aggregated, mixed
 
+    @staticmethod
+    def _latest_version_rows(rows: list) -> list:
+        """Restrict window rows to the HIGHEST query_version present — the
+        same rule _aggregate_metric applies, so per-window passes (novelty,
+        time-stratified) never mix metric definitions."""
+        if not rows:
+            return rows
+        use = max(int(r.provenance.get("query_version", 1)) for r in rows)
+        return [r for r in rows if int(r.provenance.get("query_version", 1)) == use]
+
     async def _time_strata(
         self, experiment_id: str, metric_key: str, control_key: str
     ) -> dict[str, list[tuple[float, float]]]:
@@ -108,7 +118,7 @@ class AnalysisService:
             ).scalars()
         )
         by_window: dict = {}
-        for row in rows:
+        for row in self._latest_version_rows(rows):
             by_window.setdefault(row.window_start, {})[row.variant_key] = row
         strata: dict[str, list[tuple[float, float]]] = {}
         for _ws, variants in sorted(by_window.items()):
@@ -215,6 +225,7 @@ class AnalysisService:
                 )
             ).scalars()
         )
+        rows = self._latest_version_rows(rows)
         starts = sorted({r.window_start for r in rows})
         if len(starts) < 4:  # need real windows on both sides of the split
             return False
