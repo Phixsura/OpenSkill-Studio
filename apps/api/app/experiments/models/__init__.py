@@ -22,6 +22,11 @@ from app.experiments.models.guardrail import (
     SRM_GUARDRAIL_KEY,
     GuardrailEvent,
 )
+from app.experiments.models.holdout import (
+    HOLDOUT_GROUP_MAX_BP,
+    HOLDOUT_GROUP_STATUSES,
+    HoldoutGroup,
+)
 from app.experiments.models.metric import (
     METRIC_DIRECTIONS,
     METRIC_KINDS,
@@ -42,6 +47,9 @@ __all__ = [
     "INCIDENT_GUARDRAIL_KEY",
     "SRM_GUARDRAIL_KEY",
     "GuardrailEvent",
+    "HOLDOUT_GROUP_MAX_BP",
+    "HOLDOUT_GROUP_STATUSES",
+    "HoldoutGroup",
     "LAYER_TOTAL_SLICES",
     "METRIC_DIRECTIONS",
     "METRIC_KINDS",

@@ -501,6 +501,18 @@ async def _exp_window_sweep(ctx: dict) -> None:
             log.info("exp_windows_enqueued", count=n)
 
 
+async def _exp_interaction_sweep(ctx: dict) -> None:
+    """ADR-017 §4.13 v2: weekly cross-experiment interaction scan."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_interactions
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_interactions(db)
+        if n:
+            await db.commit()
+            log.warning("exp_interactions_alerted", pairs=n)
+
+
 async def _exp_retention(ctx: dict) -> None:
     """ADR-017 §13: prune archived experiments' raw exposures past retention."""
     from app.core.database import AsyncSessionLocal
@@ -568,6 +580,15 @@ def _cron_jobs() -> list:
         cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
         cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
         cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
+        # Cross-experiment interaction scan: weekly (Tue 04:37 UTC)
+        cron(
+            _exp_interaction_sweep,
+            weekday=1,
+            hour=4,
+            minute=37,
+            timeout=1800,
+            name="exp_interaction_sweep",
+        ),
         # P10: tls refresh
     ]
 

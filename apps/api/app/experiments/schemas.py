@@ -340,6 +340,30 @@ class LayerResponse(BaseModel):
     created_at: datetime
 
 
+class CreateHoldoutGroupRequest(_StrictReq):
+    key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{2,63}$")
+    title: str = Field(min_length=1, max_length=200)
+    domain: str = Field(max_length=20)
+    holdout_bp: int = Field(ge=1, le=2000)
+    scope_org_id: str | None = Field(default=None, min_length=26, max_length=26)
+    ends_at: datetime | None = None
+
+
+class HoldoutGroupResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    key: str
+    title: str
+    domain: str
+    scope_org_id: str | None
+    holdout_bp: int
+    status: str
+    starts_at: datetime
+    ends_at: datetime | None
+    created_at: datetime
+
+
 class AllocationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

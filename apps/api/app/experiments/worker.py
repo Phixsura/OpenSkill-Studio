@@ -13,8 +13,9 @@ caps must price in DB lifetime, oldest-first ordering prevents starvation).
 from datetime import UTC, datetime, time, timedelta
 
 import structlog
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.controlplane.models.outbox import enqueue
 from app.controlplane.worker import register_handler
@@ -75,6 +76,121 @@ async def sweep_experiment_guardrails(
         enqueue(db, "exp.evaluate_guardrails", {"experiment_id": experiment_id})
         enqueued += 1
     return enqueued
+
+
+INTERACTION_MIN_SHARED = 100
+INTERACTION_PAIR_CAP = 20
+_INTERACTION_REALERT_HOURS = 7 * 24
+
+
+async def sweep_experiment_interactions(
+    db: AsyncSession, *, cap_pairs: int = INTERACTION_PAIR_CAP
+) -> int:
+    """Cross-experiment interaction scan (ADR-017 §4.13 v2, weekly).
+
+    Layers guarantee mutual exclusion WITHIN a layer, but a unit can live in
+    experiments of different layers simultaneously — if the two variant
+    assignments are not independent over the shared units, both analyses are
+    confounded. Deterministic hashing makes true dependence impossible by
+    construction, so a significant chi-square here means something is broken
+    (a salt collision, a targeting overlap artifact, a migration replaying
+    assignments) and both owners should know. Alert-only on BOTH sides,
+    7-day suppression per pair, pair-capped per run.
+    """
+    from itertools import combinations
+
+    from app.experiments.models import ExperimentAssignment, GuardrailEvent
+    from app.experiments.models.guardrail import INTERACTION_GUARDRAIL_KEY
+    from app.experiments.services.analysis import chi2_sf
+
+    running = (
+        await db.execute(
+            select(Experiment.id, Experiment.key, Experiment.layer_key)
+            .where(Experiment.status == "running")
+            .order_by(Experiment.id.asc())
+        )
+    ).all()
+    a = aliased(ExperimentAssignment)
+    b = aliased(ExperimentAssignment)
+    alerts = 0
+    pairs_checked = 0
+    for (id1, key1, layer1), (id2, key2, layer2) in combinations(running, 2):
+        if layer1 == layer2:
+            continue  # same layer = mutually exclusive by construction
+        if pairs_checked >= cap_pairs:
+            break
+        pairs_checked += 1
+        rows = (
+            await db.execute(
+                select(a.variant_key, b.variant_key, func.count())
+                .select_from(a)
+                .join(b, (a.unit_type == b.unit_type) & (a.unit_id == b.unit_id))
+                .where(
+                    a.experiment_id == id1,
+                    b.experiment_id == id2,
+                    a.is_holdout.is_(False),
+                    b.is_holdout.is_(False),
+                )
+                .group_by(a.variant_key, b.variant_key)
+            )
+        ).all()
+        table: dict[tuple[str, str], int] = {(v1, v2): n for v1, v2, n in rows}
+        total = sum(table.values())
+        if total < INTERACTION_MIN_SHARED:
+            continue
+        rows_keys = sorted({v1 for v1, _ in table})
+        cols_keys = sorted({v2 for _, v2 in table})
+        df = (len(rows_keys) - 1) * (len(cols_keys) - 1)
+        if df < 1:
+            continue
+        row_tot = {r: sum(table.get((r, c), 0) for c in cols_keys) for r in rows_keys}
+        col_tot = {c: sum(table.get((r, c), 0) for r in rows_keys) for c in cols_keys}
+        chi2 = 0.0
+        for r in rows_keys:
+            for c in cols_keys:
+                expected = row_tot[r] * col_tot[c] / total
+                if expected <= 0:
+                    continue
+                chi2 += (table.get((r, c), 0) - expected) ** 2 / expected
+        if chi2_sf(chi2, df) >= 0.001:
+            continue
+        # 7-day suppression per PAIR (checked on side 1; both write together)
+        recent = (
+            await db.execute(
+                select(GuardrailEvent.detail).where(
+                    GuardrailEvent.experiment_id == id1,
+                    GuardrailEvent.guardrail_key == INTERACTION_GUARDRAIL_KEY,
+                    GuardrailEvent.created_at
+                    >= datetime.now(UTC) - timedelta(hours=_INTERACTION_REALERT_HOURS),
+                )
+            )
+        ).scalars()
+        if any((d or {}).get("with") == id2 for d in recent):
+            continue
+        base = {"chi2": round(chi2, 3), "df": df, "shared_units": total}
+        db.add(
+            GuardrailEvent(
+                experiment_id=id1,
+                guardrail_key=INTERACTION_GUARDRAIL_KEY,
+                action="alerted",
+                auto=True,
+                detail={**base, "with": id2, "with_key": key2},
+            )
+        )
+        db.add(
+            GuardrailEvent(
+                experiment_id=id2,
+                guardrail_key=INTERACTION_GUARDRAIL_KEY,
+                action="alerted",
+                auto=True,
+                detail={**base, "with": id1, "with_key": key1},
+            )
+        )
+        alerts += 1
+        log.warning(
+            "exp_interaction_alert", experiment_a=key1, experiment_b=key2, **base
+        )
+    return alerts
 
 
 EXPOSURE_RETENTION_DAYS = 400

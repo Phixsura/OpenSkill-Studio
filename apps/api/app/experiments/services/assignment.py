@@ -81,6 +81,12 @@ def holdout_roll(experiment_key: str, unit_type: str, unit_id: str) -> int:
     return _roll("holdout", experiment_key, unit_type, unit_id)
 
 
+def holdout_group_roll(group_key: str, unit_type: str, unit_id: str) -> int:
+    """Global holdout-group membership roll (§4.12) — its own salt so group
+    membership is uncorrelated with any experiment's layer/holdout/variant."""
+    return _roll("holdout-group", group_key, unit_type, unit_id)
+
+
 def variant_roll(experiment_key: str, version_salt: str, unit_type: str, unit_id: str) -> int:
     return _roll("variant", experiment_key, version_salt, unit_type, unit_id)
 
@@ -257,6 +263,20 @@ class AssignmentService:
             result["eligible"] = False
             result["reason"] = "unit outside experiment org scope"
             return result
+        # Global holdout groups (§4.12): members are withheld from NEW
+        # enrollment across the whole domain (before any per-experiment roll)
+        from app.experiments.services.holdouts import active_holdout_groups
+
+        for group_key, group_bp, group_org, _ends in await active_holdout_groups(
+            self.db, exp.domain
+        ):
+            if group_org is not None and group_org != exp.scope_org_id:
+                continue
+            if holdout_group_roll(group_key, unit_type, unit_id) < group_bp:
+                result["eligible"] = False
+                result["reason"] = "global holdout group"
+                result["holdout_group"] = group_key
+                return result
         if not evaluate_population(spec.population, context):
             result["eligible"] = False
             result["reason"] = "population rules"

@@ -12,7 +12,7 @@ source (exp07).
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from sqlalchemy import func, select
@@ -80,6 +80,7 @@ async def _source_exposures(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Exposure rate per variant: numerator = DISTINCT exposed units in the
     window (a unit hitting the surface five times is one exposed unit — a raw
@@ -120,6 +121,7 @@ async def _source_workflow_runs(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Production metrics over WorkflowRun for workflow_installation units.
 
@@ -188,6 +190,7 @@ async def _source_projects(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Learning outcomes over Submission (user units).
 
@@ -214,6 +217,55 @@ async def _source_projects(
             )
         ).all()
         if measure == "revision_count":
+            if (
+                variance_reduction is not None
+                and variance_reduction.covariate_metric == definition.key
+            ):
+                # CUPED mode (§4.6 v2): per-UNIT aggregation so each unit
+                # contributes one (y, x) pair — y = revisions in the window,
+                # x = revisions in the pre-assignment lookback of the SAME
+                # metric. Every assigned unit counts (ITT, zero when silent);
+                # NOTE the n/unit-of-analysis change vs per-submission mode.
+                lookback_start = window_start - timedelta(
+                    days=variance_reduction.lookback_days
+                )
+                pre_rows = (
+                    await db.execute(
+                        select(Submission.user_id, Submission.version).where(
+                            Submission.user_id.in_(units),
+                            Submission.created_at >= lookback_start,
+                            Submission.created_at < window_start,
+                        )
+                    )
+                ).all()
+                cur_rows = (
+                    await db.execute(
+                        select(Submission.user_id, Submission.version).where(
+                            Submission.user_id.in_(units),
+                            Submission.created_at >= window_start,
+                            Submission.created_at < window_end,
+                        )
+                    )
+                ).all()
+                y: dict[str, float] = dict.fromkeys(units, 0.0)
+                x: dict[str, float] = dict.fromkeys(units, 0.0)
+                for user_id, version in cur_rows:
+                    y[user_id] += float(max(0, version - 1))
+                for user_id, version in pre_rows:
+                    x[user_id] += float(max(0, version - 1))
+                ys, winsorized = winsorize([y[u] for u in units], definition.winsorize_pct)
+                xs = [x[u] for u in units]
+                result[variant] = {
+                    "n": len(units),
+                    "sum_value": sum(ys),
+                    "sum_sq": sum(v * v for v in ys),
+                    "cov_sum": sum(xs),
+                    "cov_sum_sq": sum(v * v for v in xs),
+                    "cov_xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+                    "_winsorized": winsorized,
+                    "_aggregation": "per_unit",
+                }
+                continue
             revisions = [float(max(0, version - 1)) for _status, version in rows]
             revisions, winsorized = winsorize(revisions, definition.winsorize_pct)
             result[variant] = {
@@ -238,6 +290,7 @@ async def _source_cost_ledger(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Internal cost (USD) from metered evaluation spend, per org/tenant
     units. Money stays Decimal→float at the aggregate boundary only."""
@@ -282,6 +335,7 @@ async def _source_client_briefs(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Client acceptance per org unit: COMPLETED (client accepted the
     deliverables) / all briefs touched in the window (updated_at —
@@ -321,6 +375,7 @@ async def _source_registry(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Pack adoption per org unit: installations created in the window over
     the org count (rate)."""
@@ -356,6 +411,7 @@ async def _source_eco_telemetry(
     window_start: datetime,
     window_end: datetime,
     unit_type: str = "",
+    variance_reduction=None,
 ) -> SourceResult:
     """Provider reliability from eco TelemetrySnapshots (provider_offering
     units): sample-weighted success — numerator Σ(success_rate·samples),
@@ -566,6 +622,24 @@ class MetricService:
                 )
             ).scalars()
         }
+        # CUPED covariate request comes from the experiment spec (§4.6 v2);
+        # sources that support it emit per-unit cov_* sufficient stats
+        variance_reduction = None
+        latest = (
+            await self.db.execute(
+                select(ExperimentVersion).where(
+                    ExperimentVersion.experiment_id == exp.id,
+                    ExperimentVersion.version == exp.current_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if latest is not None:
+            try:
+                variance_reduction = ExperimentSpec.model_validate(
+                    latest.spec
+                ).variance_reduction
+            except Exception:  # noqa: BLE001 — poison spec must not kill snapshots
+                variance_reduction = None
         # Window-consistent ITT: only units assigned before the window closed
         variant_units = await self._variant_units(experiment_id, as_of=window_end)
         if not variant_units:
@@ -595,6 +669,7 @@ class MetricService:
                 window_start=window_start,
                 window_end=window_end,
                 unit_type=unit_type,
+                variance_reduction=variance_reduction,
             )
             # Provenance records what actually happened — no robustness-knob
             # claims here (a source that applies capping/winsorization must
@@ -612,8 +687,14 @@ class MetricService:
                 variant_provenance = provenance
                 if values.pop("_winsorized", False):
                     variant_provenance = {
-                        **provenance,
+                        **variant_provenance,
                         "winsorize_pct": float(definition.winsorize_pct),
+                    }
+                aggregation = values.pop("_aggregation", None)
+                if aggregation is not None:
+                    variant_provenance = {
+                        **variant_provenance,
+                        "aggregation": aggregation,
                     }
                 row = {
                     "experiment_id": experiment_id,
@@ -634,6 +715,9 @@ class MetricService:
                         "denominator",
                         "sum_value",
                         "sum_sq",
+                        "cov_sum",
+                        "cov_sum_sq",
+                        "cov_xy_sum",
                         "provenance",
                     )
                     if c in row

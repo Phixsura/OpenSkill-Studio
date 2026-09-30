@@ -806,3 +806,115 @@ async def test_snapshot_unique_constraint_names_window(db):
     constraint name so a rename breaks loudly here, not silently in prod."""
     names = {c.name for c in MetricSnapshot.__table__.constraints}
     assert "uq_experiment_metric_snapshots_window" in names
+
+
+# ── CUPED covariates end-to-end (v2 batch 2, §4.6) ───────────────────
+
+
+async def test_cuped_covariates_end_to_end(db):
+    """Spec asks for CUPED on revision_count → the projects source switches
+    to per-UNIT aggregation and emits pre-period covariate sufficient stats
+    → the snapshot carries cov_* columns (provenance aggregation=per_unit)
+    → analysis engages CUPED and the honesty warning disappears."""
+    from app.experiments.models import ExperimentAssignment, MetricSnapshot
+    from app.experiments.services.analysis_service import AnalysisService
+    from app.models.project import Project, Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["metrics"]["primary"] = ["revision_count"]
+    spec["variance_reduction"] = {
+        "method": "cuped", "covariate_metric": "revision_count", "lookback_days": 28,
+    }
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await MetricService(db).ensure_seed_definitions()
+
+    project = Project(
+        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
+        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+    )
+    db.add(project)
+    window_start, window_end = _today_window()
+    # 8 users, 4 per arm; pre-period revisions (x) correlate with in-window
+    # revisions (y): y = x + arm effect — CUPED has real variance to remove
+    users: list[tuple[User, str, int]] = []
+    for i in range(8):
+        arm = "control" if i % 2 == 0 else "treatment"
+        user = User(
+            email=f"cuped-{ULID()}@example.com", display_name="U",
+            role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        )
+        db.add(user)
+        users.append((user, arm, i // 2))
+    await db.flush()
+    for user, arm, level in users:
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=user.id,
+                variant_key=arm, assigned_version=1, bucket=0, is_holdout=False,
+            )
+        )
+        # pre-period: `level` revisions at window_start - 7d
+        db.add(
+            Submission(
+                org_id=org.id, project_id=project.id, user_id=user.id,
+                status=SubmissionStatus.APPROVED, version=level + 1,
+                created_at=window_start - timedelta(days=7),
+            )
+        )
+        # in-window: y = level (+1 extra revision for treatment)
+        y = level + (1 if arm == "treatment" else 0)
+        db.add(
+            Submission(
+                org_id=org.id, project_id=project.id, user_id=user.id,
+                status=SubmissionStatus.APPROVED, version=y + 1,
+            )
+        )
+    await db.flush()
+
+    written = await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    assert written >= 2
+    snapshots = {
+        row.variant_key: row
+        for row in (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.metric_key == "revision_count",
+                )
+            )
+        ).scalars()
+    }
+    control = snapshots["control"]
+    # per-UNIT aggregation: n = units, not submissions
+    assert control.n == 4
+    assert control.provenance["aggregation"] == "per_unit"
+    # x per control unit = (0,1,2,3); y identical in control
+    assert float(control.cov_sum) == 6.0
+    assert float(control.cov_sum_sq) == 14.0
+    assert float(control.cov_xy_sum) == 14.0
+    assert float(control.sum_value) == 6.0
+    treatment = snapshots["treatment"]
+    assert float(treatment.sum_value) == 10.0  # (1,2,3,4)
+    assert float(treatment.cov_sum) == 6.0
+
+    await svc.transition(exp.id, to_status="completed", actor=admin)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    assert "cuped" in comparison
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]

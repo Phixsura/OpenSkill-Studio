@@ -27,6 +27,19 @@ def norm_sf(x: float) -> float:
     return 0.5 * math.erfc(x / math.sqrt(2.0))
 
 
+def chi2_sf(x: float, df: int) -> float:
+    """Chi-square survival function via the Wilson-Hilferty cube-root normal
+    approximation — good to ~1e-3 in the alerting tail for df >= 1, which is
+    all the interaction sweep needs (alpha = 0.001 gate, arbitrary df)."""
+    if df < 1:
+        raise ValueError("df must be >= 1")
+    if x <= 0.0:
+        return 1.0
+    c = 2.0 / (9.0 * df)
+    z = ((x / df) ** (1.0 / 3.0) - (1.0 - c)) / math.sqrt(c)
+    return norm_sf(z)
+
+
 def norm_ppf(p: float) -> float:
     """Acklam's rational approximation (|rel err| < 1.15e-9), refined with
     one Halley step against erfc for full double precision."""

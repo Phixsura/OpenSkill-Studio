@@ -18,6 +18,7 @@ const TABS = [
   { href: "/dashboard/experiments/decisions", label: "Decisions" },
   { href: "/dashboard/experiments/promotions", label: "Promotions" },
   { href: "/dashboard/experiments/layers", label: "Layers" },
+  { href: "/dashboard/experiments/holdouts", label: "Holdouts" },
   { href: "/dashboard/experiments/metrics", label: "Metric Explorer" },
 ];
 

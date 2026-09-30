@@ -13,6 +13,7 @@ from app.experiments.api.assignments import router as assignments_router
 from app.experiments.api.decisions import router as decisions_router
 from app.experiments.api.experiments import router as experiments_router_module
 from app.experiments.api.guardrails import router as guardrails_router
+from app.experiments.api.holdouts import router as holdouts_router
 from app.experiments.api.layers import router as layers_router
 from app.experiments.api.metrics import router as metrics_router
 
@@ -24,6 +25,7 @@ experiments_router.include_router(layers_router)
 experiments_router.include_router(metrics_router)
 experiments_router.include_router(decisions_router)
 experiments_router.include_router(assignments_router)
+experiments_router.include_router(holdouts_router)
 experiments_router.include_router(guardrails_router)
 experiments_router.include_router(analysis_router)
 experiments_router.include_router(experiments_router_module)

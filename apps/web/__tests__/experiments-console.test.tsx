@@ -20,6 +20,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import ExperimentsPage from "@/app/(dashboard)/dashboard/experiments/page";
+import HoldoutsPage from "@/app/(dashboard)/dashboard/experiments/holdouts/page";
 import PromotionsPage from "@/app/(dashboard)/dashboard/experiments/promotions/page";
 import { apiWithAuth } from "@/lib/api";
 
@@ -128,5 +129,72 @@ describe("Promotions board", () => {
     expect(screen.getByText("Approve")).toBeTruthy();
     expect(screen.getByText("Reject")).toBeTruthy();
     expect(screen.getByText("Apply")).toBeTruthy();
+  });
+});
+
+describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
+  const GROUP = {
+    id: "H".repeat(26),
+    key: "q4-learning-holdout",
+    title: "Q4 learning holdout",
+    domain: "learning",
+    scope_org_id: null,
+    holdout_bp: 500,
+    status: "active",
+    starts_at: "2026-10-01T00:00:00Z",
+    ends_at: null,
+  };
+
+  it("lists groups with band percentage and release action", async () => {
+    api.mockResolvedValue({ data: [GROUP] });
+    render(<HoldoutsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("q4-learning-holdout")).toBeTruthy();
+    expect(screen.getByText("5.0%")).toBeTruthy();
+    expect(screen.getByText("Release")).toBeTruthy();
+  });
+
+  it("creates a group with numeric holdout_bp and releases by id", async () => {
+    api.mockResolvedValue({ data: [GROUP] });
+    render(<HoldoutsPage />, { wrapper: wrapper() });
+    await screen.findByText("q4-learning-holdout");
+    fireEvent.change(screen.getByPlaceholderText("q4-learning-holdout"), {
+      target: { value: "new-holdout" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Q4 learning holdout"), {
+      target: { value: "New holdout" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/experiments/holdout-groups",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const createCall = api.mock.calls.find(
+      (c) => c[0] === "/experiments/holdout-groups" && c[1]?.method === "POST",
+    );
+    const body = JSON.parse(String(createCall?.[1]?.body));
+    expect(body).toEqual({
+      key: "new-holdout",
+      title: "New holdout",
+      domain: "learning",
+      holdout_bp: 500,
+    });
+    fireEvent.click(screen.getByText("Release"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        `/experiments/holdout-groups/${GROUP.id}/release`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("released groups hide the release button", async () => {
+    api.mockResolvedValue({
+      data: [{ ...GROUP, status: "released", ends_at: "2026-12-01T00:00:00Z" }],
+    });
+    render(<HoldoutsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("released")).toBeTruthy();
+    expect(screen.queryByText("Release")).toBeNull();
   });
 });

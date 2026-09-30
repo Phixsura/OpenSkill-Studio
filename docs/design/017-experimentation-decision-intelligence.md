@@ -728,6 +728,36 @@ Hardening round 5 (same day):
   synchronous applies roll back on failure; the column is reserved for a
   future async apply path.
 
+v2 batch 2 (round 9, 2026-10-01) — second slice of the §18 backlog:
+
+- **Global holdout groups** (§4.12, migration exp07a00007): an active group
+  withholds a deterministic hash band (salt `holdout-group:<key>`, max
+  2000bp) from NEW enrollment into every experiment of its domain —
+  platform-wide or org-scoped. Membership is computed, never stored
+  (release frees units instantly); existing sticky assignments keep serving
+  (a holdout never yanks an experience — same rule as pause); preview names
+  the excluding group. Admin CRUD + release at
+  /experiments/holdout-groups (+ Console Holdouts tab); the hot-path
+  domain lookup is 60s-process-cached like the missing-key cache, with
+  ends_at re-checked at eval time so expiry needs no status write.
+- **Cross-experiment interaction detection** (§4.13, weekly sweep
+  `exp_interaction_sweep`): for running experiment pairs in DIFFERENT
+  layers, the variant-assignment contingency over shared units is χ²-tested
+  for independence (Wilson-Hilferty `chi2_sf` handles arbitrary df; gate
+  α=0.001, min 100 shared units, pair-capped). Deterministic hashing makes
+  true dependence impossible by construction, so a hit means something is
+  broken (salt collision, replayed assignments) — `__interaction__` alert
+  on BOTH experiments, 7-day per-pair suppression, alert-only.
+- **CUPED covariates computed** (§4.6): when the spec sets
+  variance_reduction with covariate_metric == the metric itself, the
+  projects/revision_count source switches to per-UNIT aggregation (ITT:
+  every assigned unit contributes, zero when silent) and emits
+  cov_sum/cov_sum_sq/cov_xy_sum from the pre-window lookback — analysis now
+  engages cuped_adjusted_welch end-to-end and the
+  CUPED_COVARIATES_UNAVAILABLE honesty warning clears. Provenance stamps
+  `aggregation: per_unit` (the n-semantics change is recorded, not silent).
+  Other sources still skip covariates (the warning stays truthful there).
+
 v2 batch 1 (round 8, 2026-10-01) — first slice of the §18 backlog:
 
 - **Launch checklist enforced** (§5 v2): review→scheduled requires every
