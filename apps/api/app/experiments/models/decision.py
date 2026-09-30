@@ -19,7 +19,7 @@ from app.models.base import Base, ulid_pk
 
 DECISIONS = frozenset({"promote", "reject", "inconclusive", "extend"})
 TERMINAL_DECISIONS = frozenset({"promote", "reject"})
-PROMOTION_STATUSES = frozenset({"draft", "approved", "applied", "rejected"})
+PROMOTION_STATUSES = frozenset({"draft", "approved", "applying", "applied", "rejected"})
 
 
 class DecisionRecord(Base):

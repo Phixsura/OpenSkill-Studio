@@ -135,11 +135,20 @@ async def reject_promotion_draft(
 )
 async def apply_promotion_draft(
     draft_id: str,
+    background: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_platform_admin),
 ):
-    """Creates the target domain's DRAFT object — never a production mutation."""
-    draft = await PromotionService(db).apply(draft_id, actor=user)
+    """Creates the target domain's DRAFT object — never a production
+    mutation. background=true queues the apply through the outbox: the draft
+    parks in 'applying' and lands in 'applied', or returns to 'approved'
+    with apply_error set (retryable)."""
+    svc = PromotionService(db)
+    draft = await (
+        svc.apply_async(draft_id, actor=user)
+        if background
+        else svc.apply(draft_id, actor=user)
+    )
     await db.commit()
     return {"data": draft}
 

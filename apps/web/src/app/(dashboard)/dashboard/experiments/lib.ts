@@ -42,7 +42,7 @@ export const STATS_ENGINES = ["frequentist", "bayesian"] as const;
 export const SEQUENTIAL_METHODS = ["none", "obrien_fleming", "msprt"] as const;
 export const ANALYSIS_TYPES = ["randomized", "observational"] as const;
 export const DECISIONS = ["promote", "reject", "inconclusive", "extend"] as const;
-export const PROMOTION_STATUSES = ["draft", "approved", "applied", "rejected"] as const;
+export const PROMOTION_STATUSES = ["draft", "approved", "applying", "applied", "rejected"] as const;
 export const PROMOTION_TARGET_TYPES = [
   "learning_path",
   "pack_recommendation",

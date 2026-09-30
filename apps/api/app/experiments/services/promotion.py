@@ -195,6 +195,10 @@ class PromotionService:
         draft = await self.get(draft_id, for_update=True)
         if draft.status == "applied":
             raise AppError("PROMOTION_ALREADY_APPLIED", "Draft already applied", 409)
+        if draft.status == "applying":
+            raise AppError(
+                "PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409
+            )
         if draft.status != "approved":
             raise AppError(
                 "DECISION_STATE_INVALID",
@@ -207,6 +211,69 @@ class PromotionService:
         draft.status = "applied"
         draft.applied_at = datetime.now(UTC)
         draft.applied_ref = applied_ref
+        decision = await DecisionService(self.db).get(draft.decision_record_id)
+        from app.experiments.services.experiments import ExperimentService
+
+        await ExperimentService(self.db)._record_event(  # noqa: SLF001 — same package
+            decision.experiment_id,
+            event_type="promotion_drafted",
+            actor_user_id=actor.id,
+            payload={"draft_id": draft.id, "applied_ref": applied_ref, "applied": True},
+        )
+        await self.db.flush()
+        return draft
+
+    async def apply_async(self, draft_id: str, *, actor: User) -> PromotionDraft:
+        """Queue the apply through the outbox (v2 §18: the apply_error column's
+        purpose). The draft is parked in 'applying'; the handler lands it in
+        'applied' or returns it to 'approved' with apply_error set — a failed
+        async apply is retryable by design, never stuck."""
+        from app.controlplane.models.outbox import enqueue
+
+        draft = await self.get(draft_id, for_update=True)
+        if draft.status == "applied":
+            raise AppError("PROMOTION_ALREADY_APPLIED", "Draft already applied", 409)
+        if draft.status == "applying":
+            raise AppError(
+                "PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409
+            )
+        if draft.status != "approved":
+            raise AppError(
+                "DECISION_STATE_INVALID",
+                f"Apply requires an approved draft (got {draft.status})",
+                422,
+            )
+        draft.status = "applying"
+        draft.apply_error = None
+        enqueue(
+            self.db,
+            "exp.apply_promotion",
+            {"draft_id": draft.id, "actor_user_id": actor.id},
+        )
+        await self.db.flush()
+        return draft
+
+    async def finish_async_apply(self, draft_id: str, *, actor: User) -> PromotionDraft:
+        """Outbox-handler half of apply_async. A typed failure returns the
+        draft to 'approved' with apply_error recorded (retryable, no outbox
+        redelivery); an unexpected crash propagates so the outbox retries."""
+        draft = await self.get(draft_id, for_update=True)
+        if draft.status != "applying":  # racing manual apply/reject won
+            return draft
+        try:
+            await self._validate_target(
+                draft.target_type, draft.target_ref, draft.draft_payload
+            )
+            applied_ref = await self._apply_adapter(draft, actor)
+        except AppError as exc:
+            draft.status = "approved"
+            draft.apply_error = f"{exc.code}: {exc.message}"
+            await self.db.flush()
+            return draft
+        draft.status = "applied"
+        draft.applied_at = datetime.now(UTC)
+        draft.applied_ref = applied_ref
+        draft.apply_error = None
         decision = await DecisionService(self.db).get(draft.decision_record_id)
         from app.experiments.services.experiments import ExperimentService
 

@@ -757,3 +757,107 @@ async def test_draft_registry_status_filter(db):
     drafts = await psvc.list_drafts(status="draft")
     assert any(d.decision_record_id == decision.id for d in drafts)
     assert all(d.status == "draft" for d in drafts)
+
+
+# ── Async apply through the outbox (v2 batch 6, apply_error lands) ───
+
+
+async def _approved_draft(db, target_type="pack_recommendation", **kwargs):
+    exp, admin, result_hash = await _mk_analyzed(db)
+    decision = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        decision.id, target_type=target_type,
+        target_ref=kwargs.pop("target_ref", "a" * 26),
+        draft_payload=kwargs.pop("draft_payload", {}), actor=admin,
+    )
+    await psvc.approve(draft.id, actor=admin)
+    return draft, admin, psvc
+
+
+async def test_async_apply_parks_then_handler_lands_failure_in_apply_error(db):
+    """The unwired target fails TYPED in the handler: the draft returns to
+    'approved' with apply_error recorded — retryable, never stuck, and the
+    outbox message is consumed (no redelivery loop)."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.outbox import OutboxMessage
+    from app.experiments.worker import handle_apply_promotion
+
+    draft, admin, psvc = await _approved_draft(db)
+    parked = await psvc.apply_async(draft.id, actor=admin)
+    assert parked.status == "applying"
+    assert parked.apply_error is None
+    message = (
+        await db.execute(
+            _select(OutboxMessage).where(
+                OutboxMessage.topic == "exp.apply_promotion",
+                OutboxMessage.status == "pending",
+            ).order_by(OutboxMessage.id.desc()).limit(1)
+        )
+    ).scalar_one()
+    assert message.payload["draft_id"] == draft.id
+
+    # while in flight, both sync and a second async apply refuse
+    with pytest.raises(AppError) as e:
+        await psvc.apply(draft.id, actor=admin)
+    assert e.value.code == "PROMOTION_APPLY_IN_FLIGHT"
+    with pytest.raises(AppError) as e:
+        await psvc.apply_async(draft.id, actor=admin)
+    assert e.value.code == "PROMOTION_APPLY_IN_FLIGHT"
+
+    await handle_apply_promotion(db, message.payload)
+    row = await psvc.get(draft.id)
+    assert row.status == "approved"  # returned, not stuck in applying
+    assert "EXPERIMENT_PROMOTION_UNWIRED" in row.apply_error
+    # retryable: queue it again
+    again = await psvc.apply_async(draft.id, actor=admin)
+    assert again.status == "applying"
+    assert again.apply_error is None
+
+
+async def test_async_apply_success_lands_applied_ref(db):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.experiments.worker import handle_apply_promotion
+    from app.models.learning_path import LearningPath
+    from app.models.organization import Organization
+    from app.models.skill import ContentStatus
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    base = LearningPath(
+        org_id=org.id, name="Base path", slug=f"base-{str(ULID()).lower()}",
+        status=ContentStatus.PUBLISHED,
+    )
+    db.add(base)
+    await db.flush()
+    draft, admin, psvc = await _approved_draft(
+        db, target_type="learning_path", target_ref=base.id,
+        draft_payload={"name": "Async ordering"},
+    )
+    await psvc.apply_async(draft.id, actor=admin)
+    await handle_apply_promotion(db, {"draft_id": draft.id, "actor_user_id": admin.id})
+    row = await psvc.get(draft.id)
+    assert row.status == "applied"
+    assert row.apply_error is None
+    new_path = await db.get(LearningPath, row.applied_ref)
+    assert new_path.status == ContentStatus.DRAFT
+
+
+async def test_async_handler_skips_when_race_already_resolved(db):
+    """A racing manual path that already moved the draft out of 'applying'
+    wins; the handler is a no-op (idempotent at-least-once delivery)."""
+    from app.experiments.worker import handle_apply_promotion
+
+    draft, admin, psvc = await _approved_draft(db)
+    # never parked — handler must not touch an 'approved' draft
+    await handle_apply_promotion(db, {"draft_id": draft.id, "actor_user_id": admin.id})
+    row = await psvc.get(draft.id)
+    assert row.status == "approved"
+    assert row.apply_error is None

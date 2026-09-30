@@ -92,6 +92,63 @@ class AnalysisService:
                 arm[field] = (arm[field] or 0) + float(value)
         return aggregated, mixed
 
+    async def _corpus_prior(
+        self, exp, metric_key: str, exclude_experiment_id: str
+    ) -> dict | None:
+        """Empirical prior over a metric's effect within a domain: the latest
+        analysis_look effect of every OTHER experiment in the domain that
+        reached a terminal decision (decided = the analysis was trusted
+        enough to act on). Needs >= 3 historical effects; returns
+        {n_experiments, mean, sd}."""
+        from app.experiments.models import TERMINAL_DECISIONS, DecisionRecord
+
+        decided = (
+            await self.db.execute(
+                select(DecisionRecord.experiment_id)
+                .where(
+                    DecisionRecord.domain == exp.domain,
+                    DecisionRecord.decision.in_(TERMINAL_DECISIONS),
+                    DecisionRecord.experiment_id != exclude_experiment_id,
+                )
+                .distinct()
+            )
+        ).scalars()
+        decided_ids = list(decided)
+        if len(decided_ids) < 3:
+            return None
+        effects: list[float] = []
+        for experiment_id in decided_ids:
+            event = (
+                await self.db.execute(
+                    select(ExperimentEvent)
+                    .where(
+                        ExperimentEvent.experiment_id == experiment_id,
+                        ExperimentEvent.event_type == "analysis_look",
+                    )
+                    .order_by(ExperimentEvent.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if event is None:
+                continue
+            per_metric = (event.payload or {}).get("primary_effects", {}).get(metric_key)
+            if not per_metric:
+                continue
+            arm_effects = [
+                v["effect"] for v in per_metric.values() if v.get("effect") is not None
+            ]
+            if arm_effects:
+                effects.append(sum(arm_effects) / len(arm_effects))
+        if len(effects) < 3:
+            return None
+        mean = sum(effects) / len(effects)
+        var = sum((e - mean) ** 2 for e in effects) / (len(effects) - 1)
+        return {
+            "n_experiments": len(effects),
+            "mean": mean,
+            "sd": math.sqrt(var),
+        }
+
     async def _novelty_suspect(
         self, experiment_id: str, metric_key: str, control_key: str
     ) -> bool:
@@ -357,6 +414,29 @@ class AnalysisService:
                 entry["comparisons"] = comparisons
                 metrics_out[key] = entry
 
+        # Meta-analysis corpus prior (§11 v2): effects this DOMAIN has
+        # historically seen on the SAME primary metric, from decided
+        # experiments — normal-normal shrinkage tempers day-one overreaction
+        # to noisy effects. Informational: the unshrunk estimate stays the
+        # decision basis; shrinkage is decision-support context.
+        for key in spec.metrics.primary:
+            prior = await self._corpus_prior(exp, key, experiment_id)
+            if prior is None:
+                continue
+            entry = metrics_out.get(key)
+            if not entry or not entry.get("comparisons"):
+                continue
+            for comparison in entry["comparisons"].values():
+                effect, se = comparison.get("effect"), comparison.get("se")
+                if effect is None or se is None or se <= 0 or prior["sd"] <= 0:
+                    continue
+                precision = 1.0 / (se * se) + 1.0 / (prior["sd"] * prior["sd"])
+                shrunk = (
+                    effect / (se * se) + prior["mean"] / (prior["sd"] * prior["sd"])
+                ) / precision
+                comparison["corpus_prior"] = prior
+                comparison["shrunk_effect"] = shrunk
+
         for key in spec.metrics.primary:
             if await self._novelty_suspect(experiment_id, key, control_key):
                 warnings.append("NOVELTY_EFFECT_DECAY_SUSPECT")
@@ -413,6 +493,22 @@ class AnalysisService:
                     "look": look_number,
                     "result_hash": payload["result_hash"],
                     "at": datetime.now(UTC).isoformat(),
+                    # Corpus raw material (§11 meta-analysis): the primary
+                    # effects this look observed, se included
+                    "primary_effects": {
+                        key: {
+                            variant: {
+                                "effect": comparison.get("effect"),
+                                "se": comparison.get("se"),
+                            }
+                            for variant, comparison in (
+                                metrics_out[key].get("comparisons") or {}
+                            ).items()
+                            if comparison.get("effect") is not None
+                        }
+                        for key in spec.metrics.primary
+                        if key in metrics_out
+                    },
                 },
             )
         )

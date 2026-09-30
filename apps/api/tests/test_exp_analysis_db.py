@@ -337,3 +337,87 @@ def test_aa_probe_healthy_and_deterministic():
     assert aa_probe("aa-golden-layer", n=5000) == probe
     # bounds clamp
     assert aa_probe("aa-golden-layer", n=10)["n"] == 100
+
+
+# ── Meta-analysis corpus prior (v2 batch 5, §11) ─────────────────────
+
+
+async def _mk_decided_history(db, domain: str, metric_key: str, effects: list[float]):
+    """Insert N historical decided experiments whose latest analysis_look
+    carries the given primary effect."""
+    from app.experiments.models import DecisionRecord, ExperimentEvent
+
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain=domain)
+    svc = ExperimentService(db)
+    for effect in effects:
+        exp = await svc.create(
+            key=f"hist-{str(ULID()).lower()}", title="H", domain=domain,
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+        db.add(ExperimentEvent(
+            experiment_id=exp.id, actor_user_id=admin.id,
+            event_type="analysis_look",
+            payload={"result_hash": "0" * 64, "primary_effects": {
+                metric_key: {"treatment": {"effect": effect, "se": 0.01}},
+            }},
+        ))
+        db.add(DecisionRecord(
+            experiment_id=exp.id, experiment_version=1, decision="promote",
+            summary="hist", domain=domain, analysis_type="randomized",
+            analysis_result_hash="0" * 64, approver_user_id=admin.id,
+        ))
+    await db.flush()
+
+
+async def test_corpus_prior_shrinks_primary_effect(db):
+    """With >= 3 decided same-domain experiments on the metric, comparisons
+    carry the empirical prior and a normal-normal shrunk estimate pulled
+    toward the corpus mean."""
+    exp, admin = await _mk_running(db)
+    await _mk_decided_history(db, "learning", "exposure_rate", [0.02, 0.03, 0.04])
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    prior = comparison["corpus_prior"]
+    assert prior["n_experiments"] == 3
+    assert abs(prior["mean"] - 0.03) < 1e-9
+    assert prior["sd"] > 0
+    effect, shrunk = comparison["effect"], comparison["shrunk_effect"]
+    # shrunk lies strictly between the raw effect and the corpus mean
+    low, high = sorted((effect, prior["mean"]))
+    assert low <= shrunk <= high
+    assert shrunk != effect or effect == prior["mean"]
+
+
+async def test_corpus_prior_absent_below_three_and_cross_domain(db):
+    exp, admin = await _mk_running(db)
+    # only two decided experiments in-domain, three in ANOTHER domain
+    await _mk_decided_history(db, "learning", "exposure_rate", [0.02, 0.03])
+    await _mk_decided_history(db, "operational", "exposure_rate", [0.5, 0.6, 0.7])
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert "corpus_prior" not in comparison
+    assert "shrunk_effect" not in comparison
+
+
+async def test_analysis_look_records_primary_effects(db):
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentEvent
+
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp)
+    await AnalysisService(db).run(exp.id, actor=admin)
+    event = (
+        await db.execute(
+            _select(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == exp.id,
+                ExperimentEvent.event_type == "analysis_look",
+            ).order_by(ExperimentEvent.created_at.desc()).limit(1)
+        )
+    ).scalar_one()
+    recorded = event.payload["primary_effects"]["exposure_rate"]["treatment"]
+    assert recorded["effect"] is not None
+    assert recorded["se"] is not None

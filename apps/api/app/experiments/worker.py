@@ -56,6 +56,27 @@ async def handle_evaluate_guardrails(db: AsyncSession, payload: dict) -> None:
         log.warning("exp_guardrail_sweep_paused", **summary)
 
 
+@register_handler("exp.apply_promotion")
+async def handle_apply_promotion(db: AsyncSession, payload: dict) -> None:
+    """Async promotion apply (§18): typed failures land in apply_error and
+    return the draft to 'approved' (retryable); crashes propagate for outbox
+    retry. The system actor never approves — it only executes an approval."""
+    from app.experiments.services.promotion import PromotionService
+    from app.models.user import User
+
+    actor = await db.get(User, payload["actor_user_id"])
+    if actor is None:  # approver deleted between queue and run — leave parked
+        log.error("exp_apply_actor_missing", draft_id=payload["draft_id"])
+        return
+    draft = await PromotionService(db).finish_async_apply(payload["draft_id"], actor=actor)
+    if draft.apply_error:
+        log.warning(
+            "exp_async_apply_failed",
+            draft_id=draft.id,
+            apply_error=draft.apply_error,
+        )
+
+
 GUARDRAIL_SWEEP_CAP = 50
 
 
