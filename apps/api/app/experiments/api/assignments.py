@@ -31,10 +31,12 @@ async def preview_assignment(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_platform_admin),
 ):
-    """Dry-run the full resolution pipeline — no writes (debugging surface)."""
+    """Dry-run the full resolution pipeline — no writes (debugging surface).
+    Computes against THIS experiment row by id — key-based lookup would bind
+    to a newer live experiment after key reuse."""
     exp = await ExperimentService(db).get(experiment_id)
     result = await AssignmentService(db).compute(
-        experiment_key=exp.key,
+        experiment=exp,
         unit_type=body.unit_type,
         unit_id=body.unit_id,
         context=body.context,

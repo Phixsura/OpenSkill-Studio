@@ -222,11 +222,21 @@ class AssignmentService:
         )
 
     async def compute(
-        self, *, experiment_key: str, unit_type: str, unit_id: str, context: dict | None = None
+        self,
+        *,
+        unit_type: str,
+        unit_id: str,
+        experiment: Experiment | None = None,
+        experiment_key: str | None = None,
+        context: dict | None = None,
     ) -> dict:
-        """Dry-run the full resolution pipeline WITHOUT writing (§12 preview)."""
+        """Dry-run the full resolution pipeline WITHOUT writing (§12 preview).
+
+        Prefer passing the Experiment ROW: keys are unique among live
+        experiments only, so key-based lookup on a terminal experiment either
+        404s or — worse — binds to a NEWER experiment reusing the key."""
         context = context or {}
-        exp = await self._load(experiment_key)
+        exp = experiment if experiment is not None else await self._load(experiment_key)
         spec, version_salt = await self._spec_and_salt(exp)
         result: dict = {
             "experiment_key": exp.key,
@@ -306,7 +316,7 @@ class AssignmentService:
             return None
 
         computed = await self.compute(
-            experiment_key=experiment_key, unit_type=unit_type, unit_id=unit_id, context=context
+            experiment=exp, unit_type=unit_type, unit_id=unit_id, context=context
         )
         if not computed.get("eligible"):
             return None

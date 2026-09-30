@@ -486,12 +486,20 @@ class MetricService:
 
     # ── snapshots ────────────────────────────────────────────────────
 
-    async def _variant_units(self, experiment_id: str) -> dict[str, list[str]]:
-        """ITT unit sets: grouped by assigned variant, holdouts excluded."""
+    async def _variant_units(
+        self, experiment_id: str, *, as_of: datetime | None = None
+    ) -> dict[str, list[str]]:
+        """ITT unit sets: grouped by assigned variant, holdouts excluded.
+
+        as_of pins the set to units assigned BEFORE that instant — a
+        recompute of yesterday's window must not let today's newly assigned
+        (necessarily zero-exposure) units dilute yesterday's denominators."""
         q = select(ExperimentAssignment.variant_key, ExperimentAssignment.unit_id).where(
             ExperimentAssignment.experiment_id == experiment_id,
             ExperimentAssignment.is_holdout.is_(False),
         )
+        if as_of is not None:
+            q = q.where(ExperimentAssignment.assigned_at < as_of)
         units: dict[str, list[str]] = {}
         for variant_key, unit_id in (await self.db.execute(q)).all():
             units.setdefault(variant_key, []).append(unit_id)
@@ -534,7 +542,8 @@ class MetricService:
                 )
             ).scalars()
         }
-        variant_units = await self._variant_units(experiment_id)
+        # Window-consistent ITT: only units assigned before the window closed
+        variant_units = await self._variant_units(experiment_id, as_of=window_end)
         if not variant_units:
             return 0
         written = 0
@@ -563,13 +572,15 @@ class MetricService:
                 window_end=window_end,
                 unit_type=unit_type,
             )
+            # Provenance records what actually happened — no robustness-knob
+            # claims here (a source that applies capping/winsorization must
+            # be the one to say so; stamping definition.winsorize_pct made
+            # provenance assert an adjustment no source performs yet)
             provenance = {
                 "query_version": definition.query_version,
                 "computed_at": datetime.now(UTC).isoformat(),
                 "source": source_name,
             }
-            if definition.winsorize_pct is not None:
-                provenance["winsorize_pct"] = float(definition.winsorize_pct)
             for variant_key, values in stats.items():
                 row = {
                     "experiment_id": experiment_id,

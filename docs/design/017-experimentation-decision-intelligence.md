@@ -690,3 +690,21 @@ Hardening round 3 (same day):
 - Documented limitation: cross-window aggregation treats unit-window
   observations as independent (repeated measures) — per-unit aggregation is
   v2 work alongside the clustered analysis paths.
+
+Hardening round 4 (same day):
+
+- **Window-consistent ITT denominators**: snapshot computation now pins the
+  unit set to `assigned_at < window_end` — recomputing yesterday's window
+  after today's enrollments previously diluted yesterday's rates with
+  necessarily-zero-exposure units.
+- **Preview computes against the experiment ROW, not the key** — after key
+  reuse (round 3) a key-based preview on an archived experiment id bound to
+  the NEWER live experiment; it also 404'd on terminal experiments.
+- **Truthful provenance**: the automatic `winsorize_pct` provenance stamp is
+  removed — no source applies winsorization yet, so provenance claimed an
+  adjustment that never happened (application of the robustness knobs stays
+  v2 work; the definition fields remain the contract).
+- **Builder self-heal**: if version creation fails after the experiment row
+  is created, the Console archives the spec-less orphan (which would
+  otherwise hold the live-unique key hostage with no repair surface) before
+  surfacing the error.

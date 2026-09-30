@@ -75,45 +75,56 @@ export default function NewExperimentPage() {
         method: "POST",
         body: JSON.stringify(basics),
       });
-      const parsedVariants = variants.map((v) => ({
-        key: v.key,
-        name: v.name,
-        weight_bp: Number(v.weight_bp),
-        is_control: v.is_control,
-        config: JSON.parse(v.config || "{}"),
-      }));
-      const specBody = {
-        hypothesis: spec.hypothesis,
-        unit_type: spec.unit_type,
-        variants: parsedVariants,
-        metrics: {
-          primary: spec.primary_metrics
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          secondary: spec.secondary_metrics
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          guardrails: spec.guardrail_metric
-            ? [
-                {
-                  metric_key: spec.guardrail_metric,
-                  op: spec.guardrail_op,
-                  threshold: Number(spec.guardrail_threshold),
-                  window_hours: Number(spec.guardrail_window_hours),
-                },
-              ]
-            : [],
-        },
-        stats_engine: spec.stats_engine,
-        sequential: spec.sequential,
-        analysis_type: spec.analysis_type,
-      };
-      await apiWithAuth(`/experiments/${created.data.id}/versions`, {
-        method: "POST",
-        body: JSON.stringify({ spec: specBody }),
-      });
+      let parsedVariants;
+      try {
+        parsedVariants = variants.map((v) => ({
+          key: v.key,
+          name: v.name,
+          weight_bp: Number(v.weight_bp),
+          is_control: v.is_control,
+          config: JSON.parse(v.config || "{}"),
+        }));
+        const specBody = {
+          hypothesis: spec.hypothesis,
+          unit_type: spec.unit_type,
+          variants: parsedVariants,
+          metrics: {
+            primary: spec.primary_metrics
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            secondary: spec.secondary_metrics
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            guardrails: spec.guardrail_metric
+              ? [
+                  {
+                    metric_key: spec.guardrail_metric,
+                    op: spec.guardrail_op,
+                    threshold: Number(spec.guardrail_threshold),
+                    window_hours: Number(spec.guardrail_window_hours),
+                  },
+                ]
+              : [],
+          },
+          stats_engine: spec.stats_engine,
+          sequential: spec.sequential,
+          analysis_type: spec.analysis_type,
+        };
+        await apiWithAuth(`/experiments/${created.data.id}/versions`, {
+          method: "POST",
+          body: JSON.stringify({ spec: specBody }),
+        });
+      } catch (versionError) {
+        // Self-heal: a created-but-spec-less draft would hold the (live-
+        // unique) key hostage — archive the orphan before surfacing the error
+        await apiWithAuth(`/experiments/${created.data.id}/transition`, {
+          method: "POST",
+          body: JSON.stringify({ to_status: "archived", reason: "builder spec failed" }),
+        }).catch(() => {});
+        throw versionError;
+      }
       return created.data.id;
     },
     onSuccess: (id) => router.push(`/dashboard/experiments/${id}`),

@@ -184,6 +184,54 @@ async def test_snapshot_recompute_upserts_same_window(db):
     assert exposed == 1
 
 
+async def test_recompute_denominator_pinned_to_window_end(db):
+    """Window-consistent ITT: recomputing yesterday's window after new units
+    were assigned today must NOT dilute yesterday's denominator (units are
+    filtered by assigned_at < window_end)."""
+    from app.experiments.models import ExperimentAssignment
+
+    await MetricService(db).ensure_seed_definitions()
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    for i in range(10):
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"w-{i}")
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"w-{i}")
+    # Backdate these assignments+exposures into yesterday's window
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentExposure
+
+    yesterday = datetime.now(UTC) - timedelta(days=1)
+    await db.execute(
+        _update(ExperimentAssignment)
+        .where(ExperimentAssignment.experiment_id == exp.id)
+        .values(assigned_at=yesterday)
+    )
+    await db.execute(
+        _update(ExperimentExposure)
+        .where(ExperimentExposure.experiment_id == exp.id)
+        .values(occurred_at=yesterday)
+    )
+    window_start = datetime.combine(yesterday.date(), time.min, tzinfo=UTC)
+    window_end = window_start + timedelta(days=1)
+    msvc = MetricService(db)
+    await msvc.compute_experiment_window(exp.id, window_start=window_start, window_end=window_end)
+    first = {
+        (s.variant_key): float(s.denominator or 0)
+        for s in await msvc.list_snapshots(exp.id, metric_key="exposure_rate")
+    }
+    assert sum(first.values()) == 10
+    # New units assigned TODAY, then recompute YESTERDAY's window
+    for i in range(5):
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"today-{i}")
+    await msvc.compute_experiment_window(exp.id, window_start=window_start, window_end=window_end)
+    second = {
+        (s.variant_key): float(s.denominator or 0)
+        for s in await msvc.list_snapshots(exp.id, metric_key="exposure_rate")
+    }
+    assert second == first, "today's assignments diluted yesterday's denominator"
+
+
 async def test_holdout_units_excluded_from_itt_sets(db):
     await MetricService(db).ensure_seed_definitions()
     admin = await _mk_admin(db)
