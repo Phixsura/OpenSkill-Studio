@@ -471,3 +471,55 @@ def test_bayes_continuous_interval_and_loss_pinned():
     z0 = diff / se
     el = se * math.exp(-z0 * z0 / 2) / math.sqrt(2 * math.pi) - diff * norm_sf(z0)
     assert r["expected_loss"] == pytest.approx(max(0.0, el), abs=1e-9)
+
+
+# ── Mutation-killer batch round 2 ────────────────────────────────────
+# Surviving mutants documented as equivalent/accuracy-limited:
+#   t_sf L127 GtE->Gt (t=0: both branches yield 0.5);
+#   cuped L299 Or->And + LtE->Lt (guard redundant with welch's own n>1 guard —
+#     both paths return None);
+#   bayes L399 range-start 1->2 (drops one of 2001 grid points, ~1e-6);
+#   bayes L410/L434 Gt->GtE (se==0 unreachable for beta posteriors / handled
+#     identically by the explicit se==0 branch).
+
+
+def test_t_sf_negative_symmetry():
+    for t, df in ((1.0, 5), (2.5, 3), (0.3, 12)):
+        assert t_sf(-t, df) + t_sf(t, df) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_cuped_two_element_arms_allowed():
+    r = cuped_adjusted_welch(
+        _arm_stats([1.0, 2.0], [2.0, 4.0]), _arm_stats([1.5, 2.5], [3.0, 5.0])
+    )
+    assert r is not None
+
+
+def test_cuped_theta_pinned_independently():
+    """theta must equal pooled cov(X,Y)/var(X) computed from raw values in
+    the test itself — kills any pooled-sum mutant without tautology."""
+    xc, yc = [1.0, 3.0, 5.0, 7.0], [2.1, 3.9, 6.2, 7.8]
+    xt, yt = [2.0, 4.0, 6.0, 8.0], [3.2, 5.1, 6.8, 9.1]
+    xs, ys = xc + xt, yc + yt
+    n = len(xs)
+    xbar, ybar = sum(xs) / n, sum(ys) / n
+    cov = sum((x - xbar) * (y - ybar) for x, y in zip(xs, ys, strict=True))
+    varx = sum((x - xbar) ** 2 for x in xs)
+    expected_theta = cov / varx
+    r = cuped_adjusted_welch(_arm_stats(xc, yc), _arm_stats(xt, yt))
+    assert r["theta"] == pytest.approx(expected_theta, abs=1e-9)
+
+
+def test_bayes_binary_expected_loss_asymmetric_pinned():
+    """40/100 vs 60/100: EL recomputed in-test from posterior moments —
+    kills sign mutants in the normal-approx loss formula."""
+    r = bayes_binary(40, 100, 60, 100)
+    a1, b1, a2, b2 = 41.0, 61.0, 61.0, 41.0
+    m1, m2 = a1 / (a1 + b1), a2 / (a2 + b2)
+    v1 = a1 * b1 / ((a1 + b1) ** 2 * (a1 + b1 + 1.0))
+    v2 = a2 * b2 / ((a2 + b2) ** 2 * (a2 + b2 + 1.0))
+    se = math.sqrt(v1 + v2)
+    diff = m2 - m1
+    z0 = diff / se
+    el = se * math.exp(-z0 * z0 / 2.0) / math.sqrt(2 * math.pi) - diff * norm_sf(z0)
+    assert r["expected_loss"] == pytest.approx(max(0.0, el), abs=1e-12)
