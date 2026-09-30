@@ -184,9 +184,10 @@ async def test_mixed_query_version_warns(db):
     assert total_exposure == 40
 
 
-async def test_honesty_warnings_for_unapplied_knobs(db):
-    """Spec knobs accepted but not yet applied must be SURFACED: triggered
-    (exposed-only) analysis and CUPED without covariate data both warn."""
+async def test_honesty_warnings_for_triggered_and_cuped(db):
+    """Triggered analysis is APPLIED now (batch 26): the remaining honest
+    caveats are the uncorrected dilution and any legacy snapshots computed
+    before the exposed-population switch; CUPED without covariates warns."""
     exp, admin = await _mk_running(
         db,
         trigger={"analysis_population": "exposed"},
@@ -194,8 +195,48 @@ async def test_honesty_warnings_for_unapplied_knobs(db):
     )
     await _populate(db, exp)
     result = await AnalysisService(db).run(exp.id, actor=admin)
-    assert "TRIGGERED_ANALYSIS_UNAPPLIED" in result["warnings"]
+    assert "TRIGGERED_ANALYSIS_UNAPPLIED" not in result["warnings"]
+    assert "TRIGGERED_DILUTION_UNCORRECTED" in result["warnings"]
+    # every snapshot carries the exposed marker → no mixed-population warning
+    assert "TRIGGERED_SNAPSHOTS_MIXED_POPULATION" not in result["warnings"]
     assert "CUPED_COVARIATES_UNAVAILABLE" in result["warnings"]
+
+    # a legacy snapshot without the marker flips the mixed warning on
+    db.add(_snapshot(exp.id, "exposure_rate", "control",
+                     datetime(2026, 8, 1, tzinfo=UTC),
+                     n=10, numerator=1, denominator=10))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "TRIGGERED_SNAPSHOTS_MIXED_POPULATION" in result["warnings"]
+
+
+async def test_triggered_analysis_population_is_exposed_units(db):
+    """§4.7 applied: with analysis_population=exposed, snapshot denominators
+    count EXPOSED units only, and provenance says so."""
+    from sqlalchemy import select
+
+    from app.experiments.models import MetricSnapshot as _Snap
+
+    exp, admin = await _mk_running(db, trigger={"analysis_population": "exposed"})
+    # 40 assigned, every second unit exposed (via _populate's expose_every=2)
+    await _populate(db, exp)
+    rows = [
+        r
+        for r in (
+            await db.execute(
+                select(_Snap).where(
+                    _Snap.experiment_id == exp.id,
+                    _Snap.metric_key == "exposure_rate",
+                )
+            )
+        ).scalars()
+    ]
+    assert rows
+    total_denominator = sum(int(r.denominator or 0) for r in rows)
+    assert total_denominator == 20  # exposed units only, not the 40 assigned
+    for row in rows:
+        assert row.provenance["analysis_population"] == "exposed"
+    del admin
 
 
 async def test_draft_experiment_cannot_analyze(db):

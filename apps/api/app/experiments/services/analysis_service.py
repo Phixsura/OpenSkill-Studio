@@ -404,7 +404,20 @@ class AnalysisService:
         # Honesty warnings: spec knobs accepted but not (yet) applied must be
         # surfaced, never silently ignored
         if spec.trigger.analysis_population == "exposed":
-            warnings.append("TRIGGERED_ANALYSIS_UNAPPLIED")
+            # Triggered analysis is applied at snapshot time (§4.7) — warn
+            # only when stored snapshots predate the exposed-population
+            # computation (their provenance lacks the marker)
+            legacy = (
+                await self.db.execute(
+                    select(func.count()).where(
+                        MetricSnapshot.experiment_id == experiment_id,
+                        ~MetricSnapshot.provenance.has_key("analysis_population"),
+                    )
+                )
+            ).scalar_one()
+            if legacy:
+                warnings.append("TRIGGERED_SNAPSHOTS_MIXED_POPULATION")
+            warnings.append("TRIGGERED_DILUTION_UNCORRECTED")
 
 
         metrics_out: dict[str, dict] = {}

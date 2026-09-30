@@ -1027,19 +1027,32 @@ class MetricService:
     # ── snapshots ────────────────────────────────────────────────────
 
     async def _variant_units(
-        self, experiment_id: str, *, as_of: datetime | None = None
+        self, experiment_id: str, *, as_of: datetime | None = None,
+        exposed_only: bool = False,
     ) -> dict[str, list[str]]:
         """ITT unit sets: grouped by assigned variant, holdouts excluded.
 
         as_of pins the set to units assigned BEFORE that instant — a
         recompute of yesterday's window must not let today's newly assigned
-        (necessarily zero-exposure) units dilute yesterday's denominators."""
+        (necessarily zero-exposure) units dilute yesterday's denominators.
+
+        exposed_only (§4.7 triggered analysis): restrict to units with at
+        least one recorded exposure before as_of — the analysis population
+        the spec asked for. Exposure-SRM guards the bias this introduces
+        when exposure is treatment-affected."""
         q = select(ExperimentAssignment.variant_key, ExperimentAssignment.unit_id).where(
             ExperimentAssignment.experiment_id == experiment_id,
             ExperimentAssignment.is_holdout.is_(False),
         )
         if as_of is not None:
             q = q.where(ExperimentAssignment.assigned_at < as_of)
+        if exposed_only:
+            exposure_q = select(ExperimentExposure.assignment_id).where(
+                ExperimentExposure.experiment_id == experiment_id
+            )
+            if as_of is not None:
+                exposure_q = exposure_q.where(ExperimentExposure.occurred_at < as_of)
+            q = q.where(ExperimentAssignment.id.in_(exposure_q))
         units: dict[str, list[str]] = {}
         for variant_key, unit_id in (await self.db.execute(q)).all():
             units.setdefault(variant_key, []).append(unit_id)
@@ -1104,8 +1117,22 @@ class MetricService:
                 ).variance_reduction
             except Exception:  # noqa: BLE001 — poison spec must not kill snapshots
                 variance_reduction = None
-        # Window-consistent ITT: only units assigned before the window closed
-        variant_units = await self._variant_units(experiment_id, as_of=window_end)
+        # Window-consistent ITT: only units assigned before the window closed.
+        # Triggered analysis (§4.7): the spec may narrow the population to
+        # EXPOSED units — recorded in provenance so every snapshot says which
+        # denominator it carries.
+        exposed_only = False
+        if latest is not None:
+            try:
+                exposed_only = (
+                    ExperimentSpec.model_validate(latest.spec).trigger.analysis_population
+                    == "exposed"
+                )
+            except Exception:  # noqa: BLE001 — poison spec handled downstream
+                exposed_only = False
+        variant_units = await self._variant_units(
+            experiment_id, as_of=window_end, exposed_only=exposed_only
+        )
         if not variant_units:
             return 0
         # Switchback (§4.5): the whole roster belongs to the DAY's variant —
@@ -1189,6 +1216,8 @@ class MetricService:
             }
             if switchback_washout_applied is not None:
                 provenance["washout_minutes"] = switchback_washout_applied
+            if exposed_only:
+                provenance["analysis_population"] = "exposed"
             for variant_key, values in stats.items():
                 values = dict(values)
                 # Meta flags from the source (not snapshot columns): a source
