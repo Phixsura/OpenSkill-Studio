@@ -67,16 +67,25 @@ def pool_stratified(strata: list[tuple[float, float]]) -> dict | None:
     §4.6 v2): effect = Σ(e_i/se_i²)/Σ(1/se_i²), se = sqrt(1/Σ(1/se_i²)).
     Strata with non-finite or non-positive se are dropped; needs >= 2 usable
     strata to differ meaningfully from the pooled estimate."""
-    usable = [
-        (e, se)
-        for e, se in strata
-        if math.isfinite(e) and math.isfinite(se) and se > 0
-    ]
+    # fuzz-found (#27): a denormal se underflows se*se to 0.0 — the weight
+    # must itself be finite and positive, not just the se
+    usable = []
+    for e, se in strata:
+        if not (math.isfinite(e) and math.isfinite(se) and se > 0):
+            continue
+        weight = 1.0 / (se * se) if se * se > 0 else float("inf")
+        if math.isfinite(weight) and math.isfinite(e * weight):
+            usable.append((e, se, weight))
     if len(usable) < 2:
         return None
-    weight_total = sum(1.0 / (se * se) for _e, se in usable)
-    effect = sum(e / (se * se) for e, se in usable) / weight_total
+    weight_total = sum(w for _e, _se, w in usable)
+    if not math.isfinite(weight_total) or weight_total <= 0:
+        return None
+    effect = sum(e * w for e, _se, w in usable) / weight_total
     se = math.sqrt(1.0 / weight_total)
+    if not (math.isfinite(effect) and math.isfinite(se) and se > 0):
+        return None
+    usable = [(e, s_) for e, s_, _w in usable]
     z = effect / se
     return {
         "effect": effect,

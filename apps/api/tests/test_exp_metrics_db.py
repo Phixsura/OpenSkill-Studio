@@ -1260,3 +1260,75 @@ async def test_switchback_window_snapshots_land_on_day_variant(db):
     assert exposure_rows[0].variant_key == expected
     assert int(exposure_rows[0].denominator) == 6
     assert int(exposure_rows[0].numerator) == 6
+
+
+async def test_switchback_washout_excludes_head_of_window(db):
+    """Exposures inside the washout band do not count; provenance records the
+    applied washout; a washout covering the whole window writes nothing."""
+    from sqlalchemy import update
+
+    from app.experiments.models import ExperimentExposure
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="WB", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["design"] = "switchback"
+    spec["switchback"] = {
+        "switch_unit": "platform_day", "window_minutes": 1440, "washout_minutes": 120,
+    }
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    asvc = AssignmentService(db)
+    window_start, window_end = _today_window()
+    for i in range(4):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"wb-{i}")
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"wb-{i}")
+    # push two units' exposures into the washout band (first 2h of the window)
+    exposures = list(
+        (
+            await db.execute(
+                select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
+            )
+        ).scalars()
+    )
+    for exposure in exposures[:2]:
+        await db.execute(
+            update(ExperimentExposure)
+            .where(ExperimentExposure.id == exposure.id)
+            .values(occurred_at=window_start + timedelta(minutes=30))
+        )
+    # ...and the rest safely after the washout
+    for exposure in exposures[2:]:
+        await db.execute(
+            update(ExperimentExposure)
+            .where(ExperimentExposure.id == exposure.id)
+            .values(occurred_at=window_start + timedelta(minutes=300))
+        )
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    snapshots = await MetricService(db).list_snapshots(exp.id)
+    row = next(s for s in snapshots if s.metric_key == "exposure_rate")
+    assert int(row.numerator) == 2  # washout-band exposures excluded
+    assert int(row.denominator) == 4  # roster unchanged
+    assert row.provenance["washout_minutes"] == 120
+
+    # washout swallowing the entire window computes nothing
+    tiny_end = window_start + timedelta(minutes=60)
+    written = await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=tiny_end
+    )
+    assert written == 0

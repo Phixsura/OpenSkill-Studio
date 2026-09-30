@@ -190,3 +190,94 @@ def test_bh_total_and_monotone(ps):
     failed = sorted(p for key, p in ps.items() if not out[key])
     if passed and failed:
         assert max(passed) <= min(failed) + 1e-12
+
+
+# ── Round-10 cores: totality contracts ───────────────────────────────
+
+
+@given(
+    strata=st.lists(
+        st.tuples(
+            st.floats(allow_nan=True, allow_infinity=True),
+            st.floats(allow_nan=True, allow_infinity=True),
+        ),
+        max_size=20,
+    )
+)
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+def test_pool_stratified_total(strata):
+    from app.experiments.services.analysis import pool_stratified
+
+    result = pool_stratified(strata)
+    if result is not None:
+        assert math.isfinite(result["effect"])
+        assert math.isfinite(result["se"]) and result["se"] > 0
+        assert 0.0 <= result["p"] <= 1.0
+        assert result["ci"][0] <= result["effect"] <= result["ci"][1]
+        assert result["strata"] >= 2
+
+
+@given(
+    arms=st.dictionaries(
+        st.text(min_size=1, max_size=8),
+        st.tuples(
+            st.floats(min_value=-1e6, max_value=1e6),
+            st.floats(min_value=-1e6, max_value=1e6),
+        ),
+        max_size=6,
+    )
+)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+def test_thompson_weights_total(arms):
+    from app.experiments.services.analysis import thompson_weights
+
+    # negative/corrupt arm counts: the fn must filter, not crash
+    result = thompson_weights(arms, draws=50)
+    if result is not None:
+        assert sum(result["suggested_weights_bp"].values()) == 10_000
+        assert all(0.0 <= p <= 1.0 for p in result["p_best"].values())
+        assert abs(sum(result["p_best"].values()) - 1.0) < 1e-9
+
+
+@given(
+    x=st.floats(allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e308),
+    df=st.integers(min_value=1, max_value=200),
+)
+@settings(max_examples=300)
+def test_chi2_sf_in_unit_interval(x, df):
+    from app.experiments.services.analysis import chi2_sf
+
+    p = chi2_sf(x, df)
+    assert 0.0 <= p <= 1.0
+
+
+@given(
+    key=st.text(min_size=1, max_size=40),
+    salt=st.text(min_size=1, max_size=16),
+    minutes=st.integers(min_value=0, max_value=10**9),
+    window=st.integers(min_value=5, max_value=10_080),
+)
+@settings(max_examples=200)
+def test_switchback_variant_total_and_stable(key, salt, minutes, window):
+    from datetime import UTC, datetime, timedelta
+
+    from app.experiments.schemas import ExperimentSpec
+    from app.experiments.services.assignment import switchback_variant
+
+    spec = ExperimentSpec.model_validate({
+        "hypothesis": "switchback fuzz totality",
+        "unit_type": "user",
+        "design": "switchback",
+        "switchback": {"switch_unit": "x", "window_minutes": window},
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["exposure_rate"],
+                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                    "threshold": 100.0}]},
+    })
+    at = datetime(2020, 1, 1, tzinfo=UTC) + timedelta(minutes=minutes)
+    v = switchback_variant(key, salt, spec, at)
+    assert v in ("control", "treatment")
+    assert v == switchback_variant(key, salt, spec, at)  # stable

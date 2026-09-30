@@ -1077,6 +1077,25 @@ class MetricService:
                 )
                 roster = sorted({u for units in variant_units.values() for u in units})
                 variant_units = {day_variant: roster}
+                # Washout (§4.5): drop the carry-over band at the head of the
+                # switch window — sources aggregate [start+washout, end) and
+                # provenance records the exclusion
+                washout = parsed.switchback.washout_minutes if parsed.switchback else 0
+                if washout > 0:
+                    effective_start = window_start + timedelta(minutes=washout)
+                    if effective_start >= window_end:
+                        return 0  # the washout swallows the whole window
+                    switchback_washout_applied = washout
+                    source_window_start = effective_start
+                else:
+                    switchback_washout_applied = None
+                    source_window_start = window_start
+            else:
+                switchback_washout_applied = None
+                source_window_start = window_start
+        else:
+            switchback_washout_applied = None
+            source_window_start = window_start
         written = 0
         for key in metric_keys:
             definition = definitions.get(key)
@@ -1099,7 +1118,7 @@ class MetricService:
                 experiment=exp,
                 definition=definition,
                 variant_units=variant_units,
-                window_start=window_start,
+                window_start=source_window_start,
                 window_end=window_end,
                 unit_type=unit_type,
                 variance_reduction=variance_reduction,
@@ -1113,6 +1132,8 @@ class MetricService:
                 "computed_at": datetime.now(UTC).isoformat(),
                 "source": source_name,
             }
+            if switchback_washout_applied is not None:
+                provenance["washout_minutes"] = switchback_washout_applied
             for variant_key, values in stats.items():
                 values = dict(values)
                 # Meta flags from the source (not snapshot columns): a source

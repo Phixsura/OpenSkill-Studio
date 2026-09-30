@@ -394,10 +394,7 @@ class AnalysisService:
         # surfaced, never silently ignored
         if spec.trigger.analysis_population == "exposed":
             warnings.append("TRIGGERED_ANALYSIS_UNAPPLIED")
-        if spec.switchback is not None and spec.switchback.washout_minutes > 0:
-            # accepted-but-unapplied knob (§4.5): boundary washout is not yet
-            # excluded from window aggregates
-            warnings.append("SWITCHBACK_WASHOUT_UNAPPLIED")
+
 
         metrics_out: dict[str, dict] = {}
         secondary_ps: dict[str, float] = {}
