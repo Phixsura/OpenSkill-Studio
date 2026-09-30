@@ -233,6 +233,19 @@ class RampRequest(_StrictReq):
     ramp_bp: int = Field(ge=0, le=10_000)
 
 
+class PreviewAssignmentRequest(_StrictReq):
+    unit_type: str = Field(max_length=24)
+    unit_id: str = Field(min_length=1, max_length=26)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("unit_type")
+    @classmethod
+    def _unit_known(cls, v: str) -> str:
+        if v not in UNIT_TYPES:
+            raise ValueError(f"unknown unit_type: {v} (allowed: {sorted(UNIT_TYPES)})")
+        return v
+
+
 class CreateLayerRequest(_StrictReq):
     key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{2,63}$")
     domain: str = Field(max_length=20)

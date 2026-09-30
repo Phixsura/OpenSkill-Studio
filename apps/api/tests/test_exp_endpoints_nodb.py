@@ -15,6 +15,8 @@ WRITE_ENDPOINTS = [
     ("patch", f"/api/v1/experiments/{EXP_ID}/ramp", {"ramp_bp": 100}),
     ("post", "/api/v1/experiments/layers", {}),
     ("post", "/api/v1/experiments/layers/learning-core/allocations", {}),
+    ("post", f"/api/v1/experiments/{EXP_ID}/assignments:preview",
+     {"unit_type": "user", "unit_id": "u" * 26}),
 ]
 
 READ_ENDPOINTS = [
@@ -22,6 +24,8 @@ READ_ENDPOINTS = [
     f"/api/v1/experiments/{EXP_ID}",
     f"/api/v1/experiments/{EXP_ID}/versions",
     f"/api/v1/experiments/{EXP_ID}/events",
+    f"/api/v1/experiments/{EXP_ID}/assignments",
+    f"/api/v1/experiments/{EXP_ID}/exposures/stats",
     "/api/v1/experiments/layers",
     "/api/v1/experiments/layers/learning-core/allocations",
 ]
