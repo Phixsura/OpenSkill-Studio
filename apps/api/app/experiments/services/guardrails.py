@@ -186,7 +186,13 @@ class GuardrailService:
     def _observed(definition: MetricDefinition, combined: dict) -> float | None:
         """Collapse combined sufficient stats into the guarded scalar.
         binary/rate → numerator/denominator; continuous → sum or mean
-        (definition.spec.guardrail_aggregate overrides; cost is a sum)."""
+        (definition.spec.guardrail_aggregate overrides; cost is a sum).
+        A non-finite result (fuzz-found: a denormal denominator overflows the
+        division to inf, which then crashes the Numeric write on the
+        GuardrailEvent) is treated like the denominator-0 case: not
+        evaluable → None."""
+        import math
+
         aggregate = definition.spec.get("guardrail_aggregate")
         if aggregate is None:
             aggregate = "rate" if definition.kind in ("binary", "rate") else "mean"
@@ -194,14 +200,15 @@ class GuardrailService:
             denominator = combined.get("denominator") or 0
             if not denominator:
                 return None
-            return float(combined.get("numerator") or 0) / float(denominator)
-        if aggregate == "sum":
-            return float(combined.get("sum_value") or combined.get("numerator") or 0)
-        # mean
-        n = combined.get("n") or 0
-        if not n:
-            return None
-        return float(combined.get("sum_value") or 0) / float(n)
+            observed = float(combined.get("numerator") or 0) / float(denominator)
+        elif aggregate == "sum":
+            observed = float(combined.get("sum_value") or combined.get("numerator") or 0)
+        else:  # mean
+            n = combined.get("n") or 0
+            if not n:
+                return None
+            observed = float(combined.get("sum_value") or 0) / float(n)
+        return observed if math.isfinite(observed) else None
 
     async def evaluate_experiment(
         self, experiment_id: str, *, now: datetime | None = None

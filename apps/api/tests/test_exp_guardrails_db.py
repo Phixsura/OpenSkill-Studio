@@ -327,6 +327,11 @@ def test_observed_scalar_all_aggregates():
     # explicit rate override on a continuous definition
     rate_override = SimpleNamespace(kind="continuous", spec={"guardrail_aggregate": "rate"})
     assert observed(rate_override, {"numerator": 1, "denominator": 2}) == pytest.approx(0.5)
+    # fuzz-found: a denormal denominator overflows the division to inf →
+    # not evaluable (a non-finite observed would crash the Numeric write)
+    assert observed(rate_def, {"numerator": 1e308, "denominator": 5e-324}) is None
+    assert observed(sum_def, {"sum_value": float("inf")}) is None
+    assert observed(cont_def, {"n": 5e-324, "sum_value": 1e308}) is None
 
 
 async def test_launch_checklist_required_to_schedule(db):
