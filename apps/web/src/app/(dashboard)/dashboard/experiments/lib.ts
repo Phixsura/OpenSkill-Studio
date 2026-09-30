@@ -141,6 +141,7 @@ export interface MetricSnapshot {
   id: string;
   metric_key: string;
   variant_key: string;
+  segment?: string;
   window_start: string;
   window_end: string;
   n: number;

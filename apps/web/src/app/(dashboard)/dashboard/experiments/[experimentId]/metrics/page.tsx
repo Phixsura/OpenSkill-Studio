@@ -45,6 +45,7 @@ export default function ExperimentMetricsPage() {
                   <tr>
                     <th className="py-1 pr-3">Window</th>
                     <th className="py-1 pr-3">Variant</th>
+                    <th className="py-1 pr-3">Segment</th>
                     <th className="py-1 pr-3">n</th>
                     <th className="py-1 pr-3">Numerator</th>
                     <th className="py-1 pr-3">Denominator</th>
@@ -59,6 +60,7 @@ export default function ExperimentMetricsPage() {
                         {fmtDate(s.window_start)}
                       </td>
                       <td className="py-1 pr-3 font-medium">{s.variant_key}</td>
+                      <td className="py-1 pr-3 text-xs text-slate-500">{s.segment || "whole"}</td>
                       <td className="py-1 pr-3">{s.n}</td>
                       <td className="py-1 pr-3">{fmtNum(s.numerator, 2)}</td>
                       <td className="py-1 pr-3">{fmtNum(s.denominator, 2)}</td>
