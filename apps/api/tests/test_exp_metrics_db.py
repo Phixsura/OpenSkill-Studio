@@ -1697,3 +1697,120 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
 # Wave-4 survivor ledger: the top-orgs cap constant (20→21) is a §106.26
 # bound whose exact value is policy, pinned here by reference; the salt
 # prefix length is now a shared constant covered by its own pin.
+
+
+# ── Feature-combination matrix (round 10 cross-checks) ───────────────
+
+
+async def _mk_running_spec(db, spec_overrides: dict):
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="CMB", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec.update(spec_overrides)
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    return exp, admin
+
+
+async def test_segments_compose_with_switchback(db):
+    """segments × switchback: the org slice rows carry the WINDOW's variant
+    (the roster fold happens before slicing)."""
+    from app.experiments.models import MetricSnapshot
+    from app.experiments.schemas import ExperimentSpec as _Spec
+    from app.experiments.services.assignment import switchback_variant, version_salt_of
+    from app.models.organization import OrgMember, OrgRole
+
+    _tenant, org = await _mk_org(db)
+    exp, admin = await _mk_running_spec(db, {
+        "design": "switchback",
+        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        "segments": ["org"],
+    })
+    del admin
+    asvc = AssignmentService(db)
+    for _i in range(4):
+        user = await _mk_admin(db)
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
+        await db.flush()
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=user.id
+        ) is not None
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    versions = await ExperimentService(db).get_versions(exp.id)
+    spec = _Spec.model_validate(versions[-1].spec)
+    expected = switchback_variant(
+        exp.key, version_salt_of(versions[0].spec_hash), spec, window_start
+    )
+    seg_rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.segment == f"org:{org.id}",
+                    MetricSnapshot.metric_key == "exposure_rate",
+                )
+            )
+        ).scalars()
+    )
+    assert len(seg_rows) == 1
+    assert seg_rows[0].variant_key == expected
+    assert int(seg_rows[0].denominator) == 4
+
+
+async def test_segments_compose_with_triggered(db):
+    """segments × exposed-only: slice denominators are exposed ∩ org."""
+    from app.experiments.models import MetricSnapshot
+    from app.models.organization import OrgMember, OrgRole
+
+    _tenant, org = await _mk_org(db)
+    exp, _ = await _mk_running_spec(db, {
+        "trigger": {"analysis_population": "exposed"},
+        "segments": ["org"],
+    })
+    asvc = AssignmentService(db)
+    for i in range(6):
+        user = await _mk_admin(db)
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
+        await db.flush()
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=user.id
+        ) is not None
+        if i < 2:  # only two units ever exposed
+            await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=user.id
+            )
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    rows = list(
+        (
+            await db.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id,
+                    MetricSnapshot.metric_key == "exposure_rate",
+                )
+            )
+        ).scalars()
+    )
+    whole = [r for r in rows if r.segment == ""]
+    slices = [r for r in rows if r.segment == f"org:{org.id}"]
+    assert sum(int(r.denominator or 0) for r in whole) == 2   # exposed roster
+    assert sum(int(r.denominator or 0) for r in slices) == 2  # exposed ∩ org
+    for row in rows:
+        assert row.provenance["analysis_population"] == "exposed"
