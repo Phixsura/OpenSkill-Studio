@@ -192,6 +192,7 @@ def test_full_illegal_transition_matrix(from_status, to_status):
         with pytest.raises(AppError) as e:
             svc.check_transition(from_status, to_status)
         assert e.value.code == "EXPERIMENT_INVALID_TRANSITION"
+        assert e.value.status_code == 422
 
 
 def test_no_reentry_to_running_from_analyzed():

@@ -37,6 +37,22 @@ def _spec(weights: list[tuple[str, int, bool]]) -> ExperimentSpec:
 # ── Determinism & uniformity ─────────────────────────────────────────
 
 
+def test_hash_golden_vectors():
+    """Pinned outputs for fixed inputs — kills any silent change to the
+    digest-slice width, parse base or salt layout (a changed constant would
+    re-randomize EVERY live experiment on deploy)."""
+    assert bucket("layer-golden", "user", "unit-42") == 8322
+    assert holdout_roll("exp-golden", "user", "unit-42") == 8783
+    assert variant_roll("exp-golden", "saltgold", "user", "unit-42") == 2885
+
+
+def test_population_eq_empty_values_fail_closed():
+    """eq with an empty values list must be False, never an IndexError."""
+    assert not evaluate_population(
+        _pop([{"field": "cohort_id", "op": "eq", "values": []}]), {"cohort_id": "c1"}
+    )
+
+
 def test_bucket_deterministic():
     assert bucket("layer-a", "user", "u1") == bucket("layer-a", "user", "u1")
     assert 0 <= bucket("layer-a", "user", "u1") < BUCKET_SPACE

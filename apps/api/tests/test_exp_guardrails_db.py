@@ -206,6 +206,13 @@ async def test_srm_alerts_but_never_pauses(db):
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm" in summary
+    # Pin the χ² arithmetic exactly: expected 80/80 on a 50/50 spec,
+    # chi2 = (150-80)²/80 + (10-80)²/80 = 122.5, df = 1, total = 160
+    srm = summary["srm"]
+    assert srm["total"] == 160
+    assert srm["counts"] == {"control": 150, "treatment": 10}
+    assert srm["df"] == 1
+    assert srm["chi2"] == pytest.approx(122.5, abs=1e-6)
     assert (await db.get(Experiment, exp.id)).status == "running", "SRM must never pause"
     events = await GuardrailService(db).list_events(exp.id)
     srm_events = [e for e in events if e.guardrail_key == SRM_GUARDRAIL_KEY]
@@ -214,6 +221,94 @@ async def test_srm_alerts_but_never_pauses(db):
     await GuardrailService(db).evaluate_experiment(exp.id)
     events = await GuardrailService(db).list_events(exp.id)
     assert len([e for e in events if e.guardrail_key == SRM_GUARDRAIL_KEY]) == 1
+
+
+async def test_srm_fires_exactly_at_min_sample_boundary(db):
+    """total == SRM_MIN_ASSIGNMENTS must be checked (the < boundary): 100
+    units all in one arm of a 50/50 spec is a maximal mismatch."""
+    from app.experiments.services.guardrails import SRM_MIN_ASSIGNMENTS
+
+    exp, _ = await _mk_running(db)
+    for i in range(SRM_MIN_ASSIGNMENTS):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"bnd-{i:04d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm" in summary
+    assert summary["srm"]["total"] == SRM_MIN_ASSIGNMENTS
+
+
+async def test_srm_runs_at_max_variant_count(db):
+    """df = 9 (ten variants — the spec maximum) must still be evaluated: the
+    df-range guard is exclusive of impossible values only."""
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    variants = [
+        {"key": f"v{i}", "name": f"V{i}", "weight_bp": 1000, "is_control": i == 0}
+        for i in range(10)
+    ]
+    await svc.create_version(
+        exp.id,
+        spec={
+            "hypothesis": "ten-way test exercises the df=9 SRM path fully",
+            "unit_type": "user",
+            "variants": variants,
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 1.0}],
+            },
+        },
+        actor=admin,
+    )
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    for status in ("review", "scheduled", "running"):
+        await svc.transition(exp.id, to_status=status, actor=admin)
+    # 120 units all in v0: gross mismatch across 10 arms (df = 9)
+    for i in range(120):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"ten-{i:04d}",
+                variant_key="v0", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm" in summary
+    assert summary["srm"]["df"] == 9
+
+
+def test_observed_scalar_all_aggregates():
+    """_observed pure paths: rate (denominator-guarded), sum (sum_value with
+    numerator fallback), mean (n-guarded) and the explicit aggregate override."""
+    from types import SimpleNamespace
+
+    from app.experiments.services.guardrails import GuardrailService
+
+    observed = GuardrailService._observed
+    rate_def = SimpleNamespace(kind="rate", spec={})
+    assert observed(rate_def, {"numerator": 3, "denominator": 4}) == pytest.approx(0.75)
+    assert observed(rate_def, {"numerator": 3, "denominator": 0}) is None
+    cont_def = SimpleNamespace(kind="continuous", spec={})
+    assert observed(cont_def, {"n": 4, "sum_value": 10.0}) == pytest.approx(2.5)
+    assert observed(cont_def, {"n": 0, "sum_value": 10.0}) is None
+    sum_def = SimpleNamespace(kind="continuous", spec={"guardrail_aggregate": "sum"})
+    assert observed(sum_def, {"sum_value": 7.5}) == pytest.approx(7.5)
+    assert observed(sum_def, {"numerator": 5}) == pytest.approx(5.0)  # fallback
+    assert observed(sum_def, {}) == pytest.approx(0.0)
+    # explicit rate override on a continuous definition
+    rate_override = SimpleNamespace(kind="continuous", spec={"guardrail_aggregate": "rate"})
+    assert observed(rate_override, {"numerator": 1, "denominator": 2}) == pytest.approx(0.5)
 
 
 async def test_srm_quiet_below_min_sample(db):
