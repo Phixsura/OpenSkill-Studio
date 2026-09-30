@@ -91,6 +91,32 @@ def variant_roll(experiment_key: str, version_salt: str, unit_type: str, unit_id
     return _roll("variant", experiment_key, version_salt, unit_type, unit_id)
 
 
+def aa_probe(layer_key: str, *, n: int = 2000, unit_type: str = "user") -> dict:
+    """A/A hash-health probe (§4.13 v2): bucket n synthetic units into the
+    layer's hash space and chi-square the decile occupancy against uniform.
+    Deterministic (synthetic ids), pure, zero-I/O — a deploy-time self-check
+    that the bucketing hash still spreads. p < 0.001 means the hash layout
+    changed (which would re-randomize every live experiment) or the digest
+    is broken; both are stop-the-line."""
+    from app.experiments.services.analysis import chi2_sf
+
+    n = max(100, min(int(n), 50_000))
+    deciles = [0] * 10
+    for i in range(n):
+        deciles[bucket(layer_key, unit_type, f"aa-probe-{i}") * 10 // BUCKET_SPACE] += 1
+    expected = n / 10.0
+    chi2 = sum((d - expected) ** 2 / expected for d in deciles)
+    p_value = chi2_sf(chi2, 9)
+    return {
+        "layer_key": layer_key,
+        "n": n,
+        "deciles": deciles,
+        "chi2": round(chi2, 3),
+        "p": p_value,
+        "healthy": p_value >= 0.001,
+    }
+
+
 def pick_variant(spec: ExperimentSpec, roll: int) -> str:
     """Cumulative weight_bp interval lookup over a roll in [0, 10000)."""
     cumulative = 0

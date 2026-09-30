@@ -223,3 +223,117 @@ async def test_secondary_metric_gets_fdr_flag_when_data_exists(db):
     comparison = secondary["comparisons"]["treatment"]
     assert comparison.get("insufficient_data") is True
     assert "passes_fdr" not in comparison
+
+
+# ── Health checks (v2 batch 4, §4.13/§4.6): pre_balance, novelty, aa_probe ──
+
+
+def _snapshot(exp_id, metric_key, variant, ws, **cols):
+    return MetricSnapshot(
+        experiment_id=exp_id, metric_key=metric_key, variant_key=variant,
+        window_start=ws, window_end=ws + timedelta(days=1),
+        provenance={"query_version": 1}, **cols,
+    )
+
+
+async def test_pre_balance_suspect_on_covariate_imbalance(db):
+    """Covariates are pre-experiment by construction — arm means that differ
+    (p < 0.001) mean broken randomization, and analysis must say so."""
+    exp, admin = await _mk_running(
+        db, metrics={"primary": ["revision_count"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "revision_count", "control", ws,
+                     n=200, sum_value=200.0, sum_sq=260.0,
+                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=500.0))
+    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
+                     n=200, sum_value=220.0, sum_sq=300.0,
+                     cov_sum=1200.0, cov_sum_sq=7500.0, cov_xy_sum=500.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "PRE_BALANCE_SUSPECT" in result["warnings"]
+
+
+async def test_pre_balance_quiet_when_covariates_match(db):
+    exp, admin = await _mk_running(
+        db, metrics={"primary": ["revision_count"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "revision_count", "control", ws,
+                     n=200, sum_value=200.0, sum_sq=260.0,
+                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=500.0))
+    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
+                     n=200, sum_value=220.0, sum_sq=300.0,
+                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=500.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "PRE_BALANCE_SUSPECT" not in result["warnings"]
+    # CUPED engaged — the covariates are real, so no unavailability warning
+    assert "cuped" in result["metrics"]["revision_count"]["comparisons"]["treatment"]
+
+
+async def test_novelty_decay_flags_early_effect_that_vanishes(db):
+    """Strong early binary effect (days 1-2) that disappears (days 3-4)
+    → NOVELTY_EFFECT_DECAY_SUSPECT; a stable effect stays quiet."""
+    from sqlalchemy import delete
+
+    exp, admin = await _mk_running(db)
+    base = datetime(2026, 9, 1, tzinfo=UTC)
+
+    async def _seed(decaying: bool):
+        await db.execute(
+            delete(MetricSnapshot).where(
+                MetricSnapshot.experiment_id == exp.id,
+                MetricSnapshot.metric_key == "exposure_rate",
+            )
+        )
+        for day in range(4):
+            ws = base + timedelta(days=day)
+            for variant in ("control", "treatment"):
+                early = day < 2
+                if variant == "control":
+                    numerator = 50
+                elif early:
+                    numerator = 90            # huge early lift
+                else:
+                    numerator = 50 if decaying else 90
+                db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
+                                 n=200, numerator=numerator, denominator=200))
+        await db.flush()
+
+    await _seed(decaying=True)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" in result["warnings"]
+
+    await _seed(decaying=False)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
+
+
+async def test_novelty_needs_enough_windows(db):
+    """One or two windows can't split — no false decay alarm on day one."""
+    exp, admin = await _mk_running(db)
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    for variant, numerator in (("control", 50), ("treatment", 90)):
+        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
+                         n=200, numerator=numerator, denominator=200))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
+
+
+def test_aa_probe_healthy_and_deterministic():
+    from app.experiments.services.assignment import aa_probe
+
+    probe = aa_probe("aa-golden-layer", n=5000)
+    assert probe["healthy"] is True
+    assert probe["n"] == 5000
+    assert sum(probe["deciles"]) == 5000
+    # deterministic: same inputs, same report
+    assert aa_probe("aa-golden-layer", n=5000) == probe
+    # bounds clamp
+    assert aa_probe("aa-golden-layer", n=10)["n"] == 100

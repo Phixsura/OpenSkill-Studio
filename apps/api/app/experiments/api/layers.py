@@ -63,3 +63,17 @@ async def list_allocations(
 ):
     rows = await LayerService(db).list_allocations(layer_key)
     return {"data": [AllocationResponse.model_validate(x).model_dump() for x in rows]}
+
+
+@router.get("/{layer_key}/aa-probe", response_model=dict)
+async def layer_aa_probe(
+    layer_key: str,
+    n: int = 2000,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Deterministic A/A hash-health probe for a layer (§4.13 v2)."""
+    from app.experiments.services.assignment import aa_probe
+
+    layer = await LayerService(db)._get_layer(layer_key)  # noqa: SLF001 — uniform 404
+    return {"data": aa_probe(layer.key, n=n)}

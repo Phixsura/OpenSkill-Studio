@@ -92,6 +92,87 @@ class AnalysisService:
                 arm[field] = (arm[field] or 0) + float(value)
         return aggregated, mixed
 
+    async def _novelty_suspect(
+        self, experiment_id: str, metric_key: str, control_key: str
+    ) -> bool:
+        """Novelty / effect-decay health check (§4.6 v2): split the metric's
+        snapshot windows at their midpoint and compare the pooled effect of
+        the early half against the late half. A strong early effect
+        (|z| > 3) that flips sign or shrinks to under a third late is the
+        classic novelty signature — flagged, never auto-acted on."""
+        rows = list(
+            (
+                await self.db.execute(
+                    select(MetricSnapshot).where(
+                        MetricSnapshot.experiment_id == experiment_id,
+                        MetricSnapshot.metric_key == metric_key,
+                    )
+                )
+            ).scalars()
+        )
+        starts = sorted({r.window_start for r in rows})
+        if len(starts) < 4:  # need real windows on both sides of the split
+            return False
+        midpoint = starts[len(starts) // 2]
+
+        def _pool(half_rows: list) -> dict[str, dict]:
+            pooled: dict[str, dict] = {}
+            for row in half_rows:
+                arm = pooled.setdefault(row.variant_key, dict.fromkeys(_SUM_FIELDS))
+                for field in _SUM_FIELDS:
+                    value = getattr(row, field)
+                    if value is None:
+                        continue
+                    arm[field] = (arm[field] or 0) + float(value)
+            return pooled
+
+        def _effect_z(pooled: dict[str, dict]) -> tuple[float, float] | None:
+            control = pooled.get(control_key)
+            treatments = [a for k, a in pooled.items() if k != control_key]
+            if control is None or not treatments:
+                return None
+            arm = treatments[0]
+            if control.get("denominator") and arm.get("denominator"):
+                if control["denominator"] < 30 or arm["denominator"] < 30:
+                    return None
+                result = stats.analyze_binary(
+                    control.get("numerator") or 0.0, control["denominator"],
+                    arm.get("numerator") or 0.0, arm["denominator"],
+                )
+            elif (control.get("n") or 0) >= 30 and (arm.get("n") or 0) >= 30:
+                result = stats.welch_from_stats(
+                    control["n"], control.get("sum_value") or 0.0,
+                    control.get("sum_sq") or 0.0,
+                    arm["n"], arm.get("sum_value") or 0.0,
+                    arm.get("sum_sq") or 0.0,
+                )
+            else:
+                return None
+            if result.get("insufficient_data"):
+                return None
+            z = result.get("z")
+            if z is None:
+                z = result.get("t")
+            effect = result.get("effect")
+            if z is None or effect is None:
+                return None
+            return effect, z
+
+        early = _effect_z(_pool([r for r in rows if r.window_start < midpoint]))
+        late = _effect_z(_pool([r for r in rows if r.window_start >= midpoint]))
+        if early is None or late is None:
+            return False
+        early_effect, early_z = early
+        late_effect, _late_z = late
+        if abs(early_z) <= 3.0:
+            return False
+        if early_effect == 0.0:
+            return False
+        return (
+            early_effect * late_effect < 0
+            or abs(late_effect) < abs(early_effect) / 3.0
+        )
+
     @staticmethod
     def _compare(
         kind: str, engine: str, control: dict, treatment: dict
@@ -232,6 +313,29 @@ class AnalysisService:
                 for variant_key, arm in aggregated.items():
                     if variant_key == control_key:
                         continue
+                    # Pre-balance health check (§4.13): the covariate is
+                    # PRE-experiment by construction, so its means must not
+                    # differ across arms — a significant difference means the
+                    # randomization (or the data feed) is broken, and every
+                    # downstream effect estimate is suspect.
+                    control_arm = aggregated[control_key]
+                    if (
+                        "PRE_BALANCE_SUSPECT" not in warnings
+                        and all(
+                            a.get("cov_sum") is not None
+                            and a.get("cov_sum_sq") is not None
+                            and (a.get("n") or 0) >= 2
+                            for a in (control_arm, arm)
+                        )
+                    ):
+                        balance = stats.welch_from_stats(
+                            control_arm["n"], control_arm["cov_sum"],
+                            control_arm["cov_sum_sq"],
+                            arm["n"], arm["cov_sum"], arm["cov_sum_sq"],
+                        )
+                        p_balance = balance.get("p")
+                        if p_balance is not None and p_balance < 0.001:
+                            warnings.append("PRE_BALANCE_SUSPECT")
                     comparison = self._compare(
                         kind, spec.stats_engine, aggregated[control_key], arm
                     )
@@ -252,6 +356,11 @@ class AnalysisService:
                         secondary_ps[f"{key}:{variant_key}"] = comparison["p"]
                 entry["comparisons"] = comparisons
                 metrics_out[key] = entry
+
+        for key in spec.metrics.primary:
+            if await self._novelty_suspect(experiment_id, key, control_key):
+                warnings.append("NOVELTY_EFFECT_DECAY_SUSPECT")
+                break
 
         if spec.variance_reduction is not None:
             any_cuped = any(
