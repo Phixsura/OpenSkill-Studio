@@ -159,6 +159,59 @@ async def _source_workflow_runs(
             )
         ).all()
         if measure == "latency_ms":
+            if (
+                variance_reduction is not None
+                and variance_reduction.covariate_metric == definition.key
+            ):
+                # CUPED mode (§4.6 v2, third source on the shared contract):
+                # per-UNIT mean latency — y over the window, x over the
+                # pre-window lookback; ITT zero-fill for silent installations
+                lookback_start = window_start - timedelta(
+                    days=variance_reduction.lookback_days
+                )
+
+                async def _unit_latency(start, end, units=units):
+                    period_rows = (
+                        await db.execute(
+                            select(
+                                WorkflowRun.installation_id,
+                                WorkflowRun.started_at,
+                                WorkflowRun.finished_at,
+                            ).where(
+                                WorkflowRun.installation_id.in_(units),
+                                WorkflowRun.created_at >= start,
+                                WorkflowRun.created_at < end,
+                                WorkflowRun.status.in_(terminal),
+                            )
+                        )
+                    ).all()
+                    per_unit: dict[str, list[float]] = {}
+                    for installation_id, started, finished in period_rows:
+                        if started is None or finished is None:
+                            continue
+                        per_unit.setdefault(installation_id, []).append(
+                            (finished - started).total_seconds() * 1000.0
+                        )
+                    return {
+                        u: sum(vals) / len(vals) for u, vals in per_unit.items()
+                    }
+
+                cur = await _unit_latency(window_start, window_end)
+                pre = await _unit_latency(lookback_start, window_start)
+                ys = [cur.get(u, 0.0) for u in units]
+                xs = [pre.get(u, 0.0) for u in units]
+                ys, winsorized = winsorize(ys, definition.winsorize_pct)
+                result[variant] = {
+                    "n": len(units),
+                    "sum_value": sum(ys),
+                    "sum_sq": sum(v * v for v in ys),
+                    "cov_sum": sum(xs),
+                    "cov_sum_sq": sum(v * v for v in xs),
+                    "cov_xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+                    "_winsorized": winsorized,
+                    "_aggregation": "per_unit",
+                }
+                continue
             durations = [
                 (finished - started).total_seconds() * 1000.0
                 for status, started, finished in rows

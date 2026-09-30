@@ -1814,3 +1814,57 @@ async def test_segments_compose_with_triggered(db):
     assert sum(int(r.denominator or 0) for r in slices) == 2  # exposed ∩ org
     for row in rows:
         assert row.provenance["analysis_population"] == "exposed"
+
+
+async def test_workflow_runs_latency_cuped_per_unit(db):
+    """workflow_runs CUPED mode: per-installation MEAN latency with the
+    pre-window lookback as covariate (exact goldens, ITT zero-fill)."""
+    from app.experiments.models import MetricDefinition
+    from app.experiments.schemas import VarianceReductionSpec
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    _tenant, org = await _mk_org(db)
+    active = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    silent = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add_all([active, silent])
+    await db.flush()
+    await MetricService(db).ensure_seed_definitions()
+    definition = (
+        await db.execute(
+            select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms")
+        )
+    ).scalar_one()
+    window_start, window_end = _today_window()
+    pre_at = window_start - timedelta(days=3)
+
+    def _run(created_at, ms):
+        return WorkflowRun(
+            org_id=org.id, installation_id=active.id, definition_snapshot={},
+            status=RunStatus.COMPLETED, created_at=created_at,
+            started_at=created_at, finished_at=created_at + timedelta(milliseconds=ms),
+        )
+
+    # pre: mean (100+300)/2 = 200ms; window: mean (400+600)/2 = 500ms
+    db.add_all([
+        _run(pre_at, 100), _run(pre_at, 300),
+        _run(window_start + timedelta(hours=1), 400),
+        _run(window_start + timedelta(hours=1), 600),
+    ])
+    await db.flush()
+    vr = VarianceReductionSpec(
+        method="cuped", covariate_metric="run_latency_ms", lookback_days=28
+    )
+    stats = await SOURCE_REGISTRY["workflow_runs"](
+        db, experiment=None, definition=definition,
+        variant_units={"treatment": [active.id, silent.id]},
+        window_start=window_start, window_end=window_end,
+        unit_type="workflow_installation", variance_reduction=vr,
+    )
+    arm = stats["treatment"]
+    assert arm["n"] == 2
+    assert arm["sum_value"] == pytest.approx(500.0)   # active 500 + silent 0
+    assert arm["cov_sum"] == pytest.approx(200.0)
+    assert arm["cov_xy_sum"] == pytest.approx(500.0 * 200.0)
+    assert arm["_aggregation"] == "per_unit"
