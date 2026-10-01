@@ -478,3 +478,21 @@ async def test_fallback_exposure_context_pins_the_arm(db):
         )
     ).scalar_one()
     assert row.context["arm"] == "fallback"
+
+
+async def test_binding_override_inactive_offering_falls_back(db):
+    """Mutation-killer (round 19): an offering that EXISTS but is inactive
+    must fall back on its own — an Or→And flip there would let a deactivated
+    credentialed offering keep serving an experiment override."""
+    org, offering = await _mk_offering(db, capability="text.generate", active=False)
+    exp, _ = await _mk_surface_experiment(
+        db, key=hooks.SURFACE_WORKFLOW_BINDING, domain="workflow",
+        unit_type="workflow_installation",
+        treatment_config={"offering_id": offering.id},
+    )
+    install_unit = await _treatment_unit(db, exp, "workflow_installation", "instx")
+    assert await hooks.workflow_binding_override(
+        db, installation_id=install_unit, org_id=org.id,
+        capability="text.generate", required_features=set(),
+    ) is None
+    assert await _exposures(db, exp.id) == 1  # arm=fallback recorded

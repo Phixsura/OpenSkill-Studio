@@ -884,6 +884,13 @@ interaction alert notifies BOTH owners), same additive-never-blocking
 posture as the pause notification. Round 16 shipped the version-keyed spec
 cache (zero staleness, poison never cached, ~3→2 queries per resolve).
 
+Rounds 18-19: last-mile Console inputs for org-scoped/self-expiring
+holdout groups; mutation wave 6 over the six surface hooks — 13/13 killed
+after one REAL gap closed: the inactive-offering branch of the binding
+override had no independent test (an Or→And flip would have let a
+deactivated credentialed offering keep serving an override — now pinned to
+fall back with the arm=fallback exposure).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
