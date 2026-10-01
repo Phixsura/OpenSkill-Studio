@@ -996,6 +996,22 @@ host rollback still rolls their exposure back (transactional consistency
 both ways). The affected tests moved to committed fixtures with explicit
 cleanup.
 
+Round 35 — host commit-timing audit (the #40 follow-through), all six
+surfaces mapped:
+
+- registry search, cohort path: READ-path hosts → hooks own their committed
+  short transaction (fixed in #40).
+- matching: the run endpoint commits right after engine.run → exposure
+  persists with the MatchRun.
+- rubric: the hook runs before evaluation's R94[H5] pre-LLM commit → the
+  exposure rides that commit.
+- workflow binding: resolve happens before the R13 write-ahead commit that
+  precedes every provider call → persisted with the lease state.
+- retry policy: inside create_run, persisted by create_run's commit.
+  No new defect — the four write-path hooks are transactionally sound, and
+  keeping them on the host session is correct (a host rollback reverts their
+  exposure, matching the user-visible outcome).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
