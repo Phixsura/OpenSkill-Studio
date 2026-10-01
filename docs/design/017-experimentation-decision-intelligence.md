@@ -971,6 +971,10 @@ independence chi2 0.73 (p = .40): the three-salt core is healthy at scale
 added so maintainers can run the 472-test experimentation suite in one
 command.
 
+Round 32: `make e2e-exp` — the live-API E2E (74 checks) now starts its own
+uvicorn, runs, and tears down in one command; verified green through the
+target twice.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

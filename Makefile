@@ -56,6 +56,15 @@ lint:                             ## Lint all code
 lint-fix:                         ## Fix lint issues
 	pnpm lint:fix
 
+e2e-exp: ## Live-API E2E for the experimentation platform (starts its own uvicorn on :8442)
+	cd apps/api && (APP_ENV=test uv run uvicorn app.main:app --port 8442 & \
+		echo $$! > /tmp/exp-e2e-uvicorn.pid; \
+		until curl -sf http://localhost:8442/api/v1/health >/dev/null 2>&1 || \
+			! kill -0 $$(cat /tmp/exp-e2e-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
+		PYTHONPATH=. uv run python tests/e2e_experiment_lifecycle.py; \
+		status=$$?; kill $$(cat /tmp/exp-e2e-uvicorn.pid) 2>/dev/null; \
+		rm -f /tmp/exp-e2e-uvicorn.pid; exit $$status)
+
 test-exp: ## Run the experimentation-platform suites (ADR-017, needs infra-up + db-migrate)
 	cd apps/api && uv run pytest tests/test_exp_spec_validation.py tests/test_exp_assignment_pure.py \
 		tests/test_exp_assignment_db.py tests/test_exp_metrics_db.py tests/test_exp_guardrails_db.py \
