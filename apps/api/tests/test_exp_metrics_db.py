@@ -1982,3 +1982,17 @@ async def test_prune_retention_boundary(db):
         )
     ).scalar_one()
     assert remaining == 1  # the 399-day row survives
+
+
+def test_exp_outbox_handlers_registered():
+    """§96 class (handler edition): an exp.* outbox topic whose handler is
+    written but never registered is dead code the sweeps enqueue into
+    forever — pin all three by name in the live registry."""
+    from app.controlplane.worker import HANDLERS, load_handlers
+
+    load_handlers()
+    assert {
+        "exp.compute_snapshots",
+        "exp.evaluate_guardrails",
+        "exp.apply_promotion",
+    } <= set(HANDLERS)

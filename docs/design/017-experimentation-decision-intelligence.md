@@ -1027,6 +1027,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 38: the exp outbox handlers joined the §96 pin (an unregistered
+handler is dead code the sweeps enqueue into forever — all three topics
+asserted by name in the live registry), and the hot path got its baseline
+numbers: NEW-assignment resolve ≈ 3.2 ms/call, sticky resolve ≈ 1.0 ms/call
+on the dev Postgres with the version-keyed spec cache warm — the figures
+future latency regressions will be judged against.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
