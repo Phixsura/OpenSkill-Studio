@@ -855,6 +855,14 @@ dependency count per API module (neither set can change as a drive-by).
 Note: the experiments Console nav remains platform-gated — delegated org
 operators work through the API until an org-side console exists.
 
+Round 14 — defect #37 (funnel integrity): all seven invalid-override
+fallback paths across the six surface hooks returned the default experience
+WITHOUT an exposure — treatment units with broken overrides vanished from
+the funnel, biasing exposed-only analysis and noisily tripping exposure-SRM.
+Every fallback now records an arm=fallback exposure at the decision point
+(per-unit-per-day deduped), making the funnel a partition again: control /
+treatment / fallback.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
