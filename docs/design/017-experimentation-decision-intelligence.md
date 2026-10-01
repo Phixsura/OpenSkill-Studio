@@ -959,6 +959,11 @@ Round 29: the async-apply journey certified over HTTP — park in
 inline lands the draft in 'applied' with its target-domain ref. Live E2E
 now 68 checks (both runs green, idempotent against its own residue).
 
+Round 30: guardrail ops endpoints certified over HTTP — manual evaluate,
+the incident trigger's 403 wall for non-platform callers, incident →
+immediate pause, the org admin SEEING the **incident** event through the
+delegated diagnostics, and resuming after the drill. Live E2E 74 checks.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

@@ -519,6 +519,29 @@ async def main() -> int:
               and r.json()["data"]["variant_key"] in ("control", "treatment"),
               r.text[:200])
 
+        # ── Guardrail ops endpoints over HTTP (round 30) ──────────────
+        r = await c.post(f"/experiments/{org_exp_id}/guardrails/evaluate",
+                         headers=admin, json={})
+        check("manual guardrail evaluate runs", r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{org_exp_id}/guardrails/incident",
+                         headers=student, json={"reason": "nope"})
+        check("incident trigger is platform-admin only", r.status_code == 403,
+              r.text[:200])
+        r = await c.post(f"/experiments/{org_exp_id}/guardrails/incident",
+                         headers=admin, json={"reason": "e2e drill"})
+        check("manual incident pauses immediately", r.status_code == 201, r.text[:200])
+        r = await c.get(f"/experiments/{org_exp_id}", headers=student)
+        check("incident left the experiment paused",
+              r.json()["data"]["status"] == "paused", r.text[:200])
+        r = await c.get(f"/experiments/{org_exp_id}/guardrails/events", headers=student)
+        check("org admin sees the incident event (delegated diagnostics)",
+              r.status_code == 200
+              and any(e["guardrail_key"] == "__incident__" for e in r.json()["data"]),
+              r.text[:300])
+        r = await c.post(f"/experiments/{org_exp_id}/transition", headers=student,
+                         json={"to_status": "running"})
+        check("org admin resumes after the drill", r.status_code == 200, r.text[:200])
+
         r = await c.post(f"/experiments/{org_exp_id}/decisions", headers=student, json={
             "decision": "promote", "summary": "nope",
             "analysis_result_hash": "0" * 64,
