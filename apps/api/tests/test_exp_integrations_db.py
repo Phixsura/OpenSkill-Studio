@@ -120,6 +120,35 @@ async def _exposures(db, experiment_id: str) -> int:
     ).scalar_one()
 
 
+
+
+async def _commit_fixtures(db):
+    """Defect #40 made the read-path hooks run in their OWN sessions — they
+    can only see COMMITTED experiments. Tests touching those hooks commit
+    their fixtures and clean up explicitly (the rollback fixture no longer
+    covers them)."""
+    await db.commit()
+
+
+async def _purge_committed(db, *, experiment_id: str, layer_key: str,
+                           tenant_id: str | None = None):
+    from sqlalchemy import delete
+
+    from app.controlplane.models.tenant import TenantAccount
+    from app.experiments.models import Experiment, ExperimentLayer
+
+    await db.execute(delete(Experiment).where(Experiment.id == experiment_id))
+    await db.execute(delete(ExperimentLayer).where(ExperimentLayer.key == layer_key))
+    if tenant_id:
+        from app.models.organization import Organization
+
+        await db.execute(
+            delete(Organization).where(Organization.tenant_id == tenant_id)
+        )
+        await db.execute(delete(TenantAccount).where(TenantAccount.id == tenant_id))
+    await db.commit()
+
+
 # ── Matching (Part H) ────────────────────────────────────────────────
 
 
@@ -261,6 +290,7 @@ async def test_registry_sort_override_end_to_end(db):
         unit_type="user", treatment_config={"sort": "most_installed"},
     )
     user_unit = await _treatment_unit(db, exp, "user", "viewer")
+    await _commit_fixtures(db)
     assert await hooks.registry_sort_override(db, user_id=user_unit) == "most_installed"
     # End-to-end through the real seam: search_packs applies the override
     # for the viewer without raising (result ordering exercised by the
@@ -270,6 +300,7 @@ async def test_registry_sort_override_end_to_end(db):
     packs, _total = await RegistryService(db).search_packs(viewer_user_id=user_unit)
     assert isinstance(packs, list)
     assert await _exposures(db, exp.id) >= 1
+    await _purge_committed(db, experiment_id=exp.id, layer_key=exp.layer_key)
 
 
 async def test_registry_sort_override_rejects_unknown_sort(db):
@@ -278,9 +309,11 @@ async def test_registry_sort_override_rejects_unknown_sort(db):
         unit_type="user", treatment_config={"sort": "totally-bogus"},
     )
     user_unit = await _treatment_unit(db, exp, "user", "viewerx")
+    await _commit_fixtures(db)
     assert await hooks.registry_sort_override(db, user_id=user_unit) is None
     # defect #37: the fallback IS this unit's exposure (arm recorded)
     assert await _exposures(db, exp.id) == 1
+    await _purge_committed(db, experiment_id=exp.id, layer_key=exp.layer_key)
 
 
 # ── Cohort path structure (Part F) ───────────────────────────────────
@@ -311,14 +344,21 @@ async def test_cohort_path_override_same_org_only(db):
         unit_type="cohort", treatment_config={"alternative_path_id": alt.id},
     )
     cohort_unit = await _treatment_unit(db, exp, "cohort", "coh")
-    assert await hooks.cohort_path_override(
-        db, cohort_id=cohort_unit, org_id=org.id
-    ) == alt.id
-    # Cross-org read refused — curricula never leak across orgs
-    assert await hooks.cohort_path_override(
-        db, cohort_id=cohort_unit, org_id="x" * 26
-    ) is None
-    assert await _exposures(db, exp.id) == 1
+    tenant_id = tenant.id
+    await _commit_fixtures(db)
+    try:
+        assert await hooks.cohort_path_override(
+            db, cohort_id=cohort_unit, org_id=org.id
+        ) == alt.id
+        # Cross-org read refused — curricula never leak across orgs
+        assert await hooks.cohort_path_override(
+            db, cohort_id=cohort_unit, org_id="x" * 26
+        ) is None
+        # the second (fallback) call hits the per-unit-per-day dedup
+        assert await _exposures(db, exp.id) == 1
+    finally:
+        await _purge_committed(db, experiment_id=exp.id, layer_key=exp.layer_key,
+                               tenant_id=tenant_id)
 
 
 # ── Rubric wording (Part F) ──────────────────────────────────────────
@@ -470,14 +510,20 @@ async def test_fallback_exposure_context_pins_the_arm(db):
     from app.experiments.hooks import registry_sort_override
 
     unit = await _treatment_unit(db, exp, "user", "fbk")
-    result = await registry_sort_override(db, user_id=unit)
-    assert result is None
-    row = (
-        await db.execute(
-            _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
-        )
-    ).scalar_one()
-    assert row.context["arm"] == "fallback"
+    await _commit_fixtures(db)
+    try:
+        result = await registry_sort_override(db, user_id=unit)
+        assert result is None
+        row = (
+            await db.execute(
+                _select(ExperimentExposure).where(
+                    ExperimentExposure.experiment_id == exp.id
+                )
+            )
+        ).scalar_one()
+        assert row.context["arm"] == "fallback"
+    finally:
+        await _purge_committed(db, experiment_id=exp.id, layer_key=exp.layer_key)
 
 
 async def test_binding_override_inactive_offering_falls_back(db):

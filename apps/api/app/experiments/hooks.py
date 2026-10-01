@@ -183,27 +183,43 @@ async def workflow_binding_override(
 async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | None:
     """Marketplace presentation: ordering strategy for the registry list —
     only among the EXISTING sort vocabulary. Unit: user (anonymous visitors
-    are never enrolled — identity resolution is out of scope)."""
-    resolved = await facade.resolve_variant(
-        db,
-        experiment_key=SURFACE_REGISTRY_ORDERING,
-        unit_type="user",
-        unit_id=user_id,
-    )
-    if not resolved:
-        return None
-    sort = resolved.config.get("sort")
-    if sort is None:
-        await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                      unit_id=user_id, context={"surface": "registry", "arm": "control"})
-        return None
-    if sort not in REGISTRY_SORTS:
-        await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                      unit_id=user_id, context={"surface": "registry", "arm": "fallback"})
-        return None
-    await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                  unit_id=user_id, context={"surface": "registry", "sort": sort})
-    return sort
+    are never enrolled — identity resolution is out of scope).
+
+    Defect #40: the registry search is a READ-path host — its request
+    session is never committed, so sticky assignments and exposures written
+    through it were silently discarded at request end (the experiment looked
+    live but collected NOTHING). The hook runs its writes in its OWN short
+    transaction; the host `db` parameter stays for signature stability."""
+    del db  # read-path host session must not carry experiment writes
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as own:
+        resolved = await facade.resolve_variant(
+            own,
+            experiment_key=SURFACE_REGISTRY_ORDERING,
+            unit_type="user",
+            unit_id=user_id,
+        )
+        if not resolved:
+            await own.commit()  # the sticky assignment may still have landed
+            return None
+        sort = resolved.config.get("sort")
+        if sort is None:
+            await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                          unit_id=user_id,
+                          context={"surface": "registry", "arm": "control"})
+            await own.commit()
+            return None
+        if sort not in REGISTRY_SORTS:
+            await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                          unit_id=user_id,
+                          context={"surface": "registry", "arm": "fallback"})
+            await own.commit()
+            return None
+        await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                      unit_id=user_id, context={"surface": "registry", "sort": sort})
+        await own.commit()
+        return sort
 
 
 @_shield
@@ -216,31 +232,43 @@ async def cohort_path_override(
     Recommendations never silently rewrite active curricula: the assigned
     path rows are untouched; only this cohort's effective read is redirected.
     Unit: cohort."""
-    resolved = await facade.resolve_variant(
-        db,
-        experiment_key=SURFACE_COHORT_PATH,
-        unit_type="cohort",
-        unit_id=cohort_id,
-        context={"org_id": org_id},
-    )
-    if not resolved:
-        return None
-    path_id = resolved.config.get("alternative_path_id")
-    if not path_id:
-        await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                      unit_id=cohort_id, context={"surface": "cohort_path", "arm": "control"})
-        return None
-    from app.models.learning_path import LearningPath
+    # Defect #40: the cohort-path read is also an uncommitted read-path host
+    del db
+    from app.core.database import AsyncSessionLocal
 
-    path = await db.get(LearningPath, path_id)
-    if path is None or path.org_id != org_id:
-        log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
-        await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                      unit_id=cohort_id, context={"surface": "cohort_path", "arm": "fallback"})
-        return None
-    await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                  unit_id=cohort_id, context={"surface": "cohort_path", "path_id": path_id})
-    return path_id
+    async with AsyncSessionLocal() as own:
+        resolved = await facade.resolve_variant(
+            own,
+            experiment_key=SURFACE_COHORT_PATH,
+            unit_type="cohort",
+            unit_id=cohort_id,
+            context={"org_id": org_id},
+        )
+        if not resolved:
+            await own.commit()
+            return None
+        path_id = resolved.config.get("alternative_path_id")
+        if not path_id:
+            await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                          unit_id=cohort_id,
+                          context={"surface": "cohort_path", "arm": "control"})
+            await own.commit()
+            return None
+        from app.models.learning_path import LearningPath
+
+        path = await own.get(LearningPath, path_id)
+        if path is None or path.org_id != org_id:
+            log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
+            await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                          unit_id=cohort_id,
+                          context={"surface": "cohort_path", "arm": "fallback"})
+            await own.commit()
+            return None
+        await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                      unit_id=cohort_id,
+                      context={"surface": "cohort_path", "path_id": path_id})
+        await own.commit()
+        return path_id
 
 
 @_shield

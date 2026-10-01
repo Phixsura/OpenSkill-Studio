@@ -985,6 +985,17 @@ Every override now runs under a @_shield decorator (any exception → log +
 default experience), pinned by an exploding-db.get test that proves the
 host session survives.
 
+Round 34 — defect #40 (SEVERE, silent data loss): get_db never commits,
+and the registry search and cohort-path reads are READ-path hosts — every
+sticky assignment and exposure those two hooks wrote through the request
+session was DISCARDED at request end. The experiments looked live (same-
+transaction reads in tests masked it) while collecting nothing in
+production. Both read-path hooks now run their writes in their OWN short
+transaction (committed); write-path hooks stay on the host session so a
+host rollback still rolls their exposure back (transactional consistency
+both ways). The affected tests moved to committed fixtures with explicit
+cleanup.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
