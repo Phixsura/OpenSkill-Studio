@@ -921,6 +921,19 @@ elapsing EXACTLY now closes (count pinned to 1); prune retention pinned at
 399-keep/401-delete — a flipped cutoff sign would have deleted EVERYTHING
 archived, which is exactly the mutant that survived before the killer.
 
+Round 23: mutation wave 10 — the analysis_service internals (108 sites,
+the largest single target). Killers: a direct _compare matrix (None-laden
+arms behave as zeros → insufficient_data for every kind × engine; engine
+signature fields pinned; rate-bayesian extras ride exactly on sufficient
+data), the version filter aggregates the HIGHEST version's VALUES (v2-only
+sums, not v1+v2), novelty minimum-30 per pooled half and the one-third
+ratio pinned from both sides (the exact instant is a float boundary,
+ledgered), single-version runs never flag MIXED, the corpus prior takes
+each experiment's LATEST look (an older wild look is ignored) and its sd is
+the exact sample standard deviation. Remaining survivors ledgered:
+unreachable query_version defaults, per-window None-coalesce templates
+(round-6 class), float/index-exact instants.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

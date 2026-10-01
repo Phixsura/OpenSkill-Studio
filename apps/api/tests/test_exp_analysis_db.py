@@ -702,3 +702,180 @@ async def test_corpus_prior_is_platform_admin_only(db):
     assert "corpus_prior" not in comparison
     assert "shrunk_effect" not in comparison
     assert "effect" in comparison  # the analysis itself is untouched
+
+
+# ── Round-23 mutation killers (analysis_service internals) ───────────
+
+
+def test_compare_matrix_pins_none_coalescing_and_engines():
+    """_compare direct matrix: every `x or 0.0` coalesce is REAL (None-laden
+    arms behave as zeros → insufficient_data, never a crash), both engines
+    per kind produce their signature fields, and the rate bayesian extras
+    appear exactly when data suffices."""
+    from app.experiments.services.analysis_service import AnalysisService
+
+    compare = AnalysisService._compare  # noqa: SLF001 — direct unit pin
+
+    none_arm = {"numerator": None, "denominator": None, "n": None,
+                "sum_value": None, "sum_sq": None}
+    good_bin = {"numerator": 60.0, "denominator": 200.0}
+    # None-laden arms = zeros = insufficient, for every kind/engine
+    for kind in ("binary", "rate", "time_to_event", "continuous"):
+        for engine in ("frequentist", "bayesian"):
+            result = compare(kind, engine, none_arm, dict(none_arm))
+            assert result.get("insufficient_data") is True, (kind, engine)
+
+    # binary frequentist vs bayesian signatures
+    freq = compare("binary", "frequentist", {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    assert "p" in freq and "ci" in freq
+    bayes = compare("binary", "bayesian", {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    assert "p_beat_control" in bayes
+    # time_to_event carries the binary-at-horizon caveat
+    tte = compare("time_to_event", "frequentist",
+                  {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    assert "caveat" in tte
+    # rate bayesian extras ride on sufficient data
+    rate = compare("rate", "bayesian",
+                   {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    assert "p_beat_control" in rate and "expected_loss" in rate
+    assert rate["expected_loss"] >= 0.0
+    # continuous engines
+    cont_c = {"n": 50.0, "sum_value": 100.0, "sum_sq": 260.0}
+    cont_t = {"n": 50.0, "sum_value": 150.0, "sum_sq": 500.0}
+    freq_c = compare("continuous", "frequentist", cont_c, cont_t)
+    assert "t" in freq_c or "z" in freq_c
+    bayes_c = compare("continuous", "bayesian", cont_c, cont_t)
+    assert "p_beat_control" in bayes_c
+
+
+async def test_aggregate_uses_only_the_highest_query_version_values(db):
+    """Version filter killer: the aggregate must EQUAL the v2 rows alone —
+    not v1+v2 — and the mixed flag trips."""
+    exp, admin = await _mk_running(db)
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    for version, numerator in ((1, 500), (2, 30)):
+        for variant in ("control", "treatment"):
+            db.add(MetricSnapshot(
+                experiment_id=exp.id, metric_key="exposure_rate",
+                variant_key=variant, window_start=ws + timedelta(days=version),
+                window_end=ws + timedelta(days=version + 1),
+                n=100, numerator=numerator, denominator=100,
+                provenance={"query_version": version},
+            ))
+    await db.flush()
+    aggregated, mixed = await AnalysisService(db)._aggregate_metric(  # noqa: SLF001
+        exp.id, "exposure_rate"
+    )
+    assert mixed is True
+    assert aggregated["treatment"]["numerator"] == 30.0  # v2 only, never 530
+    assert aggregated["treatment"]["denominator"] == 100.0
+
+
+async def test_novelty_thresholds_boundaries(db):
+    """Novelty boundaries: 29-per-arm halves stay quiet (min 30), and a late
+    effect EXACTLY one third of the early one is NOT decay (strict <)."""
+    from sqlalchemy import delete
+
+    exp, admin = await _mk_running(db)
+    base = datetime(2026, 9, 1, tzinfo=UTC)
+
+    async def _seed(denominator: int, early_num: int, late_num: int, control_num: int):
+        await db.execute(delete(MetricSnapshot).where(
+            MetricSnapshot.experiment_id == exp.id,
+        ))
+        for day in range(4):
+            ws = base + timedelta(days=day)
+            for variant in ("control", "treatment"):
+                if variant == "control":
+                    numerator = control_num
+                else:
+                    numerator = early_num if day < 2 else late_num
+                db.add(MetricSnapshot(
+                    experiment_id=exp.id, metric_key="exposure_rate",
+                    variant_key=variant, window_start=ws,
+                    window_end=ws + timedelta(days=1),
+                    n=denominator, numerator=numerator, denominator=denominator,
+                    provenance={"query_version": 1},
+                ))
+        await db.flush()
+
+    # 28 per arm per HALF (14 per window × 2): below the 30 minimum —
+    # quiet even with a huge decay
+    await _seed(14, 13, 1, 1)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
+
+    # the one-third ratio from clearly ABOVE (no decay) and clearly BELOW
+    # (decay) — the exact ==1/3 instant is float-unstable and ledgered as a
+    # float-exact boundary (the round-6 class)
+    await _seed(200, 100, 65, 40)   # late 0.125 > 0.30/3 → quiet
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
+    await _seed(200, 100, 50, 40)   # late 0.05 < 0.10 → flagged
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NOVELTY_EFFECT_DECAY_SUSPECT" in result["warnings"]
+
+
+async def test_single_version_never_flags_mixed(db):
+    """len(versions) > 1 killer: a single query_version must not trip
+    SNAPSHOT_VERSION_MIXED."""
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "SNAPSHOT_VERSION_MIXED" not in result["warnings"]
+
+
+async def test_corpus_prior_uses_latest_look_and_exact_sd(db):
+    """Corpus killers: per historical experiment the LATEST look wins (an
+    older look with a wild effect is ignored), and the prior's sd is the
+    exact sample standard deviation."""
+    from app.experiments.models import DecisionRecord, ExperimentEvent
+
+    exp, admin = await _mk_running(db)
+    layer_admin = admin
+    svc = ExperimentService(db)
+    from ulid import ULID as _ULID
+
+    effects = [0.02, 0.03, 0.04]
+    for i, effect in enumerate(effects):
+        hist = await svc.create(
+            key=f"hist-{str(_ULID()).lower()}", title="H", domain="learning",
+            layer_key=exp.layer_key, owner_user_id=layer_admin.id,
+        )
+        # an OLD look with a wild effect, then the current one — latest wins
+        db.add(ExperimentEvent(
+            experiment_id=hist.id, actor_user_id=layer_admin.id,
+            event_type="analysis_look",
+            payload={"result_hash": "0" * 64, "primary_effects": {
+                "exposure_rate": {"treatment": {"effect": 9.9, "se": 0.01}},
+            }},
+            created_at=datetime(2026, 8, 1, tzinfo=UTC),
+        ))
+        db.add(ExperimentEvent(
+            experiment_id=hist.id, actor_user_id=layer_admin.id,
+            event_type="analysis_look",
+            payload={"result_hash": "1" * 64, "primary_effects": {
+                "exposure_rate": {"treatment": {"effect": effect, "se": 0.01}},
+            }},
+            created_at=datetime(2026, 9, 1 + i, tzinfo=UTC),
+        ))
+        db.add(DecisionRecord(
+            experiment_id=hist.id, experiment_version=1, decision="promote",
+            summary="hist", domain="learning", analysis_type="randomized",
+            analysis_result_hash="1" * 64, approver_user_id=layer_admin.id,
+        ))
+    await db.flush()
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    prior = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]["corpus_prior"]
+    assert prior["n_experiments"] == 3
+    assert abs(prior["mean"] - 0.03) < 1e-12          # 9.9 never leaked in
+    assert abs(prior["sd"] - 0.01) < 1e-12            # exact sample sd
+
+
+# Wave-10 survivor ledger: the query_version .get(..., 1) defaults are
+# unreachable (compute always stamps the version); the per-window None
+# coalesces in _time_strata/_novelty mirror the snapshot-column templates
+# (round-6 class — same-kind rows always carry their kind's fields); the
+# novelty midpoint index and the exact ==1/3 and z==3 instants are
+# float/index-exact boundaries.
