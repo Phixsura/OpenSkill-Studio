@@ -76,6 +76,34 @@ async def seed_matching_configs(entity_type: str) -> tuple[str, str]:
     return active_id, entity_type
 
 
+async def grant_org_admin(user_id: str) -> str:
+    """Create a tenant+org and make the user its admin; returns org_id."""
+    from ulid import ULID
+
+    from app.controlplane.models.tenant import TenantAccount
+    from app.core.database import AsyncSessionLocal, engine
+    from app.models.organization import Organization, OrgMember, OrgRole
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        tenant = TenantAccount(
+            name=f"e2e-t-{str(ULID()).lower()}", slug=f"e2e-t-{str(ULID()).lower()}"
+        )
+        db.add(tenant)
+        await db.flush()
+        org = Organization(
+            name="e2e delegation org", slug=f"e2e-o-{str(ULID()).lower()}",
+            tenant_id=tenant.id,
+        )
+        db.add(org)
+        await db.flush()
+        db.add(OrgMember(org_id=org.id, user_id=user_id, role=OrgRole.ADMIN))
+        org_id = org.id
+        await db.commit()
+    await engine.dispose()
+    return org_id
+
+
 async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -> None:
     from sqlalchemy import delete as _delete
 
@@ -117,6 +145,7 @@ async def main() -> int:
             "display_name": "Student",
         })
         student = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        student_id = r.json()["user"]["id"]
 
         # ── Authorization wall: operator surfaces are admin-only ──────
         for path in ("/experiments", "/experiments/decisions",
@@ -364,6 +393,33 @@ async def main() -> int:
         r = await c.get("/experiments", headers=student)
         check("roleless reader still 403 after delegation", r.status_code == 403,
               r.text[:200])
+
+        # ── Round 10: org-admin WRITE delegation over HTTP ────────────
+        org_id = await grant_org_admin(student_id)
+        r = await c.post("/experiments", headers=admin, json={
+            "key": f"org-exp-{uid()}", "title": "org-scoped", "domain": "matching",
+            "layer_key": layer_key, "scope_org_id": org_id,
+        })
+        check("org-scoped experiment created", r.status_code == 201, r.text[:200])
+        org_exp_id = r.json()["data"]["id"]
+        experiment_ids.append(org_exp_id)
+        r = await c.get(f"/experiments/{org_exp_id}", headers=student)
+        check("org admin reads own-org experiment", r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{org_exp_id}/transition", headers=student,
+                         json={"to_status": "review"})
+        check("org admin transitions own-org experiment",
+              r.status_code == 200 and r.json()["data"]["status"] == "review",
+              r.text[:200])
+        r = await c.post(f"/experiments/{experiment_ids[0]}/transition", headers=student,
+                         json={"to_status": "paused"})
+        check("org admin cannot touch a platform experiment (uniform 404)",
+              r.status_code == 404, r.text[:200])
+        r = await c.post(f"/experiments/{org_exp_id}/decisions", headers=student, json={
+            "decision": "promote", "summary": "nope",
+            "analysis_result_hash": "0" * 64,
+        })
+        check("decisions stay platform-admin even for org admins",
+              r.status_code == 403, r.text[:200])
 
     await cleanup(experiment_ids, layer_key, entity_type)
     print(f"\n{PASS} passed, {FAIL} failed")
