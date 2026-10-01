@@ -56,6 +56,14 @@ lint:                             ## Lint all code
 lint-fix:                         ## Fix lint issues
 	pnpm lint:fix
 
+test-exp: ## Run the experimentation-platform suites (ADR-017, needs infra-up + db-migrate)
+	cd apps/api && uv run pytest tests/test_exp_spec_validation.py tests/test_exp_assignment_pure.py \
+		tests/test_exp_assignment_db.py tests/test_exp_metrics_db.py tests/test_exp_guardrails_db.py \
+		tests/test_exp_analysis.py tests/test_exp_analysis_db.py tests/test_exp_decisions_db.py \
+		tests/test_exp_integrations_db.py tests/test_exp_e2e_flow.py tests/test_exp_endpoints_nodb.py \
+		tests/test_exp_web_parity.py tests/test_exp_holdouts_db.py tests/test_exp_fuzz.py \
+		-q --timeout=600 --timeout-method=thread
+
 test:                             ## Run all tests
 	pnpm test
 
