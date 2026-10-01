@@ -744,3 +744,65 @@ async def test_org_admin_delegation_covers_snapshots_and_analysis(db):
         layer_key=layer2.key, owner_user_id=admin.id, scope_org_id=org.id,
     )
     assert (await svc.get_scoped(org_exp.id, scope.org_ids)).id == org_exp.id
+
+
+async def test_platform_admin_dep_direct(db):
+    """Direct pin on require_platform_admin: admin passes, non-admin gets
+    exactly FORBIDDEN/403 (the mutation lane's dep-flip killer)."""
+    from app.experiments.api.deps import require_platform_admin
+
+    admin = await _mk_admin(db)
+    assert (await require_platform_admin(user=admin)) is admin
+    student = User(
+        email=f"dep-{ULID()}@example.com", display_name="S",
+        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(student)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await require_platform_admin(user=student)
+    assert e.value.code == "FORBIDDEN"
+    assert e.value.status_code == 403
+
+
+async def test_list_experiments_filters_and_cursor_scope(db):
+    """List semantics pinned: status/domain filters are EQUALITY, the cursor
+    is strictly-less-than (R395: predicate matches the sort), and
+    next_cursor appears exactly when a full page returned."""
+    from app.experiments.services.experiments import ExperimentService
+
+    exp1, admin = await _mk_running(db)                       # learning, running
+    svc = ExperimentService(db)
+    ops_layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="operational"
+    )
+    draft = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="Draft", domain="operational",
+        layer_key=ops_layer.key, owner_user_id=admin.id,
+    )
+    rows, total, _ = await svc.list_experiments(status="running")
+    assert all(r.status == "running" for r in rows)
+    assert exp1.id in {r.id for r in rows}
+    assert draft.id not in {r.id for r in rows}
+    rows, _, _ = await svc.list_experiments(domain="operational")
+    domains = {r.domain for r in rows}
+    assert domains == {"operational"} or domains == set()
+    assert draft.id in {r.id for r in rows}
+
+    # cursor strictly less-than: paging from the NEWER row excludes it
+    newer, older = sorted([exp1.id, draft.id], reverse=True)
+    rows, _, _ = await svc.list_experiments(cursor=newer, limit=500)
+    ids = {r.id for r in rows}
+    assert newer not in ids
+    assert older in ids
+
+    # next_cursor exactly when the page is full
+    rows, _, next_cursor = await svc.list_experiments(limit=1)
+    assert len(rows) == 1 and next_cursor == rows[-1].id
+    rows, _, next_cursor = await svc.list_experiments(limit=100000)
+    assert next_cursor is None
+
+
+# Wave-5 survivor ledger: ExperimentService.list_experiments' limit default
+# (50) is unreachable — the API layer always passes an explicit Query-bound
+# limit; the default exists only for internal callers.
