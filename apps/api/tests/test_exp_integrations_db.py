@@ -166,7 +166,8 @@ async def test_matching_override_wrong_entity_type_falls_back(db):
         db, org_id=org_unit, target_entity_type="something-else"
     )
     assert result is None
-    assert await _exposures(db, exp.id) == 0  # no exposure without effect
+    # defect #37: the fallback IS this unit's exposure (arm recorded)
+    assert await _exposures(db, exp.id) == 1
 
 
 # ── Workflow binding (Part G, R82 re-check) ──────────────────────────
@@ -240,7 +241,8 @@ async def test_binding_override_capability_mismatch_refused(db):
         db, installation_id=install_unit, org_id=org.id,
         capability="text.generate", required_features={"vision"},
     ) is None
-    assert await _exposures(db, exp.id) == 0
+    # defect #37: the fallback IS this unit's exposure (arm recorded)
+    assert await _exposures(db, exp.id) == 1
 
 
 async def test_binding_override_no_installation_skips(db):
@@ -277,7 +279,8 @@ async def test_registry_sort_override_rejects_unknown_sort(db):
     )
     user_unit = await _treatment_unit(db, exp, "user", "viewerx")
     assert await hooks.registry_sort_override(db, user_id=user_unit) is None
-    assert await _exposures(db, exp.id) == 0
+    # defect #37: the fallback IS this unit's exposure (arm recorded)
+    assert await _exposures(db, exp.id) == 1
 
 
 # ── Cohort path structure (Part F) ───────────────────────────────────
@@ -339,7 +342,8 @@ async def test_rubric_override_rejects_malformed(db):
     )
     project_unit = await _treatment_unit(db, exp, "project", "projm")
     assert await hooks.rubric_override(db, project_id=project_unit) is None
-    assert await _exposures(db, exp.id) == 0
+    # defect #37: the fallback IS this unit's exposure (arm recorded)
+    assert await _exposures(db, exp.id) == 1
 
 
 # ── Retry policy (operational) ───────────────────────────────────────
@@ -451,3 +455,26 @@ async def test_hooks_are_noops_without_experiments(db):
     assert await hooks.cohort_path_override(db, cohort_id="c" * 26, org_id="o" * 26) is None
     assert await hooks.rubric_override(db, project_id="p" * 26) is None
     assert await hooks.retry_policy_override(db, tenant_id="t" * 26) is None
+
+
+async def test_fallback_exposure_context_pins_the_arm(db):
+    """Defect #37 detail pin: the invalid-override fallback exposure carries
+    arm=fallback — distinguishable from control and treatment exposures in
+    the funnel and in debugging."""
+    from sqlalchemy import select as _select
+
+    exp, _admin = await _mk_surface_experiment(
+        db, key="surface-registry-ordering", domain="marketplace",
+        unit_type="user", treatment_config={"sort": "no-such-sort-strategy"},
+    )
+    from app.experiments.hooks import registry_sort_override
+
+    unit = await _treatment_unit(db, exp, "user", "fbk")
+    result = await registry_sort_override(db, user_id=unit)
+    assert result is None
+    row = (
+        await db.execute(
+            _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
+        )
+    ).scalar_one()
+    assert row.context["arm"] == "fallback"

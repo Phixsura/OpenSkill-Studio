@@ -88,6 +88,11 @@ async def matching_config_override(
             config_id=config_id,
             target_entity_type=target_entity_type,
         )
+        # Defect #37: a treatment unit falling back to the default is STILL
+        # exposed at the decision point — dropping it from the funnel biases
+        # exposed-only analysis and false-fires exposure-SRM
+        await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
+                      unit_id=org_id, context={"surface": "matching", "arm": "fallback"})
         return None
     await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
                   unit_id=org_id, context={"surface": "matching", "config_id": config_id})
@@ -126,6 +131,9 @@ async def workflow_binding_override(
 
     offering = await db.get(ProviderModelOffering, offering_id)
     if offering is None or not offering.is_active:
+        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
+                      unit_id=installation_id,
+                      context={"surface": "workflow_binding", "arm": "fallback"})
         return None
     conn = await db.get(ProviderConnection, offering.connection_id)
     if (
@@ -140,6 +148,9 @@ async def workflow_binding_override(
             offering_id=offering_id,
             capability=capability,
         )
+        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
+                      unit_id=installation_id,
+                      context={"surface": "workflow_binding", "arm": "fallback"})
         return None
     await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
                   unit_id=installation_id, context={"surface": "workflow_binding", "offering_id": offering_id})
@@ -164,6 +175,8 @@ async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | Non
                       unit_id=user_id, context={"surface": "registry", "arm": "control"})
         return None
     if sort not in REGISTRY_SORTS:
+        await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
+                      unit_id=user_id, context={"surface": "registry", "arm": "fallback"})
         return None
     await _expose(db, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
                   unit_id=user_id, context={"surface": "registry", "sort": sort})
@@ -198,6 +211,8 @@ async def cohort_path_override(
     path = await db.get(LearningPath, path_id)
     if path is None or path.org_id != org_id:
         log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
+        await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
+                      unit_id=cohort_id, context={"surface": "cohort_path", "arm": "fallback"})
         return None
     await _expose(db, key=SURFACE_COHORT_PATH, unit_type="cohort",
                   unit_id=cohort_id, context={"surface": "cohort_path", "path_id": path_id})
@@ -228,6 +243,8 @@ async def rubric_override(
         isinstance(item, dict) and item.get("criterion") for item in rubric
     ):
         log.warning("experiment_rubric_override_invalid", project_id=project_id)
+        await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
+                      unit_id=project_id, context={"surface": "rubric", "arm": "fallback"})
         return None
     await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
                   unit_id=project_id, context={"surface": "rubric"})
@@ -250,6 +267,8 @@ async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | No
                       unit_id=tenant_id, context={"surface": "retry_policy", "arm": "control"})
         return None
     if not isinstance(attempts, int):
+        await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
+                      unit_id=tenant_id, context={"surface": "retry_policy", "arm": "fallback"})
         return None
     clamped = max(RETRY_ATTEMPTS_MIN, min(RETRY_ATTEMPTS_MAX, attempts))
     await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
