@@ -1012,6 +1012,13 @@ surfaces mapped:
   keeping them on the host session is correct (a host rollback reverts their
   exposure, matching the user-visible outcome).
 
+Round 36: the end-to-end NUMBER-CONSERVATION audit — one 60-unit cohort
+flows resolve → exposure → funnel diagnostics → snapshot window → analysis
+aggregate → guardrail observed, and every stage must agree on the exact
+same assigned/exposed counts; any future double-count or lost write in any
+stage breaks exactly one labeled equation. This is the invariant the #40
+class violates, now held permanently by a single test.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

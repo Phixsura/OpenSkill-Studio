@@ -232,3 +232,114 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     )
     await db.execute(delete(User).where(User.id == admin.id))
     await db.commit()
+
+
+async def test_number_conservation_resolve_to_analysis(db):
+    """End-to-end CONSERVATION audit (round 36): one cohort of units flows
+    through resolve → exposure → snapshot → aggregate → funnel, and every
+    stage must agree on the same numbers — any future double-count or lost
+    write in any stage breaks exactly one equation here."""
+    from datetime import UTC, datetime, timedelta
+    from datetime import time as dtime
+
+    from ulid import ULID
+
+    from app.experiments.services.analysis_service import AnalysisService
+    from app.experiments.services.assignment import AssignmentService
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.guardrails import GuardrailService
+    from app.experiments.services.layers import LayerService
+    from app.experiments.services.metrics import MetricService
+    from app.models.user import User, UserRole, UserStatus
+
+    admin = User(
+        email=f"conserve-{ULID()}@example.com", display_name="C",
+        role=UserRole.ADMIN, status=UserStatus.ACTIVE,
+    )
+    db.add(admin)
+    await db.flush()
+    await MetricService(db).ensure_seed_definitions()
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    esvc = ExperimentService(db)
+    exp = await esvc.create(
+        key=f"exp-{str(ULID()).lower()}", title="Conservation", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await esvc.create_version(exp.id, spec={
+        "hypothesis": "every stage agrees on the same unit counts",
+        "unit_type": "user",
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["exposure_rate"],
+                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                    "threshold": 100.0}]},
+    }, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    for status in ("review", "scheduled", "running"):
+        await esvc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
+    await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+
+    # Stage 1: resolve N units, expose every third one
+    asvc = AssignmentService(db)
+    total_units = 60
+    exposed_expected = 0
+    per_variant_assigned: dict[str, int] = {}
+    per_variant_exposed: dict[str, int] = {}
+    for i in range(total_units):
+        r = await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=f"cons-{i:03d}"
+        )
+        assert r is not None
+        per_variant_assigned[r.variant_key] = per_variant_assigned.get(r.variant_key, 0) + 1
+        if i % 3 == 0:
+            assert await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=f"cons-{i:03d}"
+            )
+            exposed_expected += 1
+            per_variant_exposed[r.variant_key] = (
+                per_variant_exposed.get(r.variant_key, 0) + 1
+            )
+
+    # Stage 2: funnel diagnostics must agree with stage 1 exactly
+    stats = await asvc.assignment_stats(exp.id)
+    assert stats["variants"] == per_variant_assigned
+    assert stats["total"] == total_units
+    funnel = (await asvc.exposure_stats(exp.id))["funnel"]
+    for variant, assigned in per_variant_assigned.items():
+        assert funnel[variant]["assigned"] == assigned
+        assert funnel[variant]["exposed_units"] == per_variant_exposed.get(variant, 0)
+
+    # Stage 3: the snapshot window carries the SAME numbers
+    window_start = datetime.combine(datetime.now(UTC).date(), dtime.min, tzinfo=UTC)
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_start + timedelta(days=1)
+    )
+    rows = await MetricService(db).list_snapshots(exp.id, metric_key="exposure_rate")
+    snap_assigned = sum(int(r.denominator or 0) for r in rows if r.segment == "")
+    snap_exposed = sum(int(r.numerator or 0) for r in rows if r.segment == "")
+    assert snap_assigned == total_units
+    assert snap_exposed == exposed_expected
+
+    # Stage 4: analysis aggregates to the same totals
+    aggregated, _ = await AnalysisService(db)._aggregate_metric(  # noqa: SLF001
+        exp.id, "exposure_rate"
+    )
+    assert sum(arm["denominator"] for arm in aggregated.values()) == total_units
+    assert sum(arm["numerator"] for arm in aggregated.values()) == exposed_expected
+
+    # Stage 5: the guardrail's live exposure_rate observes the same ratio
+    observed = GuardrailService(db)._observed(  # noqa: SLF001
+        type("D", (), {"kind": "rate", "spec": {}})(),
+        {"numerator": float(snap_exposed), "denominator": float(snap_assigned)},
+    )
+    assert observed is not None
+    assert abs(observed - exposed_expected / total_units) < 1e-12
