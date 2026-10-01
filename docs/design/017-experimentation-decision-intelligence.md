@@ -1027,6 +1027,20 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 39 — defect #41 (fail-safe facade poisoned the HOST session): the
+facade caught exceptions but never rolled back, so a mid-flush DB error
+(natural trigger: a unit_id one char over the varchar(26) column) left the
+host's session in PendingRollback. On the self-serve surface the very next
+commit 500'd; on write-path hooks the damage surfaced LATER at the host's
+own business commit — outside every shield — the experiment breaking the
+product path it rode along with, the exact thing this ADR forbids. Fix:
+both facade entry points run the service call under a SAVEPOINT
+(`begin_nested()`): an error rolls back only the experiment writes, the
+host's prior uncommitted business writes survive, and the session stays
+healthy. Pinned by a poison-isolation test (host write before the
+touchpoint, 27-char unit_id as the bomb, post-poison flush + a fresh valid
+resolve must both work); the test was proven to KILL the unfixed facade.
+
 Round 38: the exp outbox handlers joined the §96 pin (an unregistered
 handler is dead code the sweeps enqueue into forever — all three topics
 asserted by name in the live registry), and the hot path got its baseline

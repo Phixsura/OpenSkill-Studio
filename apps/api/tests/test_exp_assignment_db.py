@@ -740,3 +740,41 @@ async def test_layer_allocation_boundary_matrix(db):
         "LAYER_SLICE_OVERLAP": {409},
         "VALIDATION_ERROR": {422},
     }, found
+
+
+async def test_facade_db_error_does_not_poison_host_session(db):
+    """Defect #41: a mid-flush DB error inside the facade (natural trigger:
+    unit_id one char over the varchar(26) column) must roll back to a
+    SAVEPOINT — the host session stays healthy and the host's PRIOR
+    uncommitted business write survives. Without the savepoint the session
+    enters PendingRollback and the HOST's own later commit explodes —
+    the experiment breaking the product path it rode along with."""
+    from app.experiments import facade
+
+    exp, admin = await _mk_running(db)
+    # host business write BEFORE the experiment touchpoint
+    host_row = User(
+        email=f"host-{ULID()}@example.com", display_name="H",
+        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(host_row)
+    await db.flush()
+
+    # 27 chars > varchar(26) -> StringDataRightTruncation at flush time
+    resolved = await facade.resolve_variant(
+        db, experiment_key=exp.key, unit_type="user", unit_id="u" * 27
+    )
+    assert resolved is None  # fail-safe default served
+    exposed = await facade.record_exposure(
+        db, experiment_key=exp.key, unit_type="user", unit_id="u" * 27
+    )
+    assert exposed is False
+
+    # the session is NOT poisoned: flush works and the host write is intact
+    await db.flush()
+    assert await db.get(User, host_row.id) is not None
+    # and the surface still works for the next (valid) unit
+    ok = await facade.resolve_variant(
+        db, experiment_key=exp.key, unit_type="user", unit_id="after-poison"
+    )
+    assert ok is not None

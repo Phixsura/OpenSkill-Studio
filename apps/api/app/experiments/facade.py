@@ -26,12 +26,19 @@ async def resolve_variant(
     """Sticky deterministic assignment; None means: serve the control/default
     experience (ineligible, not ramped, holdout, paused, or unknown key)."""
     try:
-        return await AssignmentService(db).resolve(
-            experiment_key=experiment_key,
-            unit_type=unit_type,
-            unit_id=unit_id,
-            context=context,
-        )
+        # Defect #41: the service call runs under a SAVEPOINT. A mid-flush DB
+        # error would otherwise poison the HOST's session (PendingRollback) —
+        # the damage surfacing later at the host's own commit, OUTSIDE every
+        # shield, breaking the product write the experiment rode along with.
+        # The savepoint rollback discards only the experiment writes; the
+        # host's prior uncommitted business writes stay intact.
+        async with db.begin_nested():
+            return await AssignmentService(db).resolve(
+                experiment_key=experiment_key,
+                unit_type=unit_type,
+                unit_id=unit_id,
+                context=context,
+            )
     except Exception:  # noqa: BLE001 — experiments never break product paths
         logger.warning(
             "experiment_resolve_failed", experiment_key=experiment_key, unit_type=unit_type
@@ -50,13 +57,14 @@ async def record_exposure(
 ) -> bool:
     """Append-only exposure at the moment the variant takes effect."""
     try:
-        return await AssignmentService(db).record_exposure(
-            experiment_key=experiment_key,
-            unit_type=unit_type,
-            unit_id=unit_id,
-            dedup_key=dedup_key,
-            context=context,
-        )
+        async with db.begin_nested():  # defect #41 — see resolve_variant
+            return await AssignmentService(db).record_exposure(
+                experiment_key=experiment_key,
+                unit_type=unit_type,
+                unit_id=unit_id,
+                dedup_key=dedup_key,
+                context=context,
+            )
     except Exception:  # noqa: BLE001 — exposures never break product paths
         logger.warning(
             "experiment_exposure_failed", experiment_key=experiment_key, unit_type=unit_type
