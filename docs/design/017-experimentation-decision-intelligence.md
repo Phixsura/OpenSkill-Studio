@@ -840,6 +840,13 @@ Round 11 (same day, adversarial continuation) — four more defects:
   Plus delegation consistency (batch 42): snapshots, analysis run and
   segments honor the same read scope as the operating surfaces.
 
+Round 12: mutation wave 5 over the delegation/self-serve layer (12/13 —
+require_platform_admin pinned directly, list filters as equality, keyset
+cursor strictly-less-than per R395, next_cursor exactly on full pages; the
+sole survivor is the unreachable service-internal limit default, ledgered);
+segment-picker web tests; holdout release confirm-guard; self-exposure
+dedup_key bound = column bound (#36).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
