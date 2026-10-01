@@ -638,3 +638,35 @@ async def test_switchback_experiment_never_srm_alerts(db):
     assert events == []
     row = await db.get(Experiment, exp.id)
     assert row.status == "running"
+
+
+async def test_srm_alert_notifies_owner_once_per_window(db):
+    """Defect #38: alert-only findings reach the owner — one notification
+    per dedup window (the suppressed re-check adds none)."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.models.notification import Notification
+
+    exp, _ = await _mk_running(db)
+    for i in range(150):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"nsrm-{i:03d}",
+                variant_key="control", assigned_version=1, bucket=0,
+            )
+        )
+    await db.flush()
+    svc = GuardrailService(db)
+    await svc.evaluate_experiment(exp.id)
+    await svc.evaluate_experiment(exp.id)  # suppressed window — no second note
+
+    count = (
+        await db.execute(
+            _select(_func.count()).where(
+                Notification.user_id == exp.owner_user_id,
+                Notification.type == "experiment_guardrail",
+            )
+        )
+    ).scalar_one()
+    assert count == 1

@@ -126,7 +126,10 @@ async def sweep_experiment_interactions(
 
     running = (
         await db.execute(
-            select(Experiment.id, Experiment.key, Experiment.layer_key)
+            select(
+                Experiment.id, Experiment.key, Experiment.layer_key,
+                Experiment.owner_user_id, Experiment.title,
+            )
             .where(Experiment.status == "running")
             .order_by(Experiment.id.asc())
         )
@@ -145,7 +148,7 @@ async def sweep_experiment_interactions(
     start = (now or datetime.now(UTC)).isocalendar().week % len(cross_layer_pairs)
     window = (cross_layer_pairs + cross_layer_pairs)[start : start + cap_pairs]
     alerts = 0
-    for (id1, key1, _layer1), (id2, key2, _layer2) in window:
+    for (id1, key1, _layer1, owner1, title1), (id2, key2, _layer2, owner2, title2) in window:
         rows = (
             await db.execute(
                 select(a.variant_key, b.variant_key, func.count())
@@ -216,6 +219,25 @@ async def sweep_experiment_interactions(
         log.warning(
             "exp_interaction_alert", experiment_a=key1, experiment_b=key2, **base
         )
+        # defect #38: both owners hear about it once per dedup window
+        try:
+            from app.services.notification import NotificationService
+
+            for owner_id, title, other_key in (
+                (owner1, title1, key2), (owner2, title2, key1),
+            ):
+                await NotificationService(db).create(
+                    user_id=owner_id,
+                    notification_type="experiment_guardrail",
+                    title=f"Interaction alert on '{title}'",
+                    body=(
+                        f"Variant assignments correlate with experiment "
+                        f"'{other_key}' — randomization integrity suspect."
+                    ),
+                    data={"experiment_a": id1, "experiment_b": id2, **base},
+                )
+        except Exception:  # noqa: BLE001 — additive, never blocking
+            log.warning("exp_interaction_notify_failed", experiment_a=id1)
     return alerts
 
 

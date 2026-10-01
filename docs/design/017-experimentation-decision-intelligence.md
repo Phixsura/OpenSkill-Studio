@@ -877,6 +877,13 @@ poison specs are never cached, and the guardrail/analysis paths read their
 own spec uncached, keeping the poison→pause safety loop untouched.
 resolve() drops from ~3 to ~2 queries per call.
 
+Round 17 — defect #38 (alert reachability): the three alert-only findings
+(SRM, exposure-SRM, cross-experiment interaction) were silent outside the
+Console — owners now get ONE fail-safe notification per dedup window (the
+interaction alert notifies BOTH owners), same additive-never-blocking
+posture as the pause notification. Round 16 shipped the version-keyed spec
+cache (zero staleness, poison never cached, ~3→2 queries per resolve).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

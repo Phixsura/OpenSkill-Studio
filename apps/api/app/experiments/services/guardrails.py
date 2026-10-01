@@ -58,6 +58,23 @@ class GuardrailService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _notify_alert(self, exp: Experiment, *, title: str, detail: dict) -> None:
+        """Defect #38: alert-only findings (SRM, exposure-SRM, interaction)
+        were silent outside the Console — the owner gets ONE notification per
+        dedup window, fail-safe like the pause notification."""
+        try:
+            from app.services.notification import NotificationService
+
+            await NotificationService(self.db).create(
+                user_id=exp.owner_user_id,
+                notification_type="experiment_guardrail",
+                title=title,
+                body="Alert only — the experiment keeps running; review the diagnostics.",
+                data={"experiment_id": exp.id, **detail},
+            )
+        except Exception:  # noqa: BLE001 — additive, never blocking
+            log.warning("experiment_alert_notify_failed", experiment_id=exp.id)
+
     async def _spec(self, exp: Experiment) -> ExperimentSpec | None:
         latest = (
             await self.db.execute(
@@ -128,6 +145,9 @@ class GuardrailService:
                 )
             )
             log.warning("experiment_srm_alert", experiment_id=exp.id, **detail)
+            await self._notify_alert(
+                exp, title=f"SRM alert on '{exp.title}'", detail=detail
+            )
         return detail
 
     async def check_exposure_srm(self, exp: Experiment) -> dict | None:
@@ -186,6 +206,9 @@ class GuardrailService:
                 )
             )
             log.warning("experiment_exposure_srm_alert", experiment_id=exp.id, **detail)
+            await self._notify_alert(
+                exp, title=f"Exposure-SRM alert on '{exp.title}'", detail=detail
+            )
         return detail
 
     # ── Guardrail metrics ────────────────────────────────────────────
