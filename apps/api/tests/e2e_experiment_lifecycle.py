@@ -104,6 +104,19 @@ async def grant_org_admin(user_id: str) -> str:
     return org_id
 
 
+async def drive_outbox(topic: str) -> None:
+    """Drive the transactional outbox inline (the worker loop is not running
+    in the E2E server) — same technique the outbox-driving suite uses."""
+    from app.controlplane.worker import process_outbox_once
+    from app.core.database import AsyncSessionLocal, engine
+
+    await engine.dispose(close=False)
+    async with AsyncSessionLocal() as db:
+        await process_outbox_once(db, topics=[topic])
+        await db.commit()
+    await engine.dispose()
+
+
 async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -> None:
     from sqlalchemy import delete as _delete
 
@@ -325,6 +338,39 @@ async def main() -> int:
                          json={})
         check("second apply idempotent 409 (PROMOTION_ALREADY_APPLIED)",
               r.status_code == 409, r.text[:200])
+
+        # ── Async apply through the outbox, over HTTP (round 29) ──────
+        r = await c.post(f"/experiments/decisions/{decision_id}/promotion-drafts",
+                         headers=admin, json={
+                             "target_type": "matching_config",
+                             "target_ref": active_config_id,
+                             "draft_payload": {"weights": {"skill_fit": 0.5,
+                                                           "history": 0.5}},
+                         })
+        check("second draft for async apply", r.status_code == 201, r.text[:300])
+        async_draft_id = r.json()["data"]["id"]
+        r = await c.post(
+            f"/experiments/promotion-drafts/{async_draft_id}/approve",
+            headers=admin, json={})
+        check("approve async draft", r.status_code == 200, r.text[:200])
+        r = await c.post(
+            f"/experiments/promotion-drafts/{async_draft_id}/apply?background=true",
+            headers=admin, json={})
+        check("async apply parks in applying",
+              r.status_code == 200 and r.json()["data"]["status"] == "applying",
+              r.text[:300])
+        r = await c.post(
+            f"/experiments/promotion-drafts/{async_draft_id}/apply",
+            headers=admin, json={})
+        check("sync apply refused while in flight (409)",
+              r.status_code == 409, r.text[:200])
+        await drive_outbox("exp.apply_promotion")
+        r = await c.get("/experiments/promotion-drafts?status=applied&limit=100",
+                        headers=admin)
+        applied_rows = [d for d in r.json()["data"] if d["id"] == async_draft_id]
+        check("outbox handler landed the async apply",
+              len(applied_rows) == 1 and bool(applied_rows[0]["applied_ref"]),
+              r.text[:300])
 
         # ── Surface-key reuse after terminal ──────────────────────────
         r = await c.post("/experiments", headers=admin, json={

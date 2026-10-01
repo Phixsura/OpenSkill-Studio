@@ -954,6 +954,11 @@ tests — every Console page now has them; hygiene audit clean (zero
 TODO/FIXME in the package, every noqa carries its reason); five
 randomized-seed fuzz passes across the rounds all green.
 
+Round 29: the async-apply journey certified over HTTP — park in
+'applying', sync apply refused in flight (409), the outbox handler driven
+inline lands the draft in 'applied' with its target-domain ref. Live E2E
+now 68 checks (both runs green, idempotent against its own residue).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
