@@ -670,3 +670,42 @@ async def test_srm_alert_notifies_owner_once_per_window(db):
         )
     ).scalar_one()
     assert count == 1
+
+
+async def test_pause_survives_notification_db_failure(db, monkeypatch):
+    """Defect #42 (the #41 class): the owner notification is ADDITIVE — if
+    its write explodes at the DB level it must roll back to its own
+    SAVEPOINT. Before the fix the failed flush poisoned the session, the
+    pause write was lost at commit, and the breached experiment kept
+    running while the worker retried into the same wall forever."""
+    from sqlalchemy import text
+
+    from app.services.notification import NotificationService
+
+    async def _exploding_create(self, *a, **k):
+        # a REAL statement failure on the same session — poisons it
+        await self.db.execute(text("select * from __no_such_table__"))
+
+    monkeypatch.setattr(NotificationService, "create", _exploding_create)
+
+    exp, _ = await _mk_running(
+        db,
+        guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.4,
+             "window_hours": 24}
+        ],
+    )
+    asvc = AssignmentService(db)
+    for i in range(10):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                               unit_id=f"nf-{i}")
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
+                                   unit_id=f"nf-{i}")
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert summary["breaches"], "breach must still be detected"
+    # the pause survived the notification failure AND the session is healthy
+    await db.flush()
+    assert (await db.get(Experiment, exp.id)).status == "paused"
+    events = await GuardrailService(db).list_events(exp.id)
+    assert any(e.action == "paused" and e.auto for e in events)

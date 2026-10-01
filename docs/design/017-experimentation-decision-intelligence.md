@@ -1027,6 +1027,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 40 — defect #42 (the #41 class, swept): all three "additive, never
+blocking" owner-notification sites (alert-only findings, the auto-pause
+notice, the interaction sweep) swallowed exceptions while CONTINUING on the
+same session. A notification flush error therefore poisoned the session and
+— worst case — sank the very pause it was announcing: the breached
+experiment kept running while arq retried into the same wall forever. Each
+site now runs its notification under a SAVEPOINT, making the swallow sound.
+Pinned by a pause-survives-notification-DB-failure test (a real failing
+statement on the same session inside a monkeypatched create), kill-proven
+against the unfixed code. The remaining broad swallows in the package were
+triaged: every other one wraps pure spec parsing (no DB inside the try) or
+re-raises as a typed error — not in the class.
+
 Round 39 — defect #41 (fail-safe facade poisoned the HOST session): the
 facade caught exceptions but never rolled back, so a mid-flush DB error
 (natural trigger: a unit_id one char over the varchar(26) column) left the

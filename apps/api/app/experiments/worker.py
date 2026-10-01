@@ -223,19 +223,23 @@ async def sweep_experiment_interactions(
         try:
             from app.services.notification import NotificationService
 
+            notify_svc = NotificationService(db)
             for owner_id, title, other_key in (
                 (owner1, title1, key2), (owner2, title2, key1),
             ):
-                await NotificationService(db).create(
-                    user_id=owner_id,
-                    notification_type="experiment_guardrail",
-                    title=f"Interaction alert on '{title}'",
-                    body=(
-                        f"Variant assignments correlate with experiment "
-                        f"'{other_key}' — randomization integrity suspect."
-                    ),
-                    data={"experiment_a": id1, "experiment_b": id2, **base},
-                )
+                # Defect #42: savepoint keeps a notify flush error from
+                # poisoning the sweep's session (see guardrails._notify_alert)
+                async with db.begin_nested():
+                    await notify_svc.create(
+                        user_id=owner_id,
+                        notification_type="experiment_guardrail",
+                        title=f"Interaction alert on '{title}'",
+                        body=(
+                            f"Variant assignments correlate with experiment "
+                            f"'{other_key}' — randomization integrity suspect."
+                        ),
+                        data={"experiment_a": id1, "experiment_b": id2, **base},
+                    )
         except Exception:  # noqa: BLE001 — additive, never blocking
             log.warning("exp_interaction_notify_failed", experiment_a=id1)
     return alerts

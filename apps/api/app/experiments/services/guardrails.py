@@ -65,13 +65,17 @@ class GuardrailService:
         try:
             from app.services.notification import NotificationService
 
-            await NotificationService(self.db).create(
-                user_id=exp.owner_user_id,
-                notification_type="experiment_guardrail",
-                title=title,
-                body="Alert only — the experiment keeps running; review the diagnostics.",
-                data={"experiment_id": exp.id, **detail},
-            )
+            # Defect #42 (the #41 class): the notification write runs under a
+            # SAVEPOINT — a flush error here would otherwise poison the
+            # session and sink the guardrail finding it merely annotates.
+            async with self.db.begin_nested():
+                await NotificationService(self.db).create(
+                    user_id=exp.owner_user_id,
+                    notification_type="experiment_guardrail",
+                    title=title,
+                    body="Alert only — the experiment keeps running; review the diagnostics.",
+                    data={"experiment_id": exp.id, **detail},
+                )
         except Exception:  # noqa: BLE001 — additive, never blocking
             log.warning("experiment_alert_notify_failed", experiment_id=exp.id)
 
@@ -403,17 +407,22 @@ class GuardrailService:
             try:
                 from app.services.notification import NotificationService
 
-                await NotificationService(self.db).create(
-                    user_id=exp.owner_user_id,
-                    notification_type="experiment_guardrail",
-                    title=f"Experiment '{exp.title}' auto-paused by guardrail",
-                    body=(
-                        f"{summary['breaches'][0]['metric_key']} breached its "
-                        "threshold — review the guardrail dashboard."
-                    ),
-                    data={"experiment_id": experiment_id,
-                          "breaches": summary["breaches"]},
-                )
+                # Defect #42: without the SAVEPOINT a failed notification
+                # flush poisoned the session, the pause write itself was then
+                # lost at handler commit, and the breached experiment KEPT
+                # RUNNING while arq retried into the same wall forever.
+                async with self.db.begin_nested():
+                    await NotificationService(self.db).create(
+                        user_id=exp.owner_user_id,
+                        notification_type="experiment_guardrail",
+                        title=f"Experiment '{exp.title}' auto-paused by guardrail",
+                        body=(
+                            f"{summary['breaches'][0]['metric_key']} breached its "
+                            "threshold — review the guardrail dashboard."
+                        ),
+                        data={"experiment_id": experiment_id,
+                              "breaches": summary["breaches"]},
+                    )
             except Exception:  # noqa: BLE001 — additive, never blocking
                 log.warning("experiment_pause_notify_failed", experiment_id=experiment_id)
         exp.last_guardrail_check_at = now
