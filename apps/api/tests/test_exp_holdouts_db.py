@@ -625,3 +625,41 @@ async def test_org_admin_write_delegation_transition_and_ramp(db):
     # blocked either by the state machine (review cannot promote) or, from an
     # analyzable state, by the decision runtime gate — never allowed
     assert e.value.code in ("EXPERIMENT_INVALID_TRANSITION", "EXPERIMENT_DECISION_REQUIRED")
+
+
+async def test_holdout_group_org_scoped_applies_to_org_experiments(db):
+    """The symmetric face: an org-scoped group DOES withhold members from
+    that org's own experiments (only platform experiments are exempt)."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="hg sym", slug=f"hg-{str(ULID()).lower()}", tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    platform_exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    layer2 = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    org_exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="OrgScoped", domain="learning",
+        layer_key=layer2.key, owner_user_id=admin.id, scope_org_id=org.id,
+    )
+    await svc.create_version(org_exp.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer2.key, experiment_id=org_exp.id, slice_start=0, slice_end=9999,
+    )
+    group = await HoldoutGroupService(db).create(
+        key=f"hg-{str(ULID()).lower()}", title="org hold", domain="learning",
+        holdout_bp=2000, scope_org_id=org.id,
+    )
+    member, _ = _member_and_nonmember(group.key, 2000)
+    preview = await AssignmentService(db).compute(
+        experiment=org_exp, unit_type="user", unit_id=member,
+        context={"org_id": org.id},
+    )
+    assert preview["eligible"] is False
+    assert preview.get("holdout_group") == group.key
