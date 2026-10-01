@@ -721,3 +721,26 @@ async def test_holdout_key_reusable_after_release(db):
     )
     assert preview["eligible"] is False
     assert preview["holdout_group"] == key
+
+
+async def test_org_admin_delegation_covers_snapshots_and_analysis(db):
+    """Delegation consistency: an org admin who can OPERATE their experiment
+    can also read its snapshots and run its analysis; platform experiments
+    stay a uniform 404 on those surfaces too."""
+    from app.experiments.api.deps import experiment_read_scope
+    from app.experiments.services.experiments import ExperimentService
+
+    org_admin, org = await _mk_org_admin(db)
+    platform_exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    scope = await experiment_read_scope(user=org_admin, db=db)
+    # the scoped gate both analysis and metrics endpoints now share:
+    with pytest.raises(AppError) as e:
+        await svc.get_scoped(platform_exp.id, scope.org_ids)
+    assert e.value.status_code == 404
+    layer2 = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    org_exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="OwnAnalysis", domain="learning",
+        layer_key=layer2.key, owner_user_id=admin.id, scope_org_id=org.id,
+    )
+    assert (await svc.get_scoped(org_exp.id, scope.org_ids)).id == org_exp.id

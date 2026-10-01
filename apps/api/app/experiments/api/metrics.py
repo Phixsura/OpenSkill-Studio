@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.experiments.api.deps import check_enum, require_platform_admin
+from app.experiments.api.deps import (
+    ReadScope,
+    check_enum,
+    experiment_read_scope,
+    require_platform_admin,
+)
 from app.experiments.schemas import (
     CreateMetricDefinitionRequest,
     MetricDefinitionResponse,
@@ -65,9 +70,9 @@ async def list_metric_snapshots(
     metric_key: str | None = Query(default=None, max_length=64),
     limit: int = Query(200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    await ExperimentService(db).get(experiment_id)
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await MetricService(db).list_snapshots(
         experiment_id, metric_key=metric_key, limit=limit
     )
