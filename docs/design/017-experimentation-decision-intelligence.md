@@ -869,9 +869,13 @@ numbering audited #27–#37 consistent. Honest performance note, deferred:
 resolve() costs ~3 queries per call on the hot path (experiment row, spec
 version, sticky row) — industry client SDKs evaluate locally at ~0. A
 process-local spec cache (invalidated by create_version/forget_missing_key)
-would cut this, at the price of a bounded staleness window; deliberately
-NOT done in this round — correctness cadence over latency — and recorded
-here so the trade-off is a decision, not an accident.
+would cut this. DONE in round 16 with a stronger design than the one
+deferred: the cache entry is keyed by (experiment_id, current_version), and
+specs are immutable — a version bump misses automatically, so there is NO
+staleness window at all (the TTL only bounds memory for dead experiments);
+poison specs are never cached, and the guardrail/analysis paths read their
+own spec uncached, keeping the poison→pause safety loop untouched.
+resolve() drops from ~3 to ~2 queries per call.
 
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant

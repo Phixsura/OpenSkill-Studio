@@ -456,3 +456,52 @@ async def test_self_serve_resolve_is_sticky_and_self_scoped(db):
     assert await facade.record_exposure(
         db, experiment_key=exp.key, unit_type="user", unit_id=user_id, dedup_key="d1"
     )
+
+
+# ── Hot-path spec cache (round 16): version-keyed, zero staleness ─────
+
+
+async def test_spec_cache_hits_without_queries_and_follows_versions(db):
+    """Second resolution serves the spec from the process cache (zero DB
+    round trips); a version bump misses AUTOMATICALLY because the entry is
+    keyed by current_version — no staleness window to reason about."""
+    from app.experiments.models import ExperimentVersion
+    from app.experiments.services.assignment import forget_spec
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    forget_spec(exp.id)
+    spec1, salt1 = await svc._spec_and_salt(exp)  # noqa: SLF001 — fills the cache
+
+    calls = {"n": 0}
+    real_execute = db.execute
+
+    async def counting_execute(*args, **kwargs):
+        calls["n"] += 1
+        return await real_execute(*args, **kwargs)
+
+    db.execute = counting_execute  # type: ignore[method-assign]
+    try:
+        spec2, salt2 = await svc._spec_and_salt(exp)  # noqa: SLF001
+    finally:
+        db.execute = real_execute  # type: ignore[method-assign]
+    assert calls["n"] == 0
+    assert spec2 is spec1 and salt2 == salt1
+
+    # version bump: same experiment row, new current_version → cache miss,
+    # fresh spec parsed, SAME v1 salt (immutable randomization)
+    import json
+
+    from app.experiments.services.experiments import canonical_spec_hash
+
+    new_spec = json.loads(json.dumps(spec1.model_dump()))
+    new_spec["hypothesis"] = "version two reaches resolution immediately"
+    db.add(ExperimentVersion(
+        experiment_id=exp.id, version=2, spec=new_spec,
+        spec_hash=canonical_spec_hash(new_spec), created_by=admin.id,
+    ))
+    exp.current_version = 2
+    await db.flush()
+    spec3, salt3 = await svc._spec_and_salt(exp)  # noqa: SLF001
+    assert spec3.hypothesis == "version two reaches resolution immediately"
+    assert salt3 == salt1  # v1 hash stays the salt forever

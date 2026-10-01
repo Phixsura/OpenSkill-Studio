@@ -62,6 +62,18 @@ def _remember_missing(experiment_key: str) -> None:
     _MISSING_KEY_CACHE[experiment_key] = time.monotonic() + _MISSING_KEY_TTL_SECONDS
 
 
+# Hot-path spec cache (§18 round 16): resolve() re-read the version rows on
+# every call. Specs are IMMUTABLE and the entry is keyed by (experiment_id,
+# current_version) — a version bump misses automatically, so there is NO
+# staleness window; the TTL only bounds memory for dead experiments.
+_SPEC_CACHE_TTL_SECONDS = 300.0
+_SPEC_CACHE: dict[str, tuple[float, int, "ExperimentSpec", str]] = {}
+
+
+def forget_spec(experiment_id: str) -> None:
+    _SPEC_CACHE.pop(experiment_id, None)
+
+
 def forget_missing_key(experiment_key: str) -> None:
     """Called on experiment creation so a new surface experiment takes effect
     immediately in this process."""
@@ -241,6 +253,13 @@ class AssignmentService:
         return exp
 
     async def _spec_and_salt(self, exp: Experiment) -> tuple[ExperimentSpec, str]:
+        cached = _SPEC_CACHE.get(exp.id)
+        if (
+            cached is not None
+            and cached[0] > time.monotonic()
+            and cached[1] == exp.current_version
+        ):
+            return cached[2], cached[3]
         rows = (
             await self.db.execute(
                 select(ExperimentVersion)
@@ -255,11 +274,20 @@ class AssignmentService:
         # version 1's hash is the stable randomization salt (§6)
         version_salt = version_salt_of(versions[0].spec_hash)
         try:
-            return ExperimentSpec.model_validate(latest.spec), version_salt
+            spec = ExperimentSpec.model_validate(latest.spec)
         except Exception as exc:  # noqa: BLE001 — poison spec: typed, not a 500
+            # never cache a poison spec — a data repair must take effect at once
+            forget_spec(exp.id)
             raise AppError(
                 "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
             ) from exc
+        _SPEC_CACHE[exp.id] = (
+            time.monotonic() + _SPEC_CACHE_TTL_SECONDS,
+            exp.current_version,
+            spec,
+            version_salt,
+        )
+        return spec, version_salt
 
     async def _existing(
         self, experiment_id: str, unit_type: str, unit_id: str
