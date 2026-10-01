@@ -354,7 +354,10 @@ class SelfResolveRequest(_StrictReq):
 
 class SelfExposureRequest(_StrictReq):
     experiment_key: str = Field(min_length=1, max_length=64)
-    dedup_key: str | None = Field(default=None, max_length=120)
+    # must match the column bound exactly (String(64)) — a wider schema let
+    # 65-120 char keys through to a truncation error the fail-safe facade
+    # swallowed as a SILENTLY DROPPED exposure (defect #36, R88 write-boundary)
+    dedup_key: str | None = Field(default=None, max_length=64)
 
 
 class CreateHoldoutGroupRequest(_StrictReq):

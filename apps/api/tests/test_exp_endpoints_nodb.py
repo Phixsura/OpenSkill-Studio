@@ -111,3 +111,18 @@ def test_experiment_reads_are_admin_gated():
         if path.name != "deps.py" and "get_current_user" in path.read_text(encoding="utf-8")
     ]
     assert not offenders, f"non-admin experiment reads: {offenders}"
+
+
+def test_self_exposure_dedup_key_bound_matches_column():
+    """Defect #36: the schema bound must equal the column bound (String(64))
+    — anything wider reaches the DB as a truncation error that the fail-safe
+    facade swallows as a silently dropped exposure."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.experiments.schemas import SelfExposureRequest
+
+    ok = SelfExposureRequest(experiment_key="surface-x", dedup_key="d" * 64)
+    assert ok.dedup_key == "d" * 64
+    with _pytest.raises(ValidationError):
+        SelfExposureRequest(experiment_key="surface-x", dedup_key="d" * 65)
