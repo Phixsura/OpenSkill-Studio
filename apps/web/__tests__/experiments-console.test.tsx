@@ -180,6 +180,10 @@ describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
       domain: "learning",
       holdout_bp: 500,
     });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByText("Release"));
+    expect(api.mock.calls.some((c) => String(c[0]).includes("/release"))).toBe(false); // declined confirm = no release call
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByText("Release"));
     await waitFor(() =>
       expect(api).toHaveBeenCalledWith(
@@ -187,6 +191,7 @@ describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    confirmSpy.mockRestore();
   });
 
   it("released groups hide the release button", async () => {

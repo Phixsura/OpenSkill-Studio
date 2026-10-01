@@ -148,7 +148,16 @@ export default function HoldoutGroupsPage() {
                     {g.status === "active" ? (
                       <button
                         type="button"
-                        onClick={() => release.mutate(g.id)}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Release ${g.key}? Its units re-enter every ` +
+                                "experiment in the domain immediately.",
+                            )
+                          ) {
+                            release.mutate(g.id);
+                          }
+                        }}
                         className="rounded-md border px-2 py-1 text-xs"
                       >
                         Release
