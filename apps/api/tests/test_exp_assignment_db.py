@@ -584,11 +584,11 @@ async def test_guardrail_exemption_matrix(db):
     from ulid import ULID as _ULID
 
     from app.experiments.services.experiments import ExperimentService
-    from app.experiments.services.layers import LayerService as _LS
+    from app.experiments.services.layers import LayerService as LayerSvc
 
     async def _to_review(domain: str, risk: str):
         admin = await _mk_admin(db)
-        layer = await _LS(db).create(key=f"lyr-{str(_ULID()).lower()}", domain=domain)
+        layer = await LayerSvc(db).create(key=f"lyr-{str(_ULID()).lower()}", domain=domain)
         svc = ExperimentService(db)
         exp = await svc.create(
             key=f"exp-{str(_ULID()).lower()}", title="G", domain=domain,
@@ -597,7 +597,7 @@ async def test_guardrail_exemption_matrix(db):
         spec = _spec()
         spec["metrics"] = {"primary": ["exposure_rate"], "guardrails": []}
         await svc.create_version(exp.id, spec=spec, actor=admin)
-        await _LS(db).allocate(
+        await LayerSvc(db).allocate(
             layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
         )
         await svc.transition(exp.id, to_status="review", actor=admin)
@@ -629,7 +629,7 @@ async def test_high_risk_schedule_needs_platform_admin_even_delegated(db):
     from ulid import ULID as _ULID
 
     from app.experiments.services.experiments import ExperimentService
-    from app.experiments.services.layers import LayerService as _LS
+    from app.experiments.services.layers import LayerService as LayerSvc
 
     admin = await _mk_admin(db)
     operator = User(
@@ -638,14 +638,14 @@ async def test_high_risk_schedule_needs_platform_admin_even_delegated(db):
     )
     db.add(operator)
     await db.flush()
-    layer = await _LS(db).create(key=f"lyr-{str(_ULID()).lower()}", domain="learning")
+    layer = await LayerSvc(db).create(key=f"lyr-{str(_ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
         key=f"exp-{str(_ULID()).lower()}", title="HR", domain="learning",
         layer_key=layer.key, owner_user_id=admin.id, risk_class="high",
     )
     await svc.create_version(exp.id, spec=_spec(), actor=admin)
-    await _LS(db).allocate(
+    await LayerSvc(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
