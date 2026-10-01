@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -154,5 +154,32 @@ describe("Bandit suggestion banner", () => {
     expect(await screen.findByText(/Bandit suggestion/)).toBeTruthy();
     expect(screen.getByText(/treatment 97\.0%/)).toBeTruthy();
     expect(screen.getByText(/advisory/)).toBeTruthy();
+  });
+});
+
+describe("Segment picker (v2 §4.8)", () => {
+  it("runs the analysis against the chosen segment", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (String(path).endsWith("/segments")) {
+        return { data: ["org:AAAA", "org:BBBB"] };
+      }
+      return analysisPayload();
+    });
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    const select = (await screen.findByLabelText("Segment")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "org:AAAA" } });
+    fireEvent.click(screen.getByText("Run analysis"));
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some((c) => String(c[0]).includes("/analysis?segment=org%3AAAAA")),
+      ).toBe(true),
+    );
+  });
+
+  it("hides the picker when no segments exist", async () => {
+    api.mockResolvedValue({ data: [] });
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Segment")).toBeNull();
   });
 });
