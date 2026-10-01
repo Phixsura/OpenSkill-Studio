@@ -118,6 +118,18 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
             ["E2E holdout", "dup", "too big", "nope"])))
         await db.execute(_delete(ExperimentLayer).where(ExperimentLayer.key == layer_key))
         await db.execute(
+            _delete(ExperimentLayer).where(ExperimentLayer.key.like("lyr-org-%"))
+        )
+        from app.controlplane.models.tenant import TenantAccount
+        from app.models.organization import Organization
+
+        await db.execute(
+            _delete(Organization).where(Organization.name == "e2e delegation org")
+        )
+        await db.execute(
+            _delete(TenantAccount).where(TenantAccount.slug.like("e2e-t-%"))
+        )
+        await db.execute(
             _delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
         )
         await db.commit()
@@ -396,9 +408,12 @@ async def main() -> int:
 
         # ── Round 10: org-admin WRITE delegation over HTTP ────────────
         org_id = await grant_org_admin(student_id)
+        r = await c.post("/experiments/layers", headers=admin,
+                         json={"key": f"lyr-org-{uid()}", "domain": "matching"})
+        org_layer = r.json()["data"]["key"]
         r = await c.post("/experiments", headers=admin, json={
             "key": f"org-exp-{uid()}", "title": "org-scoped", "domain": "matching",
-            "layer_key": layer_key, "scope_org_id": org_id,
+            "layer_key": org_layer, "scope_org_id": org_id,
         })
         check("org-scoped experiment created", r.status_code == 201, r.text[:200])
         org_exp_id = r.json()["data"]["id"]
@@ -414,6 +429,50 @@ async def main() -> int:
                          json={"to_status": "paused"})
         check("org admin cannot touch a platform experiment (uniform 404)",
               r.status_code == 404, r.text[:200])
+        # ── Defect #32: self-serve resolve reaches org-scoped experiments ─
+        # the org admin walks their own experiment to running (delegated
+        # writes + the checklist), then resolves it as a plain member
+        r = await c.post(f"/experiments/{org_exp_id}/versions", headers=admin, json={
+            "spec": {
+                "hypothesis": "org-scoped self-serve resolution works",
+                "unit_type": "user",
+                "variants": [
+                    {"key": "control", "name": "C", "weight_bp": 5000,
+                     "is_control": True},
+                    {"key": "treatment", "name": "T", "weight_bp": 5000},
+                ],
+                "metrics": {"primary": ["exposure_rate"],
+                            "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                            "threshold": 100.0}]},
+            },
+        })
+        check("org-scoped spec added", r.status_code == 201, r.text[:200])
+        org_exp_key = (await c.get(f"/experiments/{org_exp_id}", headers=student)).json()[
+            "data"]["key"]
+        r = await c.post(f"/experiments/layers/{org_layer}/allocations", headers=admin,
+                         json={"experiment_id": org_exp_id, "slice_start": 0,
+                               "slice_end": 9999})
+        check("org exp slice allocated", r.status_code in (200, 201, 409), r.text[:200])
+        checklist = {k: True for k in (
+            "hypothesis_peer_checked", "power_computed", "metrics_reviewed",
+            "rollback_owner_named",
+        )}
+        r = await c.post(f"/experiments/{org_exp_id}/transition", headers=student,
+                         json={"to_status": "scheduled", "checklist": checklist})
+        check("org admin schedules with checklist", r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{org_exp_id}/transition", headers=student,
+                         json={"to_status": "running"})
+        check("org admin starts the experiment", r.status_code == 200, r.text[:200])
+        r = await c.patch(f"/experiments/{org_exp_id}/ramp", headers=student,
+                          json={"ramp_bp": 10000})
+        check("org admin ramps to 100%", r.status_code == 200, r.text[:200])
+        r = await c.post("/experiments/self/resolve", headers=student,
+                         json={"experiment_key": org_exp_key})
+        check("self-resolve reaches the org-scoped experiment (defect #32)",
+              r.status_code == 200
+              and r.json()["data"]["variant_key"] in ("control", "treatment"),
+              r.text[:200])
+
         r = await c.post(f"/experiments/{org_exp_id}/decisions", headers=student, json={
             "decision": "promote", "summary": "nope",
             "analysis_result_hash": "0" * 64,

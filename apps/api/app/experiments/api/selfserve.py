@@ -24,11 +24,24 @@ async def self_resolve(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_self_serve_user),
 ):
+    # Defect #32: without an org context, org-scoped experiments were
+    # unreachable from the self-serve surface. The caller's primary org
+    # (min org_id — the same deterministic rule segments use) rides along.
+    from sqlalchemy import func, select
+
+    from app.models.organization import OrgMember
+
+    primary_org = (
+        await db.execute(
+            select(func.min(OrgMember.org_id)).where(OrgMember.user_id == user.id)
+        )
+    ).scalar_one_or_none()
     resolved = await facade.resolve_variant(
         db,
         experiment_key=body.experiment_key,
         unit_type="user",
         unit_id=user.id,
+        context={"org_id": primary_org} if primary_org else None,
     )
     await db.commit()  # persist the sticky assignment the resolve may create
     if resolved is None:
