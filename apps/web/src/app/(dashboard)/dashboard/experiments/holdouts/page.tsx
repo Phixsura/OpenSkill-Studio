@@ -22,7 +22,14 @@ interface HoldoutGroup {
 export default function HoldoutGroupsPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ key: "", title: "", domain: "learning", holdout_bp: "500" });
+  const [form, setForm] = useState({
+    key: "",
+    title: "",
+    domain: "learning",
+    holdout_bp: "500",
+    scope_org_id: "",
+    ends_at: "",
+  });
 
   const groups = useQuery({
     queryKey: ["experiment-holdout-groups"],
@@ -38,11 +45,20 @@ export default function HoldoutGroupsPage() {
           title: form.title,
           domain: form.domain,
           holdout_bp: Number(form.holdout_bp),
+          scope_org_id: form.scope_org_id || null,
+          ends_at: form.ends_at ? new Date(form.ends_at).toISOString() : null,
         }),
       }),
     onSuccess: () => {
       setError(null);
-      setForm({ key: "", title: "", domain: form.domain, holdout_bp: "500" });
+      setForm({
+        key: "",
+        title: "",
+        domain: form.domain,
+        holdout_bp: "500",
+        scope_org_id: "",
+        ends_at: "",
+      });
       queryClient.invalidateQueries({ queryKey: ["experiment-holdout-groups"] });
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : "Failed to create holdout group"),
@@ -108,6 +124,24 @@ export default function HoldoutGroupsPage() {
               className="block w-24 rounded-md border px-2 py-1 text-sm"
               value={form.holdout_bp}
               onChange={(e) => setForm({ ...form, holdout_bp: e.target.value })}
+            />
+          </label>
+          <label className="text-xs text-slate-600">
+            Scope org id (optional)
+            <input
+              className="block w-56 rounded-md border px-2 py-1 text-sm"
+              value={form.scope_org_id}
+              onChange={(e) => setForm({ ...form, scope_org_id: e.target.value })}
+              placeholder="platform-wide when empty"
+            />
+          </label>
+          <label className="text-xs text-slate-600">
+            Ends (optional)
+            <input
+              type="date"
+              className="block rounded-md border px-2 py-1 text-sm"
+              value={form.ends_at}
+              onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
             />
           </label>
           <button

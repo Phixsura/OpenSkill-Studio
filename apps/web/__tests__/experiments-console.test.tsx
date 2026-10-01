@@ -179,6 +179,8 @@ describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
       title: "New holdout",
       domain: "learning",
       holdout_bp: 500,
+      scope_org_id: null,
+      ends_at: null,
     });
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     fireEvent.click(screen.getByText("Release"));
