@@ -947,6 +947,13 @@ campaign is reproducible by anyone, not an artifact of one session; plus
 the switchback × holdout-group combination pinned (the group check precedes
 the design branch, so members are withheld from switchback enrollment too).
 
+Rounds 26-28: live E2E re-certified at 63/63 after the full campaign; the
+last two untested Console subpages (assignment diagnostics incl. the SRM
+banner and dry-run preview, and the guardrail dashboard) gained behavior
+tests — every Console page now has them; hygiene audit clean (zero
+TODO/FIXME in the package, every noqa carries its reason); five
+randomized-seed fuzz passes across the rounds all green.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

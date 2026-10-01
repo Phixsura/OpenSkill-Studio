@@ -57,7 +57,7 @@ async def record_exposure(
             dedup_key=dedup_key,
             context=context,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — exposures never break product paths
         logger.warning(
             "experiment_exposure_failed", experiment_key=experiment_key, unit_type=unit_type
         )

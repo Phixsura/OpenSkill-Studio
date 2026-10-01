@@ -1244,7 +1244,7 @@ class MetricService:
         if latest is not None:
             try:
                 spec_segments = ExperimentSpec.model_validate(latest.spec).segments
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — poison spec: segments just skip
                 spec_segments = []
         if "org" in spec_segments and unit_type == "user":
             from app.models.organization import OrgMember
