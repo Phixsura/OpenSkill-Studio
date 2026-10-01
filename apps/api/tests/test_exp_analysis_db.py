@@ -622,3 +622,56 @@ async def test_segment_analysis_is_informational_slice(db):
     comparison = full["metrics"]["exposure_rate"]["comparisons"]["treatment"]
     assert abs(comparison["effect"] - 0.10) < 1e-9  # (70-50)/200, segments excluded
     assert "segment" not in full
+
+
+async def test_three_arm_experiment_end_to_end(db):
+    """Multi-variant path: a 3-arm experiment assigns to all arms, analysis
+    produces one comparison per treatment (against the single control), and
+    the bandit suggestion spans all three arms."""
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="marketplace")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="3arm", domain="marketplace",
+        layer_key=layer.key, owner_user_id=admin.id, risk_class="low",
+    )
+    spec = _spec(allocation_mode="bandit")
+    spec["variants"] = [
+        {"key": "control", "name": "C", "weight_bp": 4000, "is_control": True},
+        {"key": "t1", "name": "T1", "weight_bp": 3000},
+        {"key": "t2", "name": "T2", "weight_bp": 3000},
+    ]
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+
+    asvc = AssignmentService(db)
+    seen = set()
+    for i in range(120):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"3a-{i}")
+        assert r is not None
+        seen.add(r.variant_key)
+        if i % 2 == 0:
+            await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=f"3a-{i}"
+            )
+    assert seen == {"control", "t1", "t2"}
+
+    start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=start, window_end=start + timedelta(days=1)
+    )
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparisons = result["metrics"]["exposure_rate"]["comparisons"]
+    assert set(comparisons) == {"t1", "t2"}
+    for comparison in comparisons.values():
+        assert "effect" in comparison
+    bandit = result["bandit"]
+    assert set(bandit["p_best"]) == {"control", "t1", "t2"}
+    assert sum(bandit["suggested_weights_bp"].values()) == 10_000
