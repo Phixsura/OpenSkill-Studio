@@ -50,13 +50,23 @@ def _shield(fn):
     queries (db.get on configs/offerings/paths) could raise and abort the
     host transaction (an evaluation run, a workflow start, a matching run).
     The whole override is now fail-safe: any exception logs and serves the
-    default experience."""
+    default experience.
+
+    Defect #43 (the #41 class at the hook layer): swallowing is only sound
+    if the HOST's session comes out healthy. The hook body runs raw reads on
+    the host session outside the facade's own savepoints (db.get with a
+    spec-config-derived id — a non-string there is a statement error), so
+    the whole body runs under a SAVEPOINT on the host session: an exception
+    rolls back only the hook's work and the host's transaction stays usable.
+    Read-path hooks that `del db` and open their own committed sessions are
+    unaffected — the outer savepoint just opens and releases empty."""
     import functools
 
     @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(db, *args, **kwargs):
         try:
-            return await fn(*args, **kwargs)
+            async with db.begin_nested():
+                return await fn(db, *args, **kwargs)
         except Exception:  # noqa: BLE001 — experiments never break product paths
             log.warning("experiment_hook_failed", hook=fn.__name__)
             return None

@@ -571,3 +571,51 @@ async def test_hooks_are_total_even_when_validation_queries_raise(db):
     assert result is None  # default experience, no exception escaped
     # the session is still usable afterwards (the host transaction survives)
     assert await _exposures(db, exp.id) >= 0
+
+
+async def test_shield_savepoint_keeps_host_session_healthy(db, monkeypatch):
+    """Defect #43 (the #41 class at the hook layer): @_shield swallows, but
+    swallowing is only sound if the HOST session comes out healthy. A real
+    statement failure inside the hook body (simulated here through the
+    facade seam the body calls on the host session) must roll back to the
+    shield's savepoint — the host's prior uncommitted write survives and its
+    transaction keeps working."""
+    from sqlalchemy import text
+    from ulid import ULID as _ULID
+
+    from app.experiments import facade as _facade
+    from app.experiments import hooks
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    async def _poisoning(db_, **kwargs):
+        await db_.execute(text("select * from __no_such_table__"))
+
+    monkeypatch.setattr(_facade, "resolve_variant", _poisoning)
+
+    # host business write BEFORE the hook touchpoint
+    host_row = _User(
+        email=f"shield-{_ULID()}@example.com", display_name="S",
+        role=_Role.STUDENT, status=_Status.ACTIVE,
+    )
+    db.add(host_row)
+    await db.flush()
+
+    assert await hooks.matching_config_override(
+        db, org_id="o" * 26, target_entity_type="project"
+    ) is None
+    assert await hooks.rubric_override(db, project_id="p" * 26) is None
+
+    # the host session is NOT poisoned and the prior write is intact.
+    # NOTE: db.get would hit the identity map and mask a rollback — the
+    # unfixed shield let the statement error roll back the WHOLE host
+    # transaction (silent loss of the host's prior writes), so the proof
+    # must be a real SELECT.
+    await db.flush()
+    from sqlalchemy import select as _select
+
+    found = (
+        await db.execute(_select(_User.id).where(_User.id == host_row.id))
+    ).scalar_one_or_none()
+    assert found is not None

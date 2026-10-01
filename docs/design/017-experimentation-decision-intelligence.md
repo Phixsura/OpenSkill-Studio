@@ -1027,6 +1027,21 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 41 — defect #43 (the #41 class, third and final site): @_shield
+swallowed hook-body exceptions, but the body runs raw reads on the HOST
+session outside the facade's savepoints (db.get with spec-config-derived
+ids). A statement failure there left the host either in a failed
+transaction (its next statement exploding with InFailedSQLTransaction) or
+silently rolled back — the host's prior uncommitted business writes lost
+while it went on to "commit" nothing. The shield now wraps the whole hook
+body in a SAVEPOINT on the host session; read-path hooks that open their
+own sessions just open-and-release an empty one. Test lesson worth keeping:
+the first proof attempt asserted survival via db.get — which hits the
+identity map and masked the rollback entirely; the pin uses a real SELECT.
+With #41 (facade), #42 (notifications) and #43 (hooks), every
+swallow-and-continue site in the package now confines its failures to a
+savepoint — the class is closed.
+
 Round 40 — defect #42 (the #41 class, swept): all three "additive, never
 blocking" owner-notification sites (alert-only findings, the auto-pause
 notice, the interaction sweep) swallowed exceptions while CONTINUING on the
