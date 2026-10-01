@@ -82,3 +82,24 @@ describe("Experiment builder design fields (v2 round 10)", () => {
     });
   });
 });
+
+describe("Segment opt-in (v2 §4.8)", () => {
+  it("adds segments:[org] to the spec when checked (user units only)", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (path === "/experiments") return { data: { id: "E".repeat(26) } };
+      return { data: [] };
+    });
+    render(<NewExperimentPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByLabelText("Org segment breakdown"));
+    fireEvent.change(screen.getByLabelText("Hypothesis"), {
+      target: { value: "segment opt-in rides the spec" },
+    });
+    fireEvent.click(screen.getByText(/Create experiment/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).endsWith("/versions"))).toBe(true),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/versions"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    expect(body.spec.segments).toEqual(["org"]);
+  });
+});

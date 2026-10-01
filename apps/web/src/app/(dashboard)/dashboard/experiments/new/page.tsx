@@ -59,6 +59,7 @@ export default function NewExperimentPage() {
     guardrail_window_hours: "24",
     design: "parallel",
     allocation_mode: "fixed",
+    segment_org: false,
     switchback_window_minutes: "1440",
     switchback_washout_minutes: "0",
   });
@@ -119,6 +120,7 @@ export default function NewExperimentPage() {
           analysis_type: spec.analysis_type,
           design: spec.design,
           allocation_mode: spec.allocation_mode,
+          ...(spec.segment_org && spec.unit_type === "user" ? { segments: ["org"] } : {}),
           ...(spec.design === "switchback"
             ? {
                 switchback: {
@@ -484,6 +486,18 @@ export default function NewExperimentPage() {
               ))}
             </select>
           </div>
+          {spec.unit_type === "user" ? (
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={spec.segment_org}
+                  onChange={(e) => setSpec({ ...spec, segment_org: e.target.checked })}
+                />
+                Org segment breakdown
+              </label>
+            </div>
+          ) : null}
           {spec.design === "switchback" ? (
             <>
               <div>
