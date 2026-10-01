@@ -812,6 +812,14 @@ triggered: slice denominators = exposed ∩ org; multi-org users land in
 exactly ONE slice — min org_id); CUPED extended to a third source
 (workflow_runs per-installation mean latency); competitive matrix synced.
 
+ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
+only be added in draft/review, so any candidate intervention instant
+precedes every running-phase window — there is no pre-period snapshot data,
+and an ITS block would be dead code. ITS needs pre-period metric backfill
+(computing windows over a roster that predates enrollment), which the
+ITT/as_of model intentionally forbids. Revisit only with a dedicated
+backfill design.
+
 Remaining (explicitly deferred): per-unit repeated-measures for every
 source, CUPED covariates beyond projects/revision_count, segment-dimension
 breakdowns (needs a snapshot dimension), full KM time-to-event, write-side
