@@ -934,6 +934,13 @@ the exact sample standard deviation. Remaining survivors ledgered:
 unreachable query_version defaults, per-window None-coalesce templates
 (round-6 class), float/index-exact instants.
 
+Round 24: the experiment DETAIL page (the lifecycle-operations core UI)
+had zero tests — four landed: the review checklist renders five boxes for
+ethics domains / four otherwise and rides the schedule transition verbatim,
+running transitions carry no checklist body, and analyzed status gates
+promote/reject behind the decision flow (no buttons offered). Triple
+randomized-seed fuzz pass all green.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
