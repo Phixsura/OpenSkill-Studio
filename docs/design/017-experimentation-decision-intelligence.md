@@ -847,6 +847,14 @@ sole survivor is the unreachable service-internal limit default, ledgered);
 segment-picker web tests; holdout release confirm-guard; self-exposure
 dedup_key bound = column bound (#36).
 
+Round 13: delegation reaches the diagnostic surfaces an operator actually
+needs — guardrail events (an auto-paused experiment's WHY), assignment
+stats, exposure funnel, dry-run preview — while incident/force-evaluate
+stay platform-admin; a manifest test pins the exact scope-vs-platform
+dependency count per API module (neither set can change as a drive-by).
+Note: the experiments Console nav remains platform-gated — delegated org
+operators work through the API until an org-side console exists.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
