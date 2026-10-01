@@ -675,3 +675,30 @@ async def test_three_arm_experiment_end_to_end(db):
     bandit = result["bandit"]
     assert set(bandit["p_best"]) == {"control", "t1", "t2"}
     assert sum(bandit["suggested_weights_bp"].values()) == 10_000
+
+
+async def test_corpus_prior_is_platform_admin_only(db):
+    """Information boundary (#35): the corpus prior aggregates effects across
+    the whole domain incl. other orgs — a non-platform actor's analysis runs
+    without it (same data, no shrinkage context)."""
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    exp, admin = await _mk_running(db)
+    await _mk_decided_history(db, "learning", "exposure_rate", [0.02, 0.03, 0.04])
+    await _populate(db, exp)
+    with_prior = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "corpus_prior" in with_prior["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+
+    org_operator = _User(
+        email=f"op-{ULID()}@example.com", display_name="Op",
+        role=_Role.INSTRUCTOR, status=_Status.ACTIVE,
+    )
+    db.add(org_operator)
+    await db.flush()
+    without = await AnalysisService(db).run(exp.id, actor=org_operator)
+    comparison = without["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert "corpus_prior" not in comparison
+    assert "shrunk_effect" not in comparison
+    assert "effect" in comparison  # the analysis itself is untouched

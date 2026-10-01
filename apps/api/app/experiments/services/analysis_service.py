@@ -25,7 +25,7 @@ from app.experiments.models import (
 )
 from app.experiments.schemas import ExperimentSpec
 from app.experiments.services import analysis as stats
-from app.models.user import User
+from app.models.user import User, UserRole
 
 _ANALYZABLE_STATUSES = frozenset({"running", "paused", "completed", "analyzed"})
 
@@ -539,6 +539,12 @@ class AnalysisService:
         # to noisy effects. Informational: the unshrunk estimate stays the
         # decision basis; shrinkage is decision-support context.
         for key in spec.metrics.primary:
+            if actor.role != UserRole.ADMIN:
+                # information boundary (§18): the corpus prior aggregates
+                # effects across the whole domain, including other orgs'
+                # experiments — platform-admin eyes only; delegated analyses
+                # simply run without the shrinkage context
+                break
             prior = await self._corpus_prior(exp, key, experiment_id)
             if prior is None:
                 continue
