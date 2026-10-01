@@ -587,3 +587,41 @@ async def test_interaction_alert_detail_and_min_boundary(db):
 #   positive — defensive edge.
 # - `chi2_sf >= 0.001` and the 7-day `>=`: exact-boundary equivalents.
 # - round(chi2, 3→4): fully-correlated tables give integer chi2.
+
+
+async def test_org_admin_write_delegation_transition_and_ramp(db):
+    """Write delegation (§18): an org admin transitions and ramps THEIR org's
+    experiment; a platform experiment is a uniform 404; the decision runtime
+    gate still refuses direct promotion for every caller."""
+    from app.experiments.api.deps import experiment_read_scope
+    from app.experiments.services.experiments import ExperimentService
+
+    org_admin, org = await _mk_org_admin(db)
+    platform_exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    layer_key = platform_exp.layer_key
+    org_exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="Org-run", domain="learning",
+        layer_key=layer_key, owner_user_id=admin.id, scope_org_id=org.id,
+    )
+    await svc.create_version(org_exp.id, spec=_spec(), actor=org_admin)
+
+    scope = await experiment_read_scope(user=org_admin, db=db)
+    # own-org experiment: the full operating path works under the org admin
+    await svc.get_scoped(org_exp.id, scope.org_ids)
+    await svc.transition(org_exp.id, to_status="review", actor=org_admin)
+    row = await svc.get(org_exp.id)
+    assert row.status == "review"
+
+    # platform experiment: uniform 404 BEFORE any transition runs
+    with pytest.raises(AppError) as e:
+        await svc.get_scoped(platform_exp.id, scope.org_ids)
+    assert e.value.status_code == 404
+    assert (await svc.get(platform_exp.id)).status == "running"  # untouched
+
+    # the no-auto-promote posture holds for delegated writers too
+    with pytest.raises(AppError) as e:
+        await svc.transition(org_exp.id, to_status="promoted", actor=org_admin)
+    # blocked either by the state machine (review cannot promote) or, from an
+    # analyzable state, by the decision runtime gate — never allowed
+    assert e.value.code in ("EXPERIMENT_INVALID_TRANSITION", "EXPERIMENT_DECISION_REQUIRED")

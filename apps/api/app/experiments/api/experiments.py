@@ -105,13 +105,19 @@ async def transition_experiment(
     experiment_id: str,
     body: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
+    """Lifecycle transitions. Org-admin delegation (§18): an org admin may
+    operate experiments scoped to their org — out-of-scope is a uniform 404
+    and the promoted/rejected states stay behind the decision runtime gate
+    (EXPERIMENT_DECISION_REQUIRED) for EVERY caller; decisions and
+    promotions remain platform-admin surfaces."""
     check_enum(body.to_status, EXPERIMENT_STATUSES, "to_status")
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     exp = await ExperimentService(db).transition(
         experiment_id,
         to_status=body.to_status,
-        actor=user,
+        actor=scope.user,
         reason=body.reason,
         checklist=body.checklist,
     )
@@ -124,9 +130,12 @@ async def set_ramp(
     experiment_id: str,
     body: RampRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    exp = await ExperimentService(db).set_ramp(experiment_id, ramp_bp=body.ramp_bp, actor=user)
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
+    exp = await ExperimentService(db).set_ramp(
+        experiment_id, ramp_bp=body.ramp_bp, actor=scope.user
+    )
     await db.commit()
     return {"data": exp}
 
