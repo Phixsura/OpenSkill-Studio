@@ -891,6 +891,18 @@ override had no independent test (an Or→And flip would have let a
 deactivated credentialed offering keep serving an override — now pinned to
 fall back with the arm=fallback exposure).
 
+Round 20: mutation wave 7 over the decision/promotion flow — 45/45 after
+killers. Fifteen survivors were flipped HTTP-status constants (the round-6
+lesson recurring at scale): now ONE AST-level contract test pins the full
+(error code → status) map for both services, so any flipped constant
+anywhere fails a single named test. Semantic killers: omitted
+uncertainty/segments/evidence default to {} (an or→and would hand None to
+non-null JSONB), inconclusive never extends the close date while extend
+moves it by exactly the requested days, and the corpus win-rate pool is
+pinned with an ASYMMETRIC 2:1 promote:reject split plus an observational
+reject that must stay excluded (the symmetric-collision lesson, third
+occurrence — asymmetry is now the default fixture shape).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

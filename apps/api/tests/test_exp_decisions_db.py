@@ -861,3 +861,103 @@ async def test_async_handler_skips_when_race_already_resolved(db):
     row = await psvc.get(draft.id)
     assert row.status == "approved"
     assert row.apply_error is None
+
+
+def test_error_status_contract_pinned_by_source():
+    """Round-20 mutation lesson (the round-6 one recurring): every AppError's
+    HTTP status in the decision/promotion services is part of the API
+    contract — pin the full (code → status) map straight from the AST so a
+    single flipped constant anywhere fails here."""
+    import ast
+    from pathlib import Path
+
+    services = Path(__file__).resolve().parents[1] / "app" / "experiments" / "services"
+    found: dict[str, set[int]] = {}
+    for name in ("decisions.py", "promotion.py"):
+        tree = ast.parse((services / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "AppError"
+                and len(node.args) >= 3
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[2], ast.Constant)
+            ):
+                found.setdefault(node.args[0].value, set()).add(node.args[2].value)
+
+    assert found == {
+        "DECISION_HASH_MISMATCH": {422},
+        "DECISION_STATE_INVALID": {409, 422},
+        "EXPERIMENT_NOT_FOUND": {404},
+        "EXPERIMENT_PROMOTION_UNWIRED": {422},
+        "EXPERIMENT_SPEC_INVALID": {422},
+        "PROMOTION_ALREADY_APPLIED": {409},
+        "PROMOTION_APPLY_IN_FLIGHT": {409},
+        "PROMOTION_REQUIRES_RANDOMIZED": {422},
+        "VALIDATION_ERROR": {422},
+    }, found
+
+
+async def test_decision_optional_fields_default_to_empty_dicts(db):
+    """`x or {}` killers: omitted uncertainty/segments/evidence land as {}
+    (an Or→And flip would hand None to non-null JSONB columns)."""
+    exp, admin, result_hash = await _mk_analyzed(db)
+    record = await DecisionService(db).create(
+        exp.id, decision="inconclusive", summary="defaults pinned",
+        analysis_result_hash=result_hash, actor=admin,
+    )
+    assert record.uncertainty == {}
+    assert record.segments == {}
+    assert record.evidence == {}
+
+
+async def test_inconclusive_never_extends_the_close(db):
+    """`decision == "extend" and close_at` killer: an inconclusive decision
+    on an experiment WITH a close date must not move it (And→Or would)."""
+    from datetime import UTC, datetime, timedelta
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    close_at = datetime(2026, 12, 1, tzinfo=UTC)
+    exp.analysis_close_at = close_at
+    await db.flush()
+    await DecisionService(db).create(
+        exp.id, decision="inconclusive", summary="no extension",
+        analysis_result_hash=result_hash, actor=admin,
+    )
+    await db.refresh(exp)
+    assert exp.analysis_close_at == close_at
+    # and extend DOES move it, by exactly the requested days
+    await DecisionService(db).create(
+        exp.id, decision="extend", summary="two more weeks",
+        analysis_result_hash=result_hash, actor=admin, extend_days=14,
+    )
+    await db.refresh(exp)
+    assert exp.analysis_close_at == close_at + timedelta(days=14)
+
+
+async def test_meta_distinguishes_randomized_terminal_and_promoted(db):
+    """Meta-aggregation killers: the corpus counters must split by
+    analysis_type AND by decision (promote vs reject)."""
+    svc = DecisionService(db)
+    exp1, admin, h1 = await _mk_analyzed(db)
+    await svc.create(exp1.id, decision="promote", summary="win",
+                     analysis_result_hash=h1, actor=admin)
+    exp2, admin2, h2 = await _mk_analyzed(db)
+    await svc.create(exp2.id, decision="reject", summary="loss",
+                     analysis_result_hash=h2, actor=admin2)
+    # asymmetric promote count (2:1) — a promote==/!= flip must move win_rate
+    exp2b, admin2b, h2b = await _mk_analyzed(db)
+    await svc.create(exp2b.id, decision="promote", summary="second win",
+                     analysis_result_hash=h2b, actor=admin2b)
+    # an OBSERVATIONAL reject must not enter the randomized win-rate pool
+    exp3, admin3, h3 = await _mk_analyzed(db, analysis_type="observational")
+    await svc.create(exp3.id, decision="reject", summary="assoc only",
+                     analysis_result_hash=h3, actor=admin3)
+    meta = await svc.meta(domain="learning")
+    assert meta["by_decision"]["promote"] == 2
+    assert meta["by_decision"]["reject"] == 2
+    # randomized pool: exactly 2 promote / 3 terminal — the observational
+    # reject is excluded (And→Or) and promote vs reject counting (Eq→NotEq)
+    # both pinned by the ASYMMETRIC 2:1 split
+    assert abs(meta["win_rate"] - 2 / 3) < 1e-12
