@@ -806,6 +806,12 @@ Round-10 continuation (same day, batches 16-32) — the marathon's second half:
   core 24/27) with every survivor classified; DiD fuzz totality; live E2E
   52 checks including the self-serve walls.
 
+Round-10 tail (batches 33-35): feature-combination matrix pinned
+(segments × switchback: slices carry the window's variant; segments ×
+triggered: slice denominators = exposed ∩ org; multi-org users land in
+exactly ONE slice — min org_id); CUPED extended to a third source
+(workflow_runs per-installation mean latency); competitive matrix synced.
+
 Remaining (explicitly deferred): per-unit repeated-measures for every
 source, CUPED covariates beyond projects/revision_count, segment-dimension
 breakdowns (needs a snapshot dimension), full KM time-to-event, write-side
