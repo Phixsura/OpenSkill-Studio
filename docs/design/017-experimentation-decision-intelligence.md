@@ -812,6 +812,14 @@ triggered: slice denominators = exposed ∩ org; multi-org users land in
 exactly ONE slice — min org_id); CUPED extended to a third source
 (workflow_runs per-installation mean latency); competitive matrix synced.
 
+Round-10 close-out (batches 36-40): org-admin WRITE delegation
+(transition + ramp via the read scope, uniform 404 outside it; decisions/
+promotions/creation stay platform — direct promote re-pinned refused for
+delegated writers); three-arm end-to-end (assignment reaches all arms, one
+comparison per treatment, Thompson spans all arms); org-scoped holdout's
+symmetric face (it DOES withhold from the org's own experiments); live E2E
+grew to 57 checks (write-delegation walls over HTTP).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
