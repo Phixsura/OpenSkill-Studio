@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.experiments.api.deps import require_platform_admin
+from app.experiments.api.deps import (
+    ReadScope,
+    experiment_read_scope,
+    require_platform_admin,
+)
 from app.experiments.schemas import GuardrailEventResponse, IncidentRequest
 from app.experiments.services.experiments import ExperimentService
 from app.experiments.services.guardrails import GuardrailService
@@ -19,9 +23,12 @@ async def list_guardrail_events(
     experiment_id: str,
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    await ExperimentService(db).get(experiment_id)
+    """Delegation consistency: an operator whose experiment auto-paused must
+    be able to see WHY — events follow the read scope (uniform 404 outside);
+    the manual incident trigger and the force-evaluate stay platform-admin."""
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await GuardrailService(db).list_events(experiment_id, limit=limit)
     return {"data": [GuardrailEventResponse.model_validate(x).model_dump() for x in rows]}
 

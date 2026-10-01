@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
-from app.experiments.api.deps import require_platform_admin
+from app.experiments.api.deps import (
+    ReadScope,
+    experiment_read_scope,
+)
 from app.experiments.schemas import PreviewAssignmentRequest
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
-from app.models.user import User
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/experiments", tags=["Experiments — Assignments"])
@@ -18,9 +20,9 @@ router = APIRouter(prefix="/experiments", tags=["Experiments — Assignments"])
 async def assignment_stats(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    await ExperimentService(db).get(experiment_id)
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     return {"data": await AssignmentService(db).assignment_stats(experiment_id)}
 
 
@@ -29,12 +31,12 @@ async def preview_assignment(
     experiment_id: str,
     body: PreviewAssignmentRequest,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
     """Dry-run the full resolution pipeline — no writes (debugging surface).
     Computes against THIS experiment row by id — key-based lookup would bind
     to a newer live experiment after key reuse."""
-    exp = await ExperimentService(db).get(experiment_id)
+    exp = await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     result = await AssignmentService(db).compute(
         experiment=exp,
         unit_type=body.unit_type,
@@ -48,7 +50,7 @@ async def preview_assignment(
 async def exposure_stats(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_platform_admin),
+    scope: ReadScope = Depends(experiment_read_scope),
 ):
-    await ExperimentService(db).get(experiment_id)
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     return {"data": await AssignmentService(db).exposure_stats(experiment_id)}

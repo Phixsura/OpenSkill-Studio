@@ -126,3 +126,34 @@ def test_self_exposure_dedup_key_bound_matches_column():
     assert ok.dedup_key == "d" * 64
     with _pytest.raises(ValidationError):
         SelfExposureRequest(experiment_key="surface-x", dedup_key="d" * 65)
+
+
+def test_delegated_surface_manifest_pinned():
+    """The org-delegation surface is a deliberate, PINNED set: per-experiment
+    operating/diagnostic endpoints follow experiment_read_scope; everything
+    platform-wide (creation, definitions, decisions, promotions, layers,
+    holdouts, incident/evaluate triggers) stays require_platform_admin.
+    Growing either set is a conscious edit here, never a drive-by."""
+    from pathlib import Path
+
+    api_dir = Path(__file__).resolve().parents[1] / "app" / "experiments" / "api"
+    counts = {}
+    for path in sorted(api_dir.glob("*.py")):
+        if path.name in ("deps.py", "__init__.py"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        counts[path.name] = (
+            text.count("Depends(experiment_read_scope)"),
+            text.count("Depends(require_platform_admin)"),
+        )
+    assert counts == {
+        "analysis.py": (2, 0),
+        "assignments.py": (3, 0),
+        "decisions.py": (0, 9),
+        "experiments.py": (6, 2),
+        "guardrails.py": (1, 2),
+        "holdouts.py": (0, 3),
+        "layers.py": (0, 5),
+        "metrics.py": (1, 3),
+        "selfserve.py": (0, 0),
+    }, counts
