@@ -663,3 +663,37 @@ async def test_holdout_group_org_scoped_applies_to_org_experiments(db):
     )
     assert preview["eligible"] is False
     assert preview.get("holdout_group") == group.key
+
+
+async def test_holdout_group_concurrent_create_same_key_races_to_409(db):
+    """Defect #33 (R88 class): two committed sessions racing the same key —
+    one wins, the loser gets the TYPED 409 (the pre-check select alone has a
+    race window that used to surface an unmapped IntegrityError)."""
+    import asyncio
+
+    from sqlalchemy import delete
+
+    key = f"hg-race-{str(ULID()).lower()}"
+
+    async def _create():
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            try:
+                await HoldoutGroupService(session).create(
+                    key=key, title="race", domain="learning", holdout_bp=100
+                )
+                await session.commit()
+                return "created"
+            except AppError as exc:
+                return exc.code
+
+    try:
+        results = await asyncio.gather(_create(), _create())
+        assert sorted(results) == ["EXPERIMENT_HOLDOUT_KEY_TAKEN", "created"], results
+    finally:
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(HoldoutGroup).where(HoldoutGroup.key == key))
+            await session.commit()

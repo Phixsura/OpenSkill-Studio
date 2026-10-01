@@ -21,6 +21,7 @@ import time
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -107,7 +108,15 @@ class HoldoutGroupService:
             created_by=actor_id,
         )
         self.db.add(group)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            # Defect #33 (R88 class): the pre-check select has a race window —
+            # a concurrent create of the same key must land as the SAME typed
+            # 409, never an unmapped 500
+            raise AppError(
+                "EXPERIMENT_HOLDOUT_KEY_TAKEN", "Holdout group key already exists", 409
+            ) from exc
         invalidate_holdout_group_cache()
         return group
 
