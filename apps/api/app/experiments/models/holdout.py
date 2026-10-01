@@ -9,7 +9,7 @@ deterministic salt), never stored; existing sticky assignments keep serving
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
@@ -22,7 +22,9 @@ class HoldoutGroup(Base):
     __tablename__ = "experiment_holdout_groups"
 
     id: Mapped[str] = ulid_pk()
-    key: Mapped[str] = mapped_column(String(64), unique=True)
+    # unique among ACTIVE groups only (the round-3 one-shot-key lesson:
+    # a released group must not hold its key hostage forever)
+    key: Mapped[str] = mapped_column(String(64))
     title: Mapped[str] = mapped_column(String(200))
     domain: Mapped[str] = mapped_column(String(20))
     # null = platform-wide; set = applies to that org's experiments only
@@ -40,4 +42,12 @@ class HoldoutGroup(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_experiment_holdout_groups_domain", "domain", "status"),)
+    __table_args__ = (
+        Index("ix_experiment_holdout_groups_domain", "domain", "status"),
+        Index(
+            "uq_experiment_holdout_groups_active_key",
+            "key",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )

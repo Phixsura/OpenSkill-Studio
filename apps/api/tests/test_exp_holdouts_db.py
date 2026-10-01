@@ -697,3 +697,27 @@ async def test_holdout_group_concurrent_create_same_key_races_to_409(db):
         async with AsyncSessionLocal() as session:
             await session.execute(delete(HoldoutGroup).where(HoldoutGroup.key == key))
             await session.commit()
+
+
+async def test_holdout_key_reusable_after_release(db):
+    """Defect #34 (the round-3 one-shot-key lesson, holdout edition): a
+    released group frees its key for a NEW group; two ACTIVE same-key groups
+    stay impossible."""
+    svc = HoldoutGroupService(db)
+    key = f"hg-{str(ULID()).lower()}"
+    first = await svc.create(key=key, title="first", domain="learning", holdout_bp=100)
+    await svc.release(first.id)
+    second = await svc.create(key=key, title="second", domain="learning", holdout_bp=200)
+    assert second.id != first.id
+    assert second.status == "active"
+    with pytest.raises(AppError) as exc:
+        await svc.create(key=key, title="third", domain="learning", holdout_bp=300)
+    assert exc.value.code == "EXPERIMENT_HOLDOUT_KEY_TAKEN"
+    # exclusion follows the ACTIVE group's band (200bp, not the released 100)
+    member, _ = _member_and_nonmember(key, 200)
+    exp, _admin = await _mk_running(db)
+    preview = await AssignmentService(db).compute(
+        experiment=exp, unit_type="user", unit_id=member
+    )
+    assert preview["eligible"] is False
+    assert preview["holdout_group"] == key

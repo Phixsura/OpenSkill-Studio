@@ -94,7 +94,11 @@ class HoldoutGroupService:
                 # uniform 404 — no org-existence oracle (R89 class)
                 raise AppError("ORG_NOT_FOUND", "Organization not found", 404)
         taken = (
-            await self.db.execute(select(HoldoutGroup.id).where(HoldoutGroup.key == key))
+            await self.db.execute(
+                select(HoldoutGroup.id).where(
+                    HoldoutGroup.key == key, HoldoutGroup.status == "active"
+                )
+            )
         ).scalar_one_or_none()
         if taken is not None:
             raise AppError("EXPERIMENT_HOLDOUT_KEY_TAKEN", "Holdout group key already exists", 409)
