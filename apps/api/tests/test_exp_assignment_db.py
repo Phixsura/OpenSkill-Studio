@@ -15,6 +15,7 @@ from sqlalchemy import delete, select
 from ulid import ULID
 
 from app.core.database import AsyncSessionLocal
+from app.exceptions import AppError
 from app.experiments.models import (
     Experiment,
     ExperimentAssignment,
@@ -505,3 +506,168 @@ async def test_spec_cache_hits_without_queries_and_follows_versions(db):
     spec3, salt3 = await svc._spec_and_salt(exp)  # noqa: SLF001
     assert spec3.hypothesis == "version two reaches resolution immediately"
     assert salt3 == salt1  # v1 hash stays the salt forever
+
+
+# ── Round-21 mutation killers (experiments service) ──────────────────
+
+
+def test_experiments_error_status_contract_pinned_by_source():
+    """The round-20 AST contract, extended to the experiments service."""
+    import ast
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "experiments" / "services" / "experiments.py"
+    )
+    found: dict[str, set[int]] = {}
+    for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "AppError"
+            and len(node.args) >= 3
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[2], ast.Constant)
+        ):
+            found.setdefault(node.args[0].value, set()).add(node.args[2].value)
+    assert found == {
+        "EXPERIMENT_CHECKLIST_INCOMPLETE": {422},
+        "EXPERIMENT_DECISION_REQUIRED": {422},
+        "EXPERIMENT_INVALID_TRANSITION": {422},
+        "EXPERIMENT_KEY_TAKEN": {409},
+        "EXPERIMENT_NOT_FOUND": {404},
+        "EXPERIMENT_NO_GUARDRAILS": {422},
+        "EXPERIMENT_RAMP_DECREASE": {422},
+        "EXPERIMENT_SPEC_INVALID": {422},
+        "FORBIDDEN": {403},
+        "VALIDATION_ERROR": {422},
+    }, found
+
+
+async def test_spec_size_cap_boundary_exact(db):
+    """64000 bytes is LEGAL, 64001 is not (Gt→GtE killer) — padded to the
+    exact canonical size programmatically."""
+    import json
+
+    from app.experiments.services.experiments import ExperimentService
+
+    svc = ExperimentService(db)
+    base = _spec()
+
+    def _sized(padding: int) -> dict:
+        import copy
+
+        s2 = copy.deepcopy(base)
+        s2["variants"][1]["config"] = {"pad": "h" * padding}
+        return s2
+
+    def _raw(spec: dict) -> int:
+        return len(json.dumps(spec, separators=(",", ":"), ensure_ascii=False))
+
+    pad = 10
+    while _raw(_sized(pad)) < 64_000:
+        pad += 64_000 - _raw(_sized(pad))
+    exact = _sized(pad - (_raw(_sized(pad)) - 64_000))
+    assert _raw(exact) == 64_000
+    svc.validate_spec(exact, domain="learning", risk_class="medium")  # legal
+    over = _sized(pad - (_raw(_sized(pad)) - 64_000) + 1)
+    assert _raw(over) == 64_001
+    with pytest.raises(AppError) as e:
+        svc.validate_spec(over, domain="learning", risk_class="medium")
+    assert e.value.code == "EXPERIMENT_SPEC_INVALID"
+
+
+async def test_guardrail_exemption_matrix(db):
+    """needs_guardrails = NOT (low AND exempt-domain): all three non-exempt
+    corners refuse scheduling without guardrails; the exempt corner passes."""
+    from ulid import ULID as _ULID
+
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.layers import LayerService as _LS
+
+    async def _to_review(domain: str, risk: str):
+        admin = await _mk_admin(db)
+        layer = await _LS(db).create(key=f"lyr-{str(_ULID()).lower()}", domain=domain)
+        svc = ExperimentService(db)
+        exp = await svc.create(
+            key=f"exp-{str(_ULID()).lower()}", title="G", domain=domain,
+            layer_key=layer.key, owner_user_id=admin.id, risk_class=risk,
+        )
+        spec = _spec()
+        spec["metrics"] = {"primary": ["exposure_rate"], "guardrails": []}
+        await svc.create_version(exp.id, spec=spec, actor=admin)
+        await _LS(db).allocate(
+            layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+        )
+        await svc.transition(exp.id, to_status="review", actor=admin)
+        return svc, exp, admin
+
+    # low + operational (exempt): schedules without guardrails
+    svc, exp, admin = await _to_review("operational", "low")
+    await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    assert (await svc.get(exp.id)).status == "scheduled"
+    # low + learning (NOT exempt): refused
+    svc, exp, admin = await _to_review("learning", "low")
+    with pytest.raises(AppError) as e:
+        await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                             checklist=_CHECKLIST)
+    assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
+    # medium + operational (NOT exempt): refused
+    svc, exp, admin = await _to_review("operational", "medium")
+    with pytest.raises(AppError) as e:
+        await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                             checklist=_CHECKLIST)
+    assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
+
+
+async def test_high_risk_schedule_needs_platform_admin_even_delegated(db):
+    """The high-risk gate holds against delegated writers: a non-platform
+    actor scheduling a high-risk experiment gets FORBIDDEN/403; the platform
+    admin passes the same gate."""
+    from ulid import ULID as _ULID
+
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.layers import LayerService as _LS
+
+    admin = await _mk_admin(db)
+    operator = User(
+        email=f"hr-{_ULID()}@example.com", display_name="Op",
+        role=UserRole.INSTRUCTOR, status=UserStatus.ACTIVE,
+    )
+    db.add(operator)
+    await db.flush()
+    layer = await _LS(db).create(key=f"lyr-{str(_ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(_ULID()).lower()}", title="HR", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id, risk_class="high",
+    )
+    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    await _LS(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    with pytest.raises(AppError) as e:
+        await svc.transition(exp.id, to_status="scheduled", actor=operator,
+                             checklist=_CHECKLIST)
+    assert e.value.code == "FORBIDDEN"
+    assert e.value.status_code == 403
+    await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    assert (await svc.get(exp.id)).status == "scheduled"
+
+
+async def test_ramp_equal_value_is_not_a_decrease(db):
+    """`ramp_bp < exp.ramp_bp` killer: setting the SAME value while running
+    is legal (idempotent re-apply); one bp less is refused."""
+    exp, _ = await _mk_running(db, ramp_bp=5000)
+    from app.experiments.services.experiments import ExperimentService
+
+    svc = ExperimentService(db)
+    admin = await _mk_admin(db)
+    await svc.set_ramp(exp.id, ramp_bp=5000, actor=admin)  # equal: fine
+    with pytest.raises(AppError) as e:
+        await svc.set_ramp(exp.id, ramp_bp=4999, actor=admin)
+    assert e.value.code == "EXPERIMENT_RAMP_DECREASE"

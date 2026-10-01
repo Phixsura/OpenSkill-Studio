@@ -903,6 +903,14 @@ pinned with an ASYMMETRIC 2:1 promote:reject split plus an observational
 reject that must stay excluded (the symmetric-collision lesson, third
 occurrence — asymmetry is now the default fixture shape).
 
+Round 21: mutation wave 8 over the experiments service lifecycle — 36/36
+after killers. The AST status-contract pin extended to experiments.py;
+semantic killers: the 64000-byte spec cap is INCLUSIVE (padded to the exact
+canonical size programmatically), the guardrail-exemption matrix pinned on
+all three refusing corners plus the exempt one, the high-risk schedule gate
+holds against DELEGATED writers (403) while the platform admin passes the
+same gate, and an equal-value ramp re-apply is not a decrease.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
