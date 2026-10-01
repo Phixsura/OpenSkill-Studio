@@ -496,3 +496,32 @@ async def test_binding_override_inactive_offering_falls_back(db):
         capability="text.generate", required_features=set(),
     ) is None
     assert await _exposures(db, exp.id) == 1  # arm=fallback recorded
+
+
+async def test_hooks_are_total_even_when_validation_queries_raise(db):
+    """Defect #39: an exception INSIDE the override (beyond the facade's
+    resolve shield — e.g. the config-validation db.get) must serve the
+    default experience, never abort the host transaction."""
+    entity_type, _active, candidate = await _mk_matching_pair(db)
+    exp, _ = await _mk_surface_experiment(
+        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        unit_type="organization",
+        treatment_config={"matching_config_id": candidate.id},
+    )
+    org_unit = await _treatment_unit(db, exp, "organization", "shield")
+
+    real_get = db.get
+
+    async def exploding_get(*args, **kwargs):
+        raise RuntimeError("validation query infrastructure hiccup")
+
+    db.get = exploding_get  # type: ignore[method-assign]
+    try:
+        result = await hooks.matching_config_override(
+            db, org_id=org_unit, target_entity_type=entity_type
+        )
+    finally:
+        db.get = real_get  # type: ignore[method-assign]
+    assert result is None  # default experience, no exception escaped
+    # the session is still usable afterwards (the host transaction survives)
+    assert await _exposures(db, exp.id) >= 0

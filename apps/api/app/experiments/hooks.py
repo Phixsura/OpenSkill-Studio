@@ -44,6 +44,26 @@ RETRY_ATTEMPTS_MIN, RETRY_ATTEMPTS_MAX = 1, 10
 
 
 
+def _shield(fn):
+    """Defect #39: the host call sites rely on hooks being TOTAL — but only
+    facade.resolve_variant was shielded; the override's own validation
+    queries (db.get on configs/offerings/paths) could raise and abort the
+    host transaction (an evaluation run, a workflow start, a matching run).
+    The whole override is now fail-safe: any exception logs and serves the
+    default experience."""
+    import functools
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception:  # noqa: BLE001 — experiments never break product paths
+            log.warning("experiment_hook_failed", hook=fn.__name__)
+            return None
+
+    return wrapper
+
+
 async def _expose(
     db: AsyncSession, *, key: str, unit_type: str, unit_id: str, context: dict
 ) -> None:
@@ -53,6 +73,7 @@ async def _expose(
     )
 
 
+@_shield
 async def matching_config_override(
     db: AsyncSession, *, org_id: str, target_entity_type: str
 ):
@@ -99,6 +120,7 @@ async def matching_config_override(
     return candidate
 
 
+@_shield
 async def workflow_binding_override(
     db: AsyncSession,
     *,
@@ -157,6 +179,7 @@ async def workflow_binding_override(
     return offering
 
 
+@_shield
 async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | None:
     """Marketplace presentation: ordering strategy for the registry list —
     only among the EXISTING sort vocabulary. Unit: user (anonymous visitors
@@ -183,6 +206,7 @@ async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | Non
     return sort
 
 
+@_shield
 async def cohort_path_override(
     db: AsyncSession, *, cohort_id: str, org_id: str
 ) -> str | None:
@@ -219,6 +243,7 @@ async def cohort_path_override(
     return path_id
 
 
+@_shield
 async def rubric_override(
     db: AsyncSession, *, project_id: str
 ) -> list | dict | None:
@@ -251,6 +276,7 @@ async def rubric_override(
     return rubric
 
 
+@_shield
 async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | None:
     """Operational: per-tenant step retry budget (clamped 1..10). Unit: tenant."""
     resolved = await facade.resolve_variant(

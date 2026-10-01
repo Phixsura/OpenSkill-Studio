@@ -975,6 +975,16 @@ Round 32: `make e2e-exp` — the live-API E2E (74 checks) now starts its own
 uvicorn, runs, and tears down in one command; verified green through the
 target twice.
 
+Round 33 — defect #39 (host-transaction safety): the six host call sites
+(matching engine, workflow runtime ×2, registry search, cohort path,
+evaluation rubric) relied on the hooks being TOTAL, but only the facade's
+resolve was shielded — an exception in the override's own validation
+queries (db.get on configs/offerings/paths) would have aborted the host
+transaction: a crashed evaluation run, workflow start, or matching run.
+Every override now runs under a @_shield decorator (any exception → log +
+default experience), pinned by an exploding-db.get test that proves the
+host session survives.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
