@@ -72,7 +72,10 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db, *, domain: str = "learning", layer_key: str | None = None):
+async def _mk_running(
+    db, *, domain: str = "learning", layer_key: str | None = None,
+    spec_overrides: dict | None = None,
+):
     admin = await _mk_admin(db)
     layer_key = layer_key or f"lyr-{str(ULID()).lower()}"
     layer = await LayerService(db).create(key=layer_key, domain=domain)
@@ -84,7 +87,7 @@ async def _mk_running(db, *, domain: str = "learning", layer_key: str | None = N
         layer_key=layer.key,
         owner_user_id=admin.id,
     )
-    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    await svc.create_version(exp.id, spec=_spec(**(spec_overrides or {})), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -806,3 +809,29 @@ async def test_list_experiments_filters_and_cursor_scope(db):
 # Wave-5 survivor ledger: ExperimentService.list_experiments' limit default
 # (50) is unreachable — the API layer always passes an explicit Query-bound
 # limit; the default exists only for internal callers.
+
+
+async def test_holdout_group_excludes_switchback_enrollment_too(db):
+    """Combination: a domain holdout group withholds members from SWITCHBACK
+    experiments exactly like parallel ones (the group check precedes the
+    design branch in compute)."""
+    exp, _ = await _mk_running(
+        db,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
+    )
+    group = await HoldoutGroupService(db).create(
+        key=f"hg-{str(ULID()).lower()}", title="sb hold", domain="learning",
+        holdout_bp=2000,
+    )
+    member, nonmember = _member_and_nonmember(group.key, 2000)
+    svc = AssignmentService(db)
+    assert await svc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id=member
+    ) is None
+    served = await svc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id=nonmember
+    )
+    assert served is not None and served.variant_key in ("control", "treatment")

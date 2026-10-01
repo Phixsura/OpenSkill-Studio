@@ -1,0 +1,19 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["pool_stratified", "thompson_weights", "chi2_sf"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py", "-q", "-x",
+            "--timeout=120", "--timeout-method=thread",
+            "-k", "stratified or thompson or chi2"],
+    "timeout": 180
+  },
+  {
+    "path": "app/experiments/services/assignment.py",
+    "funcs": ["switchback_variant", "holdout_group_roll", "aa_probe"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_assignment_pure.py",
+            "tests/test_exp_analysis_db.py::test_aa_probe_healthy_and_deterministic",
+            "tests/test_exp_holdouts_db.py::test_holdout_group_fraction_roughly_matches_bp",
+            "-q", "-x", "--timeout=120", "--timeout-method=thread"],
+    "timeout": 240
+  }
+]

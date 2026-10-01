@@ -1,0 +1,17 @@
+[
+  {
+    "path": "app/experiments/api/deps.py",
+    "funcs": ["experiment_read_scope", "require_platform_admin", "require_self_serve_user"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_holdouts_db.py", "tests/test_exp_endpoints_nodb.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread",
+            "-k", "delegation or admin or scope or self"],
+    "timeout": 300
+  },
+  {
+    "path": "app/experiments/services/experiments.py",
+    "funcs": ["get_scoped", "list_experiments"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_holdouts_db.py", "tests/test_exp_e2e_flow.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread"],
+    "timeout": 300
+  }
+]

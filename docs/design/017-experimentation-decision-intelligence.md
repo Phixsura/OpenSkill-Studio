@@ -941,6 +941,12 @@ running transitions carry no checklist body, and analyzed status gates
 promote/reject behind the decision flow (no buttons offered). Triple
 randomized-seed fuzz pass all green.
 
+Round 25: the ten mutation-wave configs moved from the session scratchpad
+into the repo (tests/mutation_configs/ with a results README) so the
+campaign is reproducible by anyone, not an artifact of one session; plus
+the switchback × holdout-group combination pinned (the group check precedes
+the design branch, so members are withheld from switchback enrollment too).
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
