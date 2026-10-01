@@ -820,6 +820,26 @@ comparison per treatment, Thompson spans all arms); org-scoped holdout's
 symmetric face (it DOES withhold from the org's own experiments); live E2E
 grew to 57 checks (write-delegation walls over HTTP).
 
+Round 11 (same day, adversarial continuation) — four more defects:
+
+- **#32** self-serve resolve carried no org context, so org-scoped
+  experiments were structurally unreachable from the product surface — the
+  caller's primary org (min org_id) now rides along; live E2E walks the full
+  delegated-operator journey (schedule w/ checklist → run → ramp →
+  self-resolve) to 63 checks.
+- **#33** (R88 class) holdout create's duplicate pre-check had a race
+  window surfacing an unmapped IntegrityError — flush now maps to the typed
+  409; two-session race test.
+- **#34** (the round-3 one-shot-key lesson, holdout edition) a RELEASED
+  group held its key forever — key uniqueness is now active-only
+  (exp09a00009 partial index), release→recreate proven with the new band
+  taking effect.
+- **#35** (information boundary) after write delegation, an org operator's
+  analysis would have carried the cross-org corpus prior — non-platform
+  actors now run the identical analysis without the shrinkage context.
+  Plus delegation consistency (batch 42): snapshots, analysis run and
+  segments honor the same read scope as the operating surfaces.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
