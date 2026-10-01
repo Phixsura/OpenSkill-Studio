@@ -16,6 +16,7 @@ from ulid import ULID
 from app.core.database import AsyncSessionLocal
 from app.exceptions import AppError
 from app.experiments.models import MetricSnapshot
+from app.experiments.schemas import ExperimentSpec as SpecModel
 from app.experiments.security import ETHICS_CHECKLIST_KEY, LAUNCH_CHECKLIST_KEYS
 from app.experiments.services.assignment import AssignmentService
 from app.experiments.services.experiments import ExperimentService
@@ -1266,10 +1267,9 @@ async def test_switchback_window_snapshots_land_on_day_variant(db):
     exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
     assert len(exposure_rows) == 1  # one arm owns the whole day
     versions = await svc.get_versions(exp.id)
-    from app.experiments.schemas import ExperimentSpec as _Spec
 
     expected = switchback_variant(
-        exp.key, versions[0].spec_hash[:8], _Spec.model_validate(spec), window_start
+        exp.key, versions[0].spec_hash[:8], SpecModel.model_validate(spec), window_start
     )
     assert exposure_rows[0].variant_key == expected
     assert int(exposure_rows[0].denominator) == 6
@@ -1728,7 +1728,6 @@ async def test_segments_compose_with_switchback(db):
     """segments × switchback: the org slice rows carry the WINDOW's variant
     (the roster fold happens before slicing)."""
     from app.experiments.models import MetricSnapshot
-    from app.experiments.schemas import ExperimentSpec as _Spec
     from app.experiments.services.assignment import switchback_variant, version_salt_of
     from app.models.organization import OrgMember, OrgRole
 
@@ -1752,7 +1751,7 @@ async def test_segments_compose_with_switchback(db):
         exp.id, window_start=window_start, window_end=window_end
     )
     versions = await ExperimentService(db).get_versions(exp.id)
-    spec = _Spec.model_validate(versions[-1].spec)
+    spec = SpecModel.model_validate(versions[-1].spec)
     expected = switchback_variant(
         exp.key, version_salt_of(versions[0].spec_hash), spec, window_start
     )
@@ -1906,3 +1905,80 @@ async def test_segment_multi_org_user_attributed_deterministically(db):
     segments = {r.segment for r in seg_rows}
     assert segments == {f"org:{first_org.id}"}
     assert sum(int(r.denominator or 0) for r in seg_rows) == 1
+
+
+async def test_worker_time_arithmetic_pinned(db):
+    """Wave-9 killers over the sweep time math — all with FIXED instants."""
+    from app.experiments.worker import (
+        previous_utc_day,
+        sweep_experiment_closures,
+        sweep_experiment_windows,
+    )
+
+    fixed = datetime(2026, 9, 2, 12, 34, tzinfo=UTC)
+    assert previous_utc_day(fixed) == (
+        datetime(2026, 9, 1, tzinfo=UTC),
+        datetime(2026, 9, 2, tzinfo=UTC),
+    )
+
+    # analysis_close_at EXACTLY now: strictly-greater keeps it OUT
+    await MetricService(db).ensure_seed_definitions()
+    exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    await svc.transition(exp.id, to_status="completed", actor=admin)
+    exp.analysis_close_at = fixed
+    await db.flush()
+    assert await sweep_experiment_windows(db, now=fixed) == 0
+
+    # stop_policy.max_days elapsing EXACTLY now closes the experiment
+    exp2, _admin2 = await _mk_running(db)
+    spec_days = 14  # _spec() stop_policy default — read it back to be exact
+    versions = await svc.get_versions(exp2.id)
+    spec_days = SpecModel.model_validate(versions[-1].spec).stop_policy.max_days
+    exp2.started_at = fixed - timedelta(days=spec_days)
+    await db.flush()
+    closed = await sweep_experiment_closures(db, now=fixed)
+    assert closed == 1
+    assert (await svc.get(exp2.id)).status == "completed"
+
+
+async def test_prune_retention_boundary(db):
+    """Wave-9 killer: 399-day-old exposures of an archived experiment stay,
+    401-day-old ones go — a flipped cutoff sign would delete everything."""
+    from app.experiments.models import ExperimentAssignment, ExperimentExposure
+    from app.experiments.worker import prune_experiment_history
+
+    exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    asvc = AssignmentService(db)
+    r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="pr" + "0" * 24)
+    assert r is not None
+    now = datetime.now(UTC)
+    assignment_id = (
+        await db.execute(
+            select(ExperimentAssignment.id).where(
+                ExperimentAssignment.experiment_id == exp.id
+            )
+        )
+    ).scalar_one()
+    db.add(ExperimentExposure(
+        assignment_id=assignment_id, experiment_id=exp.id, context={},
+        occurred_at=now - timedelta(days=399),
+    ))
+    db.add(ExperimentExposure(
+        assignment_id=assignment_id, experiment_id=exp.id, context={},
+        occurred_at=now - timedelta(days=401),
+    ))
+    for status in ("completed", "archived"):
+        await svc.transition(exp.id, to_status=status, actor=admin)
+    await db.flush()
+    result = await prune_experiment_history(db, now=now)
+    assert result["exposures"] == 1  # exactly the 401-day row
+    from sqlalchemy import func as _func
+
+    remaining = (
+        await db.execute(
+            select(_func.count()).where(ExperimentExposure.experiment_id == exp.id)
+        )
+    ).scalar_one()
+    assert remaining == 1  # the 399-day row survives

@@ -911,6 +911,16 @@ all three refusing corners plus the exempt one, the high-risk schedule gate
 holds against DELEGATED writers (403) while the platform admin passes the
 same gate, and an equal-value ramp re-apply is not a decrease.
 
+Round 22: mutation wave 9 — layers allocation and the worker sweeps,
+30/36 → 36/36 after killers (grand total across nine waves: ~430 sites).
+Killers: the allocation boundary matrix (slice_end == total_slices−1 legal,
+== refused; adjacency legal; single-point overlap refused on both edges) +
+the layers AST status contract; previous_utc_day pinned on a fixed instant;
+analysis_close_at == now stays OUT of the window sweep; a stop_policy
+elapsing EXACTLY now closes (count pinned to 1); prune retention pinned at
+399-keep/401-delete — a flipped cutoff sign would have deleted EVERYTHING
+archived, which is exactly the mutant that survived before the killer.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,

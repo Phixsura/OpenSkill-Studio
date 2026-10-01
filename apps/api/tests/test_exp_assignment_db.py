@@ -671,3 +671,72 @@ async def test_ramp_equal_value_is_not_a_decrease(db):
     with pytest.raises(AppError) as e:
         await svc.set_ramp(exp.id, ramp_bp=4999, actor=admin)
     assert e.value.code == "EXPERIMENT_RAMP_DECREASE"
+
+
+async def test_layer_allocation_boundary_matrix(db):
+    """Wave-9 killers: slice_end == total_slices-1 legal, == total_slices
+    refused; adjacent slices legal; single-point overlap refused on BOTH
+    edges; plus the layers error-status AST contract."""
+    import ast
+    from pathlib import Path
+
+    from ulid import ULID as _ULID
+
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.layers import LayerService as LayerSvc
+
+    admin = await _mk_admin(db)
+    layer = await LayerSvc(db).create(key=f"lyr-{str(_ULID()).lower()}", domain="learning")
+    svc = ExperimentService(db)
+
+    async def _exp():
+        e = await svc.create(
+            key=f"exp-{str(_ULID()).lower()}", title="L", domain="learning",
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+        return e.id
+
+    a, b, c = await _exp(), await _exp(), await _exp()
+    # top boundary: 9999 legal (total_slices 10000), 10000 refused
+    await LayerSvc(db).allocate(
+        layer_key=layer.key, experiment_id=a, slice_start=5000, slice_end=9999
+    )
+    with pytest.raises(AppError) as e:
+        await LayerSvc(db).allocate(
+            layer_key=layer.key, experiment_id=b, slice_start=0, slice_end=10_000
+        )
+    assert e.value.code == "VALIDATION_ERROR"
+    # adjacent is legal...
+    await LayerSvc(db).allocate(
+        layer_key=layer.key, experiment_id=b, slice_start=0, slice_end=4999
+    )
+    # ...but sharing a single point on either edge is an overlap
+    for start, end in ((4999, 4999), (9999, 9999), (0, 0)):
+        with pytest.raises(AppError) as e:
+            await LayerSvc(db).allocate(
+                layer_key=layer.key, experiment_id=c, slice_start=start, slice_end=end
+            )
+        assert e.value.code == "LAYER_SLICE_OVERLAP"
+        assert e.value.status_code == 409
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "experiments" / "services" / "layers.py"
+    )
+    found: dict[str, set[int]] = {}
+    for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "AppError"
+            and len(node.args) >= 3
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[2], ast.Constant)
+        ):
+            found.setdefault(node.args[0].value, set()).add(node.args[2].value)
+    assert found == {
+        "EXPERIMENT_KEY_TAKEN": {409},
+        "EXPERIMENT_NOT_FOUND": {404},
+        "LAYER_SLICE_OVERLAP": {409},
+        "VALIDATION_ERROR": {422},
+    }, found
