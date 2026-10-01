@@ -1019,6 +1019,14 @@ same assigned/exposed counts; any future double-count or lost write in any
 stage breaks exactly one labeled equation. This is the invariant the #40
 class violates, now held permanently by a single test.
 
+Round 37: rollback safety — the full exp01→exp09 migration chain was
+downgraded to its base (eco10) and re-upgraded to head on the dev database;
+all nine downgrades execute cleanly (including the two unique-constraint
+swaps and the segment-column removal) and the full suite passes on the
+rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
+shows the only facade write-path callers are the six hooks and the
+self-serve endpoints, all with audited persistence.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
