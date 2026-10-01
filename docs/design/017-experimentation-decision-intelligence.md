@@ -863,6 +863,16 @@ Every fallback now records an arm=fallback exposure at the decision point
 (per-unit-per-day deduped), making the funnel a partition again: control /
 treatment / fallback.
 
+Round 15: the builder exposes the org-segment opt-in (the spec/API
+supported it since round 10 with no Console path to request it); defect
+numbering audited #27–#37 consistent. Honest performance note, deferred:
+resolve() costs ~3 queries per call on the hot path (experiment row, spec
+version, sticky row) — industry client SDKs evaluate locally at ~0. A
+process-local spec cache (invalidated by create_version/forget_missing_key)
+would cut this, at the price of a bounded staleness window; deliberately
+NOT done in this round — correctness cadence over latency — and recorded
+here so the trade-off is a decision, not an accident.
+
 ITS was attempted and DELIBERATELY REVERTED in round 10: spec versions can
 only be added in draft/review, so any candidate intervention instant
 precedes every running-phase window — there is no pre-period snapshot data,
