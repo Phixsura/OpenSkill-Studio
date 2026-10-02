@@ -28,3 +28,12 @@ dev Postgres must be migrated (`make db-migrate`) for the db-coupled waves.
 Survivor policy: every survivor is either killed by a named killer test or
 recorded in an in-test ledger with the reason it is equivalent. "Timed out"
 counts as killed. See ADR-017 §18 for the campaign narrative.
+
+## wave11_savepoints_locks.json (round 46)
+
+Targets the rounds-39-45 fixes: facade savepoints, the _shield savepoint,
+finish_async_apply's savepointed adapter, and the rolling backfill sweep.
+Result: 12/12 killed, 0 survivors. facade.py and _shield yielded 0 mutants —
+the harness's operators do not mutate try/except/async-with structure; those
+shapes are held instead by the kill-proven defect pins (#41/#42/#43: each
+test was run against the unfixed HEAD and failed).
