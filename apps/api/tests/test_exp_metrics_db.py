@@ -322,10 +322,19 @@ async def test_sweep_enqueues_yesterday_window_for_live_experiments(db):
         ).scalars()
     )
     mine = [m for m in rows if m.payload.get("experiment_id") == exp.id]
-    assert len(mine) == 1
+    # Defect #46: rolling backfill — yesterday plus the two days before it,
+    # most recent enqueued LAST, each window exactly one day wide.
+    from app.experiments.worker import SNAPSHOT_BACKFILL_DAYS
+
+    assert len(mine) == SNAPSHOT_BACKFILL_DAYS == 3
     ws, we = previous_utc_day()
-    assert mine[0].payload["window_start"] == ws.isoformat()
-    assert mine[0].payload["window_end"] == we.isoformat()
+    got = [(m.payload["window_start"], m.payload["window_end"]) for m in mine]
+    expect = [
+        ((ws - timedelta(days=o)).isoformat(),
+         (we - timedelta(days=o)).isoformat())
+        for o in range(SNAPSHOT_BACKFILL_DAYS - 1, -1, -1)
+    ]
+    assert got == expect
 
 
 async def test_sweep_closed_analysis_never_occupies_cap_slots(db):
@@ -351,7 +360,10 @@ async def test_sweep_closed_analysis_never_occupies_cap_slots(db):
     await db.flush()
     live_exp, _ = await _mk_running(db)  # newer id → loses an id-ordered cap-1
     enqueued = await sweep_experiment_windows(db, cap=1)
-    assert enqueued == 1
+    # cap counts EXPERIMENTS (slots); each slot enqueues the backfill fan
+    from app.experiments.worker import SNAPSHOT_BACKFILL_DAYS
+
+    assert enqueued == SNAPSHOT_BACKFILL_DAYS
     from app.controlplane.models.outbox import OutboxMessage
 
     rows = list(

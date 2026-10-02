@@ -1027,6 +1027,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 43 — defect #46 (snapshot sweep had no catch-up): the windows sweep
+enqueued ONLY yesterday — a worker outage left that day's snapshots missing
+forever, and exposures landing after the sweep (late writers) were never
+reflected. The sweep now re-enqueues a rolling SNAPSHOT_BACKFILL_DAYS=3
+window fan per live experiment (most recent last): the snapshot upsert is
+idempotent, so recomputation backfills outages up to 2 days and continuously
+heals late-arriving data. The cap still counts experiments (slots), so the
+anti-starvation ordering is unchanged; outbox volume is 3 small messages per
+experiment-day. Longer outages still need a manual window recompute — the
+bound is deliberate (unbounded backfill is the accumulation-bomb shape).
+
 Round 42 — defects #44 and #45. #44: the spec cross-checks never compared
 washout to window — a switchback spec with washout_minutes >= window_minutes
 folds EVERY snapshot window to zero (metrics' swallow guard), so the

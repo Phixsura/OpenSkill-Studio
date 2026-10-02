@@ -286,13 +286,29 @@ def previous_utc_day(now: datetime | None = None) -> tuple[datetime, datetime]:
     return today - timedelta(days=1), today
 
 
+# Defect #46: sweeping ONLY yesterday leaves permanent holes — a worker
+# outage skips that day forever, and exposures that land after the sweep
+# (late writers, backdated occurred_at) are never reflected. The sweep
+# re-enqueues a rolling window of recent days instead: the snapshot upsert
+# is idempotent, so recomputation both backfills outages (up to
+# SNAPSHOT_BACKFILL_DAYS - 1 days) and heals late-arriving data.
+SNAPSHOT_BACKFILL_DAYS = 3
+
+
 async def sweep_experiment_windows(
     db: AsyncSession, *, now: datetime | None = None, cap: int = SWEEP_CAP
 ) -> int:
     """Enqueue yesterday's UTC-day snapshot window for every experiment still
     in its analysis life. Bounded; handler idempotency absorbs double-enqueue."""
     now = now or datetime.now(UTC)
-    window_start, window_end = previous_utc_day(now)
+    yesterday_start, _ = previous_utc_day(now)
+    # Rolling re-enqueue (defect #46): most recent day LAST so that, under a
+    # backlog, the freshest window is the one closest to its data.
+    windows = [
+        (yesterday_start - timedelta(days=offset),
+         yesterday_start - timedelta(days=offset - 1))
+        for offset in range(SNAPSHOT_BACKFILL_DAYS - 1, -1, -1)
+    ]
     # The analysis-close filter lives in SQL, BEFORE the cap: a backlog of
     # analytically-closed experiments must never occupy capped slots and
     # starve live ones (the fourth accumulation-bomb shape, §106.26 class).
@@ -310,16 +326,17 @@ async def sweep_experiment_windows(
     )
     enqueued = 0
     for (experiment_id,) in (await db.execute(q)).all():
-        enqueue(
-            db,
-            "exp.compute_snapshots",
-            {
-                "experiment_id": experiment_id,
-                "window_start": window_start.isoformat(),
-                "window_end": window_end.isoformat(),
-            },
-        )
-        enqueued += 1
+        for window_start, window_end in windows:
+            enqueue(
+                db,
+                "exp.compute_snapshots",
+                {
+                    "experiment_id": experiment_id,
+                    "window_start": window_start.isoformat(),
+                    "window_end": window_end.isoformat(),
+                },
+            )
+            enqueued += 1
     return enqueued
 
 
