@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 86 — the #85 class swept across every bounded-batch sweep test:
+closures and starts are ordering-safe by construction (the test's rows sort
+first — 29-day-old started_at, explicit past start_at); the guardrail
+fairness test already carries the §106.25 stamp-residue-checked guard; the
+windows cap test pushes residue out via analysis_close_at; the analysis
+sweep tests pause residue running experiments. No unguarded bounded-batch
+test remains — the credits ladder was the last one standing.
+
 Round 85 — a certification red outside the exp package, diagnosed to the
 row: the credits expiry-ladder test raced the sweep's bounded oldest-first
 batch (limit 500) against shared-DB residue — at EXACTLY 499 stale held
