@@ -10,7 +10,7 @@ analyses NEVER claim causality (causal_claim: false + caveat)."""
 import hashlib
 import json
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -580,6 +580,26 @@ class AnalysisService:
             if await self._novelty_suspect(experiment_id, key, control_key):
                 warnings.append("NOVELTY_EFFECT_DECAY_SUSPECT")
                 break
+
+        # Data-flow health (round 51): a RUNNING experiment whose newest
+        # exposure is older than 48h (or that has none at all) is most often
+        # a broken integration, not a finished experiment — surface it.
+        if exp.status == "running":
+            from app.experiments.models import ExperimentExposure
+
+            last_exposure = (
+                await self.db.execute(
+                    select(func.max(ExperimentExposure.occurred_at)).where(
+                        ExperimentExposure.experiment_id == experiment_id
+                    )
+                )
+            ).scalar_one_or_none()
+            stale_cutoff = datetime.now(UTC) - timedelta(hours=48)
+            if last_exposure is None or (
+                (last_exposure.replace(tzinfo=UTC) if last_exposure.tzinfo is None
+                 else last_exposure) < stale_cutoff
+            ):
+                warnings.append("NO_RECENT_EXPOSURES")
 
         # Design-time power vs reality (§4.13 v3): when the spec declares a
         # power target, compute the required n per arm from the OBSERVED

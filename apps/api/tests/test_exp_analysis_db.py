@@ -967,3 +967,27 @@ async def test_power_block_and_underpowered_warning(db):
     plain = await AnalysisService(db).run(plain_exp.id, actor=plain_admin)
     assert "power" not in plain
     assert "SAMPLE_BELOW_POWER_TARGET" not in plain["warnings"]
+
+
+async def test_no_recent_exposures_warning(db):
+    """Round 51: a RUNNING experiment with no exposures at all flags
+    NO_RECENT_EXPOSURES (most often a broken integration, not a finished
+    experiment); fresh exposures clear it."""
+    exp, admin = await _mk_running(db)
+    # assignments but ZERO exposures
+    asvc = AssignmentService(db)
+    for i in range(4):
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=f"noexp-{i}"
+        ) is not None
+    start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=start, window_end=start + timedelta(days=1)
+    )
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NO_RECENT_EXPOSURES" in result["warnings"]
+
+    fresh_exp, fresh_admin = await _mk_running(db)
+    await _populate(db, fresh_exp)  # records exposures NOW
+    fresh = await AnalysisService(db).run(fresh_exp.id, actor=fresh_admin)
+    assert "NO_RECENT_EXPOSURES" not in fresh["warnings"]

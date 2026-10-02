@@ -1027,6 +1027,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 51 — data-flow health: funnel diagnostics now carry
+last_exposure_at (the console's "is data still flowing?" signal), and a
+full analysis of a RUNNING experiment whose newest exposure is older than
+48h — or that has none — warns NO_RECENT_EXPOSURES: that state is most
+often a broken integration, not a finished experiment, and silence was the
+only previous symptom.
+
 Round 50 — builder gains the optional power target (MDE %, defaults alpha
 .05 / power .8): filled, the spec carries power.mde and every analysis
 reports required-vs-actual; blank, no power block is sent (both paths

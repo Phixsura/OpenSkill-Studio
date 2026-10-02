@@ -778,3 +778,20 @@ async def test_facade_db_error_does_not_poison_host_session(db):
         db, experiment_key=exp.key, unit_type="user", unit_id="after-poison"
     )
     assert ok is not None
+
+
+async def test_exposure_stats_carries_last_exposure_at(db):
+    """Round 51: the funnel diagnostics carry the newest exposure timestamp
+    (the console's data-flow signal) — None before any exposure, ISO after."""
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    assert await asvc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id="flow-1"
+    ) is not None
+    stats = await asvc.exposure_stats(exp.id)
+    assert stats["last_exposure_at"] is None
+    assert await asvc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="flow-1"
+    )
+    stats = await asvc.exposure_stats(exp.id)
+    assert isinstance(stats["last_exposure_at"], str)

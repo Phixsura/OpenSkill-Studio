@@ -592,4 +592,19 @@ class AssignmentService:
             variant: {"assigned": count, "exposed_units": exposed.get(variant, 0)}
             for variant, count in assigned["variants"].items()
         }
-        return {"funnel": funnel, "holdout": assigned["holdout"]}
+        # Round 51 (data-flow health): the newest exposure timestamp — the
+        # console's "is data still flowing?" signal for running experiments
+        last_exposure_at = (
+            await self.db.execute(
+                select(func.max(ExperimentExposure.occurred_at)).where(
+                    ExperimentExposure.experiment_id == experiment_id
+                )
+            )
+        ).scalar_one_or_none()
+        return {
+            "funnel": funnel,
+            "holdout": assigned["holdout"],
+            "last_exposure_at": (
+                last_exposure_at.isoformat() if last_exposure_at else None
+            ),
+        }
