@@ -43,6 +43,7 @@ function mockDiagnostics({ srm = false } = {}) {
             treatment: { assigned: 80, exposed_units: 70 },
           },
           holdout: 5,
+          last_exposure_at: "2026-10-01T12:00:00Z",
         },
       };
     }
@@ -106,6 +107,13 @@ describe("Assignment diagnostics (ADR-017 Part L)", () => {
 });
 
 describe("Guardrail dashboard", () => {
+  it("shows the last-exposure data-flow line", async () => {
+    mockDiagnostics({ srm: false });
+    render(<AssignmentsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/Last exposure:/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(/none recorded/)).toBeNull());
+  });
+
   it("renders guardrail events with key and action", async () => {
     mockDiagnostics({ srm: true });
     render(<GuardrailsPage />, { wrapper: wrapper() });

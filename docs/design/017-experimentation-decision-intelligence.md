@@ -1027,6 +1027,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 52 — the data-flow signal reaches the console: the diagnostics page
+renders "Last exposure: <local time | none recorded>" under the funnel
+table (web 683/683). NO_RECENT_EXPOSURES already rendered verbatim through
+the warnings list.
+
 Round 51 — data-flow health: funnel diagnostics now carry
 last_exposure_at (the console's "is data still flowing?" signal), and a
 full analysis of a RUNNING experiment whose newest exposure is older than

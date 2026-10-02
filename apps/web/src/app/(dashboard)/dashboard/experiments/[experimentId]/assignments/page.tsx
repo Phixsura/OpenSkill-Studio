@@ -18,6 +18,7 @@ interface AssignmentStats {
 interface ExposureFunnel {
   funnel: Record<string, { assigned: number; exposed_units: number }>;
   holdout: number;
+  last_exposure_at: string | null;
 }
 
 export default function AssignmentsPage() {
@@ -101,6 +102,12 @@ export default function AssignmentsPage() {
             </tr>
           </tbody>
         </table>
+        <p className="mt-2 text-xs text-slate-500">
+          Last exposure:{" "}
+          {funnel.data?.data.last_exposure_at
+            ? new Date(funnel.data.data.last_exposure_at).toLocaleString()
+            : "none recorded"}
+        </p>
       </SectionCard>
 
       <SectionCard title="Preview bucketing (dry-run, no writes)">
