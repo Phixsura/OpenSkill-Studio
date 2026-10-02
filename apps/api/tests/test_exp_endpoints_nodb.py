@@ -157,3 +157,36 @@ def test_delegated_surface_manifest_pinned():
         "metrics.py": (2, 3),  # round 47: + CSV export (same read scope)
         "selfserve.py": (0, 0),
     }, counts
+
+
+def test_no_model_response_field_drift():
+    """Round 48 (the #49 class, closed): every column a model stores must be
+    serialized by its response schema — segment went missing for nine rounds
+    because nothing pinned the pairing. Response-only extras must be real
+    columns' computed companions, allowlisted here by name."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.experiments import models as m
+    from app.experiments import schemas as sch
+
+    pairs = [
+        (m.Experiment, sch.ExperimentResponse),
+        (m.ExperimentVersion, sch.VersionResponse),
+        (m.ExperimentLayer, sch.LayerResponse),
+        (m.HoldoutGroup, sch.HoldoutGroupResponse),
+        (m.ExperimentLayerAllocation, sch.AllocationResponse),
+        (m.MetricDefinition, sch.MetricDefinitionResponse),
+        (m.MetricSnapshot, sch.MetricSnapshotResponse),
+        (m.DecisionRecord, sch.DecisionRecordResponse),
+        (m.PromotionDraft, sch.PromotionDraftResponse),
+        (m.GuardrailEvent, sch.GuardrailEventResponse),
+        (m.ExperimentEvent, sch.ExperimentEventResponse),
+    ]
+    allowed_extra: dict[str, set[str]] = {}
+    for model, schema in pairs:
+        cols = {c.key for c in sa_inspect(model).columns}
+        fields = set(schema.model_fields)
+        missing = cols - fields
+        assert not missing, f"{model.__name__} columns never serialized: {sorted(missing)}"
+        extra = fields - cols - allowed_extra.get(schema.__name__, set())
+        assert not extra, f"{schema.__name__} fields without columns: {sorted(extra)}"

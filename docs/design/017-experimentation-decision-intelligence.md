@@ -1027,6 +1027,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 48 — the #49 class CLOSED by construction: an automated audit of all
+11 (model, response-schema) pairs found three more unserialized columns —
+Experiment.last_guardrail_check_at (an operator freshness signal: a running
+experiment never checked is a red flag), Experiment.updated_at, and
+HoldoutGroup.created_by (audit attribution). All three are serialized now,
+and a drift-guard test pins every pair: a model column absent from its
+response schema fails the build, as does a response field with no column
+behind it (allowlist empty). segment went missing for nine rounds because
+nothing owned this pairing; now the pairing owns itself.
+
 Round 47 — defect #49 + the results-export surface. #49: MetricSnapshot
 stored `segment` since exp08 but MetricSnapshotResponse never serialized it
 — the listing made segment rows indistinguishable from whole-population

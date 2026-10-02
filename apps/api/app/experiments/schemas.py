@@ -333,7 +333,11 @@ class ExperimentResponse(BaseModel):
     started_at: datetime | None
     ended_at: datetime | None
     analysis_close_at: datetime | None
+    # Round 48 (the #49 drift class, closed by audit): guardrail freshness is
+    # an operator signal — a running experiment never checked is a red flag
+    last_guardrail_check_at: datetime | None
     created_at: datetime
+    updated_at: datetime
 
 
 class VersionResponse(BaseModel):
@@ -391,6 +395,7 @@ class HoldoutGroupResponse(BaseModel):
     status: str
     starts_at: datetime
     ends_at: datetime | None
+    created_by: str | None
     created_at: datetime
 
 
