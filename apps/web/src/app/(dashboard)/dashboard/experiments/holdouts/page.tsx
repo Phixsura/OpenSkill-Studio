@@ -19,9 +19,36 @@ interface HoldoutGroup {
   ends_at: string | null;
 }
 
+interface HoldoutReport {
+  group_key: string;
+  metric_key: string;
+  window_days: number;
+  sampled_units: number;
+  holdout_units: number;
+  general_units: number;
+  arms: Record<string, { n?: number; numerator?: number; denominator?: number }>;
+  comparison: { effect?: number; p?: number } | null;
+  caveat: string;
+}
+
 export default function HoldoutGroupsPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [reportMetric, setReportMetric] = useState("project_approval_rate");
+  const [report, setReport] = useState<HoldoutReport | null>(null);
+  const runReport = useMutation({
+    mutationFn: (groupId: string) =>
+      apiWithAuth<{ data: HoldoutReport }>(
+        `/experiments/holdout-groups/${groupId}/report?metric_key=${encodeURIComponent(
+          reportMetric,
+        )}`,
+      ),
+    onSuccess: (r) => {
+      setReport(r.data);
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
   const [form, setForm] = useState({
     key: "",
     title: "",
@@ -179,6 +206,13 @@ export default function HoldoutGroupsPage() {
                     {g.ends_at ? new Date(g.ends_at).toLocaleDateString() : "—"}
                   </td>
                   <td className="py-1 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => runReport.mutate(g.id)}
+                      className="mr-2 rounded-md border px-2 py-1 text-xs"
+                    >
+                      Report
+                    </button>
                     {g.status === "active" ? (
                       <button
                         type="button"
@@ -203,6 +237,43 @@ export default function HoldoutGroupsPage() {
             </tbody>
           </table>
         )}
+        <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+          <label htmlFor="hg-report-metric">Report metric</label>
+          <input
+            id="hg-report-metric"
+            className="rounded-md border px-2 py-1"
+            value={reportMetric}
+            onChange={(e) => setReportMetric(e.target.value)}
+          />
+        </div>
+        {report ? (
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="font-medium">
+              {report.group_key} · {report.metric_key} · last {report.window_days}d
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              {report.holdout_units.toLocaleString()} held out /{" "}
+              {report.general_units.toLocaleString()} general (of{" "}
+              {report.sampled_units.toLocaleString()} sampled)
+            </div>
+            <div className="mt-1">
+              {Object.entries(report.arms).map(([arm, v]) => (
+                <span key={arm} className="mr-4">
+                  {arm}:{" "}
+                  {v.denominator
+                    ? `${(((v.numerator ?? 0) / v.denominator) * 100).toFixed(1)}%`
+                    : `n=${v.n ?? 0}`}
+                </span>
+              ))}
+              {report.comparison?.p !== undefined ? (
+                <span className="text-xs text-slate-500">
+                  p = {report.comparison.p?.toFixed(4)}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 text-xs text-amber-700">{report.caveat}</p>
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );

@@ -196,6 +196,35 @@ describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
     confirmSpy.mockRestore();
   });
 
+  it("runs a holdout report and renders split, arms and the caveat", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (String(path).includes("/report")) {
+        return {
+          data: {
+            group_key: "q4-learning-holdout",
+            metric_key: "project_approval_rate",
+            window_days: 28,
+            sampled_units: 1000,
+            holdout_units: 48,
+            general_units: 952,
+            arms: {
+              holdout: { numerator: 10, denominator: 48 },
+              general: { numerator: 300, denominator: 952 },
+            },
+            comparison: { effect: 0.1, p: 0.1234 },
+            caveat: "no single-feature causal claim.",
+          },
+        };
+      }
+      return { data: [GROUP] };
+    });
+    render(<HoldoutsPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Report"));
+    expect(await screen.findByText(/48 held out/)).toBeTruthy();
+    expect(screen.getByText(/p = 0.1234/)).toBeTruthy();
+    expect(screen.getByText(/no single-feature causal claim/)).toBeTruthy();
+  });
+
   it("released groups hide the release button", async () => {
     api.mockResolvedValue({
       data: [{ ...GROUP, status: "released", ends_at: "2026-12-01T00:00:00Z" }],

@@ -1027,6 +1027,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 55 — the holdout report reaches the console: a Report action per
+group with a metric picker renders the held-out/general split, per-arm
+rates (or n for continuous), the comparison p, and the observational caveat
+verbatim. Web 684/684.
+
 Round 54 — global holdout MEASUREMENT lands (§4.12 v2 — the reason the
 groups exist, and until now entirely absent): GET
 /experiments/holdout-groups/{id}/report?metric_key=&window_days= splits a
