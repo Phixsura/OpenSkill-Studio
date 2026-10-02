@@ -585,6 +585,25 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
 - Base branch: the epic depends on the eco facade, so implementation chains on
   the issue-35 branch (PR #36) until it merges.
 
+## 18a. Operator runbook (round 58 — what each signal means and what to do)
+
+Every signal below is surfaced in the Console; none requires DB access.
+
+| Signal                                                | Meaning                                                                                                      | First response                                                                                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NO_RECENT_EXPOSURES` warning / stale "Last exposure" | The surface stopped recording exposures — almost always a broken host integration, not a finished experiment | Check the host surface's deploy/logs; verify with POST /experiments/self/exposures on a test account; if intended, complete the experiment |
+| `SAMPLE_BELOW_POWER_TARGET` / Underpowered banner     | Not enough units against the declared MDE — a "no effect" read is not evidence of absence                    | Keep running, raise ramp_bp, or accept a bigger MDE; never promote on an underpowered primary                                              |
+| SRM alert (`__srm__` guardrail event, alert-only)     | Assignment counts deviate from spec weights — randomization or data-feed suspect                             | Check recent ramp changes and layer edits; run the layer A/A probe; if unexplained, pause and investigate before trusting ANY result       |
+| Exposure-SRM alert                                    | Exposure funnel imbalanced across arms — one arm's surface renders/exposes differently                       | Audit the host surface per arm (error rates, latency); exposure dilution biases toward null                                                |
+| Guardrail auto-pause                                  | A declared guardrail breached its threshold                                                                  | The experiment is already safe (paused). Review the breach in Diagnostics → fix or accept → resume via transition running                  |
+| `__incident__` event                                  | A human pressed the incident button                                                                          | Coordinate with the operator who filed it; resume only after the stated reason is addressed                                                |
+| `PRE_BALANCE_SUSPECT`                                 | CUPED covariate differs across arms pre-experiment — randomization or feed broken                            | Treat all effects as suspect; re-check assignment integrity (A/A probe, interaction sweep)                                                 |
+| `NOVELTY_EFFECT_DECAY_SUSPECT`                        | Early-window effect much larger than late-window                                                             | Extend the run; judge on the late window; don't promote a novelty spike                                                                    |
+| `TRIGGERED_*` warnings                                | Exposed-only analysis population caveats                                                                     | Expected for triggered experiments; confirm provenance markers on snapshots                                                                |
+| Interaction alert (both owners notified)              | Two same-domain experiments' assignments correlate                                                           | Verify layer slices are disjoint; if they are, investigate shared upstream surfaces                                                        |
+| Promotion stuck in `applying` / `apply_error` set     | Async apply failed typed and parked back to approved                                                         | Read apply_error on the Promotions page; fix the target-domain issue; re-apply                                                             |
+| Snapshot holes after an outage                        | Worker was down > SNAPSHOT_BACKFILL_DAYS-1 days                                                              | Recompute manually: enqueue exp.compute_snapshots for the missing day windows                                                              |
+
 ## 18. Implementation notes (exp01–exp09, 2026-09-30)
 
 Deviations from and refinements to the plan, discovered during implementation:
