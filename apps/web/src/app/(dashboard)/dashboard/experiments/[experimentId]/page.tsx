@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
+import { usePlatformAdmin } from "@/lib/use-me";
 import { ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../components";
 import {
   ALLOWED_TRANSITIONS,
@@ -39,6 +40,7 @@ interface AuditEvent {
 
 export default function ExperimentDetailPage() {
   const { experimentId } = useParams<{ experimentId: string }>();
+  const isPlatformAdmin = usePlatformAdmin();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [rampPct, setRampPct] = useState("");
@@ -237,8 +239,9 @@ export default function ExperimentDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           {decisionGated ? (
             <span className="mr-2 text-xs text-slate-500">
-              promote / reject are recorded as a decision (run the analysis, then create a decision
-              with its result hash)
+              {isPlatformAdmin
+                ? "promote / reject are recorded as a decision (run the analysis, then create a decision with its result hash)"
+                : "promote / reject are platform-admin decisions — share your analysis result hash with a platform admin"}
             </span>
           ) : null}
           {nextStatuses.length === 0 && !decisionGated ? (

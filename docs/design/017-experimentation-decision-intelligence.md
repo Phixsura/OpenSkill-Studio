@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 70 — the analyzed-status hint degrades for delegated operators
+(decisions are platform calls; the hint now says to hand the analysis
+result hash to a platform admin instead of pointing at a tab they cannot
+see). Web 690/690.
+
 Round 69 — automated monitoring (industry parity: scheduled analyses):
 sweep_experiment_analyses runs a daily analysis over RUNNING mSPRT
 experiments — the always-valid engine pays no peeking cost, so automation
