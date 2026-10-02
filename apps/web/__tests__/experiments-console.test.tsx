@@ -72,6 +72,20 @@ describe("Experiment Console list (ADR-017 Part L)", () => {
     expect(screen.getByText("1 of 1")).toBeTruthy();
   });
 
+  it("search box sends q and keeps it shareable in the URL", async () => {
+    api.mockResolvedValue({ data: [EXPERIMENT], meta: { total: 1, next_cursor: null } });
+    render(<ExperimentsPage />, { wrapper: wrapper() });
+    await screen.findByText("Rubric wording B");
+    const box = screen.getByLabelText("Search experiments");
+    fireEvent.change(box, { target: { value: "rubric" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await vi.waitFor(() => {
+      const withQ = api.mock.calls.find((c) => String(c[0]).includes("q=rubric"));
+      expect(withQ).toBeTruthy();
+    });
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining("q=rubric"), expect.anything());
+  });
+
   it("delegated operators see the list without platform-only tabs or create", async () => {
     platformAdmin = false;
     try {

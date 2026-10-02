@@ -227,6 +227,7 @@ class ExperimentService:
         *,
         status: str | None = None,
         domain: str | None = None,
+        q: str | None = None,
         cursor: str | None = None,
         limit: int = 50,
         scope_org_ids: list[str] | None = None,
@@ -238,6 +239,14 @@ class ExperimentService:
             base = base.where(Experiment.status == status)
         if domain:
             base = base.where(Experiment.domain == domain)
+        if q:
+            # round 93: console text search — key or title, case-insensitive;
+            # ILIKE wildcards in user input are escaped so `%` means percent
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            needle = f"%{escaped}%"
+            base = base.where(
+                Experiment.key.ilike(needle) | Experiment.title.ilike(needle)
+            )
         if scope_org_ids is not None:
             # org-admin delegation (§18): only experiments scoped to the
             # caller's orgs — platform-wide experiments are NOT theirs to see

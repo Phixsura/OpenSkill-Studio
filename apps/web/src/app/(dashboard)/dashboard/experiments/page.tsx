@@ -33,14 +33,16 @@ function ExperimentsInner() {
   const params = useSearchParams();
   const [status, setStatusState] = useState(params.get("status") ?? "");
   const [domain, setDomainState] = useState(params.get("domain") ?? "");
+  const [q, setQState] = useState(params.get("q") ?? "");
   const [pages, setPages] = useState<Experiment[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const syncUrl = (nextStatus: string, nextDomain: string) => {
+  const syncUrl = (nextStatus: string, nextDomain: string, nextQ = q) => {
     const query = new URLSearchParams();
     if (nextStatus) query.set("status", nextStatus);
     if (nextDomain) query.set("domain", nextDomain);
+    if (nextQ) query.set("q", nextQ);
     const suffix = query.toString();
     router.replace(`/dashboard/experiments${suffix ? `?${suffix}` : ""}`, { scroll: false });
   };
@@ -56,14 +58,21 @@ function ExperimentsInner() {
     setCursor(null);
     syncUrl(status, v);
   };
+  const setQ = (v: string) => {
+    setQState(v);
+    setPages([]);
+    setCursor(null);
+    syncUrl(status, domain, v);
+  };
 
   const { data, isLoading } = useQuery({
-    queryKey: ["experiments", status, domain, cursor],
+    queryKey: ["experiments", status, domain, q, cursor],
     queryFn: async () => {
       try {
         const query = new URLSearchParams({ limit: "50" });
         if (status) query.set("status", status);
         if (domain) query.set("domain", domain);
+        if (q) query.set("q", q);
         if (cursor) query.set("cursor", cursor);
         const res = await apiWithAuth<{
           data: Experiment[];
@@ -130,6 +139,21 @@ function ExperimentsInner() {
               </option>
             ))}
           </select>
+        </label>
+        <label className="text-sm text-slate-600">
+          Search{" "}
+          <input
+            aria-label="Search experiments"
+            className="rounded-md border px-2 py-1 text-sm"
+            placeholder="key or title"
+            defaultValue={q}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") setQ((e.target as HTMLInputElement).value);
+            }}
+            onBlur={(e) => {
+              if (e.target.value !== q) setQ(e.target.value);
+            }}
+          />
         </label>
       </div>
       {isLoading && experiments.length === 0 ? (

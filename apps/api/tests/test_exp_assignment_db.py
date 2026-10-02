@@ -1094,3 +1094,35 @@ async def test_clone_duplicates_spec_as_new_draft(db):
     with pytest.raises(AppError) as exc:
         await svc.clone(bare.id, new_key=f"c-{str(ULID()).lower()}", actor=admin)
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
+
+
+async def test_list_experiments_text_search(db):
+    """Round 93: q matches key OR title case-insensitively, and ILIKE
+    wildcards in the user's input are literals (percent means percent)."""
+    admin = await _mk_admin(db)
+    svc = ExperimentService(db)
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    tag = str(ULID()).lower()[:10]
+    by_key = await svc.create(key=f"needle-{tag}", title="Plain title",
+                              domain="learning", layer_key=layer.key,
+                              owner_user_id=admin.id)
+    by_title = await svc.create(key=f"other-{tag}x", title=f"NEEDLE-{tag} inside",
+                                domain="learning", layer_key=layer.key,
+                                owner_user_id=admin.id)
+    pct = await svc.create(key=f"pct-{tag}", title=f"100% ramp {tag}",
+                           domain="learning", layer_key=layer.key,
+                           owner_user_id=admin.id)
+
+    rows, total, _ = await svc.list_experiments(q=f"needle-{tag}")
+    ids = {r.id for r in rows}
+    assert by_key.id in ids and by_title.id in ids and pct.id not in ids
+    assert total == 2
+
+    # literal percent — not a wildcard
+    rows2, total2, _ = await svc.list_experiments(q=f"100% ramp {tag}")
+    assert {r.id for r in rows2} == {pct.id} and total2 == 1
+    # a bare % must NOT match everything with this tag
+    rows3, _, _ = await svc.list_experiments(q=f"%{tag}%")
+    assert rows3 == []

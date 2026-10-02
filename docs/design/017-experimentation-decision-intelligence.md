@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 93 — console text search: list_experiments gained q (key OR title,
+case-insensitive, ILIKE wildcards in user input ESCAPED so a literal
+percent matches a percent — pinned: a bare %tag% matches nothing), the
+endpoint takes ?q= (capped 120), and the console grew a search box sharing
+the URL-state machinery with the status/domain filters (Enter or blur
+applies; the q rides the shareable URL). Web 695/695.
+
 Round 92 — experiment CLONE (industry parity: duplicate): POST
 /experiments/{id}/clone creates a NEW draft carrying the source's current
 spec as its v1 (identical canonical hash, pinned), same

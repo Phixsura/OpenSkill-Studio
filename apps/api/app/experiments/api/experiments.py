@@ -52,6 +52,7 @@ async def create_experiment(
 async def list_experiments(
     status: str | None = None,
     domain: str | None = None,
+    q: str | None = Query(default=None, max_length=120),
     cursor: str | None = Query(default=None, max_length=26),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -60,7 +61,7 @@ async def list_experiments(
     check_enum(status, EXPERIMENT_STATUSES, "status")
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     rows, total, next_cursor = await ExperimentService(db).list_experiments(
-        status=status, domain=domain, cursor=cursor, limit=limit,
+        status=status, domain=domain, q=q, cursor=cursor, limit=limit,
         scope_org_ids=scope.org_ids,
     )
     return {
