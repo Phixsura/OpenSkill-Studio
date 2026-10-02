@@ -1066,3 +1066,34 @@ async def test_holdout_report_comparison_edges(db):
     assert continuous["arms"]["general"]["n"] == 2
     assert continuous["comparison"] is not None
     assert "insufficient_data" not in continuous["comparison"]
+
+    # Case A2 (inverse one-sided): a SECOND group whose key is searched so
+    # the user holding the data is HELD under it — the general side then has
+    # the zero denominator, killing the symmetric >=-boundary mutant.
+    i = 0
+    while True:
+        key2 = f"hg-inv-{i}-{str(ULID()).lower()[:8]}"
+        if holdout_group_roll(key2, "user", general[0]) < bp:
+            break
+        i += 1
+    group2 = await svc.create(
+        key=key2, title="Inverse", domain="learning", holdout_bp=bp,
+        scope_org_id=org.id,
+    )
+    inverse = await svc.report(group2.id, metric_key="project_approval_rate")
+    assert inverse["arms"]["holdout"]["denominator"] >= 2
+    if inverse["arms"]["general"].get("denominator", 0) == 0:
+        assert inverse["comparison"] is None
+
+    # Case C: time_to_event kind computes NO comparison (KM is deferred) —
+    # even when the arms carry welch-shaped stats
+    from app.experiments.services.metrics import MetricService
+
+    t2e_key = f"t2e_{str(ULID()).lower()[:12]}"
+    await MetricService(db).create_definition(
+        key=t2e_key, title="T2E probe", kind="time_to_event",
+        domain="learning", source_kind="service",
+        spec={"source": "projects", "measure": "revision_count"},
+    )
+    t2e = await svc.report(group.id, metric_key=t2e_key)
+    assert t2e["comparison"] is None
