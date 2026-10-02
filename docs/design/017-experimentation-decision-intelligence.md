@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 96 — guardrail/incident history CSV export (the metrics export's
+sibling): GET /{id}/guardrails/events/export under the same delegated read
+scope and uniform 404; system-set key columns only, the free-form detail
+JSON stays out of the flat file. E2E 86 checks (delegated export verified).
+
 Round 95 — mutation wave 15 over clone/search/scorecard: 12/13 killed
 (the second-look test kills the widened-limit mutant via
 scalar_one_or_none; the one survivor is the list's default-arg 50, the

@@ -603,6 +603,13 @@ async def main() -> int:
         r = await c.get(f"/experiments/{org_exp_id}", headers=student)
         check("incident left the experiment paused",
               r.json()["data"]["status"] == "paused", r.text[:200])
+        r = await c.get(
+            f"/experiments/{org_exp_id}/guardrails/events/export", headers=student)
+        check("delegated guardrail CSV export with header row",
+              r.status_code == 200
+              and r.headers["content-type"].startswith("text/csv")
+              and r.text.splitlines()[0].startswith("guardrail_key,metric_key"),
+              f"{r.status_code} {r.text[:120]}")
         r = await c.get(f"/experiments/{org_exp_id}/guardrails/events", headers=student)
         check("org admin sees the incident event (delegated diagnostics)",
               r.status_code == 200

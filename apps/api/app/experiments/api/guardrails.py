@@ -18,6 +18,52 @@ from app.schemas.base import DataResponse
 router = APIRouter(prefix="/experiments", tags=["Experiments — Guardrails"])
 
 
+_EVENT_EXPORT_COLUMNS = (
+    "guardrail_key", "metric_key", "observed", "threshold", "action",
+    "auto", "created_at",
+)
+
+
+@router.get("/{experiment_id}/guardrails/events/export")
+async def export_guardrail_events(
+    experiment_id: str,
+    limit: int = Query(1000, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """CSV export of the guardrail/incident history (round 96 — the metrics
+    export's sibling): same delegated read scope and uniform 404; key
+    columns are system-set identifiers (no formula-injection surface) and
+    the free-form detail JSON stays out of the flat file."""
+    import csv
+    import io
+
+    from fastapi.responses import Response
+
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
+    rows = await GuardrailService(db).list_events(experiment_id, limit=limit)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_EVENT_EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow(
+            [
+                value.isoformat() if hasattr(value := getattr(row, col), "isoformat")
+                else value
+                for col in _EVENT_EXPORT_COLUMNS
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="experiment-{experiment_id}-guardrails.csv"'
+            )
+        },
+    )
+
+
 @router.get("/{experiment_id}/guardrails/events", response_model=dict)
 async def list_guardrail_events(
     experiment_id: str,
