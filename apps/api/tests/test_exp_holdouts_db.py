@@ -994,3 +994,75 @@ async def test_holdout_report_org_scoped_exact_values(db):
     with pytest.raises(AppError) as exc:
         await svc.report(group.id, metric_key="exposure_rate")
     assert exc.value.status_code == 422
+
+
+async def test_holdout_report_comparison_edges(db):
+    """Wave-12 boundary kills: a one-sided (zero-denominator) binary report
+    yields comparison None — never a crashed analyze_binary; a continuous
+    report with n EXACTLY 2 per side computes (the >= 2 gate's exact
+    boundary)."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization, OrgMember, OrgRole
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User, UserRole, UserStatus
+
+    tenant = TenantAccount(
+        name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}"
+    )
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name="edge org", slug=f"edge-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+    key = f"hg-edge-{str(ULID()).lower()}"
+    bp = 2000
+    held: list[str] = []
+    general: list[str] = []
+    for i in range(200):
+        if len(held) >= 1 and len(general) >= 1:
+            break
+        u = User(email=f"edge-{i}-{ULID()}@example.com", display_name="E",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
+        (held if holdout_group_roll(key, "user", u.id) < bp else general).append(u.id)
+    await db.flush()
+    assert held and general
+    svc = HoldoutGroupService(db)
+    group = await svc.create(
+        key=key, title="Edge", domain="learning", holdout_bp=bp,
+        scope_org_id=org.id,
+    )
+    project = Project(
+        org_id=org.id, title="EP", slug=f"ep-{str(ULID()).lower()}",
+        description="d", instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
+    db.add(project)
+    await db.flush()
+
+    # Case A: data ONLY on the general side -> binary comparison must be None
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=general[0],
+                      status=SubmissionStatus.APPROVED, version=2))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=general[0],
+                      status=SubmissionStatus.REJECTED, version=4))
+    await db.flush()
+    one_sided = await svc.report(group.id, metric_key="project_approval_rate")
+    assert one_sided["arms"]["holdout"].get("denominator", 0) == 0
+    assert one_sided["arms"]["general"]["denominator"] == 2
+    assert one_sided["comparison"] is None
+
+    # Case B: n EXACTLY 2 per side -> continuous comparison computes
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=held[0],
+                      status=SubmissionStatus.APPROVED, version=1))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=held[0],
+                      status=SubmissionStatus.REJECTED, version=3))
+    await db.flush()
+    continuous = await svc.report(group.id, metric_key="revision_count")
+    assert continuous["arms"]["holdout"]["n"] == 2
+    assert continuous["arms"]["general"]["n"] == 2
+    assert continuous["comparison"] is not None
+    assert "insufficient_data" not in continuous["comparison"]
