@@ -1083,17 +1083,26 @@ async def test_holdout_report_comparison_edges(db):
     i = 0
     while True:
         key2 = f"hg-inv-{i}-{str(ULID()).lower()[:8]}"
-        if holdout_group_roll(key2, "user", general[0]) < bp:
+        if (
+            holdout_group_roll(key2, "user", general[0]) < bp
+            and holdout_group_roll(key2, "user", held[0]) < bp
+        ):
             break
         i += 1
     group2 = await svc.create(
         key=key2, title="Inverse", domain="learning", holdout_bp=bp,
         scope_org_id=org.id,
     )
+    # BOTH data-bearing users are held under group2 — the general side has
+    # zero data on every metric, unconditionally
     inverse = await svc.report(group2.id, metric_key="project_approval_rate")
-    assert inverse["arms"]["holdout"]["denominator"] >= 2
-    if inverse["arms"]["general"].get("denominator", 0) == 0:
-        assert inverse["comparison"] is None
+    assert inverse["arms"]["holdout"]["denominator"] == 4
+    assert inverse["arms"]["general"].get("denominator", 0) == 0
+    assert inverse["comparison"] is None
+    inv_cont = await svc.report(group2.id, metric_key="revision_count")
+    assert inv_cont["arms"]["holdout"]["n"] == 4
+    assert inv_cont["arms"]["general"].get("n", 0) == 0
+    assert inv_cont["comparison"] is None
 
     # Case C: time_to_event kind computes NO comparison (KM is deferred) —
     # even when the arms carry welch-shaped stats
