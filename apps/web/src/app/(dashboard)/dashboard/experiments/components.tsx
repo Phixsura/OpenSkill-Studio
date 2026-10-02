@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { usePlatformAdmin } from "@/lib/use-me";
+
 export function Pill({ value, styles }: { value: string; styles: Record<string, string> }) {
   const cls = styles[value] ?? "bg-slate-100 text-slate-700";
   return (
@@ -15,18 +17,21 @@ export function Pill({ value, styles }: { value: string; styles: Record<string, 
 
 const TABS = [
   { href: "/dashboard/experiments", label: "Experiments" },
-  { href: "/dashboard/experiments/decisions", label: "Decisions" },
-  { href: "/dashboard/experiments/promotions", label: "Promotions" },
-  { href: "/dashboard/experiments/layers", label: "Layers" },
-  { href: "/dashboard/experiments/holdouts", label: "Holdouts" },
-  { href: "/dashboard/experiments/metrics", label: "Metric Explorer" },
+  // platformOnly tabs list/operate platform-admin endpoints — a delegated
+  // org operator would only collect 403s there (defect #59)
+  { href: "/dashboard/experiments/decisions", label: "Decisions", platformOnly: true },
+  { href: "/dashboard/experiments/promotions", label: "Promotions", platformOnly: true },
+  { href: "/dashboard/experiments/layers", label: "Layers", platformOnly: true },
+  { href: "/dashboard/experiments/holdouts", label: "Holdouts", platformOnly: true },
+  { href: "/dashboard/experiments/metrics", label: "Metric Explorer", platformOnly: true },
 ];
 
 export function ExperimentsNav() {
   const pathname = usePathname();
+  const isPlatformAdmin = usePlatformAdmin();
   return (
     <nav className="flex flex-wrap gap-2 border-b pb-2">
-      {TABS.map((tab) => {
+      {TABS.filter((tab) => !tab.platformOnly || isPlatformAdmin).map((tab) => {
         const active =
           tab.href === "/dashboard/experiments"
             ? pathname === tab.href || /^\/dashboard\/experiments\/(new|01)/i.test(pathname)

@@ -17,6 +17,8 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ experimentId: "E".repeat(26) }),
   useSearchParams: () => searchParams.current,
 }));
+let platformAdmin = true;
+vi.mock("@/lib/use-me", () => ({ usePlatformAdmin: () => platformAdmin }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import ExperimentsPage from "@/app/(dashboard)/dashboard/experiments/page";
@@ -68,6 +70,24 @@ describe("Experiment Console list (ADR-017 Part L)", () => {
     expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("50%")).toBeTruthy();
     expect(screen.getByText("1 of 1")).toBeTruthy();
+  });
+
+  it("delegated operators see the list without platform-only tabs or create", async () => {
+    platformAdmin = false;
+    try {
+      api.mockResolvedValue({
+        data: [EXPERIMENT],
+        meta: { total: 1, next_cursor: null },
+      } as never);
+      render(<ExperimentsPage />, { wrapper: wrapper() });
+      expect(await screen.findByText("Rubric wording B")).toBeTruthy();
+      expect(screen.queryByText("New experiment")).toBeNull();
+      expect(screen.queryByText("Decisions")).toBeNull();
+      expect(screen.queryByText("Holdouts")).toBeNull();
+      expect(screen.getAllByText("Experiments").length).toBeGreaterThanOrEqual(1);
+    } finally {
+      platformAdmin = true;
+    }
   });
 
   it("seeds filters from the URL and keeps them shareable", async () => {

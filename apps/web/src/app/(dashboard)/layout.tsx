@@ -7,9 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 
 import { cn } from "@/lib/utils";
-import { api, sharedRefresh } from "@/lib/api";
+import { api, apiWithAuth, sharedRefresh } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useMe } from "@/lib/use-me";
 import { NotificationBell } from "@/components/notification-bell";
@@ -30,6 +30,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const tenantMemberships = me?.tenant_memberships ?? [];
   const partnerMemberships = me?.partner_memberships ?? [];
   const hasPlatformRole = (me?.platform_roles?.length ?? 0) > 0 || me?.role === "admin";
+  // Defect #59 (ADR-017 delegation had an API but no door): org owners and
+  // admins hold real delegated experiment access (read, operate, diagnose,
+  // export on own-org experiments) — the console link must show for them too.
+  const { data: myOrgsData } = useQuery({
+    queryKey: ["my-orgs"],
+    queryFn: () => apiWithAuth<{ data: { id: string; role: string }[] }>("/orgs"),
+    staleTime: 60_000,
+  });
+  const hasExperimentDelegation = (myOrgsData?.data ?? []).some((o) =>
+    ["owner", "admin"].includes(o.role),
+  );
   const impersonation = me?.impersonation ?? null;
 
   useEffect(() => setMounted(true), []);
@@ -211,7 +222,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         🌐 Ecosystem
       </NavLink>
-      {hasPlatformRole ? (
+      {hasPlatformRole || hasExperimentDelegation ? (
         <NavLink
           href="/dashboard/experiments"
           active={pathname.startsWith("/dashboard/experiments")}

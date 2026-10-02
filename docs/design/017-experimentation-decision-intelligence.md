@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 68 — defect #59 (delegation had an API but no DOOR): the Experiments
+nav link rendered only for platform roles, so org owners/admins — who hold
+real delegated access to their own-org experiments (read, transition, ramp,
+diagnostics, analysis, guardrail events, CSV export) — had no way into the
+console the delegation was built for. The link now also shows for any
+owner/admin org membership (shared my-orgs query), the platform-only tabs
+(Decisions/Promotions/Layers/Holdouts/Metric Explorer) hide for delegated
+operators instead of serving them 403s, and the New-experiment button gates
+on platform admin. Pinned by a delegated-view test. Web 690/690.
+
 Round 67 — post-exp10/exp11 verification battery: live E2E 80/80, hot
 path re-benchmarked at 2.76 ms new / 0.88 ms sticky (the rescoped dedup
 index sits on the write path and cost nothing — slightly faster than the

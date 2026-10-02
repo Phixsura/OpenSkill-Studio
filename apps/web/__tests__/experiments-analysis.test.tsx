@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ experimentId: "E".repeat(26) }),
   useSearchParams: () => new URLSearchParams(),
 }));
+vi.mock("@/lib/use-me", () => ({ usePlatformAdmin: () => true }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import AnalysisPage from "@/app/(dashboard)/dashboard/experiments/[experimentId]/analysis/page";

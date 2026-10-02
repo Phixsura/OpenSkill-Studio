@@ -12,6 +12,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/experiments/new",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
 }));
+vi.mock("@/lib/use-me", () => ({ usePlatformAdmin: () => true }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import NewExperimentPage from "@/app/(dashboard)/dashboard/experiments/new/page";

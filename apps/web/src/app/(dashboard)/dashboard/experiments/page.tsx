@@ -8,6 +8,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
+import { usePlatformAdmin } from "@/lib/use-me";
 import { EmptyState, ErrorBanner, ExperimentsNav, Pill } from "./components";
 import {
   EXPERIMENT_DOMAINS,
@@ -27,6 +28,7 @@ export default function ExperimentsPage() {
 }
 
 function ExperimentsInner() {
+  const isPlatformAdmin = usePlatformAdmin();
   const router = useRouter();
   const params = useSearchParams();
   const [status, setStatusState] = useState(params.get("status") ?? "");
@@ -86,12 +88,14 @@ function ExperimentsInner() {
       <ExperimentsNav />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Experiments</h1>
-        <Link
-          href="/dashboard/experiments/new"
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
-        >
-          New experiment
-        </Link>
+        {isPlatformAdmin ? (
+          <Link
+            href="/dashboard/experiments/new"
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+          >
+            New experiment
+          </Link>
+        ) : null}
       </div>
       <ErrorBanner message={error} />
       <div className="flex flex-wrap gap-3">

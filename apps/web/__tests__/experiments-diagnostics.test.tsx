@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   useParams: () => ({ experimentId: "E".repeat(26) }),
 }));
+vi.mock("@/lib/use-me", () => ({ usePlatformAdmin: () => true }));
 vi.mock("@/lib/api", () => ({ apiWithAuth: vi.fn(), ApiError: class extends Error {} }));
 
 import AssignmentsPage from "@/app/(dashboard)/dashboard/experiments/[experimentId]/assignments/page";
