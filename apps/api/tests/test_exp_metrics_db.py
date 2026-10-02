@@ -2075,11 +2075,17 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
 
     now = datetime.now(UTC)
     due = await _scheduled(now - timedelta(minutes=5))
+    boundary = await _scheduled(now)  # start_at == now exactly (<= edge)
     future = await _scheduled(now + timedelta(days=1))
     manual = await _scheduled(None)
 
+    # the passed clock is authoritative — a PAST now launches nothing
+    assert await sweep_experiment_starts(db, now=now - timedelta(days=30)) == 0
+    assert (await db.get(Experiment, due.id)).status == "scheduled"
+
     started = await sweep_experiment_starts(db, now=now)
-    assert started >= 1
+    assert started == 2  # due + the exact <= boundary, each counted once
+    assert (await db.get(Experiment, boundary.id)).status == "running"
     assert (await db.get(Experiment, due.id)).status == "running"
     assert (await db.get(Experiment, due.id)).started_at is not None
     assert (await db.get(Experiment, future.id)).status == "scheduled"
