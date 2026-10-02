@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 71 — mutation wave 14 over the analysis sweep: 14/16 killed, 2
+float-exact boundary equivalents ledgered. The instructive survivor: an
+Or->And mutant crashed inside the notification SHIELD and the shield
+swallowed the crash — a fail-safe wrapper hides mutants just like it hides
+bugs, so the significance unpack moved outside it (only the genuinely
+additive write stays shielded).
+
 Round 70 — the analyzed-status hint degrades for delegated operators
 (decisions are platform calls; the hint now says to hand the analysis
 result hash to a platform admin instead of pointing at a tab they cannot

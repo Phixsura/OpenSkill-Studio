@@ -64,3 +64,14 @@ sweep_experiment_starts: 4/4 killed after strengthening — a past `now`
 launches nothing (the passed clock is authoritative, killing the
 `now or datetime.now()` flip), start_at == now is the exact <= edge, and
 the return value is pinned to the exact launch count.
+
+## wave14_analysis_sweep.json (round 71)
+
+sweep_experiment_analyses: 14/16 killed. Kills needed the §106.25
+pause-the-residue trick for an exact analyzed count, a balanced no-effect
+experiment (never notifies), a 24.5h-backdated notification (the dedup
+window re-opens), and moving the significance unpack OUT of the notify
+shield (an Or->And mutant crashed there and the shield swallowed the crash
+— shields hide mutants; keep only the genuinely-additive write inside).
+Ledgered equivalents: p < alpha at float-exact p == 0.05, and the dedup
+cutoff's >= at a float-exact timestamp — both unconstructible.
