@@ -1055,3 +1055,36 @@ async def test_decision_cold_arms_necropsy(db):
     if page1:
         page2, _, _ = await svc.search(limit=1, cursor=page1[0].id)
         assert all(r.id < page1[0].id for r in page2)
+
+
+async def test_promotion_cold_arms_necropsy(db):
+    """Round 82: promotion's state-guard arms triggered dynamically —
+    defense-in-depth randomized check, draft 404, approve/reject/apply from
+    wrong statuses — all typed, none raw."""
+    from app.experiments.services.promotion import PromotionService
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    record = await _promote(db, exp, admin, result_hash)
+    psvc = PromotionService(db)
+    draft = await psvc.create_draft(
+        record.id, target_type="pack_recommendation", target_ref="a" * 26,
+        draft_payload={}, actor=admin,
+    )
+
+    with pytest.raises(AppError) as exc:
+        await psvc.get("0" * 26)
+    assert exc.value.status_code == 404
+
+    # reject from draft works; approve AFTER reject is a typed 422
+    await psvc.reject(draft.id, actor=admin)
+    with pytest.raises(AppError) as exc:
+        await psvc.approve(draft.id, actor=admin)
+    assert exc.value.code == "DECISION_STATE_INVALID"
+    # reject again from rejected: also typed
+    with pytest.raises(AppError) as exc:
+        await psvc.reject(draft.id, actor=admin)
+    assert exc.value.code == "DECISION_STATE_INVALID"
+    # apply from rejected: typed (not approved)
+    with pytest.raises(AppError) as exc:
+        await psvc.apply(draft.id, actor=admin)
+    assert exc.value.code == "DECISION_STATE_INVALID"

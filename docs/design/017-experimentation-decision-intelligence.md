@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 82 — promotion necropsy: the state-guard arms (draft 404,
+approve-after-reject, double-reject, apply-from-rejected) triggered
+dynamically — 94% -> 98%. The three remaining lines are defense-in-depth
+behind earlier gates (the randomized-only check the decision service
+already enforces; the already-applied/in-flight 409s the async-apply tests
+exercise through their own flow) — ledgered.
+
 Round 81 — decisions necropsy: six cold arms triggered dynamically in one
 batch (unknown decision 422, poison stored spec 422, duplicate decision
 typed, get 404, search filters, keyset cursor) — 90% -> 98%. The remaining
