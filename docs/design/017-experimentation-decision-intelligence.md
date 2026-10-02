@@ -1046,6 +1046,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 84 — analysis-service spec arms pinned (dangling current_version
+and corrupted stored spec are both typed 422s, never raw 500s). Necropsy
+triage for the remainder: the corpus-prior and novelty statistical
+sub-branches (per-metric event mining, <30-denominator refusals, the
+continuous welch arm of the early/late split) are exercised partially by
+the dedicated novelty/corpus tests and the pure-core fuzz; forcing the
+rest needs multi-experiment effect-history fixtures with marginal value —
+ledgered. The service-layer necropsy campaign (rounds 74-84) closes with:
+holdouts 99%, decisions/promotion 98%, analysis core 97%, metrics 96%,
+assignment/guardrails/worker/experiments 91-95%, every remaining line
+individually accounted for as defense-in-depth, race fallback, or
+statistical sub-branch.
+
 Round 83 — experiments-service necropsy: the search body (status/domain
 filters, delegation scope list, keyset cursor), list_events, uniform 404s,
 create validations (unknown domain/risk, missing layer, layer-domain

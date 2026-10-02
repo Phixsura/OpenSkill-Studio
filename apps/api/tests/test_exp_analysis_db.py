@@ -1173,3 +1173,37 @@ async def test_auto_analysis_poison_arms_never_stall_the_batch(db, monkeypatch):
     analyzed = await sweep_experiment_analyses(db)
     assert analyzed == 1  # only the healthy one; neither arm stalled the batch
     await db.flush()  # the crash stayed inside its savepoint
+
+
+async def test_analysis_spec_arms_necropsy(db):
+    """Round 84: the analysis _spec arms — a dangling current_version (no
+    matching row) is a typed 422, and a corrupted stored spec is a typed
+    422 parse failure; neither leaks a raw 500."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.models import ExperimentVersion as VersionModel
+
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp, units=6)
+
+    await db.execute(
+        _update(_Exp).where(_Exp.id == exp.id).values(current_version=99)
+    )
+    with pytest.raises(AppError) as exc:
+        await AnalysisService(db).run(exp.id, actor=admin)
+    assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
+    assert "no spec version" in exc.value.message
+
+    await db.execute(
+        _update(_Exp).where(_Exp.id == exp.id).values(current_version=1)
+    )
+    await db.execute(
+        _update(VersionModel)
+        .where(VersionModel.experiment_id == exp.id, VersionModel.version == 1)
+        .values(spec={"hypothesis": "nope"})
+    )
+    with pytest.raises(AppError) as exc:
+        await AnalysisService(db).run(exp.id, actor=admin)
+    assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
+    assert "failed to parse" in exc.value.message
