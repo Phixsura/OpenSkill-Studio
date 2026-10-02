@@ -1027,6 +1027,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 44 — defect #47 (the #41 family, promotion seam): finish_async_apply
+converts a typed adapter failure into a state write ON THE KEPT transaction
+(draft parked back to 'approved' + apply_error) — so any partial writes the
+adapter made before raising would have been committed alongside the parking.
+Today's adapters are single-create (audited: matching_config, learning_path,
+workflow_binding via its own savepoint, eco_rollout through the eco service's
+validate-first create), so the window was latent — but the next adapter
+wouldn't promise that. The validate+apply pair now runs under a savepoint;
+pinned by a write-then-fail-typed adapter test (kill-proven: the unfixed
+branch leaks the partial row). The sync apply path needs nothing — its
+AppError propagates and the request transaction rolls back whole.
+
 Round 43 — defect #46 (snapshot sweep had no catch-up): the windows sweep
 enqueued ONLY yesterday — a worker outage left that day's snapshots missing
 forever, and exposures landing after the sweep (late writers) were never

@@ -261,10 +261,17 @@ class PromotionService:
         if draft.status != "applying":  # racing manual apply/reject won
             return draft
         try:
-            await self._validate_target(
-                draft.target_type, draft.target_ref, draft.draft_payload
-            )
-            applied_ref = await self._apply_adapter(draft, actor)
+            # Defect #47 (the #41 family): the typed-failure branch below
+            # KEEPS the transaction and writes draft state into it — so any
+            # partial writes an adapter made before raising must be confined
+            # to a savepoint, or they'd be committed alongside the 'approved'
+            # parking. Today's adapters are single-create, but the next one
+            # won't promise that.
+            async with self.db.begin_nested():
+                await self._validate_target(
+                    draft.target_type, draft.target_ref, draft.draft_payload
+                )
+                applied_ref = await self._apply_adapter(draft, actor)
         except AppError as exc:
             draft.status = "approved"
             draft.apply_error = f"{exc.code}: {exc.message}"

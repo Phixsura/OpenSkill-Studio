@@ -850,6 +850,46 @@ async def test_async_apply_success_lands_applied_ref(db):
     assert new_path.status == ContentStatus.DRAFT
 
 
+async def test_typed_apply_failure_discards_partial_adapter_writes(db, monkeypatch):
+    """Defect #47 (the #41 family): the typed-failure branch keeps the
+    transaction and parks the draft back to 'approved' — so partial writes
+    an adapter made BEFORE raising must roll back to the savepoint, never
+    ride along with the parking. Pinned with an adapter that writes a row
+    and then fails typed."""
+    from ulid import ULID as _ULID
+
+    from app.exceptions import AppError as _AppError
+    from app.experiments.services.promotion import PromotionService
+    from app.experiments.worker import handle_apply_promotion
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    marker_email = f"partial-{_ULID()}@example.com"
+
+    async def _write_then_fail(self, draft, actor):
+        self.db.add(_User(email=marker_email, display_name="P",
+                          role=_Role.STUDENT, status=_Status.ACTIVE))
+        await self.db.flush()
+        raise _AppError("EXPERIMENT_PROMOTION_UNWIRED", "typed failure after write", 422)
+
+    monkeypatch.setattr(PromotionService, "_apply_adapter", _write_then_fail)
+
+    draft, admin, psvc = await _approved_draft(db)
+    await psvc.apply_async(draft.id, actor=admin)
+    await handle_apply_promotion(db, {"draft_id": draft.id, "actor_user_id": admin.id})
+    row = await psvc.get(draft.id)
+    assert row.status == "approved"
+    assert row.apply_error and "typed failure after write" in row.apply_error
+    # the partial adapter write is GONE
+    from sqlalchemy import select as _select
+
+    leaked = (
+        await db.execute(_select(_User.id).where(_User.email == marker_email))
+    ).scalar_one_or_none()
+    assert leaked is None
+
+
 async def test_async_handler_skips_when_race_already_resolved(db):
     """A racing manual path that already moved the draft out of 'applying'
     wins; the handler is a no-op (idempotent at-least-once delivery)."""
