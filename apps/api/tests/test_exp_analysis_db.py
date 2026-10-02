@@ -943,3 +943,27 @@ async def test_concurrent_of_analyses_cannot_overspend_looks(db):
 
             await session.execute(delete(_User).where(_User.id == admin_id))
             await session.commit()
+
+
+async def test_power_block_and_underpowered_warning(db):
+    """Round 46: a spec with a power target gets a payload power block from
+    the OBSERVED control baseline — a 40-unit experiment against a 20%% MDE
+    target is deeply underpowered, so SAMPLE_BELOW_POWER_TARGET must fire
+    and powered must be False. A spec without power declares nothing."""
+    exp, admin = await _mk_running(
+        db, power={"mde": 0.20, "alpha": 0.05, "power": 0.8}
+    )
+    await _populate(db, exp)
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    block = result["power"]
+    assert block["metric_key"] == "exposure_rate"
+    assert block["required_n_per_arm"] > block["min_arm_n"] > 0
+    assert block["powered"] is False
+    assert "SAMPLE_BELOW_POWER_TARGET" in result["warnings"]
+    assert 0 < block["baseline_rate"] < 1
+
+    plain_exp, plain_admin = await _mk_running(db)
+    await _populate(db, plain_exp)
+    plain = await AnalysisService(db).run(plain_exp.id, actor=plain_admin)
+    assert "power" not in plain
+    assert "SAMPLE_BELOW_POWER_TARGET" not in plain["warnings"]

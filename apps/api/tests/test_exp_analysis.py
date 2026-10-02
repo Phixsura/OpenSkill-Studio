@@ -720,3 +720,23 @@ def test_did_estimate_totality():
     result = did_estimate(flat, flat)
     assert result["effect"] == 0.0
     assert result["p"] is None
+
+
+def test_required_n_per_arm_known_value_and_monotonicity():
+    """Round 46: two-proportion sample size. Classic worked example —
+    baseline 10%, relative MDE 20% (10% -> 12%), alpha .05, power .8 —
+    lands near the textbook ~3,8xx per arm; exact integer ledgered from the
+    formula itself (normal approximation, pooled-H0/unpooled-H1)."""
+    from app.experiments.services.analysis import required_n_per_arm
+
+    n = required_n_per_arm(0.10, 0.20)
+    assert 3600 < n < 4100
+    assert n == required_n_per_arm(0.10, 0.20)  # deterministic
+    # more power -> more units; bigger MDE -> fewer; stricter alpha -> more
+    assert required_n_per_arm(0.10, 0.20, power=0.9) > n
+    assert required_n_per_arm(0.10, 0.40) < n
+    assert required_n_per_arm(0.10, 0.20, alpha=0.01) > n
+    # degenerate inputs refuse instead of lying
+    assert required_n_per_arm(0.0, 0.2) is None
+    assert required_n_per_arm(0.9, 0.2) is None   # lifted rate >= 1
+    assert required_n_per_arm(0.5, 0.0) is None   # no difference to detect

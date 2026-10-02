@@ -581,6 +581,50 @@ class AnalysisService:
                 warnings.append("NOVELTY_EFFECT_DECAY_SUSPECT")
                 break
 
+        # Design-time power vs reality (§4.13 v3): when the spec declares a
+        # power target, compute the required n per arm from the OBSERVED
+        # control baseline of the first binary primary metric and compare it
+        # with the smallest arm. An underpowered read gets a health warning —
+        # a "no effect" conclusion below the target is not evidence of
+        # absence.
+        power_block = None
+        if spec.power is not None:
+            for key in spec.metrics.primary:
+                entry = metrics_out.get(key)
+                # binary AND rate are both proportion-shaped (numerator /
+                # denominator) — the two-proportion formula applies to both
+                if not entry or entry.get("kind") not in ("binary", "rate"):
+                    continue
+                aggregated, _ = await self._aggregate_metric(
+                    experiment_id, key, segment=segment or ""
+                )
+                control_arm = aggregated.get(control_key)
+                if not control_arm or not control_arm.get("denominator"):
+                    continue
+                baseline = control_arm["numerator"] / control_arm["denominator"]
+                required = stats.required_n_per_arm(
+                    baseline, spec.power.mde,
+                    alpha=spec.power.alpha, power=spec.power.power,
+                )
+                if required is None:
+                    continue
+                min_arm_n = min(
+                    int(arm.get("denominator") or 0) for arm in aggregated.values()
+                )
+                power_block = {
+                    "metric_key": key,
+                    "baseline_rate": baseline,
+                    "mde": spec.power.mde,
+                    "alpha": spec.power.alpha,
+                    "power": spec.power.power,
+                    "required_n_per_arm": required,
+                    "min_arm_n": min_arm_n,
+                    "powered": min_arm_n >= required,
+                }
+                if min_arm_n < required:
+                    warnings.append("SAMPLE_BELOW_POWER_TARGET")
+                break
+
         if spec.analysis_type == "observational":
             # Quasi-experiment support (§10 v2): where per-unit pre-period
             # covariates exist, attach a DiD change-score estimate. Still an
@@ -664,6 +708,8 @@ class AnalysisService:
         }
         if payload_bandit is not None:
             payload["bandit"] = payload_bandit
+        if power_block is not None:
+            payload["power"] = power_block
         if not causal:
             payload["caveat"] = (
                 "Observational analysis — associations only; no causal claim "

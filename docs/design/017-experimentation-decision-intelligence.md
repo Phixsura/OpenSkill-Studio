@@ -1027,6 +1027,22 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 46 — mutation wave 11 over the savepoint/lock fixes (12/12 killed, 0
+survivors; facade/_shield yielded 0 mutants — try/except/async-with shapes
+are outside the harness's operators and are held by the kill-proven defect
+pins instead), and the DESIGN-TIME POWER gap closed (industry parity:
+Statsig/Eppo both surface required-vs-actual sample size). New pure
+`required_n_per_arm(baseline, mde_rel, alpha, power)` — classic
+two-proportion normal approximation, pooled under H0 / unpooled under H1,
+mde RELATIVE to baseline, degenerate inputs -> None. Full analyses whose
+spec declares a power target now attach a `power` block computed from the
+OBSERVED control baseline of the first proportion-shaped (binary OR rate)
+primary metric: required_n_per_arm vs min arm n, powered flag, and the
+SAMPLE_BELOW_POWER_TARGET health warning when short — a "no effect" read
+below target is not evidence of absence. Console analysis page renders a
+Powered/Underpowered banner. Textbook check pinned: baseline 10%,
+relative MDE 20%, alpha .05, power .8 -> ~3.8k units/arm.
+
 Round 45 — defect #48 (look-budget race, alpha overspend): the sequential
 look budget was read-count-then-insert with NO lock — two concurrent full
 analyses at the last O'Brien-Fleming look both saw used=N, both passed the

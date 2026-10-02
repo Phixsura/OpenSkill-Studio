@@ -475,6 +475,28 @@ def msprt_always_valid_p(z: float, tau: float = 1.0) -> float:
     return min(1.0, math.exp(-log_lr))
 
 
+def required_n_per_arm(
+    baseline_rate: float, mde_rel: float, *, alpha: float = 0.05, power: float = 0.8
+) -> int | None:
+    """Two-proportion sample size per arm (design-time power, §4.13 v3):
+    classic normal approximation with pooled variance under H0 and unpooled
+    under H1. mde is a RELATIVE lift on the baseline (the industry
+    convention). None for degenerate inputs (no detectable difference, or a
+    lifted rate outside (0,1))."""
+    p1 = baseline_rate
+    p2 = p1 * (1.0 + mde_rel)
+    if not (0.0 < p1 < 1.0) or not (0.0 < p2 < 1.0) or p1 == p2:
+        return None
+    z_a = norm_ppf(1.0 - alpha / 2.0)
+    z_b = norm_ppf(power)
+    pbar = (p1 + p2) / 2.0
+    numerator = (
+        z_a * math.sqrt(2.0 * pbar * (1.0 - pbar))
+        + z_b * math.sqrt(p1 * (1.0 - p1) + p2 * (1.0 - p2))
+    ) ** 2
+    return math.ceil(numerator / (p1 - p2) ** 2)
+
+
 def obrien_fleming_boundary(look: int, max_looks: int, alpha: float = 0.05) -> float:
     """Classic OF approximation: z-boundary at look k of K is
     z_{alpha/2}·sqrt(K/k) — very conservative early, nominal at the end."""

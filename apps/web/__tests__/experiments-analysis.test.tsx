@@ -139,6 +139,27 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
 });
 
 describe("Bandit suggestion banner", () => {
+  it("renders the power banner for an underpowered read", async () => {
+    api.mockResolvedValue(
+      analysisPayload({
+        power: {
+          metric_key: "exposure_rate",
+          baseline_rate: 0.5,
+          mde: 0.2,
+          required_n_per_arm: 392,
+          min_arm_n: 20,
+          powered: false,
+        },
+        warnings: ["SAMPLE_BELOW_POWER_TARGET"],
+      }),
+    );
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/Underpowered/)).toBeTruthy();
+    expect(screen.getByText(/20 \/ 392 units per arm/)).toBeTruthy();
+    expect(screen.getByText(/SAMPLE_BELOW_POWER_TARGET/)).toBeTruthy();
+  });
+
   it("renders advisory weights and p(best)", async () => {
     api.mockResolvedValue(
       analysisPayload({

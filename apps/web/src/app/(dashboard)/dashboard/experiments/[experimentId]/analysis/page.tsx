@@ -45,6 +45,14 @@ interface AnalysisResult {
     suggested_weights_bp: Record<string, number>;
   };
   warnings: string[];
+  power?: {
+    metric_key: string;
+    baseline_rate: number;
+    mde: number;
+    required_n_per_arm: number;
+    min_arm_n: number;
+    powered: boolean;
+  };
   result_hash: string;
   metrics: Record<
     string,
@@ -161,6 +169,21 @@ export default function AnalysisPage() {
               {Object.entries(result.bandit.p_best)
                 .map(([k, v]) => `${k} ${(v * 100).toFixed(1)}%`)
                 .join(" / ")}
+            </div>
+          ) : null}
+          {result.power ? (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                result.power.powered
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : "border-amber-200 bg-amber-50 text-amber-900"
+              }`}
+            >
+              <strong>{result.power.powered ? "Powered" : "Underpowered"}</strong> on{" "}
+              {result.power.metric_key}: {result.power.min_arm_n.toLocaleString()} /{" "}
+              {result.power.required_n_per_arm.toLocaleString()} units per arm (baseline{" "}
+              {(result.power.baseline_rate * 100).toFixed(1)}%, MDE{" "}
+              {(result.power.mde * 100).toFixed(0)}% relative)
             </div>
           ) : null}
           {result.warnings.map((w) => (
