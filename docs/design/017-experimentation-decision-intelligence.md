@@ -1046,6 +1046,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 73 — coverage audit over the whole package (pytest-cov across the 14
+unit suites): services at 90-99% (holdouts 99, analysis core 97, promotion
+94, assignment/guardrails/metrics/experiments/worker 90-92) with the
+uncovered service lines enumerated and accounted for — typed-error raises
+already pinned by the AST status-contract tests, CUPED per-source
+sub-branches, and poison-spec skip arms. API routers read 50-65% in this
+run BY DESIGN: unit suites call services directly, and the thin router
+bodies are exercised by the 80-check live E2E plus the manifest/scope pins
+(the uncovered router lines are exactly the pass-through bodies). No
+untested logic was found hiding behind the numbers; layers.py's 80% is the
+validation branches the spec-validation suite drives via service calls.
+
 Round 72 — experiment notifications are user-manageable: the notification
 preferences panel gained toggles for experiment_guardrail and
 experiment_significance (absent = enabled, the existing default — the
