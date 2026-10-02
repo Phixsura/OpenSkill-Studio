@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 97 — the layer A/A hash-health probe reaches the console: a per-layer
+Probe action on the Layers page renders chi-squared, p and the
+healthy/SUSPECT verdict inline (the API's own healthy flag at the 0.001
+threshold). The Layers page also gained its missing behavior tests (the
+second uncovered console page the campaign found). Web 697/697.
+
 Round 96 — guardrail/incident history CSV export (the metrics export's
 sibling): GET /{id}/guardrails/events/export under the same delegated read
 scope and uniform 404; system-set key columns only, the free-form detail

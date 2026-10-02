@@ -27,6 +27,12 @@ export default function LayersPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState({ key: "", domain: "learning" });
   const [alloc, setAlloc] = useState({ experiment_id: "", slice_start: "0", slice_end: "9999" });
+  const [probe, setProbe] = useState<{
+    layer: string;
+    chi2: number;
+    p: number;
+    healthy: boolean;
+  } | null>(null);
 
   const layers = useQuery({
     queryKey: ["experiment-layers"],
@@ -124,10 +130,33 @@ export default function LayersPage() {
                 >
                   {layer.key} <span className="text-xs text-slate-500">({layer.domain})</span>
                 </button>
+                <button
+                  type="button"
+                  className="ml-2 rounded-md border px-2 py-0.5 text-xs"
+                  onClick={async () => {
+                    try {
+                      const res = await apiWithAuth<{
+                        data: { chi2: number; p: number; healthy: boolean };
+                      }>(`/experiments/layers/${layer.key}/aa-probe`);
+                      setProbe({ layer: layer.key, ...res.data });
+                      setError(null);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : "Probe failed");
+                    }
+                  }}
+                >
+                  A/A probe
+                </button>
               </li>
             ))}
           </ul>
         )}
+        {probe ? (
+          <p className="mt-2 text-xs text-slate-600" data-testid="aa-probe-result">
+            {probe.layer}: χ² {probe.chi2.toFixed(2)}, p = {probe.p.toFixed(4)}{" "}
+            {probe.healthy ? "— hash healthy" : "— hash health SUSPECT"}
+          </p>
+        ) : null}
       </SectionCard>
       {selected ? (
         <SectionCard title={`Allocations in ${selected}`}>
