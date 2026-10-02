@@ -159,6 +159,16 @@ export default function ExperimentDetailPage() {
             <dt className="text-xs text-slate-500">Holdout</dt>
             <dd>{fmtPct(experiment.holdout_bp)}</dd>
           </div>
+          {experiment.status === "scheduled" ? (
+            <div>
+              <dt className="text-xs text-slate-500">Auto-starts</dt>
+              <dd>
+                {experiment.start_at
+                  ? new Date(experiment.start_at).toLocaleString()
+                  : "manual start"}
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs text-slate-500">Started</dt>
             <dd>{fmtDate(experiment.started_at)}</dd>

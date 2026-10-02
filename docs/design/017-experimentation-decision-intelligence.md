@@ -1046,6 +1046,9 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 65 — the detail page shows a scheduled experiment's Auto-starts time
+(or "manual start"). Web 689/689.
+
 Round 64 — defect #58 (SEVERE: shared dedup keys swallowed other units'
 exposures): the dedup unique index was (experiment_id, dedup_key) — but
 idempotency is a PER-ASSIGNMENT contract. Any two units sharing a natural

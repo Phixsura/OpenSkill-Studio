@@ -120,6 +120,13 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     });
   });
 
+  it("scheduled status shows the auto-start time or 'manual start'", async () => {
+    mockApiFor("scheduled");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Auto-starts")).toBeTruthy();
+    expect(screen.getByText("manual start")).toBeTruthy();
+  });
+
   it("flags a running experiment whose guardrails were never checked", async () => {
     mockApiFor("running");
     render(<ExperimentDetailPage />, { wrapper: wrapper() });
