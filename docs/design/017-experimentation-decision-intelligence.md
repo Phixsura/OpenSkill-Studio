@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 88 — the residue crossed 500 and took out the OTHER three
+bounded-batch credits tests the #86 audit had reasoned were fine (they
+construct their own stale rows, which now sort behind 501 residue rows and
+miss the batch entirely). One-time cleanup released the 501 debris rows,
+and all three tests gained the §106.25 guard — including the committed-
+session variant, where the push-out persists and doubles as cleanup. The
+#86 audit's miss is itself the lesson: reasoning "the test's rows sort
+first" only holds for ORDERINGS the test controls; stale-window membership
+is global state, and every bounded-batch test needs the guard regardless.
+
 Round 87 — the standing scorecard (industry parity: results persist on the
 experiment page, not just in the last response): GET
 /experiments/{id}/analysis/latest reads the newest analysis_look from the
