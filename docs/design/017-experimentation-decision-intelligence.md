@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 61 — mutation wave 13 over the start sweep: 4/4 killed after
+strengthening (a past `now` launches nothing — the passed clock is
+authoritative; start_at == now is the exact <= edge; exact launch count
+pinned). Live E2E 80 checks with the start_at echo.
+
 Round 60 — scheduled auto-start (exp10, the gap #55 the status name
 promised): 'scheduled' used to mean launch-checked-awaiting-a-human.
 start_at is an optional column (NULL = the old manual behavior, unchanged);

@@ -57,3 +57,10 @@ n exactly 2 on the continuous gate, bp sitting exactly ON a member's roll,
 and a time_to_event definition proving unknown kinds compute no comparison.
 Deflake lesson: a searched bp must have at least one roll strictly below it
 or the held side is empty and carries no numerator key.
+
+## wave13_start_sweep.json (round 61)
+
+sweep_experiment_starts: 4/4 killed after strengthening — a past `now`
+launches nothing (the passed clock is authoritative, killing the
+`now or datetime.now()` flip), start_at == now is the exact <= edge, and
+the return value is pinned to the exact launch count.
