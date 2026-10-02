@@ -425,11 +425,11 @@ async def sweep_experiment_analyses(
         ).scalar_one()
         if already:
             continue
+        metric_key, variant_key, p = significant[0]
         try:
             from app.services.notification import NotificationService
 
             async with db.begin_nested():  # the #42 law: additive, confined
-                metric_key, variant_key, p = significant[0]
                 await NotificationService(db).create(
                     user_id=owner_user_id,
                     notification_type="experiment_significance",
