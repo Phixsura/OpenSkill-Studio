@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 62 — defect #56 (scheduling timezone ambiguity): a NAIVE start_at
+was accepted and stored as interpreted by the DB session's TimeZone — the
+same request could start an experiment hours apart across deployments (the
+console always sends Z; direct API callers could not be sure). Naive now
+means UTC, deterministically, normalized at the service boundary; pinned by
+a naive-scheduled experiment that stores tz-aware and launches on the UTC
+clock. (Shadowing lesson recurs: a function-local `from datetime import
+UTC` makes UTC local to the WHOLE function — UnboundLocalError at earlier
+uses.)
+
 Round 61 — mutation wave 13 over the start sweep: 4/4 killed after
 strengthening (a past `now` launches nothing — the passed clock is
 authoritative; start_at == now is the exact <= edge; exact launch count

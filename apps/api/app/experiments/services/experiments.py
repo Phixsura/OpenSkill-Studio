@@ -385,7 +385,12 @@ class ExperimentService:
             )
         if to_status == "scheduled":
             await self._check_schedule_preconditions(exp, actor, checklist)
-            # exp10: an optional auto-start time; the start sweep launches it
+            # exp10: an optional auto-start time; the start sweep launches it.
+            # Defect #56: a NAIVE datetime here is interpreted by the DB
+            # session's TimeZone — the same request could start hours apart
+            # across deployments. Naive means UTC, deterministically.
+            if start_at is not None and start_at.tzinfo is None:
+                start_at = start_at.replace(tzinfo=UTC)
             exp.start_at = start_at
         now = datetime.now(UTC)
         from_status = exp.status

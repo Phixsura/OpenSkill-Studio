@@ -2074,6 +2074,12 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
         return exp
 
     now = datetime.now(UTC)
+    # Defect #56: a NAIVE start_at means UTC deterministically — never the
+    # DB session's TimeZone
+    naive_due = await _scheduled((now - timedelta(minutes=5)).replace(tzinfo=None))
+    stored = (await db.get(Experiment, naive_due.id)).start_at
+    assert stored is not None and stored.utcoffset() is not None
+
     due = await _scheduled(now - timedelta(minutes=5))
     boundary = await _scheduled(now)  # start_at == now exactly (<= edge)
     future = await _scheduled(now + timedelta(days=1))
@@ -2084,7 +2090,8 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
     assert (await db.get(Experiment, due.id)).status == "scheduled"
 
     started = await sweep_experiment_starts(db, now=now)
-    assert started == 2  # due + the exact <= boundary, each counted once
+    assert started == 3  # naive_due + due + the exact <= boundary, once each
+    assert (await db.get(Experiment, naive_due.id)).status == "running"
     assert (await db.get(Experiment, boundary.id)).status == "running"
     assert (await db.get(Experiment, due.id)).status == "running"
     assert (await db.get(Experiment, due.id)).started_at is not None
