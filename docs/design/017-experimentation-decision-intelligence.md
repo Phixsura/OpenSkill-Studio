@@ -1027,6 +1027,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 50 — builder gains the optional power target (MDE %, defaults alpha
+.05 / power .8): filled, the spec carries power.mde and every analysis
+reports required-vs-actual; blank, no power block is sent (both paths
+pinned). PR #47's body refreshed with the rounds 26–49 record. Web 682/682.
+
 Round 49 — console surfaces guardrail freshness: the detail page shows
 last_guardrail_check_at, and a RUNNING experiment that has never been
 checked renders an amber "never — sweep pending" flag — the operator-visible

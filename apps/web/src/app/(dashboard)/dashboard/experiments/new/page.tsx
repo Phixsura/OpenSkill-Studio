@@ -60,6 +60,7 @@ export default function NewExperimentPage() {
     design: "parallel",
     allocation_mode: "fixed",
     segment_org: false,
+    power_mde_pct: "",
     switchback_window_minutes: "1440",
     switchback_washout_minutes: "0",
   });
@@ -121,6 +122,9 @@ export default function NewExperimentPage() {
           design: spec.design,
           allocation_mode: spec.allocation_mode,
           ...(spec.segment_org && spec.unit_type === "user" ? { segments: ["org"] } : {}),
+          ...(spec.power_mde_pct.trim()
+            ? { power: { mde: Number(spec.power_mde_pct) / 100 } }
+            : {}),
           ...(spec.design === "switchback"
             ? {
                 switchback: {
@@ -446,6 +450,21 @@ export default function NewExperimentPage() {
                 onChange={(e) => setSpec({ ...spec, guardrail_window_hours: e.target.value })}
               />
             </div>
+          </div>
+          <div>
+            <label className={label} htmlFor="exp-mde">
+              Power target — MDE % (optional)
+            </label>
+            <input
+              id="exp-mde"
+              className={input}
+              placeholder="e.g. 20 = detect a 20% relative lift"
+              value={spec.power_mde_pct}
+              onChange={(e) => setSpec({ ...spec, power_mde_pct: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Analyses will compare required vs actual sample size (alpha 0.05, power 0.8).
+            </p>
           </div>
         </div>
       </SectionCard>

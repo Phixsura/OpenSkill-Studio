@@ -102,4 +102,43 @@ describe("Segment opt-in (v2 §4.8)", () => {
     const body = JSON.parse(String(call?.[1]?.body));
     expect(body.spec.segments).toEqual(["org"]);
   });
+
+  it("sends power.mde when the MDE field is filled and omits it when blank", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (path === "/experiments") return { data: { id: "E".repeat(26) } };
+      return { data: [] };
+    });
+    render(<NewExperimentPage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByLabelText(/Power target/), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("Hypothesis"), {
+      target: { value: "power target rides the spec" },
+    });
+    fireEvent.click(screen.getByText(/Create experiment/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).endsWith("/versions"))).toBe(true),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/versions"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    expect(body.spec.power).toEqual({ mde: 0.2 });
+  });
+
+  it("omits power entirely when the MDE field is blank", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (path === "/experiments") return { data: { id: "E".repeat(26) } };
+      return { data: [] };
+    });
+    render(<NewExperimentPage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByLabelText("Hypothesis"), {
+      target: { value: "no power target means no block" },
+    });
+    fireEvent.click(screen.getByText(/Create experiment/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).endsWith("/versions"))).toBe(true),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/versions"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    expect(body.spec.power).toBeUndefined();
+  });
 });
