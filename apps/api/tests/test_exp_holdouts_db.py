@@ -835,3 +835,48 @@ async def test_holdout_group_excludes_switchback_enrollment_too(db):
         experiment_key=exp.key, unit_type="user", unit_id=nonmember
     )
     assert served is not None and served.variant_key in ("control", "treatment")
+
+
+async def test_holdout_group_report_splits_and_compares(db):
+    """Round 54 (§4.12 v2 — the measurement the groups exist for): the
+    report splits a user universe by the group's own membership roll,
+    aggregates the metric per side, and compares. Zero-data populations
+    still report arms; an unsupported source refuses typed."""
+    from app.experiments.services.assignment import holdout_group_roll
+    from app.experiments.services.metrics import MetricService
+
+    await MetricService(db).ensure_seed_definitions()
+    svc = HoldoutGroupService(db)
+    group = await svc.create(
+        key=f"hg-rep-{str(ULID()).lower()}", title="Report", domain="learning",
+        holdout_bp=2000,
+    )
+    # a known universe: users minted here, membership derived by the SAME roll
+    from app.models.user import User, UserRole, UserStatus
+
+    minted = []
+    for i in range(40):
+        u = User(email=f"hrep-{i}-{ULID()}@example.com", display_name=f"H{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        minted.append(u)
+    await db.flush()
+    report = await svc.report(group.id, metric_key="project_approval_rate")
+    assert report["group_key"] == group.key
+    assert report["holdout_units"] + report["general_units"] == report["sampled_units"]
+    assert report["sampled_units"] >= 40
+    # the split is EXACTLY the membership roll, not an independent sample
+    expected_held = sum(
+        1 for u in minted
+        if holdout_group_roll(group.key, "user", u.id) < group.holdout_bp
+    )
+    assert expected_held <= report["holdout_units"]
+    assert set(report["arms"]) == {"holdout", "general"}
+    assert "no single-feature causal claim" in report["caveat"]
+
+    with pytest.raises(AppError) as exc:
+        await svc.report(group.id, metric_key="exposure_rate")
+    assert exc.value.code == "VALIDATION_ERROR"
+    with pytest.raises(AppError) as exc:
+        await svc.report("0" * 26, metric_key="project_approval_rate")
+    assert exc.value.code == "EXPERIMENT_NOT_FOUND"

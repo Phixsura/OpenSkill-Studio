@@ -152,7 +152,7 @@ def test_delegated_surface_manifest_pinned():
         "decisions.py": (0, 9),
         "experiments.py": (6, 2),
         "guardrails.py": (1, 2),
-        "holdouts.py": (0, 3),
+        "holdouts.py": (0, 4),  # round 54: + holdout report (platform admin)
         "layers.py": (0, 5),
         "metrics.py": (2, 3),  # round 47: + CSV export (same read scope)
         "selfserve.py": (0, 0),

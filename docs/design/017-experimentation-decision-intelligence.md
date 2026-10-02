@@ -1027,6 +1027,21 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 54 — global holdout MEASUREMENT lands (§4.12 v2 — the reason the
+groups exist, and until now entirely absent): GET
+/experiments/holdout-groups/{id}/report?metric_key=&window_days= splits a
+capped user universe (20k, org-scoped via OrgMember when the group is) by
+the group's OWN membership roll, aggregates the metric per side through the
+registered source functions (experiment=None — only learning_paths ever
+read the experiment and it already guards), and compares with the same
+engine as experiment analyses (two-proportion for binary/rate, Welch for
+continuous). The report carries an explicit caveat: membership is
+randomized but the "treatment" is every launch since the group started —
+no single-feature causal claim. Sources allowed: the user-unit product set
+only (projects, cost_ledger, evaluations, learning_paths, client_briefs,
+registry); exposures/workflow metrics refuse typed. Platform-admin only;
+holdouts manifest pin (0,4).
+
 Round 53 — defect #50 (retention dead end): promoted/rejected were modeled
 as fully terminal, but §13's prune runs on ARCHIVED experiments only — so a
 promoted experiment's raw exposures could never be deleted and grew forever

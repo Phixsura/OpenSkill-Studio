@@ -1,6 +1,6 @@
 """Global holdout-group endpoints (ADR-017 §4.12 v2). Platform-admin only."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -50,3 +50,18 @@ async def release_holdout_group(
     group = await HoldoutGroupService(db).release(group_id)
     await db.commit()
     return {"data": group}
+
+
+@router.get("/{group_id}/report", response_model=DataResponse[dict])
+async def holdout_group_report(
+    group_id: str,
+    metric_key: str = Query(min_length=3, max_length=64),
+    window_days: int = Query(default=28, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Cross-experiment holdout measurement (§4.12 v2): held-out vs general
+    population on one metric over the window. Read-only."""
+    return {"data": await HoldoutGroupService(db).report(
+        group_id, metric_key=metric_key, window_days=window_days
+    )}
