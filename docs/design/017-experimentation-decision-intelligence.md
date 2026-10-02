@@ -1046,6 +1046,9 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 90 — live E2E grew the scorecard check (the latest-look endpoint
+mirrors the run's result hash, automated=false for a human run): 81 checks.
+
 Round 89 — metric trend sparklines (industry parity: results pages chart
 movement over time): the snapshot page renders a per-variant inline-SVG
 trend above each metric's table — rate (numerator/denominator) or mean

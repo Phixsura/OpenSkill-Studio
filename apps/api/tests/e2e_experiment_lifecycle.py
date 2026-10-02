@@ -304,6 +304,14 @@ async def main() -> int:
         result_hash = r.json()["data"]["result_hash"]
         check("analysis is causal (randomized)", r.json()["data"]["causal_claim"] is True)
 
+        # Round 87: the standing scorecard mirrors the newest look
+        r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
+        check("latest-look scorecard matches the run's hash",
+              r.status_code == 200
+              and (r.json()["data"] or {}).get("result_hash") == result_hash
+              and (r.json()["data"] or {}).get("automated") is False,
+              r.text[:300])
+
         r = await c.post(f"/experiments/{exp_id}/decisions", headers=admin, json={
             "decision": "promote", "summary": "forged-hash attempt over the wire",
             "analysis_result_hash": "0" * 64,
