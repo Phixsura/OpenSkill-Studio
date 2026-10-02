@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 89 — metric trend sparklines (industry parity: results pages chart
+movement over time): the snapshot page renders a per-variant inline-SVG
+trend above each metric's table — rate (numerator/denominator) or mean
+(sum/n) per daily window, whole-population rows only (segment slices
+excluded from the trend), skipped below two usable points. Zero
+dependencies, zero API changes; the page also gained its missing behavior
+tests. Web 693/693.
+
 Round 88 — the residue crossed 500 and took out the OTHER three
 bounded-batch credits tests the #86 audit had reasoned were fine (they
 construct their own stale rows, which now sort behind 501 residue rows and
