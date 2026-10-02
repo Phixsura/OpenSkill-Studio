@@ -919,8 +919,17 @@ async def test_holdout_report_org_scoped_exact_values(db):
 
     # pick bp exactly ON one member's roll — the strict-< boundary unit
     rolls = {u.id: holdout_group_roll(key, "user", u.id) for u in members}
-    boundary = next((r for r in rolls.values() if 1 <= r <= 2000), None)
-    if boundary is None:  # ~0.1% of key draws; widen deterministically
+
+    def _candidate(rs: dict) -> int | None:
+        # a roll in bp range with at least one STRICTLY smaller roll below it
+        # (otherwise the held side is empty and the arms carry no numerator)
+        values = sorted(rs.values())
+        return next(
+            (r for r in values if 1 <= r <= 2000 and values[0] < r), None
+        )
+
+    boundary = _candidate(rolls)
+    if boundary is None:  # rare key draw; widen deterministically
         extra = [
             User(email=f"repx-{i}-{ULID()}@example.com", display_name="RX",
                  role=UserRole.STUDENT, status=UserStatus.ACTIVE)
@@ -934,7 +943,8 @@ async def test_holdout_report_org_scoped_exact_values(db):
         await db.flush()
         members.extend(extra)
         rolls = {u.id: holdout_group_roll(key, "user", u.id) for u in members}
-        boundary = next(r for r in rolls.values() if 1 <= r <= 2000)
+        boundary = _candidate(rolls)
+        assert boundary is not None, sorted(rolls.values())
     bp = boundary
 
     svc = HoldoutGroupService(db)
