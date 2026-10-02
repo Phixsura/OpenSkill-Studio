@@ -1046,6 +1046,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 76 — cold-branch necropsy on assignment.py: five honestly-reachable
+branches pinned in one batch (org-scope mismatch reason, missing-allocation
+reason, unknown-key exposure False, holdout tally in assignment_stats, and
+a non-serving switchback status). Two remain as ledgered defense: the
+assignment-write-lost 500 (requires the ON CONFLICT insert and the
+re-select to BOTH miss — a torn-write race the lock architecture excludes)
+and the switchback non-serving elif that _load_or_none's status filter
+already short-circuits. The exp suite crossed 500 tests.
+
 Round 75 — necropsy continues on the analysis sweep's defensive arms: a
 stored unparseable spec and a crashing analysis (a real statement error on
 the shared session) each skip their experiment while the batch continues —

@@ -850,3 +850,88 @@ async def test_facade_record_exposure_exception_arm(db, monkeypatch):
         db, experiment_key=exp.key, unit_type="user", unit_id="exc-arm"
     ) is False
     await db.flush()  # session not poisoned
+
+
+async def test_assignment_cold_branches_necropsy(db):
+    """Round 76 (necropsy batch): the compute/resolve branches the suites
+    never touched — org-scope mismatch, missing layer allocation, unknown-key
+    exposure, holdout tally in assignment_stats, and a non-serving
+    switchback status."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    # org-scoped experiment + WRONG org context -> ineligible with reason
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="scope", slug=f"sc-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    svc = ExperimentService(db)
+    scoped = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="S", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id, scope_org_id=org.id,
+    )
+    await svc.create_version(scoped.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=scoped.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(scoped.id, to_status="review", actor=admin)
+    await svc.transition(scoped.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    await svc.transition(scoped.id, to_status="running", actor=admin)
+    await svc.set_ramp(scoped.id, ramp_bp=10_000, actor=admin)
+    asvc = AssignmentService(db)
+    wrong = await asvc.compute(
+        experiment=scoped, unit_type="user", unit_id="necro-1",
+        context={"org_id": "x" * 26},
+    )
+    assert wrong["eligible"] is False
+    assert "org scope" in wrong["reason"]
+
+    # experiment WITHOUT a layer allocation -> ineligible with reason
+    bare_layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    bare = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="B", domain="learning",
+        layer_key=bare_layer.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(bare.id, spec=_spec(), actor=admin)
+    unalloc = await asvc.compute(
+        experiment=bare, unit_type="user", unit_id="necro-2"
+    )
+    assert unalloc["eligible"] is False
+    assert "allocation" in unalloc["reason"]
+
+    # unknown experiment key on the exposure path -> fail-safe False
+    assert await asvc.record_exposure(
+        experiment_key="no-such-experiment", unit_type="user", unit_id="necro-3"
+    ) is False
+
+    # holdout tally: a per-unit holdout unit lands in the holdout counter
+    held_exp, _ = await _mk_running(db, holdout_bp=10_000)
+    r = await asvc.resolve(
+        experiment_key=held_exp.key, unit_type="user", unit_id="necro-4"
+    )
+    assert r is None  # held out
+    stats = await asvc.assignment_stats(held_exp.id)
+    assert stats["holdout"] == 1
+    assert stats["variants"] == {}
+
+    # a non-serving status on the switchback path -> None
+    sb, sb_admin = await _mk_running(db, spec_overrides={
+        "design": "switchback",
+        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+    })
+    await svc.transition(sb.id, to_status="completed", actor=sb_admin)
+    await svc.transition(sb.id, to_status="archived", actor=sb_admin)
+    assert await asvc.resolve(
+        experiment_key=sb.key, unit_type="user", unit_id="necro-5"
+    ) is None
