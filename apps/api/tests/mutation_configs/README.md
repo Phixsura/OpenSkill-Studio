@@ -75,3 +75,10 @@ shield (an Or->And mutant crashed there and the shield swallowed the crash
 — shields hide mutants; keep only the genuinely-additive write inside).
 Ledgered equivalents: p < alpha at float-exact p == 0.05, and the dedup
 cutoff's >= at a float-exact timestamp — both unconstructible.
+
+## wave15_clone_search_scorecard.json (round 95)
+
+clone + list_experiments(q) + latest_look: 12/13 killed. The second-look
+addition killed the limit(1)->limit(2) mutant (scalar_one_or_none explodes
+on two rows). Ledgered equivalent: the list default `limit: int = 50` —
+the default-arg equivalence class this ledger already carries.

@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 95 — mutation wave 15 over clone/search/scorecard: 12/13 killed
+(the second-look test kills the widened-limit mutant via
+scalar_one_or_none; the one survivor is the list's default-arg 50, the
+ledgered equivalence class).
+
 Round 94 — clone and search verified over the wire (85 E2E checks): the
 clone lands as a draft with the source key's copy, text search finds it, a
 bare % is a literal, and clone is platform-walled. The new checks also
