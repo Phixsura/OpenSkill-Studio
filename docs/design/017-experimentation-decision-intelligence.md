@@ -1046,6 +1046,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 64 — defect #58 (SEVERE: shared dedup keys swallowed other units'
+exposures): the dedup unique index was (experiment_id, dedup_key) — but
+idempotency is a PER-ASSIGNMENT contract. Any two units sharing a natural
+key (the dashboard client's per-day key is the same string for every user)
+collided, and the targetless ON CONFLICT DO NOTHING silently dropped every
+unit after the first each day. The server-side hooks never tripped it only
+because their keys happen to embed unit ids. exp11 rescopes the index to
+(assignment_id, dedup_key) — strictly narrower, so existing rows always
+satisfy it; kill-proven by downgrading the index under the two-units-one-key
+test (old: 1 row; fixed: 2). Round 59's client wiring is what exposed the
+latent class — the first real consumer is also the first real adversary.
+
 Round 63 — defect #57 (exposure spam per render): useExperiment's
 recordExposure depended on the whole useMutation RESULT object — a new
 identity every render — so any effect depending on recordExposure re-fired

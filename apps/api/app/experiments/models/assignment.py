@@ -76,9 +76,13 @@ class ExperimentExposure(Base):
 
     __table_args__ = (
         Index("ix_experiment_exposures_exp_occurred", "experiment_id", "occurred_at"),
+        # Defect #58 (exp11): dedup is PER ASSIGNMENT — scoping it to the
+        # experiment made units sharing a natural key (per-day client keys)
+        # collide, and ON CONFLICT silently dropped every unit after the
+        # first each day.
         Index(
             "uq_experiment_exposures_dedup",
-            "experiment_id",
+            "assignment_id",
             "dedup_key",
             unique=True,
             postgresql_where=text("dedup_key IS NOT NULL"),

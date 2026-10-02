@@ -795,3 +795,38 @@ async def test_exposure_stats_carries_last_exposure_at(db):
     )
     stats = await asvc.exposure_stats(exp.id)
     assert isinstance(stats["last_exposure_at"], str)
+
+
+async def test_shared_dedup_key_never_swallows_other_units(db):
+    """Defect #58: dedup is PER ASSIGNMENT. Two units recording with the
+    SAME natural key (the client's per-day key is the same string for every
+    user) must BOTH land; the same unit repeating the key stays one row."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentExposure
+
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    for uid in ("dd-user-a", "dd-user-b"):
+        assert await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=uid
+        ) is not None
+        assert await asvc.record_exposure(
+            experiment_key=exp.key, unit_type="user", unit_id=uid,
+            dedup_key="todo-2026-10-02",
+        )
+    # repeat for one unit — absorbed, not duplicated
+    assert await asvc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="dd-user-a",
+        dedup_key="todo-2026-10-02",
+    )
+    n = (
+        await db.execute(
+            _select(_func.count()).where(
+                ExperimentExposure.experiment_id == exp.id,
+                ExperimentExposure.dedup_key == "todo-2026-10-02",
+            )
+        )
+    ).scalar_one()
+    assert n == 2  # one per unit — the second unit was previously swallowed
