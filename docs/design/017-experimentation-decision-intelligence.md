@@ -1027,6 +1027,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 49 — console surfaces guardrail freshness: the detail page shows
+last_guardrail_check_at, and a RUNNING experiment that has never been
+checked renders an amber "never — sweep pending" flag — the operator-visible
+end of the sweep pipeline (an experiment outside the sweep is exactly the
+unguarded state §9 forbids). Web types gained the three round-48 fields;
+web 680/680.
+
 Round 48 — the #49 class CLOSED by construction: an automated audit of all
 11 (model, response-schema) pairs found three more unserialized columns —
 Experiment.last_guardrail_check_at (an operator freshness signal: a running

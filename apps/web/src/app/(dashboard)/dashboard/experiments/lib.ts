@@ -122,7 +122,9 @@ export interface Experiment {
   started_at: string | null;
   ended_at: string | null;
   analysis_close_at: string | null;
+  last_guardrail_check_at: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface GuardrailEvent {

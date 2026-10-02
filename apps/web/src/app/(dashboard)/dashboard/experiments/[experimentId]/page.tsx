@@ -162,6 +162,22 @@ export default function ExperimentDetailPage() {
             <dt className="text-xs text-slate-500">Analysis closes</dt>
             <dd>{fmtDate(experiment.analysis_close_at)}</dd>
           </div>
+          <div>
+            <dt className="text-xs text-slate-500">Guardrails checked</dt>
+            <dd
+              className={
+                experiment.status === "running" && !experiment.last_guardrail_check_at
+                  ? "text-amber-700"
+                  : undefined
+              }
+            >
+              {experiment.last_guardrail_check_at
+                ? fmtDate(experiment.last_guardrail_check_at)
+                : experiment.status === "running"
+                  ? "never — sweep pending"
+                  : "—"}
+            </dd>
+          </div>
         </dl>
       </SectionCard>
 
