@@ -47,7 +47,13 @@ signature; the original structure-only test never reached the comparison
 branch. Survivors killed by exact-value pins (required_n(0.10, 0.20) == 3841,
 open-interval boundary refusals, org-scoped exact split with bp sitting ON a
 member's roll, per-arm numerator/denominator from real submissions, window
-clamps, typed statuses). Ledgered equivalents: the two lower-bound
-Lt->LtE mutants on required_n (0 < p flips to <= but p1 == p2 then refuses),
-and the report's >=-boundary guards that only differ at impossible zero/cap
-edges.
+clamps, typed statuses). Final ledgered equivalents (49 mutants, 45 killed): the lower-bound
+Lt->LtE mutants on required_n (0 <= p lets p=0 through but the p1 == p2
+guard then refuses — same output), and the report's sample_capped GtE->Gt
+(differs only when the sampled universe is EXACTLY the 20k cap). The
+boundary-kill menagerie that got here: one-sided reports in BOTH directions
+(a second group whose key is searched so both data-bearing users are held),
+n exactly 2 on the continuous gate, bp sitting exactly ON a member's roll,
+and a time_to_event definition proving unknown kinds compute no comparison.
+Deflake lesson: a searched bp must have at least one roll strictly below it
+or the held side is empty and carries no numerator key.
