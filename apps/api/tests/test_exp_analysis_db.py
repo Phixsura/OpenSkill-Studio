@@ -1221,6 +1221,11 @@ async def test_latest_look_scorecard(db):
     latest = await svc.latest_look(exp.id)
     assert latest is not None
     assert latest["result_hash"] == first["result_hash"]
+    # a SECOND look: latest means newest, and exactly one row is read
+    # (a widened limit makes scalar_one_or_none explode on two)
+    second = await svc.run(exp.id, actor=admin)
+    latest2 = await svc.latest_look(exp.id)
+    assert latest2 is not None and latest2["result_hash"] == second["result_hash"]
     assert latest["sequential"] == "msprt"
     assert latest["automated"] is False
     assert "exposure_rate" in latest["primary_effects"]
