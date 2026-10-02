@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 81 — decisions necropsy: six cold arms triggered dynamically in one
+batch (unknown decision 422, poison stored spec 422, duplicate decision
+typed, get 404, search filters, keyset cursor) — 90% -> 98%. The remaining
+pair is the IntegrityError mapping behind the state machine: reaching it
+needs a concurrent decision racing past the status check, the same
+belt-and-braces shape as the holdout 409 — ledgered as the race fallback
+the locked transition normally makes unreachable.
+
 Round 80 — necropsy tail on metrics: the cap_value clamp on latency
 durations (100/300/10000 capped at 500 -> sum 900), the learning_paths
 scope-org JOIN arm (ITT shape preserved: the unit counts with zero scoped

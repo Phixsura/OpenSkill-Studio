@@ -1001,3 +1001,57 @@ async def test_meta_distinguishes_randomized_terminal_and_promoted(db):
     # reject is excluded (And→Or) and promote vs reject counting (Eq→NotEq)
     # both pinned by the ASYMMETRIC 2:1 split
     assert abs(meta["win_rate"] - 2 / 3) < 1e-12
+
+
+async def test_decision_cold_arms_necropsy(db):
+    """Round 81 (dynamic triggers for arms the AST contract pins only
+    statically): unknown decision 422, poison stored spec 422, duplicate
+    decision -> typed IntegrityError mapping, get 404, list filters and
+    keyset cursor."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentVersion as VersionModel
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    svc = DecisionService(db)
+
+    with pytest.raises(AppError) as exc:
+        await svc.create(exp.id, decision="banana", summary="x" * 12,
+                         analysis_result_hash=result_hash, actor=admin)
+    assert exc.value.code == "VALIDATION_ERROR" and exc.value.status_code == 422
+
+    # a second analyzed experiment with a CORRUPTED stored spec
+    exp2, admin2, hash2 = await _mk_analyzed(db)
+    await db.execute(
+        _update(VersionModel)
+        .where(VersionModel.experiment_id == exp2.id, VersionModel.version == 1)
+        .values(spec={"hypothesis": "bad"})
+    )
+    with pytest.raises(AppError) as exc:
+        await svc.create(exp2.id, decision="promote", summary="y" * 12,
+                         analysis_result_hash=hash2, actor=admin2)
+    assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
+
+    # duplicate decision on the same experiment -> typed, never raw 500
+    first = await svc.create(exp.id, decision="reject", summary="z" * 12,
+                             analysis_result_hash=result_hash, actor=admin)
+    assert first.decision == "reject"
+    with pytest.raises(AppError) as exc:
+        await svc.create(exp.id, decision="reject", summary="w" * 12,
+                         analysis_result_hash=result_hash, actor=admin)
+    assert exc.value.code in ("DECISION_STATE_INVALID",
+                              "EXPERIMENT_INVALID_TRANSITION")
+
+    with pytest.raises(AppError) as exc:
+        await svc.get("0" * 26)
+    assert exc.value.status_code == 404
+
+    # list filters + keyset cursor
+    rows, _total, _cur = await svc.search(domain=exp.domain, decision="reject")
+    assert any(r.id == first.id for r in rows)
+    rows2, _, _ = await svc.search(decision="promote")
+    assert all(r.decision == "promote" for r in rows2)
+    page1, _, _ = await svc.search(limit=1)
+    if page1:
+        page2, _, _ = await svc.search(limit=1, cursor=page1[0].id)
+        assert all(r.id < page1[0].id for r in page2)
