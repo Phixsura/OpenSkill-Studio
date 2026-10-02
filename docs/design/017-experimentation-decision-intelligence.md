@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 85 — a certification red outside the exp package, diagnosed to the
+row: the credits expiry-ladder test raced the sweep's bounded oldest-first
+batch (limit 500) against shared-DB residue — at EXACTLY 499 stale held
+rows the test's review hold squeaked in as #500 and its running hold was
+cut at #501, so the 6h extension never ran. Fixed with the §106.25 pattern
+(push residue out of the stale window in-txn; the rollback fixture restores
+it), verified 3x green plus the full credits suite. The residue itself is a
+by-product of weeks of committed-fixture and live-E2E traffic on the shared
+dev DB — the fix makes the test immune to any future accumulation level.
+
 Round 84 — analysis-service spec arms pinned (dangling current_version
 and corrupted stored spec are both typed 422s, never raw 500s). Necropsy
 triage for the remainder: the corpus-prior and novelty statistical

@@ -3145,6 +3145,21 @@ async def test_stale_reservation_expiry_extension_ladder(db):
     await db.flush()
     await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=_actor(user))
     now = datetime.now(UTC)
+    # §106.25 (round 85): the expiry sweep is a bounded oldest-first batch
+    # (limit 500) — committed stale residue in the shared dev DB eventually
+    # crowds OUR three holds out of the batch (observed at exactly 499
+    # residue rows: review squeaked in as #500, running was cut at #501).
+    # Push the residue out of the stale window in-txn; the rollback fixture
+    # restores it.
+    from sqlalchemy import update as _update
+
+    from app.controlplane.models.credit import CreditReservation as _Res
+
+    await db.execute(
+        _update(_Res)
+        .where(_Res.status == "held", _Res.expires_at < now)
+        .values(expires_at=now + timedelta(days=30))
+    )
 
     def _run(status):
         return WorkflowRun(
