@@ -1046,6 +1046,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 67 — post-exp10/exp11 verification battery: live E2E 80/80, hot
+path re-benchmarked at 2.76 ms new / 0.88 ms sticky (the rescoped dedup
+index sits on the write path and cost nothing — slightly faster than the
+3.2/1.0 baseline), Hypothesis fuzz twice green. Segment write volume
+ledgered while at it: worst case ≈ metrics x variants x (1 + 20 org
+slices) x 3 backfill windows of idempotent upserts per experiment-day —
+bounded by the top-20 org cap and the deliberate backfill constant; no
+growth path exists without a spec change.
+
 Round 66 — the #58 class closed by audit: all five ON CONFLICT sites in
 the package were checked against the unique constraint they ride (seed
 definitions on key; snapshot upsert on the window+segment constraint;
