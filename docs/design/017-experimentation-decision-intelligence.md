@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 66 — the #58 class closed by audit: all five ON CONFLICT sites in
+the package were checked against the unique constraint they ride (seed
+definitions on key; snapshot upsert on the window+segment constraint;
+sticky assignments on the unit constraint twice; the exposure dedup on the
+rescoped per-assignment index). A structural pin now asserts the three
+load-bearing idempotency scopes by column list — a future scope widening
+(the #58 shape) fails the build instead of silently swallowing rows.
+
 Round 65 — the detail page shows a scheduled experiment's Auto-starts time
 (or "manual start"). Web 689/689.
 

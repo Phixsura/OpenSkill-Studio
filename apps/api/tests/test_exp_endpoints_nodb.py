@@ -190,3 +190,42 @@ def test_no_model_response_field_drift():
         assert not missing, f"{model.__name__} columns never serialized: {sorted(missing)}"
         extra = fields - cols - allowed_extra.get(schema.__name__, set())
         assert not extra, f"{schema.__name__} fields without columns: {sorted(extra)}"
+
+
+def test_idempotency_scopes_pinned():
+    """Round 66 (the #58 class, closed by audit): every ON CONFLICT rides a
+    unique constraint whose columns ARE the idempotency contract — pin the
+    three load-bearing ones so a scope widening (the #58 shape: experiment-
+    wide dedup swallowing other units) fails the build."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.experiments.models import (
+        ExperimentAssignment,
+        ExperimentExposure,
+        MetricSnapshot,
+    )
+
+    exposure_indexes = {
+        idx.name: [c.name for c in idx.columns]
+        for idx in sa_inspect(ExperimentExposure).local_table.indexes
+    }
+    assert exposure_indexes["uq_experiment_exposures_dedup"] == [
+        "assignment_id", "dedup_key",
+    ]  # per-ASSIGNMENT idempotency (defect #58)
+
+    assignment_uniques = {
+        c.name: [col.name for col in c.columns]
+        for c in sa_inspect(ExperimentAssignment).local_table.constraints
+        if c.name and "unit" in c.name
+    }
+    assert assignment_uniques["uq_experiment_assignments_unit"] == [
+        "experiment_id", "unit_type", "unit_id",
+    ]  # sticky per unit per experiment
+
+    snapshot_uniques = {
+        c.name: [col.name for col in c.columns]
+        for c in sa_inspect(MetricSnapshot).local_table.constraints
+        if c.name and "window" in c.name
+    }
+    cols = snapshot_uniques["uq_experiment_metric_snapshots_window"]
+    assert "segment" in cols and "window_start" in cols  # exp08 slice safety
