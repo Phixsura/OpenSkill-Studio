@@ -58,6 +58,25 @@ export default function HoldoutGroupsPage() {
     ends_at: "",
   });
 
+  const definitions = useQuery({
+    queryKey: ["experiment-metric-definitions"],
+    queryFn: () =>
+      apiWithAuth<{ data: { key: string; spec?: { source?: string } }[] }>(
+        "/experiments/metric-definitions",
+      ),
+  });
+  const reportableSources = new Set([
+    "projects",
+    "cost_ledger",
+    "evaluations",
+    "learning_paths",
+    "client_briefs",
+    "registry",
+  ]);
+  const reportableKeys = (definitions.data?.data ?? [])
+    .filter((d) => reportableSources.has(d.spec?.source ?? ""))
+    .map((d) => d.key);
+
   const groups = useQuery({
     queryKey: ["experiment-holdout-groups"],
     queryFn: () => apiWithAuth<{ data: HoldoutGroup[] }>("/experiments/holdout-groups"),
@@ -242,9 +261,15 @@ export default function HoldoutGroupsPage() {
           <input
             id="hg-report-metric"
             className="rounded-md border px-2 py-1"
+            list="hg-reportable-metrics"
             value={reportMetric}
             onChange={(e) => setReportMetric(e.target.value)}
           />
+          <datalist id="hg-reportable-metrics">
+            {reportableKeys.map((k) => (
+              <option key={k} value={k} />
+            ))}
+          </datalist>
         </div>
         {report ? (
           <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">

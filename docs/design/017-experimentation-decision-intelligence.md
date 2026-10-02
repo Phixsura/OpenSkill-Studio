@@ -1046,6 +1046,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 98 — the holdout report's metric input gained datalist suggestions
+limited to the reportable-source set (mirroring the service's
+REPORT_SOURCES), so operators pick a valid metric instead of guessing at a 422. Web 697/697.
+
 Round 97 — the layer A/A hash-health probe reaches the console: a per-layer
 Probe action on the Layers page renders chi-squared, p and the
 healthy/SUSPECT verdict inline (the API's own healthy flag at the 0.001
