@@ -203,13 +203,17 @@ def test_transition_matrix_is_total_over_statuses():
 
 
 def test_terminal_statuses_have_no_exits():
-    for terminal in ("promoted", "rejected", "archived"):
-        assert _ALLOWED[terminal] == frozenset()
+    """Defect #50: promoted/rejected are decision-terminal but may still
+    ARCHIVE (otherwise their exposures escape §13 retention forever);
+    archived is the only true dead end."""
+    assert _ALLOWED["archived"] == frozenset()
+    assert _ALLOWED["promoted"] == frozenset({"archived"})
+    assert _ALLOWED["rejected"] == frozenset({"archived"})
 
 
-def test_every_nonterminal_can_archive():
+def test_every_status_except_archived_can_archive():
     for status, targets in _ALLOWED.items():
-        if status in ("promoted", "rejected", "archived"):
+        if status == "archived":
             continue
         assert "archived" in targets, status
 

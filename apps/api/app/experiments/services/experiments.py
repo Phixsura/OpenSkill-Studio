@@ -43,8 +43,11 @@ _ALLOWED: dict[str, frozenset[str]] = {
     "paused": frozenset({"running", "completed", "archived"}),
     "completed": frozenset({"analyzed", "archived"}),
     "analyzed": frozenset({"promoted", "rejected", "archived"}),
-    "promoted": frozenset(),
-    "rejected": frozenset(),
+    # Defect #50: promoted/rejected are DECISION-terminal, not
+    # STORAGE-terminal — with no path to archived their raw exposures could
+    # never be pruned (§13 retention runs on archived only) and grew forever.
+    "promoted": frozenset({"archived"}),
+    "rejected": frozenset({"archived"}),
     "archived": frozenset(),
 }
 

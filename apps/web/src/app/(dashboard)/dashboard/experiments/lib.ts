@@ -83,8 +83,9 @@ export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   paused: ["running", "completed", "archived"],
   completed: ["analyzed", "archived"],
   analyzed: ["promoted", "rejected", "archived"],
-  promoted: [],
-  rejected: [],
+  // defect #50: decision-terminal, not storage-terminal — archive stays open
+  promoted: ["archived"],
+  rejected: ["archived"],
   archived: [],
 };
 

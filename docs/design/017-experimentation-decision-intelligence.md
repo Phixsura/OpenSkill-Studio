@@ -1027,6 +1027,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 53 — defect #50 (retention dead end): promoted/rejected were modeled
+as fully terminal, but §13's prune runs on ARCHIVED experiments only — so a
+promoted experiment's raw exposures could never be deleted and grew forever
+(the accumulation-bomb shape wearing a lifecycle costume). The distinction
+is decision-terminal vs storage-terminal: promoted/rejected now allow
+exactly one exit, archived (the decision itself is immutable; archiving is
+a storage action). Web transition table synced (the API↔web parity pin
+caught the drift exactly as designed); pinned end-to-end by a
+promoted→archived→pruned lifecycle test.
+
 Round 52 — the data-flow signal reaches the console: the diagnostics page
 renders "Last exposure: <local time | none recorded>" under the funnel
 table (web 683/683). NO_RECENT_EXPOSURES already rendered verbatim through

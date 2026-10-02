@@ -343,3 +343,83 @@ async def test_number_conservation_resolve_to_analysis(db):
     )
     assert observed is not None
     assert abs(observed - exposed_expected / total_units) < 1e-12
+
+
+async def test_promoted_experiment_archives_and_prunes(db):
+    """Defect #50: promoted/rejected are decision-terminal, not
+    storage-terminal — without a path to archived their raw exposures
+    escaped §13 retention forever. A promoted experiment archives, and the
+    prune then covers its >400-day exposures."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment, ExperimentExposure
+    from app.experiments.services.assignment import AssignmentService
+    from app.experiments.worker import prune_experiment_history
+    from app.models.user import User, UserRole, UserStatus
+
+    admin = User(
+        email=f"arch-{ULID()}@example.com", display_name="A",
+        role=UserRole.ADMIN, status=UserStatus.ACTIVE,
+    )
+    db.add(admin)
+    await db.flush()
+    await MetricService(db).ensure_seed_definitions()
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    esvc = ExperimentService(db)
+    exp = await esvc.create(
+        key=f"exp-{str(ULID()).lower()}", title="Arch", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await esvc.create_version(exp.id, spec={
+        "hypothesis": "promoted experiments can archive and then prune",
+        "unit_type": "user",
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["exposure_rate"],
+                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                    "threshold": 100.0}]},
+    }, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    for status in ("review", "scheduled", "running"):
+        await esvc.transition(
+            exp.id, to_status=status, actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
+    await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+    asvc = AssignmentService(db)
+    r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="arch-1")
+    assert r is not None
+    assert await asvc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="arch-1"
+    )
+    # land in promoted via a direct status write (the decision machinery is
+    # exercised elsewhere; here the matrix edge itself is under test)
+    exp_id = exp.id  # capture BEFORE expire_all (expired attrs refresh sync)
+    await db.execute(
+        _update(Experiment).where(Experiment.id == exp_id).values(status="promoted")
+    )
+    await db.refresh(exp)
+    archived = await esvc.transition(exp_id, to_status="archived", actor=admin)
+    assert archived.status == "archived"
+    # age the exposure past retention; prune now covers it
+    await db.execute(
+        _update(ExperimentExposure)
+        .where(ExperimentExposure.experiment_id == exp_id)
+        .values(occurred_at=datetime.now(UTC) - timedelta(days=401))
+    )
+    result = await prune_experiment_history(db)
+    assert result["exposures"] >= 1
+    remaining = (
+        await db.execute(
+            select(ExperimentExposure).where(
+                ExperimentExposure.experiment_id == exp_id
+            )
+        )
+    ).scalars().all()
+    assert remaining == []
