@@ -153,8 +153,27 @@ async def test_no_breach_no_pause_but_stamped(db):
 
 
 async def test_unwired_guardrail_source_skips_not_pauses(db):
+    """Round 77 rewrite — the original passed for the wrong reason: cost_usd
+    gained a wired source in exp07, so neither defensive arm ran. The honest
+    arms: (1) a guardrail naming a metric with NO definition, (2) one whose
+    definition's source isn't in the registry — both skip with a warning,
+    neither pauses, neither crashes."""
+    from ulid import ULID as _ULID
+
+    from app.experiments.services.metrics import MetricService as MetricSvc
+
+    probe_key = f"unwired_{str(_ULID()).lower()[:10]}"
+    await MetricSvc(db).ensure_seed_definitions()
+    await MetricSvc(db).create_definition(
+        key=probe_key, title="Unwired probe", kind="continuous",
+        domain="operational", source_kind="service",
+        spec={"source": "no_such_source"},
+    )
     exp, _ = await _mk_running(
-        db, guardrails=[{"metric_key": "cost_usd", "op": "lte", "threshold": 0.0001}]
+        db, guardrails=[
+            {"metric_key": "ghost_metric_zzz", "op": "lte", "threshold": 1.0},
+            {"metric_key": probe_key, "op": "lte", "threshold": 1.0},
+        ]
     )
     await AssignmentService(db).resolve(
         experiment_key=exp.key, unit_type="user", unit_id="u" * 26
@@ -709,3 +728,33 @@ async def test_pause_survives_notification_db_failure(db, monkeypatch):
     assert (await db.get(Experiment, exp.id)).status == "paused"
     events = await GuardrailService(db).list_events(exp.id)
     assert any(e.action == "paused" and e.auto for e in events)
+
+
+async def test_alert_notify_failure_never_blocks_the_finding(db, monkeypatch):
+    """Round 77: _notify_alert's except arm — an exploding notification
+    service logs and moves on; the SRM finding itself survives."""
+    from app.services.notification import NotificationService
+
+    async def _plain_boom(self, *a, **k):
+        raise RuntimeError("notify transport down")
+
+    monkeypatch.setattr(NotificationService, "create", _plain_boom)
+    exp, _ = await _mk_running(db)
+    for i in range(150):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"nf-a-{i:04d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    for i in range(10):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"nf-b-{i:04d}",
+                variant_key="treatment", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm" in summary  # the finding outlives the notify failure
+    assert (await db.get(Experiment, exp.id)).status == "running"

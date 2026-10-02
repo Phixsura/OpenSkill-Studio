@@ -1046,6 +1046,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 77 — necropsy catches a SECOND right-for-the-wrong-reason test: the
+"unwired guardrail source" pin used cost_usd, whose source was wired in
+exp07 — the test has been green via normal evaluation ever since, with both
+defensive arms (undefined metric, unregistered source) dead. Rewritten
+honestly: a guardrail naming a definition-less metric plus a custom
+definition whose source isn't in the registry — both arms now
+branch-verified. The alert-notify except arm (transport down: finding
+survives, no pause) pinned too.
+
 Round 76 — cold-branch necropsy on assignment.py: five honestly-reachable
 branches pinned in one batch (org-scope mismatch reason, missing-allocation
 reason, unknown-key exposure False, holdout tally in assignment_stats, and
