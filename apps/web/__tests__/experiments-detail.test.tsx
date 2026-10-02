@@ -45,6 +45,7 @@ function experiment(status: string, domain = "learning") {
     started_at: null,
     ended_at: null,
     analysis_close_at: null,
+    start_at: null,
     last_guardrail_check_at: null,
     created_at: "2026-09-29T00:00:00Z",
     updated_at: "2026-09-29T00:00:00Z",
@@ -100,6 +101,23 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     const call = api.mock.calls.find((c) => String(c[0]).endsWith("/transition"));
     const body = JSON.parse(String(call?.[1]?.body));
     expect(body).toEqual({ to_status: "paused" });
+  });
+
+  it("sends start_at with the schedule transition when the field is set", async () => {
+    mockApiFor("review");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("Auto-start at");
+    fireEvent.change(input, { target: { value: "2026-11-01T09:00" } });
+    for (const key of await screen.findAllByRole("checkbox")) {
+      fireEvent.click(key);
+    }
+    fireEvent.click(screen.getByText("→ scheduled"));
+    await vi.waitFor(() => {
+      const call = api.mock.calls.find((c) => String(c[0]).includes("/transition"));
+      expect(call).toBeTruthy();
+      const body = JSON.parse(String(call?.[1]?.body));
+      expect(body.start_at).toContain("2026-11-01");
+    });
   });
 
   it("flags a running experiment whose guardrails were never checked", async () => {

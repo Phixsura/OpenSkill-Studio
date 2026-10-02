@@ -119,7 +119,7 @@ describe("DashboardPage (R417)", () => {
   });
 
   it("renders the experiment headline and records a day-deduped exposure", async () => {
-    api.mockImplementation((rawPath: unknown, init?: { body?: string }) => {
+    api.mockImplementation(((rawPath: unknown, init?: { body?: string }) => {
       const path = String(rawPath ?? "");
       if (path === "/orgs") return Promise.resolve({ data: [] });
       if (path === "/me/overview") return Promise.resolve({ data: OVERVIEW });
@@ -132,7 +132,7 @@ describe("DashboardPage (R417)", () => {
         return Promise.resolve({ data: { recorded: true } });
       }
       return Promise.resolve({ data: null });
-    });
+    }) as never);
     render(<DashboardPage />, { wrapper: wrapper() });
     expect(await screen.findByText("Finish these today")).toBeTruthy();
     expect(screen.queryByText("To do")).toBeNull();

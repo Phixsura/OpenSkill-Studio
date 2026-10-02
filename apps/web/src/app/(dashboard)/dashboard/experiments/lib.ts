@@ -120,6 +120,7 @@ export interface Experiment {
   risk_class: string;
   ramp_bp: number;
   holdout_bp: number;
+  start_at: string | null;
   started_at: string | null;
   ended_at: string | null;
   analysis_close_at: string | null;

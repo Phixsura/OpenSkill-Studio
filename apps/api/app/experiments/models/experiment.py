@@ -65,6 +65,10 @@ class Experiment(Base):
     last_guardrail_check_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # exp10: optional scheduled auto-start — NULL = manual start (round 60)
+    start_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

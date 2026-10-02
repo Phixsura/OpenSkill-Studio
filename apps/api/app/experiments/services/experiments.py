@@ -368,6 +368,7 @@ class ExperimentService:
         actor: User,
         reason: str | None = None,
         checklist: dict | None = None,
+        start_at=None,
         _via_decision: bool = False,
     ) -> Experiment:
         exp = await self._get_locked(experiment_id)
@@ -384,6 +385,8 @@ class ExperimentService:
             )
         if to_status == "scheduled":
             await self._check_schedule_preconditions(exp, actor, checklist)
+            # exp10: an optional auto-start time; the start sweep launches it
+            exp.start_at = start_at
         now = datetime.now(UTC)
         from_status = exp.status
         exp.status = to_status

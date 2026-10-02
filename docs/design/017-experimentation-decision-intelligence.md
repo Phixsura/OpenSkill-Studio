@@ -1046,6 +1046,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 60 — scheduled auto-start (exp10, the gap #55 the status name
+promised): 'scheduled' used to mean launch-checked-awaiting-a-human.
+start_at is an optional column (NULL = the old manual behavior, unchanged);
+the transition to scheduled accepts it, the new sweep_experiment_starts
+(cron :09/:39, capped, oldest-due first) launches due experiments through
+the SAME locked state machine as every other transition — a racing manual
+start simply wins — and the launch is audited as a system transition with
+the reason recorded. Console: an Auto-start datetime field beside the
+launch checklist ("blank = start manually"). Migration round-trip verified;
+pins: due starts launch + stamp started_at, future and NULL stay scheduled.
+
 Rounds 58–59 — the runbook (§18a) and the FIRST REAL CLIENT SURFACE.
 Round 59 wired useExperiment into a product page at last (the hook had zero
 consumers — a client SDK nobody called): the dashboard To-do headline

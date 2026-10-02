@@ -340,6 +340,43 @@ async def sweep_experiment_windows(
     return enqueued
 
 
+START_SWEEP_CAP = 200
+
+
+async def sweep_experiment_starts(
+    db: AsyncSession, *, now: datetime | None = None, cap: int = START_SWEEP_CAP
+) -> int:
+    """exp10 (round 60): launch scheduled experiments whose start_at is due.
+    NULL start_at keeps the manual-start behavior. The locked state machine
+    serializes against a racing manual transition — the human simply wins."""
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.guardrails import _system_actor
+
+    now = now or datetime.now(UTC)
+    rows = (
+        await db.execute(
+            select(Experiment.id)
+            .where(
+                Experiment.status == "scheduled",
+                Experiment.start_at.is_not(None),
+                Experiment.start_at <= now,
+            )
+            .order_by(Experiment.start_at.asc())
+            .limit(cap)
+        )
+    ).all()
+    started = 0
+    for (experiment_id,) in rows:
+        await ExperimentService(db).transition(
+            experiment_id,
+            to_status="running",
+            actor=_system_actor(),
+            reason="scheduled start_at reached",
+        )
+        started += 1
+    return started
+
+
 CLOSURE_SWEEP_CAP = 200
 
 

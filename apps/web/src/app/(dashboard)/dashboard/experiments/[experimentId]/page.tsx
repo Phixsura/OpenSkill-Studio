@@ -43,6 +43,7 @@ export default function ExperimentDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [rampPct, setRampPct] = useState("");
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [startAt, setStartAt] = useState(""); // exp10: optional auto-start
 
   const { data } = useQuery({
     queryKey: ["experiment", experimentId],
@@ -67,7 +68,15 @@ export default function ExperimentDetailPage() {
     mutationFn: (to_status: string) =>
       apiWithAuth(`/experiments/${experimentId}/transition`, {
         method: "POST",
-        body: JSON.stringify(to_status === "scheduled" ? { to_status, checklist } : { to_status }),
+        body: JSON.stringify(
+          to_status === "scheduled"
+            ? {
+                to_status,
+                checklist,
+                ...(startAt ? { start_at: new Date(startAt).toISOString() } : {}),
+              }
+            : { to_status },
+        ),
       }),
     onSuccess: () => {
       setError(null);
@@ -202,6 +211,17 @@ export default function ExperimentDetailPage() {
                 {CHECKLIST_LABELS[key] ?? key}
               </label>
             ))}
+            <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+              Auto-start at
+              <input
+                type="datetime-local"
+                aria-label="Auto-start at"
+                className="rounded-md border px-2 py-1 text-xs"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+              />
+              <span className="text-xs text-slate-500">(blank = start manually)</span>
+            </label>
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">

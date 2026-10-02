@@ -2041,3 +2041,56 @@ async def test_snapshot_response_serializes_segment(db):
     assert rows
     dumped = MetricSnapshotResponse.model_validate(rows[0]).model_dump()
     assert dumped["segment"] == ""  # whole-population marker, present and typed
+
+
+async def test_start_sweep_launches_due_scheduled_experiments(db):
+    """exp10 (round 60): the start sweep launches scheduled experiments whose
+    start_at is due; future and NULL start_at stay scheduled (NULL = the old
+    manual-start behavior, unchanged)."""
+    from app.experiments.models import Experiment, ExperimentEvent
+    from app.experiments.worker import sweep_experiment_starts
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+
+    async def _scheduled(start_at):
+        layer = await LayerService(db).create(
+            key=f"lyr-{str(ULID()).lower()}", domain="learning"
+        )
+        svc = ExperimentService(db)
+        exp = await svc.create(
+            key=f"exp-{str(ULID()).lower()}", title="S", domain="learning",
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+        await svc.create_version(exp.id, spec=_spec(), actor=admin)
+        await LayerService(db).allocate(
+            layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+        )
+        await svc.transition(exp.id, to_status="review", actor=admin)
+        await svc.transition(
+            exp.id, to_status="scheduled", actor=admin,
+            checklist=_CHECKLIST, start_at=start_at,
+        )
+        return exp
+
+    now = datetime.now(UTC)
+    due = await _scheduled(now - timedelta(minutes=5))
+    future = await _scheduled(now + timedelta(days=1))
+    manual = await _scheduled(None)
+
+    started = await sweep_experiment_starts(db, now=now)
+    assert started >= 1
+    assert (await db.get(Experiment, due.id)).status == "running"
+    assert (await db.get(Experiment, due.id)).started_at is not None
+    assert (await db.get(Experiment, future.id)).status == "scheduled"
+    assert (await db.get(Experiment, manual.id)).status == "scheduled"
+    # the launch is audited as a system transition
+    events = (
+        await db.execute(
+            select(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == due.id,
+                ExperimentEvent.event_type == "transition",
+            )
+        )
+    ).scalars().all()
+    assert any("start_at" in ((e.payload or {}).get("reason") or "") for e in events)

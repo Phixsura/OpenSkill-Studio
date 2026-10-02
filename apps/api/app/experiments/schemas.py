@@ -245,6 +245,8 @@ class CreateVersionRequest(_StrictReq):
 class TransitionRequest(_StrictReq):
     to_status: str = Field(max_length=12)
     reason: str | None = Field(default=None, max_length=1000)
+    # exp10: optional auto-start time, only meaningful with to_status=scheduled
+    start_at: datetime | None = None
     # §5 v2: review→scheduled requires the launch checklist affirmed
     checklist: dict[str, bool] = Field(default_factory=dict)
 
@@ -330,6 +332,7 @@ class ExperimentResponse(BaseModel):
     risk_class: str
     ramp_bp: int
     holdout_bp: int
+    start_at: datetime | None
     started_at: datetime | None
     ended_at: datetime | None
     analysis_close_at: datetime | None

@@ -120,6 +120,7 @@ async def transition_experiment(
         actor=scope.user,
         reason=body.reason,
         checklist=body.checklist,
+        start_at=body.start_at,
     )
     await db.commit()
     return {"data": exp}
