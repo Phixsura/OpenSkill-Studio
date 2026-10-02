@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 75 — necropsy continues on the analysis sweep's defensive arms: a
+stored unparseable spec and a crashing analysis (a real statement error on
+the shared session) each skip their experiment while the batch continues —
+the healthy experiment behind them is still analyzed, the crash stays
+inside its savepoint, and both arms are now branch-verified covered.
+
 Round 74 — the coverage audit pays off twice. (1) A right-for-the-wrong-
 reason test: the legacy washout-swallow pin passed because its mutated
 stored spec now FAILS PARSE post-#44 (poison-spec skip arm, never the

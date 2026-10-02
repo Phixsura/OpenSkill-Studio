@@ -1125,3 +1125,51 @@ async def test_auto_analysis_balanced_experiment_never_notifies(db):
         )
     ).scalar_one()
     assert n == 0
+
+
+async def test_auto_analysis_poison_arms_never_stall_the_batch(db, monkeypatch):
+    """Round 75 (coverage necropsy of the sweep's defensive arms): a stored
+    unparseable spec AND a crashing analysis each skip their experiment and
+    the batch continues — the healthy mSPRT experiment behind them is still
+    analyzed, and the crash's session damage stays inside its savepoint."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.models import ExperimentVersion as _Ver
+    from app.experiments.worker import sweep_experiment_analyses
+
+    # three running experiments, OLDEST ids first in the sweep order:
+    poison_spec, _ = await _mk_running(db)
+    crasher, _ = await _mk_running(db)
+    healthy, _ = await _mk_running(db)
+    await _populate(db, healthy)
+
+    # (1) poison: corrupt the stored spec so model_validate fails
+    await db.execute(
+        _update(_Ver)
+        .where(_Ver.experiment_id == poison_spec.id, _Ver.version == 1)
+        .values(spec={"hypothesis": "x"})
+    )
+    # (2) crasher: analysis raises a REAL statement error on the session
+    from app.experiments.services.analysis_service import AnalysisService as Svc
+
+    original_run = Svc.run
+
+    async def _maybe_boom(self, experiment_id, **kwargs):
+        if experiment_id == crasher.id:
+            from sqlalchemy import text as _text
+
+            await self.db.execute(_text("select * from __no_table__"))
+        return await original_run(self, experiment_id, **kwargs)
+
+    monkeypatch.setattr(Svc, "run", _maybe_boom)
+
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status == "running",
+               _Exp.id.notin_([poison_spec.id, crasher.id, healthy.id]))
+        .values(status="paused")
+    )
+    analyzed = await sweep_experiment_analyses(db)
+    assert analyzed == 1  # only the healthy one; neither arm stalled the batch
+    await db.flush()  # the crash stayed inside its savepoint
