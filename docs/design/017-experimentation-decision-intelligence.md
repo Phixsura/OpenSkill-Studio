@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 72 — experiment notifications are user-manageable: the notification
+preferences panel gained toggles for experiment_guardrail and
+experiment_significance (absent = enabled, the existing default — the
+service's prefs check already honors an explicit opt-out). Web 690/690.
+
 Round 71 — mutation wave 14 over the analysis sweep: 14/16 killed, 2
 float-exact boundary equivalents ledgered. The instructive survivor: an
 Or->And mutant crashed inside the notification SHIELD and the shield

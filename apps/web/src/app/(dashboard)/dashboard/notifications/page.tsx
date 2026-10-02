@@ -44,6 +44,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   endorsement_received: "Endorsement Received",
   pool_invitation: "Pool Invitation",
   passport_viewed: "Passport Viewed",
+  experiment_guardrail: "Experiment Guardrails & Alerts",
+  experiment_significance: "Experiment Significance (daily auto-analysis)",
 };
 
 function timeAgo(dateStr: string): string {
