@@ -1207,3 +1207,20 @@ async def test_analysis_spec_arms_necropsy(db):
         await AnalysisService(db).run(exp.id, actor=admin)
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
     assert "failed to parse" in exc.value.message
+
+
+async def test_latest_look_scorecard(db):
+    """Round 87: the standing scorecard — None before any analysis, then the
+    newest look with primary effects, the result hash a decision would
+    reference, and the automated flag."""
+    exp, admin = await _mk_running(db)
+    svc = AnalysisService(db)
+    assert await svc.latest_look(exp.id) is None
+    await _populate(db, exp)
+    first = await svc.run(exp.id, actor=admin)
+    latest = await svc.latest_look(exp.id)
+    assert latest is not None
+    assert latest["result_hash"] == first["result_hash"]
+    assert latest["sequential"] == "msprt"
+    assert latest["automated"] is False
+    assert "exposure_rate" in latest["primary_effects"]

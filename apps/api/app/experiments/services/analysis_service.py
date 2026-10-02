@@ -354,6 +354,34 @@ class AnalysisService:
             }
         return result
 
+    async def latest_look(self, experiment_id: str) -> dict | None:
+        """Round 87 (scorecard parity): the most recent full-analysis look —
+        the detail page's standing summary. Reads the audit trail only; None
+        when no analysis has ever run."""
+        event = (
+            await self.db.execute(
+                select(ExperimentEvent)
+                .where(
+                    ExperimentEvent.experiment_id == experiment_id,
+                    ExperimentEvent.event_type == "analysis_look",
+                )
+                .order_by(ExperimentEvent.created_at.desc(),
+                          ExperimentEvent.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if event is None:
+            return None
+        payload = event.payload or {}
+        return {
+            "at": payload.get("at"),
+            "sequential": payload.get("sequential"),
+            "look": payload.get("look"),
+            "result_hash": payload.get("result_hash"),
+            "primary_effects": payload.get("primary_effects", {}),
+            "automated": event.actor_user_id is None,
+        }
+
     async def run(
         self, experiment_id: str, *, actor: User, segment: str | None = None
     ) -> dict:

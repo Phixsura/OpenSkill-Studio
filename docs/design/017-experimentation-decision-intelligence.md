@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 87 — the standing scorecard (industry parity: results persist on the
+experiment page, not just in the last response): GET
+/experiments/{id}/analysis/latest reads the newest analysis_look from the
+audit trail (same delegated read scope, uniform 404; null before any run)
+and the detail page renders it — at/sequential/look, per-metric primary
+effects with se, the result hash a decision would reference, and an
+`automated` badge when the daily sweep produced it. Component hardened
+against junk shapes (the #54 lesson applied at the card level — a crashing
+card blanked the whole page in tests). analysis.py manifest (3,0).
+
 Round 86 — the #85 class swept across every bounded-batch sweep test:
 closures and starts are ordering-safe by construction (the test's rows sort
 first — 29-day-old started_at, explicit past start_at); the guardrail

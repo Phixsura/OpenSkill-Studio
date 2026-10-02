@@ -55,6 +55,24 @@ export default function ExperimentDetailPage() {
     queryKey: ["experiment-versions", experimentId],
     queryFn: () => apiWithAuth<{ data: Version[] }>(`/experiments/${experimentId}/versions`),
   });
+  const latest = useQuery({
+    queryKey: ["experiment-latest-analysis", experimentId],
+    queryFn: () =>
+      apiWithAuth<{
+        data: {
+          at: string | null;
+          sequential: string | null;
+          look: number | null;
+          result_hash: string | null;
+          automated: boolean;
+          primary_effects: Record<
+            string,
+            Record<string, { effect?: number | null; se?: number | null }>
+          >;
+        } | null;
+      }>(`/experiments/${experimentId}/analysis/latest`),
+  });
+
   const events = useQuery({
     queryKey: ["experiment-events", experimentId],
     queryFn: () =>
@@ -200,6 +218,35 @@ export default function ExperimentDetailPage() {
             </dd>
           </div>
         </dl>
+      </SectionCard>
+
+      <SectionCard title="Latest analysis">
+        {latest.data?.data ? (
+          <div className="space-y-1 text-sm">
+            <div className="text-xs text-slate-500">
+              {latest.data.data.at ? new Date(latest.data.data.at).toLocaleString() : "—"} ·{" "}
+              {latest.data.data.sequential}
+              {latest.data.data.look ? ` · look ${latest.data.data.look}` : ""}
+              {latest.data.data.automated ? " · automated" : ""}
+            </div>
+            {Object.entries(latest.data.data.primary_effects ?? {}).map(([metric, arms]) => (
+              <div key={metric}>
+                <span className="font-medium">{metric}</span>
+                {Object.entries(arms ?? {}).map(([arm, v]) => (
+                  <span key={arm} className="ml-3 text-slate-600">
+                    {arm}: {v.effect != null ? v.effect.toFixed(4) : "—"}
+                    {v.se != null ? ` ±${v.se.toFixed(4)}` : ""}
+                  </span>
+                ))}
+              </div>
+            ))}
+            <div className="text-xs text-slate-400">
+              hash {latest.data.data.result_hash?.slice(0, 12)}…
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">No analysis has run yet.</p>
+        )}
       </SectionCard>
 
       <SectionCard title="Lifecycle">

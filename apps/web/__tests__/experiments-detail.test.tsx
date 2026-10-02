@@ -58,6 +58,7 @@ function mockApiFor(status: string, domain = "learning") {
     if (String(path).endsWith(`/experiments/${"E".repeat(26)}`)) {
       return { data: experiment(status, domain) };
     }
+    if (String(path).endsWith("/analysis/latest")) return { data: null };
     return { data: [] };
   });
 }
@@ -119,6 +120,32 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
       const body = JSON.parse(String(call?.[1]?.body));
       expect(body.start_at).toContain("2026-11-01");
     });
+  });
+
+  it("renders the latest-analysis scorecard when a look exists", async () => {
+    api.mockImplementation(((rawPath: unknown) => {
+      const path = String(rawPath ?? "");
+      if (path.endsWith("/analysis/latest"))
+        return Promise.resolve({
+          data: {
+            at: "2026-10-02T12:00:00Z",
+            sequential: "msprt",
+            look: 3,
+            result_hash: "a".repeat(64),
+            automated: true,
+            primary_effects: {
+              exposure_rate: { treatment: { effect: 0.1234, se: 0.02 } },
+            },
+          },
+        });
+      if (/experiments\/E+$/.test(path)) return Promise.resolve({ data: experiment("running") });
+      return Promise.resolve({ data: [] });
+    }) as never);
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/exposure_rate/)).toBeTruthy();
+    expect(screen.getByText(/0.1234/)).toBeTruthy();
+    expect(screen.getByText(/automated/)).toBeTruthy();
+    expect(screen.getByText(/hash aaaaaaaaaaaa/)).toBeTruthy();
   });
 
   it("scheduled status shows the auto-start time or 'manual start'", async () => {

@@ -36,6 +36,21 @@ async def run_analysis(
     return {"data": payload}
 
 
+@router.get("/{experiment_id}/analysis/latest", response_model=DataResponse[dict | None])
+async def latest_analysis(
+    experiment_id: str,
+    db: AsyncSession = Depends(get_db),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """The most recent analysis look (scorecard summary) — read-only, from
+    the audit trail; null when no analysis has ever run. Same delegated read
+    scope and uniform 404 as the analysis itself."""
+    from app.experiments.services.experiments import ExperimentService
+
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
+    return {"data": await AnalysisService(db).latest_look(experiment_id)}
+
+
 @router.get("/{experiment_id}/segments", response_model=dict)
 async def list_segments(
     experiment_id: str,
