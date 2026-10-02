@@ -1027,6 +1027,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 45 — defect #48 (look-budget race, alpha overspend): the sequential
+look budget was read-count-then-insert with NO lock — two concurrent full
+analyses at the last O'Brien-Fleming look both saw used=N, both passed the
+max_looks gate and both recorded a look, exceeding the budget by one beyond
+the spending plan (a genuine type-I inflation, not just bookkeeping). Full
+analyses now take the experiment row lock (the same one the state machine
+uses); informational segment slices stay lock-free — they record no look.
+Kill-proven with a two-committed-session race at max_looks=1: unfixed, both
+returned look 1; fixed, exactly one look lands and the loser gets the typed
+EXPERIMENT_LOOKS_EXHAUSTED.
+
 Round 44 — defect #47 (the #41 family, promotion seam): finish_async_apply
 converts a typed adapter failure into a state write ON THE KEPT transaction
 (draft parked back to 'approved' + apply_error) — so any partial writes the

@@ -879,3 +879,67 @@ async def test_corpus_prior_uses_latest_look_and_exact_sd(db):
 # (round-6 class — same-kind rows always carry their kind's fields); the
 # novelty midpoint index and the exact ==1/3 and z==3 instants are
 # float/index-exact boundaries.
+
+
+async def test_concurrent_of_analyses_cannot_overspend_looks(db):
+    """Defect #48: two committed sessions racing the LAST O'Brien-Fleming
+    look — the row lock serializes them, so exactly one records the look and
+    the other gets EXPERIMENT_LOOKS_EXHAUSTED. Before the fix both passed
+    the max_looks gate and the budget was exceeded by one (alpha overspend
+    beyond the spending plan)."""
+    import asyncio
+
+    from sqlalchemy import delete, func, select
+
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.models import Experiment, ExperimentLayer
+
+    exp, admin = await _mk_running(
+        db, sequential="obrien_fleming", stop_policy={"max_days": 28, "max_looks": 1}
+    )
+    await _populate(db, exp, units=10)
+    # the race needs COMMITTED state visible to two fresh sessions
+    await db.commit()
+    exp_id, layer_key, admin_id = exp.id, exp.layer_key, admin.id
+
+    async def _analyze():
+        async with AsyncSessionLocal() as session:
+            from app.models.user import User as _User
+
+            actor = await session.get(_User, admin_id)
+            try:
+                result = await AnalysisService(session).run(exp_id, actor=actor)
+                await session.commit()
+                return ("ok", result["looks"]["used"])
+            except AppError as exc:
+                return ("err", exc.code)
+
+    try:
+        results = await asyncio.gather(_analyze(), _analyze())
+        outcomes = sorted(r[0] for r in results)
+        assert outcomes == ["err", "ok"], results
+        assert ("err", "EXPERIMENT_LOOKS_EXHAUSTED") in results
+        assert ("ok", 1) in results
+        # exactly ONE look event exists — the budget was never exceeded
+        async with AsyncSessionLocal() as session:
+            from app.experiments.models import ExperimentEvent as _Ev
+
+            n = (
+                await session.execute(
+                    select(func.count()).where(
+                        _Ev.experiment_id == exp_id,
+                        _Ev.event_type == "analysis_look",
+                    )
+                )
+            ).scalar_one()
+            assert n == 1
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(Experiment).where(Experiment.id == exp_id))
+            await session.execute(
+                delete(ExperimentLayer).where(ExperimentLayer.key == layer_key)
+            )
+            from app.models.user import User as _User
+
+            await session.execute(delete(_User).where(_User.id == admin_id))
+            await session.commit()

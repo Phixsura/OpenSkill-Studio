@@ -361,7 +361,21 @@ class AnalysisService:
         analyses are informational — they consume NO sequential look budget,
         record NO analysis_look event (so a decision can never reference
         them), and skip the corpus/bandit/novelty extras."""
-        exp = await self.db.get(Experiment, experiment_id)
+        if segment is None:
+            # Defect #48: the look budget is read-count-then-insert — two
+            # concurrent full analyses both saw used=N, both passed the
+            # max_looks gate and both recorded a look: the budget could be
+            # EXCEEDED by one (alpha overspend beyond the O'Brien-Fleming
+            # spending plan). The experiment row lock serializes full
+            # analyses; informational segment slices stay lock-free (they
+            # record no look).
+            from app.experiments.services.experiments import ExperimentService
+
+            exp = await ExperimentService(self.db)._get_locked(  # noqa: SLF001
+                experiment_id
+            )
+        else:
+            exp = await self.db.get(Experiment, experiment_id)
         if not exp:
             raise AppError("EXPERIMENT_NOT_FOUND", "Experiment not found", 404)
         if exp.status not in _ANALYZABLE_STATUSES:
