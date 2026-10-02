@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 94 — clone and search verified over the wire (85 E2E checks): the
+clone lands as a draft with the source key's copy, text search finds it, a
+bare % is a literal, and clone is platform-walled. The new checks also
+flushed a cleanup latent: layers can only drop once nothing hangs on them —
+a crashed earlier run leaves orphan experiments on historical org layers,
+so the E2E cleanup now deletes riders first (and thereby swept the existing
+orphans).
+
 Round 93 — console text search: list_experiments gained q (key OR title,
 case-insensitive, ILIKE wildcards in user input ESCAPED so a literal
 percent matches a percent — pinned: a bare %tag% matches nothing), the

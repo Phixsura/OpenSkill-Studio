@@ -119,6 +119,7 @@ async def drive_outbox(topic: str) -> None:
 
 async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -> None:
     from sqlalchemy import delete as _delete
+    from sqlalchemy import select as _select
 
     from app.core.database import AsyncSessionLocal, engine
     from app.experiments.models import Experiment, ExperimentLayer, HoldoutGroup
@@ -129,10 +130,22 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
         await db.execute(_delete(Experiment).where(Experiment.id.in_(experiment_ids)))
         await db.execute(_delete(HoldoutGroup).where(HoldoutGroup.title.in_(
             ["E2E holdout", "dup", "too big", "nope"])))
-        await db.execute(_delete(ExperimentLayer).where(ExperimentLayer.key == layer_key))
+        # Round 94: layers can only drop once NOTHING hangs on them — a
+        # crashed earlier run may have left orphan experiments (e.g. clones)
+        # on historical lyr-org-% layers; delete riders first, always.
+        doomed_layers = (
+            ExperimentLayer.key == layer_key
+        ) | ExperimentLayer.key.like("lyr-org-%")
         await db.execute(
-            _delete(ExperimentLayer).where(ExperimentLayer.key.like("lyr-org-%"))
+            _delete(Experiment).where(
+                Experiment.layer_key.in_(
+                    (await db.execute(
+                        _select(ExperimentLayer.key).where(doomed_layers)
+                    )).scalars().all() or [""]
+                )
+            )
         )
+        await db.execute(_delete(ExperimentLayer).where(doomed_layers))
         from app.controlplane.models.tenant import TenantAccount
         from app.models.organization import Organization
 
@@ -303,6 +316,32 @@ async def main() -> int:
         check("run analysis", r.status_code == 200, r.text[:300])
         result_hash = r.json()["data"]["result_hash"]
         check("analysis is causal (randomized)", r.json()["data"]["causal_claim"] is True)
+
+        # Round 92/93: clone + console text search over the wire
+        clone_key = f"clone-{uid()}"
+        r = await c.post(f"/experiments/{exp_id}/clone", headers=admin,
+                         json={"key": clone_key})
+        check("clone creates a draft copy with the source spec",
+              r.status_code == 201
+              and r.json()["data"]["status"] == "draft"
+              and r.json()["data"]["key"] == clone_key,
+              r.text[:300])
+        clone_id = r.json()["data"]["id"]
+        experiment_ids.append(clone_id)  # the cleanup must know the copy
+        r = await c.get(f"/experiments?q={clone_key}", headers=admin)
+        check("text search finds the clone by key",
+              r.status_code == 200
+              and any(e["id"] == clone_id for e in r.json()["data"]),
+              r.text[:300])
+        r = await c.get("/experiments?q=%25", headers=admin)
+        check("a bare %% wildcard is a literal (matches nothing here)",
+              r.status_code == 200
+              and all("%" in (e["key"] + e["title"]) for e in r.json()["data"]),
+              r.text[:300])
+        r = await c.post(f"/experiments/{exp_id}/clone", headers=student,
+                         json={"key": f"c2-{uid()}"})
+        check("clone is platform-admin walled", r.status_code == 403,
+              str(r.status_code))
 
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
