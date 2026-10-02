@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 91 — PR #47's description refreshed with the rounds 59-90 record
+(client-surface defect chain #54/#57/#58, exp10/exp11, automated
+monitoring, console parity set, the necropsy campaign, the bounded-batch
+class). Totals: migrations exp01-exp11, exp suites 510, web 693, live E2E
+81, 74 certifications latest 6890 all-green.
+
 Round 90 — live E2E grew the scorecard check (the latest-look endpoint
 mirrors the run's result hash, automated=false for a human run): 81 checks.
 
