@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 74 — the coverage audit pays off twice. (1) A right-for-the-wrong-
+reason test: the legacy washout-swallow pin passed because its mutated
+stored spec now FAILS PARSE post-#44 (poison-spec skip arm, never the
+swallow branch) — the branch's honest reachable case is a VALID week-window
+spec (10080) with a 1440-minute washout computed over a day window, and the
+test now constructs exactly that (branch verified covered). (2) The
+facade's record_exposure except arm had never run — now pinned: a raising
+service yields False with the session healthy. Coverage-guided review found
+what green suites could not: a test can pass while its target branch died.
+
 Round 73 — coverage audit over the whole package (pytest-cov across the 14
 unit suites): services at 90-99% (holdouts 99, analysis core 97, promotion
 94, assignment/guardrails/metrics/experiments/worker 90-92) with the

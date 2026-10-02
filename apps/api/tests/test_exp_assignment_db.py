@@ -830,3 +830,23 @@ async def test_shared_dedup_key_never_swallows_other_units(db):
         )
     ).scalar_one()
     assert n == 2  # one per unit — the second unit was previously swallowed
+
+
+async def test_facade_record_exposure_exception_arm(db, monkeypatch):
+    """Round 74 (coverage audit payoff): the facade's record_exposure except
+    arm was never exercised — a raising service must yield False with the
+    session healthy (the #41 savepoint confines the damage)."""
+    from sqlalchemy import text as _text
+
+    from app.experiments import facade
+    from app.experiments.services.assignment import AssignmentService as _Svc
+
+    async def _boom(self, **kwargs):
+        await self.db.execute(_text("select * from __nope__"))
+
+    monkeypatch.setattr(_Svc, "record_exposure", _boom)
+    exp, _ = await _mk_running(db)
+    assert await facade.record_exposure(
+        db, experiment_key=exp.key, unit_type="user", unit_id="exc-arm"
+    ) is False
+    await db.flush()  # session not poisoned
