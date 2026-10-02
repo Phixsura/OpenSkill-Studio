@@ -47,9 +47,13 @@ export function useExperiment(experimentKey: string) {
 
   const recordExposure = useCallback((dedupKey?: string) => exposure.mutate(dedupKey), [exposure]);
 
+  // Defect #54: fail-safe must hold CLIENT-side too — an unexpected
+  // response shape (data: null, missing fields) crashed the HOST page
+  // through the optional-chain gap. Everything is null-safe now.
+  const payload = resolve.data?.data ?? null;
   return {
-    variantKey: resolve.data?.data.variant_key ?? null,
-    config: resolve.data?.data.config ?? {},
+    variantKey: payload?.variant_key ?? null,
+    config: payload?.config ?? {},
     isLoading: resolve.isLoading,
     recordExposure,
   };

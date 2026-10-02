@@ -1046,6 +1046,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Rounds 58–59 — the runbook (§18a) and the FIRST REAL CLIENT SURFACE.
+Round 59 wired useExperiment into a product page at last (the hook had zero
+consumers — a client SDK nobody called): the dashboard To-do headline
+(`dashboard-todo-nudge`, presentation-only, config.headline capped at 80
+chars, default copy on any miss) with a day-deduped exposure fired only
+when the section is actually on screen (assignment != exposure). Wiring it
+found defect #54: the hook's optional chain stopped one level short —
+`resolve.data?.data.variant_key` crashed the HOST page on a `data: null`
+response, so the client-side fail-safe was incomplete; now null-safe
+end-to-end and pinned over three malformed shapes. Failure-invisibility
+test: a rejected resolve renders the default headline.
+
 Round 57 — defect #52 (found by mutation-driven test strengthening): the
 holdout report called analyze_binary with DICTS against its positional-float
 signature — the comparison crashed on any populated report, and the

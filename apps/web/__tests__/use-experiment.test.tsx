@@ -62,4 +62,16 @@ describe("useExperiment (ADR-017 §7 self-serve hook)", () => {
     expect(await screen.findByText("default")).toBeTruthy();
     expect(hookValue.config).toEqual({});
   });
+
+  it("malformed response shapes never crash the host page (defect #54)", async () => {
+    for (const payload of [{ data: null }, {}, { data: { config: null } }]) {
+      api.mockResolvedValue(payload as never);
+      const view = render(<Probe k={`surface-shape-${JSON.stringify(payload).length}`} />, {
+        wrapper: wrapper(),
+      });
+      expect(await screen.findByText("default")).toBeTruthy();
+      expect(hookValue.config).toEqual({});
+      view.unmount();
+    }
+  });
 });
