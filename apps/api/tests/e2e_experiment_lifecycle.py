@@ -248,9 +248,13 @@ async def main() -> int:
             "metrics_reviewed": True, "rollback_owner_named": True,
         }
         r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
-                         json={"to_status": "scheduled", "checklist": checklist})
+                         json={"to_status": "scheduled", "checklist": checklist,
+                               "start_at": "2027-01-01T09:00:00Z"})
         check("transition → scheduled (checklist affirmed)",
               r.status_code == 200, r.text[:200])
+        check("exp10: start_at echoes on the scheduled experiment",
+              (r.json()["data"].get("start_at") or "").startswith("2027-01-01"),
+              r.text[:200])
         r = await c.post(f"/experiments/{exp_id}/transition", headers=admin,
                          json={"to_status": "running"})
         check("transition → running", r.status_code == 200, r.text[:200])
