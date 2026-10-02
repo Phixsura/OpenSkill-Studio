@@ -2118,3 +2118,57 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
         )
     ).scalars().all()
     assert any("start_at" in ((e.payload or {}).get("reason") or "") for e in events)
+
+
+async def test_every_source_degrades_on_type_mismatch_and_empty_units(db):
+    """Round 78 (necropsy sweep over all registered sources): every source
+    must degrade to {n: 0} shapes — never crash — on (a) a unit_type it does
+    not serve and (b) an empty unit list of the type it does. One sweep
+    covers the twelve per-source defensive arms at once."""
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+
+    await MetricService(db).ensure_seed_definitions()
+    expected_types = {
+        "exposures": "user", "workflow_runs": "workflow_installation",
+        "projects": "user", "cost_ledger": "tenant",
+        "client_briefs": "organization", "registry": "organization",
+        "eco_telemetry": "provider_offering", "learning_paths": "user",
+        "evaluations": "user", "talent_outcomes": "user",
+        "billing": "tenant", "capabilities": "user",
+    }
+    assert set(expected_types) == set(SOURCE_REGISTRY)
+    # exposures needs a real experiment (internal source, exercised across
+    # every suite); workflow_runs and cost_ledger have no type gate by design
+    gated = {"projects", "client_briefs", "registry", "eco_telemetry",
+             "learning_paths", "evaluations", "talent_outcomes", "billing",
+             "capabilities"}
+    # a definition per source (seeds cover most; synthesize the rest)
+    definitions = {
+        d.spec.get("source"): d for d in await MetricService(db).list_definitions()
+    }
+    window_start, window_end = _today_window()
+    for name, fn in SOURCE_REGISTRY.items():
+        if name == "exposures":
+            continue
+        definition = definitions.get(name)
+        if definition is None:
+            definition = await MetricService(db).create_definition(
+                key=f"probe_{name}"[:40], title=f"probe {name}",
+                kind="continuous", domain="operational", source_kind="service",
+                spec={"source": name},
+            )
+        if name in gated:
+            mismatch = await fn(
+                db, experiment=None, definition=definition,
+                variant_units={"v": ["u1"]},
+                window_start=window_start, window_end=window_end,
+                unit_type="zzz_not_a_unit",
+            )
+            assert mismatch == {"v": {"n": 0}}, name
+        empty = await fn(
+            db, experiment=None, definition=definition,
+            variant_units={"v": []},
+            window_start=window_start, window_end=window_end,
+            unit_type=expected_types[name],
+        )
+        assert empty.get("v", {}).get("n", 0) == 0, name

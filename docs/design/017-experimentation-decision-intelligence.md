@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 78 — necropsy sweep over all twelve registered sources in one
+parameterized test: every gated source degrades to {n:0} on a unit_type it
+does not serve, and every source (exposures aside — it needs a real
+experiment and is exercised everywhere) degrades on an empty unit list.
+metrics.py coverage 90% -> 95%; the sweep also DOCUMENTED the gate
+topology: workflow_runs and cost_ledger carry no type gate by design, and
+the sweep pins which sources are gated (a silently dropped gate now fails).
+
 Round 77 — necropsy catches a SECOND right-for-the-wrong-reason test: the
 "unwired guardrail source" pin used cost_usd, whose source was wired in
 exp07 — the test has been green via normal evaluation ever since, with both
