@@ -2172,3 +2172,68 @@ async def test_every_source_degrades_on_type_mismatch_and_empty_units(db):
             unit_type=expected_types[name],
         )
         assert empty.get("v", {}).get("n", 0) == 0, name
+
+
+async def test_cost_ledger_cuped_tenant_arm(db):
+    """Round 79 necropsy: the CUPED per-unit covariate lookback has a TENANT
+    rollup arm (org costs summed up to tenant) that no test reached —
+    exercised with tenant units + a cuped variance_reduction whose covariate
+    is the metric itself."""
+    from decimal import Decimal
+
+    from app.experiments.schemas import VarianceReductionSpec
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+    from app.models.evaluation import EvalType, EvaluationTask
+
+    await MetricService(db).ensure_seed_definitions()
+    tenant, org = await _mk_org(db)
+    db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT,
+                          cost_usd=Decimal("0.40")))
+    await db.flush()
+    definition = next(
+        d for d in await MetricService(db).list_definitions() if d.key == "cost_usd"
+    )
+    window_start, window_end = _today_window()
+    out = await SOURCE_REGISTRY["cost_ledger"](
+        db, experiment=None, definition=definition,
+        variant_units={"treatment": [tenant.id]},
+        window_start=window_start, window_end=window_end,
+        unit_type="tenant",
+        variance_reduction=VarianceReductionSpec(
+            method="cuped", covariate_metric="cost_usd", lookback_days=7
+        ),
+    )
+    arm = out["treatment"]
+    assert arm["n"] == 1
+    assert arm["sum_value"] == pytest.approx(0.40)
+    assert "cov_sum" in arm and "cov_xy_sum" in arm
+    assert arm["_aggregation"] == "per_unit"
+
+
+async def test_snapshot_compute_poison_spec_arms(db):
+    """Round 79: the snapshot pipeline's legacy-defense arms — a CORRUPTED
+    stored spec (the only way such a row exists post-#44) makes the key
+    parse, variance-reduction read, exposed-only read and segment read each
+    fall back instead of crashing; the compute writes nothing and returns 0."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentVersion as VersionModel
+    from app.experiments.services.assignment import forget_spec
+
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    assert await asvc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id="poison-0"
+    ) is not None
+    await db.execute(
+        _update(VersionModel)
+        .where(VersionModel.experiment_id == exp.id, VersionModel.version == 1)
+        .values(spec={"hypothesis": "too short"})
+    )
+    forget_spec(exp.id)
+    window_start, window_end = _today_window()
+    written = await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    assert written == 0
+    assert await MetricService(db).list_snapshots(exp.id) == []

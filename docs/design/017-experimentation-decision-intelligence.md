@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 79 — metrics necropsy continues: the cost_ledger CUPED TENANT arm
+(org costs rolled up to tenant inside the covariate lookback) and the
+snapshot pipeline's poison-spec arm pinned; 95% -> 96%. Triage insight for
+the remaining poison arms (variance-reduction / exposed-only / segment
+reads at 1173-1248): they parse the SAME stored spec the key-parse arm
+already guards, and the key parse short-circuits first — unreachable
+duplicates of one defense, ledgered rather than forced.
+
 Round 78 — necropsy sweep over all twelve registered sources in one
 parameterized test: every gated source degrades to {n:0} on a unit_type it
 does not serve, and every source (exposures aside — it needs a real
