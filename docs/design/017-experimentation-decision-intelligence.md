@@ -1046,6 +1046,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 69 — automated monitoring (industry parity: scheduled analyses):
+sweep_experiment_analyses runs a daily analysis over RUNNING mSPRT
+experiments — the always-valid engine pays no peeking cost, so automation
+is statistically free; O'Brien-Fleming experiments are EXCLUDED by spec
+check (a robot must never spend a budgeted look — pinned: the OF
+experiment's look count stays 0 through the sweep). On any primary
+comparison crossing always_valid_p < 0.05 the owner is notified once per
+day (query-side dedup on stored notifications); each experiment runs under
+its own savepoint (#41 law) and the notification under another (#42 law).
+The system actor's role=None means automated runs never attach the
+platform-admin-only corpus prior. Cron: daily 07:13.
+
 Round 68 — defect #59 (delegation had an API but no DOOR): the Experiments
 nav link rendered only for platform roles, so org owners/admins — who hold
 real delegated access to their own-org experiments (read, transition, ramp,

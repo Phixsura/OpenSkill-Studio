@@ -991,3 +991,75 @@ async def test_no_recent_exposures_warning(db):
     await _populate(db, fresh_exp)  # records exposures NOW
     fresh = await AnalysisService(db).run(fresh_exp.id, actor=fresh_admin)
     assert "NO_RECENT_EXPOSURES" not in fresh["warnings"]
+
+
+async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
+    """Round 69: the daily sweep analyzes RUNNING mSPRT experiments (free
+    peeking), notifies the owner once per day on significance, and NEVER
+    touches an O'Brien-Fleming experiment (a robot must not spend a budgeted
+    look)."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentEvent
+    from app.experiments.worker import sweep_experiment_analyses
+    from app.models.notification import Notification
+
+    # mSPRT with an overwhelming effect: all treatment units exposed, no
+    # control units exposed
+    exp, admin = await _mk_running(db)
+    asvc = AssignmentService(db)
+    for i in range(80):
+        r = await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=f"auto-{i}"
+        )
+        assert r is not None
+        if r.variant_key == "treatment":
+            await asvc.record_exposure(
+                experiment_key=exp.key, unit_type="user", unit_id=f"auto-{i}"
+            )
+    start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=start, window_end=start + timedelta(days=1)
+    )
+
+    # an OF experiment that must NOT be analyzed by the robot
+    of_exp, _ = await _mk_running(
+        db, sequential="obrien_fleming", stop_policy={"max_days": 28, "max_looks": 2}
+    )
+    await _populate(db, of_exp)
+
+    analyzed = await sweep_experiment_analyses(db)
+    assert analyzed >= 1
+    of_looks = (
+        await db.execute(
+            _select(_func.count()).where(
+                ExperimentEvent.experiment_id == of_exp.id,
+                ExperimentEvent.event_type == "analysis_look",
+            )
+        )
+    ).scalar_one()
+    assert of_looks == 0  # the OF budget is untouched
+
+    notes = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_significance",
+            )
+        )
+    ).scalars().all()
+    assert len(notes) == 1
+    assert notes[0].data["experiment_id"] == exp.id
+
+    # second run the same day: analysis repeats, notification does NOT
+    await sweep_experiment_analyses(db)
+    n2 = (
+        await db.execute(
+            _select(_func.count()).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_significance",
+            )
+        )
+    ).scalar_one()
+    assert n2 == 1

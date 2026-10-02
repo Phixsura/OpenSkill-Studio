@@ -340,6 +340,114 @@ async def sweep_experiment_windows(
     return enqueued
 
 
+ANALYSIS_SWEEP_CAP = 100
+SIGNIFICANCE_ALPHA = 0.05
+
+
+async def sweep_experiment_analyses(
+    db: AsyncSession, *, cap: int = ANALYSIS_SWEEP_CAP
+) -> int:
+    """Automated monitoring (round 69, industry parity): run a daily analysis
+    over RUNNING mSPRT experiments — the always-valid engine pays no peeking
+    cost, so automation is statistically free; O'Brien-Fleming experiments
+    are EXCLUDED (an automated run would burn a budgeted look). When any
+    primary comparison's always_valid_p crosses alpha, the owner hears about
+    it once per day. Each experiment runs under its own savepoint (the #41
+    law) so one poison experiment cannot stall or corrupt the batch."""
+    from datetime import timedelta
+
+    from app.experiments.schemas import ExperimentSpec
+    from app.experiments.services.analysis_service import AnalysisService
+    from app.experiments.services.guardrails import _system_actor
+    from app.models.notification import Notification
+
+    rows = (
+        await db.execute(
+            select(Experiment.id, Experiment.owner_user_id, Experiment.title,
+                   Experiment.current_version)
+            .where(Experiment.status == "running")
+            .order_by(Experiment.id.asc())
+            .limit(cap)
+        )
+    ).all()
+    analyzed = 0
+    for experiment_id, owner_user_id, title, current_version in rows:
+        version = (
+            await db.execute(
+                select(ExperimentVersion).where(
+                    ExperimentVersion.experiment_id == experiment_id,
+                    ExperimentVersion.version == current_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            continue
+        try:
+            spec = ExperimentSpec.model_validate(version.spec)
+        except Exception:  # noqa: BLE001 — one poison spec must not stall the batch
+            log.error("exp_auto_analysis_spec_unparseable", experiment_id=experiment_id)
+            continue
+        if spec.sequential != "msprt":
+            continue  # OF looks are a human budget — never spent by a robot
+        try:
+            async with db.begin_nested():
+                result = await AnalysisService(db).run(
+                    experiment_id, actor=_system_actor()
+                )
+        except Exception:  # noqa: BLE001 — poison analysis: skip, never stall
+            log.error("exp_auto_analysis_failed", experiment_id=experiment_id)
+            continue
+        analyzed += 1
+        significant = [
+            (metric_key, variant_key, comparison["always_valid_p"])
+            for metric_key in spec.metrics.primary
+            for variant_key, comparison in (
+                (result["metrics"].get(metric_key) or {}).get("comparisons") or {}
+            ).items()
+            if comparison.get("always_valid_p") is not None
+            and comparison["always_valid_p"] < SIGNIFICANCE_ALPHA
+        ]
+        if not significant or owner_user_id is None:
+            continue
+        # once per day per experiment — query-side dedup on the stored rows
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        already = (
+            await db.execute(
+                select(func.count())
+                .select_from(Notification)
+                .where(
+                    Notification.user_id == owner_user_id,
+                    Notification.type == "experiment_significance",
+                    Notification.created_at >= cutoff,
+                    Notification.data["experiment_id"].astext == experiment_id,
+                )
+            )
+        ).scalar_one()
+        if already:
+            continue
+        try:
+            from app.services.notification import NotificationService
+
+            async with db.begin_nested():  # the #42 law: additive, confined
+                metric_key, variant_key, p = significant[0]
+                await NotificationService(db).create(
+                    user_id=owner_user_id,
+                    notification_type="experiment_significance",
+                    title=f"Experiment '{title}' crossed significance",
+                    body=(
+                        f"{metric_key} ({variant_key}) always-valid p = {p:.4g} "
+                        "— review the analysis before acting; mSPRT stays "
+                        "valid under continuous monitoring."
+                    ),
+                    data={"experiment_id": experiment_id,
+                          "metric_key": metric_key, "p": p},
+                )
+        except Exception:  # noqa: BLE001 — additive, never blocking
+            log.warning("exp_significance_notify_failed",
+                        experiment_id=experiment_id)
+    return analyzed
+
+
 START_SWEEP_CAP = 200
 
 

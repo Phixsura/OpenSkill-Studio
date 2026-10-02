@@ -525,6 +525,18 @@ async def _exp_retention(ctx: dict) -> None:
             log.info("exp_history_pruned", **pruned)
 
 
+async def _exp_analysis_sweep(ctx: dict) -> None:
+    """ADR-017 round 69: daily automated mSPRT analysis + significance notify."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_analyses
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_analyses(db)
+        if n:
+            await db.commit()
+            log.info("exp_auto_analyses_ran", count=n)
+
+
 async def _exp_start_sweep(ctx: dict) -> None:
     """ADR-017 exp10: launch scheduled experiments whose start_at is due."""
     from app.core.database import AsyncSessionLocal
@@ -592,6 +604,8 @@ def _cron_jobs() -> list:
         cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
         cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
         cron(_exp_start_sweep, minute={9, 39}, name="exp_start_sweep"),
+        cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800,
+             name="exp_analysis_sweep"),
         cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
         # Cross-experiment interaction scan: weekly (Tue 04:37 UTC)
         cron(
