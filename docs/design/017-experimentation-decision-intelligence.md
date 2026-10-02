@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 83 — experiments-service necropsy: the search body (status/domain
+filters, delegation scope list, keyset cursor), list_events, uniform 404s,
+create validations (unknown domain/risk, missing layer, layer-domain
+mismatch), wrong-status guards (create_version after draft/review, ramp in
+terminal), schedule-without-version and incomplete-checklist arms — all
+triggered dynamically in one batch.
+
 Round 82 — promotion necropsy: the state-guard arms (draft 404,
 approve-after-reject, double-reject, apply-from-rejected) triggered
 dynamically — 94% -> 98%. The three remaining lines are defense-in-depth

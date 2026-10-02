@@ -935,3 +935,98 @@ async def test_assignment_cold_branches_necropsy(db):
     assert await asvc.resolve(
         experiment_key=sb.key, unit_type="user", unit_id="necro-5"
     ) is None
+
+
+async def test_experiments_service_cold_arms_necropsy(db):
+    """Round 83: experiments-service arms the unit suites never ran — the
+    search body (filters, delegation scope, keyset cursor), list_events,
+    uniform 404s, create validations, and the wrong-status guards."""
+    admin = await _mk_admin(db)
+    svc = ExperimentService(db)
+
+    with pytest.raises(AppError) as exc:
+        await svc.get("0" * 26)
+    assert exc.value.status_code == 404
+    with pytest.raises(AppError):
+        await svc.get_versions("0" * 26)  # uniform 404 through get()
+
+    with pytest.raises(AppError) as exc:
+        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
+                         domain="galaxy", layer_key="any",
+                         owner_user_id=admin.id)
+    assert exc.value.code == "VALIDATION_ERROR"
+    with pytest.raises(AppError) as exc:
+        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
+                         domain="learning", layer_key="any",
+                         owner_user_id=admin.id, risk_class="apocalyptic")
+    assert exc.value.code == "VALIDATION_ERROR"
+    with pytest.raises(AppError) as exc:
+        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
+                         domain="learning", layer_key="layer-does-not-exist",
+                         owner_user_id=admin.id)
+    assert exc.value.status_code == 404
+    wrong_domain_layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="matching"
+    )
+    with pytest.raises(AppError) as exc:
+        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
+                         domain="learning", layer_key=wrong_domain_layer.key,
+                         owner_user_id=admin.id)
+    assert exc.value.code == "VALIDATION_ERROR"
+
+    exp, _ = await _mk_running(db)
+    # create_version only in draft/review
+    with pytest.raises(AppError) as exc:
+        await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    assert exc.value.code == "EXPERIMENT_INVALID_TRANSITION"
+    # ramp refused in terminal statuses
+    await svc.transition(exp.id, to_status="completed", actor=admin)
+    with pytest.raises(AppError) as exc:
+        await svc.set_ramp(exp.id, ramp_bp=100, actor=admin)
+    assert exc.value.code == "EXPERIMENT_INVALID_TRANSITION"
+
+    # schedule gates: no version, then incomplete checklist
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    bare = await svc.create(key=f"b-{str(ULID()).lower()}", title="B",
+                            domain="learning", layer_key=layer.key,
+                            owner_user_id=admin.id)
+    await svc.transition(bare.id, to_status="review", actor=admin)
+    with pytest.raises(AppError) as exc:
+        await svc.transition(bare.id, to_status="scheduled", actor=admin,
+                             checklist=_CHECKLIST)
+    assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
+    await svc.transition(bare.id, to_status="draft", actor=admin)
+    await svc.create_version(bare.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(layer_key=layer.key, experiment_id=bare.id,
+                                    slice_start=0, slice_end=9999)
+    await svc.transition(bare.id, to_status="review", actor=admin)
+    with pytest.raises(AppError) as exc:
+        await svc.transition(bare.id, to_status="scheduled", actor=admin,
+                             checklist={"hypothesis_peer_checked": True})
+    assert exc.value.code == "EXPERIMENT_CHECKLIST_INCOMPLETE"
+
+    # spec not JSON-serializable -> typed 422
+    with pytest.raises(AppError) as exc:
+        await svc.create_version(bare.id, spec={**_spec(),
+                                                "population": {"rules": []},
+                                                "hypothesis": "x" * 20,
+                                                "metrics": {"primary": ["exposure_rate"],
+                                                            "guardrails": []},
+                                                "_bad": float("inf")},
+                                 actor=admin)
+    assert exc.value.code in ("EXPERIMENT_SPEC_INVALID", "VALIDATION_ERROR")
+
+    # search: filters + delegation scope + keyset cursor + events
+    rows, total, _cursor = await svc.list_experiments(
+        status="completed", domain="learning")
+    assert any(r.id == exp.id for r in rows) and total >= 1
+    scoped_rows, _, _ = await svc.list_experiments(scope_org_ids=["z" * 26])
+    assert all(r.scope_org_id == "z" * 26 for r in scoped_rows)
+    page1, _, cur = await svc.list_experiments(limit=1)
+    if cur:
+        page2, _, _ = await svc.list_experiments(limit=1, cursor=cur)
+        assert all(r.id < page1[0].id for r in page2)
+    events = await svc.list_events(exp.id, limit=5)
+    assert events and all(e.experiment_id == exp.id for e in events)
