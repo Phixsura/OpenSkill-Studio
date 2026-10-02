@@ -1029,8 +1029,18 @@ async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
     )
     await _populate(db, of_exp)
 
+    # §106.25: pause committed residue so the sweep sees OUR experiments only
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status == "running", _Exp.id.notin_([exp.id, of_exp.id]))
+        .values(status="paused")
+    )
     analyzed = await sweep_experiment_analyses(db)
-    assert analyzed >= 1
+    assert analyzed == 1  # the mSPRT one, counted exactly once
     of_looks = (
         await db.execute(
             _select(_func.count()).where(
@@ -1063,3 +1073,55 @@ async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
         )
     ).scalar_one()
     assert n2 == 1
+
+    # the dedup window is 24h exactly: a notification older than that no
+    # longer suppresses — backdate it and the sweep notifies again
+    await db.execute(
+        _update(Notification)
+        .where(Notification.user_id == admin.id,
+               Notification.type == "experiment_significance")
+        .values(created_at=datetime.now(UTC) - timedelta(hours=24, minutes=30))
+    )
+    await sweep_experiment_analyses(db)
+    n3 = (
+        await db.execute(
+            _select(_func.count()).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_significance",
+            )
+        )
+    ).scalar_one()
+    assert n3 == 2
+
+
+async def test_auto_analysis_balanced_experiment_never_notifies(db):
+    """Round 71 (wave-14 kills): a no-effect mSPRT experiment is analyzed
+    but NEVER notifies — the significance gate is p present AND p < alpha,
+    and the not-significant path must short-circuit before touching the
+    (empty) significant list."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.worker import sweep_experiment_analyses
+    from app.models.notification import Notification
+
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp)  # balanced: every other unit exposed, both arms
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status == "running", _Exp.id != exp.id)
+        .values(status="paused")
+    )
+    analyzed = await sweep_experiment_analyses(db)
+    assert analyzed == 1
+    n = (
+        await db.execute(
+            _select(_func.count()).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_significance",
+            )
+        )
+    ).scalar_one()
+    assert n == 0
