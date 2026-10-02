@@ -211,11 +211,10 @@ class HoldoutGroupService:
             if (holdout_arm.get("denominator") or 0) > 0 and (
                 general_arm.get("denominator") or 0
             ) > 0:
+                # held-out side is the CONTROL (it sees no launches)
                 comparison = stats.analyze_binary(
-                    {"numerator": holdout_arm["numerator"],
-                     "denominator": holdout_arm["denominator"]},
-                    {"numerator": general_arm["numerator"],
-                     "denominator": general_arm["denominator"]},
+                    holdout_arm["numerator"], holdout_arm["denominator"],
+                    general_arm["numerator"], general_arm["denominator"],
                 )
         elif definition.kind == "continuous" and (
             (holdout_arm.get("n") or 0) >= 2 and (general_arm.get("n") or 0) >= 2

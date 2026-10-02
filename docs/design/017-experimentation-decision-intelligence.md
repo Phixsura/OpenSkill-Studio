@@ -1027,6 +1027,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 57 — defect #52 (found by mutation-driven test strengthening): the
+holdout report called analyze_binary with DICTS against its positional-float
+signature — the comparison crashed on any populated report, and the
+original structure-only test never reached that branch (a weak test is a
+defect incubator). Wave 12 drove the strengthening: required_n_per_arm
+pinned to its exact textbook value (3841 at 10%/20%/0.05/0.8) plus
+open-interval boundary refusals; the report pinned on an org-scoped,
+fully-controlled universe with bp chosen to sit exactly ON one member's
+roll (the strict-< boundary mutant flips a unit and dies), exact per-arm
+values from real submissions, window clamps, and typed statuses. Wave 12:
+49 mutants, 2 ledgered equivalents, everything else killed.
+
 Round 56 — defect #51 (regression caught by live E2E, introduced in round
 48): serializing updated_at broke every return-the-row-after-commit
 endpoint — onupdate marks the attribute expired after the UPDATE flush, and

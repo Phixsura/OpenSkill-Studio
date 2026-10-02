@@ -740,3 +740,9 @@ def test_required_n_per_arm_known_value_and_monotonicity():
     assert required_n_per_arm(0.0, 0.2) is None
     assert required_n_per_arm(0.9, 0.2) is None   # lifted rate >= 1
     assert required_n_per_arm(0.5, 0.0) is None   # no difference to detect
+    # exact boundaries (wave-12 survivors): the OPEN interval ends refuse
+    assert required_n_per_arm(1.0, -0.5) is None  # p1 == 1 exactly
+    assert required_n_per_arm(0.5, 1.0) is None   # p2 == 1 exactly
+    # exact value pin (kills the sqrt-argument and exponent mutants) — the
+    # formula's own output at the textbook point, ledgered as a constant
+    assert required_n_per_arm(0.10, 0.20) == 3841

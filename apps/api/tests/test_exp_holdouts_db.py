@@ -880,3 +880,117 @@ async def test_holdout_group_report_splits_and_compares(db):
     with pytest.raises(AppError) as exc:
         await svc.report("0" * 26, metric_key="project_approval_rate")
     assert exc.value.code == "EXPERIMENT_NOT_FOUND"
+
+
+async def test_holdout_report_org_scoped_exact_values(db):
+    """Round 57 (wave-12 survivor kills): org-scoped report over a FULLY
+    CONTROLLED universe — exact strict-< split (bp chosen to sit exactly on
+    one member's roll, so the >= mutant flips a unit), exact per-arm
+    numerator/denominator from real submissions inside the [now-28d, now)
+    window (the window-direction mutant empties it), default and clamped
+    window_days, and typed error statuses."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization, OrgMember, OrgRole
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User, UserRole, UserStatus
+
+    tenant = TenantAccount(
+        name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}"
+    )
+    db.add(tenant)
+    await db.flush()
+    org = Organization(
+        name="report org", slug=f"rep-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
+    db.add(org)
+    await db.flush()
+
+    key = f"hg-exact-{str(ULID()).lower()}"
+    members: list[User] = []
+    for i in range(30):
+        u = User(email=f"rep-{i}-{ULID()}@example.com", display_name=f"R{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        members.append(u)
+    await db.flush()
+    for u in members:
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
+    await db.flush()
+
+    # pick bp exactly ON one member's roll — the strict-< boundary unit
+    rolls = {u.id: holdout_group_roll(key, "user", u.id) for u in members}
+    boundary = next((r for r in rolls.values() if 1 <= r <= 2000), None)
+    if boundary is None:  # ~0.1% of key draws; widen deterministically
+        extra = [
+            User(email=f"repx-{i}-{ULID()}@example.com", display_name="RX",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+            for i in range(30)
+        ]
+        for u in extra:
+            db.add(u)
+        await db.flush()
+        for u in extra:
+            db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
+        await db.flush()
+        members.extend(extra)
+        rolls = {u.id: holdout_group_roll(key, "user", u.id) for u in members}
+        boundary = next(r for r in rolls.values() if 1 <= r <= 2000)
+    bp = boundary
+
+    svc = HoldoutGroupService(db)
+    group = await svc.create(
+        key=key, title="Exact", domain="learning", holdout_bp=bp,
+        scope_org_id=org.id,
+    )
+    held_ids = sorted(uid for uid, r in rolls.items() if r < bp)
+    general_ids = sorted(uid for uid, r in rolls.items() if r >= bp)
+
+    # real data: approvals today for one unit on each side that exists
+    project = Project(
+        org_id=org.id, title="RP", slug=f"rp-{str(ULID()).lower()}",
+        description="d", instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
+    db.add(project)
+    await db.flush()
+    expected = {"holdout": [0, 0], "general": [0, 0]}  # [numerator, denominator]
+    for side, ids in (("holdout", held_ids), ("general", general_ids)):
+        for uid in ids[:2]:
+            db.add(Submission(org_id=org.id, project_id=project.id, user_id=uid,
+                              status=SubmissionStatus.APPROVED, version=1))
+            db.add(Submission(org_id=org.id, project_id=project.id, user_id=uid,
+                              status=SubmissionStatus.REJECTED, version=1))
+            expected[side][0] += 1
+            expected[side][1] += 2
+    await db.flush()
+
+    report = await svc.report(group.id, metric_key="project_approval_rate")
+    assert report["window_days"] == 28  # default pinned
+    assert report["sampled_units"] == len(members)  # org scope = our universe
+    assert report["holdout_units"] == len(held_ids)  # strict < exactly
+    assert report["general_units"] == len(general_ids)
+    for side in ("holdout", "general"):
+        arm = report["arms"][side]
+        assert arm["numerator"] == expected[side][0]
+        assert arm["denominator"] == expected[side][1]
+    if expected["holdout"][1] and expected["general"][1]:
+        assert report["comparison"] is not None
+
+    clamped_low = await svc.report(
+        group.id, metric_key="project_approval_rate", window_days=0
+    )
+    assert clamped_low["window_days"] == 1
+    clamped_high = await svc.report(
+        group.id, metric_key="project_approval_rate", window_days=4000
+    )
+    assert clamped_high["window_days"] == 365
+
+    with pytest.raises(AppError) as exc:
+        await svc.report("0" * 26, metric_key="project_approval_rate")
+    assert exc.value.status_code == 404
+    with pytest.raises(AppError) as exc:
+        await svc.report(group.id, metric_key="no-such-metric")
+    assert exc.value.status_code == 404
+    with pytest.raises(AppError) as exc:
+        await svc.report(group.id, metric_key="exposure_rate")
+    assert exc.value.status_code == 422
