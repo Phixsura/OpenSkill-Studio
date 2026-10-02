@@ -11,6 +11,7 @@ from app.experiments.api.deps import (
     require_platform_admin,
 )
 from app.experiments.schemas import (
+    CloneExperimentRequest,
     CreateExperimentRequest,
     CreateVersionRequest,
     ExperimentEventResponse,
@@ -151,3 +152,23 @@ async def list_events(
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await ExperimentService(db).list_events(experiment_id, limit=limit)
     return {"data": [ExperimentEventResponse.model_validate(x).model_dump() for x in rows]}
+
+
+@router.post(
+    "/{experiment_id}/clone",
+    response_model=DataResponse[ExperimentResponse],
+    status_code=201,
+)
+async def clone_experiment(
+    experiment_id: str,
+    body: CloneExperimentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    """Duplicate an experiment: a NEW draft carrying the source's current
+    spec as v1 — no layer allocation (slices are claimed deliberately)."""
+    experiment = await ExperimentService(db).clone(
+        experiment_id, new_key=body.key, actor=user
+    )
+    await db.commit()
+    return {"data": experiment}

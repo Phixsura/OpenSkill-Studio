@@ -150,7 +150,7 @@ def test_delegated_surface_manifest_pinned():
         "analysis.py": (3, 0),  # round 87: + latest-look scorecard (read scope)
         "assignments.py": (3, 0),
         "decisions.py": (0, 9),
-        "experiments.py": (6, 2),
+        "experiments.py": (6, 3),  # round 92: + clone (platform admin)
         "guardrails.py": (1, 2),
         "holdouts.py": (0, 4),  # round 54: + holdout report (platform admin)
         "layers.py": (0, 5),

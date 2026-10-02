@@ -179,6 +179,49 @@ class ExperimentService:
         )
         return exp
 
+    async def clone(
+        self, experiment_id: str, *, new_key: str, actor: User
+    ) -> Experiment:
+        """Round 92 (industry parity: duplicate an experiment): a NEW draft
+        with the source's CURRENT spec as its v1 — same domain/layer/scope/
+        risk/holdout knobs, no layer allocation (slices are a scarce,
+        mutually-exclusive resource — claiming them is a deliberate act),
+        audit-linked to the source. The source is untouched."""
+        source = await self.get(experiment_id)
+        version = (
+            await self.db.execute(
+                select(ExperimentVersion).where(
+                    ExperimentVersion.experiment_id == experiment_id,
+                    ExperimentVersion.version == source.current_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            raise AppError(
+                "EXPERIMENT_SPEC_INVALID",
+                "Source experiment has no spec version to clone",
+                422,
+            )
+        copy = await self.create(
+            key=new_key,
+            title=f"{source.title} (copy)",
+            domain=source.domain,
+            layer_key=source.layer_key,
+            owner_user_id=actor.id,
+            scope_org_id=source.scope_org_id,
+            risk_class=source.risk_class,
+            holdout_bp=source.holdout_bp,
+        )
+        await self.create_version(copy.id, spec=version.spec, actor=actor)
+        await self._record_event(
+            copy.id,
+            event_type="cloned_from",
+            actor_user_id=actor.id,
+            payload={"source_experiment_id": source.id,
+                     "source_version": source.current_version},
+        )
+        return copy
+
     async def list_experiments(
         self,
         *,

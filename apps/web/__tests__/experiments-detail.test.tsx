@@ -122,6 +122,32 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     });
   });
 
+  it("clone button posts the new key and navigates to the copy", async () => {
+    mockApiFor("running");
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { assign },
+      writable: true,
+    });
+    vi.spyOn(window, "prompt").mockReturnValue("my-clone-key");
+    api.mockImplementation(((rawPath: unknown, init?: { method?: string }) => {
+      const path = String(rawPath ?? "");
+      if (path.endsWith("/clone") && init?.method === "POST")
+        return Promise.resolve({ data: { id: "N".repeat(26) } });
+      if (path.endsWith(`/experiments/${"E".repeat(26)}`))
+        return Promise.resolve({ data: experiment("running") });
+      if (path.endsWith("/analysis/latest")) return Promise.resolve({ data: null });
+      return Promise.resolve({ data: [] });
+    }) as never);
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Clone"));
+    await vi.waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(`/dashboard/experiments/${"N".repeat(26)}`),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/clone"));
+    expect(JSON.parse(String(call?.[1]?.body)).key).toBe("my-clone-key");
+  });
+
   it("renders the latest-analysis scorecard when a look exists", async () => {
     api.mockImplementation(((rawPath: unknown) => {
       const path = String(rawPath ?? "");

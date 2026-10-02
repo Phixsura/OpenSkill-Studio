@@ -1046,6 +1046,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 92 — experiment CLONE (industry parity: duplicate): POST
+/experiments/{id}/clone creates a NEW draft carrying the source's current
+spec as its v1 (identical canonical hash, pinned), same
+domain/layer/scope/risk/holdout knobs, NO layer allocation (slices are a
+scarce mutually-exclusive resource — claiming them stays a deliberate act),
+audit-linked via a cloned_from event. Version-less sources refuse typed;
+key collisions are the usual 409. Console: a Clone button on the detail
+page (platform admin) prompting for the new key and navigating to the copy.
+experiments.py manifest (6,3).
+
 Round 91 — PR #47's description refreshed with the rounds 59-90 record
 (client-surface defect chain #54/#57/#58, exp10/exp11, automated
 monitoring, console parity set, the necropsy campaign, the bounded-batch

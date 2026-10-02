@@ -284,6 +284,29 @@ export default function ExperimentDetailPage() {
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
+          {isPlatformAdmin ? (
+            <button
+              type="button"
+              className="rounded-md border px-3 py-1.5 text-sm"
+              onClick={async () => {
+                const key = window.prompt(
+                  "New experiment key for the clone (lowercase, 3-64 chars):",
+                );
+                if (!key) return;
+                try {
+                  const created = await apiWithAuth<{ data: { id: string } }>(
+                    `/experiments/${experimentId}/clone`,
+                    { method: "POST", body: JSON.stringify({ key }) },
+                  );
+                  window.location.assign(`/dashboard/experiments/${created.data.id}`);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Clone failed");
+                }
+              }}
+            >
+              Clone
+            </button>
+          ) : null}
           {decisionGated ? (
             <span className="mr-2 text-xs text-slate-500">
               {isPlatformAdmin

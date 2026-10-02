@@ -237,6 +237,10 @@ class CreateExperimentRequest(_StrictReq):
     holdout_bp: int = Field(default=0, ge=0, le=1000)
 
 
+class CloneExperimentRequest(_StrictReq):
+    key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{2,63}$")
+
+
 class CreateVersionRequest(_StrictReq):
     # Validated server-side via ExperimentSpec so ethics gates raise typed codes
     spec: dict[str, Any]

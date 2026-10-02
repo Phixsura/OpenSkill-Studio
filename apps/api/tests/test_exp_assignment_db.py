@@ -1030,3 +1030,67 @@ async def test_experiments_service_cold_arms_necropsy(db):
         assert all(r.id < page1[0].id for r in page2)
     events = await svc.list_events(exp.id, limit=5)
     assert events and all(e.experiment_id == exp.id for e in events)
+
+
+async def test_clone_duplicates_spec_as_new_draft(db):
+    """Round 92: clone = NEW draft carrying the source's current spec as v1
+    (same spec hash), no layer allocation, audit-linked; a source without a
+    version refuses typed; the key collision is the usual 409."""
+    from app.experiments.models import ExperimentEvent, ExperimentVersion
+
+    exp, _ = await _mk_running(db)
+    svc = ExperimentService(db)
+    admin = await _mk_admin(db)
+    new_key = f"copy-{str(ULID()).lower()}"
+    copy = await svc.clone(exp.id, new_key=new_key, actor=admin)
+    assert copy.status == "draft"
+    assert copy.key == new_key
+    assert copy.title.endswith("(copy)")
+    assert copy.layer_key == exp.layer_key
+    src_v = (
+        await db.execute(
+            select(ExperimentVersion).where(
+                ExperimentVersion.experiment_id == exp.id,
+                ExperimentVersion.version == 1,
+            )
+        )
+    ).scalar_one()
+    copy_v = (
+        await db.execute(
+            select(ExperimentVersion).where(
+                ExperimentVersion.experiment_id == copy.id,
+                ExperimentVersion.version == 1,
+            )
+        )
+    ).scalar_one()
+    assert copy_v.spec_hash == src_v.spec_hash  # identical canonical spec
+    from app.experiments.models import ExperimentLayerAllocation
+
+    alloc = (
+        await db.execute(
+            select(ExperimentLayerAllocation).where(
+                ExperimentLayerAllocation.experiment_id == copy.id
+            )
+        )
+    ).scalar_one_or_none()
+    assert alloc is None  # slices are claimed deliberately, never copied
+    events = (
+        await db.execute(
+            select(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == copy.id,
+                ExperimentEvent.event_type == "cloned_from",
+            )
+        )
+    ).scalars().all()
+    assert events and events[0].payload["source_experiment_id"] == exp.id
+
+    # a version-less source refuses typed
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    bare = await svc.create(key=f"bare-{str(ULID()).lower()}", title="B",
+                            domain="learning", layer_key=layer.key,
+                            owner_user_id=admin.id)
+    with pytest.raises(AppError) as exc:
+        await svc.clone(bare.id, new_key=f"c-{str(ULID()).lower()}", actor=admin)
+    assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
