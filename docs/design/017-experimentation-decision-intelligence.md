@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 80 — necropsy tail on metrics: the cap_value clamp on latency
+durations (100/300/10000 capped at 500 -> sum 900), the learning_paths
+scope-org JOIN arm (ITT shape preserved: the unit counts with zero scoped
+items), and billing's pre-window-churn skip (a tenant cancelled before the
+window is never at risk — added as a fourth tenant to the existing billing
+matrix, retention unchanged at 1/2 proving the exclusion).
+
 Round 79 — metrics necropsy continues: the cost_ledger CUPED TENANT arm
 (org costs rolled up to tenant inside the covariate lookback) and the
 snapshot pipeline's poison-spec arm pinned; 95% -> 96%. Triage insight for

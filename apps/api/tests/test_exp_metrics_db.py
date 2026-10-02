@@ -1123,6 +1123,7 @@ async def test_billing_source_tenant_measures(db):
     tenant_new, _org1 = await _mk_org(db)
     tenant_old, org2 = await _mk_org(db)
     tenant_churn, _org3 = await _mk_org(db)
+    tenant_gone, _org4 = await _mk_org(db)  # churned BEFORE the window
     now = datetime.now(UTC)
     window_start, window_end = _today_window()
     plan = ProductPlan(key=f"exp-{str(ULID()).lower()[:8]}", name="Exp")
@@ -1159,26 +1160,29 @@ async def test_billing_source_tenant_measures(db):
 
     db.add(_sub(tenant_old.id))
     db.add(_sub(tenant_churn.id, cancelled_at=window_start + timedelta(hours=2)))
+    # round 80: a pre-window churn is OUT of the at-risk set entirely
+    db.add(_sub(tenant_gone.id, cancelled_at=window_start - timedelta(days=1)))
     await db.flush()
-    units = [tenant_new.id, tenant_old.id, tenant_churn.id]
+    units = [tenant_new.id, tenant_old.id, tenant_churn.id, tenant_gone.id]
 
     conversion = await _run_source(
         db, "billing", definition_key="conversion_rate", units=units, unit_type="tenant",
     )
-    assert conversion["treatment"] == {"n": 3, "numerator": 1, "denominator": 3}
+    assert conversion["treatment"] == {"n": 4, "numerator": 1, "denominator": 4}
 
     arpu = await _run_source(
         db, "billing", definition_key="arpu_usd", units=units, unit_type="tenant",
     )
-    # 50.00 + 200.00 + 0.00 (ITT zero for silent tenant)
-    assert arpu["treatment"]["n"] == 3
+    # 50.00 + 200.00 + 0.00 + 0.00 (ITT zero for silent tenants)
+    assert arpu["treatment"]["n"] == 4
     assert arpu["treatment"]["sum_value"] == 250.0
 
     retention = await _run_source(
         db, "billing", definition_key="retention_rate", units=units, unit_type="tenant",
     )
     # at risk: tenant_old (retained) + tenant_churn (cancelled mid-window);
-    # tenant_new had no subscription at window start
+    # tenant_new had no subscription at window start and tenant_gone churned
+    # BEFORE the window (the skip arm — never at risk)
     assert retention["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
 
     # non-zero eval cost against tenant_old's org: margin arithmetic pinned
@@ -2237,3 +2241,71 @@ async def test_snapshot_compute_poison_spec_arms(db):
     )
     assert written == 0
     assert await MetricService(db).list_snapshots(exp.id) == []
+
+
+async def test_latency_cap_and_scoped_learning_paths_arms(db):
+    """Round 80 necropsy tail: (1) definition.cap_value clamps latency
+    durations before winsorize; (2) the learning_paths source narrows its
+    item universe to the experiment's scope_org when one is set."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select as _select
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import MetricDefinition
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+    from app.models.workflow_pack import WorkflowPackInstallation
+
+    await MetricService(db).ensure_seed_definitions()
+    tenant, org = await _mk_org(db)
+
+    # (1) cap arm on run_latency_ms
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    pack_install = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add(pack_install)
+    await db.flush()
+    t0 = datetime.now(UTC) - timedelta(hours=1)
+    for ms in (100, 300, 10_000):
+        db.add(WorkflowRun(
+            org_id=org.id, installation_id=pack_install.id,
+            definition_snapshot={}, status=RunStatus.COMPLETED,
+            created_at=t0, started_at=t0,
+            finished_at=t0 + timedelta(milliseconds=ms),
+        ))
+    await db.flush()
+    await db.execute(
+        _update(MetricDefinition)
+        .where(MetricDefinition.key == "run_latency_ms")
+        .values(cap_value=500)
+    )
+    definition = (
+        await db.execute(
+            _select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms")
+        )
+    ).scalar_one()
+    window_start, window_end = _today_window()
+    capped = await SOURCE_REGISTRY["workflow_runs"](
+        db, experiment=None, definition=definition,
+        variant_units={"t": [pack_install.id]},
+        window_start=t0 - timedelta(hours=1), window_end=window_end,
+        unit_type="workflow_installation",
+    )
+    assert capped["t"]["sum_value"] == pytest.approx(100 + 300 + 500)
+
+    # (2) scope_org narrowing on learning_paths
+    lp_def = next(
+        d for d in await MetricService(db).list_definitions()
+        if (d.spec or {}).get("source") == "learning_paths"
+    )
+    scoped = SimpleNamespace(scope_org_id=org.id)
+    out = await SOURCE_REGISTRY["learning_paths"](
+        db, experiment=scoped, definition=lp_def,
+        variant_units={"t": ["u" * 26]},
+        window_start=window_start, window_end=window_end,
+        unit_type="user",
+    )
+    # ITT shape: the unit is counted even with zero scoped items; the point
+    # here is the scope JOIN ran (branch 609) without error
+    assert out["t"]["n"] == 1
+    assert out["t"].get("numerator", 0) == 0
