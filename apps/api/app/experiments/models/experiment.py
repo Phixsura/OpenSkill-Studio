@@ -72,6 +72,13 @@ class Experiment(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # Defect #51 (found by live E2E, introduced in round 48): onupdate marks
+    # updated_at expired after every UPDATE flush; endpoints that commit and
+    # then return the ORM row hit a SYNC lazy refresh inside FastAPI response
+    # serialization (MissingGreenlet -> 500). eager_defaults fetches the new
+    # value in the UPDATE's own RETURNING, so nothing is ever expired.
+    __mapper_args__ = {"eager_defaults": True}
+
     __table_args__ = (
         Index("ix_experiments_status_domain", "status", "domain"),
         Index("ix_experiments_layer", "layer_key"),

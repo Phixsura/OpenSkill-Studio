@@ -410,6 +410,25 @@ async def main() -> int:
         check("holdout list shows group",
               r.status_code == 200
               and any(g["key"] == hg_key for g in r.json()["data"]), r.text[:200])
+        # Round 54: cross-experiment holdout measurement
+        r = await c.get(
+            f"/experiments/holdout-groups/{group_id}/report"
+            "?metric_key=project_approval_rate", headers=admin)
+        check("holdout report splits and carries the caveat",
+              r.status_code == 200
+              and set(r.json()["data"]["arms"]) == {"holdout", "general"}
+              and "causal claim" in r.json()["data"]["caveat"],
+              r.text[:300])
+        r = await c.get(
+            f"/experiments/holdout-groups/{group_id}/report?metric_key=exposure_rate",
+            headers=admin)
+        check("holdout report refuses non-reportable sources typed",
+              r.status_code == 422, r.text[:200])
+        r = await c.get(
+            f"/experiments/holdout-groups/{group_id}/report"
+            "?metric_key=project_approval_rate", headers=student)
+        check("holdout report is admin-walled", r.status_code == 403,
+              str(r.status_code))
         r = await c.post(f"/experiments/holdout-groups/{group_id}/release",
                          headers=admin, json={})
         check("holdout released", r.status_code == 200

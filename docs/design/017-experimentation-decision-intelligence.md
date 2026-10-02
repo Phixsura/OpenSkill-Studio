@@ -1027,6 +1027,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 56 — defect #51 (regression caught by live E2E, introduced in round
+48): serializing updated_at broke every return-the-row-after-commit
+endpoint — onupdate marks the attribute expired after the UPDATE flush, and
+FastAPI's response serialization then triggered a SYNC lazy refresh
+(MissingGreenlet -> 500). Unit tests never serialize through FastAPI after
+a commit, so only the live E2E saw it — the layered-verification argument
+in one incident. Fix: eager_defaults on the Experiment mapper (the UPDATE's
+own RETURNING carries the fresh value; nothing expires). The E2E also grew
+the three holdout-report checks (79 total).
+
 Round 55 — the holdout report reaches the console: a Report action per
 group with a metric picker renders the held-out/general split, per-arm
 rates (or n for continuous), the comparison p, and the observational caveat
