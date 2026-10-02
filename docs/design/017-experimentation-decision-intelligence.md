@@ -1027,6 +1027,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 47 — defect #49 + the results-export surface. #49: MetricSnapshot
+stored `segment` since exp08 but MetricSnapshotResponse never serialized it
+— the listing made segment rows indistinguishable from whole-population
+rows (the web type even declared `segment?` and never received it), so a
+consumer summing rows double-counted every sliced metric; one field in the
+response schema fixes it, pinned by a serialization test. Export: GET
+/experiments/{id}/metrics/export streams the snapshots as CSV (the
+industry-standard results hand-off) under the SAME delegated read scope and
+uniform-404 wall as the JSON listing; key columns are pattern-validated
+lowercase so there is no Excel formula-injection surface, and provenance
+stays out of the flat file. metrics.py manifest pin moved to (2,3); live
+E2E grew both export checks (76 checks).
+
 Round 46 — mutation wave 11 over the savepoint/lock fixes (12/12 killed, 0
 survivors; facade/_shield yielded 0 mutants — try/except/async-with shapes
 are outside the harness's operators and are held by the kill-proven defect

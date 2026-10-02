@@ -77,3 +77,53 @@ async def list_metric_snapshots(
         experiment_id, metric_key=metric_key, limit=limit
     )
     return {"data": [MetricSnapshotResponse.model_validate(x).model_dump() for x in rows]}
+
+
+_EXPORT_COLUMNS = (
+    "metric_key", "variant_key", "segment", "window_start", "window_end",
+    "n", "numerator", "denominator", "sum_value", "sum_sq",
+    "cov_sum", "cov_sum_sq", "cov_xy_sum", "computed_at",
+)
+
+
+@router.get("/{experiment_id}/metrics/export")
+async def export_metric_snapshots(
+    experiment_id: str,
+    metric_key: str | None = Query(default=None, max_length=64),
+    limit: int = Query(5000, ge=1, le=20_000),
+    db: AsyncSession = Depends(get_db),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """CSV export of metric snapshots (§12 v3 — the industry-standard
+    results-export surface). Same read scope and uniform 404 as the JSON
+    listing; key columns are pattern-validated lowercase (no Excel formula
+    injection surface) and provenance stays out of the flat file."""
+    import csv
+    import io
+
+    from fastapi.responses import Response
+
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
+    rows = await MetricService(db).list_snapshots(
+        experiment_id, metric_key=metric_key, limit=limit
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow(
+            [
+                value.isoformat() if hasattr(value := getattr(row, col), "isoformat")
+                else value
+                for col in _EXPORT_COLUMNS
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="experiment-{experiment_id}-snapshots.csv"'
+            )
+        },
+    )

@@ -542,6 +542,17 @@ async def main() -> int:
                          json={"to_status": "running"})
         check("org admin resumes after the drill", r.status_code == 200, r.text[:200])
 
+        # Round 47: CSV export rides the same read scope as the JSON listing
+        r = await c.get(f"/experiments/{org_exp_id}/metrics/export", headers=student)
+        check("delegated CSV export returns text/csv with the header row",
+              r.status_code == 200
+              and r.headers["content-type"].startswith("text/csv")
+              and r.text.splitlines()[0].startswith("metric_key,variant_key,segment"),
+              f"{r.status_code} {r.headers.get('content-type')} {r.text[:120]}")
+        r = await c.get(f"/experiments/{exp_id}/metrics/export", headers=student)
+        check("CSV export outside scope is a uniform 404", r.status_code == 404,
+              str(r.status_code))
+
         r = await c.post(f"/experiments/{org_exp_id}/decisions", headers=student, json={
             "decision": "promote", "summary": "nope",
             "analysis_result_hash": "0" * 64,

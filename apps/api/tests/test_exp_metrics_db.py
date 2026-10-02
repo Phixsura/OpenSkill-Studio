@@ -2019,3 +2019,25 @@ def test_exp_outbox_handlers_registered():
         "exp.evaluate_guardrails",
         "exp.apply_promotion",
     } <= set(HANDLERS)
+
+
+async def test_snapshot_response_serializes_segment(db):
+    """Defect #49: segment was stored (exp08) but never serialized — the
+    listing made segment rows indistinguishable from whole-population rows,
+    so a consumer summing them double-counted every sliced metric."""
+    from app.experiments.schemas import MetricSnapshotResponse
+
+    await MetricService(db).ensure_seed_definitions()
+    exp, _ = await _mk_running(db)
+    asvc = AssignmentService(db)
+    assert await asvc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id="seg" + "0" * 23
+    ) is not None
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    rows = await MetricService(db).list_snapshots(exp.id)
+    assert rows
+    dumped = MetricSnapshotResponse.model_validate(rows[0]).model_dump()
+    assert dumped["segment"] == ""  # whole-population marker, present and typed

@@ -431,6 +431,10 @@ class MetricSnapshotResponse(BaseModel):
     experiment_id: str
     metric_key: str
     variant_key: str
+    # Defect #49: segment was stored (exp08) but never serialized — segment
+    # rows were indistinguishable from whole-population rows in the listing,
+    # and a consumer summing rows double-counted every sliced metric.
+    segment: str
     window_start: datetime
     window_end: datetime
     n: int

@@ -154,6 +154,6 @@ def test_delegated_surface_manifest_pinned():
         "guardrails.py": (1, 2),
         "holdouts.py": (0, 3),
         "layers.py": (0, 5),
-        "metrics.py": (1, 3),
+        "metrics.py": (2, 3),  # round 47: + CSV export (same read scope)
         "selfserve.py": (0, 0),
     }, counts
