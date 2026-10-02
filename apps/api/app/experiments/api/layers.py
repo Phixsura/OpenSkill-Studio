@@ -1,6 +1,6 @@
 """Mutual-exclusion layer endpoints (ADR-017 §12)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -68,7 +68,9 @@ async def list_allocations(
 @router.get("/{layer_key}/aa-probe", response_model=dict)
 async def layer_aa_probe(
     layer_key: str,
-    n: int = 2000,
+    # Defect #45: the probe is a synchronous hash loop ON the event loop —
+    # an unbounded n lets one admin typo stall the whole API process.
+    n: int = Query(default=2000, ge=100, le=50_000),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_platform_admin),
 ):

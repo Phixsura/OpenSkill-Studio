@@ -1027,6 +1027,20 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 42 — defects #44 and #45. #44: the spec cross-checks never compared
+washout to window — a switchback spec with washout_minutes >= window_minutes
+folds EVERY snapshot window to zero (metrics' swallow guard), so the
+experiment runs forever collecting nothing, invisible until someone stares
+at an empty analysis. Rejected at the spec boundary now (>= is the exact
+dangerous edge); the metrics-side swallow stays as defense for legacy rows,
+covered by mutating a stored spec directly — the only way such a row can
+exist. #45: the layer A/A probe's n parameter was unbounded — the probe is
+a synchronous hash loop ON the event loop, so one admin typo (n=1e9) stalls
+the entire API process; Query-clamped to [100, 50000] and pinned by a
+route-signature test. Savepoint overhead check from rounds 39–41: resolve
+re-benchmarked at 2.99 ms new / 1.08 ms sticky — within noise of the
+pre-savepoint baseline, no ADR baseline change needed.
+
 Round 41 — defect #43 (the #41 class, third and final site): @_shield
 swallowed hook-body exceptions, but the body runs raw reads on the HOST
 session outside the facade's savepoints (db.get with spec-config-derived

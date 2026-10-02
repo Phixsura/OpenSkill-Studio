@@ -209,6 +209,16 @@ class ExperimentSpec(_StrictReq):
             raise ValueError("segments require user units (org mapping)")
         if self.design == "switchback" and self.switchback is None:
             raise ValueError("switchback design requires a switchback config")
+        if (
+            self.switchback is not None
+            and self.switchback.washout_minutes >= self.switchback.window_minutes
+        ):
+            # Defect #44: washout >= window makes EVERY window fold to zero —
+            # the experiment runs forever collecting nothing, invisibly.
+            raise ValueError(
+                "washout_minutes must be < window_minutes "
+                f"({self.switchback.washout_minutes} >= {self.switchback.window_minutes})"
+            )
         if self.design != "switchback" and self.switchback is not None:
             raise ValueError("switchback config only valid for switchback design")
         return self

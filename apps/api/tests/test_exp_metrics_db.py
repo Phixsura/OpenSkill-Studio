@@ -1661,13 +1661,14 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
         window_start=window_start,
         window_end=window_start + timedelta(minutes=1440),
     )
-    del exact  # zero-washout spec — exercise the boundary on a washout spec:
+    del exact
+    # Defect #44: a washout >= window spec is now rejected at the boundary —
+    # it would fold EVERY window to zero forever.
     spec2 = dict(spec)
     spec2["switchback"] = {
         "switch_unit": "platform_day", "window_minutes": 1440,
         "washout_minutes": 1440,
     }
-    # versions are immutable; new experiment for the exact-swallow case
     layer2 = await LayerService(db).create(
         key=f"l2-{str(ULID()).lower()}", domain="learning"
     )
@@ -1675,19 +1676,29 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
         key=f"exp-{str(ULID()).lower()}", title="WZ2", domain="learning",
         layer_key=layer2.key, owner_user_id=admin.id,
     )
-    await svc.create_version(exp2.id, spec=spec2, actor=admin)
-    await LayerService(db).allocate(
-        layer_key=exp2.layer_key, experiment_id=exp2.id, slice_start=0, slice_end=9999
+    with pytest.raises(AppError):
+        await svc.create_version(exp2.id, spec=spec2, actor=admin)
+    # The metrics-side swallow branch stays as DEFENSE for legacy rows that
+    # predate the gate — covered by mutating the stored spec JSONB directly
+    # (the only way such a row can exist now).
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import ExperimentVersion as VersionModel
+    from app.experiments.services.assignment import forget_spec
+
+    stored = dict(spec)
+    stored["switchback"] = {
+        "switch_unit": "platform_day", "window_minutes": 1440,
+        "washout_minutes": 1440,
+    }
+    await db.execute(
+        _update(VersionModel)
+        .where(VersionModel.experiment_id == exp.id, VersionModel.version == 1)
+        .values(spec=stored)
     )
-    await svc.transition(exp2.id, to_status="review", actor=admin)
-    await svc.transition(exp2.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
-    await svc.transition(exp2.id, to_status="running", actor=admin)
-    await svc.set_ramp(exp2.id, ramp_bp=10_000, actor=admin)
-    assert await asvc.resolve(
-        experiment_key=exp2.key, unit_type="user", unit_id="wz" + "1" * 24
-    ) is not None
+    forget_spec(exp.id)
     swallowed = await MetricService(db).compute_experiment_window(
-        exp2.id,
+        exp.id,
         window_start=window_start,
         window_end=window_start + timedelta(minutes=1440),
     )

@@ -97,6 +97,40 @@ def test_switchback_requires_config_and_vice_versa():
     assert ok.switchback.window_minutes == 60
 
 
+def test_washout_must_be_shorter_than_window():
+    """Defect #44: washout >= window folds EVERY snapshot window to zero —
+    the experiment runs forever collecting nothing. Rejected at the spec
+    boundary; the exact == boundary is the dangerous one (a whole window of
+    washout leaves a zero-length effective window)."""
+    for washout in (60, 61, 1440):
+        with pytest.raises(AppError):
+            _validate(_spec(design="switchback", switchback={
+                "switch_unit": "org", "window_minutes": 60,
+                "washout_minutes": washout,
+            }))
+    ok = _validate(_spec(design="switchback", switchback={
+        "switch_unit": "org", "window_minutes": 60, "washout_minutes": 59,
+    }))
+    assert ok.switchback.washout_minutes == 59
+
+
+def test_aa_probe_n_is_bounded_at_the_route():
+    """Defect #45: aa_probe is a synchronous hash loop on the event loop —
+    the route must clamp n (an unbounded admin typo stalls the API)."""
+    import inspect
+
+    from app.experiments.api.layers import layer_aa_probe
+
+    param = inspect.signature(layer_aa_probe).parameters["n"]
+    meta = param.default  # fastapi Query carries the constraint metadata
+    constraints = {
+        type(m).__name__.lower(): getattr(m, "ge", getattr(m, "le", None))
+        for m in getattr(meta, "metadata", [])
+    }
+    assert constraints.get("ge") == 100
+    assert constraints.get("le") == 50_000
+
+
 def test_nonfinite_guardrail_threshold_rejected():
     bad = _spec(
         metrics={
