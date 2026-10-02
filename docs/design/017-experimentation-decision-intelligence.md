@@ -1046,6 +1046,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 63 — defect #57 (exposure spam per render): useExperiment's
+recordExposure depended on the whole useMutation RESULT object — a new
+identity every render — so any effect depending on recordExposure re-fired
+per render, POSTing one exposure per render (server-side dedup absorbed the
+rows; the network amplification was real). It now depends on the
+identity-stable `mutate`; pinned by a double-rerender test asserting exactly
+one exposure call, kill-proven against the unfixed hook.
+
 Round 62 — defect #56 (scheduling timezone ambiguity): a NAIVE start_at
 was accepted and stored as interpreted by the DB session's TimeZone — the
 same request could start an experiment hours apart across deployments (the

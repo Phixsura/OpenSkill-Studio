@@ -133,12 +133,18 @@ describe("DashboardPage (R417)", () => {
       }
       return Promise.resolve({ data: null });
     }) as never);
-    render(<DashboardPage />, { wrapper: wrapper() });
+    const view = render(<DashboardPage />, { wrapper: wrapper() });
     expect(await screen.findByText("Finish these today")).toBeTruthy();
     expect(screen.queryByText("To do")).toBeNull();
     await vi.waitFor(() =>
       expect(api.mock.calls.some((c) => String(c[0]) === "/experiments/self/exposures")).toBe(true),
     );
+    // defect #57: re-renders must NOT re-fire the exposure effect
+    view.rerender(<DashboardPage />);
+    view.rerender(<DashboardPage />);
+    expect(
+      api.mock.calls.filter((c) => String(c[0]) === "/experiments/self/exposures").length,
+    ).toBe(1);
   });
 
   it("experiment failure is invisible — the default headline renders", async () => {

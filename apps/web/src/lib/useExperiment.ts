@@ -45,7 +45,16 @@ export function useExperiment(experimentKey: string) {
       }),
   });
 
-  const recordExposure = useCallback((dedupKey?: string) => exposure.mutate(dedupKey), [exposure]);
+  // Defect #57: `exposure` is a NEW object every render, so depending on it
+  // gave recordExposure a new identity each render — any effect depending on
+  // recordExposure re-fired per render, spamming one exposure POST per
+  // render (server dedup absorbed the rows; the network noise was real).
+  // `mutate` itself is identity-stable.
+  const { mutate: mutateExposure } = exposure;
+  const recordExposure = useCallback(
+    (dedupKey?: string) => mutateExposure(dedupKey),
+    [mutateExposure],
+  );
 
   // Defect #54: fail-safe must hold CLIENT-side too — an unexpected
   // response shape (data: null, missing fields) crashed the HOST page
