@@ -19,6 +19,7 @@ from app.experiments.schemas import (
     CreateMetricDefinitionRequest,
     MetricDefinitionResponse,
     MetricSnapshotResponse,
+    UpdateMetricDefinitionRequest,
 )
 from app.experiments.security import EXPERIMENT_DOMAINS
 from app.experiments.services.experiments import ExperimentService
@@ -51,6 +52,24 @@ async def list_metric_definitions(
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     rows = await MetricService(db).list_definitions(domain=domain)
     return {"data": [MetricDefinitionResponse.model_validate(x).model_dump() for x in rows]}
+
+
+@router.patch(
+    "/metric-definitions/{key}",
+    response_model=DataResponse[MetricDefinitionResponse],
+)
+async def update_metric_definition(
+    key: str,
+    body: UpdateMetricDefinitionRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_platform_admin),
+):
+    """Edit a definition's operational knobs; kind/source stay immutable."""
+    definition = await MetricService(db).update_definition(
+        key, **body.model_dump()
+    )
+    await db.commit()
+    return {"data": definition}
 
 
 @router.post("/metric-definitions/seed", response_model=DataResponse[dict])

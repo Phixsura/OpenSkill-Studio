@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 101 — metric definitions gained an operational-knobs PATCH (title,
+privacy class, direction, winsorize/cap with explicit clear flags);
+kind/source/query_version stay IMMUTABLE — they are analysis semantics
+baked into every stored snapshot, and changing them would silently re-mean
+history (the schema does not even accept them, pinned). metrics.py manifest
+(2,4).
+
 Round 100 — the hundredth adversarial round. Standing totals: 59 numbered
 defects/gaps found and fixed (every fix kill-proven or branch-verified),
 11 migrations, 512 exp tests, 697 web tests, an 86-check live E2E journey,

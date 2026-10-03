@@ -2309,3 +2309,32 @@ async def test_latency_cap_and_scoped_learning_paths_arms(db):
     # here is the scope JOIN ran (branch 609) without error
     assert out["t"]["n"] == 1
     assert out["t"].get("numerator", 0) == 0
+
+
+async def test_update_definition_operational_knobs_only(db):
+    """Round 101: PATCH edits title/privacy/direction/winsorize/cap, clears
+    via explicit flags, refuses unknown enums typed, 404s unknown keys —
+    kind/source are not even accepted by the schema."""
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+    updated = await svc.update_definition(
+        "run_latency_ms", title="Run latency (edited)",
+        direction="decrease_good", winsorize_pct=99.0, cap_value=60_000,
+    )
+    assert updated.title == "Run latency (edited)"
+    assert float(updated.winsorize_pct) == 99.0
+    assert float(updated.cap_value) == 60_000
+    cleared = await svc.update_definition(
+        "run_latency_ms", clear_winsorize=True, clear_cap=True
+    )
+    assert cleared.winsorize_pct is None and cleared.cap_value is None
+    with pytest.raises(AppError) as exc:
+        await svc.update_definition("run_latency_ms", direction="sideways")
+    assert exc.value.code == "VALIDATION_ERROR"
+    with pytest.raises(AppError) as exc:
+        await svc.update_definition("no_such_metric_zzz", title="x")
+    assert exc.value.status_code == 404
+    from app.experiments.schemas import UpdateMetricDefinitionRequest
+
+    assert "kind" not in UpdateMetricDefinitionRequest.model_fields
+    assert "spec" not in UpdateMetricDefinitionRequest.model_fields

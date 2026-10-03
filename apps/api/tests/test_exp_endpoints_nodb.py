@@ -154,7 +154,7 @@ def test_delegated_surface_manifest_pinned():
         "guardrails.py": (2, 2),  # round 96: + events CSV export (read scope)
         "holdouts.py": (0, 4),  # round 54: + holdout report (platform admin)
         "layers.py": (0, 5),
-        "metrics.py": (2, 3),  # round 47: + CSV export (same read scope)
+        "metrics.py": (2, 4),  # round 47 CSV export; round 101 definition PATCH
         "selfserve.py": (0, 0),
     }, counts
 

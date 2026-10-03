@@ -1073,6 +1073,39 @@ class MetricService:
             ) from exc
         return definition
 
+    async def update_definition(self, key: str, **changes) -> MetricDefinition:
+        """Round 101: edit the OPERATIONAL knobs of a definition (title,
+        privacy class, direction, winsorize/cap). kind/source stay immutable
+        — they are analysis semantics baked into stored snapshots."""
+        definition = (
+            await self.db.execute(
+                select(MetricDefinition).where(MetricDefinition.key == key)
+            )
+        ).scalar_one_or_none()
+        if definition is None:
+            raise AppError("EXPERIMENT_NOT_FOUND", "Metric definition not found", 404)
+        for name, allowed in (
+            ("privacy_class", METRIC_PRIVACY_CLASSES),
+            ("direction", METRIC_DIRECTIONS),
+        ):
+            value = changes.get(name)
+            if value is not None and value not in allowed:
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    f"Unknown {name}: {value} (allowed: {sorted(allowed)})",
+                    422,
+                )
+        for field in ("title", "privacy_class", "direction",
+                      "winsorize_pct", "cap_value"):
+            if changes.get(field) is not None:
+                setattr(definition, field, changes[field])
+        if changes.get("clear_winsorize"):
+            definition.winsorize_pct = None
+        if changes.get("clear_cap"):
+            definition.cap_value = None
+        await self.db.flush()
+        return definition
+
     async def list_definitions(self, *, domain: str | None = None) -> list[MetricDefinition]:
         q = select(MetricDefinition).order_by(MetricDefinition.key.asc())
         if domain:

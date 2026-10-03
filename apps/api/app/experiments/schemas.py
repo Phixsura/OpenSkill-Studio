@@ -303,6 +303,20 @@ class IncidentRequest(_StrictReq):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class UpdateMetricDefinitionRequest(_StrictReq):
+    """Round 101: the EDITABLE subset only — kind/source/query_version are
+    analysis semantics and stay immutable (changing them silently re-means
+    every stored snapshot); provenance already records query_version."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    privacy_class: str | None = Field(default=None, max_length=16)
+    direction: str | None = Field(default=None, max_length=16)
+    winsorize_pct: float | None = Field(default=None, gt=0, lt=100)
+    cap_value: float | None = None
+    clear_winsorize: bool = False
+    clear_cap: bool = False
+
+
 class CreateMetricDefinitionRequest(_StrictReq):
     key: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_]{2,63}$")
     title: str = Field(min_length=1, max_length=200)
