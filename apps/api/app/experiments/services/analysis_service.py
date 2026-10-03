@@ -93,6 +93,19 @@ class AnalysisService:
                 if value is None:
                     continue
                 arm[field] = (arm[field] or 0) + float(value)
+            # §4.6 v3 (round 115): fold the per-window covariates map —
+            # sums, squares, xy and the xx cross terms all add across windows
+            if row.covariates:
+                acc = arm.setdefault("covariates", {})
+                for cov_key, entry in row.covariates.items():
+                    slot = acc.setdefault(
+                        cov_key, {"sum": 0.0, "sum_sq": 0.0, "xy_sum": 0.0}
+                    )
+                    for f in ("sum", "sum_sq", "xy_sum"):
+                        slot[f] += float(entry.get(f) or 0.0)
+                    for other, xx in (entry.get("xx") or {}).items():
+                        slot.setdefault("xx", {})
+                        slot["xx"][other] = slot["xx"].get(other, 0.0) + float(xx)
         return aggregated, mixed
 
     @staticmethod
@@ -296,7 +309,8 @@ class AnalysisService:
 
     @staticmethod
     def _compare(
-        kind: str, engine: str, control: dict, treatment: dict
+        kind: str, engine: str, control: dict, treatment: dict,
+        covariate_keys: list[str] | None = None
     ) -> dict:
         if kind in ("binary", "time_to_event"):
             x1 = control.get("numerator") or 0.0
@@ -338,6 +352,24 @@ class AnalysisService:
             result = stats.bayes_continuous(*args)
         else:
             result = stats.welch_from_stats(*args)
+        if covariate_keys and len(covariate_keys) > 1:
+            multi = stats.multi_cuped_adjusted_welch(
+                {"n": control.get("n"), "sum": control.get("sum_value"),
+                 "sum_sq": control.get("sum_sq"),
+                 "covariates": control.get("covariates")},
+                {"n": treatment.get("n"), "sum": treatment.get("sum_value"),
+                 "sum_sq": treatment.get("sum_sq"),
+                 "covariates": treatment.get("covariates")},
+                covariate_keys,
+            )
+            if multi is not None:
+                result["cuped"] = {
+                    "effect": multi["effect"], "ci": multi["ci"],
+                    "p": multi["p"], "theta": multi["theta"],
+                    "covariates": covariate_keys,
+                    "mode": "multi",
+                }
+                return result
         cuped = stats.cuped_adjusted_welch(
             {"n": control.get("n"), "sum": control.get("sum_value"),
              "sum_sq": control.get("sum_sq"), "cov_sum": control.get("cov_sum"),
@@ -523,7 +555,12 @@ class AnalysisService:
                         if p_balance is not None and p_balance < 0.001:
                             warnings.append("PRE_BALANCE_SUSPECT")
                     comparison = self._compare(
-                        kind, spec.stats_engine, aggregated[control_key], arm
+                        kind, spec.stats_engine, aggregated[control_key], arm,
+                        covariate_keys=(
+                            spec.variance_reduction.covariates()
+                            if spec.variance_reduction is not None
+                            else None
+                        ),
                     )
                     # Sequential adjustment on the standardized statistic.
                     # NOT `get("z") or get("t")` — a legitimate z of exactly

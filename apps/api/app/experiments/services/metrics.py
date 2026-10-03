@@ -127,6 +127,7 @@ async def assemble_covariates(
         days=variance_reduction.lookback_days
     )
     out: dict = {}
+    x_maps: dict[str, dict[str, float]] = {}
     for cov_key in variance_reduction.covariates():
         definition = definitions_by_key.get(cov_key)
         if definition is None:
@@ -154,6 +155,17 @@ async def assemble_covariates(
             "sum_sq": sum(v * v for v in xs),
             "xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
         }
+        x_maps[cov_key] = x
+    # §4.6 v3 step 3 needs the covariate CROSS-products for the joint OLS —
+    # upper triangle only, keyed on the earlier covariate
+    keys = [k for k in variance_reduction.covariates() if k in out]
+    for i, ki in enumerate(keys):
+        xx: dict[str, float] = {}
+        for kj in keys[i + 1:]:
+            xi, xj = x_maps[ki], x_maps[kj]
+            xx[kj] = sum(xi.get(u, 0.0) * xj.get(u, 0.0) for u in units)
+        if xx:
+            out[ki]["xx"] = xx
     return out
 
 

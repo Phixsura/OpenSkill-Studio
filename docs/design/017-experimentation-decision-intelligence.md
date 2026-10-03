@@ -1059,6 +1059,21 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 115 — multi-covariate CUPED, step 3 of 3 (the epoch closes): the
+assembler now also stores the covariate CROSS-products (upper triangle,
+keyed on the earlier covariate) — the joint OLS is unsolvable without
+them; the pure core gained multi_cuped_adjusted_welch (pooled centered
+normal equations, k<=3 Gaussian elimination, Z = Y - theta·(X - x̄),
+Welch over Z) verified at 1e-9 against an EXPLICIT per-unit
+residualization oracle with correlated covariates, exactly reducing to the
+single-covariate implementation at k == 1, and refusing collinear designs
+and missing cross terms; the aggregate folds the covariates map across
+windows; comparisons carry cuped.mode == "multi" with the full theta map.
+End-to-end pinned: a two-covariate spec flows snapshot -> aggregate ->
+joint adjustment. The long-deferred item is DONE for every covariate whose
+source has a provider (projects ships; the provider registry is the
+extension point).
+
 Round 114 — multi-covariate CUPED, step 2 of 3 (data): a covariate
 PROVIDER registry computes per-unit pre-period values per source (projects
 ships first, measure-aware: revisions vs approvals); in k>1 mode the main

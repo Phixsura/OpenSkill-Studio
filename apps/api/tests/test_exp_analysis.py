@@ -746,3 +746,131 @@ def test_required_n_per_arm_known_value_and_monotonicity():
     # exact value pin (kills the sqrt-argument and exponent mutants) — the
     # formula's own output at the textbook point, ledgered as a constant
     assert required_n_per_arm(0.10, 0.20) == 3841
+
+
+def _mc_arm_stats(ys, xs_by_key, keys):
+    cov = {}
+    for i, k in enumerate(keys):
+        xs = xs_by_key[k]
+        entry = {
+            "sum": sum(xs),
+            "sum_sq": sum(v * v for v in xs),
+            "xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+        }
+        xx = {}
+        for k2 in keys[i + 1:]:
+            xs2 = xs_by_key[k2]
+            xx[k2] = sum(a * b for a, b in zip(xs, xs2, strict=True))
+        if xx:
+            entry["xx"] = xx
+        cov[k] = entry
+    return {"n": len(ys), "sum": sum(ys),
+            "sum_sq": sum(v * v for v in ys), "covariates": cov}
+
+
+def test_multi_cuped_matches_per_unit_oracle():
+    """§4.6 v3 round 115: the sufficient-stats implementation must agree with
+    an EXPLICIT per-unit residualization oracle — pooled centered OLS theta,
+    Z = y - theta·(x - x̄), Welch over Z — on a two-covariate fixture with
+    correlated covariates."""
+    from app.experiments.services.analysis import (
+        multi_cuped_adjusted_welch,
+        welch_from_stats,
+    )
+
+    keys = ["c1", "c2"]
+    cy = [5.0, 7.0, 6.0, 9.0, 4.0, 8.0]
+    cx1 = [1.0, 2.0, 1.5, 3.0, 0.5, 2.5]
+    cx2 = [0.0, 1.0, 1.0, 2.0, 0.0, 2.0]
+    ty = [7.5, 9.0, 8.0, 11.0, 6.0, 10.5]
+    tx1 = [1.2, 2.2, 1.4, 3.1, 0.6, 2.6]
+    tx2 = [0.0, 1.0, 1.0, 2.0, 1.0, 2.0]
+
+    control = _mc_arm_stats(cy, {"c1": cx1, "c2": cx2}, keys)
+    treatment = _mc_arm_stats(ty, {"c1": tx1, "c2": tx2}, keys)
+    result = multi_cuped_adjusted_welch(control, treatment, keys)
+    assert result is not None and "insufficient_data" not in result
+
+    # oracle: explicit per-unit computation
+    ally = cy + ty
+    allx = {"c1": cx1 + tx1, "c2": cx2 + tx2}
+    n = len(ally)
+    ybar = sum(ally) / n
+    xbar = {k: sum(allx[k]) / n for k in keys}
+    # centered normal equations solved by hand (2x2)
+    a11 = sum((v - xbar["c1"]) ** 2 for v in allx["c1"])
+    a22 = sum((v - xbar["c2"]) ** 2 for v in allx["c2"])
+    a12 = sum((p - xbar["c1"]) * (q - xbar["c2"])
+              for p, q in zip(allx["c1"], allx["c2"], strict=True))
+    b1 = sum((p - xbar["c1"]) * (y - ybar)
+             for p, y in zip(allx["c1"], ally, strict=True))
+    b2 = sum((q - xbar["c2"]) * (y - ybar)
+             for q, y in zip(allx["c2"], ally, strict=True))
+    det = a11 * a22 - a12 * a12
+    th1 = (b1 * a22 - b2 * a12) / det
+    th2 = (b2 * a11 - b1 * a12) / det
+    assert result["theta"]["c1"] == pytest.approx(th1, rel=1e-9)
+    assert result["theta"]["c2"] == pytest.approx(th2, rel=1e-9)
+
+    def residuals(ys, x1s, x2s):
+        return [
+            y - th1 * (p - xbar["c1"]) - th2 * (q - xbar["c2"])
+            for y, p, q in zip(ys, x1s, x2s, strict=True)
+        ]
+
+    zc = residuals(cy, cx1, cx2)
+    zt = residuals(ty, tx1, tx2)
+    oracle = welch_from_stats(
+        len(zc), sum(zc), sum(v * v for v in zc),
+        len(zt), sum(zt), sum(v * v for v in zt),
+    )
+    assert result["effect"] == pytest.approx(oracle["effect"], rel=1e-9)
+    assert result["t"] == pytest.approx(oracle["t"], rel=1e-9)
+    assert result["p"] == pytest.approx(oracle["p"], rel=1e-9)
+
+
+def test_multi_cuped_k1_reduces_to_single_cuped():
+    """k == 1 must agree with the existing cuped_adjusted_welch exactly."""
+    from app.experiments.services.analysis import (
+        cuped_adjusted_welch,
+        multi_cuped_adjusted_welch,
+    )
+
+    cy = [5.0, 7.0, 6.0, 9.0]
+    cx = [1.0, 2.0, 1.5, 3.0]
+    ty = [7.5, 9.0, 8.0, 11.0]
+    tx = [1.2, 2.2, 1.4, 3.1]
+    control = _mc_arm_stats(cy, {"c1": cx}, ["c1"])
+    treatment = _mc_arm_stats(ty, {"c1": tx}, ["c1"])
+    multi = multi_cuped_adjusted_welch(control, treatment, ["c1"])
+    single = cuped_adjusted_welch(
+        {"n": 4, "sum": sum(cy), "sum_sq": sum(v * v for v in cy),
+         "cov_sum": sum(cx), "cov_sum_sq": sum(v * v for v in cx),
+         "cov_xy_sum": sum(a * b for a, b in zip(cy, cx, strict=True))},
+        {"n": 4, "sum": sum(ty), "sum_sq": sum(v * v for v in ty),
+         "cov_sum": sum(tx), "cov_sum_sq": sum(v * v for v in tx),
+         "cov_xy_sum": sum(a * b for a, b in zip(ty, tx, strict=True))},
+    )
+    assert multi is not None and single is not None
+    assert multi["effect"] == pytest.approx(single["effect"], rel=1e-9)
+    assert multi["t"] == pytest.approx(single["t"], rel=1e-9)
+    assert multi["theta"]["c1"] == pytest.approx(single["theta"], rel=1e-9)
+
+
+def test_multi_cuped_degenerate_refusals():
+    """Collinear covariates -> singular normal equations -> None; a missing
+    cross term -> None."""
+    from app.experiments.services.analysis import multi_cuped_adjusted_welch
+
+    keys = ["c1", "c2"]
+    cy = [5.0, 7.0, 6.0]
+    cx = [1.0, 2.0, 1.5]
+    control = _mc_arm_stats(cy, {"c1": cx, "c2": cx}, keys)  # identical -> collinear
+    treatment = _mc_arm_stats([7.0, 9.0, 8.0], {"c1": cx, "c2": cx}, keys)
+    assert multi_cuped_adjusted_welch(control, treatment, keys) is None
+
+    good_c = _mc_arm_stats(cy, {"c1": cx, "c2": [0.0, 1.0, 2.0]}, keys)
+    good_t = _mc_arm_stats([7.0, 9.0, 8.0],
+                        {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
+    del good_c["covariates"]["c1"]["xx"]  # missing cross term
+    assert multi_cuped_adjusted_welch(good_c, good_t, keys) is None

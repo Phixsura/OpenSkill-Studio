@@ -1229,3 +1229,77 @@ async def test_latest_look_scorecard(db):
     assert latest["sequential"] == "msprt"
     assert latest["automated"] is False
     assert "exposure_rate" in latest["primary_effects"]
+
+
+async def test_multi_covariate_analysis_end_to_end(db):
+    """§4.6 v3 round 115 (the epoch closes): a two-covariate spec flows
+    snapshot -> aggregate -> joint adjustment; the comparison carries
+    cuped.mode == "multi" with BOTH thetas."""
+    from datetime import timedelta as _td
+
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User as _User
+
+    exp, admin = await _mk_running(db, variance_reduction={
+        "method": "cuped",
+        "covariate_metrics": ["revision_count", "project_approval_rate"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["revision_count"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    project = Project(org_id=org.id, title="MP",
+                      slug=f"mp-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+
+    asvc = AssignmentService(db)
+    window_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    pre = window_start - _td(days=3)
+    rng_rows = [
+        # (pre_version, pre_status, window_version)
+        (3, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.REJECTED, 3),
+        (1, SubmissionStatus.APPROVED, 1),
+        (4, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.REJECTED, 1),
+        (3, SubmissionStatus.REJECTED, 4),
+        (1, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.APPROVED, 3),
+    ]
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    for i, (pv, pstat, wv) in enumerate(rng_rows):
+        u = _User(email=f"mca-{i}-{ULID()}@example.com", display_name=f"A{i}",
+                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        db.add(u)
+        await db.flush()
+        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                                  unit_id=u.id) is not None
+        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
+                          status=pstat, version=pv, created_at=pre))
+        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
+                          status=SubmissionStatus.REJECTED, version=wv,
+                          created_at=window_start + _td(hours=2)))
+    await db.flush()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_start + _td(days=1)
+    )
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    cuped = comparison.get("cuped")
+    assert cuped is not None and cuped.get("mode") == "multi"
+    assert set(cuped["theta"]) == {"revision_count", "project_approval_rate"}

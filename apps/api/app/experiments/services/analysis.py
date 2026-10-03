@@ -410,6 +410,130 @@ def analyze_rate(
 # ── CUPED (§10 v2): sufficient-statistics variance reduction ─────────
 
 
+def _solve_spd(a: list[list[float]], b: list[float]) -> list[float] | None:
+    """Tiny Gaussian elimination with partial pivoting for the k<=3 normal
+    equations; None when singular/degenerate."""
+    k = len(b)
+    m = [row[:] + [b[i]] for i, row in enumerate(a)]
+    for col in range(k):
+        pivot = max(range(col, k), key=lambda r: abs(m[r][col]))
+        if abs(m[pivot][col]) < 1e-12:
+            return None
+        m[col], m[pivot] = m[pivot], m[col]
+        for r in range(k):
+            if r == col:
+                continue
+            f = m[r][col] / m[col][col]
+            for c in range(col, k + 1):
+                m[r][c] -= f * m[col][c]
+    return [m[i][k] / m[i][i] for i in range(k)]
+
+
+def multi_cuped_adjusted_welch(
+    control: dict, treatment: dict, covariate_keys: list[str]
+) -> dict | None:
+    """§4.6 v3 (round 115): joint multi-covariate CUPED from per-arm
+    sufficient stats. Arms carry {n, sum, sum_sq, covariates: {key: {sum,
+    sum_sq, xy_sum, xx: {later_key: sum}}}}. theta is the pooled OLS
+    coefficient vector over CENTERED covariates; Z = Y - theta·(X - x_mean)
+    analyzed with Welch. k == 1 reduces exactly to cuped_adjusted_welch.
+    None when any aggregate is missing or the design is degenerate."""
+    k = len(covariate_keys)
+    if k == 0:
+        return None
+    arms = (control, treatment)
+    for arm in arms:
+        if any(arm.get(f) is None for f in ("n", "sum", "sum_sq")):
+            return None
+        cov = arm.get("covariates") or {}
+        for key in covariate_keys:
+            entry = cov.get(key)
+            if entry is None or any(
+                entry.get(f) is None for f in ("sum", "sum_sq", "xy_sum")
+            ):
+                return None
+    n = control["n"] + treatment["n"]
+    if control["n"] <= 1 or treatment["n"] <= 1:
+        return None
+
+    def pooled_cov(key: str, field: str) -> float:
+        return (control["covariates"][key][field]
+                + treatment["covariates"][key][field])
+
+    def pooled_xx(ki: str, kj: str) -> float:
+        # upper-triangle storage: the earlier key holds the cross sum
+        i, j = covariate_keys.index(ki), covariate_keys.index(kj)
+        first, second = (ki, kj) if i < j else (kj, ki)
+        total = 0.0
+        for arm in arms:
+            entry = arm["covariates"][first]
+            xx = entry.get("xx") or {}
+            if second not in xx:
+                return float("nan")
+            total += xx[second]
+        return total
+
+    sy = control["sum"] + treatment["sum"]
+    sx = {key: pooled_cov(key, "sum") for key in covariate_keys}
+    x_mean = {key: sx[key] / n for key in covariate_keys}
+    # centered normal equations: A[i][j] = S_xixj - n·x̄i·x̄j ; b[i] = S_xiy - n·x̄i·ȳ
+    a: list[list[float]] = []
+    b: list[float] = []
+    y_mean = sy / n
+    for i, ki in enumerate(covariate_keys):
+        row = []
+        for j, kj in enumerate(covariate_keys):
+            if i == j:
+                s_ij = pooled_cov(ki, "sum_sq")
+            else:
+                s_ij = pooled_xx(ki, kj)
+                if s_ij != s_ij:  # NaN — missing cross term
+                    return None
+            row.append(s_ij - n * x_mean[ki] * x_mean[kj])
+        a.append(row)
+        b.append(pooled_cov(ki, "xy_sum") - n * x_mean[ki] * y_mean)
+    theta = _solve_spd(a, b)
+    if theta is None:
+        return None
+
+    def adjusted(arm: dict) -> tuple[float, float, float]:
+        an, asy, asyy = arm["n"], arm["sum"], arm["sum_sq"]
+        cov = arm["covariates"]
+        # ΣZ = Σy − Σ_i θi (Σxi − n·x̄i)
+        sz = asy - sum(
+            theta[i] * (cov[ki]["sum"] - an * x_mean[ki])
+            for i, ki in enumerate(covariate_keys)
+        )
+        # ΣZ² = Σy² − 2Σθi(Σxiy − x̄iΣy) + ΣΣ θiθj (Σxixj − x̄jΣxi − x̄iΣxj + n·x̄i·x̄j)
+        szz = asyy
+        for i, ki in enumerate(covariate_keys):
+            szz -= 2.0 * theta[i] * (cov[ki]["xy_sum"] - x_mean[ki] * asy)
+        for i, ki in enumerate(covariate_keys):
+            for j, kj in enumerate(covariate_keys):
+                if i == j:
+                    s_ij = cov[ki]["sum_sq"]
+                elif i < j:
+                    s_ij = (cov[ki].get("xx") or {}).get(kj, 0.0)
+                else:
+                    s_ij = (cov[kj].get("xx") or {}).get(ki, 0.0)
+                szz += theta[i] * theta[j] * (
+                    s_ij
+                    - x_mean[kj] * cov[ki]["sum"]
+                    - x_mean[ki] * cov[kj]["sum"]
+                    + an * x_mean[ki] * x_mean[kj]
+                )
+        return an, sz, szz
+
+    n1, s1, ss1 = adjusted(control)
+    n2, s2, ss2 = adjusted(treatment)
+    result = welch_from_stats(n1, s1, ss1, n2, s2, ss2)
+    if result.get("insufficient_data"):
+        return None
+    result["theta"] = {key: theta[i] for i, key in enumerate(covariate_keys)}
+    result["cuped"] = "multi"
+    return result
+
+
 def cuped_adjusted_welch(control: dict, treatment: dict) -> dict | None:
     """CUPED from per-arm sufficient stats:
     {n, sum, sum_sq, cov_sum, cov_sum_sq, cov_xy_sum}.
