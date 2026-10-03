@@ -250,3 +250,34 @@ def test_spec_hash_is_key_order_independent():
 
 def test_spec_hash_detects_value_change():
     assert canonical_spec_hash({"a": 1}) != canonical_spec_hash({"a": 2})
+
+
+def test_variance_reduction_multi_covariate_forms():
+    """§4.6 v3 (round 113): exactly one of covariate_metric /
+    covariate_metrics; the list is deduped and capped at 3; covariates()
+    normalizes both forms."""
+    single = _validate(_spec(variance_reduction={
+        "method": "cuped", "covariate_metric": "cost_usd",
+    }))
+    assert single.variance_reduction.covariates() == ["cost_usd"]
+    multi = _validate(_spec(variance_reduction={
+        "method": "cuped",
+        "covariate_metrics": ["cost_usd", "run_latency_ms"],
+    }))
+    assert multi.variance_reduction.covariates() == ["cost_usd", "run_latency_ms"]
+    with pytest.raises(AppError):
+        _validate(_spec(variance_reduction={"method": "cuped"}))  # neither
+    with pytest.raises(AppError):
+        _validate(_spec(variance_reduction={
+            "method": "cuped", "covariate_metric": "a" * 10,
+            "covariate_metrics": ["cost_usd"],
+        }))  # both
+    with pytest.raises(AppError):
+        _validate(_spec(variance_reduction={
+            "method": "cuped", "covariate_metrics": ["cost_usd", "cost_usd"],
+        }))  # dupes
+    with pytest.raises(AppError):
+        _validate(_spec(variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["a", "b", "c", "d"],
+        }))  # > 3

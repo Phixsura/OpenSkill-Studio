@@ -161,7 +161,7 @@ async def _source_workflow_runs(
         if measure == "latency_ms":
             if (
                 variance_reduction is not None
-                and variance_reduction.covariate_metric == definition.key
+                and definition.key in variance_reduction.covariates()
             ):
                 # CUPED mode (§4.6 v2, third source on the shared contract):
                 # per-UNIT mean latency — y over the window, x over the
@@ -283,7 +283,7 @@ async def _source_projects(
         if measure == "revision_count":
             if (
                 variance_reduction is not None
-                and variance_reduction.covariate_metric == definition.key
+                and definition.key in variance_reduction.covariates()
             ):
                 # CUPED mode (§4.6 v2): per-UNIT aggregation so each unit
                 # contributes one (y, x) pair — y = revisions in the window,
@@ -367,7 +367,7 @@ async def _source_cost_ledger(
             continue
         if (
             variance_reduction is not None
-            and variance_reduction.covariate_metric == definition.key
+            and definition.key in variance_reduction.covariates()
         ):
             # CUPED mode (§4.6 v2, same contract as projects): per-UNIT
             # totals — y = unit's cost in the window, x = its cost in the
@@ -1415,6 +1415,7 @@ class MetricService:
                     "cov_sum",
                     "cov_sum_sq",
                     "cov_xy_sum",
+                    "covariates",
                     "provenance",
                 )
                 if c in row

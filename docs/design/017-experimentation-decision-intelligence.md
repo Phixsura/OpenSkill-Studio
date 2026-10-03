@@ -1059,6 +1059,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 113 — multi-covariate CUPED, step 1 of 3 (schema): the deferred item
+leaves the deferred list under sustained demand. VarianceReductionSpec
+gains covariate_metrics (1-3, deduped) with the singular form kept for
+back-compat (exactly one form, validator-pinned; covariates() normalizes
+both); exp12 adds a JSONB covariates map {key: {sum, sum_sq, xy_sum}} to
+snapshots while the cov_* columns stay as the FIRST covariate's mirror so
+every pre-exp12 reader keeps working; the three per-source CUPED gates now
+test membership in covariates(). Round-trip verified; steps 2 (sources
+compute the map) and 3 (analysis-side multivariate adjustment) follow.
+
 Round 111 — the Promotions page polls every 5s while any draft is
 'applying' (an async apply resolves out-of-band; the operator now sees it
 land without refreshing) and rests otherwise — the interval logic is an

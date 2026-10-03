@@ -97,9 +97,34 @@ class StopPolicySpec(_StrictReq):
 
 
 class VarianceReductionSpec(_StrictReq):
+    """§4.6 v3 (round 113): multi-covariate CUPED. `covariate_metrics` is
+    the list form (1-3, deduped); the singular `covariate_metric` stays for
+    back-compat and means a one-element list. Exactly one form is given."""
+
     method: str = Field(max_length=20)
-    covariate_metric: str = Field(min_length=1, max_length=64)
+    covariate_metric: str | None = Field(default=None, min_length=1, max_length=64)
+    covariate_metrics: list[str] | None = Field(default=None, min_length=1, max_length=3)
     lookback_days: int = Field(default=28, ge=1, le=365)
+
+    def covariates(self) -> list[str]:
+        if self.covariate_metrics:
+            return self.covariate_metrics
+        return [self.covariate_metric] if self.covariate_metric else []
+
+    @model_validator(mode="after")
+    def _exactly_one_form(self) -> "VarianceReductionSpec":
+        if bool(self.covariate_metric) == bool(self.covariate_metrics):
+            raise ValueError(
+                "variance_reduction takes exactly one of covariate_metric "
+                "or covariate_metrics"
+            )
+        if self.covariate_metrics:
+            if len(set(self.covariate_metrics)) != len(self.covariate_metrics):
+                raise ValueError("covariate_metrics must be unique")
+            for key in self.covariate_metrics:
+                if not (1 <= len(key) <= 64):
+                    raise ValueError("covariate metric keys must be 1-64 chars")
+        return self
 
     @field_validator("method")
     @classmethod
@@ -471,6 +496,7 @@ class MetricSnapshotResponse(BaseModel):
     cov_sum: float | None
     cov_sum_sq: float | None
     cov_xy_sum: float | None
+    covariates: dict
     provenance: dict
     computed_at: datetime
 

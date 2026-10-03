@@ -86,6 +86,10 @@ class MetricSnapshot(Base):
     cov_sum: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
     cov_sum_sq: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
     cov_xy_sum: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    # exp12 (§4.6 v3): per-covariate sufficient stats {key: {sum, sum_sq,
+    # xy_sum}}; the cov_* columns above mirror the FIRST covariate so every
+    # pre-exp12 reader keeps working
+    covariates: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
