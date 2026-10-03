@@ -1351,5 +1351,6 @@ async def test_multi_covariate_analysis_end_to_end(db):
     cuped = comparison.get("cuped")
     assert cuped is not None and cuped.get("mode") == "multi"
     assert set(cuped["theta"]) == {"revision_count", "project_approval_rate"}
+    assert isinstance(cuped.get("variance_reduction_pct"), float)  # round 123
     # #62: the real joint adjustment ran — no degrade warning
     assert "CUPED_MULTI_DEGRADED" not in result["warnings"]

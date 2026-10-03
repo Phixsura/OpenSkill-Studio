@@ -529,6 +529,17 @@ def multi_cuped_adjusted_welch(
     result = welch_from_stats(n1, s1, ss1, n2, s2, ss2)
     if result.get("insufficient_data"):
         return None
+    # same honesty readout as the single-covariate path: achieved variance
+    # reduction vs the unadjusted Welch
+    raw = welch_from_stats(
+        control["n"], control["sum"], control["sum_sq"],
+        treatment["n"], treatment["sum"], treatment["sum_sq"],
+    )
+    var_raw = raw.get("control", {}).get("var", 0) + raw.get("treatment", {}).get("var", 0)
+    var_adj = result.get("control", {}).get("var", 0) + result.get("treatment", {}).get("var", 0)
+    result["variance_reduction_pct"] = (
+        100.0 * (1.0 - var_adj / var_raw) if var_raw > 0 else 0.0
+    )
     result["theta"] = {key: theta[i] for i, key in enumerate(covariate_keys)}
     result["cuped"] = "multi"
     return result

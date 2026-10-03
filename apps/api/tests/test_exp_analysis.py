@@ -827,6 +827,19 @@ def test_multi_cuped_matches_per_unit_oracle():
     assert result["effect"] == pytest.approx(oracle["effect"], rel=1e-9)
     assert result["t"] == pytest.approx(oracle["t"], rel=1e-9)
     assert result["p"] == pytest.approx(oracle["p"], rel=1e-9)
+    # round 123: the honesty readout mirrors the single path — achieved
+    # variance reduction vs the UNADJUSTED Welch, from the same residuals
+    raw = welch_from_stats(
+        len(cy), sum(cy), sum(v * v for v in cy),
+        len(ty), sum(ty), sum(v * v for v in ty),
+    )
+    expected_pct = 100.0 * (
+        1.0
+        - (oracle["control"]["var"] + oracle["treatment"]["var"])
+        / (raw["control"]["var"] + raw["treatment"]["var"])
+    )
+    assert result["variance_reduction_pct"] == pytest.approx(expected_pct, rel=1e-9)
+    assert result["variance_reduction_pct"] > 0  # correlated fixture must help
 
 
 def test_multi_cuped_k1_reduces_to_single_cuped():
@@ -855,6 +868,9 @@ def test_multi_cuped_k1_reduces_to_single_cuped():
     assert multi["effect"] == pytest.approx(single["effect"], rel=1e-9)
     assert multi["t"] == pytest.approx(single["t"], rel=1e-9)
     assert multi["theta"]["c1"] == pytest.approx(single["theta"], rel=1e-9)
+    assert multi["variance_reduction_pct"] == pytest.approx(
+        single["variance_reduction_pct"], rel=1e-9
+    )
 
 
 def test_multi_cuped_degenerate_refusals():

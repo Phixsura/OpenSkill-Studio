@@ -1062,6 +1062,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 123 — the multi adjustment gains the single path's honesty readout:
+variance_reduction_pct (achieved reduction vs the unadjusted Welch) now
+rides the multi result too, pinned 1e-9 against the oracle's residuals and
+exactly equal to the single path at k == 1; the analysis page's conditional
+pct render (round 118) lights up for multi without changes. Also de-staled
+the time_to_event caveat ("full KM in exp10" — exp10 shipped as scheduled
+start; the caveat now points at the deferred list).
+
 Round 122 — console parity #64: the builder exposed MDE, switchback and
 segments but variance_reduction was unconfigurable — CUPED (single or
 multi) existed only for operators hand-writing spec JSON. The builder now

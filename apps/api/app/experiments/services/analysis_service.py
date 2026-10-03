@@ -322,7 +322,7 @@ class AnalysisService:
             else:
                 result = stats.analyze_binary(x1, n1, x2, n2)
             if kind == "time_to_event":
-                result["caveat"] = "time_to_event analyzed as binary-at-horizon (full KM in exp10)"
+                result["caveat"] = "time_to_event analyzed as binary-at-horizon (full KM deferred, ADR-017 §16)"
             return result
         if kind == "rate":
             result = stats.analyze_rate(
@@ -366,6 +366,7 @@ class AnalysisService:
                 result["cuped"] = {
                     "effect": multi["effect"], "ci": multi["ci"],
                     "p": multi["p"], "theta": multi["theta"],
+                    "variance_reduction_pct": multi["variance_reduction_pct"],
                     "covariates": covariate_keys,
                     "mode": "multi",
                 }
