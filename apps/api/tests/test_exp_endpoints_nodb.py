@@ -147,7 +147,7 @@ def test_delegated_surface_manifest_pinned():
             text.count("Depends(require_platform_admin)"),
         )
     assert counts == {
-        "analysis.py": (3, 0),  # round 87: + latest-look scorecard (read scope)
+        "analysis.py": (4, 0),  # round 137: + look history  # round 87: + latest-look scorecard (read scope)
         "assignments.py": (4, 0),  # round 133: + assignments CSV export
         "decisions.py": (0, 9),
         "experiments.py": (6, 4),  # round 92 clone; round 129 ramp-plan (platform)

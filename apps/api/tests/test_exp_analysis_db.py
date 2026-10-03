@@ -1397,3 +1397,23 @@ async def test_quantile_comparison_rides_the_analysis(db):
     assert 256.0 <= q["treatment"] <= 512.0
     assert q["diff"] == pytest.approx(q["treatment"] - q["control"])
     assert "caveat" in q
+
+
+async def test_look_history_lists_every_look_newest_first(db):
+    """Round 137: the history view returns every recorded look, newest
+    first, each entry shaped like latest_look; segment analyses stay out
+    (they record no look)."""
+    exp, admin = await _mk_running(db)
+    await _populate(db, exp)
+    svc = AnalysisService(db)
+    first = await svc.run(exp.id, actor=admin)
+    second = await svc.run(exp.id, actor=admin)
+    history = await svc.look_history(exp.id)
+    assert len(history) == 2
+    # msprt looks carry no budget number (that is OF's) — order by recency
+    assert history[0]["at"] >= history[1]["at"]
+    assert history[0]["result_hash"] == second["result_hash"]
+    assert history[1]["result_hash"] == first["result_hash"]
+    assert history[0] == await svc.latest_look(exp.id)
+    assert all(entry["automated"] is False for entry in history)
+    assert len(await svc.look_history(exp.id, limit=1)) == 1

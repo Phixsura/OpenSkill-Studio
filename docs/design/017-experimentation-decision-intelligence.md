@@ -1101,6 +1101,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 137 — look history: GET /analysis/history lists every recorded
+look newest first (audit-trail reads only, latest_look's shape per entry,
+same delegated scope as the scorecard; segment analyses stay out — they
+record no look). E2E 105; the delegated-surface manifest moved with it.
+
 Round 136 — mutation wave 21 over the digest sweep: 13/14 killed (both
 7-day >= edges by exactly-on-boundary rows, the day constant by a
 7.5-day-old event, EXACT per-line counts against inverted id filters, the

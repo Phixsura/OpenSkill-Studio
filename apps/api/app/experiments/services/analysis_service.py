@@ -420,6 +420,38 @@ class AnalysisService:
             "automated": event.actor_user_id is None,
         }
 
+    async def look_history(
+        self, experiment_id: str, *, limit: int = 50
+    ) -> list[dict]:
+        """Round 137: every recorded look, newest first — the audit-trail
+        view the scorecard's latest row summarizes. Same shape as
+        latest_look per entry."""
+        events = list(
+            (
+                await self.db.execute(
+                    select(ExperimentEvent)
+                    .where(
+                        ExperimentEvent.experiment_id == experiment_id,
+                        ExperimentEvent.event_type == "analysis_look",
+                    )
+                    .order_by(ExperimentEvent.created_at.desc(),
+                              ExperimentEvent.id.desc())
+                    .limit(limit)
+                )
+            ).scalars()
+        )
+        return [
+            {
+                "at": (event.payload or {}).get("at"),
+                "sequential": (event.payload or {}).get("sequential"),
+                "look": (event.payload or {}).get("look"),
+                "result_hash": (event.payload or {}).get("result_hash"),
+                "primary_effects": (event.payload or {}).get("primary_effects", {}),
+                "automated": event.actor_user_id is None,
+            }
+            for event in events
+        ]
+
     async def run(
         self, experiment_id: str, *, actor: User, segment: str | None = None
     ) -> dict:

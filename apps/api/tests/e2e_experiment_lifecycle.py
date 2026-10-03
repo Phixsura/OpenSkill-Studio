@@ -351,6 +351,13 @@ async def main() -> int:
         result_hash = r.json()["data"]["result_hash"]
         check("analysis is causal (randomized)", r.json()["data"]["causal_claim"] is True)
 
+        r = await c.get(f"/experiments/{exp_id}/analysis/history", headers=admin)
+        check("analysis history lists the recorded look over the wire",
+              r.status_code == 200
+              and len(r.json()["data"]) >= 1
+              and r.json()["data"][0]["result_hash"] == result_hash,
+              r.text[:300])
+
         # Round 92/93: clone + console text search over the wire
         clone_key = f"clone-{uid()}"
         r = await c.post(f"/experiments/{exp_id}/clone", headers=admin,

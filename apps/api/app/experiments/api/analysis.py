@@ -1,6 +1,6 @@
 """Analysis endpoint (ADR-017 §10, §12)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -49,6 +49,21 @@ async def latest_analysis(
 
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     return {"data": await AnalysisService(db).latest_look(experiment_id)}
+
+
+@router.get("/{experiment_id}/analysis/history", response_model=dict)
+async def analysis_history(
+    experiment_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """Round 137: the full look sequence, newest first (audit-trail reads
+    only, same delegated scope as the scorecard)."""
+    from app.experiments.services.experiments import ExperimentService
+
+    await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
+    return {"data": await AnalysisService(db).look_history(experiment_id, limit=limit)}
 
 
 @router.get("/{experiment_id}/segments", response_model=dict)
