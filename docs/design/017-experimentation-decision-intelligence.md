@@ -1101,6 +1101,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 132 — defect #66 (concurrency sweep over the new sweep): between
+sweep_ramp_plans' read and its set_ramp write, a manual ramp or a pause
+makes set_ramp refuse — the unfixed sweep let that AppError abort the
+WHOLE batch, starving every later experiment's scheduled step
+(kill-proven via a monkeypatched race). The sweep now skips the racing
+experiment (logged) and continues; set_ramp's own law still guards the
+write. Same family as the poison-entry guard — a per-item failure must
+never become a batch failure.
+
 Round 131 — ramp-plan verification closes: live E2E 103 checks (a
 non-increasing plan refused over the wire, the platform wall, null
 round-trip) and mutation wave 20 at 23/23 after strengthening (every

@@ -495,6 +495,7 @@ async def sweep_ramp_plans(
     HIGHEST due target wins (missed intermediate steps collapse into one
     jump); already-reached targets are no-ops, so the sweep is idempotent.
     set_ramp's own monotonicity law still guards every write."""
+    from app.exceptions import AppError
     from app.experiments.services.experiments import ExperimentService
     from app.experiments.services.guardrails import _system_actor
 
@@ -525,9 +526,20 @@ async def sweep_ramp_plans(
                 due.append(target)
         if not due:
             continue
-        await ExperimentService(db).set_ramp(
-            experiment_id, ramp_bp=max(due), actor=_system_actor()
-        )
+        try:
+            await ExperimentService(db).set_ramp(
+                experiment_id, ramp_bp=max(due), actor=_system_actor()
+            )
+        except AppError as exc:
+            # #66: a manual ramp or a pause can land between our read and
+            # this write — set_ramp rightly refuses, and ONE experiment's
+            # race must never abort the rest of the batch
+            log.info(
+                "exp_ramp_plan_step_skipped",
+                experiment_id=experiment_id,
+                code=exc.code,
+            )
+            continue
         applied += 1
     return applied
 

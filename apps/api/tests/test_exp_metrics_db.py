@@ -2780,3 +2780,38 @@ async def test_ramp_plan_sweep_applies_highest_due(db):
     # the future step still applies later
     assert await sweep_ramp_plans(db, now=now + timedelta(days=3)) == 1
     assert (await db.get(Experiment, exp.id)).ramp_bp == 8000
+
+
+async def test_ramp_plan_sweep_tolerates_a_racing_refusal(db, monkeypatch):
+    """#66: between the sweep's read and its set_ramp write, a manual ramp
+    or a pause can make set_ramp refuse — one experiment's race must never
+    abort the rest of the batch (the unfixed sweep crashed mid-loop and
+    starved every later experiment)."""
+    from app.exceptions import AppError as _AppError
+    from app.experiments.models import Experiment
+    from app.experiments.services.experiments import ExperimentService as _Svc
+    from app.experiments.worker import sweep_ramp_plans
+
+    exp_a, admin_a = await _mk_running_low_ramp(db)
+    exp_b, admin_b = await _mk_running_low_ramp(db)
+    now = datetime.now(UTC)
+    svc = ExperimentService(db)
+    for exp, admin in ((exp_a, admin_a), (exp_b, admin_b)):
+        await svc.set_ramp_plan(exp.id, plan=[
+            {"at": (now - timedelta(minutes=1)).isoformat(), "ramp_bp": 5000},
+        ], actor=admin)
+
+    real_set_ramp = _Svc.set_ramp
+    first = min(exp_a.id, exp_b.id)  # the sweep walks in id order
+
+    async def racing(self, experiment_id, *, ramp_bp, actor):
+        if experiment_id == first:
+            raise _AppError("EXPERIMENT_RAMP_DECREASE", "racing manual ramp", 422)
+        return await real_set_ramp(self, experiment_id, ramp_bp=ramp_bp, actor=actor)
+
+    monkeypatch.setattr(_Svc, "set_ramp", racing)
+    assert await sweep_ramp_plans(db, now=now) == 1  # the OTHER one applied
+    monkeypatch.undo()
+    second = exp_b.id if first == exp_a.id else exp_a.id
+    assert (await db.get(Experiment, second)).ramp_bp == 5000
+    assert (await db.get(Experiment, first)).ramp_bp == 1000  # untouched
