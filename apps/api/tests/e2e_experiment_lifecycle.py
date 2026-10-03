@@ -773,6 +773,13 @@ async def main() -> int:
               and r.headers["content-type"].startswith("text/csv")
               and r.text.splitlines()[0].startswith("metric_key,variant_key,segment"),
               f"{r.status_code} {r.headers.get('content-type')} {r.text[:120]}")
+        r = await c.get(f"/experiments/{org_exp_id}/assignments/export",
+                        headers=student)
+        check("delegated assignments CSV export returns text/csv",
+              r.status_code == 200
+              and r.headers.get("content-type", "").startswith("text/csv")
+              and r.text.splitlines()[0].startswith("unit_type,unit_id"),
+              r.text[:200])
         r = await c.get(f"/experiments/{exp_id}/metrics/export", headers=student)
         check("CSV export outside scope is a uniform 404", r.status_code == 404,
               str(r.status_code))

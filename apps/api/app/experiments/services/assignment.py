@@ -555,6 +555,23 @@ class AssignmentService:
 
     # ── diagnostics (§12) ────────────────────────────────────────────
 
+    async def list_assignments(
+        self, experiment_id: str, *, limit: int = 5000
+    ) -> list[ExperimentAssignment]:
+        """Round 133: raw assignment rows for the CSV export — stable
+        (assigned_at, id) order so a capped export is a deterministic
+        prefix, not an arbitrary sample."""
+        q = (
+            select(ExperimentAssignment)
+            .where(ExperimentAssignment.experiment_id == experiment_id)
+            .order_by(
+                ExperimentAssignment.assigned_at.asc(),
+                ExperimentAssignment.id.asc(),
+            )
+            .limit(limit)
+        )
+        return list((await self.db.execute(q)).scalars())
+
     async def assignment_stats(self, experiment_id: str) -> dict:
         counts_q = (
             select(

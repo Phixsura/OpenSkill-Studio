@@ -1101,6 +1101,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 133 — the export trio completes: raw assignment rows export as CSV
+(GET /assignments/export — the audit/compliance read next to snapshots and
+guardrail events), stable (assigned_at, id) order so a capped export is a
+deterministic prefix, same delegated read scope and uniform 404; E2E 104.
+In-build lesson: an E2E insertion anchored on a check() must verify WHOSE
+response variable that check reads — landing between an assignment and its
+check silently retargets the assertion (caught because the 404 check went
+green-to-red, not silently green).
+
 Round 132b — defect #67 (the #66 family applied everywhere): the start
 and closure sweeps' docstrings promised "the human simply wins" a racing
 manual transition — but when the human won, transition() raised and the

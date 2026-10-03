@@ -2865,3 +2865,32 @@ async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypa
     second = next(e.id for e in exps if e.id != first)
     assert (await db.get(Experiment, second)).status == "running"
     assert (await db.get(Experiment, first)).status == "scheduled"
+
+
+async def test_list_assignments_order_and_cap(db):
+    """Round 133: the export listing is a DETERMINISTIC prefix — stable
+    (assigned_at, id) order, cap honored exactly. Scoped by a fresh
+    experiment id, so the bounded batch cannot inherit residue (§106.25:
+    the scope IS the guard here)."""
+    from app.experiments.models import ExperimentAssignment
+
+    exp, _admin = await _mk_running_low_ramp(db)
+    base_at = datetime.now(UTC) - timedelta(hours=1)
+    ids = []
+    for i in range(3):
+        a = ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=f"u{i}" + "x" * 24,
+            variant_key="control" if i % 2 == 0 else "treatment",
+            assigned_version=1, bucket=i, is_holdout=False,
+        )
+        db.add(a)
+        await db.flush()
+        # assigned_at is server-default — backdate it for a deterministic order
+        a.assigned_at = base_at + timedelta(minutes=i)
+        ids.append(a)
+    await db.flush()
+    svc = AssignmentService(db)
+    rows = await svc.list_assignments(exp.id)
+    assert [r.unit_id for r in rows] == [a.unit_id for a in ids]
+    capped = await svc.list_assignments(exp.id, limit=2)
+    assert [r.unit_id for r in capped] == [ids[0].unit_id, ids[1].unit_id]
