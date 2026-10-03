@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 102 — the Metric Explorer gained inline editing of the operational
+knobs (winsorize/cap/direction through the round-101 PATCH; blank fields
+send the explicit clear flags — pinned both ways). The Explorer also gained
+its missing behavior tests — the THIRD uncovered console page the campaign
+has found. Web 699/699 across 143 files.
+
 Round 101 — metric definitions gained an operational-knobs PATCH (title,
 privacy class, direction, winsorize/cap with explicit clear flags);
 kind/source/query_version stay IMMUTABLE — they are analysis semantics

@@ -63,6 +63,27 @@ function MetricExplorerInner() {
   });
 
   const definitions = data?.data ?? [];
+  const [editing, setEditing] = useState<string | null>(null);
+  const [edit, setEdit] = useState({ winsorize_pct: "", cap_value: "", direction: "" });
+  const save = useMutation({
+    mutationFn: (key: string) =>
+      apiWithAuth(`/experiments/metric-definitions/${key}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...(edit.direction ? { direction: edit.direction } : {}),
+          ...(edit.winsorize_pct
+            ? { winsorize_pct: Number(edit.winsorize_pct) }
+            : { clear_winsorize: true }),
+          ...(edit.cap_value ? { cap_value: Number(edit.cap_value) } : { clear_cap: true }),
+        }),
+      }),
+    onSuccess: () => {
+      setEditing(null);
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["experiment-metric-definitions"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
 
   return (
     <div className="space-y-6 p-6">
@@ -110,6 +131,7 @@ function MetricExplorerInner() {
                 <th className="py-1 pr-3">qv</th>
                 <th className="py-1 pr-3">Direction</th>
                 <th className="py-1 pr-3">Winsorize</th>
+                <th className="py-1 pr-3" />
               </tr>
             </thead>
             <tbody>
@@ -128,6 +150,61 @@ function MetricExplorerInner() {
                   <td className="py-1 pr-3">{d.query_version}</td>
                   <td className="py-1 pr-3 text-xs">{d.direction}</td>
                   <td className="py-1 pr-3 text-xs">{d.winsorize_pct ?? "—"}</td>
+                  <td className="py-1 pr-3 text-xs">
+                    {editing === d.key ? (
+                      <span className="flex items-center gap-1">
+                        <input
+                          aria-label={`winsorize ${d.key}`}
+                          className="w-16 rounded border px-1 py-0.5"
+                          placeholder="wins%"
+                          value={edit.winsorize_pct}
+                          onChange={(e) => setEdit({ ...edit, winsorize_pct: e.target.value })}
+                        />
+                        <input
+                          aria-label={`cap ${d.key}`}
+                          className="w-20 rounded border px-1 py-0.5"
+                          placeholder="cap"
+                          value={edit.cap_value}
+                          onChange={(e) => setEdit({ ...edit, cap_value: e.target.value })}
+                        />
+                        <select
+                          aria-label={`direction ${d.key}`}
+                          className="rounded border px-1 py-0.5"
+                          value={edit.direction}
+                          onChange={(e) => setEdit({ ...edit, direction: e.target.value })}
+                        >
+                          <option value="">dir…</option>
+                          <option value="increase_good">increase_good</option>
+                          <option value="decrease_good">decrease_good</option>
+                        </select>
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-0.5"
+                          onClick={() => save.mutate(d.key)}
+                        >
+                          Save
+                        </button>
+                        <button type="button" className="px-1" onClick={() => setEditing(null)}>
+                          ✕
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="rounded border px-2 py-0.5"
+                        onClick={() => {
+                          setEditing(d.key);
+                          setEdit({
+                            winsorize_pct: d.winsorize_pct?.toString() ?? "",
+                            cap_value: "",
+                            direction: "",
+                          });
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
