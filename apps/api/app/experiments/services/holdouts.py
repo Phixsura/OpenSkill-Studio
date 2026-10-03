@@ -18,7 +18,7 @@ invalidated eagerly on create/release in this process.
 """
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -141,8 +141,6 @@ class HoldoutGroupService:
         over the window. Observational ACROSS experiments (the membership
         itself is randomized, but launches since the group started are the
         treatment) — reported with the same engine as experiment analyses."""
-        from datetime import UTC, datetime, timedelta
-
         from app.experiments.services import analysis as stats
         from app.experiments.services.assignment import holdout_group_roll
         from app.experiments.services.metrics import SOURCE_REGISTRY, MetricService

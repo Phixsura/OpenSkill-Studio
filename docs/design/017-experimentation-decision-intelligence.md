@@ -1101,6 +1101,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 133b — hygiene: the holdout report's function-local
+`from datetime import ...` (the UnboundLocalError-shadowing law's latent
+form) hoisted to module level — removing it exposed that the top import
+lacked timedelta, i.e. the local import was MASKING an incomplete module
+import. One full-suite flake of test_holdout_report_comparison_edges
+(isolated/file-level 5x green, full-suite rerun green) matches the
+known parallel-DB-use environment class: a just-killed E2E uvicorn's
+connections raced the suite start — wait for server death before starting
+the suite.
+
 Round 133 — the export trio completes: raw assignment rows export as CSV
 (GET /assignments/export — the audit/compliance read next to snapshots and
 guardrail events), stable (assigned_at, id) order so a capped export is a
