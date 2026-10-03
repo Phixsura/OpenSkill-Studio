@@ -126,6 +126,32 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     ).toBeTruthy();
   });
 
+  it("renders the multi-covariate CUPED line without the pct field (#61)", async () => {
+    // §4.6 v3: the multi shape has NO variance_reduction_pct — the old
+    // render called .toFixed on undefined and crashed the whole table
+    const payload = analysisPayload();
+    const metrics = (
+      payload.data as { metrics: Record<string, { comparisons: Record<string, object> }> }
+    ).metrics;
+    metrics.exposure_rate!.comparisons.treatment = {
+      effect: 0.05,
+      ci: [0.01, 0.09],
+      p: 0.02,
+      cuped: {
+        effect: 0.042,
+        ci: [0.02, 0.064],
+        p: 0.01,
+        theta: { revision_count: 0.3, project_approval_rate: -0.1 },
+        covariates: ["revision_count", "project_approval_rate"],
+        mode: "multi",
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/CUPED ×2: 0\.0420/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

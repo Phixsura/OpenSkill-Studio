@@ -25,7 +25,15 @@ interface Comparison {
   passes_fdr?: boolean;
   insufficient_data?: boolean;
   caveat?: string;
-  cuped?: { effect: number; ci: [number, number]; variance_reduction_pct: number };
+  cuped?: {
+    effect: number;
+    ci: [number, number];
+    // single-covariate shape carries variance_reduction_pct; the §4.6 v3
+    // multi shape (mode === "multi") carries theta per covariate instead
+    variance_reduction_pct?: number;
+    mode?: string;
+    covariates?: string[];
+  };
   corpus_prior?: { n_experiments: number; mean: number; sd: number };
   shrunk_effect?: number;
   time_stratified?: { effect: number; se: number; ci: [number, number]; strata: number };
@@ -253,8 +261,14 @@ export default function AnalysisPage() {
                               </div>
                               {c.cuped ? (
                                 <div className="text-xs text-violet-700">
-                                  CUPED: {fmtNum(c.cuped.effect)} (−
-                                  {c.cuped.variance_reduction_pct.toFixed(0)}% var)
+                                  CUPED
+                                  {c.cuped.mode === "multi"
+                                    ? ` ×${c.cuped.covariates?.length ?? 0}`
+                                    : ""}
+                                  : {fmtNum(c.cuped.effect)}
+                                  {c.cuped.variance_reduction_pct != null
+                                    ? ` (−${c.cuped.variance_reduction_pct.toFixed(0)}% var)`
+                                    : ""}
                                 </div>
                               ) : null}
                               {c.time_stratified ? (

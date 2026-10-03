@@ -1059,6 +1059,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 118 — defect #61 (web, found by parity-sweeping the new multi
+shape): the analysis page typed cuped's variance_reduction_pct as required
+and called .toFixed on it, so a §4.6 v3 multi result (which carries theta,
+not a pct) crashed the whole comparisons table — kill-proven (TypeError:
+Cannot read properties of undefined). The line now renders "CUPED ×k" for
+multi mode and the pct only when present. Law: every NEW backend response
+shape must be swept against the pages that render its parent object.
+
 Round 117 — COVARIATE_PROVIDERS gains its second source, evaluations:
 pre-period SubmissionReview verdicts per user unit (pass_count default —
 APPROVED only; review_count counts every verdict), mirroring the source's
