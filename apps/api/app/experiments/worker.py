@@ -485,6 +485,53 @@ async def sweep_experiment_starts(
     return started
 
 
+RAMP_SWEEP_CAP = 200
+
+
+async def sweep_ramp_plans(
+    db: AsyncSession, *, now: datetime | None = None, cap: int = RAMP_SWEEP_CAP
+) -> int:
+    """Round 129: apply due ramp-plan steps on running experiments. The
+    HIGHEST due target wins (missed intermediate steps collapse into one
+    jump); already-reached targets are no-ops, so the sweep is idempotent.
+    set_ramp's own monotonicity law still guards every write."""
+    from app.experiments.services.experiments import ExperimentService
+    from app.experiments.services.guardrails import _system_actor
+
+    now = now or datetime.now(UTC)
+    rows = (
+        await db.execute(
+            select(Experiment.id, Experiment.ramp_bp, Experiment.ramp_plan)
+            .where(
+                Experiment.status == "running",
+                Experiment.ramp_plan.is_not(None),
+            )
+            .order_by(Experiment.id.asc())
+            .limit(cap)
+        )
+    ).all()
+    applied = 0
+    for experiment_id, current_bp, plan in rows:
+        due = []
+        for entry in plan or []:
+            try:
+                at = datetime.fromisoformat(entry["at"])
+                target = int(entry["ramp_bp"])
+            except (KeyError, TypeError, ValueError):
+                continue  # poison entries never block the sweep
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=UTC)
+            if at <= now and target > current_bp:
+                due.append(target)
+        if not due:
+            continue
+        await ExperimentService(db).set_ramp(
+            experiment_id, ramp_bp=max(due), actor=_system_actor()
+        )
+        applied += 1
+    return applied
+
+
 CLOSURE_SWEEP_CAP = 200
 
 

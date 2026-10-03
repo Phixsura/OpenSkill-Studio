@@ -69,6 +69,9 @@ class Experiment(Base):
     start_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # exp14 (round 129): scheduled ramp plan [{at: iso, ramp_bp: int}] —
+    # the sweep raises ramp_bp when an entry comes due; NULL = manual ramp
+    ramp_plan: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

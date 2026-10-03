@@ -2610,3 +2610,106 @@ def test_value_histogram_and_validator_exact_pins():
     with pytest.raises(_AppError) as e:
         _validate_quantiles([0.5], "binary")
     assert e.value.status_code == 422
+
+
+async def _mk_running_low_ramp(db):
+    """A running experiment held at ramp 1000 so plan targets have room."""
+    admin = await _mk_admin(db)
+    await MetricService(db).ensure_seed_definitions()
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=1000, actor=admin)
+    return exp, admin
+
+
+async def test_ramp_plan_validation(db):
+    """Round 129: plans are monotone by construction — non-increasing
+    targets refused, a first target at or below the live ramp refused,
+    naive datetimes normalize to UTC, None clears."""
+    from app.exceptions import AppError as _AppError
+
+    exp, admin = await _mk_running_low_ramp(db)
+    svc = ExperimentService(db)
+    future = datetime.now(UTC) + timedelta(hours=1)
+
+    with pytest.raises(_AppError) as e:
+        await svc.set_ramp_plan(exp.id, plan=[
+            {"at": future.isoformat(), "ramp_bp": 5000},
+            {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000},
+        ], actor=admin)
+    assert e.value.code == "EXPERIMENT_RAMP_DECREASE"
+
+    with pytest.raises(_AppError) as e:
+        await svc.set_ramp_plan(exp.id, plan=[
+            {"at": future.isoformat(), "ramp_bp": 1000},  # == live ramp
+        ], actor=admin)
+    assert e.value.code == "EXPERIMENT_RAMP_DECREASE"
+
+    with pytest.raises(_AppError) as e:
+        await svc.set_ramp_plan(exp.id, plan=[
+            {"at": future.isoformat(), "ramp_bp": 99999},
+        ], actor=admin)
+    assert e.value.code == "VALIDATION_ERROR"
+
+    # a naive at is UTC (#56 law) and the plan stores it aware
+    naive = (datetime.now(UTC) + timedelta(hours=2)).replace(tzinfo=None)
+    exp = await svc.set_ramp_plan(exp.id, plan=[
+        {"at": naive.isoformat(), "ramp_bp": 4000},
+    ], actor=admin)
+    assert exp.ramp_plan[0]["at"].endswith("+00:00")
+    exp = await svc.set_ramp_plan(exp.id, plan=None, actor=admin)
+    assert exp.ramp_plan is None
+
+
+async def test_ramp_plan_sweep_applies_highest_due(db):
+    """Round 129: the sweep jumps to the HIGHEST due target (missed steps
+    collapse), records the audit event, ignores poison entries, and is
+    idempotent — a second pass applies nothing."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import Experiment, ExperimentEvent
+    from app.experiments.worker import sweep_ramp_plans
+
+    exp, admin = await _mk_running_low_ramp(db)
+    svc = ExperimentService(db)
+    now = datetime.now(UTC)
+    await svc.set_ramp_plan(exp.id, plan=[
+        {"at": (now + timedelta(minutes=5)).isoformat(), "ramp_bp": 2000},
+        {"at": (now + timedelta(minutes=10)).isoformat(), "ramp_bp": 5000},
+        {"at": (now + timedelta(days=2)).isoformat(), "ramp_bp": 8000},
+    ], actor=admin)
+    # poison entry must never block the sweep
+    exp_row = await db.get(Experiment, exp.id)
+    exp_row.ramp_plan = [*exp_row.ramp_plan, {"at": "garbage", "ramp_bp": "x"}]
+    await db.flush()
+
+    sweep_now = now + timedelta(minutes=30)  # steps 1+2 due, step 3 not
+    assert await sweep_ramp_plans(db, now=sweep_now) == 1
+    exp_row = await db.get(Experiment, exp.id)
+    assert exp_row.ramp_bp == 5000
+    events = list((await db.execute(
+        _select(ExperimentEvent).where(
+            ExperimentEvent.experiment_id == exp.id,
+            ExperimentEvent.event_type == "ramp_changed",
+        )
+    )).scalars())
+    assert any(e.payload.get("to_bp") == 5000 for e in events)
+    # idempotent: both due targets now <= current ramp
+    assert await sweep_ramp_plans(db, now=sweep_now) == 0
+    # the future step still applies later
+    assert await sweep_ramp_plans(db, now=now + timedelta(days=3)) == 1
+    assert (await db.get(Experiment, exp.id)).ramp_bp == 8000

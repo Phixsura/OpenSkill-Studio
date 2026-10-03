@@ -16,6 +16,7 @@ from app.experiments.schemas import (
     CreateVersionRequest,
     ExperimentEventResponse,
     ExperimentResponse,
+    RampPlanRequest,
     RampRequest,
     TransitionRequest,
     VersionResponse,
@@ -138,6 +139,27 @@ async def set_ramp(
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     exp = await ExperimentService(db).set_ramp(
         experiment_id, ramp_bp=body.ramp_bp, actor=scope.user
+    )
+    await db.commit()
+    return {"data": exp}
+
+
+@router.patch("/{experiment_id}/ramp-plan", response_model=DataResponse[ExperimentResponse])
+async def set_ramp_plan(
+    experiment_id: str,
+    body: RampPlanRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_platform_admin),
+):
+    exp = await ExperimentService(db).set_ramp_plan(
+        experiment_id,
+        plan=(
+            [{"at": step.at.isoformat(), "ramp_bp": step.ramp_bp}
+             for step in body.plan]
+            if body.plan is not None
+            else None
+        ),
+        actor=user,
     )
     await db.commit()
     return {"data": exp}

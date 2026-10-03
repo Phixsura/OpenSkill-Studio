@@ -497,6 +497,71 @@ class ExperimentService:
         await self.db.flush()
         return exp
 
+    async def set_ramp_plan(
+        self, experiment_id: str, *, plan: list | None, actor: User
+    ) -> Experiment:
+        """Round 129: scheduled ramp — entries {at, ramp_bp} the sweep
+        applies when due. Monotonic by construction (ITT: ramp only
+        widens): targets must strictly increase along time order. None or
+        [] clears the plan (manual ramp resumes)."""
+        exp = await self._get_locked(experiment_id)
+        if exp.status not in ("draft", "review", "scheduled", "running"):
+            raise AppError(
+                "EXPERIMENT_INVALID_TRANSITION",
+                f"Ramp plan cannot change in status {exp.status}",
+                422,
+            )
+        normalized: list[dict] | None = None
+        if plan:
+            if len(plan) > 20:
+                raise AppError(
+                    "VALIDATION_ERROR", "Ramp plan holds at most 20 steps", 422
+                )
+            parsed = []
+            for entry in plan:
+                try:
+                    at = datetime.fromisoformat(str(entry["at"]))
+                    ramp_bp = int(entry["ramp_bp"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise AppError(
+                        "VALIDATION_ERROR",
+                        "Each ramp step needs at (ISO datetime) and ramp_bp",
+                        422,
+                    ) from exc
+                if at.tzinfo is None:  # naive datetimes are UTC here (#56)
+                    at = at.replace(tzinfo=UTC)
+                if not 1 <= ramp_bp <= 10_000:
+                    raise AppError(
+                        "VALIDATION_ERROR", "ramp_bp must be 1..10000", 422
+                    )
+                parsed.append((at, ramp_bp))
+            parsed.sort(key=lambda pair: pair[0])
+            targets = [bp for _, bp in parsed]
+            if any(b <= a for a, b in zip(targets, targets[1:], strict=False)):
+                raise AppError(
+                    "EXPERIMENT_RAMP_DECREASE",
+                    "Ramp plan targets must strictly increase over time (ITT)",
+                    422,
+                )
+            if exp.status in ("scheduled", "running") and targets[0] <= exp.ramp_bp:
+                raise AppError(
+                    "EXPERIMENT_RAMP_DECREASE",
+                    f"First planned target must exceed the live ramp ({exp.ramp_bp})",
+                    422,
+                )
+            normalized = [
+                {"at": at.isoformat(), "ramp_bp": bp} for at, bp in parsed
+            ]
+        exp.ramp_plan = normalized
+        await self._record_event(
+            exp.id,
+            event_type="ramp_plan_set",
+            actor_user_id=actor.id,
+            payload={"steps": normalized or []},
+        )
+        await self.db.flush()
+        return exp
+
     async def set_ramp(self, experiment_id: str, *, ramp_bp: int, actor: User) -> Experiment:
         exp = await self._get_locked(experiment_id)
         if exp.status not in ("draft", "review", "scheduled", "running"):

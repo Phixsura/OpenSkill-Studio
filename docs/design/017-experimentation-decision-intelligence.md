@@ -1101,6 +1101,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 129 — scheduled ramp plans (exp14): `ramp_plan` on the experiment —
+up to 20 {at, ramp_bp} steps, strictly increasing targets (ITT: a plan
+cannot encode a decrease), first live target must exceed the current ramp,
+naive datetimes normalize to UTC. A worker sweep (minute 14/44) applies
+the HIGHEST due target on running experiments through set_ramp itself (its
+monotonicity law still guards every write), records the standard
+ramp_changed audit event, skips poison entries, and is idempotent.
+Platform-walled PATCH /ramp-plan (the delegated-surface manifest pin moved
+with it, deliberately). Guardrail auto-pause naturally halts the plan —
+the sweep only touches running experiments.
+
 Round 128 — defect #65 + percentile guardrails: the window fold did
 scalar + dict the moment a quantiles-enabled definition served as a
 guardrail (the source now emits value_histogram) — a TypeError that killed

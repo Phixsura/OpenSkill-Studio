@@ -284,6 +284,17 @@ class RampRequest(_StrictReq):
     ramp_bp: int = Field(ge=0, le=10_000)
 
 
+class RampPlanStep(_StrictReq):
+    at: datetime
+    ramp_bp: int = Field(ge=1, le=10_000)
+
+
+class RampPlanRequest(_StrictReq):
+    """Round 129: scheduled ramp steps; null/empty clears the plan."""
+
+    plan: list[RampPlanStep] | None = Field(default=None, max_length=20)
+
+
 class PreviewAssignmentRequest(_StrictReq):
     unit_type: str = Field(max_length=24)
     unit_id: str = Field(min_length=1, max_length=26)
@@ -378,6 +389,7 @@ class ExperimentResponse(BaseModel):
     owner_user_id: str
     risk_class: str
     ramp_bp: int
+    ramp_plan: list | None = None
     holdout_bp: int
     start_at: datetime | None
     started_at: datetime | None

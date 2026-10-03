@@ -549,6 +549,18 @@ async def _exp_start_sweep(ctx: dict) -> None:
             log.info("exp_experiments_auto_started", count=n)
 
 
+async def _exp_ramp_plan_sweep(ctx: dict) -> None:
+    """ADR-017 round 129: apply due scheduled-ramp steps."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_ramp_plans
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_ramp_plans(db)
+        if n:
+            await db.commit()
+            log.info("exp_ramp_plans_applied", count=n)
+
+
 async def _exp_closure_sweep(ctx: dict) -> None:
     """ADR-017 §13: auto-complete running experiments past max_days."""
     from app.core.database import AsyncSessionLocal
@@ -604,6 +616,7 @@ def _cron_jobs() -> list:
         cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
         cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
         cron(_exp_start_sweep, minute={9, 39}, name="exp_start_sweep"),
+        cron(_exp_ramp_plan_sweep, minute={14, 44}, name="exp_ramp_plan_sweep"),
         cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800,
              name="exp_analysis_sweep"),
         cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
