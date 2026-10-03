@@ -152,6 +152,27 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(await screen.findByText(/CUPED ×2: 0\.0420/)).toBeTruthy();
   });
 
+  it("renders quantile lines when the comparison carries them (§4.14)", async () => {
+    const payload = analysisPayload();
+    const metrics = (
+      payload.data as { metrics: Record<string, { comparisons: Record<string, object> }> }
+    ).metrics;
+    metrics.exposure_rate!.comparisons.treatment = {
+      effect: 0.05,
+      ci: [0.01, 0.09],
+      p: 0.02,
+      quantiles: {
+        "0.5": { control: 101.2, treatment: 304.5, diff: 203.3, ci: [150, 260] },
+        "0.95": { control: 900.0, treatment: 850.0, diff: -50.0, ci: [-120, 30] },
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/p50: 101\.2000 → 304\.5000 \(\+203\.3000\)/)).toBeTruthy();
+    expect(screen.getByText(/p95: 900\.0000 → 850\.0000 \(-50\.0000\)/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

@@ -17,7 +17,7 @@ interface MetricDefinition {
   domain: string;
   source_kind: string;
   query_version: number;
-  spec: { source?: string; measure?: string };
+  spec: { source?: string; measure?: string; quantiles?: number[] };
   direction: string;
   winsorize_pct: number | null;
 }
@@ -64,7 +64,12 @@ function MetricExplorerInner() {
 
   const definitions = data?.data ?? [];
   const [editing, setEditing] = useState<string | null>(null);
-  const [edit, setEdit] = useState({ winsorize_pct: "", cap_value: "", direction: "" });
+  const [edit, setEdit] = useState({
+    winsorize_pct: "",
+    cap_value: "",
+    direction: "",
+    quantiles: "",
+  });
   const save = useMutation({
     mutationFn: (key: string) =>
       apiWithAuth(`/experiments/metric-definitions/${key}`, {
@@ -75,6 +80,14 @@ function MetricExplorerInner() {
             ? { winsorize_pct: Number(edit.winsorize_pct) }
             : { clear_winsorize: true }),
           ...(edit.cap_value ? { cap_value: Number(edit.cap_value) } : { clear_cap: true }),
+          ...(edit.quantiles.trim()
+            ? {
+                quantiles: edit.quantiles
+                  .split(",")
+                  .map((v) => Number(v.trim()))
+                  .filter((v) => !Number.isNaN(v)),
+              }
+            : { clear_quantiles: true }),
         }),
       }),
     onSuccess: () => {
@@ -161,6 +174,13 @@ function MetricExplorerInner() {
                           onChange={(e) => setEdit({ ...edit, winsorize_pct: e.target.value })}
                         />
                         <input
+                          aria-label={`quantiles ${d.key}`}
+                          className="w-20 rounded border px-1 py-0.5"
+                          placeholder="q (0.5,0.95)"
+                          value={edit.quantiles}
+                          onChange={(e) => setEdit({ ...edit, quantiles: e.target.value })}
+                        />
+                        <input
                           aria-label={`cap ${d.key}`}
                           className="w-20 rounded border px-1 py-0.5"
                           placeholder="cap"
@@ -201,6 +221,7 @@ function MetricExplorerInner() {
                             winsorize_pct: d.winsorize_pct?.toString() ?? "",
                             cap_value: "",
                             direction: "",
+                            quantiles: (d.spec?.quantiles ?? []).join(", "),
                           });
                         }}
                       >

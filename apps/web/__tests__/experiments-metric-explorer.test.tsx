@@ -71,6 +71,9 @@ describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
     fireEvent.change(screen.getByLabelText("direction run_latency_ms"), {
       target: { value: "decrease_good" },
     });
+    fireEvent.change(screen.getByLabelText("quantiles run_latency_ms"), {
+      target: { value: "0.5, 0.95" },
+    });
     fireEvent.click(screen.getByText("Save"));
     await vi.waitFor(() => {
       const call = api.mock.calls.find((c) => c[1]?.method === "PATCH");
@@ -80,6 +83,7 @@ describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
         direction: "decrease_good",
         winsorize_pct: 95,
         cap_value: 60000,
+        quantiles: [0.5, 0.95],
       });
     });
   });
@@ -100,6 +104,7 @@ describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
       const body = JSON.parse(String(call?.[1]?.body));
       expect(body.clear_winsorize).toBe(true);
       expect(body.clear_cap).toBe(true);
+      expect(body.clear_quantiles).toBe(true);
     });
   });
 });

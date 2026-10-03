@@ -1094,6 +1094,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 125 — quantile console parity: the analysis comparison renders its
+quantile lines (p50: control → treatment (diff), teal, per probability)
+and the Metric Explorer's inline edit gains the quantiles knob (comma
+list; blank sends clear_quantiles like its siblings), prefilled from the
+definition's spec. Found in-build: the Edit button initialized the edit
+state via an object literal that dropped the new key — undefined.trim()
+threw INSIDE the mutation, so the PATCH never fired and only the
+clear-flags test (which skips the fill) caught it. Law: a literal that
+RESETS state must be updated with every state key its shape gained.
+
 Round 124 — the QUANTILE epoch lands (§4.14, design-first): p50/p95
 reads for continuous metrics, the industry question mean-based sufficient
 stats cannot answer. Step 1: definitions take a `quantiles` knob (1-3

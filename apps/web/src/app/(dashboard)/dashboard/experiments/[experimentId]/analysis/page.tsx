@@ -25,6 +25,10 @@ interface Comparison {
   passes_fdr?: boolean;
   insufficient_data?: boolean;
   caveat?: string;
+  quantiles?: Record<
+    string,
+    { control: number; treatment: number; diff: number; ci: [number, number] }
+  >;
   cuped?: {
     effect: number;
     ci: [number, number];
@@ -271,6 +275,15 @@ export default function AnalysisPage() {
                                     : ""}
                                 </div>
                               ) : null}
+                              {c.quantiles
+                                ? Object.entries(c.quantiles).map(([prob, q]) => (
+                                    <div key={prob} className="text-xs text-teal-700">
+                                      p{Math.round(Number(prob) * 100)}: {fmtNum(q.control)} →{" "}
+                                      {fmtNum(q.treatment)} ({q.diff >= 0 ? "+" : ""}
+                                      {fmtNum(q.diff)})
+                                    </div>
+                                  ))
+                                : null}
                               {c.time_stratified ? (
                                 <div className="text-xs text-sky-700">
                                   Time-stratified: {fmtNum(c.time_stratified.effect)} over{" "}
