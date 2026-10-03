@@ -1101,6 +1101,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 144 — binary CUPED's second source: the evaluations source under
+variance_reduction switches to the same per-unit 0/1 contract (a unit
+passes when ANY of its in-window reviews is APPROVED; numerator counts
+passing UNITS), feeding the covariate assembler cross-source.
+
 Round 143 — mutation wave 23 (whole _compare after the binary-CUPED
 branch): 30/31. The sweep exposed three blind spots OLDER than the new
 code — effect values never exactly pinned, the rate-bayesian

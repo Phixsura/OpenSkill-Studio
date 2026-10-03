@@ -3105,3 +3105,79 @@ async def test_binary_cuped_per_unit_snapshot(db):
         assert set(entry) >= {"sum", "sum_sq", "xy_sum"}
         assert float(snap.cov_sum) == entry["sum"]  # mirror law
         assert snap.provenance.get("aggregation") == "per_unit"
+
+
+async def test_evaluations_source_per_unit_under_variance_reduction(db):
+    """Round 144: the evaluations source under variance_reduction switches
+    to per-UNIT 0/1 (same contract as projects, round 142): numerator counts
+    units with an APPROVED review, denominator counts UNITS, and the
+    per-unit map rides out for the assembler."""
+    from types import SimpleNamespace
+
+    from app.experiments.services.metrics import SOURCE_REGISTRY
+    from app.models.project import (
+        Project,
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+
+    _tenant, org = await _mk_org(db)
+    project = Project(org_id=org.id, title="EvB",
+                      slug=f"evb-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    users = []
+    for i in range(3):
+        u = User(email=f"evb-{i}-{ULID()}@example.com", display_name=f"V{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        users.append(u.id)
+    window_start, window_end = _today_window()
+    t0 = window_start + timedelta(hours=1)
+    # unit0: APPROVED + REVISION_REQUESTED reviews (y=1); unit1: only
+    # REVISION_REQUESTED (y=0); unit2: silent (y=0, ITT)
+    subs = {}
+    for user_id in users[:2]:
+        sub = Submission(org_id=org.id, project_id=project.id, user_id=user_id,
+                         status=SubmissionStatus.SUBMITTED, version=1,
+                         created_at=t0)
+        db.add(sub)
+        await db.flush()
+        subs[user_id] = sub
+    for user_id, status in ((users[0], ReviewStatus.APPROVED),
+                            (users[0], ReviewStatus.REVISION_REQUESTED),
+                            (users[1], ReviewStatus.REVISION_REQUESTED)):
+        db.add(SubmissionReview(submission_id=subs[user_id].id,
+                                reviewer_type=ReviewerType.AI,
+                                status=status, score=70, created_at=t0))
+    await db.flush()
+
+    await MetricService(db).ensure_seed_definitions()
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.spec["source"].astext == "evaluations"))
+    ).scalars().first()
+    assert definition is not None
+    vr = SimpleNamespace(
+        covariates=lambda: ["revision_count"], lookback_days=14
+    )
+    out = await SOURCE_REGISTRY["evaluations"](
+        db, experiment=None, definition=definition,
+        variant_units={"treatment": users},
+        window_start=window_start, window_end=window_end,
+        unit_type="user", variance_reduction=vr,
+    )
+    arm = out["treatment"]
+    assert arm["n"] == 3 and arm["denominator"] == 3
+    assert arm["numerator"] == 1  # approved UNITS, not approved reviews
+    assert arm["_aggregation"] == "per_unit"
+    assert arm["_unit_values"] == {users[0]: 1.0, users[1]: 0.0, users[2]: 0.0}

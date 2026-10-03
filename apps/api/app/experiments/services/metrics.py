@@ -973,6 +973,35 @@ async def _source_evaluations(
         if not units:
             result[variant] = {"n": 0}
             continue
+        if variance_reduction is not None:
+            # Binary CUPED (round 144, same contract as the projects source,
+            # round 142): per-UNIT 0/1 — 1 when any of the unit's reviews in
+            # the window is APPROVED (ITT; unit-of-analysis change vs
+            # per-review mode). _unit_values feeds the covariate assembler.
+            rows = (
+                await db.execute(
+                    select(Submission.user_id, SubmissionReview.status)
+                    .join(Submission, Submission.id == SubmissionReview.submission_id)
+                    .where(
+                        Submission.user_id.in_(units),
+                        SubmissionReview.created_at >= window_start,
+                        SubmissionReview.created_at < window_end,
+                    )
+                )
+            ).all()
+            y: dict[str, float] = dict.fromkeys(units, 0.0)
+            for user_id, status in rows:
+                if status == ReviewStatus.APPROVED:
+                    y[user_id] = 1.0
+            passed_units = sum(1 for u in units if y[u] > 0)
+            result[variant] = {
+                "n": len(units),
+                "numerator": passed_units,
+                "denominator": len(units),
+                "_aggregation": "per_unit",
+                "_unit_values": y,
+            }
+            continue
         rows = (
             await db.execute(
                 select(SubmissionReview.status)
