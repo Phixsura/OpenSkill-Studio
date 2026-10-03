@@ -11,6 +11,7 @@ and returns per-variant sufficient statistics. Unknown sources are SKIPPED
 source (exp07).
 """
 
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
@@ -58,6 +59,47 @@ def register_source(name: str):
 # key over user units. Providers are registered per source; cross-source
 # covariates work for any (main metric, covariate) pair whose covariate
 # source has a provider. k == 1 keeps the legacy in-source path untouched.
+
+def value_histogram(values: list[float]) -> dict:
+    """§4.14 (round 124): base-2 log histogram {bucket: count} over positive
+    values, with "__zero__"/"__neg__" overflow keys. Mergeable across
+    windows/segments by plain addition; ~2 significant digits of relative
+    precision — enough for a p95 regression read."""
+    hist: dict = {}
+    for v in values:
+        if v < 0:
+            key = "__neg__"
+        elif v == 0:
+            key = "__zero__"
+        else:
+            key = str(max(-20, min(43, math.floor(math.log2(v)))))
+        hist[key] = hist.get(key, 0) + 1
+    return hist
+
+
+def _validate_quantiles(quantiles, kind) -> None:
+    """§4.14: 1-3 probabilities strictly inside (0, 1), continuous-kind
+    definitions only (quantiles of a binary/rate are not a thing here)."""
+    if quantiles is None:
+        return
+    if not isinstance(quantiles, (list, tuple)) or not 1 <= len(quantiles) <= 3:
+        raise AppError(
+            "VALIDATION_ERROR", "quantiles must list 1-3 probabilities", 422
+        )
+    for value in quantiles:
+        if not isinstance(value, (int, float)) or not 0.0 < float(value) < 1.0:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"quantile {value!r} outside (0, 1)",
+                422,
+            )
+    if kind != "continuous":
+        raise AppError(
+            "VALIDATION_ERROR",
+            f"quantiles require a continuous metric (kind: {kind})",
+            422,
+        )
+
 
 COVARIATE_PROVIDERS: dict = {}
 
@@ -372,6 +414,10 @@ async def _source_workflow_runs(
                 "sum_sq": sum(d * d for d in durations),
                 "_winsorized": winsorized,
             }
+            # §4.14: per-event sketch ONLY when the definition asks for
+            # quantiles — no silent write amplification
+            if definition.spec.get("quantiles"):
+                result[variant]["value_histogram"] = value_histogram(durations)
         elif measure == "failure_rate":
             failed = sum(1 for status, _s, _f in rows if status == RunStatus.FAILED)
             result[variant] = {
@@ -863,6 +909,10 @@ async def _source_learning_paths(
                 "sum_sq": sum(d * d for d in durations),
                 "_winsorized": winsorized,
             }
+            # §4.14: per-event sketch ONLY when the definition asks for
+            # quantiles — no silent write amplification
+            if definition.spec.get("quantiles"):
+                result[variant]["value_histogram"] = value_histogram(durations)
     return result
 
 
@@ -1236,6 +1286,9 @@ class MetricService:
                 raise AppError(
                     "VALIDATION_ERROR", f"Unknown {name}: {value} (allowed: {sorted(allowed)})", 422
                 )
+        _validate_quantiles(
+            (fields.get("spec") or {}).get("quantiles"), fields.get("kind")
+        )
         definition = MetricDefinition(**fields)
         self.db.add(definition)
         try:
@@ -1272,6 +1325,14 @@ class MetricService:
                       "winsorize_pct", "cap_value"):
             if changes.get(field) is not None:
                 setattr(definition, field, changes[field])
+        if changes.get("quantiles") is not None:
+            _validate_quantiles(changes["quantiles"], definition.kind)
+            definition.spec = {**(definition.spec or {}),
+                               "quantiles": [float(v) for v in changes["quantiles"]]}
+        if changes.get("clear_quantiles"):
+            definition.spec = {
+                k: v for k, v in (definition.spec or {}).items() if k != "quantiles"
+            }
         if changes.get("clear_winsorize"):
             definition.winsorize_pct = None
         if changes.get("clear_cap"):

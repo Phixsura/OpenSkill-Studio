@@ -2535,3 +2535,52 @@ async def test_cov_evaluations_provider_boundaries_and_measures(db):
         units=users, lookback_start=lookback_start, window_start=window_start,
     )
     assert x == {users[0]: 3.0, users[1]: 0.0}
+
+
+async def test_latency_quantile_histogram_and_knob(db):
+    """§4.14 round 124: a quantiles-requesting definition makes the latency
+    source emit the base-2 log sketch (exact buckets pinned); without the
+    knob no sketch is written; the knob validates hard (continuous only,
+    probabilities inside (0,1)) and clears clean."""
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    _tenant, org = await _mk_org(db)
+    installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add(installation)
+    await db.flush()
+    window_start, _ = _today_window()
+    t0 = window_start + timedelta(hours=1)
+    for ms in (100, 300, 10_000):
+        db.add(WorkflowRun(
+            org_id=org.id, installation_id=installation.id,
+            definition_snapshot={}, status=RunStatus.COMPLETED,
+            created_at=t0, started_at=t0,
+            finished_at=t0 + timedelta(milliseconds=ms),
+        ))
+    await db.flush()
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+    await svc.update_definition("run_latency_ms", quantiles=[0.5, 0.95])
+    out = await _run_source(
+        db, "workflow_runs", definition_key="run_latency_ms",
+        units=[installation.id], unit_type="workflow_installation",
+    )
+    # 100 -> bucket 6 ([64,128)), 300 -> 8 ([256,512)), 10000 -> 13
+    assert out["treatment"]["value_histogram"] == {"6": 1, "8": 1, "13": 1}
+
+    await svc.update_definition("run_latency_ms", clear_quantiles=True)
+    out = await _run_source(
+        db, "workflow_runs", definition_key="run_latency_ms",
+        units=[installation.id], unit_type="workflow_installation",
+    )
+    assert "value_histogram" not in out["treatment"]
+
+    # knob validation: binary kind, out-of-range, too many
+    from app.exceptions import AppError as _AppError
+    with pytest.raises(_AppError):
+        await svc.update_definition("run_success_rate", quantiles=[0.5])
+    with pytest.raises(_AppError):
+        await svc.update_definition("run_latency_ms", quantiles=[1.5])
+    with pytest.raises(_AppError):
+        await svc.update_definition("run_latency_ms", quantiles=[0.0])

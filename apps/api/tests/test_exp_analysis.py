@@ -873,6 +873,92 @@ def test_multi_cuped_k1_reduces_to_single_cuped():
     )
 
 
+def _hist_of(values: list[float]) -> dict:
+    """Build the §4.14 base-2 log histogram the way a source would."""
+    import math as _math
+
+    hist: dict = {}
+    for v in values:
+        if v < 0:
+            key = "__neg__"
+        elif v == 0:
+            key = "__zero__"
+        else:
+            key = str(max(-20, min(43, _math.floor(_math.log2(v)))))
+        hist[key] = hist.get(key, 0) + 1
+    return hist
+
+
+def test_histogram_quantile_brackets_the_true_sample_quantile():
+    """Log buckets lose precision but may never lose ORDER: the estimate
+    must land within the bucket bounds that contain the true sample
+    quantile, for every p across a spread of scales."""
+    import math as _math
+
+    from app.experiments.services.analysis import histogram_quantile
+
+    values = sorted([0.7, 1.3, 2.9, 3.3, 5.1, 9.8, 17.0, 33.0, 64.5, 130.0,
+                     250.0, 400.0, 700.0, 1500.0, 2900.0, 6000.0])
+    hist = _hist_of(values)
+    for p in (0.1, 0.25, 0.5, 0.75, 0.9, 0.95):
+        out = histogram_quantile(hist, p)
+        assert out is not None and out["n"] == len(values)
+        # fractional-rank estimator: bracket by the two neighboring order
+        # statistics' bucket bounds (floor-rank value's bucket floor, the
+        # ceil-rank value's bucket ceiling)
+        rank = min(max(p * len(values), 1.0), float(len(values)))
+        lo_q = values[_math.floor(rank) - 1]
+        hi_q = values[_math.ceil(rank) - 1]
+        lo = 2.0 ** _math.floor(_math.log2(lo_q))
+        hi = 2.0 ** (_math.floor(_math.log2(hi_q)) + 1)
+        assert lo <= out["estimate"] <= hi, (p, out["estimate"], (lo, hi))
+        assert out["ci"][0] <= out["estimate"] <= out["ci"][1]
+
+
+def test_histogram_quantile_exact_pins_and_refusals():
+    from app.experiments.services.analysis import histogram_quantile
+
+    # hand histogram: 4 values in bucket 1 ([2,4)), 4 in bucket 3 ([8,16))
+    hist = {"1": 4, "3": 4}
+    out = histogram_quantile(hist, 0.5)
+    # rank 4.0 of 8 -> last of bucket 1: frac 4/4=1 -> exactly hi = 4.0
+    assert out is not None and out["estimate"] == pytest.approx(4.0)
+    # p -> 1 pushes into bucket 3's upper half
+    hi = histogram_quantile(hist, 0.95)
+    assert hi is not None and 8.0 <= hi["estimate"] <= 16.0
+    # zeros are real rank mass at 0.0
+    zed = histogram_quantile({"__zero__": 6, "3": 2}, 0.5)
+    assert zed is not None and zed["estimate"] == 0.0
+    # refusals: negatives, tiny n, p bounds, empty
+    assert histogram_quantile({"__neg__": 1, "3": 5}, 0.5) is None
+    assert histogram_quantile({"3": 1}, 0.5) is None
+    assert histogram_quantile({"3": 5}, 0.0) is None
+    assert histogram_quantile({"3": 5}, 1.0) is None
+    assert histogram_quantile({}, 0.5) is None
+
+
+def test_quantile_comparison_diff_and_conservative_ci():
+    from app.experiments.services.analysis import (
+        histogram_quantile,
+        quantile_comparison,
+    )
+
+    control = _hist_of([10.0] * 20 + [12.0] * 20)
+    treatment = _hist_of([20.0] * 20 + [24.0] * 20)
+    out = quantile_comparison(control, treatment, 0.5)
+    assert out is not None
+    c = histogram_quantile(control, 0.5)
+    t = histogram_quantile(treatment, 0.5)
+    assert out["diff"] == pytest.approx(t["estimate"] - c["estimate"])
+    # conservative combine: subtracting opposite ends can only widen
+    assert out["ci"][0] <= out["diff"] <= out["ci"][1]
+    assert out["ci"][1] - out["ci"][0] >= (
+        (t["ci"][1] - t["ci"][0]) + (c["ci"][1] - c["ci"][0])
+    ) - 1e-12
+    # either side refusing refuses the comparison
+    assert quantile_comparison({"__neg__": 2}, treatment, 0.5) is None
+
+
 def test_multi_cuped_degenerate_refusals():
     """Collinear covariates -> singular normal equations -> None; a missing
     cross term -> None."""

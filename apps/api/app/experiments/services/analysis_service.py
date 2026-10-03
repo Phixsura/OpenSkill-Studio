@@ -93,6 +93,11 @@ class AnalysisService:
                 if value is None:
                     continue
                 arm[field] = (arm[field] or 0) + float(value)
+            # §4.14 (round 124): histogram counts add across windows
+            if getattr(row, "value_histogram", None):
+                hacc = arm.setdefault("value_histogram", {})
+                for bucket, count in row.value_histogram.items():
+                    hacc[bucket] = hacc.get(bucket, 0) + int(count)
             # §4.6 v3 (round 115): fold the per-window covariates map —
             # sums, squares, xy and the xx cross terms all add across windows
             if row.covariates:
@@ -563,6 +568,27 @@ class AnalysisService:
                             else None
                         ),
                     )
+                    # §4.14 (round 124): quantile reads for continuous
+                    # metrics whose definition requests them — informational,
+                    # never a decision basis (the registered engine's primary
+                    # comparison stays authoritative)
+                    q_probs = (
+                        (definition.spec or {}).get("quantiles")
+                        if definition is not None and kind == "continuous"
+                        else None
+                    )
+                    if q_probs:
+                        q_out = {}
+                        for prob in q_probs:
+                            q_cmp = stats.quantile_comparison(
+                                control_arm.get("value_histogram") or {},
+                                arm.get("value_histogram") or {},
+                                float(prob),
+                            )
+                            if q_cmp is not None:
+                                q_out[str(prob)] = q_cmp
+                        if q_out:
+                            comparison["quantiles"] = q_out
                     # Sequential adjustment on the standardized statistic.
                     # NOT `get("z") or get("t")` — a legitimate z of exactly
                     # 0.0 is falsy and would silently drop the sequential

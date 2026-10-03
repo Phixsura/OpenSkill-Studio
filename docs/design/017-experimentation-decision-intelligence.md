@@ -1094,6 +1094,23 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 124 — the QUANTILE epoch lands (§4.14, design-first): p50/p95
+reads for continuous metrics, the industry question mean-based sufficient
+stats cannot answer. Step 1: definitions take a `quantiles` knob (1-3
+probabilities, continuous-kind only, PATCHable — it changes reporting, not
+stored semantics). Step 2: snapshots gain value_histogram (exp13) — a
+base-2 log sketch with **zero**/**neg** overflow keys, emitted by BOTH
+per-event continuous sites (run latency, path time-to-completion) only
+when the definition asks; counts fold across windows like the covariates
+map. Step 3: pure `histogram_quantile` (cumulative walk, geometric
+interpolation) with a distribution-free order-statistic CI, and
+`quantile_comparison` whose combined CI subtracts opposite ends
+(conservative by construction, caveat attached); the analysis comparison
+carries `quantiles: {"0.5": {...}}` — informational, never a decision
+basis. Oracle: estimates bracket the true sample quantile's bucket across
+scales; exact pins on hand histograms; refusals (negatives, n<2, p
+bounds) pinned.
+
 Round 123 — the multi adjustment gains the single path's honesty readout:
 variance_reduction_pct (achieved reduction vs the unadjusted Welch) now
 rides the multi result too, pinned 1e-9 against the oracle's residuals and

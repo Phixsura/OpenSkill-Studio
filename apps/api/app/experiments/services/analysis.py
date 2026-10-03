@@ -600,6 +600,85 @@ def cuped_adjusted_welch(control: dict, treatment: dict) -> dict | None:
 # ── Sequential monitoring ────────────────────────────────────────────
 
 
+def _hist_value_at_rank(entries: list[tuple[int, int]], rank: float) -> float | None:
+    """Value at a (possibly fractional) 1-based rank in a base-2 log
+    histogram: walk cumulative counts, geometric interpolation between the
+    bucket's bounds by the within-bucket rank fraction."""
+    total = sum(c for _, c in entries)
+    if total <= 0:
+        return None
+    rank = min(max(rank, 1.0), float(total))
+    seen = 0
+    for bucket, count in entries:
+        if seen + count >= rank:
+            lo, hi = 2.0 ** bucket, 2.0 ** (bucket + 1)
+            frac = (rank - seen) / count
+            return lo * (hi / lo) ** frac
+        seen += count
+    return 2.0 ** (entries[-1][0] + 1)
+
+
+def histogram_quantile(hist: dict, p: float) -> dict | None:
+    """§4.14 (round 124): quantile estimate + distribution-free CI from a
+    base-2 log histogram {bucket: count} with "__zero__"/"__neg__" overflow
+    keys. Refuses (None) on empty data, p outside (0,1), or ANY negative
+    values (log buckets are for positive-domain metrics — latency, cost).
+    CI from order statistics: rank bounds np ± z*sqrt(np(1-p)), mapped back
+    through the histogram — conservative, no normality assumed."""
+    if not hist or not (0.0 < p < 1.0):
+        return None
+    if int(hist.get("__neg__", 0) or 0) > 0:
+        return None
+    zeros = int(hist.get("__zero__", 0) or 0)
+    entries = sorted(
+        (int(k), int(v))
+        for k, v in hist.items()
+        if k not in ("__zero__", "__neg__") and int(v) > 0
+    )
+    n = zeros + sum(c for _, c in entries)
+    if n < 2:
+        return None
+
+    def at_rank(rank: float) -> float:
+        rank = min(max(rank, 1.0), float(n))
+        if rank <= zeros:
+            return 0.0
+        value = _hist_value_at_rank(entries, rank - zeros)
+        return 0.0 if value is None else value
+
+    target = p * n
+    estimate = at_rank(target)
+    z = 1.959963984540054
+    half = z * math.sqrt(n * p * (1.0 - p))
+    return {
+        "estimate": estimate,
+        "ci": [at_rank(target - half), at_rank(target + half)],
+        "n": n,
+        "caveat": "distribution-free order-statistic CI; log-bucket resolution",
+    }
+
+
+def quantile_comparison(
+    control_hist: dict, treatment_hist: dict, p: float
+) -> dict | None:
+    """Control-vs-treatment quantile difference. The combined CI subtracts
+    opposite CI ends (conservative — wider than an exact two-sample
+    interval, never narrower). Never a decision basis on its own."""
+    c = histogram_quantile(control_hist, p)
+    t = histogram_quantile(treatment_hist, p)
+    if c is None or t is None:
+        return None
+    return {
+        "control": c["estimate"],
+        "treatment": t["estimate"],
+        "diff": t["estimate"] - c["estimate"],
+        "ci": [t["ci"][0] - c["ci"][1], t["ci"][1] - c["ci"][0]],
+        "n_control": c["n"],
+        "n_treatment": t["n"],
+        "caveat": c["caveat"],
+    }
+
+
 def msprt_always_valid_p(z: float, tau: float = 1.0) -> float:
     """Mixture SPRT always-valid p-value for a standardized statistic z with
     N(0, tau²) mixture prior. Peek freely: p is valid at every look."""

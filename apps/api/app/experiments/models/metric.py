@@ -90,6 +90,11 @@ class MetricSnapshot(Base):
     # xy_sum}}; the cov_* columns above mirror the FIRST covariate so every
     # pre-exp12 reader keeps working
     covariates: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # exp13 (§4.14): base-2 log histogram {bucket: count} for quantile reads;
+    # populated only when the definition requests quantiles
+    value_histogram: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default="{}"
+    )
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

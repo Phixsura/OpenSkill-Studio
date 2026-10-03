@@ -1354,3 +1354,46 @@ async def test_multi_covariate_analysis_end_to_end(db):
     assert isinstance(cuped.get("variance_reduction_pct"), float)  # round 123
     # #62: the real joint adjustment ran — no degrade warning
     assert "CUPED_MULTI_DEGRADED" not in result["warnings"]
+
+
+async def test_quantile_comparison_rides_the_analysis(db):
+    """§4.14 round 124: snapshots carrying value_histogram fold across
+    windows (counts add) and the continuous comparison gains a quantiles
+    block for each probability the definition requests — informational,
+    alongside the engine's primary comparison."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+
+    exp, admin = await _mk_running(
+        db, metrics={"primary": ["run_latency_ms"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+        unit_type="workflow_installation",
+    )
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "run_latency_ms"))
+    ).scalar_one()
+    definition.spec = {**definition.spec, "quantiles": [0.5]}
+    await db.flush()
+    ws1 = datetime(2026, 9, 1, tzinfo=UTC)
+    ws2 = datetime(2026, 9, 2, tzinfo=UTC)
+    # control ~100ms (bucket 6), treatment ~300ms (bucket 8); two windows
+    # each so the fold is observable (counts double)
+    for ws in (ws1, ws2):
+        db.add(_snapshot(exp.id, "run_latency_ms", "control", ws,
+                         n=10, sum_value=1000.0, sum_sq=110_000.0,
+                         value_histogram={"6": 10}))
+        db.add(_snapshot(exp.id, "run_latency_ms", "treatment", ws,
+                         n=10, sum_value=3000.0, sum_sq=950_000.0,
+                         value_histogram={"8": 10}))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["run_latency_ms"]["comparisons"]["treatment"]
+    q = comparison["quantiles"]["0.5"]
+    assert q["n_control"] == 20 and q["n_treatment"] == 20  # folded
+    assert 64.0 <= q["control"] <= 128.0
+    assert 256.0 <= q["treatment"] <= 512.0
+    assert q["diff"] == pytest.approx(q["treatment"] - q["control"])
+    assert "caveat" in q

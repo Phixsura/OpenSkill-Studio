@@ -338,8 +338,12 @@ class UpdateMetricDefinitionRequest(_StrictReq):
     direction: str | None = Field(default=None, max_length=16)
     winsorize_pct: float | None = Field(default=None, gt=0, lt=100)
     cap_value: float | None = None
+    # §4.14: quantile reporting (operational — changes what is REPORTED,
+    # not what stored sufficient stats mean); continuous-kind only
+    quantiles: list[float] | None = Field(default=None, min_length=1, max_length=3)
     clear_winsorize: bool = False
     clear_cap: bool = False
+    clear_quantiles: bool = False
 
 
 class CreateMetricDefinitionRequest(_StrictReq):
@@ -497,6 +501,7 @@ class MetricSnapshotResponse(BaseModel):
     cov_sum_sq: float | None
     cov_xy_sum: float | None
     covariates: dict
+    value_histogram: dict = {}
     provenance: dict
     computed_at: datetime
 
