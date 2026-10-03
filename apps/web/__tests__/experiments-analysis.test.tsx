@@ -152,6 +152,30 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(await screen.findByText(/CUPED ×2: 0\.0420/)).toBeTruthy();
   });
 
+  it("renders the binary-CUPED caveat inline (round 145)", async () => {
+    const payload = analysisPayload();
+    const metrics = (
+      payload.data as { metrics: Record<string, { comparisons: Record<string, object> }> }
+    ).metrics;
+    metrics.exposure_rate!.comparisons.treatment = {
+      effect: 0.05,
+      ci: [0.01, 0.09],
+      p: 0.02,
+      cuped: {
+        effect: 0.042,
+        ci: [0.02, 0.064],
+        p: 0.01,
+        theta: 0.3,
+        variance_reduction_pct: 22.4,
+        caveat: "linear adjustment on a per-unit 0/1 outcome",
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/linear adjustment on a per-unit 0\/1 outcome/)).toBeTruthy();
+  });
+
   it("renders quantile lines when the comparison carries them (§4.14)", async () => {
     const payload = analysisPayload();
     const metrics = (

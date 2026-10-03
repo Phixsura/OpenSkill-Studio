@@ -37,6 +37,7 @@ interface Comparison {
     variance_reduction_pct?: number;
     mode?: string;
     covariates?: string[];
+    caveat?: string;
   };
   corpus_prior?: { n_experiments: number; mean: number; sd: number };
   shrunk_effect?: number;
@@ -286,6 +287,9 @@ export default function AnalysisPage() {
                                   {c.cuped.variance_reduction_pct != null
                                     ? ` (−${c.cuped.variance_reduction_pct.toFixed(0)}% var)`
                                     : ""}
+                                  {c.cuped.caveat ? (
+                                    <span className="text-slate-500"> — {c.cuped.caveat}</span>
+                                  ) : null}
                                 </div>
                               ) : null}
                               {c.quantiles

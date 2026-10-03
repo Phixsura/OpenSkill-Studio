@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 145 — the binary-CUPED caveat renders inline on the analysis page
+(the honesty string was server-side only); behavior-pinned. The data-path
+interaction audit for the new branch came back clean: guardrail and
+holdout-report source calls pass no variance_reduction (per-review
+semantics preserved), spec immutability prevents mixed per-unit/per-review
+snapshot semantics, and unsupported binary sources degrade to the honest
+CUPED_COVARIATES_UNAVAILABLE warning.
+
 Round 144 — binary CUPED's second source: the evaluations source under
 variance_reduction switches to the same per-unit 0/1 contract (a unit
 passes when ANY of its in-window reviews is APPROVED; numerator counts
