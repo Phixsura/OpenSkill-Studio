@@ -512,14 +512,17 @@ async def sweep_weekly_digest(
     week_ago = now - timedelta(days=7)
     rows = (
         await db.execute(
-            select(Experiment.id, Experiment.title, Experiment.owner_user_id)
-            .where(Experiment.status == "running")
+            select(Experiment.id, Experiment.title, Experiment.owner_user_id,
+                   Experiment.status)
+            # analyzed experiments are WAITING ON A DECISION — the digest is
+            # exactly the place to keep that from going stale (round 141)
+            .where(Experiment.status.in_(("running", "analyzed")))
             .order_by(Experiment.id.asc())
             .limit(cap)
         )
     ).all()
     by_owner: dict[str, list] = {}
-    for experiment_id, title, owner_user_id in rows:
+    for experiment_id, title, owner_user_id, status in rows:
         if owner_user_id is None:
             continue
         exposures = (
@@ -543,7 +546,7 @@ async def sweep_weekly_digest(
             )
         ).scalar_one()
         by_owner.setdefault(owner_user_id, []).append(
-            (experiment_id, title, int(exposures), int(events))
+            (experiment_id, title, int(exposures), int(events), status)
         )
     sent = 0
     cutoff = now - timedelta(days=DIGEST_DEDUP_DAYS)
@@ -562,8 +565,12 @@ async def sweep_weekly_digest(
         if already:
             continue
         lines = [
-            f"{title}: {exposures} exposures, {events} guardrail events (7d)"
-            for _id, title, exposures, events in items
+            (
+                f"{title}: AWAITING DECISION"
+                if status == "analyzed"
+                else f"{title}: {exposures} exposures, {events} guardrail events (7d)"
+            )
+            for _id, title, exposures, events, status in items
         ]
         try:
             from app.services.notification import NotificationService
@@ -572,7 +579,7 @@ async def sweep_weekly_digest(
                 await NotificationService(db).create(
                     user_id=owner_user_id,
                     notification_type="experiment_digest",
-                    title=f"Weekly experiment digest ({len(items)} running)",
+                    title=f"Weekly experiment digest ({len(items)} active)",
                     body="\n".join(lines[:20]),
                     data={"experiment_ids": [i for i, *_ in items]},
                 )

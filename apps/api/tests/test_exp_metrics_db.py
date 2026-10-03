@@ -2817,6 +2817,32 @@ async def test_ramp_plan_sweep_tolerates_a_racing_refusal(db, monkeypatch):
     assert (await db.get(Experiment, first)).ramp_bp == 1000  # untouched
 
 
+async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
+    """Round 141: an analyzed experiment is WAITING ON A DECISION — the
+    digest must say so instead of silently omitting it (running-only was a
+    blind spot exactly where staleness hurts)."""
+    from sqlalchemy import select as _select
+
+    from app.models.notification import Notification
+
+    exp, admin = await _mk_running_low_ramp(db)
+    svc = ExperimentService(db)
+    for to_status in ("completed", "analyzed"):
+        await svc.transition(exp.id, to_status=to_status, actor=admin)
+    from app.experiments.worker import sweep_weekly_digest
+
+    assert await sweep_weekly_digest(db) == 1
+    notif = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_digest",
+            )
+        )
+    ).scalar_one()
+    assert "T: AWAITING DECISION" in notif.body
+
+
 async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypatch):
     """#67 (the #66 family applied everywhere): the start and closure
     sweeps' docstrings promised "the human simply wins" a racing manual
@@ -2981,6 +3007,7 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     assert lines["T"] == "1 exposures, 0 guardrail events (7d)"
     assert lines["B"] == "0 exposures, 2 guardrail events (7d)"
     assert set(notif.data["experiment_ids"]) == {exp_a.id, exp_b.id}
+    assert "active" in notif.title
     # dedup window: a rerun sends nothing, INCLUDING at the exact cutoff
     # instant (the >= edge of the dedup window)
     assert await sweep_weekly_digest(db, now=now) == 0

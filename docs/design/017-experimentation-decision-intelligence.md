@@ -1101,6 +1101,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 141 — the digest covers the decision queue: analyzed experiments
+(waiting on a human decision) now appear as "AWAITING DECISION" lines —
+running-only was a blind spot exactly where staleness hurts most (an
+analysis nobody acts on). Title says "active" instead of "running".
+
 Round 140 — mutation wave 22 over the new readers (look_history,
 list_assignments): 8/10 killed — the OF look-number payload mapping needed
 an obrien_fleming run (msprt looks are None there, invisible to the
