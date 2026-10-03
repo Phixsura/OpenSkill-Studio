@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 105 — the metric enums joined the web parity wall: METRIC_DIRECTIONS
+and METRIC_KINDS are now exported constants pinned against the backend sets
+(the Explorer's direction dropdown had them hardcoded — correct today,
+a drift point tomorrow; fourteen vocabularies now ride the parity test).
+
 Round 104 — wave 16 over update_definition closed 4/4 (the surviving
 status-code mutant died once the dynamic assert joined the static AST map),
 and the live E2E grew the definition-PATCH pair (edit the cap, clear the

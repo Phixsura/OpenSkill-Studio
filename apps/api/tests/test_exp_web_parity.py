@@ -50,6 +50,10 @@ def test_web_vocabularies_match_backend():
 
     assert _web_array("DESIGNS") == set(DESIGNS)
     assert _web_array("ALLOCATION_MODES") == set(ALLOCATION_MODES)
+    from app.experiments.models.metric import METRIC_DIRECTIONS, METRIC_KINDS
+
+    assert _web_array("METRIC_DIRECTIONS") == set(METRIC_DIRECTIONS)
+    assert _web_array("METRIC_KINDS") == set(METRIC_KINDS)
 
 
 def test_web_checklist_matches_backend():

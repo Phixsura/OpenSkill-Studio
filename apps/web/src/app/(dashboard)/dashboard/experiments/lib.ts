@@ -44,6 +44,9 @@ export const ALLOCATION_MODES = ["fixed", "bandit"] as const;
 export const SEQUENTIAL_METHODS = ["none", "obrien_fleming", "msprt"] as const;
 export const ANALYSIS_TYPES = ["randomized", "observational"] as const;
 export const DECISIONS = ["promote", "reject", "inconclusive", "extend"] as const;
+export const METRIC_DIRECTIONS = ["increase_good", "decrease_good"] as const;
+export const METRIC_KINDS = ["binary", "continuous", "rate", "time_to_event"] as const;
+
 export const PROMOTION_STATUSES = ["draft", "approved", "applying", "applied", "rejected"] as const;
 export const PROMOTION_TARGET_TYPES = [
   "learning_path",

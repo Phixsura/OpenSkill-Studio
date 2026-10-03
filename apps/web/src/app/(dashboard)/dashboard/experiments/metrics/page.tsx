@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EmptyState, ErrorBanner, ExperimentsNav, SectionCard } from "../components";
-import { EXPERIMENT_DOMAINS } from "../lib";
+import { EXPERIMENT_DOMAINS, METRIC_DIRECTIONS } from "../lib";
 
 interface MetricDefinition {
   id: string;
@@ -174,8 +174,11 @@ function MetricExplorerInner() {
                           onChange={(e) => setEdit({ ...edit, direction: e.target.value })}
                         >
                           <option value="">dir…</option>
-                          <option value="increase_good">increase_good</option>
-                          <option value="decrease_good">decrease_good</option>
+                          {METRIC_DIRECTIONS.map((dir) => (
+                            <option key={dir} value={dir}>
+                              {dir}
+                            </option>
+                          ))}
                         </select>
                         <button
                           type="button"
