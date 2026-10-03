@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 139 — digest opt-out parity: the weekly digest (round 135) shipped
+suppressible on the backend (prefs key = the type name) but the
+notifications settings page had no toggle — the operator could not opt
+out from the UI. Added the "Experiment Weekly Digest" toggle, and the
+notifications-preferences page gained its FIRST behavior test (the page
+predates the every-page-tested campaign, which covered experiments pages
+only). Law: a new notification type ships WITH its preference toggle.
+
 Round 138 — look-history console card: the analysis page lists the look
 sequence (time, look number when OF, automated badge, truncated result
 hash) under the results; behavior-pinned.
