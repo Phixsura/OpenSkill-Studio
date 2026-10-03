@@ -277,6 +277,45 @@ def _snapshot(exp_id, metric_key, variant, ws, **cols):
     )
 
 
+async def test_multi_degrade_to_single_cuped_warns(db):
+    """#62: a TWO-covariate spec whose snapshots carry only ONE covariate
+    (its partner's source has no provider, say) silently fell back to the
+    single-covariate adjustment — the operator asked for a joint adjustment
+    and heard nothing. The fallback must warn CUPED_MULTI_DEGRADED; the
+    honest multi path (e2e test below) must NOT."""
+    exp, admin = await _mk_running(
+        db, variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["revision_count", "ghost_covariate"],
+            "lookback_days": 14,
+        },
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    # only the FIRST covariate assembled: cov_* mirror filled, covariates map
+    # carries one key — the multi core refuses (whole entry missing) and the
+    # legacy single path engages
+    db.add(_snapshot(exp.id, "revision_count", "control", ws,
+                     n=200, sum_value=200.0, sum_sq=260.0,
+                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=230.0,
+                     covariates={"revision_count": {
+                         "sum": 200.0, "sum_sq": 260.0, "xy_sum": 230.0}}))
+    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
+                     n=200, sum_value=220.0, sum_sq=300.0,
+                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=235.0,
+                     covariates={"revision_count": {
+                         "sum": 201.0, "sum_sq": 263.0, "xy_sum": 235.0}}))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    cuped = comparison.get("cuped")
+    assert cuped is not None and cuped.get("mode") != "multi"
+    assert "CUPED_MULTI_DEGRADED" in result["warnings"]
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
+
+
 async def test_pre_balance_suspect_on_covariate_imbalance(db):
     """Covariates are pre-experiment by construction — arm means that differ
     (p < 0.001) mean broken randomization, and analysis must say so."""
@@ -1310,3 +1349,5 @@ async def test_multi_covariate_analysis_end_to_end(db):
     cuped = comparison.get("cuped")
     assert cuped is not None and cuped.get("mode") == "multi"
     assert set(cuped["theta"]) == {"revision_count", "project_approval_rate"}
+    # #62: the real joint adjustment ran — no degrade warning
+    assert "CUPED_MULTI_DEGRADED" not in result["warnings"]

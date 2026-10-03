@@ -752,6 +752,16 @@ class AnalysisService:
             if not any_cuped:
                 # Configured but no source computed covariate aggregates yet
                 warnings.append("CUPED_COVARIATES_UNAVAILABLE")
+            elif len(spec.variance_reduction.covariates()) > 1 and not any(
+                (comparison.get("cuped") or {}).get("mode") == "multi"
+                for metric in metrics_out.values()
+                for comparison in (metric.get("comparisons") or {}).values()
+            ):
+                # #62: a multi-covariate spec fell back to the single-covariate
+                # adjustment (a covariate's source has no provider, or the
+                # joint design was degenerate) — the operator asked for a
+                # joint adjustment and must not mistake this for one
+                warnings.append("CUPED_MULTI_DEGRADED")
 
         if secondary_ps:
             fdr = stats.benjamini_hochberg(secondary_ps)

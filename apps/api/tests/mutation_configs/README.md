@@ -99,3 +99,11 @@ n == 2 admissible floor. Ledgered equivalents: the 1e-12 singularity
 threshold (float-exact), the n <= 1 guard trio (welch's own
 insufficient-data refusal makes the outcomes identical), and the two i < j
 comparisons the i == j branch already shields.
+
+## wave18_cov_evaluations.json (round 120)
+
+The evaluations covariate provider: 7/7 killed. The first run left the
+`status != APPROVED` mutant alive because the fixture held exactly one
+approved and one non-approved review — symmetric counts. A second approved
+review breaks the symmetry; fixture law: when a predicate picks a SUBSET,
+make the subset's count differ from its complement's.

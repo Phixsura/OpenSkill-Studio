@@ -2514,6 +2514,9 @@ async def test_cov_evaluations_provider_boundaries_and_measures(db):
         (ReviewStatus.APPROVED, lookback_start),
         # strictly inside -- non-APPROVED, splits the two measures
         (ReviewStatus.REVISION_REQUESTED, lookback_start + _td(days=3)),
+        # second APPROVED keeps approved != non-approved counts (kills the
+        # status != APPROVED mutant, which my symmetric 1/1 fixture missed)
+        (ReviewStatus.APPROVED, lookback_start + _td(days=5)),
         # exactly ON window_start -- the strict-< edge excludes it
         (ReviewStatus.APPROVED, window_start),
     ):
@@ -2526,9 +2529,9 @@ async def test_cov_evaluations_provider_boundaries_and_measures(db):
         db, definition=SimpleNamespace(spec={}), units=users,
         lookback_start=lookback_start, window_start=window_start,
     )
-    assert x == {users[0]: 1.0, users[1]: 0.0}
+    assert x == {users[0]: 2.0, users[1]: 0.0}
     x = await _cov_evaluations(
         db, definition=SimpleNamespace(spec={"measure": "review_count"}),
         units=users, lookback_start=lookback_start, window_start=window_start,
     )
-    assert x == {users[0]: 2.0, users[1]: 0.0}
+    assert x == {users[0]: 3.0, users[1]: 0.0}

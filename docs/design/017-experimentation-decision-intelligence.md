@@ -1059,6 +1059,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 120 — defect #62: a multi-covariate spec that degrades to the
+single-covariate fallback (unprovided source, degenerate joint design) did
+so SILENTLY — any_cuped was satisfied by the single shape, so no warning
+fired while the operator believed a joint adjustment ran. Analysis now
+appends CUPED_MULTI_DEGRADED (kill-proven; the honest multi e2e pins the
+warning absent). Mutation wave 18 on the evaluations provider: 7/7 after
+breaking the approved/non-approved fixture symmetry the first run exposed.
+
 Round 119 — live E2E grows to 93 checks: a multi-covariate spec accepted
 over the wire (spec_hash round-trip), the exactly-one-form validator's 422
 proven through the HTTP stack, and the exp12 covariates JSONB (xx included)
