@@ -1101,6 +1101,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 131 — ramp-plan verification closes: live E2E 103 checks (a
+non-increasing plan refused over the wire, the platform wall, null
+round-trip) and mutation wave 20 at 23/23 after strengthening (every
+refusal's 422 pinned, the 20/21 boundary, ramp_bp 1 and 10000 admissible
+on a draft, the audit payload's steps, a step exactly AT the sweep
+instant).
+
 Round 130 — ramp-plan console: the detail page lists the standing steps
 and takes new ones (one line per step: ISO time + target percent; blank
 clears), PATCHing the plural plan; both the parse and the clear are

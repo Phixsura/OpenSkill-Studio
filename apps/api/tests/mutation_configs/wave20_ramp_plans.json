@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/experiments.py",
+    "funcs": ["set_ramp_plan"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  },
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_ramp_plans"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

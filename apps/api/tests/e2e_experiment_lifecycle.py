@@ -292,6 +292,28 @@ async def main() -> int:
               r.status_code == 422
               and r.json()["error"]["code"] == "EXPERIMENT_RAMP_DECREASE", r.text[:200])
 
+        # ── Round 131: scheduled ramp plan over the wire (exp14) ────────
+        r = await c.patch(f"/experiments/{exp_id}/ramp-plan", headers=admin,
+                          json={"plan": [
+                              {"at": "2027-06-01T09:00:00Z", "ramp_bp": 4000},
+                              {"at": "2027-06-03T09:00:00Z", "ramp_bp": 2000},
+                          ]})
+        check("non-increasing ramp plan refused over the wire",
+              r.status_code == 422
+              and r.json()["error"]["code"] == "EXPERIMENT_RAMP_DECREASE",
+              r.text[:300])
+        r = await c.patch(f"/experiments/{exp_id}/ramp-plan", headers=student,
+                          json={"plan": None})
+        check("ramp plan is platform-admin walled", r.status_code == 403,
+              str(r.status_code))
+        # NOTE: exp is at ramp 10000 here — plan targets cannot exceed it,
+        # so the accept case clears instead (null plan round-trips)
+        r = await c.patch(f"/experiments/{exp_id}/ramp-plan", headers=admin,
+                          json={"plan": None})
+        check("ramp plan clears to null over the wire",
+              r.status_code == 200 and r.json()["data"]["ramp_plan"] is None,
+              r.text[:300])
+
         # Enum guard names the vocabulary
         r = await c.get("/experiments?status=bogus", headers=admin)
         check("enum guard 422 names vocabulary",

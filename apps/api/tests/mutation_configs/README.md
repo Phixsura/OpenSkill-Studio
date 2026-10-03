@@ -120,3 +120,11 @@ rank <= total, and the last bucket always closes >= rank, so the line is
 unreachable) and the zero-count bucket filter (a 0-count entry can never
 satisfy a new >= crossing, shifts no n, and the final return is already
 unreachable — no observable difference).
+
+## wave20_ramp_plans.json (round 131)
+
+set_ramp_plan + sweep_ramp_plans: 23/23 killed after strengthening — the
+first run left 13 alive (status-code 422 pins on every refusal site, the
+20/21 step-count boundary, ramp_bp 1 and 10000 both admissible on a draft,
+the audit payload carrying the normalized steps, and a sweep step exactly
+AT the sweep instant being due).

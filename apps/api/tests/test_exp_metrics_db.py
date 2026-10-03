@@ -2665,6 +2665,45 @@ async def test_ramp_plan_validation(db):
         ], actor=admin)
     assert e.value.code == "VALIDATION_ERROR"
 
+    # every refusal is a 422 (status pins)
+    for bad_plan in (
+        [{"at": future.isoformat(), "ramp_bp": 5000},
+         {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000}],
+        [{"at": future.isoformat(), "ramp_bp": 1000}],
+        [{"at": future.isoformat(), "ramp_bp": 99999}],
+        [{"at": "garbage", "ramp_bp": 5000}],
+    ):
+        with pytest.raises(_AppError) as e:
+            await svc.set_ramp_plan(exp.id, plan=bad_plan, actor=admin)
+        assert e.value.status_code == 422
+
+    # exactly 20 steps is admissible; 21 is not (both the operator and
+    # the constant)
+    def _steps(count: int) -> list[dict]:
+        return [
+            {"at": (future + timedelta(hours=i)).isoformat(),
+             "ramp_bp": 1100 + i * 100}
+            for i in range(count)
+        ]
+
+    exp = await svc.set_ramp_plan(exp.id, plan=_steps(20), actor=admin)
+    assert len(exp.ramp_plan) == 20
+    with pytest.raises(_AppError) as e:
+        await svc.set_ramp_plan(exp.id, plan=_steps(21), actor=admin)
+    assert e.value.status_code == 422
+
+    # the ramp_plan_set audit event carries the normalized steps
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentEvent
+    events = list((await db.execute(
+        _select(ExperimentEvent).where(
+            ExperimentEvent.experiment_id == exp.id,
+            ExperimentEvent.event_type == "ramp_plan_set",
+        ).order_by(ExperimentEvent.created_at.desc())
+    )).scalars())
+    assert events and len(events[0].payload["steps"]) == 20
+
     # a naive at is UTC (#56 law) and the plan stores it aware
     naive = (datetime.now(UTC) + timedelta(hours=2)).replace(tzinfo=None)
     exp = await svc.set_ramp_plan(exp.id, plan=[
@@ -2673,6 +2712,29 @@ async def test_ramp_plan_validation(db):
     assert exp.ramp_plan[0]["at"].endswith("+00:00")
     exp = await svc.set_ramp_plan(exp.id, plan=None, actor=admin)
     assert exp.ramp_plan is None
+
+    # a transition-walled status refuses with 422
+    await ExperimentService(db).transition(exp.id, to_status="paused",
+                                           actor=admin)
+    with pytest.raises(_AppError) as e:
+        await svc.set_ramp_plan(exp.id, plan=None, actor=admin)
+    assert e.value.status_code == 422
+
+    # ramp_bp bounds 1 and 10000 are BOTH admissible on a draft (no live
+    # ramp floor there)
+    draft_admin = await _mk_admin(db)
+    layer2 = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    draft = await ExperimentService(db).create(
+        key=f"exp-{str(ULID()).lower()}", title="D", domain="learning",
+        layer_key=layer2.key, owner_user_id=draft_admin.id,
+    )
+    out = await svc.set_ramp_plan(draft.id, plan=[
+        {"at": future.isoformat(), "ramp_bp": 1},
+        {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 10_000},
+    ], actor=draft_admin)
+    assert [step["ramp_bp"] for step in out.ramp_plan] == [1, 10_000]
 
 
 async def test_ramp_plan_sweep_applies_highest_due(db):
@@ -2697,7 +2759,12 @@ async def test_ramp_plan_sweep_applies_highest_due(db):
     exp_row.ramp_plan = [*exp_row.ramp_plan, {"at": "garbage", "ramp_bp": "x"}]
     await db.flush()
 
-    sweep_now = now + timedelta(minutes=30)  # steps 1+2 due, step 3 not
+    # a step exactly AT the sweep instant is due (the <= edge)
+    exact = await sweep_ramp_plans(db, now=now + timedelta(minutes=5))
+    assert exact == 1
+    assert (await db.get(Experiment, exp.id)).ramp_bp == 2000
+
+    sweep_now = now + timedelta(minutes=30)  # step 2 due, step 3 not
     assert await sweep_ramp_plans(db, now=sweep_now) == 1
     exp_row = await db.get(Experiment, exp.id)
     assert exp_row.ramp_bp == 5000
