@@ -2942,7 +2942,29 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
 
     from app.experiments.worker import sweep_weekly_digest
 
-    assert await sweep_weekly_digest(db) == 1
+    # boundary row: an event exactly ON the 7-day edge counts (>=), and the
+    # 7-day constant itself is pinned by a 7.5-day-old event staying out
+    now = datetime.now(UTC)
+    edge_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
+                                action="alerted", auto=True, detail={})
+    db.add(edge_event)
+    stale_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
+                                 action="alerted", auto=True, detail={})
+    db.add(stale_event)
+    await db.flush()
+    edge_event.created_at = now - timedelta(days=7)
+    stale_event.created_at = now - timedelta(days=7, hours=12)
+    # the exposure sits exactly ON the 7-day edge too (its own >= filter)
+    from app.experiments.models import ExperimentExposure as _Exposure
+    exposure_row = (
+        await db.execute(
+            _select(_Exposure).where(_Exposure.experiment_id == exp_a.id)
+        )
+    ).scalar_one()
+    exposure_row.occurred_at = now - timedelta(days=7)
+    await db.flush()
+
+    assert await sweep_weekly_digest(db, now=now) == 1
     notif = (
         await db.execute(
             _select(Notification).where(
@@ -2951,8 +2973,17 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
             )
         )
     ).scalar_one()
-    body = notif.body
-    assert "1 exposures" in body and "1 guardrail events" in body
+    # EXACT per-experiment lines: counts must come from the RIGHT experiment
+    # (an inverted id filter would swap or pollute them)
+    lines = dict(
+        line.split(": ", 1) for line in notif.body.splitlines()
+    )
+    assert lines["T"] == "1 exposures, 0 guardrail events (7d)"
+    assert lines["B"] == "0 exposures, 2 guardrail events (7d)"
     assert set(notif.data["experiment_ids"]) == {exp_a.id, exp_b.id}
-    # dedup window: a rerun sends nothing for this owner
-    assert await sweep_weekly_digest(db) == 0
+    # dedup window: a rerun sends nothing, INCLUDING at the exact cutoff
+    # instant (the >= edge of the dedup window)
+    assert await sweep_weekly_digest(db, now=now) == 0
+    assert await sweep_weekly_digest(
+        db, now=notif.created_at + timedelta(days=6)
+    ) == 0

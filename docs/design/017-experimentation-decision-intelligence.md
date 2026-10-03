@@ -1101,6 +1101,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 136 — mutation wave 21 over the digest sweep: 13/14 killed (both
+7-day >= edges by exactly-on-boundary rows, the day constant by a
+7.5-day-old event, EXACT per-line counts against inverted id filters, the
+dedup window's own >= edge); the body's lines[:20] display cap ledgered
+(a 21-running-experiment fixture for a truncation constant).
+
 Round 135 — weekly owner digest (industry-standard lifecycle email): one
 notification per owner summarizing their running experiments' 7-day
 exposure volume and guardrail-event counts (experiment_digest type,

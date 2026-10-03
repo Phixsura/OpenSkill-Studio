@@ -128,3 +128,13 @@ first run left 13 alive (status-code 422 pins on every refusal site, the
 20/21 step-count boundary, ramp_bp 1 and 10000 both admissible on a draft,
 the audit payload carrying the normalized steps, and a sweep step exactly
 AT the sweep instant being due).
+
+## wave21_digest.json (round 136)
+
+sweep_weekly_digest: 13/14 killed — both 7-day >= edges (an exposure AND a
+guardrail event exactly ON the boundary), the 7-vs-7.5-day constant, the
+per-experiment id filters pinned by EXACT per-line counts, and the dedup
+window's own >= edge (a rerun at created_at + 6d sends nothing). Ledgered:
+the body's lines[:20] cap (killing it needs 21 running experiments under
+one owner — a ~21x-lifecycle fixture for a display truncation constant;
+verified by inspection).
