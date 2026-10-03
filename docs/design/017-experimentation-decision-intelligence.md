@@ -1094,6 +1094,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 128 — defect #65 + percentile guardrails: the window fold did
+scalar + dict the moment a quantiles-enabled definition served as a
+guardrail (the source now emits value_histogram) — a TypeError that killed
+the ENTIRE guardrail sweep for that experiment; the repro crashed exactly
+there pre-fix. Histograms now fold bucket-wise, and
+`guardrail_aggregate: "p95"` guards the percentile itself through
+histogram_quantile (no sketch in the window -> not evaluable, skip —
+never crash). The p95 breach pins the exact bucket range and the
+auto-pause. Law: every consumer of a source's output shape must be swept
+when the shape grows a key — the analysis fold got the histogram handling
+in round 124, the GUARDRAIL fold did not.
+
 Round 127 — live E2E reaches 100 checks: the quantiles knob PATCHes and
 round-trips over the wire, a binary definition refuses it through the HTTP
 stack, exp13's value_histogram JSONB serializes back verbatim, and

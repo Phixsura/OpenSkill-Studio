@@ -49,10 +49,10 @@ async def db():
     await engine.dispose()
 
 
-def _spec(guardrails: list[dict] | None = None) -> dict:
+def _spec(guardrails: list[dict] | None = None, *, unit_type: str = "user") -> dict:
     return {
         "hypothesis": "guardrails pause unsafe experiments automatically",
-        "unit_type": "user",
+        "unit_type": unit_type,
         "variants": [
             {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
             {"key": "treatment", "name": "T", "weight_bp": 5000},
@@ -78,7 +78,8 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db, *, guardrails: list[dict] | None = None):
+async def _mk_running(db, *, guardrails: list[dict] | None = None,
+                      unit_type: str = "user"):
     await MetricService(db).ensure_seed_definitions()
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
@@ -90,7 +91,8 @@ async def _mk_running(db, *, guardrails: list[dict] | None = None):
         layer_key=layer.key,
         owner_user_id=admin.id,
     )
-    await svc.create_version(exp.id, spec=_spec(guardrails), actor=admin)
+    await svc.create_version(exp.id, spec=_spec(guardrails, unit_type=unit_type),
+                             actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -189,6 +191,77 @@ async def test_unwired_guardrail_source_skips_not_pauses(db):
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert summary["breaches"] == []
     assert (await db.get(Experiment, exp.id)).status == "running"
+
+
+async def test_quantile_enabled_guardrail_evaluates_p95(db):
+    """#65: a quantiles-enabled continuous definition used as a guardrail
+    made the window fold do 0 + dict (the source now emits value_histogram)
+    — a TypeError that killed the WHOLE guardrail sweep. Histograms must
+    fold as histograms, and a p-aggregate must guard the quantile itself."""
+    from app.models.workflow_pack import WorkflowPackInstallation
+    from app.models.workflow_run import RunStatus, WorkflowRun
+
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+    await svc.update_definition("run_latency_ms", quantiles=[0.95])
+    # p95 aggregate on the guardrail read
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "run_latency_ms"))
+    ).scalar_one()
+    definition.spec = {**definition.spec, "guardrail_aggregate": "p95"}
+    await db.flush()
+
+    exp, _ = await _mk_running(
+        db, unit_type="workflow_installation",
+        guardrails=[{"metric_key": "run_latency_ms", "op": "lte",
+                     "threshold": 5_000.0, "window_hours": 24}],
+    )
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name=f"o-{str(ULID()).lower()}",
+                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
+    db.add(installation)
+    await db.flush()
+    await AssignmentService(db).resolve(
+        experiment_key=exp.key, unit_type="workflow_installation",
+        unit_id=installation.id,
+    )
+    t0 = datetime.now(UTC) - timedelta(hours=1)
+    # 19 fast runs + 1 slow: p95 rank 19 -> fast bucket, but ANY mean-based
+    # read would stay low too; the slow run pushes p99. Use 10 fast + 10
+    # slow so p95 lands in the slow bucket (rank 19 of 20) and BREACHES.
+    for ms in [100] * 10 + [60_000] * 10:
+        db.add(WorkflowRun(
+            org_id=org.id, installation_id=installation.id,
+            definition_snapshot={}, status=RunStatus.COMPLETED,
+            created_at=t0, started_at=t0,
+            finished_at=t0 + timedelta(milliseconds=ms),
+        ))
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert [b["metric_key"] for b in summary["breaches"]] == ["run_latency_ms"]
+    breach = summary["breaches"][0]
+    # p95 of (10x100, 10x60000): rank 19 -> the 60000 bucket ([32768,65536))
+    assert 32_768.0 <= breach["observed"] <= 65_536.0
+    assert (await db.get(Experiment, exp.id)).status == "paused"
+    # cleanup the shared seeded definition
+    await svc.update_definition("run_latency_ms", clear_quantiles=True)
+    definition.spec = {k: v for k, v in definition.spec.items()
+                       if k != "guardrail_aggregate"}
+    await db.flush()
 
 
 async def test_gte_guardrail_direction(db):

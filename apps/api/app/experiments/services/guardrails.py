@@ -12,6 +12,7 @@ the same metric SOURCE_REGISTRY as snapshots; an unwired source SKIPS loudly
 every experiment on the slowest integration.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 
 import structlog
@@ -231,6 +232,16 @@ class GuardrailService:
         aggregate = definition.spec.get("guardrail_aggregate")
         if aggregate is None:
             aggregate = "rate" if definition.kind in ("binary", "rate") else "mean"
+        if isinstance(aggregate, str) and re.fullmatch(r"p\d{1,2}(\.\d+)?", aggregate):
+            # §4.14: percentile guardrail (p95 latency, say) — needs the
+            # value_histogram the quantiles knob makes the source emit;
+            # no sketch in the window means not evaluable (skip, not crash)
+            from app.experiments.services.analysis import histogram_quantile
+
+            out = histogram_quantile(
+                combined.get("value_histogram") or {}, float(aggregate[1:]) / 100.0
+            )
+            return out["estimate"] if out is not None else None
         if aggregate == "rate":
             denominator = combined.get("denominator") or 0
             if not denominator:
@@ -349,7 +360,16 @@ class GuardrailService:
             combined: dict = {}
             for values in stats.values():
                 for k, v in values.items():
-                    if v is not None:
+                    if v is None:
+                        continue
+                    # #65: a quantiles-enabled definition emits the exp13
+                    # value_histogram dict — histograms fold as histograms
+                    # (scalar + dict was a TypeError that killed the sweep)
+                    if isinstance(v, dict):
+                        hacc = combined.setdefault(k, {})
+                        for bucket, count in v.items():
+                            hacc[bucket] = hacc.get(bucket, 0) + count
+                    else:
                         combined[k] = combined.get(k, 0) + v
             observed = self._observed(definition, combined)
             if observed is None:
@@ -370,7 +390,10 @@ class GuardrailService:
                     window_end=now,
                     action="paused",
                     auto=True,
-                    detail={"op": guardrail.op, "combined": {k: float(v) for k, v in combined.items()}},
+                    detail={"op": guardrail.op, "combined": {
+                        k: (v if isinstance(v, dict) else float(v))
+                        for k, v in combined.items()
+                    }},
                 )
                 self.db.add(event)
                 breaches.append(event)
