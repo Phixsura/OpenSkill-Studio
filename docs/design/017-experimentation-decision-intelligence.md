@@ -291,6 +291,38 @@ novelty, interaction}, `status` enum {pass, warn, fail}, `detail` JSONB,
 `checked_at`. Latest row per check_key surfaces as the health strip on the
 experiment overview page.
 
+### 4.14 Quantile metrics (v3 round 124 — the quantile epoch)
+
+Mean-based sufficient stats cannot answer "did p95 latency regress?" —
+the industry-standard question (Statsig/Eppo both ship percentile
+metrics). Design, three steps mirroring the §4.6 v3 epoch:
+
+**Step 1 — spec/definition.** `metric_definitions.spec.quantiles`:
+optional list of 1–3 probabilities in (0, 1) (e.g. `[0.5, 0.95]`).
+Operational knob (PATCHable): it changes what is REPORTED, not what the
+stored sufficient stats mean. Only continuous-kind metrics accept it.
+
+**Step 2 — sketch.** Snapshots gain `value_histogram` JSONB (migration
+exp13): a fixed base-2 log histogram over positive values —
+`{"<bucket>": count}` where bucket = clamp(floor(log2(x)), -20, 43),
+plus `"__zero__"` and `"__neg__"` overflow keys (counts only; quantile
+estimation refuses when neg > 0 — honest for latency/cost, the target
+domain). Mergeable across windows and segments by plain addition (the
+same fold the covariates map uses). Sources producing per-event values
+populate it ONLY when the definition requests quantiles (no silent write
+amplification). ~64 buckets ≈ 2 significant digits of relative precision:
+enough for a p95 regression read, tiny in storage.
+
+**Step 3 — math + analysis.** Pure core `histogram_quantile(hist, p)`:
+cumulative-count walk, geometric interpolation inside the bucket
+(sqrt(lo·hi) at the midpoint rank fraction). Distribution-free CI from
+order statistics: rank bounds r± = np ± z·sqrt(np(1−p)) mapped back
+through the histogram (conservative, no normality assumed — the caveat
+says so). Per-variant estimates + control-vs-treatment difference with a
+conservative combined CI ride the analysis result under
+`quantiles: {"0.5": {...}, "0.95": {...}}`; never a decision basis on
+their own (the primary comparison stays the registered engine's).
+
 ## 5. Lifecycle state machine
 
 ```
