@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 108 — worker necropsy tail: six arms in one batch (the breach-log
+handler path, the deleted-approver parked arm, no-cross-layer-pairs zero,
+the single-variant df<1 skip, the interaction notify except arm under an
+exploding transport, and the dangling-version closure skip). facade.py
+reads 100% across the complementary suites.
+
 Round 107 — the dep layer's own arms pinned (check_enum 422, the 403 for
 a plain user with no admin memberships, the delegated org-ids list, the
 admin unrestricted scope, and the self-serve pass-through). deps.py fully

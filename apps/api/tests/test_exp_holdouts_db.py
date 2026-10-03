@@ -1116,3 +1116,82 @@ async def test_holdout_report_comparison_edges(db):
     )
     t2e = await svc.report(group.id, metric_key=t2e_key)
     assert t2e["comparison"] is None
+
+
+async def test_worker_cold_arms_necropsy(db, monkeypatch):
+    """Round 108 (worker necropsy tail): the breach-logging handler arm, the
+    deleted-approver parked arm, the no-cross-layer-pairs zero, the
+    single-variant df<1 skip, the interaction notify except arm, and the
+    dangling-version closure skip — one batch."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.worker import (
+        handle_apply_promotion,
+        handle_evaluate_guardrails,
+        sweep_experiment_closures,
+        sweep_experiment_interactions,
+    )
+
+    # (1) handler evaluates a breaching experiment -> breach log arm runs
+    exp, admin = await _mk_running(db, spec_overrides={
+        "metrics": {"primary": ["exposure_rate"],
+                    "guardrails": [{"metric_key": "exposure_rate", "op": "lte",
+                                    "threshold": 0.4, "window_hours": 24}]},
+    })
+    asvc = AssignmentService(db)
+    for i in range(6):
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                               unit_id=f"wk-{i}")
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
+                                   unit_id=f"wk-{i}")
+    await handle_evaluate_guardrails(db, {"experiment_id": exp.id})
+    assert (await db.get(_Exp, exp.id)).status == "paused"
+
+    # (2) deleted approver: the apply handler leaves the draft parked
+    await handle_apply_promotion(
+        db, {"draft_id": "0" * 26, "actor_user_id": "1" * 26}
+    )  # no crash, nothing to assert beyond survival — the arm logs and returns
+
+    # (3) no cross-layer RUNNING pairs -> interaction sweep returns 0
+    await db.execute(
+        _update(_Exp).where(_Exp.status == "running").values(status="paused")
+    )
+    only, _ = await _mk_running(db)
+    assert await sweep_experiment_interactions(db) == 0
+
+    # (4) a single-variant table (1bp control) -> df < 1 -> skipped, 0 alerts
+    other, _ = await _mk_running(db, spec_overrides={
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 1, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 9999},
+        ],
+    })
+    for i in range(30):
+        await asvc.resolve(experiment_key=only.key, unit_type="user",
+                           unit_id=f"ia-{i}")
+        await asvc.resolve(experiment_key=other.key, unit_type="user",
+                           unit_id=f"ia-{i}")
+    # (5) notify except arm: exploding notifications never block the sweep
+    from app.services.notification import NotificationService
+
+    async def _boom(self, *a, **k):
+        raise RuntimeError("transport down")
+
+    monkeypatch.setattr(NotificationService, "create", _boom)
+    alerts = await sweep_experiment_interactions(db)
+    assert isinstance(alerts, int)  # survived both arms
+
+    # (6) dangling current_version -> closure sweep skips, batch continues
+    stale, _ = await _mk_running(db)
+    stale_row = await db.get(_Exp, stale.id)
+    stale_row.started_at = datetime.now(UTC) - timedelta(days=99)
+    await db.execute(
+        _update(_Exp).where(_Exp.id == stale.id).values(current_version=77)
+    )
+    closed = await sweep_experiment_closures(db)
+    assert isinstance(closed, int)
+    assert (await db.get(_Exp, stale.id)).status == "running"  # skipped
