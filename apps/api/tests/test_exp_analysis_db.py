@@ -788,6 +788,84 @@ def test_compare_matrix_pins_none_coalescing_and_engines():
     bayes_c = compare("continuous", "bayesian", cont_c, cont_t)
     assert "p_beat_control" in bayes_c
 
+    # ── wave-23 exact-value pins (structural asserts kill no arithmetic or
+    # coalesce mutant) ────────────────────────────────────────────────────
+    import math as _m
+
+    import pytest as _pytest
+
+    from app.experiments.services import analysis as _stats
+
+    assert freq["effect"] == _pytest.approx(60.0 / 200.0 - 50.0 / 200.0, rel=1e-12)
+    assert freq_c["effect"] == _pytest.approx(150.0 / 50.0 - 100.0 / 50.0, rel=1e-12)
+    # the rate-bayesian extras, formulas spelled by hand against the
+    # frequentist read of the same arms
+    base = compare("rate", "frequentist",
+                   {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    se, effect = base["se"], base["effect"]
+    z0 = effect / se
+    assert rate["p_beat_control"] == _pytest.approx(_stats.norm_cdf(z0), rel=1e-12)
+    assert rate["expected_loss"] == _pytest.approx(
+        max(0.0,
+            se * _m.exp(-z0 * z0 / 2.0) / _m.sqrt(2.0 * _m.pi)
+            - effect * _stats.norm_sf(z0)),
+        rel=1e-12,
+    )
+    assert rate["credible_interval"] == base["ci"]
+    # se == 0 is REACHABLE (0/200 vs 0/200 is sufficient data, zero
+    # variance): the guards must take the else-0 branches, never divide
+    zero_rate = compare("rate", "bayesian",
+                        {"numerator": 0.0, "denominator": 200.0},
+                        {"numerator": 0.0, "denominator": 200.0})
+    assert zero_rate["p_beat_control"] == _pytest.approx(0.5)
+    assert zero_rate["expected_loss"] == 0.0
+    # binary CUPED gates (round 142): k == 1 via the cov_* mirror has NO
+    # mode key; k == 2 with a covariates map runs the multi core
+    bin_c = {"numerator": 80.0, "denominator": 200.0,
+             "cov_sum": 200.0, "cov_sum_sq": 420.0, "cov_xy_sum": 95.0}
+    bin_t = {"numerator": 110.0, "denominator": 200.0,
+             "cov_sum": 205.0, "cov_sum_sq": 440.0, "cov_xy_sum": 130.0}
+    single = compare("binary", "frequentist", bin_c, bin_t,
+                     covariate_keys=["c1"])
+    assert single["cuped"] is not None and "mode" not in single["cuped"]
+    cov_c = {"c1": {"sum": 200.0, "sum_sq": 420.0, "xy_sum": 95.0,
+                    "xx": {"c2": 210.0}},
+             "c2": {"sum": 180.0, "sum_sq": 400.0, "xy_sum": 88.0}}
+    cov_t = {"c1": {"sum": 205.0, "sum_sq": 440.0, "xy_sum": 130.0,
+                    "xx": {"c2": 215.0}},
+             "c2": {"sum": 190.0, "sum_sq": 430.0, "xy_sum": 120.0}}
+    multi = compare("binary", "frequentist",
+                    {**bin_c, "covariates": cov_c},
+                    {**bin_t, "covariates": cov_t},
+                    covariate_keys=["c1", "c2"])
+    assert multi["cuped"]["mode"] == "multi"
+    assert set(multi["cuped"]["theta"]) == {"c1", "c2"}
+    # k == 1 WITH a covariates map (the real compute path stores one even
+    # for a single covariate) must STILL take the single-covariate branch —
+    # the strict > 1 gate, pinned on binary AND continuous
+    k1_map = {"c1": {"sum": 200.0, "sum_sq": 420.0, "xy_sum": 95.0}}
+    k1_map_t = {"c1": {"sum": 205.0, "sum_sq": 440.0, "xy_sum": 130.0}}
+    bin_k1 = compare("binary", "frequentist",
+                     {**bin_c, "covariates": k1_map},
+                     {**bin_t, "covariates": k1_map_t},
+                     covariate_keys=["c1"])
+    assert bin_k1["cuped"] is not None and "mode" not in bin_k1["cuped"]
+    cont_k1 = compare("continuous", "frequentist",
+                      {"n": 200.0, "sum_value": 80.0, "sum_sq": 80.0,
+                       "cov_sum": 200.0, "cov_sum_sq": 420.0,
+                       "cov_xy_sum": 95.0, "covariates": k1_map},
+                      {"n": 200.0, "sum_value": 110.0, "sum_sq": 110.0,
+                       "cov_sum": 205.0, "cov_sum_sq": 440.0,
+                       "cov_xy_sum": 130.0, "covariates": k1_map_t},
+                      covariate_keys=["c1"])
+    assert cont_k1["cuped"] is not None and "mode" not in cont_k1["cuped"]
+    # the continuous t depends on sum_sq — pins the or-coalesce there
+    assert freq_c["t"] == _pytest.approx(
+        _stats.welch_from_stats(50.0, 100.0, 260.0, 50.0, 150.0, 500.0)["t"],
+        rel=1e-12,
+    )
+    assert freq_c["t"] != 0.0
+
 
 async def test_aggregate_uses_only_the_highest_query_version_values(db):
     """Version filter killer: the aggregate must EQUAL the v2 rows alone —

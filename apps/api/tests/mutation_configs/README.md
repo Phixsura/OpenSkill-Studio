@@ -148,3 +148,16 @@ shape equality with latest_look pinned). Ledgered: the two DEFAULT limit
 constants (50/5000) — killing them needs 51/5001 fixture rows for a
 default nobody passes; the limit MECHANISM is killed via explicit
 limit=1/limit=2 calls.
+
+## wave23_binary_cuped.json (round 143)
+
+_compare whole-function sweep after the round-142 binary-CUPED branch:
+30/31 killed. The sweep exposed three OLD blind spots beyond the new code —
+the binary/continuous effect values were never exactly pinned, the
+rate-bayesian p_beat/expected_loss formulas were never value-pinned (now
+hand-spelled against the frequentist read), and se == 0 is REACHABLE
+(0/200 vs 0/200) so the guards' else-branches are real. The k == 1 strict
+> 1 gates are pinned WITH a covariates map present (the real compute path
+stores one even for a single covariate). Ledgered: the expected_loss
+trailing `if se > 0` (with z0 already guarded to 0, the expression is
+identically 0 at se == 0 — equivalent to the else branch).

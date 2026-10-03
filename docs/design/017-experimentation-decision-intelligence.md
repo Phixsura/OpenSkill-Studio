@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 143 — mutation wave 23 (whole _compare after the binary-CUPED
+branch): 30/31. The sweep exposed three blind spots OLDER than the new
+code — effect values never exactly pinned, the rate-bayesian
+p_beat/expected_loss formulas never value-pinned, and se == 0 reachable
+(zero-variance arms are sufficient data) so the guards' else branches are
+real; the k == 1 strict >1 gates are pinned with a covariates map present.
+One mathematical equivalent ledgered.
+
 Round 142 — BINARY CUPED (§4.6 v4, Statsig-parity regression adjustment
 on proportions): a 0/1 per-unit outcome has sum == sum_sq == numerator, so
 the existing Welch CUPED cores (single AND multi) apply verbatim. The
