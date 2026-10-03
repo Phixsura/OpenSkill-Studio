@@ -1059,6 +1059,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 117 — COVARIATE_PROVIDERS gains its second source, evaluations:
+pre-period SubmissionReview verdicts per user unit (pass_count default —
+APPROVED only; review_count counts every verdict), mirroring the source's
+own semantics. The provider test pins both window edges by
+exactly-on-timestamp reviews (the proven wave-17 pattern) plus the ITT
+zero default. The registry is now demonstrably cross-source: any of the
+two sources' metrics can serve as covariates in one joint adjustment.
+
 Round 116c — defect #60 (test nondeterminism, caught by certification 92):
 the multi-covariate e2e used real hash bucketing over 8 random-ULID users,
 so ~7% of runs land an arm with n <= 1 and both adjustments correctly

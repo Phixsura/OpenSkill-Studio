@@ -2467,3 +2467,68 @@ async def test_multi_covariate_snapshot_assembly(db):
         assert "xx" not in r.covariates["project_approval_rate"]
         total_xx += (entry.get("xx") or {}).get("project_approval_rate", 0.0)
     assert total_xx == 3.0
+
+
+async def test_cov_evaluations_provider_boundaries_and_measures(db):
+    """Round 117: the evaluations covariate provider mirrors the source's
+    review semantics over the PRE-period. Boundary law (#106.25 family): a
+    review exactly ON lookback_start is in; exactly ON window_start is out.
+    pass_count counts only APPROVED; review_count counts every verdict;
+    units with no reviews stay 0.0 (ITT)."""
+    from datetime import timedelta as _td
+    from types import SimpleNamespace
+
+    from app.experiments.services.metrics import _cov_evaluations
+    from app.models.project import (
+        Project,
+        ReviewerType,
+        ReviewStatus,
+        Submission,
+        SubmissionReview,
+        SubmissionStatus,
+    )
+
+    _tenant, org = await _mk_org(db)
+    project = Project(org_id=org.id, title="EvP",
+                      slug=f"evp-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    users = []
+    for i in range(2):
+        u = User(email=f"cev-{i}-{ULID()}@example.com", display_name=f"E{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        users.append(u.id)
+    window_start = datetime.now(UTC).replace(microsecond=0)
+    lookback_start = window_start - _td(days=14)
+    sub = Submission(org_id=org.id, project_id=project.id, user_id=users[0],
+                     status=SubmissionStatus.APPROVED, version=1,
+                     created_at=lookback_start)
+    db.add(sub)
+    await db.flush()
+    for status, at in (
+        # exactly ON lookback_start -- the >= edge includes it
+        (ReviewStatus.APPROVED, lookback_start),
+        # strictly inside -- non-APPROVED, splits the two measures
+        (ReviewStatus.REVISION_REQUESTED, lookback_start + _td(days=3)),
+        # exactly ON window_start -- the strict-< edge excludes it
+        (ReviewStatus.APPROVED, window_start),
+    ):
+        db.add(SubmissionReview(submission_id=sub.id,
+                                reviewer_type=ReviewerType.AI,
+                                status=status, score=80, created_at=at))
+    await db.flush()
+
+    x = await _cov_evaluations(
+        db, definition=SimpleNamespace(spec={}), units=users,
+        lookback_start=lookback_start, window_start=window_start,
+    )
+    assert x == {users[0]: 1.0, users[1]: 0.0}
+    x = await _cov_evaluations(
+        db, definition=SimpleNamespace(spec={"measure": "review_count"}),
+        units=users, lookback_start=lookback_start, window_start=window_start,
+    )
+    assert x == {users[0]: 2.0, users[1]: 0.0}

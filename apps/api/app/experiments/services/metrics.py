@@ -112,6 +112,35 @@ async def _cov_projects(
     return x
 
 
+@covariate_provider("evaluations")
+async def _cov_evaluations(
+    db: AsyncSession, *, definition, units: list[str],
+    lookback_start, window_start,
+) -> dict[str, float]:
+    """Pre-period review outcomes per user unit (round 117): mirrors the
+    evaluations SOURCE semantics (SubmissionReview verdicts, ADR-006/008).
+    Measures: pass_count (default — APPROVED reviews) or review_count."""
+    from app.models.project import ReviewStatus, Submission, SubmissionReview
+
+    rows = (
+        await db.execute(
+            select(Submission.user_id, SubmissionReview.status)
+            .join(Submission, Submission.id == SubmissionReview.submission_id)
+            .where(
+                Submission.user_id.in_(units),
+                SubmissionReview.created_at >= lookback_start,
+                SubmissionReview.created_at < window_start,
+            )
+        )
+    ).all()
+    measure = (definition.spec or {}).get("measure", "pass_count")
+    x: dict[str, float] = dict.fromkeys(units, 0.0)
+    for user_id, status in rows:
+        if measure == "review_count" or status == ReviewStatus.APPROVED:
+            x[user_id] += 1.0
+    return x
+
+
 async def assemble_covariates(
     db: AsyncSession, *, variance_reduction, definitions_by_key: dict,
     unit_values: dict[str, float], window_start,
