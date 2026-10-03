@@ -1126,3 +1126,47 @@ async def test_list_experiments_text_search(db):
     # a bare % must NOT match everything with this tag
     rows3, _, _ = await svc.list_experiments(q=f"%{tag}%")
     assert rows3 == []
+
+
+async def test_read_scope_dep_arms(db):
+    """Round 107: the dep layer's own arms — check_enum's typed 422,
+    experiment_read_scope's 403 for a plain user with no admin org
+    memberships, the delegated org-ids path, and the self-serve pass-through
+    (the caller IS the unit)."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.experiments.api.deps import (
+        check_enum,
+        experiment_read_scope,
+        require_self_serve_user,
+    )
+    from app.models.organization import Organization, OrgMember, OrgRole
+
+    with pytest.raises(AppError) as exc:
+        check_enum("galaxy", frozenset({"learning"}), "domain")
+    assert exc.value.status_code == 422 and "galaxy" in exc.value.message
+    check_enum(None, frozenset({"learning"}), "domain")  # absent filter: fine
+
+    plain = User(email=f"plain-{ULID()}@example.com", display_name="P",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(plain)
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await experiment_read_scope(user=plain, db=db)
+    assert exc.value.status_code == 403
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="dep", slug=f"dep-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    db.add(OrgMember(org_id=org.id, user_id=plain.id, role=OrgRole.ADMIN))
+    await db.flush()
+    scope = await experiment_read_scope(user=plain, db=db)
+    assert scope.org_ids == [org.id]
+
+    admin = await _mk_admin(db)
+    assert (await experiment_read_scope(user=admin, db=db)).org_ids is None
+    assert (await require_self_serve_user(user=plain)) is plain

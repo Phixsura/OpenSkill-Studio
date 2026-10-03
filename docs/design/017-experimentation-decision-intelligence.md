@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 107 — the dep layer's own arms pinned (check_enum 422, the 403 for
+a plain user with no admin memberships, the delegated org-ids list, the
+admin unrestricted scope, and the self-serve pass-through). deps.py fully
+covered.
+
 Round 106 — hooks necropsy tail: the three write-path control arms
 (binding/rubric/retry with a config missing the surface's key — the control
 variant's natural shape) pinned in one batch: default served AND a
