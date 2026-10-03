@@ -166,6 +166,16 @@ describe("Promotions board", () => {
   });
 });
 
+describe("Promotions polling (round 111)", () => {
+  it("polls only while an async apply is in flight", async () => {
+    const { promotionsRefetchInterval } =
+      await import("@/app/(dashboard)/dashboard/experiments/promotions/page");
+    expect(promotionsRefetchInterval([{ status: "applying" }])).toBe(5000);
+    expect(promotionsRefetchInterval([{ status: "approved" }])).toBe(false);
+    expect(promotionsRefetchInterval(undefined)).toBe(false);
+  });
+});
+
 describe("Holdout groups page (ADR-017 §4.12 v2)", () => {
   const GROUP = {
     id: "H".repeat(26),

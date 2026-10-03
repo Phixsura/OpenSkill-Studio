@@ -9,6 +9,13 @@ import { ApiError, apiWithAuth } from "@/lib/api";
 import { EmptyState, ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../components";
 import { PROMOTION_STATUSES, STATUS_STYLES, fmtDate, type PromotionDraft } from "../lib";
 
+/** Poll every 5s while an async apply is in flight; otherwise rest. */
+export function promotionsRefetchInterval(
+  drafts: { status: string }[] | undefined,
+): number | false {
+  return drafts?.some((d) => d.status === "applying") ? 5000 : false;
+}
+
 export default function PromotionsPage() {
   return (
     <Suspense>
@@ -32,6 +39,9 @@ function PromotionsInner() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["experiment-promotion-drafts", status],
+    // round 111: an in-flight async apply resolves out-of-band — poll while
+    // any draft is 'applying' so the operator sees it land without refreshing
+    refetchInterval: (query) => promotionsRefetchInterval(query.state.data?.data),
     queryFn: () =>
       apiWithAuth<{ data: PromotionDraft[] }>(
         `/experiments/promotion-drafts?limit=100${status ? `&status=${status}` : ""}`,

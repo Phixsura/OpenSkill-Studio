@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 111 — the Promotions page polls every 5s while any draft is
+'applying' (an async apply resolves out-of-band; the operator now sees it
+land without refreshing) and rests otherwise — the interval logic is an
+exported pure function, pinned. Web 702/702.
+
 Round 110 — the scorecard's delegation wall verified over the wire: an org
 admin reads their own experiment's latest look (null before any run) and
 gets the uniform 404 on a platform experiment. E2E 90 checks.
