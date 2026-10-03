@@ -202,6 +202,18 @@ async def main() -> int:
         check("create layer", r.status_code == 201, r.text[:200])
         r = await c.post("/experiments/metric-definitions/seed", headers=admin, json={})
         check("seed metric definitions", r.status_code == 200, r.text[:200])
+        # Round 101/104: definition PATCH — platform-walled operational knobs
+        r = await c.patch("/experiments/metric-definitions/run_latency_ms",
+                          headers=admin, json={"cap_value": 120000})
+        check("definition PATCH edits the cap",
+              r.status_code == 200
+              and float(r.json()["data"]["cap_value"]) == 120000,
+              r.text[:200])
+        r = await c.patch("/experiments/metric-definitions/run_latency_ms",
+                          headers=admin, json={"clear_cap": True})
+        check("definition PATCH clears the cap",
+              r.status_code == 200 and r.json()["data"]["cap_value"] is None,
+              r.text[:200])
         entity_type = f"e2e-{uid()[:10]}"
         active_config_id, _ = await seed_matching_configs(entity_type)
 

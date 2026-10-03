@@ -82,3 +82,8 @@ clone + list_experiments(q) + latest_look: 12/13 killed. The second-look
 addition killed the limit(1)->limit(2) mutant (scalar_one_or_none explodes
 on two rows). Ledgered equivalent: the list default `limit: int = 50` —
 the default-arg equivalence class this ledger already carries.
+
+## wave16_update_definition.json (round 104)
+
+update_definition: 4/4 after the status-code pin (422 is contract — the
+AST map pins it statically, the dynamic assert makes the mutant die).

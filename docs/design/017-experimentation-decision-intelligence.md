@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 104 — wave 16 over update_definition closed 4/4 (the surviving
+status-code mutant died once the dynamic assert joined the static AST map),
+and the live E2E grew the definition-PATCH pair (edit the cap, clear the
+cap): 88 checks.
+
 Round 103 — the Decision registry list and detail pages gained their
 missing behavior tests (the FOURTH and FIFTH uncovered console pages):
 record listing with verdicts, and the detail's summary plus the full

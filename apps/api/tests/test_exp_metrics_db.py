@@ -2331,6 +2331,7 @@ async def test_update_definition_operational_knobs_only(db):
     with pytest.raises(AppError) as exc:
         await svc.update_definition("run_latency_ms", direction="sideways")
     assert exc.value.code == "VALIDATION_ERROR"
+    assert exc.value.status_code == 422  # status is contract (wave-16 kill)
     with pytest.raises(AppError) as exc:
         await svc.update_definition("no_such_metric_zzz", title="x")
     assert exc.value.status_code == 404
