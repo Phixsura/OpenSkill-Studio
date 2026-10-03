@@ -428,6 +428,40 @@ async def main() -> int:
               and cov_rows[0]["covariates"] == cov_map,
               r.text[:300])
 
+        # ── Round 127: §4.14 quantiles over the wire ───────────────────
+        r = await c.patch("/experiments/metric-definitions/run_latency_ms",
+                          headers=admin, json={"quantiles": [0.5, 0.95]})
+        check("quantiles knob PATCHes and round-trips",
+              r.status_code == 200
+              and r.json()["data"]["spec"].get("quantiles") == [0.5, 0.95],
+              r.text[:300])
+        r = await c.patch("/experiments/metric-definitions/run_success_rate",
+                          headers=admin, json={"quantiles": [0.5]})
+        check("quantiles on a binary definition refused over the wire",
+              r.status_code == 422, r.text[:300])
+        hist = {"6": 10, "8": 5}
+        await _eng.dispose(close=False)
+        async with SessionL() as db:
+            db.add(_Snap(experiment_id=exp_id, metric_key="run_latency_ms",
+                         variant_key="control", window_start=ws,
+                         window_end=ws + _tdlt(days=1), n=15,
+                         value_histogram=hist))
+            await db.commit()
+        await _eng.dispose()
+        r = await c.get(f"/experiments/{exp_id}/metrics", headers=admin)
+        hist_rows = [snap for snap in r.json().get("data", [])
+                     if snap.get("value_histogram")]
+        check("exp13 value_histogram round-trips over the wire",
+              r.status_code == 200 and bool(hist_rows)
+              and hist_rows[0]["value_histogram"] == hist,
+              r.text[:300])
+        r = await c.patch("/experiments/metric-definitions/run_latency_ms",
+                          headers=admin, json={"clear_quantiles": True})
+        check("clear_quantiles strips the knob",
+              r.status_code == 200
+              and "quantiles" not in r.json()["data"]["spec"],
+              r.text[:300])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",

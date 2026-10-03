@@ -1094,6 +1094,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 127 — live E2E reaches 100 checks: the quantiles knob PATCHes and
+round-trips over the wire, a binary definition refuses it through the HTTP
+stack, exp13's value_histogram JSONB serializes back verbatim, and
+clear_quantiles strips the knob (leaving the seeded definition clean for
+the next run).
+
 Round 126 — mutation wave 19 over the quantile cores: 45/49 killed, 4
 ledgered (the rank walk's final return is unreachable — the clamp
 guarantees rank <= total and the last bucket closes >= rank; the
