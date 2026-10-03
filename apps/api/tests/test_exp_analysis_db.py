@@ -1265,7 +1265,8 @@ async def test_multi_covariate_analysis_end_to_end(db):
     db.add(project)
     await db.flush()
 
-    asvc = AssignmentService(db)
+    from app.experiments.models.assignment import ExperimentAssignment
+
     window_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     pre = window_start - _td(days=3)
     rng_rows = [
@@ -1287,8 +1288,14 @@ async def test_multi_covariate_analysis_end_to_end(db):
                   role=_Role.STUDENT, status=_Status.ACTIVE)
         db.add(u)
         await db.flush()
-        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                                  unit_id=u.id) is not None
+        # #60: resolve() hash-buckets random ULIDs — ~7% of runs land an
+        # arm with n <= 1 and BOTH adjustments rightly refuse (cert-92 flake).
+        # Deterministic 4/4 split keeps the test about the covariate flow.
+        db.add(ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=u.id,
+            variant_key="control" if i % 2 == 0 else "treatment",
+            assigned_version=1, bucket=0, is_holdout=False,
+        ))
         db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
                           status=pstat, version=pv, created_at=pre))
         db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,

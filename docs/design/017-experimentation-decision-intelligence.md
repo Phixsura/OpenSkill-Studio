@@ -1059,6 +1059,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 116c — defect #60 (test nondeterminism, caught by certification 92):
+the multi-covariate e2e used real hash bucketing over 8 random-ULID users,
+so ~7% of runs land an arm with n <= 1 and both adjustments correctly
+refuse — a flake that an isolated rerun hides. Deterministic 4/4
+ExperimentAssignment split; law: an e2e about DOWNSTREAM math must not
+leave arm membership to the hash.
+
 Round 116 — mutation wave 17 over the §4.6 v3 cores: 40/46 killed (both
 window-boundary edges proven by exactly-on-timestamp rows; the xx
 upper-triangle structure pinned against slice mutants; whole-covariate
