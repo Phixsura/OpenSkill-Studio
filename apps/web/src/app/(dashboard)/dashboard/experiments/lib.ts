@@ -156,6 +156,11 @@ export interface MetricSnapshot {
   denominator: number | null;
   sum_value: number | null;
   provenance: { query_version?: number; source?: string };
+  // §4.6 v3 (exp12): per-covariate sufficient stats, upper-triangle xx
+  covariates?: Record<
+    string,
+    { sum: number; sum_sq: number; xy_sum: number; xx?: Record<string, number> }
+  >;
   computed_at: string;
 }
 
