@@ -313,6 +313,13 @@ populate it ONLY when the definition requests quantiles (no silent write
 amplification). ~64 buckets ≈ 2 significant digits of relative precision:
 enough for a p95 regression read, tiny in storage.
 
+**Step 2b — percentile guardrails (round 128).** A continuous definition
+with the quantiles knob can set `spec.guardrail_aggregate: "p95"` (any
+pNN): the guardrail window folds the sketch bucket-wise and guards
+`histogram_quantile(fold, 0.95)` itself — "pause when p95 latency
+regresses past X". No sketch in the window means not evaluable (skip,
+never crash).
+
 **Step 3 — math + analysis.** Pure core `histogram_quantile(hist, p)`:
 cumulative-count walk, geometric interpolation inside the bucket
 (sqrt(lo·hi) at the midpoint rank fraction). Distribution-free CI from
