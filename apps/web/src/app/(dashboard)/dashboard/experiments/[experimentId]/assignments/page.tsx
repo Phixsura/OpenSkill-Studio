@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
-import { ErrorBanner, ExperimentsNav, SectionCard } from "../../components";
+import { ErrorBanner, ExperimentsNav, SectionCard, CsvExportButton } from "../../components";
 import { UNIT_TYPES, type GuardrailEvent } from "../../lib";
 
 interface AssignmentStats {
@@ -68,6 +68,10 @@ export default function AssignmentsPage() {
         </Link>{" "}
         · Assignments
       </h1>
+      <CsvExportButton
+        path={`/experiments/${experimentId}/assignments/export`}
+        filename={`experiment-${experimentId}-assignments.csv`}
+      />
       <ErrorBanner message={error} />
       {srmAlert ? (
         <div

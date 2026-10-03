@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 134 — console export buttons: the three CSV surfaces (snapshots,
+guardrail events, assignments) were API-only; each page header now carries
+a CsvExportButton (authenticated raw-text fetch via a new apiTextWithAuth
+that mirrors apiWithAuth's Bearer + 401-refresh, blob download). The
+button surfaces failure inline ("Export failed — retry") — the first
+draft's unhandled rejection was invisible to the operator and leaked as a
+test-level unhandled error, which is what caught it.
+
 Round 133b — hygiene: the holdout report's function-local
 `from datetime import ...` (the UnboundLocalError-shadowing law's latent
 form) hoisted to module level — removing it exposed that the top import

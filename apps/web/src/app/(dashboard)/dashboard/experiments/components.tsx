@@ -3,6 +3,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
+
+import { apiTextWithAuth } from "@/lib/api";
 
 import { usePlatformAdmin } from "@/lib/use-me";
 
@@ -89,5 +92,37 @@ export function SectionCard({
       </div>
       {children}
     </section>
+  );
+}
+
+export function CsvExportButton({ path, filename }: { path: string; filename: string }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      type="button"
+      className="rounded-md border px-2 py-1 text-xs"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        setFailed(false);
+        try {
+          const text = await apiTextWithAuth(path);
+          const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch {
+          // surfaced inline — an unhandled rejection here would be invisible
+          setFailed(true);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {busy ? "Exporting…" : failed ? "Export failed — retry" : "Export CSV"}
+    </button>
   );
 }

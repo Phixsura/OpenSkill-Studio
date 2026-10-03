@@ -7,7 +7,14 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
-import { EmptyState, ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../../components";
+import {
+  EmptyState,
+  ErrorBanner,
+  ExperimentsNav,
+  Pill,
+  SectionCard,
+  CsvExportButton,
+} from "../../components";
 import { STATUS_STYLES, fmtDate, fmtNum, type GuardrailEvent } from "../../lib";
 
 export default function GuardrailsPage() {
@@ -65,6 +72,10 @@ export default function GuardrailsPage() {
         </Link>{" "}
         · Guardrails
       </h1>
+      <CsvExportButton
+        path={`/experiments/${experimentId}/guardrails/events/export`}
+        filename={`experiment-${experimentId}-guardrail-events.csv`}
+      />
       <ErrorBanner message={error} />
       <div className="flex flex-wrap items-end gap-3">
         <button

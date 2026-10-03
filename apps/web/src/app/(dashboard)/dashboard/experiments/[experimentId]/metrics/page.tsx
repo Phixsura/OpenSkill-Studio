@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { apiWithAuth } from "@/lib/api";
-import { EmptyState, ExperimentsNav, SectionCard } from "../../components";
+import { EmptyState, ExperimentsNav, SectionCard, CsvExportButton } from "../../components";
 import { fmtDate, fmtNum, type MetricSnapshot } from "../../lib";
 
 /** Daily value per variant for the sparkline: rate when the row carries a
@@ -91,6 +91,10 @@ export default function ExperimentMetricsPage() {
         </Link>{" "}
         · Metric snapshots
       </h1>
+      <CsvExportButton
+        path={`/experiments/${experimentId}/metrics/export`}
+        filename={`experiment-${experimentId}-snapshots.csv`}
+      />
       {isLoading ? (
         <div className="text-sm text-slate-500">Loading…</div>
       ) : snapshots.length === 0 ? (
