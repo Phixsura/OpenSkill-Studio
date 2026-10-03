@@ -1046,6 +1046,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 99 — verification battery #2 after the feature run (clone, search,
+exports, probe, scorecard, sparkline): live E2E 86/86, hot path 3.38 ms
+new / 1.11 ms sticky (within noise of the 3.2/1.0 baseline across 9 new
+endpoints), fuzz + pure cores 78/78.
+
 Round 98 — the holdout report's metric input gained datalist suggestions
 limited to the reportable-source set (mirroring the service's
 REPORT_SOURCES), so operators pick a valid metric instead of guessing at a 422. Web 697/697.
