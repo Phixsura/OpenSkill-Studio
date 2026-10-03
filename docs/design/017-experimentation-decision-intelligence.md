@@ -1059,6 +1059,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 116 — mutation wave 17 over the §4.6 v3 cores: 40/46 killed (both
+window-boundary edges proven by exactly-on-timestamp rows; the xx
+upper-triangle structure pinned against slice mutants; whole-covariate
+refusal; the n==2 floor), 6 ledgered equivalents (the 1e-12 singularity
+float threshold, the n<=1 trio welch already shields, two comparisons the
+i==j branch makes unreachable).
+
 Round 115 — multi-covariate CUPED, step 3 of 3 (the epoch closes): the
 assembler now also stores the covariate CROSS-products (upper triangle,
 keyed on the earlier covariate) — the joint OLS is unsolvable without

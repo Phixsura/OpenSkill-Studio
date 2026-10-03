@@ -87,3 +87,15 @@ the default-arg equivalence class this ledger already carries.
 
 update_definition: 4/4 after the status-code pin (422 is contract — the
 AST map pins it statically, the dynamic assert makes the mutant die).
+
+## wave17_multi_cuped.json (round 116)
+
+The §4.6 v3 cores: 40/46 killed. Kills needed boundary-timestamp rows (a
+submission exactly ON lookback_start counts; exactly ON window_start is out
+of the pre query and IN the window — proving both <=/< edges), the
+xx upper-triangle STRUCTURE pins (slice mutants on keys[i+1:] flip which
+side carries the cross term), whole-covariate-missing refusal, and the
+n == 2 admissible floor. Ledgered equivalents: the 1e-12 singularity
+threshold (float-exact), the n <= 1 guard trio (welch's own
+insufficient-data refusal makes the outcomes identical), and the two i < j
+comparisons the i == j branch already shields.
