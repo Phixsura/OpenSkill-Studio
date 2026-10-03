@@ -355,6 +355,57 @@ async def main() -> int:
         check("clone is platform-admin walled", r.status_code == 403,
               str(r.status_code))
 
+        # ── Round 119: §4.6 v3 multi-covariate CUPED over the wire ─────
+        mcv_spec = dict(good_spec, variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["exposure_rate", "run_latency_ms"],
+            "lookback_days": 14,
+        })
+        r = await c.post(f"/experiments/{clone_id}/versions", headers=admin,
+                         json={"spec": mcv_spec})
+        check("multi-covariate spec accepted over the wire",
+              r.status_code == 201 and len(r.json()["data"]["spec_hash"]) == 64,
+              r.text[:300])
+        both_forms = dict(mcv_spec, variance_reduction={
+            "method": "cuped", "covariate_metric": "exposure_rate",
+            "covariate_metrics": ["exposure_rate"], "lookback_days": 14,
+        })
+        r = await c.post(f"/experiments/{clone_id}/versions", headers=admin,
+                         json={"spec": both_forms})
+        check("both covariate forms refused (exactly-one validator)",
+              r.status_code == 422, r.text[:300])
+        # exp12: the covariates JSONB must survive the response model — the
+        # #49/#51 serialization class only a wire read can prove
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+        from datetime import timedelta as _tdlt
+
+        from app.core.database import AsyncSessionLocal as SessionL
+        from app.core.database import engine as _eng
+        from app.experiments.models.metric import MetricSnapshot as _Snap
+
+        cov_map = {
+            "exposure_rate": {"sum": 3.0, "sum_sq": 5.0, "xy_sum": 2.5,
+                              "xx": {"run_latency_ms": 7.0}},
+            "run_latency_ms": {"sum": 9.0, "sum_sq": 41.0, "xy_sum": 6.0},
+        }
+        ws = _dt.now(_UTC) - _tdlt(days=1)
+        await _eng.dispose(close=False)
+        async with SessionL() as db:
+            db.add(_Snap(experiment_id=exp_id, metric_key="exposure_rate",
+                         variant_key="control", window_start=ws,
+                         window_end=ws + _tdlt(days=1), n=5,
+                         covariates=cov_map))
+            await db.commit()
+        await _eng.dispose()
+        r = await c.get(f"/experiments/{exp_id}/metrics", headers=admin)
+        cov_rows = [snap for snap in r.json().get("data", [])
+                    if snap.get("covariates")]
+        check("exp12 covariates JSONB round-trips over the wire",
+              r.status_code == 200 and bool(cov_rows)
+              and cov_rows[0]["covariates"] == cov_map,
+              r.text[:300])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",

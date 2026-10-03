@@ -1059,6 +1059,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 119 — live E2E grows to 93 checks: a multi-covariate spec accepted
+over the wire (spec_hash round-trip), the exactly-one-form validator's 422
+proven through the HTTP stack, and the exp12 covariates JSONB (xx included)
+read back verbatim through the response model — the #49/#51 serialization
+class only a wire read can prove. No pytest-collected code changed this
+round (certification 94 covers the tree).
+
 Round 118 — defect #61 (web, found by parity-sweeping the new multi
 shape): the analysis page typed cuped's variance_reduction_pct as required
 and called .toFixed on it, so a §4.6 v3 multi result (which carries theta,
