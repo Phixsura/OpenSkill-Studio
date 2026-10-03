@@ -538,6 +538,7 @@ def test_experiments_error_status_contract_pinned_by_source():
         "EXPERIMENT_KEY_TAKEN": {409},
         "EXPERIMENT_NOT_FOUND": {404},
         "EXPERIMENT_NO_GUARDRAILS": {422},
+        "EXPERIMENT_UNKNOWN_METRICS": {422},
         "EXPERIMENT_RAMP_DECREASE": {422},
         "EXPERIMENT_SPEC_INVALID": {422},
         "FORBIDDEN": {403},

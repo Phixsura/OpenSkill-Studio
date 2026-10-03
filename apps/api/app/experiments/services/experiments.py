@@ -22,6 +22,7 @@ from app.experiments.models import (
     ExperimentLayer,
     ExperimentLayerAllocation,
     ExperimentVersion,
+    MetricDefinition,
 )
 from app.experiments.schemas import ExperimentSpec
 from app.experiments.security import (
@@ -385,6 +386,33 @@ class ExperimentService:
             )
         ).scalar_one()
         spec = self.validate_spec(latest.spec, domain=exp.domain, risk_class=exp.risk_class)
+        # #63 (write-boundary law): every metric key the spec references must
+        # resolve to a definition BEFORE the experiment can schedule — a typo
+        # here used to mean silent zero data until an analysis warning
+        referenced = {
+            *spec.metrics.primary,
+            *spec.metrics.secondary,
+            *(g.metric_key for g in spec.metrics.guardrails),
+        }
+        if spec.variance_reduction is not None:
+            referenced.update(spec.variance_reduction.covariates())
+        known = {
+            key
+            for (key,) in (
+                await self.db.execute(
+                    select(MetricDefinition.key).where(
+                        MetricDefinition.key.in_(referenced)
+                    )
+                )
+            ).all()
+        }
+        unknown = sorted(referenced - known)
+        if unknown:
+            raise AppError(
+                "EXPERIMENT_UNKNOWN_METRICS",
+                f"Spec references undefined metrics: {', '.join(unknown)}",
+                422,
+            )
         needs_guardrails = not (
             exp.risk_class == "low" and exp.domain in _GUARDRAIL_EXEMPT_DOMAINS
         )

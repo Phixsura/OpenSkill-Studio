@@ -286,7 +286,9 @@ async def test_multi_degrade_to_single_cuped_warns(db):
     exp, admin = await _mk_running(
         db, variance_reduction={
             "method": "cuped",
-            "covariate_metrics": ["revision_count", "ghost_covariate"],
+            # cost_usd IS defined (passes the #63 schedule gate) but its
+            # source has no covariate provider -> honest degrade
+            "covariate_metrics": ["revision_count", "cost_usd"],
             "lookback_days": 14,
         },
         metrics={"primary": ["revision_count"], "secondary": [],

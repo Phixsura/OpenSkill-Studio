@@ -1062,6 +1062,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 121 — defect #63 (write-boundary law applied to specs): a spec
+referencing a metric key with NO definition — primary, secondary, guardrail
+or covariate — scheduled fine and collected silent zeros forever; the typo
+surfaced only as an analysis warning weeks later. The schedule gate
+(_check_schedule_preconditions) now resolves every referenced key against
+MetricDefinition and refuses with EXPERIMENT_UNKNOWN_METRICS naming the
+unknowns. Blast radius handled honestly: the unwired-guardrail pin's
+undefined-key arm became a sourceless-definition arm (that state can no
+longer reach running via the lifecycle — which is the point), the #62
+degrade test's ghost covariate became cost_usd (defined, no provider), and
+the error-status contract pin gained the new code.
+
 Round 120 — defect #62: a multi-covariate spec that degrades to the
 single-covariate fallback (unprovided source, degenerate joint design) did
 so SILENTLY — any_cuped was satisfied by the single shape, so no warning

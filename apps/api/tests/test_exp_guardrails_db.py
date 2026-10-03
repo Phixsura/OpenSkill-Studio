@@ -163,15 +163,23 @@ async def test_unwired_guardrail_source_skips_not_pauses(db):
     from app.experiments.services.metrics import MetricService as MetricSvc
 
     probe_key = f"unwired_{str(_ULID()).lower()[:10]}"
+    # #63: an UNDEFINED metric key can no longer reach running (the schedule
+    # gate refuses it) — the honest arms are a definition with an
+    # unregistered source and one with no source declared at all
+    sourceless_key = f"nosrc_{str(_ULID()).lower()[:10]}"
     await MetricSvc(db).ensure_seed_definitions()
     await MetricSvc(db).create_definition(
         key=probe_key, title="Unwired probe", kind="continuous",
         domain="operational", source_kind="service",
         spec={"source": "no_such_source"},
     )
+    await MetricSvc(db).create_definition(
+        key=sourceless_key, title="Sourceless probe", kind="continuous",
+        domain="operational", source_kind="service", spec={},
+    )
     exp, _ = await _mk_running(
         db, guardrails=[
-            {"metric_key": "ghost_metric_zzz", "op": "lte", "threshold": 1.0},
+            {"metric_key": sourceless_key, "op": "lte", "threshold": 1.0},
             {"metric_key": probe_key, "op": "lte", "threshold": 1.0},
         ]
     )
@@ -352,6 +360,64 @@ def test_observed_scalar_all_aggregates():
     assert observed(rate_def, {"numerator": 1e308, "denominator": 5e-324}) is None
     assert observed(sum_def, {"sum_value": float("inf")}) is None
     assert observed(cont_def, {"n": 5e-324, "sum_value": 1e308}) is None
+
+
+async def test_schedule_refuses_undefined_metric_keys(db):
+    """#63 (write-boundary law): a spec referencing a metric key with no
+    definition — primary, guardrail or covariate — used to schedule fine and
+    collect silent zeros forever. The schedule gate now refuses, naming the
+    unknown keys."""
+    import pytest as _pytest
+
+    from app.exceptions import AppError as _AppError
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="matching"
+    )
+    svc = ExperimentService(db)
+    checklist = {
+        "hypothesis_peer_checked": True, "power_computed": True,
+        "metrics_reviewed": True, "rollback_owner_named": True,
+    }
+
+    slice_cursor = iter([(0, 9), (10, 19)])
+
+    async def _try(spec_patch: dict) -> _AppError:
+        exp = await svc.create(
+            key=f"exp-{str(ULID()).lower()}", title="T", domain="matching",
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+        spec = _spec()
+        spec.update(spec_patch)
+        await svc.create_version(exp.id, spec=spec, actor=admin)
+        lo, hi = next(slice_cursor)
+        await LayerService(db).allocate(
+            layer_key=layer.key, experiment_id=exp.id,
+            slice_start=lo, slice_end=hi,
+        )
+        await svc.transition(exp.id, to_status="review", actor=admin)
+        with _pytest.raises(_AppError) as e:
+            await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                                 checklist=checklist)
+        return e.value
+
+    err = await _try({"metrics": {
+        "primary": ["typo_metric_xyz"],
+        "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                        "threshold": 100.0}],
+    }})
+    assert err.code == "EXPERIMENT_UNKNOWN_METRICS"
+    assert "typo_metric_xyz" in err.message
+
+    err = await _try({"variance_reduction": {
+        "method": "cuped",
+        "covariate_metrics": ["revision_count", "typo_covariate_xyz"],
+        "lookback_days": 14,
+    }})
+    assert err.code == "EXPERIMENT_UNKNOWN_METRICS"
+    assert "typo_covariate_xyz" in err.message
 
 
 async def test_launch_checklist_required_to_schedule(db):
