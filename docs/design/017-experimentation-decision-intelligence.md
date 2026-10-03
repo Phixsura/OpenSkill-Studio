@@ -604,7 +604,20 @@ Every signal below is surfaced in the Console; none requires DB access.
 | Promotion stuck in `applying` / `apply_error` set     | Async apply failed typed and parked back to approved                                                         | Read apply_error on the Promotions page; fix the target-domain issue; re-apply                                                             |
 | Snapshot holes after an outage                        | Worker was down > SNAPSHOT_BACKFILL_DAYS-1 days                                                              | Recompute manually: enqueue exp.compute_snapshots for the missing day windows                                                              |
 
-## 18. Implementation notes (exp01–exp09, 2026-09-30)
+## 18. Implementation notes (exp01–exp11; log runs newest-first)
+
+**State at round 111 (2026-10-03):** 59 numbered defects/gaps fixed (every
+fix kill-proven or branch-verified); migrations exp01–exp11; 516 exp tests,
+702 web tests (every console page covered), 90-check live E2E, 16 mutation
+waves (all killed or ledgered), 86 full-suite certifications all green
+(latest 6896/6896). Hot path: ~3 ms new-assignment resolve, ~1 ms sticky.
+Coverage: facade/deps 100%, holdouts 99%, decisions/promotion 98%, analysis
+core 97%, metrics 96%, hooks/assignment/guardrails/worker/experiments
+91-95% — every remaining line individually accounted for (defense-in-depth,
+race fallback, or statistical sub-branch). Deliberately deferred (documented
+above): multi-covariate CUPED, full Kaplan-Meier, synthetic control, ITS
+(no pre-period exists), org-side full console. The log below is
+chronological, newest first.
 
 Deviations from and refinements to the plan, discovered during implementation:
 
