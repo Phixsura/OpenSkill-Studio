@@ -2584,3 +2584,29 @@ async def test_latency_quantile_histogram_and_knob(db):
         await svc.update_definition("run_latency_ms", quantiles=[1.5])
     with pytest.raises(_AppError):
         await svc.update_definition("run_latency_ms", quantiles=[0.0])
+
+
+def test_value_histogram_and_validator_exact_pins():
+    """Wave-19 kills: bucket math by hand (zero vs negative split, both
+    clamp ends, the exact power-of-two boundary) and every validator edge
+    (length bounds, both probability edges, non-sequence, status code)."""
+    from app.exceptions import AppError as _AppError
+    from app.experiments.services.metrics import (
+        _validate_quantiles,
+        value_histogram,
+    )
+
+    assert value_histogram([0.0, -1.0, 1.0, 1.5, 2.0 ** -25, 2.0 ** 50]) == {
+        "__zero__": 1, "__neg__": 1, "0": 2, "-20": 1, "43": 1,
+    }
+    _validate_quantiles(None, "binary")  # no quantiles -> no check
+    _validate_quantiles([0.5], "continuous")
+    _validate_quantiles((0.1, 0.5, 0.9), "continuous")  # tuple, len 3 OK
+    for bad in ([], [0.1, 0.2, 0.3, 0.4], [1.0], [0.0], {0.5}, "0.5",
+                [float("nan")]):
+        with pytest.raises(_AppError) as e:
+            _validate_quantiles(bad, "continuous")
+        assert e.value.status_code == 422, bad
+    with pytest.raises(_AppError) as e:
+        _validate_quantiles([0.5], "binary")
+    assert e.value.status_code == 422

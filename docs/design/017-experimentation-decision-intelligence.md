@@ -1094,6 +1094,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 126 — mutation wave 19 over the quantile cores: 45/49 killed, 4
+ledgered (the rank walk's final return is unreachable — the clamp
+guarantees rank <= total and the last bucket closes >= rank; the
+zero-count bucket filter has no observable effect). The first run left 23
+alive: structural tests don't kill arithmetic mutants — the kills needed
+the CI formula spelled out by hand (np ± z·sqrt(np(1-p)) with the z
+constant), the exact rank-boundary bucket edge, the zero-mass boundary,
+both clamp ends and every validator edge (a set and a string included).
+
 Round 125 — quantile console parity: the analysis comparison renders its
 quantile lines (p50: control → treatment (diff), teal, per probability)
 and the Metric Explorer's inline edit gains the quantiles knob (comma

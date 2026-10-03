@@ -937,6 +937,69 @@ def test_histogram_quantile_exact_pins_and_refusals():
     assert histogram_quantile({}, 0.5) is None
 
 
+def test_hist_rank_walk_exact_pins():
+    """Wave-19 kills: the rank walk's every operator pinned by hand.
+    Empty entries refuse; a rank exactly ON a cumulative boundary belongs
+    to the bucket that CLOSES there (frac 1 -> the bucket's hi bound), not
+    the next one; clamping lands on the last value."""
+    from app.experiments.services.analysis import _hist_value_at_rank
+
+    assert _hist_value_at_rank([], 1.0) is None
+    # boundary rank: entries (bucket 0 x2, bucket 5 x1), rank exactly 2.0
+    # -> closes bucket 0 -> hi = 2.0 (the >= edge; > would give 32.0)
+    assert _hist_value_at_rank([(0, 2), (5, 1)], 2.0) == pytest.approx(2.0)
+    # over-total rank clamps to the last rank
+    assert _hist_value_at_rank([(2, 1)], 5.0) == pytest.approx(8.0)
+
+
+def test_histogram_quantile_exact_ci_arithmetic():
+    """CI rank bounds np ± z·sqrt(np(1-p)) mapped through the histogram —
+    every constant pinned by hand on an unclamped fixture (n=100, one
+    bucket, so value = 8·2^(rank/100) exactly)."""
+    import math as _math
+
+    from app.experiments.services.analysis import histogram_quantile
+
+    out = histogram_quantile({"3": 100}, 0.5)
+    assert out is not None
+    z = 1.959963984540054
+    half = z * _math.sqrt(100 * 0.25)
+    assert out["estimate"] == pytest.approx(8.0 * 2.0 ** (50.0 / 100.0), rel=1e-12)
+    assert out["ci"][0] == pytest.approx(8.0 * 2.0 ** ((50.0 - half) / 100.0), rel=1e-12)
+    assert out["ci"][1] == pytest.approx(8.0 * 2.0 ** ((50.0 + half) / 100.0), rel=1e-12)
+    # n == 2 exactly is admissible (the n < 2 floor, both operator and const)
+    assert histogram_quantile({"3": 2}, 0.5) is not None
+    # a rank exactly AT the zero mass boundary reads 0.0 (<= edge) ...
+    zed = histogram_quantile({"__zero__": 4, "3": 4}, 0.5)
+    assert zed is not None and zed["estimate"] == 0.0
+    # ... and one past it interpolates the data buckets (rank-zeros, not +)
+    past = histogram_quantile({"__zero__": 4, "3": 4}, 0.75)
+    assert past is not None
+    assert past["estimate"] == pytest.approx(8.0 * 2.0 ** (2.0 / 4.0), rel=1e-12)
+
+
+def test_quantile_comparison_exact_ci_combination():
+    """The combined CI subtracts OPPOSITE ends — pinned by hand on
+    unclamped one-bucket arms (control 8·2^f, treatment 64·2^f)."""
+    import math as _math
+
+    from app.experiments.services.analysis import quantile_comparison
+
+    out = quantile_comparison({"3": 100}, {"6": 100}, 0.5)
+    assert out is not None
+    z = 1.959963984540054
+    half = z * _math.sqrt(100 * 0.25)
+    c_lo = 8.0 * 2.0 ** ((50.0 - half) / 100.0)
+    c_hi = 8.0 * 2.0 ** ((50.0 + half) / 100.0)
+    t_lo = 64.0 * 2.0 ** ((50.0 - half) / 100.0)
+    t_hi = 64.0 * 2.0 ** ((50.0 + half) / 100.0)
+    mid_c = 8.0 * 2.0 ** 0.5
+    mid_t = 64.0 * 2.0 ** 0.5
+    assert out["diff"] == pytest.approx(mid_t - mid_c, rel=1e-12)
+    assert out["ci"][0] == pytest.approx(t_lo - c_hi, rel=1e-12)
+    assert out["ci"][1] == pytest.approx(t_hi - c_lo, rel=1e-12)
+
+
 def test_quantile_comparison_diff_and_conservative_ci():
     from app.experiments.services.analysis import (
         histogram_quantile,

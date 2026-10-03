@@ -107,3 +107,16 @@ The evaluations covariate provider: 7/7 killed. The first run left the
 approved and one non-approved review — symmetric counts. A second approved
 review breaks the symmetry; fixture law: when a predicate picks a SUBSET,
 make the subset's count differ from its complement's.
+
+## wave19_quantiles.json (round 126)
+
+The §4.14 quantile cores: 45/49 killed. First run left 23 alive — the
+round-124 tests were structural; the kills needed HAND-ARITHMETIC pins
+(ci = value(np ± z·sqrt(np(1-p))) spelled out with the z constant, the
+rank-boundary bucket edge, the exact zero-mass boundary, both histogram
+clamp ends, every validator edge incl. a set and a string). Ledgered
+equivalents: the walk's final-return line (3 mutants — the clamp makes
+rank <= total, and the last bucket always closes >= rank, so the line is
+unreachable) and the zero-count bucket filter (a 0-count entry can never
+satisfy a new >= crossing, shifts no n, and the final return is already
+unreachable — no observable difference).

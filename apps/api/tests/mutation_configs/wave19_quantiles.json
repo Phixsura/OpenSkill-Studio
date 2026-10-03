@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["histogram_quantile", "_hist_value_at_rank", "quantile_comparison"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  },
+  {
+    "path": "app/experiments/services/metrics.py",
+    "funcs": ["value_histogram", "_validate_quantiles"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]
