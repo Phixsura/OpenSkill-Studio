@@ -2405,18 +2405,28 @@ async def test_multi_covariate_snapshot_assembly(db):
     window_start, window_end = _today_window()
     pre = window_start - _td(days=3)
     lookback_edge = window_start - _td(days=14)  # == lookback_start exactly
-    # unit 0: pre 2 revisions + 1 approval; window 1 revision
+    # unit 0: pre 2 revisions + 1 approval; PLUS a rejected row sitting
+    # EXACTLY on lookback_start (revision-branch >= boundary: +1 revision)
+    # and the window row sits EXACTLY on window_start (the pre query's
+    # strict < must exclude it; the window query's >= must include it)
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
                       status=SubmissionStatus.APPROVED, version=3,
                       created_at=pre))
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
                       status=SubmissionStatus.REJECTED, version=2,
-                      created_at=window_start + _td(hours=1)))
-    # unit 1: pre 1 approval (0 revisions); window 0 — created_at sits
-    # EXACTLY on lookback_start (the >= boundary is inclusive)
+                      created_at=lookback_edge))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
+                      status=SubmissionStatus.REJECTED, version=2,
+                      created_at=window_start))
+    # unit 1: pre 1 approval (0 revisions) exactly ON lookback_start, plus
+    # an APPROVED row exactly ON window_start — the approval pre query's
+    # strict < must exclude the latter
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
                       status=SubmissionStatus.APPROVED, version=1,
                       created_at=lookback_edge))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=window_start))
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
@@ -2438,9 +2448,22 @@ async def test_multi_covariate_snapshot_assembly(db):
             agg["xy_sum"] += v["xy_sum"]
         # first covariate mirrors into cov_*
         assert float(r.cov_sum or 0) == r.covariates["revision_count"]["sum"]
-    # exact totals across variants: pre revisions = 2 (unit0), approvals = 2
-    assert total_cov["revision_count"]["sum"] == 2.0
+    # exact totals: pre revisions = 2 (pre) + 1 (lookback edge) = 3;
+    # approvals = 1 (unit0 pre) + 1 (unit1 edge) = 2 — the window_start rows
+    # are OUT of the pre window (strict <) and IN the main window (y)
+    assert total_cov["revision_count"]["sum"] == 3.0
     assert total_cov["project_approval_rate"]["sum"] == 2.0
-    # xy: unit0 y=1 pairs with x_rev=2 and x_appr=1 -> 2 and 1
-    assert total_cov["revision_count"]["xy_sum"] == 2.0
+    # y: unit0's ONLY window row sits exactly ON window_start (v2 -> 1
+    # revision) — its inclusion proves the window >= boundary
+    # xy: unit0 y=1 pairs with x_rev=3 and x_appr=1 -> 3 and 1
+    assert total_cov["revision_count"]["xy_sum"] == 3.0
     assert total_cov["project_approval_rate"]["xy_sum"] == 1.0
+    # xx structure is the UPPER TRIANGLE keyed on the earlier covariate:
+    # revision_count carries xx[approval]; approval carries none.
+    # value: sum over units of x_rev*x_appr = unit0 3*1 + unit1 0*2 = 3
+    total_xx = 0.0
+    for r in whole:
+        entry = r.covariates["revision_count"]
+        assert "xx" not in r.covariates["project_approval_rate"]
+        total_xx += (entry.get("xx") or {}).get("project_approval_rate", 0.0)
+    assert total_xx == 3.0
