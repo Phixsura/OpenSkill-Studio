@@ -53,6 +53,110 @@ def register_source(name: str):
     return wrap
 
 
+# ── §4.6 v3 multi-covariate CUPED (round 114) ────────────────────────
+# A covariate PROVIDER returns per-unit pre-period values for one metric
+# key over user units. Providers are registered per source; cross-source
+# covariates work for any (main metric, covariate) pair whose covariate
+# source has a provider. k == 1 keeps the legacy in-source path untouched.
+
+COVARIATE_PROVIDERS: dict = {}
+
+
+def covariate_provider(source_name: str):
+    def wrap(fn):
+        COVARIATE_PROVIDERS[source_name] = fn
+        return fn
+
+    return wrap
+
+
+@covariate_provider("projects")
+async def _cov_projects(
+    db: AsyncSession, *, definition, units: list[str],
+    lookback_start, window_start,
+) -> dict[str, float]:
+    from app.models.project import Submission
+
+    rows = (
+        await db.execute(
+            select(Submission.user_id, Submission.version).where(
+                Submission.user_id.in_(units),
+                Submission.created_at >= lookback_start,
+                Submission.created_at < window_start,
+            )
+        )
+    ).all()
+    x: dict[str, float] = dict.fromkeys(units, 0.0)
+    measure = (definition.spec or {}).get("measure", "approval_rate")
+    if measure == "revision_count":
+        for user_id, version in rows:
+            x[user_id] += float(max(0, version - 1))
+        return x
+    # approval_rate (and any count-like measure): approved submissions per
+    # unit in the lookback — needs the status column
+    from app.models.project import SubmissionStatus
+
+    status_rows = (
+        await db.execute(
+            select(Submission.user_id, Submission.status).where(
+                Submission.user_id.in_(units),
+                Submission.created_at >= lookback_start,
+                Submission.created_at < window_start,
+            )
+        )
+    ).all()
+    x = dict.fromkeys(units, 0.0)
+    for user_id, status in status_rows:
+        if status == SubmissionStatus.APPROVED:
+            x[user_id] += 1.0
+    return x
+
+
+async def assemble_covariates(
+    db: AsyncSession, *, variance_reduction, definitions_by_key: dict,
+    unit_values: dict[str, float], window_start,
+) -> dict:
+    """Build the exp12 covariates map {key: {sum, sum_sq, xy_sum}} from each
+    covariate's provider; units with no pre-period data count as zero (ITT).
+    A covariate whose source has no provider is skipped (recorded upstream
+    as CUPED_COVARIATES_UNAVAILABLE by the analysis warning)."""
+    from datetime import timedelta
+
+    units = list(unit_values.keys())
+    lookback_start = window_start - timedelta(
+        days=variance_reduction.lookback_days
+    )
+    out: dict = {}
+    for cov_key in variance_reduction.covariates():
+        definition = definitions_by_key.get(cov_key)
+        if definition is None:
+            # covariates need not appear among the spec's metrics — fetch
+            definition = (
+                await db.execute(
+                    select(MetricDefinition).where(MetricDefinition.key == cov_key)
+                )
+            ).scalar_one_or_none()
+        provider = (
+            COVARIATE_PROVIDERS.get((definition.spec or {}).get("source", ""))
+            if definition is not None
+            else None
+        )
+        if provider is None:
+            continue
+        x = await provider(
+            db, definition=definition, units=units,
+            lookback_start=lookback_start, window_start=window_start,
+        )
+        xs = [x.get(u, 0.0) for u in units]
+        ys = [unit_values[u] for u in units]
+        out[cov_key] = {
+            "sum": sum(xs),
+            "sum_sq": sum(v * v for v in xs),
+            "xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+        }
+    return out
+
+
 def winsorize(values: list[float], pct) -> tuple[list[float], bool]:
     """Clamp the upper tail at the empirical pct-th percentile (v2 §4.6).
     Returns (values, applied) — provenance records the adjustment only when
@@ -281,6 +385,34 @@ async def _source_projects(
             )
         ).all()
         if measure == "revision_count":
+            if (
+                variance_reduction is not None
+                and len(variance_reduction.covariates()) > 1
+            ):
+                # §4.6 v3 (round 114): multi-covariate mode — the source
+                # emits per-unit y only; the assembler computes EVERY
+                # covariate's x through its provider (cross-source capable)
+                cur_rows = (
+                    await db.execute(
+                        select(Submission.user_id, Submission.version).where(
+                            Submission.user_id.in_(units),
+                            Submission.created_at >= window_start,
+                            Submission.created_at < window_end,
+                        )
+                    )
+                ).all()
+                y: dict[str, float] = dict.fromkeys(units, 0.0)
+                for user_id, version in cur_rows:
+                    y[user_id] += float(max(0, version - 1))
+                ys = [y[u] for u in units]
+                result[variant] = {
+                    "n": len(units),
+                    "sum_value": sum(ys),
+                    "sum_sq": sum(v * v for v in ys),
+                    "_aggregation": "per_unit",
+                    "_unit_values": y,
+                }
+                continue
             if (
                 variance_reduction is not None
                 and definition.key in variance_reduction.covariates()
@@ -1333,6 +1465,29 @@ class MetricService:
                     unit_type=unit_type,
                     variance_reduction=variance_reduction,
                 )
+                # §4.6 v3 (round 114): multi-covariate assembly — a variant
+                # row carrying per-unit y gets every covariate's sufficient
+                # stats from the providers; the FIRST covariate mirrors into
+                # cov_* so every pre-exp12 reader keeps working
+                if variance_reduction is not None:
+                    for _vk, _vals in stats.items():
+                        unit_values = _vals.pop("_unit_values", None)
+                        if not unit_values:
+                            continue
+                        cov_map = await assemble_covariates(
+                            self.db,
+                            variance_reduction=variance_reduction,
+                            definitions_by_key=definitions,
+                            unit_values=unit_values,
+                            window_start=window_start,
+                        )
+                        _vals["covariates"] = cov_map
+                        first = variance_reduction.covariates()[0]
+                        mirror = cov_map.get(first)
+                        if mirror is not None:
+                            _vals["cov_sum"] = mirror["sum"]
+                            _vals["cov_sum_sq"] = mirror["sum_sq"]
+                            _vals["cov_xy_sum"] = mirror["xy_sum"]
                 written += await self._write_snapshots(
                     experiment_id=experiment_id,
                     metric_key=key,
@@ -1381,6 +1536,7 @@ class MetricService:
             # Meta flags from the source (not snapshot columns): a source
             # that actually adjusted its values says so in provenance
             variant_provenance = provenance
+            values.pop("_unit_values", None)  # per-unit maps never persist
             if values.pop("_winsorized", False):
                 variant_provenance = {
                     **variant_provenance,

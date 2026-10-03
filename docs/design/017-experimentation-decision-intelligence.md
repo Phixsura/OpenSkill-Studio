@@ -1059,6 +1059,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 114 — multi-covariate CUPED, step 2 of 3 (data): a covariate
+PROVIDER registry computes per-unit pre-period values per source (projects
+ships first, measure-aware: revisions vs approvals); in k>1 mode the main
+source emits per-unit y only and the assembler builds the exp12 covariates
+map for EVERY covariate — cross-source capable by construction, first
+covariate mirrored into cov_*, per-unit maps never persisted, covariate
+definitions fetched by key when absent from the spec's own metric set.
+Pinned end-to-end with exact per-key sums and xy products on a
+two-covariate spec. k == 1 keeps the legacy in-source path byte-identical.
+Step 3 (analysis-side multivariate adjustment) next.
+
 Round 113 — multi-covariate CUPED, step 1 of 3 (schema): the deferred item
 leaves the deferred list under sustained demand. VarianceReductionSpec
 gains covariate_metrics (1-3, deduped) with the singular form kept for

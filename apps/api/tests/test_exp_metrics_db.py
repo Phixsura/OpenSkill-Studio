@@ -2339,3 +2339,106 @@ async def test_update_definition_operational_knobs_only(db):
 
     assert "kind" not in UpdateMetricDefinitionRequest.model_fields
     assert "spec" not in UpdateMetricDefinitionRequest.model_fields
+
+
+async def test_multi_covariate_snapshot_assembly(db):
+    """§4.6 v3 round 114: a two-covariate spec (revision_count +
+    project_approval_rate, both through the projects provider) lands a
+    covariates map with EXACT per-key sufficient stats, the first covariate
+    mirrored into cov_*, and per-unit maps never persisted."""
+    from datetime import timedelta as _td
+
+    from app.models.project import Project, Submission, SubmissionStatus
+
+    await MetricService(db).ensure_seed_definitions()
+    _tenant, org = await _mk_org(db)
+    admin = await _mk_admin(db)
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"mcv-{str(ULID()).lower()}", title="MCV", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(exp.id, spec={
+        "hypothesis": "multi-covariate adjustment tightens the estimate",
+        "unit_type": "user",
+        "variants": [
+            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+            {"key": "treatment", "name": "T", "weight_bp": 5000},
+        ],
+        "metrics": {"primary": ["revision_count"],
+                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                    "threshold": 100.0}]},
+        "variance_reduction": {
+            "method": "cuped",
+            "covariate_metrics": ["revision_count", "project_approval_rate"],
+            "lookback_days": 14,
+        },
+    }, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    for status in ("review", "scheduled", "running"):
+        await svc.transition(exp.id, to_status=status, actor=admin,
+                             checklist=_CHECKLIST if status == "scheduled" else None)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+
+    asvc = AssignmentService(db)
+    units = []
+    for i in range(6):
+        u = User(email=f"mcv-{i}-{ULID()}@example.com", display_name=f"M{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                                  unit_id=u.id) is not None
+        units.append(u.id)
+
+    project = Project(org_id=org.id, title="MP",
+                      slug=f"mp-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    window_start, window_end = _today_window()
+    pre = window_start - _td(days=3)
+    # unit 0: pre 2 revisions + 1 approval; window 1 revision
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
+                      status=SubmissionStatus.APPROVED, version=3,
+                      created_at=pre))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
+                      status=SubmissionStatus.REJECTED, version=2,
+                      created_at=window_start + _td(hours=1)))
+    # unit 1: pre 1 approval (0 revisions); window 0
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=pre))
+    await db.flush()
+
+    written = await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    assert written > 0
+    rows = await MetricService(db).list_snapshots(exp.id, metric_key="revision_count")
+    whole = [r for r in rows if r.segment == ""]
+    assert whole
+    by_variant = {}
+    for r in whole:
+        by_variant[r.variant_key] = r
+    total_cov = {}
+    for r in whole:
+        assert set(r.covariates) == {"revision_count", "project_approval_rate"}
+        for k, v in r.covariates.items():
+            agg = total_cov.setdefault(k, {"sum": 0.0, "xy_sum": 0.0})
+            agg["sum"] += v["sum"]
+            agg["xy_sum"] += v["xy_sum"]
+        # first covariate mirrors into cov_*
+        assert float(r.cov_sum or 0) == r.covariates["revision_count"]["sum"]
+    # exact totals across variants: pre revisions = 2 (unit0), approvals = 2
+    assert total_cov["revision_count"]["sum"] == 2.0
+    assert total_cov["project_approval_rate"]["sum"] == 2.0
+    # xy: unit0 y=1 pairs with x_rev=2 and x_appr=1 -> 2 and 1
+    assert total_cov["revision_count"]["xy_sum"] == 2.0
+    assert total_cov["project_approval_rate"]["xy_sum"] == 1.0
