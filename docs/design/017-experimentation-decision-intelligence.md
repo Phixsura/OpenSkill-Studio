@@ -1046,6 +1046,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 103 — the Decision registry list and detail pages gained their
+missing behavior tests (the FOURTH and FIFTH uncovered console pages):
+record listing with verdicts, and the detail's summary plus the full
+64-char result hash a promotion must reference. Every console page now has
+behavior tests. Web 701/701 across 144 files.
+
 Round 102 — the Metric Explorer gained inline editing of the operational
 knobs (winsorize/cap/direction through the round-101 PATCH; blank fields
 send the explicit clear flags — pinned both ways). The Explorer also gained
