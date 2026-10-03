@@ -619,3 +619,39 @@ async def test_shield_savepoint_keeps_host_session_healthy(db, monkeypatch):
         await db.execute(_select(_User.id).where(_User.id == host_row.id))
     ).scalar_one_or_none()
     assert found is not None
+
+
+async def test_write_path_control_arms_expose(db):
+    """Round 106 (hooks necropsy tail): a config WITHOUT the surface's key —
+    the control variant's natural shape — serves the default AND records a
+    control-arm exposure on the three write-path surfaces (binding, rubric,
+    retry). The read-path twins share the code shape and are held by their
+    kill-proven fallback pins."""
+    from sqlalchemy import select as _select
+
+    cases = [
+        (hooks.SURFACE_WORKFLOW_BINDING, "workflow", "workflow_installation",
+         lambda u: hooks.workflow_binding_override(
+             db, installation_id=u, org_id="o" * 26,
+             capability="text.generate", required_features=set(),
+         )),
+        (hooks.SURFACE_RUBRIC_WORDING, "assessment", "project",
+         lambda u: hooks.rubric_override(db, project_id=u)),
+        (hooks.SURFACE_RETRY_POLICY, "operational", "tenant",
+         lambda u: hooks.retry_policy_override(db, tenant_id=u)),
+    ]
+    for key, domain, unit_type, call in cases:
+        exp, _ = await _mk_surface_experiment(
+            db, key=key, domain=domain, unit_type=unit_type,
+            treatment_config={},
+        )
+        unit = await _treatment_unit(db, exp, unit_type, f"ctrl-{domain}")
+        assert await call(unit) is None, key
+        rows = (
+            await db.execute(
+                _select(ExperimentExposure).where(
+                    ExperimentExposure.experiment_id == exp.id
+                )
+            )
+        ).scalars().all()
+        assert rows and rows[-1].context.get("arm") == "control", key

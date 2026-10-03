@@ -1046,6 +1046,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 106 — hooks necropsy tail: the three write-path control arms
+(binding/rubric/retry with a config missing the surface's key — the control
+variant's natural shape) pinned in one batch: default served AND a
+control-arm exposure recorded. 91% -> 95%; the read-path twins share the
+code shape and stay held by their kill-proven fallback pins (committed-
+fixture cost not worth re-paying for an identical branch).
+
 Round 105 — the metric enums joined the web parity wall: METRIC_DIRECTIONS
 and METRIC_KINDS are now exported constants pinned against the backend sets
 (the Explorer's direction dropdown had them hardcoded — correct today,
