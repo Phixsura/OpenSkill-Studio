@@ -2815,3 +2815,53 @@ async def test_ramp_plan_sweep_tolerates_a_racing_refusal(db, monkeypatch):
     second = exp_b.id if first == exp_a.id else exp_a.id
     assert (await db.get(Experiment, second)).ramp_bp == 5000
     assert (await db.get(Experiment, first)).ramp_bp == 1000  # untouched
+
+
+async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypatch):
+    """#67 (the #66 family applied everywhere): the start and closure
+    sweeps' docstrings promised "the human simply wins" a racing manual
+    transition — but when the human won, transition() raised and the sweep
+    ABORTED the batch. Both now skip the racer and keep going."""
+    from app.exceptions import AppError as _AppError
+    from app.experiments.services.experiments import ExperimentService as _Svc
+    from app.experiments.worker import sweep_experiment_starts
+
+    admin = await _mk_admin(db)
+    await MetricService(db).ensure_seed_definitions()
+    svc = ExperimentService(db)
+    exps = []
+    for _ in range(2):
+        layer = await LayerService(db).create(
+            key=f"lyr-{str(ULID()).lower()}", domain="learning"
+        )
+        exp = await svc.create(
+            key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
+            layer_key=layer.key, owner_user_id=admin.id,
+        )
+        await svc.create_version(exp.id, spec=_spec(), actor=admin)
+        await LayerService(db).allocate(
+            layer_key=layer.key, experiment_id=exp.id,
+            slice_start=0, slice_end=9999,
+        )
+        await svc.transition(exp.id, to_status="review", actor=admin)
+        await svc.transition(
+            exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST,
+            start_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        exps.append(exp)
+
+    first = min(e.id for e in exps)  # sweep order: start_at then stable
+    real = _Svc.transition
+
+    async def racing(self, experiment_id, **kwargs):
+        if experiment_id == first and kwargs.get("to_status") == "running":
+            raise _AppError("EXPERIMENT_INVALID_TRANSITION", "human won", 422)
+        return await real(self, experiment_id, **kwargs)
+
+    monkeypatch.setattr(_Svc, "transition", racing)
+    assert await sweep_experiment_starts(db) == 1  # the other one started
+    monkeypatch.undo()
+    from app.experiments.models import Experiment
+    second = next(e.id for e in exps if e.id != first)
+    assert (await db.get(Experiment, second)).status == "running"
+    assert (await db.get(Experiment, first)).status == "scheduled"

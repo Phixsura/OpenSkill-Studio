@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 132b — defect #67 (the #66 family applied everywhere): the start
+and closure sweeps' docstrings promised "the human simply wins" a racing
+manual transition — but when the human won, transition() raised and the
+sweep aborted the whole batch. Both sites now skip the racer (logged) and
+continue; kill-proven with a monkeypatched race on the start sweep. Audit
+rule: every batch loop that writes through a law-enforcing service must
+catch that service's refusal per item.
+
 Round 132 — defect #66 (concurrency sweep over the new sweep): between
 sweep_ramp_plans' read and its set_ramp write, a manual ramp or a pause
 makes set_ramp refuse — the unfixed sweep let that AppError abort the

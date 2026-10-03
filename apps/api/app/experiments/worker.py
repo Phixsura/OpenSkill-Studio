@@ -457,6 +457,7 @@ async def sweep_experiment_starts(
     """exp10 (round 60): launch scheduled experiments whose start_at is due.
     NULL start_at keeps the manual-start behavior. The locked state machine
     serializes against a racing manual transition — the human simply wins."""
+    from app.exceptions import AppError
     from app.experiments.services.experiments import ExperimentService
     from app.experiments.services.guardrails import _system_actor
 
@@ -475,12 +476,20 @@ async def sweep_experiment_starts(
     ).all()
     started = 0
     for (experiment_id,) in rows:
-        await ExperimentService(db).transition(
-            experiment_id,
-            to_status="running",
-            actor=_system_actor(),
-            reason="scheduled start_at reached",
-        )
+        try:
+            await ExperimentService(db).transition(
+                experiment_id,
+                to_status="running",
+                actor=_system_actor(),
+                reason="scheduled start_at reached",
+            )
+        except AppError as exc:
+            # #67: when the human wins the race (manual start/archive between
+            # our read and this write) the state machine rightly refuses —
+            # one experiment's race must never abort the rest of the batch
+            log.info("exp_start_sweep_skipped",
+                     experiment_id=experiment_id, code=exc.code)
+            continue
         started += 1
     return started
 
@@ -555,6 +564,7 @@ async def sweep_experiment_closures(
     enrollment and stamps ended_at/analysis_close_at) — promotion stays a
     human decision. Bounded oldest-first; the transition is serialized by
     the locked state machine, so a racing manual transition simply wins."""
+    from app.exceptions import AppError
     from app.experiments.schemas import ExperimentSpec
     from app.experiments.services.experiments import ExperimentService
     from app.experiments.services.guardrails import _system_actor
@@ -587,12 +597,18 @@ async def sweep_experiment_closures(
             continue
         if started_at + timedelta(days=max_days) > now:
             continue
-        await ExperimentService(db).transition(
-            experiment_id,
-            to_status="completed",
-            actor=_system_actor(),
-            reason=f"stop_policy.max_days ({max_days}) elapsed",
-        )
+        try:
+            await ExperimentService(db).transition(
+                experiment_id,
+                to_status="completed",
+                actor=_system_actor(),
+                reason=f"stop_policy.max_days ({max_days}) elapsed",
+            )
+        except AppError as exc:
+            # #67: a racing manual complete/pause wins; skip, never abort
+            log.info("exp_closure_sweep_skipped",
+                     experiment_id=experiment_id, code=exc.code)
+            continue
         closed += 1
         log.info("exp_auto_completed", experiment_id=experiment_id, max_days=max_days)
     return closed
