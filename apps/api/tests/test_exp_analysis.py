@@ -869,6 +869,18 @@ def test_multi_cuped_degenerate_refusals():
     treatment = _mc_arm_stats([7.0, 9.0, 8.0], {"c1": cx, "c2": cx}, keys)
     assert multi_cuped_adjusted_welch(control, treatment, keys) is None
 
+    # an arm missing a WHOLE covariate entry refuses cleanly (never crashes)
+    whole_missing_c = _mc_arm_stats(cy, {"c1": cx, "c2": [0.0, 1.0, 2.0]}, keys)
+    del whole_missing_c["covariates"]["c2"]
+    whole_missing_t = _mc_arm_stats([7.0, 9.0, 8.0],
+                                    {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
+    assert multi_cuped_adjusted_welch(whole_missing_c, whole_missing_t, keys) is None
+
+    # n == 2 per arm is the exact admissible floor (> 1)
+    tiny_c = _mc_arm_stats([5.0, 7.0], {"c1": [1.0, 2.0], "c2": [0.0, 1.0]}, keys)
+    tiny_t = _mc_arm_stats([8.0, 11.0], {"c1": [1.1, 2.2], "c2": [1.0, 0.0]}, keys)
+    assert multi_cuped_adjusted_welch(tiny_c, tiny_t, keys) is not None
+
     good_c = _mc_arm_stats(cy, {"c1": cx, "c2": [0.0, 1.0, 2.0]}, keys)
     good_t = _mc_arm_stats([7.0, 9.0, 8.0],
                         {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)

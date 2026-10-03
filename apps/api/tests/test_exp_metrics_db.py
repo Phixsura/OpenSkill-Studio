@@ -2404,6 +2404,7 @@ async def test_multi_covariate_snapshot_assembly(db):
     await db.flush()
     window_start, window_end = _today_window()
     pre = window_start - _td(days=3)
+    lookback_edge = window_start - _td(days=14)  # == lookback_start exactly
     # unit 0: pre 2 revisions + 1 approval; window 1 revision
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
                       status=SubmissionStatus.APPROVED, version=3,
@@ -2411,10 +2412,11 @@ async def test_multi_covariate_snapshot_assembly(db):
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
                       status=SubmissionStatus.REJECTED, version=2,
                       created_at=window_start + _td(hours=1)))
-    # unit 1: pre 1 approval (0 revisions); window 0
+    # unit 1: pre 1 approval (0 revisions); window 0 — created_at sits
+    # EXACTLY on lookback_start (the >= boundary is inclusive)
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
                       status=SubmissionStatus.APPROVED, version=1,
-                      created_at=pre))
+                      created_at=lookback_edge))
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
