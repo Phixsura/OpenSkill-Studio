@@ -1417,3 +1417,11 @@ async def test_look_history_lists_every_look_newest_first(db):
     assert history[0] == await svc.latest_look(exp.id)
     assert all(entry["automated"] is False for entry in history)
     assert len(await svc.look_history(exp.id, limit=1)) == 1
+    # an OF look carries its budget number — pins the payload field mapping
+    # (msprt looks are None there, so they cannot distinguish it)
+    of_exp, of_admin = await _mk_running(db, sequential="obrien_fleming")
+    await _populate(db, of_exp)
+    await svc.run(of_exp.id, actor=of_admin)
+    of_history = await svc.look_history(of_exp.id)
+    assert len(of_history) == 1 and of_history[0]["look"] == 1
+    assert of_history[0]["sequential"] == "obrien_fleming"

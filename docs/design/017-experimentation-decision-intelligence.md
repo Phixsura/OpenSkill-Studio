@@ -1101,6 +1101,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 140 — mutation wave 22 over the new readers (look_history,
+list_assignments): 8/10 killed — the OF look-number payload mapping needed
+an obrien_fleming run (msprt looks are None there, invisible to the
+mutant); the two default-limit constants ledgered (the limit mechanism is
+killed by explicit small limits).
+
 Round 139 — digest opt-out parity: the weekly digest (round 135) shipped
 suppressible on the backend (prefs key = the type name) but the
 notifications settings page had no toggle — the operator could not opt

@@ -138,3 +138,13 @@ window's own >= edge (a rerun at created_at + 6d sends nothing). Ledgered:
 the body's lines[:20] cap (killing it needs 21 running experiments under
 one owner — a ~21x-lifecycle fixture for a display truncation constant;
 verified by inspection).
+
+## wave22_readers.json (round 140)
+
+look_history + list_assignments: 8/10 killed (the OF look-number field
+mapping needed an obrien_fleming run — msprt looks are None there and
+cannot distinguish the Or->And payload mutant; order, cap mechanism and
+shape equality with latest_look pinned). Ledgered: the two DEFAULT limit
+constants (50/5000) — killing them needs 51/5001 fixture rows for a
+default nobody passes; the limit MECHANISM is killed via explicit
+limit=1/limit=2 calls.
