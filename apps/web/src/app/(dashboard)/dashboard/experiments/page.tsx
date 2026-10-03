@@ -171,6 +171,7 @@ function ExperimentsInner() {
                 <th className="px-3 py-2">Ramp</th>
                 <th className="px-3 py-2">Risk</th>
                 <th className="px-3 py-2">Started</th>
+                <th className="px-3 py-2">Data flow</th>
               </tr>
             </thead>
             <tbody>
@@ -192,6 +193,20 @@ function ExperimentsInner() {
                   <td className="px-3 py-2">{fmtPct(experiment.ramp_bp)}</td>
                   <td className="px-3 py-2">{experiment.risk_class}</td>
                   <td className="px-3 py-2">{fmtDate(experiment.started_at)}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {experiment.status !== "running" ? (
+                      <span className="text-slate-400">—</span>
+                    ) : experiment.last_exposure_at == null ? (
+                      <span className="text-amber-700">no exposures</span>
+                    ) : Date.now() - new Date(experiment.last_exposure_at).getTime() >
+                      48 * 3600 * 1000 ? (
+                      <span className="text-amber-700">
+                        stale ({fmtDate(experiment.last_exposure_at)})
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700">flowing</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

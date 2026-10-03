@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 146 — list-page data-flow badge: the experiments list injects
+last_exposure_at (ONE grouped exposure query per page, never per-row) and
+the console shows flowing / stale (>48h) / no exposures per running row —
+the NO_RECENT_EXPOSURES signal surfaced where operators scan. The #49
+model-response drift guard correctly caught the injected field and gained
+its first deliberate allowlist entry (it keeps catching any other
+non-column field). E2E 106.
+
 Round 145 — the binary-CUPED caveat renders inline on the analysis page
 (the honesty string was server-side only); behavior-pinned. The data-path
 interaction audit for the new branch came back clean: guardrail and

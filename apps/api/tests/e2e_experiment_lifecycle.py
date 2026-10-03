@@ -374,6 +374,11 @@ async def main() -> int:
               r.status_code == 200
               and any(e["id"] == clone_id for e in r.json()["data"]),
               r.text[:300])
+        r = await c.get(f"/experiments?q={exp_key}", headers=admin)
+        listed = next(e for e in r.json()["data"] if e["id"] == exp_id)
+        check("round 146: the list injects last_exposure_at (data-flow badge)",
+              "last_exposure_at" in listed,
+              str(sorted(listed.keys()))[:300])
         r = await c.get("/experiments?q=%25", headers=admin)
         check("a bare %% wildcard is a literal (matches nothing here)",
               r.status_code == 200

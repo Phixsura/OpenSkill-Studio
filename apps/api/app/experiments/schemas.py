@@ -390,6 +390,9 @@ class ExperimentResponse(BaseModel):
     risk_class: str
     ramp_bp: int
     ramp_plan: list | None = None
+    # round 146 (list data-flow badge): injected by the list endpoint from
+    # one grouped exposure query — not a model column
+    last_exposure_at: datetime | None = None
     holdout_bp: int
     start_at: datetime | None
     started_at: datetime | None

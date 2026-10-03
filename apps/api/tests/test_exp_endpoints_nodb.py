@@ -182,7 +182,12 @@ def test_no_model_response_field_drift():
         (m.GuardrailEvent, sch.GuardrailEventResponse),
         (m.ExperimentEvent, sch.ExperimentEventResponse),
     ]
-    allowed_extra: dict[str, set[str]] = {}
+    allowed_extra: dict[str, set[str]] = {
+        # round 146: injected by the list endpoint (grouped exposure max) —
+        # deliberately NOT a column; the drift guard must keep catching any
+        # OTHER non-column field
+        "ExperimentResponse": {"last_exposure_at"},
+    }
     for model, schema in pairs:
         cols = {c.key for c in sa_inspect(model).columns}
         fields = set(schema.model_fields)

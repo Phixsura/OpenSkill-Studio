@@ -72,6 +72,41 @@ describe("Experiment Console list (ADR-017 Part L)", () => {
     expect(screen.getByText("1 of 1")).toBeTruthy();
   });
 
+  it("data-flow badge: fresh / stale / silent / non-running (round 146)", async () => {
+    const now = Date.now();
+    const rows = [
+      {
+        ...EXPERIMENT,
+        id: "A".repeat(26),
+        key: "fresh",
+        title: "Fresh",
+        last_exposure_at: new Date(now - 3600 * 1000).toISOString(),
+      },
+      {
+        ...EXPERIMENT,
+        id: "B".repeat(26),
+        key: "stale",
+        title: "Stale",
+        last_exposure_at: new Date(now - 72 * 3600 * 1000).toISOString(),
+      },
+      { ...EXPERIMENT, id: "C".repeat(26), key: "silent", title: "Silent", last_exposure_at: null },
+      {
+        ...EXPERIMENT,
+        id: "D".repeat(26),
+        key: "done",
+        title: "Done",
+        status: "completed",
+        last_exposure_at: null,
+      },
+    ];
+    api.mockResolvedValue({ data: rows, meta: { total: 4, next_cursor: null } });
+    render(<ExperimentsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("flowing")).toBeTruthy();
+    expect(screen.getByText(/^stale \(/)).toBeTruthy();
+    expect(screen.getByText("no exposures")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("search box sends q and keeps it shareable in the URL", async () => {
     api.mockResolvedValue({ data: [EXPERIMENT], meta: { total: 1, next_cursor: null } });
     render(<ExperimentsPage />, { wrapper: wrapper() });

@@ -65,8 +65,35 @@ async def list_experiments(
         status=status, domain=domain, q=q, cursor=cursor, limit=limit,
         scope_org_ids=scope.org_ids,
     )
+    # round 146: data-flow badge — ONE grouped query for the page's running
+    # experiments (never per-row), injected as last_exposure_at
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentExposure
+
+    running_ids = [x.id for x in rows if x.status == "running"]
+    last_seen: dict[str, object] = {}
+    if running_ids:
+        grouped = (
+            await db.execute(
+                _select(
+                    ExperimentExposure.experiment_id,
+                    _func.max(ExperimentExposure.occurred_at),
+                )
+                .where(ExperimentExposure.experiment_id.in_(running_ids))
+                .group_by(ExperimentExposure.experiment_id)
+            )
+        ).all()
+        last_seen = dict(grouped)
+    data = []
+    for x in rows:
+        item = ExperimentResponse.model_validate(x).model_dump()
+        seen = last_seen.get(x.id)
+        item["last_exposure_at"] = seen.isoformat() if seen is not None else None
+        data.append(item)
     return {
-        "data": [ExperimentResponse.model_validate(x).model_dump() for x in rows],
+        "data": data,
         "meta": {"total": total, "limit": limit, "next_cursor": next_cursor},
     }
 
