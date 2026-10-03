@@ -328,6 +328,46 @@ class AnalysisService:
                 result = stats.analyze_binary(x1, n1, x2, n2)
             if kind == "time_to_event":
                 result["caveat"] = "time_to_event analyzed as binary-at-horizon (full KM deferred, ADR-017 §16)"
+            # Round 142: regression adjustment on proportions — a 0/1 y has
+            # sum == sum_sq == numerator, so the Welch CUPED cores apply
+            # verbatim (Deng et al.'s linear adjustment; caveat attached)
+            if covariate_keys and kind == "binary":
+                y_control = {"n": n1, "sum": x1, "sum_sq": x1,
+                             "covariates": control.get("covariates"),
+                             "cov_sum": control.get("cov_sum"),
+                             "cov_sum_sq": control.get("cov_sum_sq"),
+                             "cov_xy_sum": control.get("cov_xy_sum")}
+                y_treatment = {"n": n2, "sum": x2, "sum_sq": x2,
+                               "covariates": treatment.get("covariates"),
+                               "cov_sum": treatment.get("cov_sum"),
+                               "cov_sum_sq": treatment.get("cov_sum_sq"),
+                               "cov_xy_sum": treatment.get("cov_xy_sum")}
+                adjusted = None
+                if len(covariate_keys) > 1:
+                    multi = stats.multi_cuped_adjusted_welch(
+                        y_control, y_treatment, covariate_keys
+                    )
+                    if multi is not None:
+                        adjusted = {
+                            "effect": multi["effect"], "ci": multi["ci"],
+                            "p": multi["p"], "theta": multi["theta"],
+                            "variance_reduction_pct": multi["variance_reduction_pct"],
+                            "covariates": covariate_keys,
+                            "mode": "multi",
+                        }
+                if adjusted is None:
+                    single = stats.cuped_adjusted_welch(y_control, y_treatment)
+                    if single is not None:
+                        adjusted = {
+                            "effect": single["effect"], "ci": single["ci"],
+                            "p": single["p"], "theta": single["theta"],
+                            "variance_reduction_pct": single["variance_reduction_pct"],
+                        }
+                if adjusted is not None:
+                    adjusted["caveat"] = (
+                        "linear adjustment on a per-unit 0/1 outcome"
+                    )
+                    result["cuped"] = adjusted
             return result
         if kind == "rate":
             result = stats.analyze_rate(

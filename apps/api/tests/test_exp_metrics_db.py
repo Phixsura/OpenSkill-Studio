@@ -3014,3 +3014,94 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     assert await sweep_weekly_digest(
         db, now=notif.created_at + timedelta(days=6)
     ) == 0
+
+
+async def test_binary_cuped_per_unit_snapshot(db):
+    """Round 142: approval_rate as a measured metric under
+    variance_reduction switches to per-UNIT 0/1 (unit-of-analysis change,
+    same contract as the revision_count CUPED branch): numerator counts
+    units with an APPROVED submission, denominator counts UNITS, the
+    covariates map + cov_* mirror ride the snapshot, and the per-unit map
+    never persists."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricSnapshot as _Snap
+    from app.models.project import Project, Submission, SubmissionStatus
+
+    exp, admin = await _mk_running_low_ramp(db)
+    # re-version is impossible (running) — build a fresh experiment with the
+    # right spec instead
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    svc = ExperimentService(db)
+    exp = await svc.create(
+        key=f"bcu-{str(ULID()).lower()}", title="BC", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    spec = _spec()
+    spec["metrics"] = {"primary": ["project_approval_rate"],
+                       "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                       "threshold": 100.0}]}
+    spec["variance_reduction"] = {"method": "cuped",
+                                  "covariate_metrics": ["revision_count"],
+                                  "lookback_days": 14}
+    await svc.create_version(exp.id, spec=spec, actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp.id, to_status="review", actor=admin)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="running", actor=admin)
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
+
+    _tenant, org = await _mk_org(db)
+    project = Project(org_id=org.id, title="BP",
+                      slug=f"bp-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    asvc = AssignmentService(db)
+    window_start, window_end = _today_window()
+    t0 = window_start + timedelta(hours=1)
+    units = []
+    for i in range(3):
+        u = User(email=f"bcu-{i}-{ULID()}@example.com", display_name=f"B{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                                  unit_id=u.id) is not None
+        units.append(u.id)
+    # unit0: one APPROVED + one REJECTED (y=1); unit1: REJECTED only (y=0);
+    # unit2: silent (y=0, ITT)
+    for user_id, status in ((units[0], SubmissionStatus.APPROVED),
+                            (units[0], SubmissionStatus.REJECTED),
+                            (units[1], SubmissionStatus.REJECTED)):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=user_id, status=status, version=2,
+                          created_at=t0))
+    await db.flush()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    snaps = list((await db.execute(
+        _select(_Snap).where(_Snap.experiment_id == exp.id,
+                             _Snap.metric_key == "project_approval_rate")
+    )).scalars())
+    assert snaps
+    total_units = sum(int(s.n) for s in snaps)
+    total_num = sum(float(s.numerator) for s in snaps)
+    assert total_units == 3  # UNITS, not submissions (which would be 3 too...
+    # ...so pin the distinction by the numerator: 1 approved UNIT, though the
+    # approved unit also has a rejected submission)
+    assert total_num == 1.0
+    carrying = [s for s in snaps if s.covariates]
+    assert carrying, "covariates map must ride the binary snapshot"
+    for snap in carrying:
+        entry = snap.covariates["revision_count"]
+        assert set(entry) >= {"sum", "sum_sq", "xy_sum"}
+        assert float(snap.cov_sum) == entry["sum"]  # mirror law
+        assert snap.provenance.get("aggregation") == "per_unit"

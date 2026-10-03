@@ -1425,3 +1425,34 @@ async def test_look_history_lists_every_look_newest_first(db):
     of_history = await svc.look_history(of_exp.id)
     assert len(of_history) == 1 and of_history[0]["look"] == 1
     assert of_history[0]["sequential"] == "obrien_fleming"
+
+
+async def test_binary_cuped_rides_the_comparison(db):
+    """Round 142: a binary primary under variance_reduction gains a cuped
+    block (single covariate via the cov_* mirror) with the 0/1 caveat; the
+    unadjusted engine result stays authoritative alongside."""
+    exp, admin = await _mk_running(
+        db, variance_reduction={"method": "cuped",
+                                "covariate_metric": "revision_count",
+                                "lookback_days": 14},
+        metrics={"primary": ["project_approval_rate"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    # per-unit binary snapshots: sum==sum_sq==numerator by construction
+    db.add(_snapshot(exp.id, "project_approval_rate", "control", ws,
+                     n=200, numerator=80.0, denominator=200.0,
+                     cov_sum=200.0, cov_sum_sq=420.0, cov_xy_sum=95.0))
+    db.add(_snapshot(exp.id, "project_approval_rate", "treatment", ws,
+                     n=200, numerator=110.0, denominator=200.0,
+                     cov_sum=205.0, cov_sum_sq=440.0, cov_xy_sum=130.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    comparison = result["metrics"]["project_approval_rate"]["comparisons"]["treatment"]
+    assert "p" in comparison  # the unadjusted binary engine ran
+    cuped = comparison.get("cuped")
+    assert cuped is not None
+    assert cuped["caveat"] == "linear adjustment on a per-unit 0/1 outcome"
+    assert isinstance(cuped["variance_reduction_pct"], float)
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]

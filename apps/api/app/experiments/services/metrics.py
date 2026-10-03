@@ -558,6 +558,39 @@ async def _source_projects(
                 "_winsorized": winsorized,
             }
         else:
+            if (
+                variance_reduction is not None
+                and definition.key not in variance_reduction.covariates()
+            ):
+                # Binary CUPED (round 142, Statsig-parity regression
+                # adjustment on proportions): per-UNIT y — 1 when the unit
+                # landed an APPROVED submission in the window, 0 otherwise
+                # (ITT; NOTE the unit-of-analysis change vs per-submission
+                # mode, same contract as the revision_count CUPED branch).
+                # The assembler builds every covariate from its provider and
+                # the analysis reuses the Welch CUPED core on the 0/1 y.
+                cur_rows = (
+                    await db.execute(
+                        select(Submission.user_id, Submission.status).where(
+                            Submission.user_id.in_(units),
+                            Submission.created_at >= window_start,
+                            Submission.created_at < window_end,
+                        )
+                    )
+                ).all()
+                y: dict[str, float] = dict.fromkeys(units, 0.0)
+                for user_id, status in cur_rows:
+                    if status == SubmissionStatus.APPROVED:
+                        y[user_id] = 1.0
+                approved_units = sum(1 for u in units if y[u] > 0)
+                result[variant] = {
+                    "n": len(units),
+                    "numerator": approved_units,
+                    "denominator": len(units),
+                    "_aggregation": "per_unit",
+                    "_unit_values": y,
+                }
+                continue
             approved = sum(1 for status, _v in rows if status == SubmissionStatus.APPROVED)
             result[variant] = {"n": len(rows), "numerator": approved, "denominator": len(rows)}
     return result

@@ -1101,6 +1101,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 142 — BINARY CUPED (§4.6 v4, Statsig-parity regression adjustment
+on proportions): a 0/1 per-unit outcome has sum == sum_sq == numerator, so
+the existing Welch CUPED cores (single AND multi) apply verbatim. The
+projects approval_rate source, under variance_reduction, switches to
+per-UNIT 0/1 (unit-of-analysis change, the same documented contract as the
+revision_count CUPED branch; numerator counts approved UNITS) and emits
+_unit_values for the assembler — covariates come from the providers,
+cross-source. The binary comparison carries the adjusted estimate as
+cuped with an explicit caveat ("linear adjustment on a per-unit 0/1
+outcome"); the unadjusted engine result stays authoritative. Bayesian
+binary skips adjustment (posterior and linear adjustment don't compose —
+documented).
+
 Round 141 — the digest covers the decision queue: analyzed experiments
 (waiting on a human decision) now appear as "AWAITING DECISION" lines —
 running-only was a blind spot exactly where staleness hurts most (an
