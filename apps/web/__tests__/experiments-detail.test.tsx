@@ -47,6 +47,7 @@ function experiment(status: string, domain = "learning") {
     ended_at: null,
     analysis_close_at: null,
     start_at: null,
+    ramp_plan: null,
     last_guardrail_check_at: null,
     created_at: "2026-09-29T00:00:00Z",
     updated_at: "2026-09-29T00:00:00Z",
@@ -172,6 +173,37 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     expect(screen.getByText(/0.1234/)).toBeTruthy();
     expect(screen.getByText(/automated/)).toBeTruthy();
     expect(screen.getByText(/hash aaaaaaaaaaaa/)).toBeTruthy();
+  });
+
+  it("saves a ramp plan — lines parse to {at, ramp_bp} and PATCH /ramp-plan (round 129)", async () => {
+    mockApiFor("running");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    const box = await screen.findByLabelText("ramp plan steps");
+    fireEvent.change(box, {
+      target: { value: "2026-10-05T09:00:00Z 60\n2026-10-07T09:00:00Z 100" },
+    });
+    fireEvent.click(screen.getByText("Save ramp plan"));
+    await waitFor(() => {
+      const call = api.mock.calls.find((c) => String(c[0]).endsWith("/ramp-plan"));
+      expect(call).toBeTruthy();
+      const body = JSON.parse(String(call?.[1]?.body));
+      expect(body.plan).toEqual([
+        { at: "2026-10-05T09:00:00Z", ramp_bp: 6000 },
+        { at: "2026-10-07T09:00:00Z", ramp_bp: 10000 },
+      ]);
+    });
+  });
+
+  it("a blank ramp-plan box saves null (clears the plan)", async () => {
+    mockApiFor("running");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    await screen.findByLabelText("ramp plan steps");
+    fireEvent.click(screen.getByText("Save ramp plan"));
+    await waitFor(() => {
+      const call = api.mock.calls.find((c) => String(c[0]).endsWith("/ramp-plan"));
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body)).plan).toBeNull();
+    });
   });
 
   it("scheduled status shows the auto-start time or 'manual start'", async () => {

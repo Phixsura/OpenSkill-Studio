@@ -44,6 +44,8 @@ export default function ExperimentDetailPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [rampPct, setRampPct] = useState("");
+  // "at=ISO pct; at=ISO pct" — one step per line, e.g. "2026-10-05T09:00Z 50"
+  const [planText, setPlanText] = useState("");
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [startAt, setStartAt] = useState(""); // exp10: optional auto-start
 
@@ -117,6 +119,29 @@ export default function ExperimentDetailPage() {
       invalidate();
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : "Ramp change failed"),
+  });
+
+  const setRampPlan = useMutation({
+    mutationFn: () => {
+      const steps = planText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [at, pct] = line.split(/\s+/);
+          return { at, ramp_bp: Math.round(Number(pct) * 100) };
+        });
+      return apiWithAuth(`/experiments/${experimentId}/ramp-plan`, {
+        method: "PATCH",
+        body: JSON.stringify({ plan: steps.length ? steps : null }),
+      });
+    },
+    onSuccess: () => {
+      setError(null);
+      setPlanText("");
+      invalidate();
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : "Ramp plan failed"),
   });
 
   const experiment = data?.data;
@@ -350,6 +375,34 @@ export default function ExperimentDetailPage() {
             </span>
           ) : null}
         </div>
+        {["draft", "review", "scheduled", "running"].includes(experiment.status) ? (
+          <div className="mt-3 space-y-1 text-sm">
+            <div className="text-xs text-slate-500">
+              Ramp plan (one step per line: ISO time, then target %; targets must increase — blank
+              saves as cleared)
+            </div>
+            {(experiment.ramp_plan ?? []).map((step) => (
+              <div key={step.at} className="text-xs text-slate-600">
+                {fmtDate(step.at)} → {step.ramp_bp / 100}%
+              </div>
+            ))}
+            <textarea
+              aria-label="ramp plan steps"
+              className="w-full rounded-md border px-2 py-1 font-mono text-xs"
+              rows={2}
+              placeholder="2026-10-05T09:00:00Z 50"
+              value={planText}
+              onChange={(e) => setPlanText(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => setRampPlan.mutate()}
+              className="rounded-md border px-2 py-1 text-sm"
+            >
+              Save ramp plan
+            </button>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title={`Spec versions (immutable, v${experiment.current_version})`}>

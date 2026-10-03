@@ -1101,6 +1101,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 130 — ramp-plan console: the detail page lists the standing steps
+and takes new ones (one line per step: ISO time + target percent; blank
+clears), PATCHing the plural plan; both the parse and the clear are
+behavior-pinned. The Experiment web type gained ramp_plan.
+
 Round 129 — scheduled ramp plans (exp14): `ramp_plan` on the experiment —
 up to 20 {at, ramp_bp} steps, strictly increasing targets (ITT: a plan
 cannot encode a decrease), first live target must exceed the current ramp,

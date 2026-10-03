@@ -124,6 +124,8 @@ export interface Experiment {
   ramp_bp: number;
   holdout_bp: number;
   start_at: string | null;
+  // round 129: scheduled ramp steps the worker applies when due
+  ramp_plan: { at: string; ramp_bp: number }[] | null;
   started_at: string | null;
   ended_at: string | null;
   analysis_close_at: string | null;
