@@ -1046,6 +1046,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 110 — the scorecard's delegation wall verified over the wire: an org
+admin reads their own experiment's latest look (null before any run) and
+gets the uniform 404 on a platform experiment. E2E 90 checks.
+
 Round 109 — PR #47 refreshed with the rounds 100-108 record (definition
 PATCH + Explorer editing, fourteen-vocabulary parity wall, full console-
 page test coverage, the API-side necropsy closure, E2E 88, wave 16).

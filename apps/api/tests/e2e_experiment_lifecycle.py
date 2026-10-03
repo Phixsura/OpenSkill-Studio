@@ -622,6 +622,12 @@ async def main() -> int:
               and r.headers["content-type"].startswith("text/csv")
               and r.text.splitlines()[0].startswith("guardrail_key,metric_key"),
               f"{r.status_code} {r.text[:120]}")
+        r = await c.get(f"/experiments/{org_exp_id}/analysis/latest", headers=student)
+        check("delegated scorecard read (null before any run)",
+              r.status_code == 200, r.text[:200])
+        r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=student)
+        check("scorecard outside scope is a uniform 404", r.status_code == 404,
+              str(r.status_code))
         r = await c.get(f"/experiments/{org_exp_id}/guardrails/events", headers=student)
         check("org admin sees the incident event (delegated diagnostics)",
               r.status_code == 200
