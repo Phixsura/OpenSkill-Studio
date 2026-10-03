@@ -374,6 +374,28 @@ async def main() -> int:
                          json={"spec": both_forms})
         check("both covariate forms refused (exactly-one validator)",
               r.status_code == 422, r.text[:300])
+        # #63: an undefined metric key passes spec validation (definitions
+        # may come later) but must refuse to SCHEDULE, naming the key
+        typo_spec = dict(good_spec, metrics={
+            "primary": ["typo_metric_e2e"],
+            "guardrails": [{"metric_key": "exposure_rate", "op": "lte",
+                            "threshold": 1.0}],
+        })
+        r = await c.post(f"/experiments/{clone_id}/versions", headers=admin,
+                         json={"spec": typo_spec})
+        check("typo'd metric key still versions (write comes before define)",
+              r.status_code == 201, r.text[:300])
+        r = await c.post(f"/experiments/{clone_id}/transition", headers=admin,
+                         json={"to_status": "review"})
+        check("clone reaches review", r.status_code == 200, r.text[:200])
+        r = await c.post(f"/experiments/{clone_id}/transition", headers=admin,
+                         json={"to_status": "scheduled", "checklist": checklist})
+        check("scheduling an undefined metric key refused "
+              "(EXPERIMENT_UNKNOWN_METRICS names it)",
+              r.status_code == 422
+              and r.json()["error"]["code"] == "EXPERIMENT_UNKNOWN_METRICS"
+              and "typo_metric_e2e" in r.json()["error"]["message"],
+              r.text[:300])
         # exp12: the covariates JSONB must survive the response model — the
         # #49/#51 serialization class only a wire read can prove
         from datetime import UTC as _UTC

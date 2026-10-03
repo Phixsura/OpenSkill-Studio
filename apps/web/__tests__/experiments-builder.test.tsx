@@ -125,6 +125,52 @@ describe("Segment opt-in (v2 §4.8)", () => {
     expect(body.spec.power).toEqual({ mde: 0.2 });
   });
 
+  it("sends variance_reduction (plural form) when covariates are filled (#64)", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (path === "/experiments") return { data: { id: "E".repeat(26) } };
+      return { data: [] };
+    });
+    render(<NewExperimentPage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByLabelText(/CUPED covariate metrics/), {
+      target: { value: " revision_count , project_approval_rate " },
+    });
+    fireEvent.change(screen.getByLabelText(/CUPED lookback days/), {
+      target: { value: "21" },
+    });
+    fireEvent.change(screen.getByLabelText("Hypothesis"), {
+      target: { value: "cuped config rides the spec" },
+    });
+    fireEvent.click(screen.getByText(/Create experiment/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).endsWith("/versions"))).toBe(true),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/versions"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    expect(body.spec.variance_reduction).toEqual({
+      method: "cuped",
+      covariate_metrics: ["revision_count", "project_approval_rate"],
+      lookback_days: 21,
+    });
+  });
+
+  it("omits variance_reduction when the covariates field is blank (#64)", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (path === "/experiments") return { data: { id: "E".repeat(26) } };
+      return { data: [] };
+    });
+    render(<NewExperimentPage />, { wrapper: wrapper() });
+    fireEvent.change(screen.getByLabelText("Hypothesis"), {
+      target: { value: "no covariates means no block" },
+    });
+    fireEvent.click(screen.getByText(/Create experiment/));
+    await waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]).endsWith("/versions"))).toBe(true),
+    );
+    const call = api.mock.calls.find((c) => String(c[0]).endsWith("/versions"));
+    const body = JSON.parse(String(call?.[1]?.body));
+    expect(body.spec.variance_reduction).toBeUndefined();
+  });
+
   it("omits power entirely when the MDE field is blank", async () => {
     api.mockImplementation(async (path: string) => {
       if (path === "/experiments") return { data: { id: "E".repeat(26) } };

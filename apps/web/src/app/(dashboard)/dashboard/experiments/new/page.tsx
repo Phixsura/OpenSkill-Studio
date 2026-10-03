@@ -61,6 +61,8 @@ export default function NewExperimentPage() {
     allocation_mode: "fixed",
     segment_org: false,
     power_mde_pct: "",
+    cuped_covariates: "",
+    cuped_lookback_days: "14",
     switchback_window_minutes: "1440",
     switchback_washout_minutes: "0",
   });
@@ -124,6 +126,18 @@ export default function NewExperimentPage() {
           ...(spec.segment_org && spec.unit_type === "user" ? { segments: ["org"] } : {}),
           ...(spec.power_mde_pct.trim()
             ? { power: { mde: Number(spec.power_mde_pct) / 100 } }
+            : {}),
+          ...(spec.cuped_covariates.trim()
+            ? {
+                variance_reduction: {
+                  method: "cuped",
+                  covariate_metrics: spec.cuped_covariates
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                  lookback_days: Number(spec.cuped_lookback_days) || 14,
+                },
+              }
             : {}),
           ...(spec.design === "switchback"
             ? {
@@ -464,6 +478,32 @@ export default function NewExperimentPage() {
             />
             <p className="mt-1 text-xs text-slate-500">
               Analyses will compare required vs actual sample size (alpha 0.05, power 0.8).
+            </p>
+          </div>
+          <div>
+            <label className={label} htmlFor="exp-cuped">
+              CUPED covariate metrics (optional, up to 3, comma-separated)
+            </label>
+            <input
+              id="exp-cuped"
+              className={input}
+              placeholder="e.g. revision_count, project_approval_rate"
+              value={spec.cuped_covariates}
+              onChange={(e) => setSpec({ ...spec, cuped_covariates: e.target.value })}
+            />
+            <div className="mt-2">
+              <label className={label} htmlFor="exp-cuped-lookback">
+                CUPED lookback days
+              </label>
+              <input
+                id="exp-cuped-lookback"
+                className={input}
+                value={spec.cuped_lookback_days}
+                onChange={(e) => setSpec({ ...spec, cuped_lookback_days: e.target.value })}
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Pre-period adjustment: 2+ covariates run the joint (multi) adjustment.
             </p>
           </div>
         </div>

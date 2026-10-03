@@ -1062,6 +1062,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 122 — console parity #64: the builder exposed MDE, switchback and
+segments but variance_reduction was unconfigurable — CUPED (single or
+multi) existed only for operators hand-writing spec JSON. The builder now
+takes covariate metrics (comma list, up to 3; 2+ run the joint adjustment)
+plus a lookback-days input, emitting the plural covariate_metrics form; a
+blank field omits the block entirely (both pinned). Live E2E grows to 96:
+the #63 gate proven over the wire (typo'd key versions fine, scheduling
+refuses, EXPERIMENT_UNKNOWN_METRICS names it).
+
 Round 121 — defect #63 (write-boundary law applied to specs): a spec
 referencing a metric key with NO definition — primary, secondary, guardrail
 or covariate — scheduled fine and collected silent zeros forever; the typo
