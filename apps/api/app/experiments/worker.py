@@ -494,6 +494,94 @@ async def sweep_experiment_starts(
     return started
 
 
+DIGEST_SWEEP_CAP = 500
+DIGEST_DEDUP_DAYS = 6
+
+
+async def sweep_weekly_digest(
+    db: AsyncSession, *, now: datetime | None = None, cap: int = DIGEST_SWEEP_CAP
+) -> int:
+    """Round 135: one weekly digest notification per OWNER summarizing their
+    running experiments — 7-day exposure volume and guardrail-event count
+    per experiment. Query-side dedup (DIGEST_DEDUP_DAYS) makes re-runs and
+    restarts idempotent; per-owner failures are confined (#42/#66 laws)."""
+    from app.experiments.models import ExperimentExposure, GuardrailEvent
+    from app.models.notification import Notification
+
+    now = now or datetime.now(UTC)
+    week_ago = now - timedelta(days=7)
+    rows = (
+        await db.execute(
+            select(Experiment.id, Experiment.title, Experiment.owner_user_id)
+            .where(Experiment.status == "running")
+            .order_by(Experiment.id.asc())
+            .limit(cap)
+        )
+    ).all()
+    by_owner: dict[str, list] = {}
+    for experiment_id, title, owner_user_id in rows:
+        if owner_user_id is None:
+            continue
+        exposures = (
+            await db.execute(
+                select(func.count())
+                .select_from(ExperimentExposure)
+                .where(
+                    ExperimentExposure.experiment_id == experiment_id,
+                    ExperimentExposure.occurred_at >= week_ago,
+                )
+            )
+        ).scalar_one()
+        events = (
+            await db.execute(
+                select(func.count())
+                .select_from(GuardrailEvent)
+                .where(
+                    GuardrailEvent.experiment_id == experiment_id,
+                    GuardrailEvent.created_at >= week_ago,
+                )
+            )
+        ).scalar_one()
+        by_owner.setdefault(owner_user_id, []).append(
+            (experiment_id, title, int(exposures), int(events))
+        )
+    sent = 0
+    cutoff = now - timedelta(days=DIGEST_DEDUP_DAYS)
+    for owner_user_id, items in by_owner.items():
+        already = (
+            await db.execute(
+                select(func.count())
+                .select_from(Notification)
+                .where(
+                    Notification.user_id == owner_user_id,
+                    Notification.type == "experiment_digest",
+                    Notification.created_at >= cutoff,
+                )
+            )
+        ).scalar_one()
+        if already:
+            continue
+        lines = [
+            f"{title}: {exposures} exposures, {events} guardrail events (7d)"
+            for _id, title, exposures, events in items
+        ]
+        try:
+            from app.services.notification import NotificationService
+
+            async with db.begin_nested():  # the #42 law: additive, confined
+                await NotificationService(db).create(
+                    user_id=owner_user_id,
+                    notification_type="experiment_digest",
+                    title=f"Weekly experiment digest ({len(items)} running)",
+                    body="\n".join(lines[:20]),
+                    data={"experiment_ids": [i for i, *_ in items]},
+                )
+            sent += 1
+        except Exception:  # noqa: BLE001 — additive, never blocking
+            log.warning("exp_digest_notify_failed", owner_user_id=owner_user_id)
+    return sent
+
+
 RAMP_SWEEP_CAP = 200
 
 

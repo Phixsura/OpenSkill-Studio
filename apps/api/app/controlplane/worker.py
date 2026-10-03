@@ -501,6 +501,18 @@ async def _exp_window_sweep(ctx: dict) -> None:
             log.info("exp_windows_enqueued", count=n)
 
 
+async def _exp_weekly_digest(ctx: dict) -> None:
+    """ADR-017 round 135: weekly owner digest of running experiments."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_weekly_digest
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_weekly_digest(db)
+        if n:
+            await db.commit()
+            log.info("exp_weekly_digests_sent", count=n)
+
+
 async def _exp_interaction_sweep(ctx: dict) -> None:
     """ADR-017 §4.13 v2: weekly cross-experiment interaction scan."""
     from app.core.database import AsyncSessionLocal
@@ -620,6 +632,8 @@ def _cron_jobs() -> list:
         cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800,
              name="exp_analysis_sweep"),
         cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
+        cron(_exp_weekly_digest, weekday=2, hour=8, minute=23,
+             name="exp_weekly_digest"),
         # Cross-experiment interaction scan: weekly (Tue 04:37 UTC)
         cron(
             _exp_interaction_sweep,

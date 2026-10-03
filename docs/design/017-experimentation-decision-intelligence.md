@@ -1101,6 +1101,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 135 — weekly owner digest (industry-standard lifecycle email): one
+notification per owner summarizing their running experiments' 7-day
+exposure volume and guardrail-event counts (experiment_digest type,
+Tuesday 08:23 cron off the Monday pileup, 6-day query-side dedup so
+restarts are idempotent, per-owner savepoint under the #42 law). Sits
+beside the daily significance notification; notification preferences
+already gate delivery.
+
 Round 134 — console export buttons: the three CSV surfaces (snapshots,
 guardrail events, assignments) were API-only; each page header now carries
 a CsvExportButton (authenticated raw-text fetch via a new apiTextWithAuth

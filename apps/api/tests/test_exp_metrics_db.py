@@ -2894,3 +2894,65 @@ async def test_list_assignments_order_and_cap(db):
     assert [r.unit_id for r in rows] == [a.unit_id for a in ids]
     capped = await svc.list_assignments(exp.id, limit=2)
     assert [r.unit_id for r in capped] == [ids[0].unit_id, ids[1].unit_id]
+
+
+async def test_weekly_digest_one_per_owner_with_dedup(db):
+    """Round 135: ONE digest per owner covering all their running
+    experiments (7-day exposure + guardrail-event counts); a rerun inside
+    the dedup window sends nothing; out-of-window data stays out."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import GuardrailEvent
+    from app.models.notification import Notification
+
+    exp_a, admin = await _mk_running_low_ramp(db)
+    # second experiment, SAME owner (reuse the admin through the service)
+    layer = await LayerService(db).create(
+        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    )
+    svc = ExperimentService(db)
+    exp_b = await svc.create(
+        key=f"exp-{str(ULID()).lower()}", title="B", domain="learning",
+        layer_key=layer.key, owner_user_id=admin.id,
+    )
+    await svc.create_version(exp_b.id, spec=_spec(), actor=admin)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=exp_b.id, slice_start=0, slice_end=9999
+    )
+    await svc.transition(exp_b.id, to_status="review", actor=admin)
+    await svc.transition(exp_b.id, to_status="scheduled", actor=admin,
+                         checklist=_CHECKLIST)
+    await svc.transition(exp_b.id, to_status="running", actor=admin)
+
+    await svc.set_ramp(exp_a.id, ramp_bp=10_000, actor=admin)  # full eligibility
+    asvc = AssignmentService(db)
+    await asvc.resolve(experiment_key=exp_a.key, unit_type="user",
+                       unit_id="dg-" + "u" * 23)
+    await asvc.record_exposure(experiment_key=exp_a.key, unit_type="user",
+                               unit_id="dg-" + "u" * 23)
+    db.add(GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
+                          action="alerted", auto=True, detail={}))
+    # out-of-window debris must not count
+    old_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
+                               action="alerted", auto=True, detail={})
+    db.add(old_event)
+    await db.flush()
+    old_event.created_at = datetime.now(UTC) - timedelta(days=30)
+    await db.flush()
+
+    from app.experiments.worker import sweep_weekly_digest
+
+    assert await sweep_weekly_digest(db) == 1
+    notif = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_digest",
+            )
+        )
+    ).scalar_one()
+    body = notif.body
+    assert "1 exposures" in body and "1 guardrail events" in body
+    assert set(notif.data["experiment_ids"]) == {exp_a.id, exp_b.id}
+    # dedup window: a rerun sends nothing for this owner
+    assert await sweep_weekly_digest(db) == 0
