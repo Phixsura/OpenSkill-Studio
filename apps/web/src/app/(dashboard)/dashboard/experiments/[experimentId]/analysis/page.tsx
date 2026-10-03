@@ -107,6 +107,19 @@ export default function AnalysisPage() {
     queryFn: () => apiWithAuth<{ data: string[] }>(`/experiments/${experimentId}/segments`),
   });
 
+  interface LookEntry {
+    at: string | null;
+    sequential: string | null;
+    look: number | null;
+    result_hash: string | null;
+    automated: boolean;
+  }
+  const history = useQuery({
+    queryKey: ["experiment-analysis-history", experimentId],
+    queryFn: () =>
+      apiWithAuth<{ data: LookEntry[] }>(`/experiments/${experimentId}/analysis/history`),
+  });
+
   const run = useMutation({
     mutationFn: () =>
       apiWithAuth<{ data: AnalysisResult }>(
@@ -344,6 +357,20 @@ export default function AnalysisPage() {
           experiments consume one look per run; mSPRT experiments peek freely.
         </div>
       )}
+      {(history.data?.data ?? []).length > 0 ? (
+        <SectionCard title="Look history (newest first)">
+          <ul className="space-y-1 text-xs text-slate-600">
+            {(history.data?.data ?? []).map((entry) => (
+              <li key={`${entry.result_hash}-${entry.at}`}>
+                {entry.at ? new Date(entry.at).toLocaleString() : "—"}
+                {entry.look != null ? ` · look ${entry.look}` : ""}
+                {entry.automated ? " · automated" : ""} ·{" "}
+                <code>{(entry.result_hash ?? "").slice(0, 12)}…</code>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
     </div>
   );
 }

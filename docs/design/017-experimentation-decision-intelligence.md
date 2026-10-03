@@ -1101,6 +1101,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 138 — look-history console card: the analysis page lists the look
+sequence (time, look number when OF, automated badge, truncated result
+hash) under the results; behavior-pinned.
+
 Round 137 — look history: GET /analysis/history lists every recorded
 look newest first (audit-trail reads only, latest_look's shape per entry,
 same delegated scope as the scorecard; segment analyses stay out — they

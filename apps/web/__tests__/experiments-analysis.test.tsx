@@ -173,6 +173,37 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/p95: 900\.0000 → 850\.0000 \(-50\.0000\)/)).toBeTruthy();
   });
 
+  it("renders the look history card when looks exist (round 138)", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (String(path).endsWith("/analysis/history")) {
+        return {
+          data: [
+            {
+              at: "2026-10-02T10:00:00Z",
+              sequential: "obrien_fleming",
+              look: 2,
+              result_hash: "b".repeat(64),
+              automated: true,
+            },
+            {
+              at: "2026-10-01T10:00:00Z",
+              sequential: "obrien_fleming",
+              look: 1,
+              result_hash: "a".repeat(64),
+              automated: false,
+            },
+          ],
+        };
+      }
+      return { data: [] };
+    });
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Look history (newest first)")).toBeTruthy();
+    expect(screen.getByText(/look 2/)).toBeTruthy();
+    expect(screen.getByText(/automated/)).toBeTruthy();
+    expect(screen.getByText(/bbbbbbbbbbbb…/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({
