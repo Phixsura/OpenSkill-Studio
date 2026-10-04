@@ -1108,6 +1108,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 171 — hot-path baseline refresh after the window's feature work
+(the #63 schedule gate, the list exposure injection, binary CUPED):
+new-assignment resolve 2.56 ms/call and sticky resolve 0.89 ms/call —
+both IMPROVED on the round-91 baselines (3.38/1.11); the new gates live
+on schedule-time and list-time paths, not the resolve hot path.
+
 Round 170 — mutation wave 35 over the six domain hooks: 13/13 outright.
 Every module in the experiments package now carries a dedicated
 post-rewrite mutation wave (waves 1-35, ~1100 mutants cumulative).
