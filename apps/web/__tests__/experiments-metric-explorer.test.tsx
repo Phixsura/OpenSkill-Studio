@@ -111,6 +111,36 @@ describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
       expect(body.clear_winsorize).toBe(true);
       expect(body.clear_cap).toBe(true);
       expect(body.clear_quantiles).toBe(true);
+      // continuous kind: never sends the km knob
+      expect("km" in body).toBe(false);
+    });
+  });
+
+  it("time_to_event rows get the KM toggle; the PATCH carries it (round 186)", async () => {
+    const tte = {
+      ...DEFINITION,
+      key: "placement_outcome_rate",
+      title: "Placement outcome",
+      kind: "time_to_event",
+      spec: { source: "talent_outcomes", km: true },
+      winsorize_pct: null,
+    };
+    api.mockImplementation(((rawPath: unknown, init?: { method?: string; body?: string }) => {
+      if (init?.method === "PATCH") return Promise.resolve({ data: tte });
+      return Promise.resolve({ data: [tte] });
+    }) as never);
+    render(<MetricExplorerPage />, { wrapper: wrapper() });
+    // the spec column badges the opted-in definition
+    expect(await screen.findByText(/· KM/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Edit"));
+    const toggle = screen.getByLabelText("km placement_outcome_rate") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // initialized from spec.km
+    fireEvent.click(toggle); // switch it OFF
+    fireEvent.click(screen.getByText("Save"));
+    await vi.waitFor(() => {
+      const call = api.mock.calls.find((c) => c[1]?.method === "PATCH");
+      const body = JSON.parse(String(call?.[1]?.body));
+      expect(body.km).toBe(false);
     });
   });
 });

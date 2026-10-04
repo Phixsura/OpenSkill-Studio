@@ -1151,6 +1151,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 186 — the KM knob reaches the console: the Metric Explorer's
+inline editor shows a KM checkbox on time_to_event rows only
+(initialized from spec.km, carried on the PATCH; other kinds never send
+the field — the kind gate is the API's to enforce and the console's to
+respect), and the spec column badges opted-in definitions with "· KM".
+
 Round 185 — wave 37 closure: the ITS service block lands at 88/98 via
 exact oracle-via-pure-core pins (the fixture fully determines the daily
 series, so the attached block must equal its_estimate() on that series),

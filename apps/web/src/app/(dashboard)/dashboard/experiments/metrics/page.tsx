@@ -17,7 +17,13 @@ interface MetricDefinition {
   domain: string;
   source_kind: string;
   query_version: number;
-  spec: { source?: string; measure?: string; quantiles?: number[]; guardrail_aggregate?: string };
+  spec: {
+    source?: string;
+    measure?: string;
+    quantiles?: number[];
+    guardrail_aggregate?: string;
+    km?: boolean;
+  };
   direction: string;
   winsorize_pct: number | null;
 }
@@ -69,6 +75,7 @@ function MetricExplorerInner() {
     cap_value: "",
     direction: "",
     quantiles: "",
+    km: false,
   });
   const save = useMutation({
     mutationFn: (key: string) =>
@@ -88,6 +95,9 @@ function MetricExplorerInner() {
                   .filter((v) => !Number.isNaN(v)),
               }
             : { clear_quantiles: true }),
+          ...(definitions.find((x) => x.key === key)?.kind === "time_to_event"
+            ? { km: edit.km }
+            : {}),
         }),
       }),
     onSuccess: () => {
@@ -160,6 +170,7 @@ function MetricExplorerInner() {
                     {d.spec?.source ?? "—"}
                     {d.spec?.measure ? ` · ${d.spec.measure}` : ""}
                     {d.spec?.guardrail_aggregate ? ` · guards ${d.spec.guardrail_aggregate}` : ""}
+                    {d.spec?.km ? " · KM" : ""}
                   </td>
                   <td className="py-1 pr-3">{d.query_version}</td>
                   <td className="py-1 pr-3 text-xs">{d.direction}</td>
@@ -188,6 +199,17 @@ function MetricExplorerInner() {
                           value={edit.cap_value}
                           onChange={(e) => setEdit({ ...edit, cap_value: e.target.value })}
                         />
+                        {d.kind === "time_to_event" ? (
+                          <label className="flex items-center gap-1 text-xs">
+                            <input
+                              type="checkbox"
+                              aria-label={`km ${d.key}`}
+                              checked={edit.km}
+                              onChange={(e) => setEdit({ ...edit, km: e.target.checked })}
+                            />
+                            KM
+                          </label>
+                        ) : null}
                         <select
                           aria-label={`direction ${d.key}`}
                           className="rounded border px-1 py-0.5"
@@ -223,6 +245,7 @@ function MetricExplorerInner() {
                             cap_value: "",
                             direction: "",
                             quantiles: (d.spec?.quantiles ?? []).join(", "),
+                            km: Boolean(d.spec?.km),
                           });
                         }}
                       >
