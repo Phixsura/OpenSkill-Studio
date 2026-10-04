@@ -249,6 +249,27 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/association only/)).toBeTruthy();
   });
 
+  it("renders the KM strip when a time_to_event primary carries it (round 183)", async () => {
+    const payload = analysisPayload();
+    const metrics = (payload.data as { metrics: Record<string, object> }).metrics;
+    metrics.exposure_rate = {
+      ...(metrics.exposure_rate as object),
+      km: {
+        survival_control: 0.6667,
+        survival_treatment: 0.5,
+        diff: -0.1667,
+        p: 0.42,
+        ci: [-0.55, 0.22],
+        caveat: "Kaplan-Meier at the horizon — censoring-correct",
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/Kaplan-Meier: survival 0\.5000 vs 0\.6667/)).toBeTruthy();
+    expect(screen.getByText(/censoring-correct/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

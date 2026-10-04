@@ -81,6 +81,14 @@ interface AnalysisResult {
         n_post: number;
         caveat: string;
       };
+      km?: {
+        survival_control: number;
+        survival_treatment: number;
+        diff: number;
+        p: number;
+        ci: [number, number];
+        caveat: string;
+      };
     }
   >;
 }
@@ -257,6 +265,14 @@ export default function AnalysisPage() {
                   {fmtNum(metric.its.level_change.p)}) · trend{" "}
                   {fmtNum(metric.its.trend_change.estimate)} (p {fmtNum(metric.its.trend_change.p)})
                   · {metric.its.n_pre}+{metric.its.n_post} days — {metric.its.caveat}
+                </div>
+              ) : null}
+              {metric.km ? (
+                <div className="mb-2 rounded border border-indigo-200 bg-indigo-50 p-2 text-xs">
+                  Kaplan-Meier: survival {fmtNum(metric.km.survival_treatment)} vs{" "}
+                  {fmtNum(metric.km.survival_control)} · diff {fmtNum(metric.km.diff)} (p{" "}
+                  {fmtNum(metric.km.p)}, CI {fmtNum(metric.km.ci[0])}–{fmtNum(metric.km.ci[1])}) —{" "}
+                  {metric.km.caveat}
                 </div>
               ) : null}
               {metric.insufficient_data ? (

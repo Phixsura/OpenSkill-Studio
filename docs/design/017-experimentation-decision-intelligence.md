@@ -1149,6 +1149,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 183 — the KM strip on the analysis console (the ITS pattern):
+an indigo strip under the metric card shows survival per arm, the
+horizon diff with p/CI, and the censoring-correct caveat verbatim.
+Typed into AnalysisResult.metrics; renders only when the block is
+present, so non-opted metrics are untouched.
+
 Round 182 — KM step 2 of 2: a time_to_event primary whose definition
 opts in (the km knob, time_to_event-kind-gated on the PATCH) carries a
 censoring-correct `km` block — counts computed ON DEMAND per arm (each
