@@ -1108,6 +1108,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 152 — POWER calibration closes the design loop: simulating binary
+A/B at EXACTLY required_n_per_arm(10%, 20%) == 3841 must detect at the
+promised 0.8 power (Monte-Carlo band) — a drift in either the planner or
+the runtime test breaks the pair. Together with round 151's null
+calibration, the stats layer is now pinned on BOTH error axes.
+
 Round 151 — A/A CALIBRATION Monte-Carlo (the verification stack's missing
 axis: oracles pin point correctness, nothing pinned CALIBRATION): 400
 deterministic-seed null replications — the Welch and binary p false-positive

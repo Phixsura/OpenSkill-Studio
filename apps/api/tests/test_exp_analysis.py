@@ -1114,3 +1114,34 @@ def test_aa_calibration_monte_carlo():
     # rejections than the fixed-horizon test, and never above nominal
     assert msprt_fp <= welch_fp
     assert msprt_fp <= 20, msprt_fp
+
+
+def test_power_calibration_closes_the_design_loop():
+    """Round 152 — the design-time formula and the runtime test must agree:
+    simulate binary A/B at exactly required_n_per_arm(baseline, mde) and
+    the detection rate must reach the promised power (within a Monte-Carlo
+    band). This closes the loop: a drift in EITHER the planner or the test
+    breaks it."""
+    import random
+
+    from app.experiments.services.analysis import (
+        analyze_binary,
+        required_n_per_arm,
+    )
+
+    baseline = 0.10
+    mde = 0.20  # relative: treatment rate 0.12
+    n = required_n_per_arm(baseline, mde)
+    assert n == 3841  # the round-46 pin — the planner itself is stable
+
+    rng = random.Random(7)
+    reps = 200
+    detected = 0
+    for _ in range(reps):
+        xa = sum(1 for _ in range(n) if rng.random() < baseline)
+        xb = sum(1 for _ in range(n) if rng.random() < baseline * (1 + mde))
+        if analyze_binary(xa, n, xb, n).get("p", 1.0) < 0.05:
+            detected += 1
+    # promised power 0.8 at the EXACT boundary n; binomial 3 sigma on 200
+    # reps ≈ 17 — accept [0.70, 0.92]
+    assert 140 <= detected <= 184, detected
