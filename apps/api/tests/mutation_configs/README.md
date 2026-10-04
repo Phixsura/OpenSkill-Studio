@@ -258,3 +258,10 @@ two guard redundancies (a later guard catches the same state), the se/sd
 floor guards (welch emits no se on zero variance; the corpus sd is
 floored above zero — DISCOVERED and pinned here), and the colon-free
 variant-key maxsplit.
+
+## wave35_hooks.json (round 170)
+
+The six domain hooks + the dedup key: 13/13 killed by the existing
+integration suite outright. With this, every module in app/experiments/
+(services, hooks, worker sweeps) has a dedicated post-rewrite wave on
+record — waves 1-35, ~1100 mutants cumulative.

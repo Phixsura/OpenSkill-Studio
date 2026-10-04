@@ -1108,6 +1108,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 170 — mutation wave 35 over the six domain hooks: 13/13 outright.
+Every module in the experiments package now carries a dedicated
+post-rewrite mutation wave (waves 1-35, ~1100 mutants cumulative).
+
 Round 169 — mutation wave 34, the largest single wave (88 mutants over
 AnalysisService.run itself): 79/88 across five strengthening passes — the
 error-status AST contract now covers this file, the cross-window
