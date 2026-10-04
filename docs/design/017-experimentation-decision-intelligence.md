@@ -368,6 +368,39 @@ placement-based, so the knob and the analysis gate both require
 source == talent_outcomes (round 188, defect #70) — other time_to_event
 sources (billing retention) need their own reader before opting in.
 
+### 4.16 Synthetic control (v3 round 193 — design)
+
+Observational runs today carry DiD (§10 v2) and ITS (§10 v3). Synthetic
+control closes the deferred list's largest item: instead of assuming
+parallel trends (DiD) or modeling one interrupted series (ITS), build a
+WEIGHTED COMBINATION of control-arm units whose pre-period trajectory
+matches the treatment arm's, then read the post-period gap. Three-step
+shape as before:
+
+**Step 1 — pure core.** `synthetic_control(pre_treated, post_treated,
+donors_pre, donors_post)` over day-granular series: simplex-constrained
+weights (w_i >= 0, sum w = 1) fit by deterministic projected-gradient
+descent on ||pre_treated - W . donors_pre||^2 (fixed iteration budget,
+no randomness); outputs the post-period gap mean, the pre-fit RMSPE, the
+post/pre RMSPE ratio (the honesty readout — a ratio near 1 means the fit
+explains nothing), and a PLACEBO p: each donor is refit as a
+pseudo-treated unit and p = rank of the true ratio among placebo ratios
+(Abadie-style permutation inference, deterministic). Refusals: < 3 pre
+points, < 2 donors, all-constant donor matrix.
+
+**Step 2 — analysis-time series (the ITS/KM precedent).** Per-unit daily
+means come from the SAME on-demand source reads ITS uses — one source
+call per day with variant_units = {unit_id: [unit_id]} fans the per-unit
+split out of a single query, so the cost stays 2 x ITS_DAYS calls, not
+units x days. Treated series = treatment-arm mean; donor pool =
+control-arm units capped at SC_MAX_DONORS = 20 (first-assigned order,
+deterministic); smaller pools warn SC_DONOR_POOL_SMALL. Attaches as
+`synthetic_control` on the FIRST primary of observational runs next to
+`its`, association-only caveat, segment runs untouched (early return).
+
+**Step 3 — console strip** mirroring ITS/KM: gap, placebo p, RMSPE
+ratio, donor count, caveat.
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1154,6 +1187,12 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 193 — the synthetic-control epoch opens (§4.16, step 0): design
+committed — simplex-constrained donor weights by deterministic projected
+gradient, placebo permutation inference, the post/pre RMSPE ratio as the
+honesty readout, per-unit daily series from ONE source call per day
+(variant_units fan-out, the ITS cost envelope), donor cap 20.
 
 Round 192 — the KM knob over the wire: the live E2E wall grows 106 ->
 110 (knob PATCHes onto the talent time_to_event definition and
