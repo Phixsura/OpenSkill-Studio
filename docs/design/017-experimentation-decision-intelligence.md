@@ -624,9 +624,10 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   probabilities for NEW units only; existing assignments never flip (no yanked
   experiences, ITT preserved within each allocation epoch).
 - Explicitly deferred (documented in the competitive analysis): synthetic
-  control, CUPED++ multi-covariate/ML covariates, anonymous→login identity
-  resolution, feature-flag CDN/edge SDKs, session replay, warehouse
-  connectors (we are the warehouse).
+  control, ML-learned covariates (plain multi-covariate CUPED SHIPPED in
+  rounds 113-115, §4.6 v3; binary CUPED in round 142, §4.6 v4),
+  anonymous→login identity resolution, feature-flag CDN/edge SDKs, session
+  replay, warehouse connectors (we are the warehouse).
 - Base branch: the epic depends on the eco facade, so implementation chains on
   the issue-35 branch (PR #36) until it merges.
 
