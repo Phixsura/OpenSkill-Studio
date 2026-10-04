@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["its_estimate"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

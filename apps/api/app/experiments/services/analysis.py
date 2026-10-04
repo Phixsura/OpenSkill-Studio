@@ -649,6 +649,7 @@ def its_estimate(pre: list[float], post: list[float]) -> dict | None:
             t_stat, p = 0.0, 1.0
         out[name] = {"estimate": est, "se": se, "t": t_stat, "p": p}
     out["n_pre"], out["n_post"] = n_pre, n_post
+    out["dof"] = dof  # honest readout: the t-tests' degrees of freedom
     out["caveat"] = (
         "interrupted time series — association only; "
         "no concurrent control, seasonality not modeled"

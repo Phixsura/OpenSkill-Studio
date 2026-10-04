@@ -1258,6 +1258,7 @@ def test_its_estimate_significance_and_refusals():
     jump = its_estimate(pre, post)
     assert jump is not None
     assert jump["level_change"]["p"] < 0.01
+    assert jump["dof"] == 6  # n - 4: the dof arithmetic pinned
     assert jump["level_change"]["estimate"] == pytest.approx(6.0, abs=0.2)
 
     flat_pre = [1.0 + wiggle[t] for t in range(5)]
@@ -1268,3 +1269,9 @@ def test_its_estimate_significance_and_refusals():
 
     assert its_estimate([1.0, 2.0], [3.0, 4.0, 5.0]) is None
     assert its_estimate([1.0, 2.0, 3.0], [4.0, 5.0]) is None
+    # EXACTLY 3 points per side is admissible (the < 3 floor, operator AND
+    # constant), and the reported dof is n - 4
+    minimal = its_estimate([1.0, 2.0, 3.0], [9.0, 10.0, 11.0])
+    assert minimal is not None
+    assert minimal["dof"] == 2
+    assert minimal["level_change"]["estimate"] == pytest.approx(5.0, abs=1e-9)
