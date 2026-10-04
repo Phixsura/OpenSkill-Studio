@@ -1225,3 +1225,46 @@ def test_quantile_ci_coverage_is_conservative():
             covered += 1
     # 95% nominal, conservative by construction; 3 sigma on 300 reps ≈ 11
     assert covered >= 274, covered
+
+
+def test_its_estimate_exact_on_piecewise_linear_data():
+    """Round 177 oracle: on EXACT piecewise-linear data the segmented OLS
+    recovers the level and trend changes to machine precision (pre slope 1
+    from intercept 1; post jumps to 10 with slope 2 at t0=5 -> level
+    change 4, trend change 1; zero residuals -> se 0, p 1)."""
+    from app.experiments.services.analysis import its_estimate
+
+    pre = [1.0 + t for t in range(5)]
+    post = [10.0 + 2.0 * i for i in range(5)]
+    out = its_estimate(pre, post)
+    assert out is not None
+    assert out["level_change"]["estimate"] == pytest.approx(4.0, abs=1e-9)
+    assert out["trend_change"]["estimate"] == pytest.approx(1.0, abs=1e-9)
+    # float residuals ~1e-15 make se tiny, not zero: p is EXTREME, and the
+    # literal se==0 branch stays as defense for exact-integer inputs
+    assert out["level_change"]["p"] < 1e-12
+    assert out["n_pre"] == 5 and out["n_post"] == 5
+    assert "association only" in out["caveat"]
+
+
+def test_its_estimate_significance_and_refusals():
+    """A real jump over noisy-but-deterministic data is significant; a flat
+    series is not; under 3 points per side refuses."""
+    from app.experiments.services.analysis import its_estimate
+
+    wiggle = [0.05, -0.04, 0.02, -0.03, 0.01, 0.04, -0.02, 0.03, -0.05, 0.02]
+    pre = [2.0 + 0.1 * t + wiggle[t] for t in range(5)]
+    post = [8.0 + 0.1 * (5 + i) + wiggle[5 + i] for i in range(5)]
+    jump = its_estimate(pre, post)
+    assert jump is not None
+    assert jump["level_change"]["p"] < 0.01
+    assert jump["level_change"]["estimate"] == pytest.approx(6.0, abs=0.2)
+
+    flat_pre = [1.0 + wiggle[t] for t in range(5)]
+    flat_post = [1.0 + wiggle[5 + i] for i in range(5)]
+    flat = its_estimate(flat_pre, flat_post)
+    assert flat is not None
+    assert flat["level_change"]["p"] > 0.2
+
+    assert its_estimate([1.0, 2.0], [3.0, 4.0, 5.0]) is None
+    assert its_estimate([1.0, 2.0, 3.0], [4.0, 5.0]) is None

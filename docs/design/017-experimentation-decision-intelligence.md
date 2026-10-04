@@ -1122,6 +1122,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 177 — the ITS epoch opens (§10 v3, step 1 of 2): the last
+deliberately-deferred quasi-experiment design becomes buildable — "no
+pre-period exists" only meant no pre-period SNAPSHOTS; the sources accept
+arbitrary windows, so daily pre/post means can be computed on demand. The
+pure core lands first: `its_estimate` — segmented OLS
+(y = b0 + b1·t + b2·post + b3·(t−t0)·post) over daily means via the
+existing k-generic Gaussian solver, classical OLS standard errors from
+k diagonal solves, level/trend changes with t-tests, refusals under 3
+points per side, and the association-only caveat. Oracle: exact recovery
+on piecewise-linear data; significance on a deterministic jump; flat
+series stays null. Step 2 (service wiring: on-demand daily source reads
+for observational runs) follows.
+
 Round 174 — the first BROWSER-level experiments spec
 (e2e/experiments-wall.spec.ts, Playwright): a plain user sees no
 Experiments sidebar entry and a deep link to the console renders the

@@ -600,6 +600,62 @@ def cuped_adjusted_welch(control: dict, treatment: dict) -> dict | None:
 # ── Sequential monitoring ────────────────────────────────────────────
 
 
+def its_estimate(pre: list[float], post: list[float]) -> dict | None:
+    """§10 v3 (round 177): interrupted time series for OBSERVATIONAL runs —
+    segmented OLS y_t = b0 + b1*t + b2*post + b3*(t - t0)*post over daily
+    means. Returns the level change (b2) and trend change (b3) with
+    classical OLS standard errors; None when either side has < 3 points or
+    the design is singular. Association only — the caller attaches the
+    causal_claim:false caveat."""
+    n_pre, n_post = len(pre), len(post)
+    if n_pre < 3 or n_post < 3:
+        return None
+    ys = [*pre, *post]
+    n = len(ys)
+    t0 = n_pre  # the interruption sits between pre[-1] and post[0]
+    xs = [
+        [1.0, float(t), 1.0 if t >= t0 else 0.0,
+         float(t - t0) if t >= t0 else 0.0]
+        for t in range(n)
+    ]
+    k = 4
+    xtx = [[sum(xs[r][i] * xs[r][j] for r in range(n)) for j in range(k)]
+           for i in range(k)]
+    xty = [sum(xs[r][i] * ys[r] for r in range(n)) for i in range(k)]
+    beta = _solve_spd(xtx, xty)
+    if beta is None:
+        return None
+    residuals = [ys[r] - sum(xs[r][i] * beta[i] for i in range(k))
+                 for r in range(n)]
+    dof = n - k
+    if dof <= 0:
+        return None
+    sigma2 = sum(e * e for e in residuals) / dof
+    # standard errors from the (X'X)^-1 diagonal, via k solves
+    ses = []
+    for i in range(k):
+        unit = [1.0 if j == i else 0.0 for j in range(k)]
+        col = _solve_spd(xtx, unit)
+        if col is None:
+            return None
+        ses.append(math.sqrt(max(sigma2 * col[i], 0.0)))
+    out = {}
+    for name, idx in (("level_change", 2), ("trend_change", 3)):
+        est, se = beta[idx], ses[idx]
+        if se > 0:
+            t_stat = est / se
+            p = 2.0 * t_sf(abs(t_stat), dof)
+        else:
+            t_stat, p = 0.0, 1.0
+        out[name] = {"estimate": est, "se": se, "t": t_stat, "p": p}
+    out["n_pre"], out["n_post"] = n_pre, n_post
+    out["caveat"] = (
+        "interrupted time series — association only; "
+        "no concurrent control, seasonality not modeled"
+    )
+    return out
+
+
 def _hist_value_at_rank(entries: list[tuple[int, int]], rank: float) -> float | None:
     """Value at a (possibly fractional) 1-based rank in a base-2 log
     histogram: walk cumulative counts, geometric interpolation between the
