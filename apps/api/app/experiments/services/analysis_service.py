@@ -38,6 +38,9 @@ def result_hash(payload: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+ITS_DAYS = 14  # §10 v3: daily points per side for the interrupted series
+
+
 class AnalysisService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -808,6 +811,71 @@ class AnalysisService:
                 if min_arm_n < required:
                     warnings.append("SAMPLE_BELOW_POWER_TARGET")
                 break
+
+        if spec.analysis_type == "observational" and exp.started_at is not None:
+            # §10 v3 (round 178): INTERRUPTED TIME SERIES over on-demand
+            # daily source reads — "no pre-period" only meant no pre-period
+            # snapshots; the sources accept arbitrary windows. Whole-roster
+            # daily means (ITS has no concurrent control), ITS_DAYS per
+            # side, segmented OLS in the pure core. Association only.
+            from app.experiments.services.metrics import MetricService
+
+            its_roster = await MetricService(self.db)._variant_units(  # noqa: SLF001
+                experiment_id
+            )
+            all_units = sorted({u for us in its_roster.values() for u in us})
+            if all_units:
+                from app.experiments.services.metrics import SOURCE_REGISTRY
+
+                start_day = exp.started_at.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                for key in spec.metrics.primary[:1]:
+                    definition = definitions.get(key)
+                    source = (
+                        SOURCE_REGISTRY.get(definition.spec.get("source", ""))
+                        if definition is not None
+                        else None
+                    )
+                    if source is None:
+                        continue
+
+                    async def _daily_mean(day_start):
+                        stats_out = await source(  # noqa: B023
+                            self.db,
+                            experiment=exp,
+                            definition=definition,  # noqa: B023
+                            variant_units={"all": all_units},
+                            window_start=day_start,
+                            window_end=day_start + timedelta(days=1),
+                            unit_type=spec.unit_type,
+                        )
+                        arm = stats_out.get("all") or {}
+                        if arm.get("denominator"):
+                            return float(arm.get("numerator") or 0.0) / float(
+                                arm["denominator"]
+                            )
+                        if arm.get("n"):
+                            return float(arm.get("sum_value") or 0.0) / float(
+                                arm["n"]
+                            )
+                        return None
+
+                    pre_series: list[float] = []
+                    post_series: list[float] = []
+                    for offset in range(ITS_DAYS, 0, -1):
+                        value = await _daily_mean(
+                            start_day - timedelta(days=offset)
+                        )
+                        pre_series.append(0.0 if value is None else value)
+                    for offset in range(ITS_DAYS):
+                        value = await _daily_mean(
+                            start_day + timedelta(days=offset)
+                        )
+                        post_series.append(0.0 if value is None else value)
+                    its = stats.its_estimate(pre_series, post_series)
+                    if its is not None and key in metrics_out:
+                        metrics_out[key]["its"] = its
 
         if spec.analysis_type == "observational":
             # Quasi-experiment support (§10 v2): where per-unit pre-period

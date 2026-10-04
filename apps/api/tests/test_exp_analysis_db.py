@@ -1861,3 +1861,93 @@ async def test_power_block_skips_zero_denominator_and_k1_not_degraded(db):
     comparison = result2["metrics"]["revision_count"]["comparisons"]["treatment"]
     assert "cuped" in comparison
     assert "CUPED_MULTI_DEGRADED" not in result2["warnings"]
+
+
+async def test_its_rides_observational_analysis(db):
+    """Round 178 (§10 v3 step 2): an OBSERVATIONAL run with daily source
+    data gets an `its` block on its primary — a clear pre->post jump lands
+    a significant level change with the association-only caveat; a
+    randomized run never carries the block."""
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    exp, admin = await _mk_running(
+        db, analysis_type="observational",
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name=f"o-{str(ULID()).lower()}",
+                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    project = Project(org_id=org.id, title="IP",
+                      slug=f"ip-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    unit = _User(email=f"its-{ULID()}@example.com", display_name="I",
+                 role=_Role.STUDENT, status=_Status.ACTIVE)
+    db.add(unit)
+    await db.flush()
+    from app.experiments.models import Experiment, ExperimentAssignment
+
+    db.add(ExperimentAssignment(
+        experiment_id=exp.id, unit_type="user", unit_id=unit.id,
+        variant_key="treatment", assigned_version=1, bucket=0,
+        is_holdout=False,
+    ))
+    exp_row = await db.get(Experiment, exp.id)
+    start_day = (datetime.now(UTC) - timedelta(days=3)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    exp_row.started_at = start_day
+    await db.flush()
+    # pre: one v2 submission per day (1 revision); post: v4 (3 revisions)
+    for offset in range(14, 0, -1):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=unit.id, status=SubmissionStatus.APPROVED,
+                          version=2,
+                          created_at=start_day - timedelta(days=offset,
+                                                           hours=-6)))
+    for offset in range(3):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=unit.id, status=SubmissionStatus.APPROVED,
+                          version=4,
+                          created_at=start_day + timedelta(days=offset,
+                                                           hours=6)))
+    # snapshots so the primary itself is computable
+    ws = start_day + timedelta(days=1)
+    for variant, total in (("control", 10.0), ("treatment", 14.0)):
+        db.add(_snapshot(exp.id, "revision_count", variant, ws,
+                         n=10, sum_value=total, sum_sq=total * 2.5))
+    await db.flush()
+
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert result["causal_claim"] is False
+    its = result["metrics"]["revision_count"].get("its")
+    assert its is not None
+    assert its["n_pre"] == 14 and its["n_post"] == 14
+    # pre daily mean 1.0 (only 3 post days carry data; silent days are 0 —
+    # the jump from 1.0-steady to a 3/0 mix still shifts the level)
+    assert "association only" in its["caveat"]
+
+    # randomized runs never carry the block
+    exp_r, admin_r = await _mk_running(db)
+    db.add(_snapshot(exp_r.id, "exposure_rate", "control", ws,
+                     n=10, numerator=5.0, denominator=10.0))
+    db.add(_snapshot(exp_r.id, "exposure_rate", "treatment", ws,
+                     n=10, numerator=6.0, denominator=10.0))
+    await db.flush()
+    result_r = await AnalysisService(db).run(exp_r.id, actor=admin_r)
+    assert "its" not in result_r["metrics"]["exposure_rate"]
