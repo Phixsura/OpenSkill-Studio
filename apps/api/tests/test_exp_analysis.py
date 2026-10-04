@@ -1051,3 +1051,66 @@ def test_multi_cuped_degenerate_refusals():
                         {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
     del good_c["covariates"]["c1"]["xx"]  # missing cross term
     assert multi_cuped_adjusted_welch(good_c, good_t, keys) is None
+
+
+def test_aa_calibration_monte_carlo():
+    """Round 151 — CALIBRATION, not point correctness: under the null
+    (A/A), the frequentist p must be ~uniform and the always-valid mSPRT p
+    must be CONSERVATIVE. Deterministic seed; 400 replications of n=100
+    per arm. Bounds are generous (3-sigma-ish on the binomial count) so
+    the test pins calibration bugs, not sampling noise."""
+    import random
+
+    from app.experiments.services.analysis import (
+        analyze_binary,
+        msprt_always_valid_p,
+        welch_from_stats,
+    )
+
+    rng = random.Random(42)
+    reps = 400
+    n = 100
+    welch_fp = 0
+    msprt_fp = 0
+    binary_fp = 0
+    for _ in range(reps):
+        a = [rng.gauss(10.0, 2.0) for _ in range(n)]
+        b = [rng.gauss(10.0, 2.0) for _ in range(n)]
+        w = welch_from_stats(
+            n, sum(a), sum(v * v for v in a),
+            n, sum(b), sum(v * v for v in b),
+        )
+        if w["p"] < 0.05:
+            welch_fp += 1
+        if msprt_always_valid_p(w["t"]) < 0.05:
+            msprt_fp += 1
+        xa = sum(1 for _ in range(n) if rng.random() < 0.3)
+        xb = sum(1 for _ in range(n) if rng.random() < 0.3)
+        if analyze_binary(xa, n, xb, n).get("p", 1.0) < 0.05:
+            binary_fp += 1
+    # CUPED under the null with a REAL covariate (x correlates with y but
+    # arms are identical): the adjustment must stay calibrated too
+    from app.experiments.services.analysis import cuped_adjusted_welch
+
+    cuped_fp = 0
+    for _ in range(reps):
+        def arm():
+            xs = [rng.gauss(5.0, 1.0) for _ in range(n)]
+            ys = [x + rng.gauss(0.0, 1.0) for x in xs]
+            return {
+                "n": n, "sum": sum(ys), "sum_sq": sum(v * v for v in ys),
+                "cov_sum": sum(xs), "cov_sum_sq": sum(v * v for v in xs),
+                "cov_xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
+            }
+        out = cuped_adjusted_welch(arm(), arm())
+        if out is not None and out["p"] < 0.05:
+            cuped_fp += 1
+
+    # nominal 5%: expect ~20/400; 3 sigma ≈ 13 — allow [5, 40]
+    assert 5 <= welch_fp <= 40, welch_fp
+    assert 5 <= binary_fp <= 40, binary_fp
+    assert cuped_fp <= 40, cuped_fp  # the adjustment must not inflate alpha
+    # always-valid p is strictly conservative at a single look: fewer
+    # rejections than the fixed-horizon test, and never above nominal
+    assert msprt_fp <= welch_fp
+    assert msprt_fp <= 20, msprt_fp

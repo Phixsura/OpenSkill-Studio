@@ -1108,6 +1108,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 151 — A/A CALIBRATION Monte-Carlo (the verification stack's missing
+axis: oracles pin point correctness, nothing pinned CALIBRATION): 400
+deterministic-seed null replications — the Welch and binary p false-positive
+counts must sit in a 3-sigma band around nominal 5%, the always-valid mSPRT
+p must be strictly conservative at a single look, and CUPED under the null
+with a REAL correlated covariate must not inflate alpha. Fast (<3s) and
+deterministic, so it rides the main suite, not a slow lane.
+
 Round 150 — mutation wave 25 over holdouts.report: 28/29 killed by the
 EXISTING suite (the wave-12-era strengthenings held through two rewrites);
 the 20k sample_capped informational flag ledgered.
