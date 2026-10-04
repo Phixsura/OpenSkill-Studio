@@ -1108,6 +1108,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 157 — the wave-24 design note repaid: the multi-covariate per-unit
+y path now winsorizes exactly like the single-covariate branch (the
+robustness knob cannot depend on how many covariates ride along); the
+clamped values flow into the per-unit map the assembler pairs with
+covariates, and the _winsorized provenance flag rides. Pinned with an
+outlier fixture against the winsorize helper itself. The §4.6 v3 design
+note is resolved.
+
 Round 156 — E2E corpse root-cause fixed: the lifecycle script's cleanup
 ran AFTER the main body, so any mid-flight crash skipped it entirely —
 that is where the round-155 19-corpse residue came from. Cleanup now runs

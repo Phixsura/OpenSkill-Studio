@@ -491,13 +491,22 @@ async def _source_projects(
                 y: dict[str, float] = dict.fromkeys(units, 0.0)
                 for user_id, version in cur_rows:
                     y[user_id] += float(max(0, version - 1))
-                ys = [y[u] for u in units]
+                # round 157 (the wave-24 ledger's design note repaid): the
+                # multi branch now winsorizes y like the single branch —
+                # a robustness knob must apply identically on both paths.
+                # The winsorized values flow into BOTH the sums and the
+                # per-unit map the assembler pairs with covariates.
+                ys, winsorized = winsorize(
+                    [y[u] for u in units], definition.winsorize_pct
+                )
+                y = dict(zip(units, ys, strict=True))
                 result[variant] = {
                     "n": len(units),
                     "sum_value": sum(ys),
                     "sum_sq": sum(v * v for v in ys),
                     "_aggregation": "per_unit",
                     "_unit_values": y,
+                    "_winsorized": winsorized,
                 }
                 continue
             if (

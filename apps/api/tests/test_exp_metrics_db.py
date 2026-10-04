@@ -3286,3 +3286,63 @@ async def test_projects_per_submission_window_boundaries(db):
         units=[user.id], unit_type="user",
     )
     assert out["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
+
+
+async def test_multi_branch_winsorizes_like_single(db):
+    """Round 157 (wave-24 design note repaid): a winsorize_pct on the metric
+    must clamp the multi-covariate per-unit y EXACTLY like the single
+    branch — the robustness knob cannot depend on how many covariates ride
+    along. The clamped values must flow into the per-unit map too (the
+    assembler pairs them with covariates)."""
+    from types import SimpleNamespace
+
+    from app.experiments.services.metrics import SOURCE_REGISTRY, winsorize
+    from app.models.project import Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    project = await _mk_project(db, org)
+    users = []
+    for i in range(4):
+        u = User(email=f"wz-{i}-{ULID()}@example.com", display_name=f"W{i}",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        db.add(u)
+        await db.flush()
+        users.append(u.id)
+    window_start, window_end = _today_window()
+    t0 = window_start + timedelta(hours=1)
+    # revisions per unit: 0, 1, 2, 40 — the outlier gets clamped
+    for user_id, version in ((users[1], 2), (users[2], 3), (users[3], 41)):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=user_id, status=SubmissionStatus.APPROVED,
+                          version=version, created_at=t0))
+    await db.flush()
+    await MetricService(db).ensure_seed_definitions()
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "revision_count"))
+    ).scalar_one()
+    definition.winsorize_pct = 75.0
+    await db.flush()
+    vr = SimpleNamespace(
+        covariates=lambda: ["project_approval_rate", "revision_count"],
+        lookback_days=14,
+    )
+    try:
+        out = await SOURCE_REGISTRY["projects"](
+            db, experiment=None, definition=definition,
+            variant_units={"treatment": users},
+            window_start=window_start, window_end=window_end,
+            unit_type="user", variance_reduction=vr,
+        )
+        arm = out["treatment"]
+        assert arm["_winsorized"] is True
+        expected, _flag = winsorize([0.0, 1.0, 2.0, 40.0], 75.0)
+        assert sorted(arm["_unit_values"].values()) == sorted(expected)
+        assert arm["sum_value"] == sum(expected)
+        assert max(arm["_unit_values"].values()) < 40.0  # the clamp is real
+    finally:
+        definition.winsorize_pct = None  # the seeded definition is shared
+        await db.flush()
