@@ -1955,6 +1955,10 @@ async def test_its_rides_observational_analysis(db):
     assert "association only" in its["caveat"]
     # ITS rides the FIRST primary only ([:1] is the design, not a slice bug)
     assert "its" not in result["metrics"]["project_approval_rate"]
+    # round 195: one lone treated unit, NO control units -> synthetic
+    # control refuses with the donor-pool warning instead of attaching
+    assert "synthetic_control" not in result["metrics"]["revision_count"]
+    assert "SC_DONOR_POOL_SMALL" in result["warnings"]
 
     # a rate-kind primary exercises the numerator/denominator daily branch:
     # all submissions are approved -> pre 1.0 steady, post [1,1,1] then 0
@@ -2008,6 +2012,114 @@ async def test_its_rides_observational_analysis(db):
     await db.flush()
     result_r = await AnalysisService(db).run(exp_r.id, actor=admin_r)
     assert "its" not in result_r["metrics"]["revision_count"]
+
+
+async def test_synthetic_control_rides_observational_analysis(db):
+    """Round 195 (§4.16 step 2): with a donor pool, the observational run
+    attaches a synthetic_control block on the first primary — pinned
+    bit-for-bit against the pure core on the fixture-determined series
+    (the round-185 oracle technique)."""
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    exp, admin = await _mk_running(
+        db, analysis_type="observational",
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name=f"o-{str(ULID()).lower()}",
+                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    project = Project(org_id=org.id, title="SC",
+                      slug=f"sc-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    from app.experiments.models import Experiment, ExperimentAssignment
+
+    start_day = (datetime.now(UTC) - timedelta(days=3)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    exp_row = await db.get(Experiment, exp.id)
+    exp_row.started_at = start_day
+    await db.flush()
+
+    def _user(tag):
+        u = _User(email=f"sc-{tag}-{ULID()}@example.com", display_name=tag,
+                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        db.add(u)
+        return u
+
+    treated = _user("t")
+    d_match, d_hi1, d_hi2 = _user("d0"), _user("d1"), _user("d2")
+    await db.flush()
+    for u, variant in ((treated, "treatment"), (d_match, "control"),
+                       (d_hi1, "control"), (d_hi2, "control")):
+        db.add(ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=u.id,
+            variant_key=variant, assigned_version=1, bucket=0,
+            is_holdout=False,
+        ))
+    await db.flush()
+
+    def _sub(user, day_offset, version):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=user.id, status=SubmissionStatus.APPROVED,
+                          version=version,
+                          created_at=start_day + timedelta(days=day_offset,
+                                                           hours=6)))
+
+    # treated: 1.0/day pre, then [3,3,3] and silence post
+    for off in range(-14, 0):
+        _sub(treated, off, 2)
+    for off in range(3):
+        _sub(treated, off, 4)
+    # d_match tracks the treated PRE exactly (1.0/day) on BOTH sides;
+    # the hi donors sit at 3.0/day throughout, keeping the matrix
+    # non-constant
+    for off in range(-14, 14):
+        _sub(d_match, off, 2)
+        _sub(d_hi1, off, 4)
+        _sub(d_hi2, off, 4)
+    ws = start_day + timedelta(days=1)
+    for variant, total in (("control", 10.0), ("treatment", 14.0)):
+        db.add(_snapshot(exp.id, "revision_count", variant, ws,
+                         n=10, sum_value=total, sum_sq=total * 2.5))
+    await db.flush()
+
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    sc = result["metrics"]["revision_count"].get("synthetic_control")
+    assert sc is not None
+    assert "SC_DONOR_POOL_SMALL" not in result["warnings"]
+
+    # oracle-via-pure-core: the fixture fully determines every series;
+    # donor order is sorted unit id
+    from app.experiments.services.analysis import synthetic_control
+    series = {d_match.id: 1.0, d_hi1.id: 3.0, d_hi2.id: 3.0}
+    donor_ids = sorted(series)
+    expected = synthetic_control(
+        [1.0] * 14, [3.0, 3.0, 3.0] + [0.0] * 11,
+        [[series[u]] * 14 for u in donor_ids],
+        [[series[u]] * 14 for u in donor_ids],
+    )
+    assert expected is not None
+    assert sc == expected
+    # the matched donor carries ~all the weight, so the gap is the raw
+    # post difference against a 1.0 synthetic: mean([3,3,3,0*11]) - 1
+    assert sc["gap"] == pytest.approx(9.0 / 14.0 - 1.0, abs=1e-3)
+    assert sc["donors"] == 3 and sc["placebo_p"] is not None
 
 
 async def test_km_refuses_non_talent_sources_with_warning(db):

@@ -1188,6 +1188,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 195 — SC step 2: observational runs with a donor pool attach
+`synthetic_control` on the first primary — donor units = control arm
+(sorted, capped SC_MAX_DONORS=20), treated series = other-arm daily
+mean, one source call per day via the per-unit variant_units fan-out
+(2 x ITS_DAYS calls total, the designed cost envelope). Lone-arm rosters
+warn SC_DONOR_POOL_SMALL instead of attaching. The wiring test pins the
+attached block BIT-FOR-BIT against the pure core on the
+fixture-determined series (the round-185 oracle technique), with the
+matched donor absorbing the weight and the gap reading 9/14 - 1 exactly.
+
 Round 194 — SC step 1: the pure core lands — Duchi simplex projection,
 projected gradient with the exact Lipschitz step (uniform start, 1000
 iterations, zero randomness), post-period gap, post/pre RMSPE honesty

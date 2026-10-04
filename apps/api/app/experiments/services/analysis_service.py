@@ -39,6 +39,7 @@ def result_hash(payload: dict) -> str:
 
 
 ITS_DAYS = 14  # §10 v3: daily points per side for the interrupted series
+SC_MAX_DONORS = 20  # §4.16: synthetic-control donor pool cap
 
 
 class AnalysisService:
@@ -967,6 +968,74 @@ class AnalysisService:
                     its = stats.its_estimate(pre_series, post_series)
                     if its is not None and key in metrics_out:
                         metrics_out[key]["its"] = its
+
+                    # §4.16 (round 195): SYNTHETIC CONTROL over the same
+                    # daily windows — donor pool = control-arm units (capped,
+                    # sorted for determinism), treated series = mean over the
+                    # other arms' units, one source call per day with the
+                    # per-unit variant_units fan-out.
+                    donor_units = sorted(
+                        its_roster.get(control_key, [])
+                    )[:SC_MAX_DONORS]
+                    treated_units = sorted(
+                        u for v, us in its_roster.items()
+                        if v != control_key for u in us
+                    )
+                    if len(donor_units) < 2 or not treated_units:
+                        if "SC_DONOR_POOL_SMALL" not in warnings:
+                            warnings.append("SC_DONOR_POOL_SMALL")
+                        continue
+                    sc_units = [*donor_units, *treated_units]
+                    per_unit: dict[str, tuple[list, list]] = {
+                        u: ([], []) for u in sc_units
+                    }
+
+                    async def _daily_per_unit(day_start, side):
+                        stats_out = await source(  # noqa: B023
+                            self.db,
+                            experiment=exp,
+                            definition=definition,  # noqa: B023
+                            variant_units={u: [u] for u in per_unit},  # noqa: B023
+                            window_start=day_start,
+                            window_end=day_start + timedelta(days=1),
+                            unit_type=spec.unit_type,
+                        )
+                        for u, series in per_unit.items():  # noqa: B023
+                            arm = stats_out.get(u) or {}
+                            if arm.get("denominator"):
+                                val = (float(arm.get("numerator") or 0.0)
+                                       / float(arm["denominator"]))
+                            elif arm.get("n"):
+                                val = (float(arm.get("sum_value") or 0.0)
+                                       / float(arm["n"]))
+                            else:
+                                val = 0.0
+                            series[side].append(val)
+
+                    for offset in range(ITS_DAYS, 0, -1):
+                        await _daily_per_unit(
+                            start_day - timedelta(days=offset), 0
+                        )
+                    for offset in range(ITS_DAYS):
+                        await _daily_per_unit(
+                            start_day + timedelta(days=offset), 1
+                        )
+                    n_t = len(treated_units)
+                    pre_treated = [
+                        sum(per_unit[u][0][t] for u in treated_units) / n_t
+                        for t in range(ITS_DAYS)
+                    ]
+                    post_treated = [
+                        sum(per_unit[u][1][t] for u in treated_units) / n_t
+                        for t in range(ITS_DAYS)
+                    ]
+                    sc = stats.synthetic_control(
+                        pre_treated, post_treated,
+                        [per_unit[u][0] for u in donor_units],
+                        [per_unit[u][1] for u in donor_units],
+                    )
+                    if sc is not None and key in metrics_out:
+                        metrics_out[key]["synthetic_control"] = sc
 
         if spec.analysis_type == "observational":
             # Quasi-experiment support (§10 v2): where per-unit pre-period
