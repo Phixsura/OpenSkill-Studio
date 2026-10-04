@@ -195,3 +195,9 @@ hash (the day variant must keep the v1 salt bound: pins both the limit
 and the ordering). Ledgered: the top-20 segment org cap (a 21-org fixture
 for a capacity constant; the cap mechanism is the sort+slice, exercised by
 every segmented compute).
+
+## wave27_promotion.json (round 160)
+
+promotion apply/apply_async/finish_async_apply/approve/reject: 16/16
+killed by the existing suite outright — the #47-era savepoint tests, the
+apply-race pin and the status-gate pins left nothing alive.

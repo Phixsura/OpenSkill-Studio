@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/promotion.py",
+    "funcs": ["apply", "apply_async", "finish_async_apply", "approve", "reject"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_decisions_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 900
+  }
+]

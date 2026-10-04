@@ -1108,6 +1108,9 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 160 — mutation wave 27 over the promotion lifecycle (apply, async
+apply, approve/reject): 16/16 killed by the existing suite outright.
+
 Round 159 — mutation wave 26 over the compute loop and snapshot writer:
 15/16 — the switchback first-version salt query is now pinned by a
 two-version fixture (the day variant keeps the v1 salt bound under both
