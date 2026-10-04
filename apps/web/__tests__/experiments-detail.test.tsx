@@ -206,6 +206,14 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     });
   });
 
+  it("shows the self-serve integration snippet with the experiment key (round 149)", async () => {
+    mockApiFor("running");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Integration (self-serve SDK)")).toBeTruthy();
+    expect(screen.getByText(/useExperiment\("detail-exp"\)/)).toBeTruthy();
+    expect(screen.getByText(/experiments\/self\/resolve/)).toBeTruthy();
+  });
+
   it("scheduled status shows the auto-start time or 'manual start'", async () => {
     mockApiFor("scheduled");
     render(<ExperimentDetailPage />, { wrapper: wrapper() });

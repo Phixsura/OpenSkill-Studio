@@ -421,6 +421,22 @@ export default function ExperimentDetailPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title="Integration (self-serve SDK)">
+        <p className="mb-2 text-xs text-slate-500">
+          Any signed-in surface can resolve its variant and record exposures — assignment is sticky
+          and deterministic; exposures dedup per day.
+        </p>
+        <pre className="overflow-x-auto rounded bg-slate-50 p-2 font-mono text-xs">
+          {`// React (TanStack Query already provided app-wide)
+const { variantKey, config, recordExposure } = useExperiment(${JSON.stringify(experiment.key)});
+useEffect(() => { if (variantKey) recordExposure(); }, [variantKey, recordExposure]);
+
+// Raw HTTP
+POST /api/v1/experiments/self/resolve   { "experiment_key": ${JSON.stringify(experiment.key)} }
+POST /api/v1/experiments/self/exposures { "experiment_key": ${JSON.stringify(experiment.key)} }`}
+        </pre>
+      </SectionCard>
+
       <SectionCard title="Audit trail (append-only)">
         <ul className="space-y-1 text-sm">
           {(events.data?.data ?? []).map((e) => (
