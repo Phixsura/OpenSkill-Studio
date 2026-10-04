@@ -1188,6 +1188,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 197 — wave 39 over the SC epoch, and defect #72 IN THE LOOP
+ITSELF: a docs commit ran `git add -A` while wave 39 was mid-flight and
+shipped a LIVE MUTANT (the simplex boundary flipped to >=) plus the
+harness reformat inside d9bd2d26 — caught by the harness's own
+dirty-target refusal on the re-run, diagnosed by per-function AST diff
+against HEAD, and reverted by restoring the round-195 source verbatim
+(AST-verified equal to the harness-restored file). New iron law: NEVER
+`git add -A` while a mutation wave is running. Wave 39 first pass: core
+26/35, run() re-wave 102/116; killers landed (direct Duchi-projection
+hand oracles, the placebo p == 1.0 exact pin on a perfect fit, the
+two-donor boundary on the rate branch pinned bit-for-bit, the
+constant-matrix refusal asserted block-absent); confirm pass next.
+
 Round 196 — SC step 3: the console strip (purple, next to the ITS amber
 and KM indigo strips): gap, donor count, RMSPE ratio, placebo p (or
 "n/a" when the pool is under three), caveat verbatim. The SC epoch ships

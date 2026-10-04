@@ -1412,3 +1412,38 @@ def test_synthetic_control_placebo_and_refusals():
     assert synthetic_control([1.0, 2.0, 3.0], [],
                              [[1.0, 2.0, 3.0], [2.0, 1.0, 0.0]],
                              [[], []]) is None
+
+
+def test_project_simplex_hand_oracles():
+    """Round 197 wave-39 killers: the Duchi projection by hand."""
+    from app.experiments.services.analysis import _project_simplex
+
+    assert _project_simplex([0.8, 0.8]) == pytest.approx([0.5, 0.5])
+    assert _project_simplex([2.0, 0.0]) == pytest.approx([1.0, 0.0])
+    # v = [0.3, 0.1, -0.2]: theta = (0.2 - 1)/3 = -0.2667 by hand
+    out = _project_simplex([0.3, 0.1, -0.2])
+    assert out == pytest.approx([0.3 + 4.0 / 15.0, 0.1 + 4.0 / 15.0,
+                                 -0.2 + 4.0 / 15.0], abs=1e-12)
+    assert sum(out) == pytest.approx(1.0, abs=1e-12)
+    # already-on-simplex input is a fixed point
+    assert _project_simplex([0.25, 0.75]) == pytest.approx([0.25, 0.75])
+
+
+def test_synthetic_control_placebo_p_is_one_when_fit_is_perfect():
+    """Round 197: treated IS donor 0, so the true post fit is exact and the
+    true RMSPE ratio is 0 — every placebo ratio ties or beats it, p must be
+    EXACTLY (1 + 3) / (3 + 1) = 1.0 (kills the worse-counter and the
+    numerator/denominator constant mutants: any drift makes p != 1.0 or
+    p > 1)."""
+    from app.experiments.services.analysis import synthetic_control
+
+    out = synthetic_control(
+        [1.0, 2.0, 3.0], [10.0],
+        [[1.0, 2.0, 3.0], [9.0, 8.0, 7.0], [5.0, 5.0, 5.0]],
+        [[10.0], [1.0], [5.0]],
+    )
+    assert out is not None
+    assert out["pre_rmspe"] == pytest.approx(0.0, abs=1e-6)
+    assert out["post_rmspe"] == pytest.approx(0.0, abs=1e-5)
+    assert out["placebo_p"] == pytest.approx(1.0)
+    assert out["placebo_p"] <= 1.0

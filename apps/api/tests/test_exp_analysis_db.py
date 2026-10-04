@@ -2122,6 +2122,119 @@ async def test_synthetic_control_rides_observational_analysis(db):
     assert sc["donors"] == 3 and sc["placebo_p"] is not None
 
 
+async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
+    """Round 197 wave-39 killers: (a) EXACTLY two donors is admissible (the
+    floor is < 2); (b) a rate-kind primary drives the numerator/denominator
+    per-unit branch, pinned bit-for-bit against the pure core; (c) an
+    all-constant donor matrix refuses WITHOUT a half-attached None."""
+    from app.controlplane.models.tenant import TenantAccount
+    from app.experiments.models import Experiment, ExperimentAssignment
+    from app.models.organization import Organization
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name=f"o-{str(ULID()).lower()}",
+                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    project = Project(org_id=org.id, title="SC2",
+                      slug=f"sc2-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+    start_day = (datetime.now(UTC) - timedelta(days=3)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    def _user(tag):
+        u = _User(email=f"sc2-{tag}-{ULID()}@example.com", display_name=tag,
+                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        db.add(u)
+        return u
+
+    def _sub(user, day_offset, status):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=user.id, status=status,
+                          version=2,
+                          created_at=start_day + timedelta(days=day_offset,
+                                                           hours=6)))
+
+    async def _mk_sc_exp(units_by_variant):
+        exp, admin = await _mk_running(
+            db, analysis_type="observational",
+            metrics={"primary": ["project_approval_rate"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+        )
+        exp_row = await db.get(Experiment, exp.id)
+        exp_row.started_at = start_day
+        for u, variant in units_by_variant:
+            db.add(ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=u.id,
+                variant_key=variant, assigned_version=1, bucket=0,
+                is_holdout=False,
+            ))
+        ws = start_day + timedelta(days=1)
+        for variant, num in (("control", 5.0), ("treatment", 6.0)):
+            db.add(_snapshot(exp.id, "project_approval_rate", variant, ws,
+                             n=10, numerator=num, denominator=10.0))
+        await db.flush()
+        return exp, admin
+
+    # (a)+(b): two donors — approved-daily (rate 1.0) vs rejected-daily
+    # (rate 0.0); treated approved pre, approved 3 days post then silence
+    treated, d_hi, d_lo = _user("t"), _user("hi"), _user("lo")
+    await db.flush()
+    for off in range(-14, 0):
+        _sub(treated, off, SubmissionStatus.APPROVED)
+    for off in range(3):
+        _sub(treated, off, SubmissionStatus.APPROVED)
+    for off in range(-14, 14):
+        _sub(d_hi, off, SubmissionStatus.APPROVED)
+        _sub(d_lo, off, SubmissionStatus.REJECTED)
+    await db.flush()
+    exp, admin = await _mk_sc_exp(
+        [(treated, "treatment"), (d_hi, "control"), (d_lo, "control")])
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    sc = result["metrics"]["project_approval_rate"].get("synthetic_control")
+    assert sc is not None
+    assert sc["donors"] == 2 and sc["placebo_p"] is None
+    assert "SC_DONOR_POOL_SMALL" not in result["warnings"]
+    from app.experiments.services.analysis import synthetic_control
+    series = {d_hi.id: 1.0, d_lo.id: 0.0}
+    donor_ids = sorted(series)
+    expected = synthetic_control(
+        [1.0] * 14, [1.0, 1.0, 1.0] + [0.0] * 11,
+        [[series[u]] * 14 for u in donor_ids],
+        [[series[u]] * 14 for u in donor_ids],
+    )
+    assert expected is not None and sc == expected
+
+    # (c): two CONSTANT donors (both approved daily -> both 1.0 series):
+    # the core refuses the all-constant matrix; the block must be ABSENT,
+    # never attached as None
+    t2, c1, c2 = _user("t2"), _user("c1"), _user("c2")
+    await db.flush()
+    for off in range(-14, 3):
+        _sub(t2, off, SubmissionStatus.APPROVED)
+    for off in range(-14, 14):
+        _sub(c1, off, SubmissionStatus.APPROVED)
+        _sub(c2, off, SubmissionStatus.APPROVED)
+    await db.flush()
+    exp2, admin2 = await _mk_sc_exp(
+        [(t2, "treatment"), (c1, "control"), (c2, "control")])
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    assert "synthetic_control" not in result2["metrics"]["project_approval_rate"]
+    assert "SC_DONOR_POOL_SMALL" not in result2["warnings"]
+
+
 async def test_km_refuses_non_talent_sources_with_warning(db):
     """Round 188: the KM event reader is placement-based — a BILLING
     time_to_event (retention_rate) opting in must NOT get placement curves
