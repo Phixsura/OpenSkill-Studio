@@ -27,6 +27,12 @@ API = os.environ.get("E2E_EXP_API", "http://localhost:8442/api/v1")
 PASS = 0
 FAIL = 0
 
+# round 156: cleanup state lives at module level so the finally-wrapper can
+# sweep debris even when the run CRASHES mid-flight — interrupted runs used
+# to skip cleanup entirely and leave experiment corpses in the shared test
+# DB (the round-155 residue incident)
+STATE: dict = {"experiment_ids": [], "layer_key": "", "entity_type": ""}
+
 
 def uid() -> str:
     return uuid.uuid4().hex[:12]
@@ -163,6 +169,7 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
 
 
 async def main() -> int:
+    experiment_ids = STATE["experiment_ids"]  # shared with the crash sweeper
     async with httpx.AsyncClient(base_url=API, timeout=30, trust_env=False) as c:
         # ── Bootstrap: admin (SQL-promoted) + plain student ───────────
         r = await c.post("/auth/register", json={
@@ -196,7 +203,7 @@ async def main() -> int:
         check("anonymous 401", r.status_code == 401, str(r.status_code))
 
         # ── Layer + seed defs + matching baseline ─────────────────────
-        layer_key = f"e2e-match-{uid()}"
+        layer_key = STATE["layer_key"] = f"e2e-match-{uid()}"
         r = await c.post("/experiments/layers", headers=admin,
                          json={"key": layer_key, "domain": "matching"})
         check("create layer", r.status_code == 201, r.text[:200])
@@ -214,7 +221,7 @@ async def main() -> int:
         check("definition PATCH clears the cap",
               r.status_code == 200 and r.json()["data"]["cap_value"] is None,
               r.text[:200])
-        entity_type = f"e2e-{uid()[:10]}"
+        entity_type = STATE["entity_type"] = f"e2e-{uid()[:10]}"
         active_config_id, _ = await seed_matching_configs(entity_type)
 
         # ── Ethics gate over HTTP ──────────────────────────────────────
@@ -225,7 +232,7 @@ async def main() -> int:
         })
         check("create experiment", r.status_code == 201, r.text[:200])
         exp_id = r.json()["data"]["id"]
-        experiment_ids = [exp_id]
+        experiment_ids.append(exp_id)
 
         bad_spec = {
             "hypothesis": "sensitive targeting must be refused end to end",
@@ -803,10 +810,22 @@ async def main() -> int:
         check("decisions stay platform-admin even for org admins",
               r.status_code == 403, r.text[:200])
 
-    await cleanup(experiment_ids, layer_key, entity_type)
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
 
+async def run() -> int:
+    """round 156: cleanup ALWAYS runs — a mid-flight crash must not leave
+    experiment corpses in the shared test DB."""
+    try:
+        return await main()
+    finally:
+        try:
+            await cleanup(STATE["experiment_ids"], STATE["layer_key"],
+                          STATE["entity_type"])
+        except Exception as exc:  # noqa: BLE001 — report, never mask the run error
+            print(f"cleanup failed, debris may remain: {exc!r}")
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(asyncio.run(run()))

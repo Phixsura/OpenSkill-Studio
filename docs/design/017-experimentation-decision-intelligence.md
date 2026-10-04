@@ -1108,6 +1108,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 156 — E2E corpse root-cause fixed: the lifecycle script's cleanup
+ran AFTER the main body, so any mid-flight crash skipped it entirely —
+that is where the round-155 19-corpse residue came from. Cleanup now runs
+in a finally over module-level state (ids registered as they are created),
+reporting but never masking the run's own error. E2E 106 green under the
+new wrapper.
+
 Round 155 — concurrency: two racing PROMOTE decisions leave exactly one
 terminal record, one typed DECISION_STATE_INVALID loser and one promoted
 status (the terminal unique constraint's 409 mapping, now race-pinned like
