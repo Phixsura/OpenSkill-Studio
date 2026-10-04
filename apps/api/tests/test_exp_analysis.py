@@ -1275,3 +1275,47 @@ def test_its_estimate_significance_and_refusals():
     assert minimal is not None
     assert minimal["dof"] == 2
     assert minimal["level_change"]["estimate"] == pytest.approx(5.0, abs=1e-9)
+
+
+def test_km_curve_matches_hand_computation():
+    """Round 181 oracle: the textbook product-limit example by hand —
+    n0=4; day 1: one event (S=3/4); day 2: one censoring (risk set 2);
+    day 3: one event (S = 3/4 * 1/2 = 3/8). Greenwood by hand:
+    V = S^2 * (1/(4*3) + 1/(2*1))."""
+    import math as _m
+
+    from app.experiments.services.analysis import km_curve
+
+    out = km_curve({1: 1, 3: 1}, {2: 1}, 4)
+    assert out is not None
+    assert out["survival"] == pytest.approx(3.0 / 8.0, abs=1e-12)
+    expected_se = (3.0 / 8.0) * _m.sqrt(1.0 / 12.0 + 1.0 / 2.0)
+    assert out["se"] == pytest.approx(expected_se, abs=1e-12)
+    assert out["events"] == 2 and out["censored"] == 1 and out["n0"] == 4
+    assert [pt["day"] for pt in out["curve"]] == [1, 3]
+    assert out["curve"][0]["survival"] == pytest.approx(0.75)
+    assert out["curve"][1]["at_risk"] == 2  # shrunk by the censoring too
+
+    # CENSORING-CORRECTNESS: binary-at-horizon treats the censored unit as
+    # a non-event (3/4 would be 2/4 "converted" -> survival-equivalent 0.5);
+    # KM says 3/8 for survival -- the whole point of shipping it
+    assert out["survival"] != pytest.approx(0.5)
+
+
+def test_km_refusals_and_compare():
+    from app.experiments.services.analysis import km_compare, km_curve
+
+    assert km_curve({}, {}, 10) is None  # no events
+    assert km_curve({1: 1}, {}, 1) is None  # n0 < 2
+    assert km_curve({1: 5}, {}, 4) is None  # more events than at risk
+    assert km_curve({"x": "y"}, {}, 4) is None  # malformed
+
+    control = km_curve({1: 2}, {}, 10)
+    treatment = km_curve({1: 6}, {}, 10)
+    out = km_compare(control, treatment)
+    assert out is not None
+    assert out["diff"] == pytest.approx(0.4 - 0.8)
+    assert out["p"] < 0.1
+    assert out["ci"][0] <= out["diff"] <= out["ci"][1]
+    assert "censoring-correct" in out["caveat"]
+    assert km_compare(None, treatment) is None

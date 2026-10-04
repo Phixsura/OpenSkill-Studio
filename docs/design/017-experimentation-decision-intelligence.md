@@ -1145,6 +1145,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 181 — the KM epoch opens (§4.15, step 1): the product-limit pure
+core lands — km_curve over day-granular event/censor counts (risk set
+shrunk by both, Greenwood SE, textbook hand-computed oracle incl. the
+censoring-correctness contrast against binary-at-horizon) and km_compare
+(horizon survival difference, normal CI, censoring-correct caveat with
+the engine read staying authoritative). Step 2 (source counts + exp15 +
+analysis block) follows.
+
 Round 180 — the ITS block renders on the analysis page (amber
 informational strip: level/trend changes with p-values, days per side,
 the association-only caveat verbatim); behavior-pinned.

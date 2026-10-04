@@ -600,6 +600,76 @@ def cuped_adjusted_welch(control: dict, treatment: dict) -> dict | None:
 # ── Sequential monitoring ────────────────────────────────────────────
 
 
+def km_curve(
+    events: dict[int, int], censored: dict[int, int], n0: int
+) -> dict | None:
+    """§4.15 (round 181): product-limit survival over DAY-granular counts —
+    S(t) = prod over event days (1 - d_i/n_i) with the risk set shrunk by
+    both events and censorings; Greenwood variance for the SE at the
+    horizon. Refuses on n0 < 2, no events at all, or malformed counts."""
+    if n0 < 2:
+        return None
+    try:
+        event_days = {int(k): int(v) for k, v in events.items() if int(v) > 0}
+        censor_days = {int(k): int(v) for k, v in censored.items() if int(v) > 0}
+    except (TypeError, ValueError):
+        return None
+    if not event_days:
+        return None
+    days = sorted(set(event_days) | set(censor_days))
+    at_risk = n0
+    survival = 1.0
+    greenwood = 0.0
+    curve: list[dict] = []
+    for day in days:
+        d = event_days.get(day, 0)
+        c = censor_days.get(day, 0)
+        if at_risk <= 0 or d > at_risk or d < 0 or c < 0:
+            return None
+        if d > 0:
+            survival *= 1.0 - d / at_risk
+            if at_risk > d:
+                greenwood += d / (at_risk * (at_risk - d))
+            curve.append({"day": day, "survival": survival, "at_risk": at_risk})
+        at_risk -= d + c
+    se = survival * math.sqrt(greenwood) if greenwood > 0 else 0.0
+    return {
+        "survival": survival,
+        "se": se,
+        "events": sum(event_days.values()),
+        "censored": sum(censor_days.values()),
+        "n0": n0,
+        "curve": curve,
+    }
+
+
+def km_compare(control: dict | None, treatment: dict | None) -> dict | None:
+    """Survival difference at the horizon with a normal-approximation CI
+    from the Greenwood SEs — censoring-correct, unlike binary-at-horizon,
+    which stays the authoritative engine read."""
+    if control is None or treatment is None:
+        return None
+    diff = treatment["survival"] - control["survival"]
+    se = math.sqrt(control["se"] ** 2 + treatment["se"] ** 2)
+    if se > 0:
+        z = diff / se
+        p = 2.0 * norm_sf(abs(z))
+        ci = [diff - 1.959963984540054 * se, diff + 1.959963984540054 * se]
+    else:
+        z, p, ci = 0.0, 1.0, [diff, diff]
+    return {
+        "survival_control": control["survival"],
+        "survival_treatment": treatment["survival"],
+        "diff": diff,
+        "se": se,
+        "z": z,
+        "p": p,
+        "ci": ci,
+        "caveat": "Kaplan-Meier at the horizon — censoring-correct; "
+                  "the binary-at-horizon engine read stays authoritative",
+    }
+
+
 def its_estimate(pre: list[float], post: list[float]) -> dict | None:
     """§10 v3 (round 177): interrupted time series for OBSERVATIONAL runs —
     segmented OLS y_t = b0 + b1*t + b2*post + b3*(t - t0)*post over daily
