@@ -1108,6 +1108,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 158 — §4.6 v3 scope note (a phantom gap closed by analysis, not
+code): the cost_ledger and workflow_runs sources keep their
+single-covariate in-source mode ONLY, deliberately. Multi-covariate
+assembly needs >= 2 non-collinear covariates on the experiment's unit
+type; org/tenant units have exactly one metric family (cost — any second
+cost key is collinear by construction, and the joint solver rightly
+refuses singular designs), and installation units likewise have only the
+run-latency family. User units are where multiple independent sources
+exist (projects, evaluations), and that is where the provider registry
+operates. A future org-unit source family would unlock org-level multi by
+adding a provider, not by changing the math.
+
 Round 157 — the wave-24 design note repaid: the multi-covariate per-unit
 y path now winsorizes exactly like the single-covariate branch (the
 robustness knob cannot depend on how many covariates ride along); the
