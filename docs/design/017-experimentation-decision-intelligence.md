@@ -336,20 +336,22 @@ conservative combined CI ride the analysis result under
 `quantiles: {"0.5": {...}, "0.95": {...}}`; never a decision basis on
 their own (the primary comparison stays the registered engine's).
 
-### 4.15 Kaplan-Meier time-to-event (v3 round 181 — design)
+### 4.15 Kaplan-Meier time-to-event (v3 rounds 181–183 — SHIPPED)
 
-time_to_event metrics analyze as binary-at-horizon today (honest caveat
-attached). Full KM adds censoring correctness — none of the compared
-vendors ship it; this is an exceed-the-baseline item, built in the proven
-three-step shape:
+time_to_event metrics analyze as binary-at-horizon (honest caveat
+attached); full KM adds censoring correctness — none of the compared
+vendors ship it. Built in the proven three-step shape (core round 181,
+wiring round 182, console strip round 183):
 
 **Step 1 — pure core.** `km_curve(events: dict[int, int], censored:
 dict[int, int], n0: int)` over DAY-granular counts: the product-limit
 estimator S(t) = prod(1 - d_i/n_i) with Greenwood standard errors, plus
 `km_compare(control, treatment)` — the survival difference at the horizon
-with a conservative combined CI (the quantile-comparison pattern) and a
-log-rank style z over pooled increments. Refusals: n0 < 2, no events on
-either side, malformed counts.
+with a normal-approximation CI from the combined Greenwood SEs
+(z = diff/se; as-built — simpler than the log-rank sketch in the original
+design note, and honest about being a horizon comparison rather than a
+whole-curve test). Refusals: n0 < 2, no events in the arm, d > at-risk,
+malformed counts; km_compare refuses when either curve is absent.
 
 **Step 2 — analysis-time counts (REVISED, the ITS precedent).** KM counts
 are cumulative-from-assignment, so per-window snapshot rows would need
