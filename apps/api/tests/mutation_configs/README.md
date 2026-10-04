@@ -289,6 +289,16 @@ KM-wiring survivors killed by reshaping the DB fixture (day-0 event
 exactly at assigned_at; an early censor BEFORE the control event day so
 the risk set shape is visible; arms with DIFFERENT survival so comparing
 control-to-control cannot pass; a cancelled-only-event arm pinning that
-the block stays off rather than half-attaching None). Still surviving:
-the 8 wave-34 ledgered equivalents at shifted lines, and the 10
-ITS-service-block mutants (L897-L959) — round 185's target.
+the block stays off rather than half-attaching None). Round 185 closed the
+ITS-service-block mutants: 88/98 after (a) EXACT oracle-via-pure-core
+pins — the daily series is fully determined by the fixture, so the
+attached block must equal its_estimate() on that series bit-for-bit
+(kills the window-arithmetic, empty-arm and value-fallback mutants);
+(b) a second primary pinning ITS rides the FIRST primary only; (c) a
+rate-kind observational run exercising the numerator/denominator daily
+branch with its own oracle; (d) the randomized-run scenario upgraded to
+carry a sourced primary, roster and started_at so the gate's CONJUNCTION
+is what keeps the block off. Ledgered: the 8 wave-34 equivalents at
+shifted lines + the its-attach And (its_estimate never returns None on a
+fixed 14/14 non-singular design and every spec metric is in metrics_out
+by construction — both operands are tautologies at this call site).

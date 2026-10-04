@@ -1151,6 +1151,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 185 — wave 37 closure: the ITS service block lands at 88/98 via
+exact oracle-via-pure-core pins (the fixture fully determines the daily
+series, so the attached block must equal its_estimate() on that series),
+a second primary pinning first-primary-only, a rate-kind observational
+run covering the numerator/denominator daily branch, and a randomized
+run that now carries a sourced primary + roster + started_at so the
+observational gate's conjunction is load-bearing. One new ledgered
+equivalent (the its-attach And — both operands tautological at the call
+site); the KM/ITS epochs are now mutation-certified end to end.
+
 Round 184 — mutation wave 37 over the KM epoch: the pure core lands at
 21/23 (two ledgered equivalents: the zero-censor filter and the
 greenwood-zero SE gate) after exact boundary pins — n0 == 2 admissible,

@@ -1875,7 +1875,8 @@ async def test_its_rides_observational_analysis(db):
 
     exp, admin = await _mk_running(
         db, analysis_type="observational",
-        metrics={"primary": ["revision_count"], "secondary": [],
+        metrics={"primary": ["revision_count", "project_approval_rate"],
+                 "secondary": [],
                  "guardrails": [{"metric_key": "cost_usd", "op": "lte",
                                  "threshold": 100.0}]},
     )
@@ -1926,11 +1927,13 @@ async def test_its_rides_observational_analysis(db):
                           version=4,
                           created_at=start_day + timedelta(days=offset,
                                                            hours=6)))
-    # snapshots so the primary itself is computable
+    # snapshots so the primaries themselves are computable
     ws = start_day + timedelta(days=1)
     for variant, total in (("control", 10.0), ("treatment", 14.0)):
         db.add(_snapshot(exp.id, "revision_count", variant, ws,
                          n=10, sum_value=total, sum_sq=total * 2.5))
+        db.add(_snapshot(exp.id, "project_approval_rate", variant, ws,
+                         n=10, numerator=total / 2.0, denominator=10.0))
     await db.flush()
 
     result = await AnalysisService(db).run(exp.id, actor=admin)
@@ -1938,19 +1941,67 @@ async def test_its_rides_observational_analysis(db):
     its = result["metrics"]["revision_count"].get("its")
     assert its is not None
     assert its["n_pre"] == 14 and its["n_post"] == 14
-    # pre daily mean 1.0 (only 3 post days carry data; silent days are 0 —
-    # the jump from 1.0-steady to a 3/0 mix still shifts the level)
+    # EXACT oracle pin (round 185): the daily series is fully determined —
+    # pre steady 1.0/day, post [3,3,3] then silence-as-zero — so the block
+    # must equal the pure core's answer on that series bit-for-bit
+    from app.experiments.services.analysis import its_estimate
+    expected = its_estimate([1.0] * 14, [3.0, 3.0, 3.0] + [0.0] * 11)
+    assert its["level_change"]["estimate"] == pytest.approx(
+        expected["level_change"]["estimate"], abs=1e-9)
+    assert its["trend_change"]["estimate"] == pytest.approx(
+        expected["trend_change"]["estimate"], abs=1e-9)
+    assert its["level_change"]["p"] == pytest.approx(
+        expected["level_change"]["p"], abs=1e-9)
     assert "association only" in its["caveat"]
+    # ITS rides the FIRST primary only ([:1] is the design, not a slice bug)
+    assert "its" not in result["metrics"]["project_approval_rate"]
 
-    # randomized runs never carry the block
-    exp_r, admin_r = await _mk_running(db)
-    db.add(_snapshot(exp_r.id, "exposure_rate", "control", ws,
-                     n=10, numerator=5.0, denominator=10.0))
-    db.add(_snapshot(exp_r.id, "exposure_rate", "treatment", ws,
-                     n=10, numerator=6.0, denominator=10.0))
+    # a rate-kind primary exercises the numerator/denominator daily branch:
+    # all submissions are approved -> pre 1.0 steady, post [1,1,1] then 0
+    exp2, admin2 = await _mk_running(
+        db, analysis_type="observational",
+        metrics={"primary": ["project_approval_rate"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    db.add(ExperimentAssignment(
+        experiment_id=exp2.id, unit_type="user", unit_id=unit.id,
+        variant_key="treatment", assigned_version=1, bucket=0,
+        is_holdout=False,
+    ))
+    exp2_row = await db.get(Experiment, exp2.id)
+    exp2_row.started_at = start_day
+    for variant, num in (("control", 5.0), ("treatment", 6.0)):
+        db.add(_snapshot(exp2.id, "project_approval_rate", variant, ws,
+                         n=10, numerator=num, denominator=10.0))
+    await db.flush()
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    its2 = result2["metrics"]["project_approval_rate"].get("its")
+    assert its2 is not None
+    expected2 = its_estimate([1.0] * 14, [1.0, 1.0, 1.0] + [0.0] * 11)
+    assert its2["level_change"]["estimate"] == pytest.approx(
+        expected2["level_change"]["estimate"], abs=1e-9)
+    assert its2["trend_change"]["estimate"] == pytest.approx(
+        expected2["trend_change"]["estimate"], abs=1e-9)
+
+    # randomized runs never carry the block — even with a SOURCED primary,
+    # an assigned roster and a started_at (the gate is the conjunction)
+    exp_r, admin_r = await _mk_running(
+        db, metrics={"primary": ["revision_count"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    db.add(ExperimentAssignment(
+        experiment_id=exp_r.id, unit_type="user", unit_id=unit.id,
+        variant_key="treatment", assigned_version=1, bucket=0,
+        is_holdout=False,
+    ))
+    for variant, total in (("control", 10.0), ("treatment", 14.0)):
+        db.add(_snapshot(exp_r.id, "revision_count", variant, ws,
+                         n=10, sum_value=total, sum_sq=total * 2.5))
     await db.flush()
     result_r = await AnalysisService(db).run(exp_r.id, actor=admin_r)
-    assert "its" not in result_r["metrics"]["exposure_rate"]
+    assert "its" not in result_r["metrics"]["revision_count"]
 
 
 async def test_km_block_rides_time_to_event_primary(db):
