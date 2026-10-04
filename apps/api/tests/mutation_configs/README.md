@@ -161,3 +161,19 @@ hand-spelled against the frequentist read), and se == 0 is REACHABLE
 stores one even for a single covariate). Ledgered: the expected_loss
 trailing `if se > 0` (with z0 already guarded to 0, the expression is
 identically 0 at se == 0 — equivalent to the else branch).
+
+## wave24_binary_sources.json (round 147)
+
+_source_projects + _source_evaluations after the binary-CUPED branches:
+42/43 killed. Kills needed exactly-on-timestamp rows on EVERY window edge
+of every branch (shared per-submission query, single-CUPED pre/cur, multi
+per-unit y, binary per-unit, evaluations per-unit and per-review), an
+ANTISYMMETRIC review fixture (approvals on users 0 and 2 only, so an
+inverted join or status predicate shifts the per-unit map), and an xy_sum
+pin that routes the binary y through the covariate cross term. Ledgered:
+the multi-branch k > 1 gate's GtE variant — at k == 1 both branches yield
+identical sufficient stats (the provider computes the same x as the
+in-source path); the only divergence is that the multi branch does NOT
+winsorize y, unobservable while revision_count ships without a winsorize
+knob. Design note recorded in ADR §4.6 v3: multi-covariate per-unit y is
+NOT winsorized (the single-covariate branch is).

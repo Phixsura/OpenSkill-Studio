@@ -1101,6 +1101,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 147 — mutation wave 24 over the project/evaluation sources after
+the binary-CUPED branches: 42/43 (every branch's window edges proven by
+exactly-on-timestamp rows; an antisymmetric review fixture kills inverted
+join/status mutants; xy_sum pins the binary y through the covariate cross
+term). Ledgered: the k > 1 gate's >= variant — at k == 1 both branches
+produce identical sufficient stats; the single observable divergence is
+that the MULTI per-unit y path does not winsorize (design note: §4.6 v3;
+the single-covariate branch does — a future winsorize-enabled covariate
+metric should unify this).
+
 Round 146 — list-page data-flow badge: the experiments list injects
 last_exposure_at (ONE grouped exposure query per page, never per-row) and
 the console shows flowing / stale (>48h) / no exposures per running row —

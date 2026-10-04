@@ -914,6 +914,21 @@ async def test_cuped_covariates_end_to_end(db):
                 status=SubmissionStatus.APPROVED, version=y + 1,
             )
         )
+    # wave-24 boundary rows on control unit0 (level 0, x=0, y=0 so far):
+    # exactly ON lookback_start -> IN the pre window (x += 1)
+    unit0 = next(u for u, arm, level in users if arm == "control" and level == 0)
+    lookback_start = window_start - timedelta(days=28)
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
+                      status=SubmissionStatus.APPROVED, version=2,
+                      created_at=lookback_start))
+    # exactly ON window_start -> OUT of pre (strict <), IN the window (y += 1)
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
+                      status=SubmissionStatus.APPROVED, version=2,
+                      created_at=window_start))
+    # exactly ON window_end -> OUT of the window entirely
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
+                      status=SubmissionStatus.APPROVED, version=5,
+                      created_at=window_end))
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
@@ -935,11 +950,12 @@ async def test_cuped_covariates_end_to_end(db):
     # per-UNIT aggregation: n = units, not submissions
     assert control.n == 4
     assert control.provenance["aggregation"] == "per_unit"
-    # x per control unit = (0,1,2,3); y identical in control
-    assert float(control.cov_sum) == 6.0
-    assert float(control.cov_sum_sq) == 14.0
-    assert float(control.cov_xy_sum) == 14.0
-    assert float(control.sum_value) == 6.0
+    # x per control unit = (1,1,2,3) after the lookback-edge row; the
+    # window_start row stays OUT of pre and IN the window (y unit0 = 1)
+    assert float(control.cov_sum) == 7.0
+    assert float(control.cov_sum_sq) == 15.0
+    assert float(control.cov_xy_sum) == 15.0
+    assert float(control.sum_value) == 7.0
     treatment = snapshots["treatment"]
     assert float(treatment.sum_value) == 10.0  # (1,2,3,4)
     assert float(treatment.cov_sum) == 6.0
@@ -1074,12 +1090,21 @@ async def test_evaluations_source_review_pass_rate(db):
     old = datetime.now(UTC) - timedelta(days=3)
     db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
                             status=ReviewStatus.APPROVED, score=95, created_at=old))
+    # wave-24 edges: exactly ON window_start counts; exactly ON window_end
+    # does not (the half-open [start, end) window)
+    window_start, window_end = _today_window()
+    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=77,
+                            created_at=window_start))
+    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=78,
+                            created_at=window_end))
     await db.flush()
     stats = await _run_source(
         db, "evaluations", definition_key="practical_pass_rate",
         units=[user.id], unit_type="user",
     )
-    assert stats["treatment"] == {"n": 3, "numerator": 2, "denominator": 3}
+    assert stats["treatment"] == {"n": 4, "numerator": 3, "denominator": 4}
 
 
 async def test_talent_outcomes_source_placements(db):
@@ -2427,6 +2452,11 @@ async def test_multi_covariate_snapshot_assembly(db):
     db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
                       status=SubmissionStatus.APPROVED, version=1,
                       created_at=window_start))
+    # wave-24: a row exactly ON window_end stays OUT of the window (the
+    # strict < upper edge of the per-unit y query) — y totals unchanged
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
+                      status=SubmissionStatus.APPROVED, version=9,
+                      created_at=window_end))
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
@@ -3077,12 +3107,26 @@ async def test_binary_cuped_per_unit_snapshot(db):
         units.append(u.id)
     # unit0: one APPROVED + one REJECTED (y=1); unit1: REJECTED only (y=0);
     # unit2: silent (y=0, ITT)
+    # unit0 has ONLY approved rows and unit2 only a rejected one — an
+    # inverted status predicate flips their y and the xy_sum below catches it
     for user_id, status in ((units[0], SubmissionStatus.APPROVED),
-                            (units[0], SubmissionStatus.REJECTED),
+                            (units[2], SubmissionStatus.REJECTED),
                             (units[1], SubmissionStatus.REJECTED)):
         db.add(Submission(org_id=org.id, project_id=project.id,
                           user_id=user_id, status=status, version=2,
                           created_at=t0))
+    # pre-period revisions for unit0 (x=2): xy_sum = y0*2 pins y0 exactly
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
+                      status=SubmissionStatus.APPROVED, version=3,
+                      created_at=window_start - timedelta(days=3)))
+    # wave-24 edges: unit1 approves exactly ON window_start (IN -> y=1);
+    # unit2 approves exactly ON window_end (OUT -> stays y=0)
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=window_start))
+    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[2],
+                      status=SubmissionStatus.APPROVED, version=1,
+                      created_at=window_end))
     await db.flush()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -3094,10 +3138,11 @@ async def test_binary_cuped_per_unit_snapshot(db):
     assert snaps
     total_units = sum(int(s.n) for s in snaps)
     total_num = sum(float(s.numerator) for s in snaps)
-    assert total_units == 3  # UNITS, not submissions (which would be 3 too...
-    # ...so pin the distinction by the numerator: 1 approved UNIT, though the
-    # approved unit also has a rejected submission)
-    assert total_num == 1.0
+    assert total_units == 3  # UNITS, not submissions
+    # unit0 approved mid-window, unit1 approved exactly ON window_start (the
+    # >= edge), unit2 only exactly ON window_end (the strict-< edge keeps it
+    # out) -> 2 approved units
+    assert total_num == 2.0
     carrying = [s for s in snaps if s.covariates]
     assert carrying, "covariates map must ride the binary snapshot"
     for snap in carrying:
@@ -3105,6 +3150,11 @@ async def test_binary_cuped_per_unit_snapshot(db):
         assert set(entry) >= {"sum", "sum_sq", "xy_sum"}
         assert float(snap.cov_sum) == entry["sum"]  # mirror law
         assert snap.provenance.get("aggregation") == "per_unit"
+    # unit0 is the only unit with pre-period revisions (x=2) AND an approved
+    # window (y=1): total xy == 2 pins the status predicate through the
+    # covariate cross term
+    total_xy = sum(s.covariates["revision_count"]["xy_sum"] for s in carrying)
+    assert total_xy == 2.0
 
 
 async def test_evaluations_source_per_unit_under_variance_reduction(db):
@@ -3140,22 +3190,38 @@ async def test_evaluations_source_per_unit_under_variance_reduction(db):
         users.append(u.id)
     window_start, window_end = _today_window()
     t0 = window_start + timedelta(hours=1)
-    # unit0: APPROVED + REVISION_REQUESTED reviews (y=1); unit1: only
-    # REVISION_REQUESTED (y=0); unit2: silent (y=0, ITT)
+    # ANTISYMMETRIC fixture (wave 24): every user owns a submission;
+    # approvals live on users 0 and 2 ONLY, so an inverted join (reviews
+    # matched to the WRONG submission's user) or status predicate shifts
+    # the per-unit map visibly.
     subs = {}
-    for user_id in users[:2]:
+    for user_id in users:
         sub = Submission(org_id=org.id, project_id=project.id, user_id=user_id,
                          status=SubmissionStatus.SUBMITTED, version=1,
                          created_at=t0)
         db.add(sub)
         await db.flush()
         subs[user_id] = sub
-    for user_id, status in ((users[0], ReviewStatus.APPROVED),
-                            (users[0], ReviewStatus.REVISION_REQUESTED),
-                            (users[1], ReviewStatus.REVISION_REQUESTED)):
-        db.add(SubmissionReview(submission_id=subs[user_id].id,
-                                reviewer_type=ReviewerType.AI,
-                                status=status, score=70, created_at=t0))
+    # users[0]: APPROVED mid-window (y=1); users[1]: REVISION_REQUESTED
+    # mid-window + APPROVED exactly ON window_end (OUT: y=0, and the <=
+    # mutant flips it); users[2]: APPROVED exactly ON window_start (IN: the
+    # >= edge, y=1)
+    db.add(SubmissionReview(submission_id=subs[users[0]].id,
+                            reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=90,
+                            created_at=t0))
+    db.add(SubmissionReview(submission_id=subs[users[1]].id,
+                            reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.REVISION_REQUESTED, score=40,
+                            created_at=t0))
+    db.add(SubmissionReview(submission_id=subs[users[1]].id,
+                            reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=80,
+                            created_at=window_end))
+    db.add(SubmissionReview(submission_id=subs[users[2]].id,
+                            reviewer_type=ReviewerType.AI,
+                            status=ReviewStatus.APPROVED, score=81,
+                            created_at=window_start))
     await db.flush()
 
     await MetricService(db).ensure_seed_definitions()
@@ -3178,6 +3244,33 @@ async def test_evaluations_source_per_unit_under_variance_reduction(db):
     )
     arm = out["treatment"]
     assert arm["n"] == 3 and arm["denominator"] == 3
-    assert arm["numerator"] == 1  # approved UNITS, not approved reviews
+    assert arm["numerator"] == 2
     assert arm["_aggregation"] == "per_unit"
-    assert arm["_unit_values"] == {users[0]: 1.0, users[1]: 0.0, users[2]: 0.0}
+    assert arm["_unit_values"] == {users[0]: 1.0, users[1]: 0.0, users[2]: 1.0}
+
+
+async def test_projects_per_submission_window_boundaries(db):
+    """Wave 24: the projects source's SHARED rows query (per-submission
+    modes) honors the half-open [window_start, window_end) — exactly-ON
+    rows pinned on both edges for approval_rate (no variance_reduction)."""
+    from app.models.project import Submission, SubmissionStatus
+
+    _tenant, org = await _mk_org(db)
+    user = await _mk_admin(db)
+    project = await _mk_project(db, org)
+    window_start, window_end = _today_window()
+    for created_at, status in (
+        (window_start, SubmissionStatus.APPROVED),            # IN (>= edge)
+        (window_start + timedelta(hours=2), SubmissionStatus.REJECTED),
+        (window_end, SubmissionStatus.APPROVED),              # OUT (< edge)
+        (window_start - timedelta(seconds=1), SubmissionStatus.APPROVED),
+    ):
+        db.add(Submission(org_id=org.id, project_id=project.id,
+                          user_id=user.id, status=status, version=1,
+                          created_at=created_at))
+    await db.flush()
+    out = await _run_source(
+        db, "projects", definition_key="project_approval_rate",
+        units=[user.id], unit_type="user",
+    )
+    assert out["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
