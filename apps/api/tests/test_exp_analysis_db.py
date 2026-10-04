@@ -1984,6 +1984,12 @@ async def test_its_rides_observational_analysis(db):
     assert its2["trend_change"]["estimate"] == pytest.approx(
         expected2["trend_change"]["estimate"], abs=1e-9)
 
+    # segment-sliced runs never carry the block either (round 191 pin:
+    # the segment early-return precedes the ITS block)
+    result_seg = await AnalysisService(db).run(
+        exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz")
+    assert "its" not in result_seg["metrics"]["revision_count"]
+
     # randomized runs never carry the block — even with a SOURCED primary,
     # an assigned roster and a started_at (the gate is the conjunction)
     exp_r, admin_r = await _mk_running(
@@ -2139,6 +2145,14 @@ async def test_km_block_rides_time_to_event_primary(db):
         assert "censoring-correct" in km["caveat"]
         # the binary-at-horizon engine read stays alongside
         assert "comparisons" in result["metrics"]["placement_outcome_rate"]
+
+        # §4.8 pin (round 191 audit): segment-sliced runs RETURN EARLY
+        # (before the km/its/did blocks), so a segment result can never
+        # caption whole-population curves — pinned here so a future
+        # refactor that moves the early return re-fails this
+        result_seg = await AnalysisService(db).run(
+            exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz")
+        assert "km" not in result_seg["metrics"]["placement_outcome_rate"]
 
         # a cancelled placement is NOT an event: cancelling the only
         # control event leaves the control curve absent -> the whole km

@@ -1155,6 +1155,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 191 — segment-slice audit (suspected #71, acquitted): KM, ITS and
+DiD all compute from whole-population reads, so a segment-sliced run
+carrying them would caption population curves as segment results — but
+segment runs return early (informational payload, no look recorded)
+before any of the three blocks, so the defect is unreachable. Pinned
+with segment-absence asserts on the KM and ITS fixtures so a refactor
+that moves the early return re-fails them; no production change.
+
 Round 190 — housekeeping: KM_SOURCE_UNSUPPORTED gets its §18a runbook
 row (the new-warning-ships-with-its-row law), and the PR body syncs
 through the console-tail fix.
