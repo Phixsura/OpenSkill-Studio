@@ -687,6 +687,21 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     this writing: mutation waves 1–35 (~1100 mutants, every module waved),
     fuzz totality, 131 full-suite certifications (latest 6946/6946), live
     E2E 106 checks, defects #1–#69 each fixed with a kill-proof.
+13. **Causal-inference epochs (rounds 177–197)** — ITS (§10 v3, segmented
+    OLS over on-demand daily source windows, rounds 177–180) + full
+    KAPLAN-MEIER (§4.15, censoring-correct horizon block from on-demand
+    assignment/placement counts, source-gated per #70, rounds 181–192) +
+    SYNTHETIC CONTROL (§4.16, simplex donor weights, placebo permutation
+    inference, per-unit daily fan-out, rounds 193–197) — each epoch
+    design → pure core with hand oracle → analysis-time wiring pinned
+    bit-for-bit against the core → console strip → mutation wave (36–39)
+    with reasoned ledgers. Defects #70–#72 (wrong-source KM opt-in; the
+    Explorer offering what the API refuses; a mid-wave commit shipping a
+    live mutant — now an iron law). Live E2E 110 checks; certifications
+    through 139 (6955/6955). Observational analyses carry the three
+    blocks at ~1s wall against local Postgres (ITS 28 + SC 28 on-demand
+    daily reads + KM's two queries) — informational cost, segment runs
+    exempt via the early return.
 
 ## 17. Known edges & explicit decisions
 
@@ -1187,6 +1202,10 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 198 — §16 gains item 13 (the causal-inference epochs, defects
+#70-#72, waves 36-39, the ~1s observational wall-clock readout measured
+on the SC fixture) and the PR body syncs through wave 39.
 
 Round 197 — wave 39 over the SC epoch, and defect #72 IN THE LOOP
 ITSELF: a docs commit ran `git add -A` while wave 39 was mid-flight and
