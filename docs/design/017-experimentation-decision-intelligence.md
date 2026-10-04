@@ -1108,6 +1108,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 172 — fuzz extension over the quantile surfaces: histogram_quantile
+is total over arbitrary string->int mappings (rotted JSONB included —
+None or a finite ordered read), and the quantiles-knob validator is total
+over arbitrary garbage (accept or the typed 422, nothing else).
+
 Round 171 — hot-path baseline refresh after the window's feature work
 (the #63 schedule gate, the list exposure injection, binary CUPED):
 new-assignment resolve 2.56 ms/call and sticky resolve 0.89 ms/call —

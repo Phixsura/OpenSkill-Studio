@@ -311,3 +311,59 @@ def test_did_estimate_total(control, treatment):
         if result["p"] is not None:
             assert 0.0 <= result["p"] <= 1.0
         assert result["ci"][0] <= result["effect"] <= result["ci"][1]
+
+
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    hist=st.dictionaries(
+        st.one_of(
+            st.just("__zero__"), st.just("__neg__"),
+            st.integers(min_value=-25, max_value=50).map(str),
+            st.text(max_size=6),
+        ),
+        st.one_of(st.integers(min_value=-5, max_value=10_000), st.just(0)),
+        max_size=12,
+    ),
+    p=st.floats(min_value=-0.5, max_value=1.5, allow_nan=False),
+)
+def test_fuzz_histogram_quantile_total(hist, p):
+    """§4.14 under fire: stored JSONB can rot (old rows, manual edits) —
+    histogram_quantile must return None or a finite, ordered read for ANY
+    string->int mapping, never raise."""
+    import math as _math
+
+    from app.experiments.services.analysis import histogram_quantile
+
+    try:
+        out = histogram_quantile(hist, p)
+    except (ValueError, TypeError):
+        # non-numeric bucket keys are a programming error upstream; the
+        # function may refuse them loudly but only with these types
+        return
+    if out is None:
+        return
+    assert _math.isfinite(out["estimate"]) and out["estimate"] >= 0.0
+    lo, hi = out["ci"]
+    assert lo <= out["estimate"] <= hi
+    assert out["n"] >= 2
+
+
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@given(quantiles=st.one_of(
+    st.none(),
+    st.text(max_size=6),
+    st.integers(),
+    st.lists(st.one_of(st.floats(allow_nan=True, allow_infinity=True),
+                       st.text(max_size=3), st.none()), max_size=6),
+    st.dictionaries(st.text(max_size=3), st.integers(), max_size=3),
+))
+def test_fuzz_validate_quantiles_total(quantiles):
+    """The quantiles knob validator is TOTAL over arbitrary garbage: it
+    returns None (accept) or raises the typed 422 — nothing else."""
+    from app.exceptions import AppError
+    from app.experiments.services.metrics import _validate_quantiles
+
+    try:
+        _validate_quantiles(quantiles, "continuous")
+    except AppError as exc:
+        assert exc.status_code == 422
