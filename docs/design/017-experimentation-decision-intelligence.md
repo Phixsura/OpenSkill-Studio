@@ -1108,6 +1108,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 149 — integration snippet card on the detail page (SDK developer
+experience): the experiment's own key pre-filled into the useExperiment
+usage and the raw self-serve resolve/exposure calls — wiring a surface is
+one copy-paste. Rounds 148/148b were doc-honesty: §4.13 now describes the
+IMPLEMENTED health-signal channels (no dedicated table exists) and §17's
+deferred list no longer claims multi-covariate CUPED is deferred.
+
 Round 147 — mutation wave 24 over the project/evaluation sources after
 the binary-CUPED branches: 42/43 (every branch's window edges proven by
 exactly-on-timestamp rows; an antisymmetric review fixture kills inverted
