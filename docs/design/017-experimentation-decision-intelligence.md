@@ -1230,6 +1230,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 202 — §4.6b steps 1-2 land: auto_select_covariates (pooled r from
+stored sums alone, |r| >= 0.1, strongest-first with a deterministic key
+tie-break, at most 3, degenerate/missing candidates never guessed at),
+the "auto" literal through the spec validator (lone-literal only), the
+snapshot fold resolving auto to every provider's canonical covariate
+(AUTO_COVARIATE_DEFAULTS), the #63 schedule gate checking what auto
+RESOLVES to, and the analysis wiring: per-metric selection, chosen keys
+riding the cuped block (an auto-selected SINGLETON still takes the joint
+estimator — the legacy single path reads columns auto never writes),
+CUPED_AUTO_SELECTED / CUPED_AUTO_NONE warnings with the generic
+UNAVAILABLE bark suppressed when auto-none already explains itself.
+Hand-oracle pure tests + a DB wiring test on seeded aggregates.
+
 Round 201 — the auto-covariate epoch opens (§4.6b, step 0): the last
 deferred analytics item in its honest minimal form — "auto" folds every
 provider's default covariate into snapshots, analysis selects by pooled

@@ -2235,6 +2235,65 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
     assert "SC_DONOR_POOL_SMALL" not in result2["warnings"]
 
 
+async def test_auto_covariate_selection_rides_analysis(db):
+    """Round 202 (§4.6b): covariate_metrics ["auto"] selects from the
+    stored aggregates — the correlated candidate is chosen (joint path
+    even as a singleton; the legacy single path reads columns auto never
+    writes), the constant one skipped, the run warns CUPED_AUTO_SELECTED;
+    aggregates without covariates warn CUPED_AUTO_NONE (and never the
+    generic UNAVAILABLE double-bark)."""
+    exp, admin = await _mk_running(db, variance_reduction={
+        "method": "cuped", "covariate_metrics": ["auto"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["revision_count"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    covs_control = {
+        "revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0},
+        "practical_pass_rate": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 104.0},
+    }
+    covs_treatment = {
+        "revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 150.0},
+        "practical_pass_rate": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 112.0},
+    }
+    db.add(_snapshot(exp.id, "revision_count", "control", ws,
+                     n=4, sum_value=52.0, sum_sq=696.0,
+                     covariates=covs_control))
+    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
+                     n=4, sum_value=56.0, sum_sq=804.0,
+                     covariates=covs_treatment))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "CUPED_AUTO_SELECTED" in result["warnings"]
+    comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    cuped = comparison.get("cuped")
+    assert cuped is not None
+    # only the correlated candidate qualifies (the pass-rate covariate is
+    # constant -> zero variance -> skipped), and the SINGLETON still rides
+    # the joint estimator
+    assert cuped.get("covariates") == ["revision_count"]
+    assert cuped.get("mode") == "multi"
+
+    # auto with NO covariate aggregates: honest refusal, single bark
+    exp2, admin2 = await _mk_running(db, variance_reduction={
+        "method": "cuped", "covariate_metrics": ["auto"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["revision_count"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
+                     n=4, sum_value=52.0, sum_sq=696.0))
+    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
+                     n=4, sum_value=56.0, sum_sq=804.0))
+    await db.flush()
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    assert "CUPED_AUTO_NONE" in result2["warnings"]
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result2["warnings"]
+    comparison2 = result2["metrics"]["revision_count"]["comparisons"]["treatment"]
+    assert "cuped" not in comparison2
+
+
 async def test_km_refuses_non_talent_sources_with_warning(db):
     """Round 188: the KM event reader is placement-based — a BILLING
     time_to_event (retention_rate) opting in must NOT get placement curves

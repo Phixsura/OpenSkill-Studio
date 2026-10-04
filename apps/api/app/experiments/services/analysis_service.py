@@ -319,7 +319,7 @@ class AnalysisService:
     @staticmethod
     def _compare(
         kind: str, engine: str, control: dict, treatment: dict,
-        covariate_keys: list[str] | None = None
+        covariate_keys: list[str] | None = None, auto: bool = False,
     ) -> dict:
         if kind in ("binary", "time_to_event"):
             x1 = control.get("numerator") or 0.0
@@ -347,7 +347,7 @@ class AnalysisService:
                                "cov_sum_sq": treatment.get("cov_sum_sq"),
                                "cov_xy_sum": treatment.get("cov_xy_sum")}
                 adjusted = None
-                if len(covariate_keys) > 1:
+                if len(covariate_keys) > 1 or auto:
                     multi = stats.multi_cuped_adjusted_welch(
                         y_control, y_treatment, covariate_keys
                     )
@@ -401,7 +401,7 @@ class AnalysisService:
             result = stats.bayes_continuous(*args)
         else:
             result = stats.welch_from_stats(*args)
-        if covariate_keys and len(covariate_keys) > 1:
+        if covariate_keys and (len(covariate_keys) > 1 or auto):
             multi = stats.multi_cuped_adjusted_welch(
                 {"n": control.get("n"), "sum": control.get("sum_value"),
                  "sum_sq": control.get("sum_sq"),
@@ -607,6 +607,46 @@ class AnalysisService:
                     "binary" if aggregated[control_key].get("denominator") else "continuous"
                 )
                 entry["kind"] = kind
+                # §4.6b (round 202): the "auto" spec selects covariates per
+                # metric from the STORED aggregates (pooled |r| >= 0.1, at
+                # most 3, deterministic). Selection is never silent: chosen
+                # keys ride the cuped block and the run warns
+                # CUPED_AUTO_SELECTED; nothing qualifying warns
+                # CUPED_AUTO_NONE and degrades to plain Welch.
+                cuped_auto = (
+                    spec.variance_reduction is not None
+                    and spec.variance_reduction.covariates() == ["auto"]
+                )
+                if cuped_auto:
+                    from app.experiments.services.metrics import (
+                        resolve_covariates,
+                    )
+
+                    def _y_arm(a: dict, kind: str = kind) -> dict:
+                        if kind in ("binary", "time_to_event"):
+                            y = a.get("numerator") or 0.0
+                            return {"n": a.get("denominator") or 0.0,
+                                    "sum": y, "sum_sq": y,
+                                    "covariates": a.get("covariates")}
+                        return {"n": a.get("n") or 0.0,
+                                "sum": a.get("sum_value") or 0.0,
+                                "sum_sq": a.get("sum_sq") or 0.0,
+                                "covariates": a.get("covariates")}
+
+                    metric_covariate_keys = stats.auto_select_covariates(
+                        [_y_arm(a) for a in aggregated.values()],
+                        resolve_covariates(spec.variance_reduction),
+                    ) or None
+                    flag = ("CUPED_AUTO_SELECTED" if metric_covariate_keys
+                            else "CUPED_AUTO_NONE")
+                    if flag not in warnings:
+                        warnings.append(flag)
+                else:
+                    metric_covariate_keys = (
+                        spec.variance_reduction.covariates()
+                        if spec.variance_reduction is not None
+                        else None
+                    )
                 if definition:
                     entry["direction"] = definition.direction
                 comparisons = {}
@@ -638,11 +678,8 @@ class AnalysisService:
                             warnings.append("PRE_BALANCE_SUSPECT")
                     comparison = self._compare(
                         kind, spec.stats_engine, aggregated[control_key], arm,
-                        covariate_keys=(
-                            spec.variance_reduction.covariates()
-                            if spec.variance_reduction is not None
-                            else None
-                        ),
+                        covariate_keys=metric_covariate_keys,
+                        auto=cuped_auto,
                     )
                     # §4.14 (round 124): quantile reads for continuous
                     # metrics whose definition requests them — informational,
@@ -1078,7 +1115,9 @@ class AnalysisService:
             )
             if not any_cuped:
                 # Configured but no source computed covariate aggregates yet
-                warnings.append("CUPED_COVARIATES_UNAVAILABLE")
+                # (auto-none already explains itself — no double bark)
+                if "CUPED_AUTO_NONE" not in warnings:
+                    warnings.append("CUPED_COVARIATES_UNAVAILABLE")
             elif len(spec.variance_reduction.covariates()) > 1 and not any(
                 (comparison.get("cuped") or {}).get("mode") == "multi"
                 for metric in metrics_out.values()

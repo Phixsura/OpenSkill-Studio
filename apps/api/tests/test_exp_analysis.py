@@ -1447,3 +1447,67 @@ def test_synthetic_control_placebo_p_is_one_when_fit_is_perfect():
     assert out["post_rmspe"] == pytest.approx(0.0, abs=1e-5)
     assert out["placebo_p"] == pytest.approx(1.0)
     assert out["placebo_p"] <= 1.0
+
+
+def test_auto_select_covariates_hand_oracle():
+    """Round 202 (§4.6b): selection from stored sums alone — strongest
+    |r| first, threshold exclusion, degenerate/missing candidates skipped,
+    deterministic tie-break by key, max_k cap."""
+    from app.experiments.services.analysis import auto_select_covariates
+
+    def arm(n, sy, syy, covs):
+        return {"n": n, "sum": sy, "sum_sq": syy, "covariates": covs}
+
+    # strong positive (r ~ 0.976), perfect negative, near-zero, constant
+    arms = [
+        arm(4, 52.0, 696.0, {
+            "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0},
+            "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -140.0},
+            "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 104.0},
+        }),
+        arm(4, 56.0, 804.0, {
+            "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 150.0},
+            "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -150.0},
+            "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 112.0},
+        }),
+    ]
+    out = auto_select_covariates(arms, ["strong", "anti", "flat"])
+    # |r| equal for strong/anti (same magnitude) -> tie-break by key:
+    # "anti" < "strong"; the constant covariate is skipped (zero variance)
+    assert out == ["anti", "strong"]
+
+    # threshold: an |r| below 0.1 is excluded
+    weak_arms = [
+        arm(4, 52.0, 696.0,
+            {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 130.4}}),
+        arm(4, 56.0, 804.0,
+            {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.4}}),
+    ]
+    # pooled cov = 270.8 - 270 = 0.8 -> r = 0.8/sqrt(420) ~ 0.039 < 0.1
+    assert auto_select_covariates(weak_arms, ["weak"]) == []
+
+    # a candidate missing from ANY arm is never guessed at
+    partial = [
+        arm(4, 52.0, 696.0,
+            {"strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0}}),
+        arm(4, 56.0, 804.0, {}),
+    ]
+    assert auto_select_covariates(partial, ["strong"]) == []
+
+    # max_k caps the list
+    assert auto_select_covariates(arms, ["strong", "anti"], max_k=1) == ["anti"]
+
+
+def test_variance_reduction_auto_literal_validation():
+    """Round 202: ["auto"] is a reserved lone literal."""
+    from app.experiments.schemas import VarianceReductionSpec
+
+    spec = VarianceReductionSpec(method="cuped", covariate_metrics=["auto"])
+    assert spec.covariates() == ["auto"]
+    with pytest.raises(ValueError):
+        VarianceReductionSpec(
+            method="cuped", covariate_metrics=["auto", "revision_count"])
+
+    from app.experiments.services.metrics import resolve_covariates
+    assert resolve_covariates(spec) == ["practical_pass_rate",
+                                        "revision_count"]

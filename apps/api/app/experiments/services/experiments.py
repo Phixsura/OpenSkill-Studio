@@ -395,7 +395,11 @@ class ExperimentService:
             *(g.metric_key for g in spec.metrics.guardrails),
         }
         if spec.variance_reduction is not None:
-            referenced.update(spec.variance_reduction.covariates())
+            # §4.6b: "auto" is a reserved selection literal, not a metric
+            # key — the gate checks what it RESOLVES to instead
+            from app.experiments.services.metrics import resolve_covariates
+
+            referenced.update(resolve_covariates(spec.variance_reduction))
         known = {
             key
             for (key,) in (

@@ -103,6 +103,21 @@ def _validate_quantiles(quantiles, kind) -> None:
 
 COVARIATE_PROVIDERS: dict = {}
 
+# §4.6b (round 202): the reserved "auto" covariate spec folds every
+# provider's CANONICAL covariate so analysis-time selection has all the
+# candidates in the stored aggregates
+AUTO_COVARIATE_DEFAULTS = {
+    "projects": "revision_count",
+    "evaluations": "practical_pass_rate",
+}
+
+
+def resolve_covariates(variance_reduction) -> list[str]:
+    keys = variance_reduction.covariates()
+    if keys == ["auto"]:
+        return sorted(AUTO_COVARIATE_DEFAULTS.values())
+    return keys
+
 
 def covariate_provider(source_name: str):
     def wrap(fn):
@@ -199,7 +214,7 @@ async def assemble_covariates(
     )
     out: dict = {}
     x_maps: dict[str, dict[str, float]] = {}
-    for cov_key in variance_reduction.covariates():
+    for cov_key in resolve_covariates(variance_reduction):
         definition = definitions_by_key.get(cov_key)
         if definition is None:
             # covariates need not appear among the spec's metrics — fetch
@@ -229,7 +244,7 @@ async def assemble_covariates(
         x_maps[cov_key] = x
     # §4.6 v3 step 3 needs the covariate CROSS-products for the joint OLS —
     # upper triangle only, keyed on the earlier covariate
-    keys = [k for k in variance_reduction.covariates() if k in out]
+    keys = [k for k in resolve_covariates(variance_reduction) if k in out]
     for i, ki in enumerate(keys):
         xx: dict[str, float] = {}
         for kj in keys[i + 1:]:

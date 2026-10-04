@@ -119,6 +119,12 @@ class VarianceReductionSpec(_StrictReq):
                 "or covariate_metrics"
             )
         if self.covariate_metrics:
+            if ("auto" in self.covariate_metrics
+                    and self.covariate_metrics != ["auto"]):
+                raise ValueError(
+                    '"auto" covariate selection cannot be combined with '
+                    "explicit covariates"
+                )
             if len(set(self.covariate_metrics)) != len(self.covariate_metrics):
                 raise ValueError("covariate_metrics must be unique")
             for key in self.covariate_metrics:

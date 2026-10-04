@@ -429,6 +429,46 @@ def _solve_spd(a: list[list[float]], b: list[float]) -> list[float] | None:
     return [m[i][k] / m[i][i] for i in range(k)]
 
 
+def auto_select_covariates(
+    arms: list[dict], candidates: list[str],
+    min_abs_r: float = 0.1, max_k: int = 3,
+) -> list[str]:
+    """§4.6b (round 202): data-driven covariate selection from STORED
+    aggregates alone. Each arm dict carries n, sum, sum_sq and the
+    per-covariate {sum, sum_sq, xy_sum} map under "covariates"; the pooled
+    Pearson r over all arms needs nothing else. Keeps |r| >= min_abs_r,
+    strongest first (deterministic tie-break by key), at most max_k.
+    Candidates missing from any arm, or with degenerate variance, are
+    skipped — selection never guesses."""
+    selected: list[tuple[float, str]] = []
+    for key in candidates:
+        n = sx = sxx = sy = syy = sxy = 0.0
+        ok = True
+        for arm in arms:
+            cov = (arm.get("covariates") or {}).get(key)
+            if cov is None:
+                ok = False
+                break
+            a_n = float(arm.get("n") or 0.0)
+            n += a_n
+            sx += float(cov.get("sum") or 0.0)
+            sxx += float(cov.get("sum_sq") or 0.0)
+            sxy += float(cov.get("xy_sum") or 0.0)
+            sy += float(arm.get("sum") or 0.0)
+            syy += float(arm.get("sum_sq") or 0.0)
+        if not ok or n < 2:
+            continue
+        var_x = sxx - sx * sx / n
+        var_y = syy - sy * sy / n
+        if var_x <= 0.0 or var_y <= 0.0:
+            continue
+        r = (sxy - sx * sy / n) / math.sqrt(var_x * var_y)
+        if abs(r) >= min_abs_r:
+            selected.append((-abs(r), key))
+    selected.sort()
+    return [key for _, key in selected[:max_k]]
+
+
 def multi_cuped_adjusted_welch(
     control: dict, treatment: dict, covariate_keys: list[str]
 ) -> dict | None:
