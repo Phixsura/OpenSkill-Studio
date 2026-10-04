@@ -1108,6 +1108,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 154b — defect #68 (the clock-skew class strikes the holdout
+report): the report's window upper bound used the APP clock while rows
+timestamp with the DB's server_default now() — with the DB clock 119ms
+ahead (measured; Docker VM drift makes it arbitrary), freshly written rows
+fell silently outside the window. This is the SAME lesson the guardrail
+evaluator recorded; the report now reads clock_timestamp() from the DB.
+Correction to the round-133b triage: that "environment flake" was THIS
+defect's early signal — the parallel-uvicorn attribution was wrong; a
+boundary failure that recurs deserves a clock audit before an environment
+write-off.
+
 Round 154 — calibration part 4: the quantile order-statistic CI's
 COVERAGE pinned on skewed lognormal data (300 deterministic reps, p95) —
 the bucket-resolution bracket must cover the true quantile at or above the

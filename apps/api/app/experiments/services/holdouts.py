@@ -20,7 +20,7 @@ invalidated eagerly on create/release in this process.
 import time
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,7 +190,16 @@ class HoldoutGroupService:
                 held.append(unit)
             else:
                 general.append(unit)
-        now = datetime.now(UTC)
+        # #68 (round 154, the R133 'flake' was this defect's early signal):
+        # rows timestamp with the DATABASE clock (server_default now()), so
+        # the window's upper bound must use the SAME clock — the app clock
+        # ran 119ms behind the DB here and silently excluded the freshest
+        # rows (the guardrail evaluator learned this same lesson earlier).
+        now = (
+            await self.db.execute(select(func.clock_timestamp()))
+        ).scalar_one()
+        if now.tzinfo is None:  # driver may hand back naive UTC
+            now = now.replace(tzinfo=UTC)
         window_start = now - timedelta(days=window_days)
         fn = SOURCE_REGISTRY[source]
         arms = await fn(
