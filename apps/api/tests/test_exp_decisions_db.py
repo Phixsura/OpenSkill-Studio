@@ -679,19 +679,19 @@ async def test_concurrent_decides_single_terminal_record(db):
         results = await asyncio.gather(decide_once(), decide_once())
         assert sorted(results) == ["DECISION_STATE_INVALID", "decided"], results
         async with AsyncSessionLocal() as session:
-            from app.experiments.models import DecisionRecord as _DR
-            from app.experiments.models import Experiment as _Exp
+            from app.experiments.models import DecisionRecord as DecisionRec
+            from app.experiments.models import Experiment as ExpModel
 
             count = (
                 await session.execute(
-                    _select(_func.count()).select_from(_DR).where(
-                        _DR.experiment_id == exp_id,
-                        _DR.decision.in_(("promote", "reject")),
+                    _select(_func.count()).select_from(DecisionRec).where(
+                        DecisionRec.experiment_id == exp_id,
+                        DecisionRec.decision.in_(("promote", "reject")),
                     )
                 )
             ).scalar_one()
             assert count == 1
-            assert (await session.get(_Exp, exp_id)).status == "promoted"
+            assert (await session.get(ExpModel, exp_id)).status == "promoted"
     finally:
         # committed-session law: racing tests COMMIT, so they must sweep
         # their own debris (the promoted decision pollutes the corpus
@@ -699,15 +699,15 @@ async def test_concurrent_decides_single_terminal_record(db):
         async with AsyncSessionLocal() as session:
             from sqlalchemy import delete as _delete
 
-            from app.experiments.models import Experiment as _Exp
-            from app.experiments.models import ExperimentLayer as _Layer
+            from app.experiments.models import Experiment as ExpModel
+            from app.experiments.models import ExperimentLayer as LayerModel
 
-            exp_row = await session.get(_Exp, exp_id)
+            exp_row = await session.get(ExpModel, exp_id)
             layer_key = exp_row.layer_key if exp_row else None
-            await session.execute(_delete(_Exp).where(_Exp.id == exp_id))
+            await session.execute(_delete(ExpModel).where(ExpModel.id == exp_id))
             if layer_key:
                 await session.execute(
-                    _delete(_Layer).where(_Layer.key == layer_key)
+                    _delete(LayerModel).where(LayerModel.key == layer_key)
                 )
             await session.execute(_delete(User).where(User.id == admin_id))
             await session.commit()
