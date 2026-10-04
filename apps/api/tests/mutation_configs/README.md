@@ -302,3 +302,15 @@ is what keeps the block off. Ledgered: the 8 wave-34 equivalents at
 shifted lines + the its-attach And (its_estimate never returns None on a
 fixed 14/14 non-singular design and every spec metric is in metrics_out
 by construction — both operands are tautologies at this call site).
+
+## wave38_update_definition.json (round 187)
+
+update_definition (incl. the round-182 km branch): 11/11. First pass 9/11
+— the km knob itself had shipped with NO service-level tests (the KM
+wiring tests drove spec directly), and the two survivors exposed a
+vacuous assertion: the clear_quantiles strip could drop the ENTIRE spec
+(source and measure included) and the histogram-absence check still
+passed because the sourceless definition emits nothing. Killed by
+asserting the cleared definition keeps source/measure and loses only
+quantiles, plus the new km-knob suite (kind gate 422 both directions,
+set/strip round-trip, spec preservation).

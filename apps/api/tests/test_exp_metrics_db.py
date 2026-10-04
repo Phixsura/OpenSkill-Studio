@@ -2620,7 +2620,13 @@ async def test_latency_quantile_histogram_and_knob(db):
     # 100 -> bucket 6 ([64,128)), 300 -> 8 ([256,512)), 10000 -> 13
     assert out["treatment"]["value_histogram"] == {"6": 1, "8": 1, "13": 1}
 
-    await svc.update_definition("run_latency_ms", clear_quantiles=True)
+    cleared_def = await svc.update_definition("run_latency_ms",
+                                               clear_quantiles=True)
+    # the strip removes ONLY the quantiles key — the rest of the spec
+    # (source/measure) must survive (round 187 wave-38 killer)
+    assert "quantiles" not in cleared_def.spec
+    assert cleared_def.spec.get("source") == "workflow_runs"
+    assert cleared_def.spec.get("measure") == "latency_ms"
     out = await _run_source(
         db, "workflow_runs", definition_key="run_latency_ms",
         units=[installation.id], unit_type="workflow_installation",
@@ -2635,6 +2641,35 @@ async def test_latency_quantile_histogram_and_knob(db):
         await svc.update_definition("run_latency_ms", quantiles=[1.5])
     with pytest.raises(_AppError):
         await svc.update_definition("run_latency_ms", quantiles=[0.0])
+
+
+async def test_update_definition_km_knob(db):
+    """Round 187: the km knob (round 182) through the SERVICE, not raw spec
+    writes — kind-gated to time_to_event (422 otherwise), True sets
+    spec.km, False strips it, and the rest of the spec survives both."""
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+
+    updated = await svc.update_definition("placement_outcome_rate", km=True)
+    assert updated.spec.get("km") is True
+    assert updated.spec.get("source") == "talent_outcomes"  # untouched
+
+    # idempotent re-set, then strip
+    updated = await svc.update_definition("placement_outcome_rate", km=True)
+    assert updated.spec.get("km") is True
+    updated = await svc.update_definition("placement_outcome_rate", km=False)
+    assert "km" not in updated.spec
+    assert updated.spec.get("source") == "talent_outcomes"
+
+    # kind gate: km is meaningless off time_to_event -> VALIDATION_ERROR 422
+    from app.exceptions import AppError as _AppError
+    with pytest.raises(_AppError) as exc:
+        await svc.update_definition("run_latency_ms", km=True)
+    assert exc.value.code == "VALIDATION_ERROR"
+    assert exc.value.status_code == 422
+    # ... and km=False on a wrong kind is REFUSED too, not silently ignored
+    with pytest.raises(_AppError):
+        await svc.update_definition("run_success_rate", km=False)
 
 
 def test_value_histogram_and_validator_exact_pins():

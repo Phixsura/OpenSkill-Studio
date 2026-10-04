@@ -1151,6 +1151,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 187 — the km knob gets its missing service tests + wave 38 over
+update_definition (11/11): the knob had shipped tested only via raw spec
+writes; the wave then exposed that clear_quantiles could strip the WHOLE
+spec unnoticed (a sourceless definition emits no histogram, so the
+absence assertion passed vacuously) — now pinned to remove only the
+quantiles key. Kind gate asserted in both directions (km=True and
+km=False both 422 off time_to_event).
+
 Round 186 — the KM knob reaches the console: the Metric Explorer's
 inline editor shows a KM checkbox on time_to_event rows only
 (initialized from spec.km, carried on the PATCH; other kinds never send
