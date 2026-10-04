@@ -143,4 +143,27 @@ describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
       expect(body.km).toBe(false);
     });
   });
+
+  it("billing time_to_event rows get NO KM toggle (round 189, #70)", async () => {
+    const billing = {
+      ...DEFINITION,
+      key: "retention_rate",
+      title: "Retention",
+      kind: "time_to_event",
+      spec: { source: "billing" },
+      winsorize_pct: null,
+    };
+    api.mockImplementation((async () => ({ data: [billing] })) as never);
+    render(<MetricExplorerPage />, { wrapper: wrapper() });
+    fireEvent.click(await screen.findByText("Edit"));
+    // right kind, wrong source: the reader is placement-based, so the
+    // console never offers the knob the API would 422
+    expect(screen.queryByLabelText("km retention_rate")).toBeNull();
+    fireEvent.click(screen.getByText("Save"));
+    await vi.waitFor(() => {
+      const call = api.mock.calls.find((c) => c[1]?.method === "PATCH");
+      const body = JSON.parse(String(call?.[1]?.body));
+      expect("km" in body).toBe(false);
+    });
+  });
 });

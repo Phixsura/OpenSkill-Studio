@@ -1154,6 +1154,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 189 — #70's console tail: the Explorer KM toggle (round 186) had
+keyed on kind alone, offering retention_rate a checkbox whose save the
+API now 422s. The toggle and the PATCH payload both require kind ==
+time_to_event AND source == talent_outcomes — the console never offers
+what the API refuses.
+
 Round 188 — defect #70: the KM event reader is placement-based, but the
 km knob accepted ANY time_to_event definition — enabling it on
 retention_rate (billing-sourced) would have attached placement curves to

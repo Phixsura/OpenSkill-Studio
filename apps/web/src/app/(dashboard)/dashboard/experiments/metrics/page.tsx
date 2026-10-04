@@ -95,9 +95,12 @@ function MetricExplorerInner() {
                   .filter((v) => !Number.isNaN(v)),
               }
             : { clear_quantiles: true }),
-          ...(definitions.find((x) => x.key === key)?.kind === "time_to_event"
-            ? { km: edit.km }
-            : {}),
+          ...(() => {
+            const d = definitions.find((x) => x.key === key);
+            return d?.kind === "time_to_event" && d?.spec?.source === "talent_outcomes"
+              ? { km: edit.km }
+              : {};
+          })(),
         }),
       }),
     onSuccess: () => {
@@ -199,7 +202,7 @@ function MetricExplorerInner() {
                           value={edit.cap_value}
                           onChange={(e) => setEdit({ ...edit, cap_value: e.target.value })}
                         />
-                        {d.kind === "time_to_event" ? (
+                        {d.kind === "time_to_event" && d.spec?.source === "talent_outcomes" ? (
                           <label className="flex items-center gap-1 text-xs">
                             <input
                               type="checkbox"
