@@ -1108,6 +1108,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 159 — mutation wave 26 over the compute loop and snapshot writer:
+15/16 — the switchback first-version salt query is now pinned by a
+two-version fixture (the day variant keeps the v1 salt bound under both
+limit and ordering mutants); the top-20 segment cap ledgered.
+
 Round 158 — §4.6 v3 scope note (a phantom gap closed by analysis, not
 code): the cost_ledger and workflow_runs sources keep their
 single-covariate in-source mode ONLY, deliberately. Multi-covariate

@@ -1288,6 +1288,11 @@ async def test_switchback_window_snapshots_land_on_day_variant(db):
     spec["design"] = "switchback"
     spec["switchback"] = {"switch_unit": "platform_day", "window_minutes": 1440}
     await svc.create_version(exp.id, spec=spec, actor=admin)
+    # wave-26: a SECOND version with a different hash — the day-variant salt
+    # must still come from the FIRST version (limit-1 asc, pinned both
+    # against limit mutants and ordering flips)
+    spec_v2 = dict(spec, hypothesis="switchback v2 keeps the v1 salt bound")
+    await svc.create_version(exp.id, spec=spec_v2, actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -1307,10 +1312,13 @@ async def test_switchback_window_snapshots_land_on_day_variant(db):
     snapshots = await MetricService(db).list_snapshots(exp.id)
     exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
     assert len(exposure_rows) == 1  # one arm owns the whole day
-    versions = await svc.get_versions(exp.id)
+    versions = await svc.get_versions(exp.id)  # newest first
+    assert len(versions) == 2
+    first_version = versions[-1]
+    assert first_version.spec_hash != versions[0].spec_hash
 
     expected = switchback_variant(
-        exp.key, versions[0].spec_hash[:8], SpecModel.model_validate(spec), window_start
+        exp.key, first_version.spec_hash[:8], SpecModel.model_validate(spec), window_start
     )
     assert exposure_rows[0].variant_key == expected
     assert int(exposure_rows[0].denominator) == 6

@@ -185,3 +185,13 @@ holdouts.report (post-round-58 shape): 28/29 killed by the existing suite
 survived nothing. Ledgered: the sample_capped >= flag (killing it needs a
 20k-unit fixture for an informational boolean; the cap MECHANISM itself is
 the REPORT_SAMPLE_CAP limit on the unit query, exercised by every report).
+
+## wave26_compute_loop.json (round 159)
+
+compute_experiment_window + _write_snapshots: 15/16. The surviving
+first-run mutant was the switchback FIRST-VERSION salt query's limit —
+killed by giving the switchback test a second version with a different
+hash (the day variant must keep the v1 salt bound: pins both the limit
+and the ordering). Ledgered: the top-20 segment org cap (a 21-org fixture
+for a capacity constant; the cap mechanism is the sort+slice, exercised by
+every segmented compute).
