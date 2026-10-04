@@ -647,6 +647,72 @@ async def test_unwired_targets_are_only_presentation_pair(db):
     assert PROMOTION_TARGET_TYPES - wired == {"pack_recommendation", "pricing_presentation"}
 
 
+async def test_concurrent_decides_single_terminal_record(db):
+    """Round 155: two racing PROMOTE decisions must leave exactly ONE
+    terminal record and one DECISION_STATE_INVALID loser — the terminal
+    unique constraint is the backstop and the service maps its violation to
+    a typed 409 (never a raw 500), with the experiment promoted exactly
+    once."""
+    import asyncio
+
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    exp_id, admin_id = exp.id, admin.id
+    await db.commit()  # racing sessions need committed state
+
+    async def decide_once():
+        async with AsyncSessionLocal() as session:
+            actor = await session.get(User, admin_id)
+            try:
+                await DecisionService(session).create(
+                    exp_id, decision="promote", summary="race",
+                    analysis_result_hash=result_hash, actor=actor,
+                )
+                await session.commit()
+                return "decided"
+            except AppError as e:
+                return e.code
+
+    try:
+        results = await asyncio.gather(decide_once(), decide_once())
+        assert sorted(results) == ["DECISION_STATE_INVALID", "decided"], results
+        async with AsyncSessionLocal() as session:
+            from app.experiments.models import DecisionRecord as _DR
+            from app.experiments.models import Experiment as _Exp
+
+            count = (
+                await session.execute(
+                    _select(_func.count()).select_from(_DR).where(
+                        _DR.experiment_id == exp_id,
+                        _DR.decision.in_(("promote", "reject")),
+                    )
+                )
+            ).scalar_one()
+            assert count == 1
+            assert (await session.get(_Exp, exp_id)).status == "promoted"
+    finally:
+        # committed-session law: racing tests COMMIT, so they must sweep
+        # their own debris (the promoted decision pollutes the corpus
+        # prior, the experiment pollutes the digest/time sweeps)
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import delete as _delete
+
+            from app.experiments.models import Experiment as _Exp
+            from app.experiments.models import ExperimentLayer as _Layer
+
+            exp_row = await session.get(_Exp, exp_id)
+            layer_key = exp_row.layer_key if exp_row else None
+            await session.execute(_delete(_Exp).where(_Exp.id == exp_id))
+            if layer_key:
+                await session.execute(
+                    _delete(_Layer).where(_Layer.key == layer_key)
+                )
+            await session.execute(_delete(User).where(User.id == admin_id))
+            await session.commit()
+
+
 async def test_concurrent_apply_single_target_draft(db):
     """Two racing applies must produce exactly ONE target-domain draft and
     one PROMOTION_ALREADY_APPLIED loser (the draft row is FOR-UPDATE locked;

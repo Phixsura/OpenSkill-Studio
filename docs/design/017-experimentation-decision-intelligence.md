@@ -1108,6 +1108,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 155 — concurrency: two racing PROMOTE decisions leave exactly one
+terminal record, one typed DECISION_STATE_INVALID loser and one promoted
+status (the terminal unique constraint's 409 mapping, now race-pinned like
+apply). The racing test COMMITS, which surfaced the residue class again:
+interrupted E2E runs had left 19 experiment corpses in the shared test DB,
+and three tests asserting GLOBAL counts (window-sweep zero, digest counts)
+broke. Mass cleanup was refused by policy — the CORRECT fix anyway:
+those assertions are now residue-robust (differential sweep counts,
+owner-scoped digest reads), and the racing test sweeps its own debris in a
+finally (committed-session law).
+
 Round 154c — the #68 clock audit swept every remaining app-clock use in
 the package: the SRM/interaction/significance dedup windows (hour-coarse —
 skew-insensitive), the day-level sweep windows, switchback's bucketing

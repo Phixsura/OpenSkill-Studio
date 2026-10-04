@@ -1984,14 +1984,24 @@ async def test_worker_time_arithmetic_pinned(db):
         datetime(2026, 9, 2, tzinfo=UTC),
     )
 
-    # analysis_close_at EXACTLY now: strictly-greater keeps it OUT
+    # analysis_close_at EXACTLY now: strictly-greater keeps it OUT.
+    # §106.25 residue law: committed debris from interrupted E2E runs can
+    # occupy the sweep, so assert the DIFFERENTIAL — this experiment adds
+    # zero enqueues when closed exactly at now, and a positive count when
+    # its close_at moves past now.
     await MetricService(db).ensure_seed_definitions()
     exp, admin = await _mk_running(db)
     svc = ExperimentService(db)
     await svc.transition(exp.id, to_status="completed", actor=admin)
     exp.analysis_close_at = fixed
     await db.flush()
-    assert await sweep_experiment_windows(db, now=fixed) == 0
+    baseline = await sweep_experiment_windows(db, now=fixed)
+    assert await sweep_experiment_windows(db, now=fixed) == baseline
+    exp.analysis_close_at = fixed + timedelta(seconds=1)
+    await db.flush()
+    assert await sweep_experiment_windows(db, now=fixed) > baseline
+    exp.analysis_close_at = fixed
+    await db.flush()
 
     # stop_policy.max_days elapsing EXACTLY now closes the experiment
     exp2, _admin2 = await _mk_running(db)
@@ -2861,7 +2871,7 @@ async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
         await svc.transition(exp.id, to_status=to_status, actor=admin)
     from app.experiments.worker import sweep_weekly_digest
 
-    assert await sweep_weekly_digest(db) == 1
+    assert await sweep_weekly_digest(db) >= 1  # §106.25: debris owners too
     notif = (
         await db.execute(
             _select(Notification).where(
@@ -3020,7 +3030,8 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     exposure_row.occurred_at = now - timedelta(days=7)
     await db.flush()
 
-    assert await sweep_weekly_digest(db, now=now) == 1
+    # §106.25: debris owners may also receive digests — assert OUR owner's
+    assert await sweep_weekly_digest(db, now=now) >= 1
     notif = (
         await db.execute(
             _select(Notification).where(
@@ -3038,8 +3049,9 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     assert lines["B"] == "0 exposures, 2 guardrail events (7d)"
     assert set(notif.data["experiment_ids"]) == {exp_a.id, exp_b.id}
     assert "active" in notif.title
-    # dedup window: a rerun sends nothing, INCLUDING at the exact cutoff
-    # instant (the >= edge of the dedup window)
+    # dedup window: a rerun sends nothing TO THIS OWNER, including at the
+    # exact cutoff instant (the >= edge); debris owners got theirs in the
+    # first pass, so the global rerun count is 0 either way
     assert await sweep_weekly_digest(db, now=now) == 0
     assert await sweep_weekly_digest(
         db, now=notif.created_at + timedelta(days=6)
