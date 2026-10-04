@@ -215,3 +215,10 @@ verbatim (a truthy context was droppable by an or->and mutant). Ledgered:
 the pragma-no-cover 500 on a lost assignment write (the unique constraint
 guarantees the row — unreachable defense-in-depth, status constant
 included).
+
+## wave30_layers.json (round 163)
+
+layers allocate/create: 14/14 killed by the existing suite (the FOR-UPDATE
+slice-overlap races and bound checks all pinned). Config note: the layer
+tests live in test_exp_assignment_db.py — a wrong test path makes the
+baseline RED and the harness refuses to mutate (correct behavior).

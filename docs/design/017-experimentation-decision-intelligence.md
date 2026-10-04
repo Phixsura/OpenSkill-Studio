@@ -1108,6 +1108,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 163 — mutation wave 30 over layer allocation: 14/14 killed by the
+existing suite outright. The service-core mutation sweep (waves 26-30:
+compute, promotion, holdouts, exposure, layers) is complete — every core
+now has a dedicated post-rewrite wave on record.
+
 Round 162 — mutation wave 29 over the exposure path: 4/5 after pinning
 the stored exposure context verbatim; the unreachable lost-write defense
 ledgered.
