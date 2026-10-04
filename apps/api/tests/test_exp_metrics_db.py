@@ -965,6 +965,9 @@ async def test_cuped_covariates_end_to_end(db):
     comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
     assert "cuped" in comparison
     assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
+    # wave-34: a k==1 adjustment is NOT a degraded multi (the strict > 1
+    # gate on the degrade warning)
+    assert "CUPED_MULTI_DEGRADED" not in result["warnings"]
 
 
 # ── Batch 3: newly wired sources (learning_paths / evaluations /

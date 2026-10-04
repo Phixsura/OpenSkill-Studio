@@ -264,6 +264,11 @@ async def test_secondary_metric_gets_fdr_flag_when_data_exists(db):
     comparison = secondary["comparisons"]["treatment"]
     assert comparison.get("insufficient_data") is True
     assert "passes_fdr" not in comparison
+    # wave-34: the PRIMARY must never enter the FDR pool either (a flipped
+    # role predicate feeds primary p-values into BH and stamps passes_fdr)
+    primary = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert "p" in primary or "always_valid_p" in primary
+    assert "passes_fdr" not in primary
 
 
 # ── Health checks (v2 batch 4, §4.13/§4.6): pre_balance, novelty, aa_probe ──
@@ -356,6 +361,8 @@ async def test_pre_balance_quiet_when_covariates_match(db):
     assert "PRE_BALANCE_SUSPECT" not in result["warnings"]
     # CUPED engaged — the covariates are real, so no unavailability warning
     assert "cuped" in result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    # wave-34 (L854): a k==1 adjustment is not a DEGRADED multi
+    assert "CUPED_MULTI_DEGRADED" not in result["warnings"]
 
 
 async def test_novelty_decay_flags_early_effect_that_vanishes(db):
@@ -466,6 +473,12 @@ async def test_corpus_prior_shrinks_primary_effect(db):
     assert abs(prior["mean"] - 0.03) < 1e-9
     assert prior["sd"] > 0
     effect, shrunk = comparison["effect"], comparison["shrunk_effect"]
+    # wave-34: the normal-normal precision-weighted formula pinned exactly
+    se = comparison["se"]
+    expected_shrunk = (
+        effect / (se * se) + prior["mean"] / (prior["sd"] * prior["sd"])
+    ) / (1.0 / (se * se) + 1.0 / (prior["sd"] * prior["sd"]))
+    assert shrunk == pytest.approx(expected_shrunk, rel=1e-9)
     # shrunk lies strictly between the raw effect and the corpus mean
     low, high = sorted((effect, prior["mean"]))
     assert low <= shrunk <= high
@@ -1534,3 +1547,317 @@ async def test_binary_cuped_rides_the_comparison(db):
     assert cuped["caveat"] == "linear adjustment on a per-unit 0/1 outcome"
     assert isinstance(cuped["variance_reduction_pct"], float)
     assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
+
+
+async def test_aggregate_default_version_and_cross_window_covariate_fold(db):
+    """Wave-34 kills: (B) a snapshot whose provenance LACKS query_version
+    defaults to 1 and is correctly outvoted by a v2 row (mixed flagged);
+    (C) the covariates map folds ACROSS WINDOWS — sums, xy and the xx cross
+    terms all add (exact values pinned; an inverted fold cancels them)."""
+    exp, admin = await _mk_running(db)
+    ws1 = datetime(2026, 9, 1, tzinfo=UTC)
+    ws2 = datetime(2026, 9, 2, tzinfo=UTC)
+    svc = AnalysisService(db)
+
+    # (B) versionless (defaults to 1) + explicit v2 -> v2 wins, mixed trips
+    legacy = _snapshot(exp.id, "revision_count", "control", ws1,
+                       n=10, sum_value=10.0, sum_sq=20.0)
+    legacy.provenance = {}  # no query_version at all
+    db.add(legacy)
+    db.add(_snapshot(exp.id, "revision_count", "control", ws2,
+                     n=7, sum_value=7.0, sum_sq=9.0))
+    v2 = _snapshot(exp.id, "revision_count", "treatment", ws2,
+                   n=5, sum_value=9.0, sum_sq=21.0)
+    v2.provenance = {"query_version": 2}
+    db.add(v2)
+    await db.flush()
+    aggregated, mixed = await svc._aggregate_metric(  # noqa: SLF001
+        exp.id, "revision_count"
+    )
+    assert mixed is True
+    assert set(aggregated) == {"treatment"}  # v2 outvotes BOTH v1-era rows
+    assert aggregated["treatment"]["sum_value"] == 9.0
+
+    # (B2) a LEGACY-ONLY metric (no query_version anywhere) must still
+    # aggregate — the default constant pins itself when it is the only
+    # version in play (a mutated default empties the aggregation)
+    solo = _snapshot(exp.id, "run_success_rate", "control", ws1,
+                     n=4, numerator=2.0, denominator=4.0)
+    solo.provenance = {}
+    db.add(solo)
+    await db.flush()
+    aggregated, mixed = await svc._aggregate_metric(  # noqa: SLF001
+        exp.id, "run_success_rate"
+    )
+    assert mixed is False
+    assert aggregated["control"]["denominator"] == 4.0
+
+    # (C) two windows of covariates on a separate metric fold by addition
+    for ws, scale in ((ws1, 1.0), (ws2, 2.0)):
+        snap = _snapshot(exp.id, "exposure_rate", "control", ws,
+                         n=10, sum_value=scale, sum_sq=scale,
+                         covariates={
+                             "c1": {"sum": 1.0 * scale, "sum_sq": 2.0 * scale,
+                                    "xy_sum": 3.0 * scale,
+                                    "xx": {"c2": 4.0 * scale}},
+                             "c2": {"sum": 5.0 * scale, "sum_sq": 6.0 * scale,
+                                    "xy_sum": 7.0 * scale},
+                         })
+        db.add(snap)
+    await db.flush()
+    aggregated, _mixed = await svc._aggregate_metric(  # noqa: SLF001
+        exp.id, "exposure_rate"
+    )
+    cov = aggregated["control"]["covariates"]
+    assert cov["c1"]["sum"] == 3.0 and cov["c1"]["xy_sum"] == 9.0
+    assert cov["c1"]["xx"]["c2"] == 12.0
+    assert cov["c2"]["sum"] == 15.0 and cov["c2"]["sum_sq"] == 18.0
+
+
+async def test_power_boundary_and_recent_exposure_edge(db):
+    """Wave-34: (H) min_arm_n EXACTLY at required_n_per_arm(10%, 20%) ==
+    3841 is POWERED (the >= edge; the warning fires strictly below); (G)
+    an exposure 47.5h old keeps the data-flow warning OFF while 48.5h
+    trips it — pinning the 48h constant from both sides."""
+    from app.experiments.models import ExperimentAssignment, ExperimentExposure
+
+    exp, admin = await _mk_running(
+        db, metrics={"primary": ["exposure_rate"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+        power={"mde": 0.20},
+    )
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    # baseline EXACTLY 0.5 (num = den/2) -> required_n_per_arm(0.5, 0.2)
+    # == 388, and each arm sits EXACTLY on that boundary
+    for variant in ("control", "treatment"):
+        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
+                         n=388, numerator=194.0, denominator=388.0))
+    # a FRESH exposure (47.5h is inside the 48h window)
+    unit = "pw-" + "u" * 23
+    db.add(ExperimentAssignment(
+        experiment_id=exp.id, unit_type="user", unit_id=unit,
+        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+    ))
+    await db.flush()
+    exposure = ExperimentExposure(
+        assignment_id=None, experiment_id=exp.id, context={}, dedup_key=None,
+    )
+    # the exposure model needs the assignment id — fetch it
+    from sqlalchemy import select as _select
+    assignment = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id))
+    ).scalars().first()
+    exposure.assignment_id = assignment.id
+    db.add(exposure)
+    await db.flush()
+    exposure.occurred_at = datetime.now(UTC) - timedelta(hours=47, minutes=30)
+    await db.flush()
+
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    block = result["power"]
+    assert block["required_n_per_arm"] == 388
+    assert block["powered"] is True  # EXACTLY at the boundary
+    assert "SAMPLE_BELOW_POWER_TARGET" not in result["warnings"]
+    assert "NO_RECENT_EXPOSURES" not in result["warnings"]
+
+    # push the exposure past 48h -> the warning trips (and 49h-constant
+    # mutants keep it fresh)
+    exposure.occurred_at = datetime.now(UTC) - timedelta(hours=48, minutes=30)
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "NO_RECENT_EXPOSURES" in result["warnings"]
+
+
+async def test_one_armed_metric_is_insufficient_and_n2_prebalance_runs(db):
+    """Wave-34: (L598) snapshots for ONLY the treatment arm are
+    insufficient data, never a KeyError on the missing control; (L623) the
+    pre-balance check runs at n EXACTLY 2 per arm (the >= edge) — a
+    flagrant covariate imbalance at n=2 still trips PRE_BALANCE_SUSPECT."""
+    exp, admin = await _mk_running(db, power={"mde": 0.2})
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
+                     n=10, numerator=5.0, denominator=10.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
+    assert "power" not in result  # nothing computable without a control arm
+
+    exp2, admin2 = await _mk_running(
+        db, power={"mde": 0.2},  # a denominator-less continuous primary
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
+                     n=2, sum_value=2.0, sum_sq=2.5,
+                     cov_sum=2.0, cov_sum_sq=2.5, cov_xy_sum=2.0))
+    # near-zero within-arm variance makes t ~ 2000 at df ~ 1: even the
+    # heavy df-1 tail puts p well under 0.001
+    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
+                     n=2, sum_value=2.2, sum_sq=2.9,
+                     cov_sum=2000.0, cov_sum_sq=2000000.0002,
+                     cov_xy_sum=2.0))
+    await db.flush()
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    assert "PRE_BALANCE_SUSPECT" in result2["warnings"]
+    assert "power" not in result2  # continuous primary has no denominator
+
+
+def test_analysis_service_error_status_contract_pinned():
+    """Wave-34: the AST error-status contract, extended to the analysis
+    service (the experiments.py pin does not cover this file)."""
+    import ast
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "experiments" / "services" / "analysis_service.py"
+    )
+    found: dict[str, set[int]] = {}
+    for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "AppError"
+            and len(node.args) >= 3
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[2], ast.Constant)
+        ):
+            found.setdefault(node.args[0].value, set()).add(node.args[2].value)
+    assert found == {
+        "EXPERIMENT_NOT_FOUND": {404},
+        "EXPERIMENT_SPEC_INVALID": {422},
+        "VALIDATION_ERROR": {422},
+        "EXPERIMENT_LOOKS_EXHAUSTED": {422},
+    }, found
+
+
+async def test_corpus_and_did_guards_tolerate_degenerate_entries(db):
+    """Wave-34: the corpus-prior and DiD blocks must SKIP degenerate
+    entries, never crash — an insufficient primary (no comparisons) in a
+    domain with a standing corpus, a zero-variance comparison (se == 0),
+    and an observational run whose primary has one arm."""
+    # standing corpus (3 decided experiments) comes from the shrink test's
+    # domain fixtures — build our own three quickly
+    exp0, admin = await _mk_running(db)
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+
+    # (a) insufficient primary in a corpus-bearing domain: no crash, no prior
+    db.add(_snapshot(exp0.id, "exposure_rate", "treatment", ws,
+                     n=10, numerator=5.0, denominator=10.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp0.id, actor=admin)
+    assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
+
+    # (b) zero-variance continuous primary: comparisons exist but se == 0 —
+    # the corpus shrink must skip (division by zero otherwise)
+    exp1, admin1 = await _mk_running(
+        db, metrics={"primary": ["revision_count"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    for variant in ("control", "treatment"):
+        db.add(_snapshot(exp1.id, "revision_count", variant, ws,
+                         n=50, sum_value=100.0, sum_sq=200.0))  # var == 0
+    await db.flush()
+    result1 = await AnalysisService(db).run(exp1.id, actor=admin1)
+    comparison = result1["metrics"]["revision_count"]["comparisons"]["treatment"]
+    assert "shrunk_effect" not in comparison  # guarded, not crashed
+
+    # (c) observational run with a one-armed primary: the DiD block skips
+    exp2, admin2 = await _mk_running(db, analysis_type="observational")
+    db.add(_snapshot(exp2.id, "exposure_rate", "treatment", ws,
+                     n=10, numerator=5.0, denominator=10.0))
+    await db.flush()
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    assert result2["causal_claim"] is False
+    assert result2["metrics"]["exposure_rate"].get("insufficient_data") is True
+
+
+async def test_corpus_guards_with_standing_prior(db):
+    """Wave-34 (with the corpus PRIOR in place, which the guards need to be
+    reachable): an insufficient primary skips the shrink without a
+    KeyError; a zero-variance comparison (se == 0) skips without division
+    by zero; a degenerate corpus (identical effects -> prior sd == 0) skips
+    the whole shrink."""
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+
+    # (a) insufficient primary + standing prior -> guard skips
+    exp_a, admin_a = await _mk_running(db)
+    await _mk_decided_history(db, "learning", "exposure_rate", [0.02, 0.03, 0.04])
+    db.add(_snapshot(exp_a.id, "exposure_rate", "treatment", ws,
+                     n=10, numerator=5.0, denominator=10.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp_a.id, actor=admin_a)
+    assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
+
+    # (b) zero-variance continuous primary (se == 0) with a prior standing
+    exp_b, admin_b = await _mk_running(
+        db, metrics={"primary": ["revision_count"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    await _mk_decided_history(db, "learning", "revision_count", [0.1, 0.2, 0.3])
+    for variant in ("control", "treatment"):
+        db.add(_snapshot(exp_b.id, "revision_count", variant, ws,
+                         n=50, sum_value=100.0, sum_sq=200.0))  # var == 0
+    await db.flush()
+    result_b = await AnalysisService(db).run(exp_b.id, actor=admin_b)
+    comp_b = result_b["metrics"]["revision_count"]["comparisons"]["treatment"]
+    assert "shrunk_effect" not in comp_b
+
+    # (c) IDENTICAL corpus effects: the empirical prior sd is FLOORED above
+    # zero (discovered here — the sd <= 0 guard is defense-in-depth), so the
+    # shrink still runs and pulls fully toward the degenerate corpus mean
+    exp_c, admin_c = await _mk_running(
+        db, metrics={"primary": ["run_success_rate"], "secondary": [],
+                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                     "threshold": 100.0}]},
+    )
+    await _mk_decided_history(db, "learning", "run_success_rate",
+                              [0.05, 0.05, 0.05])
+    for variant, num in (("control", 20.0), ("treatment", 30.0)):
+        db.add(_snapshot(exp_c.id, "run_success_rate", variant, ws,
+                         n=100, numerator=num, denominator=100.0))
+    await db.flush()
+    result_c = await AnalysisService(db).run(exp_c.id, actor=admin_c)
+    comp_c = result_c["metrics"]["run_success_rate"]["comparisons"]["treatment"]
+    assert comp_c["corpus_prior"]["sd"] > 0  # the floor, pinned
+    assert "shrunk_effect" in comp_c
+
+
+async def test_power_block_skips_zero_denominator_and_k1_not_degraded(db):
+    """Wave-34: a binary primary whose arms carry ZERO denominators is not
+    evaluable for power (skip, never a division by zero); and a k==1
+    variance_reduction run engages the single adjustment WITHOUT the
+    CUPED_MULTI_DEGRADED warning (the strict > 1 gate)."""
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    exp, admin = await _mk_running(db, power={"mde": 0.2})
+    for variant in ("control", "treatment"):
+        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
+                         n=0, numerator=0.0, denominator=0.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "power" not in result  # not evaluable, not crashed
+
+    exp2, admin2 = await _mk_running(
+        db, variance_reduction={"method": "cuped",
+                                "covariate_metric": "revision_count",
+                                "lookback_days": 14},
+        metrics={"primary": ["revision_count"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
+                     n=200, sum_value=200.0, sum_sq=260.0,
+                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=230.0))
+    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
+                     n=200, sum_value=220.0, sum_sq=300.0,
+                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=235.0))
+    await db.flush()
+    result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
+    comparison = result2["metrics"]["revision_count"]["comparisons"]["treatment"]
+    assert "cuped" in comparison
+    assert "CUPED_MULTI_DEGRADED" not in result2["warnings"]

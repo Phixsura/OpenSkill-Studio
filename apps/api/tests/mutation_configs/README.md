@@ -240,3 +240,21 @@ stay a limit-1 EXISTS — the limit mutant explodes a scalar_one_or_none on
 the second identical look), and the guardrail outcome is pinned to EXACTLY
 the experiment's own events (a neighbor's pause stays out). Ledgered: the
 search default limit constant (50).
+
+## wave34_analysis_run.json (round 169)
+
+AnalysisService.run + _aggregate_metric + latest_look (88 mutants, the
+largest single wave): 79/88 over five strengthening passes — the AST
+error-status contract extended to this file, the cross-window covariates
+fold exactly pinned, the default query_version pinned by a legacy-only
+row, the corpus shrink formula hand-spelled, power/exposure boundaries
+exactly ON their edges, one-armed insufficiency, n==2 pre-balance
+admissibility, degenerate corpus/power entries guarded with a STANDING
+prior (unreachable guards otherwise), and the k==1 no-degrade pin. The 9
+ledgered: two continuous exact-boundary comparisons (p == 0.001, |z| ==
+boundary — measure-zero events), the naive-tzinfo driver branch, the
+quantile gate's And (unreachable after #63 + the quantiles validator),
+two guard redundancies (a later guard catches the same state), the se/sd
+floor guards (welch emits no se on zero variance; the corpus sd is
+floored above zero — DISCOVERED and pinned here), and the colon-free
+variant-key maxsplit.

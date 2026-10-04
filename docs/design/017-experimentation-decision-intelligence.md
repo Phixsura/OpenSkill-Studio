@@ -1108,6 +1108,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 169 — mutation wave 34, the largest single wave (88 mutants over
+AnalysisService.run itself): 79/88 across five strengthening passes — the
+error-status AST contract now covers this file, the cross-window
+covariates fold and corpus shrink formula are exactly pinned, power and
+data-flow boundaries sit exactly ON their edges, and degenerate entries
+(one-armed, zero-variance, zero-denominator, insufficient-under-a-prior)
+are all guarded-not-crashed. Two in-build discoveries: the corpus prior's
+sd is FLOORED above zero (identical-effect corpora still shrink — now
+pinned), and two guard pairs are deliberately redundant (the later guard
+catches the same state; ledgered as such). 9 equivalents ledgered.
+
 Round 168 — #69 visibility: the Metric Explorer's spec column shows the
 guardrail aggregate ("guards sum") so an operator can SEE which semantics
 a ceiling enforces. A wire-level seed assertion was deliberately NOT added
