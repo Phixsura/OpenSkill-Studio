@@ -1108,6 +1108,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 164 — mutation wave 31 over the schedule gate: 19/19 after a full
+exemption/risk matrix (medium+exempt still refuses; high-risk 403s
+non-admins and schedules under an admin — the success arm was untested).
+
 Round 163 — mutation wave 30 over layer allocation: 14/14 killed by the
 existing suite outright. The service-core mutation sweep (waves 26-30:
 compute, promotion, holdouts, exposure, layers) is complete — every core

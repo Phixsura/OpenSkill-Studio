@@ -222,3 +222,12 @@ layers allocate/create: 14/14 killed by the existing suite (the FOR-UPDATE
 slice-overlap races and bound checks all pinned). Config note: the layer
 tests live in test_exp_assignment_db.py — a wrong test path makes the
 baseline RED and the harness refuses to mutate (correct behavior).
+
+## wave31_schedule_gate.json (round 164)
+
+_check_schedule_preconditions (the #63 gate + guardrail exemption +
+high-risk clause): 19/19 after a full gate MATRIX — low+exempt schedules,
+low+non-exempt refuses, MEDIUM+exempt STILL refuses (the exemption is
+risk AND domain), high-risk 403s a non-admin (status pinned) and
+schedules under a platform admin. The 422->423 family dies in the
+error-status contract pin (the config must list that test FILE too).

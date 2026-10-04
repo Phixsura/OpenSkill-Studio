@@ -493,6 +493,80 @@ async def test_schedule_refuses_undefined_metric_keys(db):
     assert "typo_covariate_xyz" in err.message
 
 
+async def test_schedule_gate_matrix_guardrail_exemption_and_risk(db):
+    """Wave-31 kills over the schedule gate's guardrail-exemption AND
+    high-risk clauses — every quadrant pinned:
+    low+exempt-domain without guardrails schedules; low+NON-exempt without
+    guardrails refuses (422 pinned); MEDIUM+exempt still refuses (the
+    exemption is risk-AND-domain); high-risk needs a platform admin (403
+    pinned) and SUCCEEDS with one."""
+    import pytest as _pytest
+
+    from app.exceptions import AppError as _AppError
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    await MetricService(db).ensure_seed_definitions()
+    admin = await _mk_admin(db)
+    checklist = _CHECKLIST  # all keys incl. ethics (learning domain needs it)
+    svc = ExperimentService(db)
+    slice_cursor = iter([(0, 9), (10, 19), (20, 29), (30, 39), (40, 49)])
+
+    async def _schedule(*, domain: str, risk_class: str, guardrails: bool,
+                        actor=None):
+        layer = await LayerService(db).create(
+            key=f"lyr-{str(ULID()).lower()}", domain=domain
+        )
+        exp = await svc.create(
+            key=f"exp-{str(ULID()).lower()}", title="G", domain=domain,
+            layer_key=layer.key, owner_user_id=admin.id,
+            risk_class=risk_class,
+        )
+        spec = _spec(
+            [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}]
+            if guardrails else []
+        )
+        spec["hypothesis"] = "guardrail exemption matrix pins the gate"
+        await svc.create_version(exp.id, spec=spec, actor=admin)
+        lo, hi = next(slice_cursor)
+        await LayerService(db).allocate(
+            layer_key=layer.key, experiment_id=exp.id,
+            slice_start=lo, slice_end=hi,
+        )
+        await svc.transition(exp.id, to_status="review", actor=admin)
+        return await svc.transition(
+            exp.id, to_status="scheduled", actor=actor or admin,
+            checklist=checklist,
+        )
+
+    # low + exempt domain + no guardrails -> schedules
+    ok = await _schedule(domain="operational", risk_class="low", guardrails=False)
+    assert ok.status == "scheduled"
+    # low + NON-exempt domain + no guardrails -> refused
+    with _pytest.raises(_AppError) as e:
+        await _schedule(domain="learning", risk_class="low", guardrails=False)
+    assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
+    assert e.value.status_code == 422
+    # MEDIUM + exempt domain + no guardrails -> STILL refused (risk AND domain)
+    with _pytest.raises(_AppError) as e:
+        await _schedule(domain="operational", risk_class="medium", guardrails=False)
+    assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
+    # high risk + non-admin actor -> 403
+    student = _User(email=f"sg-{ULID()}@example.com", display_name="S",
+                    role=_Role.STUDENT, status=_Status.ACTIVE)
+    db.add(student)
+    await db.flush()
+    with _pytest.raises(_AppError) as e:
+        await _schedule(domain="learning", risk_class="high", guardrails=True,
+                        actor=student)
+    assert e.value.code == "FORBIDDEN"
+    assert e.value.status_code == 403
+    # high risk + platform admin -> schedules
+    ok = await _schedule(domain="learning", risk_class="high", guardrails=True)
+    assert ok.status == "scheduled"
+
+
 async def test_launch_checklist_required_to_schedule(db):
     """§5 v2: scheduling without the affirmed checklist is refused with the
     missing items named; learning-domain experiments also require the ethics
