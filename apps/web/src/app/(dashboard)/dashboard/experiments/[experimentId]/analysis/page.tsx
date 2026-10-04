@@ -74,6 +74,13 @@ interface AnalysisResult {
       kind?: string;
       comparisons?: Record<string, Comparison>;
       insufficient_data?: boolean;
+      its?: {
+        level_change: { estimate: number; p: number };
+        trend_change: { estimate: number; p: number };
+        n_pre: number;
+        n_post: number;
+        caveat: string;
+      };
     }
   >;
 }
@@ -244,6 +251,14 @@ export default function AnalysisPage() {
           </div>
           {Object.entries(result.metrics).map(([key, metric]) => (
             <SectionCard key={key} title={`${key} (${metric.role})`}>
+              {metric.its ? (
+                <div className="mb-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs">
+                  ITS (observational): level {fmtNum(metric.its.level_change.estimate)} (p{" "}
+                  {fmtNum(metric.its.level_change.p)}) · trend{" "}
+                  {fmtNum(metric.its.trend_change.estimate)} (p {fmtNum(metric.its.trend_change.p)})
+                  · {metric.its.n_pre}+{metric.its.n_post} days — {metric.its.caveat}
+                </div>
+              ) : null}
               {metric.insufficient_data ? (
                 <div className="text-sm text-slate-500">Insufficient data.</div>
               ) : (

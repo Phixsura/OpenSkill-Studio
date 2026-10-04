@@ -228,6 +228,27 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/bbbbbbbbbbbb…/)).toBeTruthy();
   });
 
+  it("renders the ITS block for observational runs (round 180)", async () => {
+    const payload = analysisPayload();
+    const metrics = (payload.data as { metrics: Record<string, object> }).metrics;
+    metrics.exposure_rate = {
+      ...(metrics.exposure_rate as object),
+      its: {
+        level_change: { estimate: 4.2, p: 0.003 },
+        trend_change: { estimate: 0.9, p: 0.21 },
+        n_pre: 14,
+        n_post: 14,
+        caveat: "interrupted time series — association only",
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/ITS \(observational\): level 4\.2000/)).toBeTruthy();
+    expect(screen.getByText(/14\+14 days/)).toBeTruthy();
+    expect(screen.getByText(/association only/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

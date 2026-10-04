@@ -1122,6 +1122,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 180 — the ITS block renders on the analysis page (amber
+informational strip: level/trend changes with p-values, days per side,
+the association-only caveat verbatim); behavior-pinned.
+
 Round 179 — mutation wave 36 over its_estimate: 13/16 — the n==3 floor
 pinned from both sides and the dof EXPOSED as an honest readout (its
 arithmetic was unkillable while internal); three equivalents ledgered
