@@ -1108,6 +1108,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 168 — #69 visibility: the Metric Explorer's spec column shows the
+guardrail aggregate ("guards sum") so an operator can SEE which semantics
+a ceiling enforces. A wire-level seed assertion was deliberately NOT added
+to the E2E: the shared test DB's pre-#69 rows persist by design (ON
+CONFLICT DO NOTHING), and the honest pin is the seed template one.
+
 Round 167 — the #69 family audit over every seeded definition: ONE
 sibling (internal_cost_usd — same total-cost semantics) gained the sum
 aggregate; the remaining continuous metrics (latency, ARPU, margin,

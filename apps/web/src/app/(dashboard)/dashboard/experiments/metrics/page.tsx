@@ -17,7 +17,7 @@ interface MetricDefinition {
   domain: string;
   source_kind: string;
   query_version: number;
-  spec: { source?: string; measure?: string; quantiles?: number[] };
+  spec: { source?: string; measure?: string; quantiles?: number[]; guardrail_aggregate?: string };
   direction: string;
   winsorize_pct: number | null;
 }
@@ -159,6 +159,7 @@ function MetricExplorerInner() {
                   <td className="py-1 pr-3 text-xs">
                     {d.spec?.source ?? "—"}
                     {d.spec?.measure ? ` · ${d.spec.measure}` : ""}
+                    {d.spec?.guardrail_aggregate ? ` · guards ${d.spec.guardrail_aggregate}` : ""}
                   </td>
                   <td className="py-1 pr-3">{d.query_version}</td>
                   <td className="py-1 pr-3 text-xs">{d.direction}</td>

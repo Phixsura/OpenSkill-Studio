@@ -40,7 +40,7 @@ const DEFINITION = {
   domain: "workflow",
   source_kind: "service",
   query_version: 1,
-  spec: { source: "workflow_runs", measure: "latency_ms" },
+  spec: { source: "workflow_runs", measure: "latency_ms", guardrail_aggregate: "sum" },
   privacy_class: "aggregate_only",
   direction: "decrease_good",
   winsorize_pct: 99.9,
@@ -53,6 +53,12 @@ const DEFINITION = {
 beforeEach(() => vi.clearAllMocks());
 
 describe("Metric Explorer (ADR-017 Part L, round 102 inline edit)", () => {
+  it("renders the guardrail aggregate in the spec column (round 168)", async () => {
+    api.mockImplementation(async () => ({ data: [DEFINITION] }));
+    render(<MetricExplorerPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/guards sum/)).toBeTruthy();
+  });
+
   it("edits the operational knobs through the PATCH", async () => {
     api.mockImplementation(((rawPath: unknown, init?: { method?: string; body?: string }) => {
       const path = String(rawPath ?? "");
