@@ -689,6 +689,7 @@ async def test_holdout_group_concurrent_create_same_key_races_to_409(db):
                 await session.commit()
                 return "created"
             except AppError as exc:
+                assert exc.status_code == 409  # the RACE branch's status
                 return exc.code
 
     try:

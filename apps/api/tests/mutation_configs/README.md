@@ -201,3 +201,9 @@ every segmented compute).
 promotion apply/apply_async/finish_async_apply/approve/reject: 16/16
 killed by the existing suite outright — the #47-era savepoint tests, the
 apply-race pin and the status-gate pins left nothing alive.
+
+## wave28_holdout_lifecycle.json (round 161)
+
+holdouts create/release/active_groups_for_domain: 12/12 after pinning the
+RACE branch's 409 status (the pre-check 409 was pinned; the IntegrityError
+branch's status was not — two raise sites, two pins).
