@@ -1,0 +1,24 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["auto_select_covariates"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  },
+  {
+    "path": "app/experiments/services/metrics.py",
+    "funcs": ["resolve_covariates"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  },
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["run"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  }
+]
