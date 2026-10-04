@@ -1108,6 +1108,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 154 — calibration part 4: the quantile order-statistic CI's
+COVERAGE pinned on skewed lognormal data (300 deterministic reps, p95) —
+the bucket-resolution bracket must cover the true quantile at or above the
+nominal 95% (coarsening only widens, so coverage can only rise). All four
+statistical read surfaces now carry a calibration pin.
+
 Round 153 — the always-valid promise ITSELF pinned: 300 null runs peeked
 after every batch (12 looks each) — the mSPRT rejection rate across the
 whole monitored run stays within the alpha band while the naive

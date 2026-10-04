@@ -1191,3 +1191,37 @@ def test_msprt_anytime_validity_under_continuous_peeking():
     # what the always-valid machinery buys (and proves the sim has teeth)
     assert naive_fp > msprt_fp
     assert naive_fp >= 30, naive_fp
+
+
+def test_quantile_ci_coverage_is_conservative():
+    """Round 154 (calibration part 4): the order-statistic CI must COVER the
+    true quantile at >= nominal 95% — log-bucket coarsening only WIDENS the
+    bracket, so coverage must not fall below the binomial baseline. Skewed
+    lognormal data, deterministic seed."""
+    import math
+    import random
+
+    from app.experiments.services.analysis import histogram_quantile
+
+    rng = random.Random(23)
+    reps = 300
+    n = 400
+    true_p95 = math.exp(1.0 + 0.8 * 1.6448536269514722)  # lognormal(1, .8)
+    covered = 0
+    for _ in range(reps):
+        values = [math.exp(rng.gauss(1.0, 0.8)) for _ in range(n)]
+        hist: dict = {}
+        for v in values:
+            key = str(max(-20, min(43, math.floor(math.log2(v)))))
+            hist[key] = hist.get(key, 0) + 1
+        out = histogram_quantile(hist, 0.95)
+        assert out is not None
+        lo, hi = out["ci"]
+        # bucket resolution: widen the bracket to the enclosing bucket
+        # bounds, which is exactly what the estimate's granularity promises
+        lo_bound = 2.0 ** math.floor(math.log2(lo)) if lo > 0 else 0.0
+        hi_bound = 2.0 ** (math.floor(math.log2(hi)) + 1)
+        if lo_bound <= true_p95 <= hi_bound:
+            covered += 1
+    # 95% nominal, conservative by construction; 3 sigma on 300 reps ≈ 11
+    assert covered >= 274, covered
