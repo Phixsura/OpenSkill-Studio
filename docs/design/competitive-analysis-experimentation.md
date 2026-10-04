@@ -6,6 +6,38 @@ Amplitude), **Eppo / Datadog Experiments** (acquired 2025), **GrowthBook** (OSS)
 platforms (Microsoft ExP, Netflix XP, Uber/DoorDash switchbacks, Airbnb ERF,
 Spotify Confidence). Feeds ADR-017 v2.
 
+## 0b. Status update (2026-10-04, v3 rounds 113-176)
+
+The v3 epochs since the note below closed the last deliberate deferrals
+and added depth the matrix's vendors do not ship:
+
+- **Multi-covariate CUPED** (§4.6 v3, exp12) — the "defer" row at the
+  matrix bottom is CLOSED: a provider registry (projects, evaluations),
+  joint OLS over up to 3 covariates verified at 1e-9 against a per-unit
+  oracle, cross-window folding, honest CUPED_MULTI_DEGRADED downgrade
+  warning. ML-learned covariates remain deferred (that half of the row).
+- **Binary CUPED** (§4.6 v4) — regression-adjusted proportions (Eppo
+  CUPED++-class on binaries) on a per-unit 0/1 contract across two
+  sources, caveat attached.
+- **Quantile metrics** (§4.14, exp13) — p50/p95 reads from a mergeable
+  log-histogram sketch with distribution-free CIs, PERCENTILE GUARDRAILS
+  ("pause when p95 regresses"), console rendering.
+- **Scheduled ramp plans** (exp14) — monotone auto-ramp steps applied by a
+  crash-tolerant sweep; console editor.
+- **Operational surface**: weekly owner digest (+ decision-queue flags),
+  look history, the export trio (snapshots/guardrail events/assignments)
+  with console downloads, list data-flow badges, integration snippets,
+  digest opt-out.
+- **Statistical calibration, Monte-Carlo-pinned in the main suite** —
+  something none of the compared vendors publish as tests: null alpha
+  (Welch/binary/CUPED), power at the planner's exact n, mSPRT
+  anytime-validity under continuous peeking, quantile CI coverage.
+- Defects #1-#69 each fixed with a kill-proof; mutation waves 1-35
+  (~1100 mutants) cover every module; 131 full-suite certifications.
+
+Still open by choice: ITS, full KM time-to-event, synthetic control,
+ML-learned covariates, write-side org delegation.
+
 ## 0. Status update (2026-10-01, v2 round 10)
 
 Every "close" row below has SHIPPED (ADR-017 §18 rounds 8-10): CUPED (with
@@ -53,7 +85,7 @@ write-side org delegation.
 | Warehouse-native metric connectors                                                               | ✓                           | ✓ (core)  | ✓               | n/a                                      | **not building** — we ARE the data store; metric_definitions are our semantic layer                                                 |
 | Feature-flag CDN / edge SDKs / session replay                                                    | ✓                           | ✗         | ✓ flags         | ✗                                        | **not building** — out of scope for a B2B platform with in-process facade                                                           |
 | Identity resolution (anon→login graph)                                                           | ✓                           | ✓         | ✓               | ✗                                        | **defer** — all our units are authenticated; note for public registry pages                                                         |
-| CUPED++ multi-covariate / ML covariates                                                          | ✗                           | ✓         | ✗               | ✗                                        | **defer** — v1 single covariate, schema reserves list                                                                               |
+| CUPED++ multi-covariate / ML covariates                                                          | ✗                           | ✓         | ✗               | ✗                                        | **SHIPPED v3 rounds 113-115** (multi-covariate joint OLS + binary CUPED round 142); ML covariates stay deferred                     |
 | Synthetic control                                                                                | internal-platform territory | ✗         | ✗               | ✗                                        | **defer**                                                                                                                           |
 
 ## 2. Where we intentionally exceed industry baseline
