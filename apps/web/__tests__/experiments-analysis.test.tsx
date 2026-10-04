@@ -270,6 +270,27 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/censoring-correct/)).toBeTruthy();
   });
 
+  it("renders the synthetic-control strip (round 196)", async () => {
+    const payload = analysisPayload();
+    const metrics = (payload.data as { metrics: Record<string, object> }).metrics;
+    metrics.exposure_rate = {
+      ...(metrics.exposure_rate as object),
+      synthetic_control: {
+        gap: -0.3571,
+        rmspe_ratio: 4.2,
+        placebo_p: 0.25,
+        donors: 3,
+        caveat: "synthetic control — association only",
+      },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(await screen.findByText(/Synthetic control: gap -0\.3571/)).toBeTruthy();
+    expect(screen.getByText(/3 donors/)).toBeTruthy();
+    expect(screen.getByText(/placebo p 0\.2500/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

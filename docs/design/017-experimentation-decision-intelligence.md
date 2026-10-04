@@ -1188,6 +1188,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 196 — SC step 3: the console strip (purple, next to the ITS amber
+and KM indigo strips): gap, donor count, RMSPE ratio, placebo p (or
+"n/a" when the pool is under three), caveat verbatim. The SC epoch ships
+design-to-console in four rounds; deferred shrinks to ML-learned
+covariates and write-side org delegation.
+
 Round 195 — SC step 2: observational runs with a donor pool attach
 `synthetic_control` on the first primary — donor units = control arm
 (sorted, capped SC_MAX_DONORS=20), treated series = other-arm daily

@@ -89,6 +89,13 @@ interface AnalysisResult {
         ci: [number, number];
         caveat: string;
       };
+      synthetic_control?: {
+        gap: number;
+        rmspe_ratio: number;
+        placebo_p: number | null;
+        donors: number;
+        caveat: string;
+      };
     }
   >;
 }
@@ -265,6 +272,17 @@ export default function AnalysisPage() {
                   {fmtNum(metric.its.level_change.p)}) · trend{" "}
                   {fmtNum(metric.its.trend_change.estimate)} (p {fmtNum(metric.its.trend_change.p)})
                   · {metric.its.n_pre}+{metric.its.n_post} days — {metric.its.caveat}
+                </div>
+              ) : null}
+              {metric.synthetic_control ? (
+                <div className="mb-2 rounded border border-purple-200 bg-purple-50 p-2 text-xs">
+                  Synthetic control: gap {fmtNum(metric.synthetic_control.gap)} ·{" "}
+                  {metric.synthetic_control.donors} donors · RMSPE ratio{" "}
+                  {fmtNum(metric.synthetic_control.rmspe_ratio)}
+                  {metric.synthetic_control.placebo_p != null
+                    ? ` · placebo p ${fmtNum(metric.synthetic_control.placebo_p)}`
+                    : " · placebo p n/a"}{" "}
+                  — {metric.synthetic_control.caveat}
                 </div>
               ) : null}
               {metric.km ? (
