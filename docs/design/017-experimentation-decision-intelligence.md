@@ -284,12 +284,18 @@ measure the cumulative impact of everything shipped. `experiments.holdout_bp`
 Membership is computed, not stored (deterministic hash) — a
 `holdout_exclusions` check runs inside `resolve_variant` step 3.
 
-### 4.13 `experiment_health_checks` (v2)
+### 4.13 Health checks (v2 — implemented WITHOUT a dedicated table)
 
-`experiment_id`, `check_key` enum {srm, exposure_srm, aa_probe, pre_balance,
-novelty, interaction}, `status` enum {pass, warn, fail}, `detail` JSONB,
-`checked_at`. Latest row per check_key surfaces as the health strip on the
-experiment overview page.
+The original design called for an `experiment_health_checks` table; the
+implementation records health signals through two EXISTING channels
+instead (round 148 doc-honesty correction — no such table exists):
+alert-style findings (SRM, exposure-SRM, interaction) land as
+`guardrail_events` rows with reserved keys (`__srm__` etc., alert-only,
+dedup-windowed), and analysis-time findings (pre_balance, novelty, A/A
+probe verdicts, data-flow) ride the analysis `warnings` list and the
+diagnostics endpoints. The console surfaces them via the diagnostics
+page, the SRM banner, the detail page's guardrail-freshness line and the
+round-146 list data-flow badge.
 
 ### 4.14 Quantile metrics (v3 round 124 — the quantile epoch)
 
