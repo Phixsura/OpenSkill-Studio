@@ -1317,7 +1317,13 @@ SEED_METRIC_DEFINITIONS: list[dict] = [
      "domain": "marketplace", "source_kind": "service", "spec": {"source": "registry"}},
     # Guardrail staples
     {"key": "cost_usd", "title": "Cost ceiling (USD)", "kind": "continuous",
-     "domain": "operational", "source_kind": "service", "spec": {"source": "cost_ledger"},
+     "domain": "operational", "source_kind": "service",
+     # #69: a cost CEILING guards the window TOTAL — without this the
+     # guardrail silently evaluated the mean per task (the sum branch was
+     # unreachable: no seed set it and definition.spec is immutable).
+     # Seeds are ON CONFLICT DO NOTHING: pre-existing deployments keep the
+     # old spec until the definition row is re-seeded (documented, §18).
+     "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
      "direction": "decrease_good"},
     {"key": "run_failure_rate", "title": "Run failure rate", "kind": "rate",
      "domain": "operational", "source_kind": "service",

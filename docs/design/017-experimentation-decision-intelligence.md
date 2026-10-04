@@ -1108,6 +1108,21 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 166 — defect #69 (found chasing a wave-33 survivor): the cost
+CEILING guardrail silently evaluated the MEAN cost per task — _observed's
+sum branch was unreachable (no seed set guardrail_aggregate and
+definition.spec is immutable), so "Cost ceiling (USD)" with threshold 100
+paused only when the AVERAGE task cost passed 100. The cost_usd seed now
+sets guardrail_aggregate: "sum" (seeds are ON CONFLICT DO NOTHING —
+pre-existing deployments keep the old row until re-seeded; operators of
+old environments should verify the spec). Pinned by a fixture where the
+window TOTAL breaches while the mean sits far under. Wave 33 closed 19/19
+(fold antisymmetry, exact-threshold safety under both ops, the 404 pin);
+the surviving Add->Sub mutant was the TELL: a negated fold is invisible
+to rate/mean reads (signs cancel) and only a SUM guardrail could see it —
+no sum guardrail test existed because the sum semantics itself was
+unreachable.
+
 Round 165 — mutation wave 32 over the decision registry: 30/31 — the
 repeated-identical-look legality is now pinned (the hash probe stays a
 limit-1 EXISTS) and the guardrail outcome is scoped to exactly the

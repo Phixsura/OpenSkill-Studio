@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/guardrails.py",
+    "funcs": ["_observed", "evaluate_experiment"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_guardrails_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 900
+  }
+]

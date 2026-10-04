@@ -264,6 +264,157 @@ async def test_quantile_enabled_guardrail_evaluates_p95(db):
     await db.flush()
 
 
+async def test_guardrail_fold_and_exact_threshold_boundaries(db):
+    """Wave-33: the cross-variant fold is a SUM (an inverted fold cancels
+    asymmetric arms), and observed EXACTLY ON the threshold is safe under
+    BOTH ops (lte breaches strictly above; gte strictly below). Arms are
+    pinned by direct assignment: A 3 assigned/2 exposed, B 2 assigned/1
+    exposed -> folded exposure rate exactly 3/5."""
+    import pytest as _pytest
+
+    from app.experiments.models import Experiment, ExperimentAssignment
+
+    exp, _ = await _mk_running(
+        db, guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.6,
+             "window_hours": 24},
+        ]
+    )
+    svc = AssignmentService(db)
+    plan = [("control", 3, 2), ("treatment", 2, 1)]
+    for arm, assigned, exposed in plan:
+        for i in range(assigned):
+            unit = f"fb-{arm}-{i}" + "x" * 10
+            db.add(ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=unit,
+                variant_key=arm, assigned_version=1, bucket=0,
+                is_holdout=False,
+            ))
+            await db.flush()
+            if i < exposed:
+                assert await svc.record_exposure(
+                    experiment_key=exp.key, unit_type="user", unit_id=unit
+                )
+    # observed == 3/5 == 0.6 exactly: AT the lte threshold -> safe
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert summary["breaches"] == []
+    assert (await db.get(Experiment, exp.id)).status == "running"
+    # nudge the threshold just below: 0.6 > 0.59 -> breach, observed pinned
+    # EXACTLY (an inverted fold yields (2-1)/(3-2) == 1.0, not 0.6)
+    exp2, _ = await _mk_running(
+        db, guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.59,
+             "window_hours": 24},
+        ]
+    )
+    for arm, assigned, exposed in plan:
+        for i in range(assigned):
+            unit = f"fb2-{arm}-{i}" + "x" * 9
+            db.add(ExperimentAssignment(
+                experiment_id=exp2.id, unit_type="user", unit_id=unit,
+                variant_key=arm, assigned_version=1, bucket=0,
+                is_holdout=False,
+            ))
+            await db.flush()
+            if i < exposed:
+                assert await svc.record_exposure(
+                    experiment_key=exp2.key, unit_type="user", unit_id=unit
+                )
+    summary2 = await GuardrailService(db).evaluate_experiment(exp2.id)
+    assert len(summary2["breaches"]) == 1
+    assert summary2["breaches"][0]["observed"] == _pytest.approx(0.6)
+    # gte: observed exactly ON the floor is safe too
+    exp3, _ = await _mk_running(
+        db, guardrails=[
+            {"metric_key": "exposure_rate", "op": "gte", "threshold": 0.6,
+             "window_hours": 24},
+        ]
+    )
+    for arm, assigned, exposed in plan:
+        for i in range(assigned):
+            unit = f"fb3-{arm}-{i}" + "x" * 9
+            db.add(ExperimentAssignment(
+                experiment_id=exp3.id, unit_type="user", unit_id=unit,
+                variant_key=arm, assigned_version=1, bucket=0,
+                is_holdout=False,
+            ))
+            await db.flush()
+            if i < exposed:
+                assert await svc.record_exposure(
+                    experiment_key=exp3.key, unit_type="user", unit_id=unit
+                )
+    summary3 = await GuardrailService(db).evaluate_experiment(exp3.id)
+    assert summary3["breaches"] == []
+    # unknown experiment -> typed 404 (status pinned)
+    from app.exceptions import AppError as _AppError
+    with _pytest.raises(_AppError) as e:
+        await GuardrailService(db).evaluate_experiment("0" * 26)
+    assert e.value.status_code == 404
+
+
+async def test_cost_ceiling_guards_the_window_total(db):
+    """#69: the cost ceiling must breach on the window TOTAL, not the mean
+    per task — three cheap tasks plus one big one total 100.25 (over the
+    100 ceiling) while the mean is ~25 (far under): only the sum semantics
+    fires. Also kills the fold's Add->Sub mutant for sum aggregates (a
+    negated fold yields a negative observed that never breaches an lte)."""
+    from decimal import Decimal
+
+    import pytest as _pytest
+
+    from app.experiments.models import Experiment, ExperimentAssignment
+    from app.models.evaluation import EvalType, EvaluationTask
+
+    svc = MetricService(db)
+    await svc.ensure_seed_definitions()
+    # the shared test DB may hold the pre-#69 seed row — align it
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "cost_usd"))
+    ).scalar_one()
+    original_spec = dict(definition.spec)
+    definition.spec = {**definition.spec, "guardrail_aggregate": "sum"}
+    await db.flush()
+    try:
+        exp, _ = await _mk_running(
+            db, unit_type="organization",
+            guardrails=[{"metric_key": "cost_usd", "op": "lte",
+                         "threshold": 100.0, "window_hours": 24}],
+        )
+        from app.controlplane.models.tenant import TenantAccount
+        from app.models.organization import Organization
+
+        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                               slug=f"t-{str(ULID()).lower()}")
+        db.add(tenant)
+        await db.flush()
+        org = Organization(name=f"o-{str(ULID()).lower()}",
+                           slug=f"o-{str(ULID()).lower()}",
+                           tenant_id=tenant.id)
+        db.add(org)
+        await db.flush()
+        db.add(ExperimentAssignment(
+            experiment_id=exp.id, unit_type="organization", unit_id=org.id,
+            variant_key="control", assigned_version=1, bucket=0,
+            is_holdout=False,
+        ))
+        for cost in (Decimal("0.25"), Decimal("0.25"), Decimal("0.25"),
+                     Decimal("99.50")):
+            db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT,
+                                  cost_usd=cost))
+        await db.flush()
+        summary = await GuardrailService(db).evaluate_experiment(exp.id)
+        assert len(summary["breaches"]) == 1
+        assert summary["breaches"][0]["observed"] == _pytest.approx(100.25)
+        assert (await db.get(Experiment, exp.id)).status == "paused"
+    finally:
+        definition.spec = original_spec
+        await db.flush()
+
+
 async def test_gte_guardrail_direction(db):
     # exposure_rate must stay >= 0.5; nobody exposed → observed 0 → breach
     exp, _ = await _mk_running(
