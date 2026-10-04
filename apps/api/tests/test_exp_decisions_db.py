@@ -647,6 +647,41 @@ async def test_unwired_targets_are_only_presentation_pair(db):
     assert PROMOTION_TARGET_TYPES - wired == {"pack_recommendation", "pricing_presentation"}
 
 
+async def test_decide_after_repeated_identical_looks(db):
+    """Wave-32: the SAME result hash recorded by multiple looks is perfectly
+    legal (unchanged data, repeated runs) — the hash-exists probe must stay
+    a limit-1 EXISTS, not a scalar that explodes on the second row. Also
+    pins the guardrail_outcome's experiment scoping: a NEIGHBOR experiment's
+    events must not leak into the decision record."""
+
+    from app.experiments.models import GuardrailEvent
+
+    exp, admin, result_hash = await _mk_analyzed(db)
+    # a second identical look (same snapshots -> same hash)
+    from app.experiments.services.analysis_service import AnalysisService
+
+    second = await AnalysisService(db).run(exp.id, actor=admin)
+    assert second["result_hash"] == result_hash  # deterministic hash
+
+    # neighbor experiment's guardrail event must NOT leak into the outcome
+    neighbor, _n_admin, _n_hash = await _mk_analyzed(db)
+    db.add(GuardrailEvent(experiment_id=neighbor.id, guardrail_key="cost_usd",
+                          action="paused", auto=True, detail={}))
+    db.add(GuardrailEvent(experiment_id=exp.id, guardrail_key="cost_usd",
+                          action="alerted", auto=True, detail={}))
+    await db.flush()
+
+    record = await DecisionService(db).create(
+        exp.id, decision="promote", summary="repeated looks are legal",
+        analysis_result_hash=result_hash, actor=admin,
+    )
+    outcome = record.guardrail_outcome
+    assert outcome["clean"] is False
+    assert outcome["events"] == [
+        {"guardrail_key": "cost_usd", "action": "alerted", "count": 1}
+    ]  # exactly OUR event; the neighbor's paused event stays out
+
+
 async def test_concurrent_decides_single_terminal_record(db):
     """Round 155: two racing PROMOTE decisions must leave exactly ONE
     terminal record and one DECISION_STATE_INVALID loser — the terminal

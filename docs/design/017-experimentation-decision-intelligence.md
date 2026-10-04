@@ -1108,6 +1108,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 165 — mutation wave 32 over the decision registry: 30/31 — the
+repeated-identical-look legality is now pinned (the hash probe stays a
+limit-1 EXISTS) and the guardrail outcome is scoped to exactly the
+experiment's own events; the search default-limit constant ledgered.
+
 Round 164 — mutation wave 31 over the schedule gate: 19/19 after a full
 exemption/risk matrix (medium+exempt still refuses; high-risk 403s
 non-admins and schedules under an admin — the success arm was untested).

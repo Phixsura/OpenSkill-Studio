@@ -231,3 +231,12 @@ low+non-exempt refuses, MEDIUM+exempt STILL refuses (the exemption is
 risk AND domain), high-risk 403s a non-admin (status pinned) and
 schedules under a platform admin. The 422->423 family dies in the
 error-status contract pin (the config must list that test FILE too).
+
+## wave32_decisions.json (round 165)
+
+decisions create/search/hash-exists/guardrail-outcome: 30/31. New arms:
+the SAME result hash recorded by repeated looks is legal (the probe must
+stay a limit-1 EXISTS — the limit mutant explodes a scalar_one_or_none on
+the second identical look), and the guardrail outcome is pinned to EXACTLY
+the experiment's own events (a neighbor's pause stays out). Ledgered: the
+search default limit constant (50).
