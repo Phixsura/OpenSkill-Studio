@@ -1108,6 +1108,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 167 — the #69 family audit over every seeded definition: ONE
+sibling (internal_cost_usd — same total-cost semantics) gained the sum
+aggregate; the remaining continuous metrics (latency, ARPU, margin,
+revisions, durations) are legitimately per-event/per-unit means. The seed
+TEMPLATE is pinned (the shared test DB may hold pre-#69 rows, so the pin
+reads the template, not the row).
+
 Round 166 — defect #69 (found chasing a wave-33 survivor): the cost
 CEILING guardrail silently evaluated the MEAN cost per task — _observed's
 sum branch was unreachable (no seed set guardrail_aggregate and

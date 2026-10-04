@@ -1300,7 +1300,9 @@ SEED_METRIC_DEFINITIONS: list[dict] = [
     {"key": "client_acceptance_rate", "title": "Client acceptance", "kind": "binary",
      "domain": "workflow", "source_kind": "service", "spec": {"source": "client_briefs"}},
     {"key": "internal_cost_usd", "title": "Internal cost (USD)", "kind": "continuous",
-     "domain": "operational", "source_kind": "service", "spec": {"source": "cost_ledger"},
+     "domain": "operational", "source_kind": "service",
+     # #69 family: a cost guardrail guards the window TOTAL
+     "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
      "direction": "decrease_good"},
     {"key": "provider_reliability", "title": "Provider reliability", "kind": "rate",
      "domain": "workflow", "source_kind": "service", "spec": {"source": "eco_telemetry"}},

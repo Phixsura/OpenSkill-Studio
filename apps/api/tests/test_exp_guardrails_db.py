@@ -376,6 +376,13 @@ async def test_cost_ceiling_guards_the_window_total(db):
             MetricDefinition.key == "cost_usd"))
     ).scalar_one()
     original_spec = dict(definition.spec)
+    # #69 family audit: BOTH cost definitions seed the sum aggregate on a
+    # fresh deployment (the shared test DB may hold older rows — assert on
+    # the seed TEMPLATE, not the row)
+    from app.experiments.services.metrics import SEED_METRIC_DEFINITIONS
+    for seed in SEED_METRIC_DEFINITIONS:
+        if seed["key"] in ("cost_usd", "internal_cost_usd"):
+            assert seed["spec"].get("guardrail_aggregate") == "sum", seed["key"]
     definition.spec = {**definition.spec, "guardrail_aggregate": "sum"}
     await db.flush()
     try:
