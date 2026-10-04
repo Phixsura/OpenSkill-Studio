@@ -265,3 +265,13 @@ The six domain hooks + the dedup key: 13/13 killed by the existing
 integration suite outright. With this, every module in app/experiments/
 (services, hooks, worker sweeps) has a dedicated post-rewrite wave on
 record — waves 1-35, ~1100 mutants cumulative.
+
+## wave36_its.json (round 179)
+
+its_estimate: 13/16 after pinning the n==3 floor (both operator and
+constant, each side) and EXPOSING the dof as an honest readout (n - 4,
+pinned — the Sub->Add dof mutant was invisible while dof stayed
+internal). Ledgered: the trend dummy's >= at t == t0 (the (t - t0) factor
+is zero there, so both comparisons agree), the dof <= 0 guard (the < 3
+floors force n >= 6, dof >= 2), and the se == 0 branch (float OLS
+residuals are ~1e-15, never exactly zero — integer-input defense).

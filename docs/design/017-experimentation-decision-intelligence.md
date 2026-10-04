@@ -1122,6 +1122,19 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 179 — mutation wave 36 over its_estimate: 13/16 — the n==3 floor
+pinned from both sides and the dof EXPOSED as an honest readout (its
+arithmetic was unkillable while internal); three equivalents ledgered
+(the trend dummy agrees at t == t0, the dof guard is unreachable under
+the floors, float residuals never hit exact zero).
+
+Round 178 — ITS step 2 of 2, service wiring: an observational run with a
+started_at gets an `its` block on its first primary — the whole ITT
+roster read as ITS_DAYS=14 on-demand daily source windows per side,
+silent days as ITT zeros, segmented OLS in the pure core,
+association-only caveat; randomized runs never carry the block. The last
+deliberately-deferred quasi-design is shipped.
+
 Round 177 — the ITS epoch opens (§10 v3, step 1 of 2): the last
 deliberately-deferred quasi-experiment design becomes buildable — "no
 pre-period exists" only meant no pre-period SNAPSHOTS; the sources accept

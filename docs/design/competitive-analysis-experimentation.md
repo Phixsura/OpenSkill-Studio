@@ -35,8 +35,9 @@ and added depth the matrix's vendors do not ship:
 - Defects #1-#69 each fixed with a kill-proof; mutation waves 1-35
   (~1100 mutants) cover every module; 131 full-suite certifications.
 
-Still open by choice: ITS, full KM time-to-event, synthetic control,
-ML-learned covariates, write-side org delegation.
+Still open by choice: full KM time-to-event, synthetic control,
+ML-learned covariates, write-side org delegation. (ITS SHIPPED in rounds
+177-178 — segmented OLS over on-demand daily source windows.)
 
 ## 0. Status update (2026-10-01, v2 round 10)
 
