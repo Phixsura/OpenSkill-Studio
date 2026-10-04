@@ -1108,6 +1108,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 150 — mutation wave 25 over holdouts.report: 28/29 killed by the
+EXISTING suite (the wave-12-era strengthenings held through two rewrites);
+the 20k sample_capped informational flag ledgered.
+
 Round 149 — integration snippet card on the detail page (SDK developer
 experience): the experiment's own key pre-filled into the useExperiment
 usage and the raw self-serve resolve/exposure calls — wiring a surface is

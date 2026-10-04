@@ -177,3 +177,11 @@ in-source path); the only divergence is that the multi branch does NOT
 winsorize y, unobservable while revision_count ships without a winsorize
 knob. Design note recorded in ADR §4.6 v3: multi-covariate per-unit y is
 NOT winsorized (the single-covariate branch is).
+
+## wave25_holdout_report.json (round 150)
+
+holdouts.report (post-round-58 shape): 28/29 killed by the existing suite
+— the roll-split, source dispatch, both comparison gates and the caveat
+survived nothing. Ledgered: the sample_capped >= flag (killing it needs a
+20k-unit fixture for an informational boolean; the cap MECHANISM itself is
+the REPORT_SAMPLE_CAP limit on the unit query, exercised by every report).
