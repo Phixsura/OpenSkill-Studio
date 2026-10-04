@@ -1199,7 +1199,9 @@ against HEAD, and reverted by restoring the round-195 source verbatim
 26/35, run() re-wave 102/116; killers landed (direct Duchi-projection
 hand oracles, the placebo p == 1.0 exact pin on a perfect fit, the
 two-donor boundary on the rate branch pinned bit-for-bit, the
-constant-matrix refusal asserted block-absent); confirm pass next.
+constant-matrix refusal asserted block-absent); confirm pass: core
+31/35 and run() 106/116 — every remaining survivor a reasoned ledger
+entry. The SC epoch is mutation-certified end to end.
 
 Round 196 — SC step 3: the console strip (purple, next to the ITS amber
 and KM indigo strips): gap, donor count, RMSPE ratio, placebo p (or

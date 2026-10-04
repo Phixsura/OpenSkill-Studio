@@ -314,3 +314,26 @@ passed because the sourceless definition emits nothing. Killed by
 asserting the cleared definition keeps source/measure and loses only
 quantiles, plus the new km-knob suite (kind gate 422 both directions,
 set/strip round-trip, spec preservation).
+
+## wave39_sc.json (round 197)
+
+synthetic_control/_sc_fit/_sc_rmspe/_project_simplex: 31/35 after direct
+Duchi-projection hand oracles, the placebo p == 1.0 exact pin on a
+perfect fit (any worse-counter or p-formula drift breaks equality or
+pushes p past 1), the two-donor boundary, and the constant-matrix
+refusal. Ledgered 4: the projection's boundary >= (an equality
+coordinate gets zero weight and reproduces the same theta), the
+lip <= 0 guard (all-zero donors are already refused as all-constant),
+the 1000 -> 1001 iteration budget (converged fixed point), and the
+placebo tie >= (measure-zero, the p == 0.001 precedent).
+AnalysisService.run re-wave: 106/116 — the SC-wiring survivors killed
+(two-donor floor both mutants via the boundary fixture; the per-unit
+rate fallback via the approval-rate SC fixture; the attach And via the
+constant-matrix scenario pinning block-ABSENT over attached-None); the
+10 remaining are the standing ledgered equivalents at shifted lines.
+
+ALSO: this wave caught defect #72 in the loop itself — a `git add -A`
+docs commit during the wave's first pass shipped a live mutant
+(d9bd2d26, reverted in 6a349d60). Law: never stage or commit a wave's
+target files while the wave runs; the harness's dirty-target refusal is
+the tripwire that catches it.
