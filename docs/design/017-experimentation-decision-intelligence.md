@@ -1122,6 +1122,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 174 — the first BROWSER-level experiments spec
+(e2e/experiments-wall.spec.ts, Playwright): a plain user sees no
+Experiments sidebar entry and a deep link to the console renders the
+error state without crashing the layout — the #59 wall checked in a real
+Chromium. (Platform-admin browser flows stay with the live-API E2E, which
+can SQL-promote; the browser suite deliberately tests the unprivileged
+side.) 2/2 green against live servers.
+
 Round 172 — fuzz extension over the quantile surfaces: histogram_quantile
 is total over arbitrary string->int mappings (rotted JSONB included —
 None or a finite ordered read), and the quantiles-knob validator is total
