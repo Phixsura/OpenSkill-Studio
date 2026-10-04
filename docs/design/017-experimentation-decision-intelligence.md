@@ -336,6 +336,33 @@ conservative combined CI ride the analysis result under
 `quantiles: {"0.5": {...}, "0.95": {...}}`; never a decision basis on
 their own (the primary comparison stays the registered engine's).
 
+### 4.6b Auto covariate selection (v5 round 201 — design)
+
+Multi-covariate CUPED (v3) takes an explicit covariate_metrics list. The
+last deferred item, "ML-learned covariates", ships in its honest minimal
+form: DATA-DRIVEN SELECTION, not learned embeddings.
+
+**Spec.** `covariate_metrics: ["auto"]` — a reserved literal (mutually
+exclusive with explicit keys; the validator rejects mixing).
+
+**Snapshot side.** Auto folds the DEFAULT covariate for every registered
+provider (a small registry AUTO_COVARIATE_DEFAULTS maps provider source
+-> its canonical covariate metric key), so the stored aggregates carry
+every candidate — selection can then happen at analysis time with no
+extra reads.
+
+**Analysis side.** For each candidate the pooled pre-period correlation
+is computable from the stored sums alone (cov_xy_sum, cov_sum,
+cov_sum_sq, sum_value/numerator, n). Candidates with |r| >= 0.1 are kept
+(at most 3, strongest first, deterministic tie-break by key); the chosen
+set feeds the existing multi-CUPED estimator and the run warns
+CUPED_AUTO_SELECTED (with the keys) so the selection is never silent.
+No candidate qualifying degrades to plain Welch with CUPED_AUTO_NONE —
+honest refusal over a useless adjustment.
+
+Three-step shape: design (this), selection core + snapshot fold +
+validator (step 1-2), console surfacing of the selected keys (step 3).
+
 ### 4.15 Kaplan-Meier time-to-event (v3 rounds 181–183 — SHIPPED)
 
 time_to_event metrics analyze as binary-at-horizon (honest caveat
@@ -1202,6 +1229,12 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 201 — the auto-covariate epoch opens (§4.6b, step 0): the last
+deferred analytics item in its honest minimal form — "auto" folds every
+provider's default covariate into snapshots, analysis selects by pooled
+|r| >= 0.1 from the stored sums (deterministic, at most 3), warns
+CUPED_AUTO_SELECTED / CUPED_AUTO_NONE so selection is never silent.
 
 Round 200 — residue hygiene for the observational lane: the round-199
 section seeded its own tenant/org/project/users/submissions and layer,
