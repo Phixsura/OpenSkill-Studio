@@ -1230,6 +1230,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 203 — §4.6b step 3: the builder's covariates input documents the
+"auto" literal (the free-text field already passed it through; the
+selected keys surface on the analysis page via the cuped block's
+covariates list, which has rendered since round 145). The auto-covariate
+epoch ships design-to-console in three rounds; NOTHING remains on the
+deliberately-deferred analytics list — write-side org delegation stays a
+product-scope decision, not an analytics gap.
+
 Round 202 — §4.6b steps 1-2 land: auto_select_covariates (pooled r from
 stored sums alone, |r| >= 0.1, strongest-first with a deterministic key
 tie-break, at most 3, degenerate/missing candidates never guessed at),

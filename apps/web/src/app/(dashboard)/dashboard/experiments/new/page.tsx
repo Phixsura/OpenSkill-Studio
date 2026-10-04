@@ -482,7 +482,7 @@ export default function NewExperimentPage() {
           </div>
           <div>
             <label className={label} htmlFor="exp-cuped">
-              CUPED covariate metrics (optional, up to 3, comma-separated)
+              CUPED covariate metrics (optional, up to 3, comma-separated, or &quot;auto&quot;)
             </label>
             <input
               id="exp-cuped"
@@ -503,7 +503,8 @@ export default function NewExperimentPage() {
               />
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Pre-period adjustment: 2+ covariates run the joint (multi) adjustment.
+              Pre-period adjustment: 2+ covariates run the joint (multi) adjustment;
+              &quot;auto&quot; selects data-driven covariates at analysis time (§4.6b).
             </p>
           </div>
         </div>
