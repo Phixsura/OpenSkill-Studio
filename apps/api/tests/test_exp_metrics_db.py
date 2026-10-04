@@ -2670,6 +2670,14 @@ async def test_update_definition_km_knob(db):
     # ... and km=False on a wrong kind is REFUSED too, not silently ignored
     with pytest.raises(_AppError):
         await svc.update_definition("run_success_rate", km=False)
+    # right kind, wrong SOURCE: retention_rate is time_to_event but
+    # billing-sourced — the placement-based KM reader can't serve it (188)
+    with pytest.raises(_AppError) as exc2:
+        await svc.update_definition("retention_rate", km=True)
+    assert exc2.value.status_code == 422
+    # stripping is still allowed there (legacy cleanup path)
+    cleaned = await svc.update_definition("retention_rate", km=False)
+    assert "km" not in cleaned.spec
 
 
 def test_value_histogram_and_validator_exact_pins():

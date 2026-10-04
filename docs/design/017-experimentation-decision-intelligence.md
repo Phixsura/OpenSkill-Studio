@@ -363,7 +363,10 @@ its assigned_at).days (events) or (horizon - assigned_at).days
 migration, no fold semantics, no write amplification; the cost is one
 assignment scan plus one event query per analysis run. The `km` block
 rides next to the binary-at-horizon read, which stays authoritative;
-console strip mirrors the ITS pattern.
+console strip mirrors the ITS pattern. The event reader is
+placement-based, so the knob and the analysis gate both require
+source == talent_outcomes (round 188, defect #70) — other time_to_event
+sources (billing retention) need their own reader before opting in.
 
 ## 5. Lifecycle state machine
 
@@ -1150,6 +1153,16 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 188 — defect #70: the KM event reader is placement-based, but the
+km knob accepted ANY time_to_event definition — enabling it on
+retention_rate (billing-sourced) would have attached placement curves to
+a billing metric. Fixed at both layers: the analysis gate now requires
+source == talent_outcomes (refusing arms with a KM_SOURCE_UNSUPPORTED
+warning rather than attaching wrong-source curves), and the PATCH
+refuses km=True off talent_outcomes with 422 while still allowing
+km=False as the legacy-strip path. §4.15 notes the per-source reader as
+the extension point.
 
 Round 187 — the km knob gets its missing service tests + wave 38 over
 update_definition (11/11): the knob had shipped tested only via raw spec

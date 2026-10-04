@@ -817,12 +817,21 @@ class AnalysisService:
         # DEMAND (cumulative-from-assignment does not fit additive snapshot
         # folds). The horizon reads the DB clock (#68 law: event rows
         # timestamp with server_default now()).
-        km_keys = [
-            key for key in spec.metrics.primary
-            if (definitions.get(key) is not None
-                and definitions[key].kind == "time_to_event"
-                and (definitions[key].spec or {}).get("km"))
-        ]
+        # The event reader below is PLACEMENT-based, so only talent_outcomes
+        # definitions qualify — a billing time_to_event (retention_rate)
+        # opting in would otherwise get placement curves attached to a
+        # billing metric (round 188). Honest refusal: warn, don't attach.
+        km_keys = []
+        for key in spec.metrics.primary:
+            definition = definitions.get(key)
+            if (definition is None or definition.kind != "time_to_event"
+                    or not (definition.spec or {}).get("km")):
+                continue
+            if (definition.spec or {}).get("source") != "talent_outcomes":
+                if "KM_SOURCE_UNSUPPORTED" not in warnings:
+                    warnings.append("KM_SOURCE_UNSUPPORTED")
+                continue
+            km_keys.append(key)
         if km_keys:
             from sqlalchemy import func as _func
 

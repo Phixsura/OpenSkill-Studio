@@ -2004,6 +2004,41 @@ async def test_its_rides_observational_analysis(db):
     assert "its" not in result_r["metrics"]["revision_count"]
 
 
+async def test_km_refuses_non_talent_sources_with_warning(db):
+    """Round 188: the KM event reader is placement-based — a BILLING
+    time_to_event (retention_rate) opting in must NOT get placement curves
+    attached; the run warns KM_SOURCE_UNSUPPORTED instead."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import MetricDefinition
+
+    exp, admin = await _mk_running(
+        db, analysis_type="observational",
+        metrics={"primary": ["retention_rate"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "retention_rate"))
+    ).scalar_one()
+    original_spec = dict(definition.spec)
+    definition.spec = {**definition.spec, "km": True}
+    await db.flush()
+    try:
+        ws = datetime(2026, 9, 1, tzinfo=UTC)
+        for variant, num in (("control", 5.0), ("treatment", 6.0)):
+            db.add(_snapshot(exp.id, "retention_rate", variant, ws,
+                             n=10, numerator=num, denominator=10.0))
+        await db.flush()
+        result = await AnalysisService(db).run(exp.id, actor=admin)
+        assert "km" not in result["metrics"]["retention_rate"]
+        assert "KM_SOURCE_UNSUPPORTED" in result["warnings"]
+    finally:
+        definition.spec = original_spec
+        await db.flush()
+
+
 async def test_km_block_rides_time_to_event_primary(db):
     """Round 182 (§4.15 step 2): a time_to_event primary whose definition
     opts in (spec.km) carries a censoring-correct `km` block computed from

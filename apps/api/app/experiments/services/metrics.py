@@ -1411,6 +1411,14 @@ class MetricService:
                     f"km requires a time_to_event metric (kind: {definition.kind})",
                     422,
                 )
+            if (changes["km"]
+                    and (definition.spec or {}).get("source") != "talent_outcomes"):
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    "km requires a talent_outcomes-sourced metric (the KM "
+                    "event reader is placement-based)",
+                    422,
+                )
             spec = {k: v for k, v in (definition.spec or {}).items() if k != "km"}
             if changes["km"]:
                 spec["km"] = True
