@@ -35,9 +35,11 @@ and added depth the matrix's vendors do not ship:
 - Defects #1-#69 each fixed with a kill-proof; mutation waves 1-35
   (~1100 mutants) cover every module; 131 full-suite certifications.
 
-Still open by choice: full KM time-to-event, synthetic control,
-ML-learned covariates, write-side org delegation. (ITS SHIPPED in rounds
-177-178 — segmented OLS over on-demand daily source windows.)
+Still open by choice: ML-learned covariates, write-side org delegation.
+(ITS SHIPPED rounds 177-178, full Kaplan-Meier SHIPPED rounds 181-192
+(censoring-correct horizon block, source-gated #70), synthetic control
+SHIPPED rounds 193-196 — simplex donor weights, placebo inference,
+console strip.)
 
 ## 0. Status update (2026-10-01, v2 round 10)
 
@@ -55,8 +57,8 @@ TS hook + self-serve endpoints, and CUPED covariates on three sources
 (projects, cost_ledger, workflow_runs). The "hourly guardrail lane" was
 already satisfied: guardrail evaluation runs every 10 minutes on live
 sliding windows (only ANALYSIS windows are daily). Still open by choice:
-ITS, full KM time-to-event, multi-covariate CUPED, synthetic control,
-write-side org delegation.
+ML-learned covariates, write-side org delegation (ITS, full KM,
+multi-covariate CUPED and synthetic control have all since shipped).
 
 ## 1. Feature matrix (industry standard vs ADR-017 v1)
 
@@ -77,7 +79,7 @@ write-side org delegation.
 | **Multi-armed bandit (Autotune-class)**                                                          | ✓                           | ✗         | ✓               | deferred                                 | **close (P1), scoped** — Thompson sampling, presentation/marketplace domains only                                                   |
 | **Switchback / cluster designs for interference**                                                | ✗ (cluster only)            | partial   | ✗               | cluster only                             | **close (P1)** — switchback design for matching/marketplace (DoorDash/Lyft class problem, directly relevant to our matching domain) |
 | Stratified sampling / post-stratification                                                        | ✓                           | ✓         | ✓               | ✗                                        | **close (P1)** — post-stratification for small-n cohort/org experiments                                                             |
-| **Quasi-experiments (DiD, ITS)**                                                                 | ✗                           | ✗         | ✗               | "observational" label only               | **close (P1)** — DiD + interrupted time series with causal_claim:false; synthetic control deferred                                  |
+| **Quasi-experiments (DiD, ITS)**                                                                 | ✗                           | ✗         | ✗               | "observational" label only               | **close (P1)** — DiD + interrupted time series with causal_claim:false; **synthetic control SHIPPED rounds 193-196**                |
 | **Meta-analysis / experiment corpus priors**                                                     | ✓ Meta Analysis             | ✓         | ✗               | decision registry only                   | **close (P2)** — win-rate + effect distributions from DecisionRecords, optional prior for Bayesian engine                           |
 | Org-level default guardrail policies                                                             | ✓                           | ✓         | partial         | per-experiment                           | **close (P2)** — platform guardrail policy auto-attach                                                                              |
 | Launch checklist / review workflow                                                               | ✓                           | ✓         | partial         | review status only                       | **close (P2)** — structured checklist on review→scheduled                                                                           |
