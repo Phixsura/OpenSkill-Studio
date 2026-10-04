@@ -1108,6 +1108,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 153 — the always-valid promise ITSELF pinned: 300 null runs peeked
+after every batch (12 looks each) — the mSPRT rejection rate across the
+whole monitored run stays within the alpha band while the naive
+fixed-horizon peeker inflates several fold alongside (the contrast keeps
+the bound non-vacuous). Rounds 151-153 together: null calibration, power
+calibration, and sequential validity — the three statistical promises the
+platform makes, each now Monte-Carlo-pinned deterministically in the main
+suite.
+
 Round 152 — POWER calibration closes the design loop: simulating binary
 A/B at EXACTLY required_n_per_arm(10%, 20%) == 3841 must detect at the
 promised 0.8 power (Monte-Carlo band) — a drift in either the planner or

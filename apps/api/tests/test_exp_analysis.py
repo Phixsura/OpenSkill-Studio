@@ -1145,3 +1145,49 @@ def test_power_calibration_closes_the_design_loop():
     # promised power 0.8 at the EXACT boundary n; binomial 3 sigma on 200
     # reps ≈ 17 — accept [0.70, 0.92]
     assert 140 <= detected <= 184, detected
+
+
+def test_msprt_anytime_validity_under_continuous_peeking():
+    """Round 153 — the always-valid promise ITSELF: peek after every batch
+    and reject the moment p < alpha; across the WHOLE monitored run the
+    null rejection rate must stay at or below alpha (plus Monte-Carlo
+    slack). A fixed-horizon test peeked this way inflates alpha several
+    fold — the companion count demonstrates the contrast, which also makes
+    the msprt bound non-vacuous."""
+    import random
+
+    from app.experiments.services.analysis import (
+        msprt_always_valid_p,
+        welch_from_stats,
+    )
+
+    rng = random.Random(11)
+    reps = 300
+    batch, looks = 25, 12  # n per arm grows 25..300 in 12 peeks
+    msprt_fp = 0
+    naive_fp = 0
+    for _ in range(reps):
+        a: list[float] = []
+        b: list[float] = []
+        msprt_hit = False
+        naive_hit = False
+        for _look in range(looks):
+            a.extend(rng.gauss(0.0, 1.0) for _ in range(batch))
+            b.extend(rng.gauss(0.0, 1.0) for _ in range(batch))
+            w = welch_from_stats(
+                len(a), sum(a), sum(v * v for v in a),
+                len(b), sum(b), sum(v * v for v in b),
+            )
+            if msprt_always_valid_p(w["t"]) < 0.05:
+                msprt_hit = True
+            if w["p"] < 0.05:
+                naive_hit = True
+        msprt_fp += msprt_hit
+        naive_fp += naive_hit
+    # alpha 0.05 over 300 reps -> 15 expected at MOST (anytime-valid means
+    # the WHOLE monitored run counts as one test); 3 sigma ≈ 11
+    assert msprt_fp <= 26, msprt_fp
+    # the naive peeker must inflate well past nominal — this contrast is
+    # what the always-valid machinery buys (and proves the sim has teeth)
+    assert naive_fp > msprt_fp
+    assert naive_fp >= 30, naive_fp
