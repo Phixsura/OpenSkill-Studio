@@ -1203,6 +1203,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 199 — the observational lane over the wire: the live wall grows
+110 -> 122 — a learning-domain observational experiment created,
+checklisted (ethics_screened included — the first failing run proved the
+ethics gate bites over HTTP too), run to running, its roster and daily
+series seeded, and the analysis asserted end to end: causal_claim false,
+the ITS block with its caveat, the synthetic-control block with two
+donors (placebo honestly None below three), and no km without the knob.
+
 Round 198 — §16 gains item 13 (the causal-inference epochs, defects
 #70-#72, waves 36-39, the ~1s observational wall-clock readout measured
 on the SC fixture) and the PR body syncs through wave 39.

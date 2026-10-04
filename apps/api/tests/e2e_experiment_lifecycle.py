@@ -525,6 +525,151 @@ async def main() -> int:
               and "km" not in r.json()["data"]["spec"],
               r.text[:300])
 
+        # ── Round 199: the OBSERVATIONAL lane over the wire ────────────
+        # (ITS + synthetic control + causal_claim:false had zero live
+        # coverage — everything below runs the real HTTP path, with the
+        # roster/series seeded directly like the snapshot sections.)
+        obs_layer = f"e2e-obs-{uid()}"
+        r = await c.post("/experiments/layers", headers=admin,
+                         json={"key": obs_layer, "domain": "learning"})
+        check("create observational layer", r.status_code == 201, r.text[:200])
+        obs_key = f"e2e-obs-{uid()}"
+        r = await c.post("/experiments", headers=admin, json={
+            "key": obs_key, "title": "E2E observational", "domain": "learning",
+            "layer_key": obs_layer,
+        })
+        check("create observational experiment", r.status_code == 201,
+              r.text[:200])
+        obs_id = r.json()["data"]["id"]
+        experiment_ids.append(obs_id)
+        obs_spec = {
+            "hypothesis": "revisions change after the intervention",
+            "unit_type": "user",
+            "analysis_type": "observational",
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000,
+                 "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {"primary": ["revision_count"],
+                        "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                        "threshold": 100.0}]},
+            "population": {"rules": []},
+        }
+        r = await c.post(f"/experiments/{obs_id}/versions", headers=admin,
+                         json={"spec": obs_spec})
+        check("observational spec v1", r.status_code == 201, r.text[:300])
+        r = await c.post(f"/experiments/layers/{obs_layer}/allocations",
+                         headers=admin,
+                         json={"experiment_id": obs_id, "slice_start": 0,
+                               "slice_end": 9999})
+        check("observational slices", r.status_code == 201, r.text[:200])
+        obs_checklist = {**checklist, "ethics_screened": True}
+        for payload in ({"to_status": "review"},
+                        {"to_status": "scheduled",
+                         "checklist": obs_checklist},
+                        {"to_status": "running"}):
+            r = await c.post(f"/experiments/{obs_id}/transition",
+                             headers=admin, json=payload)
+            check(f"observational -> {payload['to_status']}",
+                  r.status_code == 200, r.text[:300])
+
+        from app.controlplane.models.tenant import TenantAccount as _Tenant
+        from app.experiments.models import Experiment as _Exp
+        from app.experiments.models import ExperimentAssignment as _Assign
+        from app.models.organization import Organization as _Org
+        from app.models.project import Project as _Proj
+        from app.models.project import Submission as _Sub
+        from app.models.project import SubmissionStatus as _SubStatus
+        from app.models.user import User as _Usr
+        from app.models.user import UserRole as _UsrRole
+        from app.models.user import UserStatus as _UsrStatus
+
+        obs_start = (_dt.now(_UTC) - _tdlt(days=3)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        await _eng.dispose(close=False)
+        async with SessionL() as db:
+            exp_row = await db.get(_Exp, obs_id)
+            exp_row.started_at = obs_start
+            tenant = _Tenant(name=f"e2e-obs-{uid()}", slug=f"e2e-obs-{uid()}")
+            db.add(tenant)
+            await db.flush()
+            obs_org = _Org(name=f"e2e-obs-{uid()}", slug=f"e2e-obs-{uid()}",
+                           tenant_id=tenant.id)
+            db.add(obs_org)
+            await db.flush()
+            proj = _Proj(org_id=obs_org.id, title="OBS",
+                         slug=f"obs-{uid()}", description="d",
+                         instructions="i",
+                         rubric=[{"criterion": "c", "max_score": 5}])
+            db.add(proj)
+            await db.flush()
+            users = {}
+            for tag, variant in (("t", "treatment"), ("d0", "control"),
+                                 ("d1", "control")):
+                u = _Usr(email=f"e2e-obs-{tag}-{uid()}@example.com",
+                         display_name=tag, role=_UsrRole.STUDENT,
+                         status=_UsrStatus.ACTIVE)
+                db.add(u)
+                await db.flush()
+                db.add(_Assign(experiment_id=obs_id, unit_type="user",
+                               unit_id=u.id, variant_key=variant,
+                               assigned_version=1, bucket=0,
+                               is_holdout=False))
+                users[tag] = u
+            # treated: steady 1/day pre, a 3-revision jump for 3 days post;
+            # donor d0 tracks the pre exactly; d1 sits at 3/day throughout
+            for off in range(-14, 0):
+                for tag, ver in (("t", 2), ("d0", 2), ("d1", 4)):
+                    db.add(_Sub(org_id=obs_org.id, project_id=proj.id,
+                                user_id=users[tag].id,
+                                status=_SubStatus.APPROVED, version=ver,
+                                created_at=obs_start + _tdlt(days=off,
+                                                             hours=6)))
+            for off in range(3):
+                db.add(_Sub(org_id=obs_org.id, project_id=proj.id,
+                            user_id=users["t"].id,
+                            status=_SubStatus.APPROVED, version=4,
+                            created_at=obs_start + _tdlt(days=off, hours=6)))
+            for off in range(14):
+                for tag, ver in (("d0", 2), ("d1", 4)):
+                    db.add(_Sub(org_id=obs_org.id, project_id=proj.id,
+                                user_id=users[tag].id,
+                                status=_SubStatus.APPROVED, version=ver,
+                                created_at=obs_start + _tdlt(days=off,
+                                                             hours=6)))
+            obs_ws = obs_start + _tdlt(days=1)
+            db.add(_Snap(experiment_id=obs_id, metric_key="revision_count",
+                         variant_key="control", window_start=obs_ws,
+                         window_end=obs_ws + _tdlt(days=1), n=10,
+                         sum_value=10.0, sum_sq=25.0))
+            db.add(_Snap(experiment_id=obs_id, metric_key="revision_count",
+                         variant_key="treatment", window_start=obs_ws,
+                         window_end=obs_ws + _tdlt(days=1), n=10,
+                         sum_value=14.0, sum_sq=35.0))
+            await db.commit()
+        await _eng.dispose()
+
+        r = await c.post(f"/experiments/{obs_id}/analysis", headers=admin,
+                         json={})
+        check("observational analysis runs over the wire",
+              r.status_code == 200, r.text[:300])
+        obs_result = r.json()["data"]
+        check("observational analysis is never a causal claim",
+              obs_result.get("causal_claim") is False, str(obs_result)[:200])
+        obs_metric = obs_result["metrics"]["revision_count"]
+        check("ITS block rides the wire with the association caveat",
+              "its" in obs_metric
+              and "association only" in obs_metric["its"]["caveat"],
+              str(obs_metric)[:300])
+        check("synthetic-control block rides the wire with two donors",
+              (obs_metric.get("synthetic_control") or {}).get("donors") == 2
+              and (obs_metric.get("synthetic_control") or {}).get(
+                  "placebo_p") is None,
+              str(obs_metric.get("synthetic_control"))[:300])
+        check("no km block without the knob",
+              "km" not in obs_metric, str(obs_metric)[:200])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",
