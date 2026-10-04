@@ -2012,12 +2012,16 @@ async def test_km_block_rides_time_to_event_primary(db):
             )
             db.add(a)
             await db.flush()
-            a.assigned_at = assigned_day
+            # unit 2 (control) joined only yesterday -> censors at day 1,
+            # BEFORE the control event day, shaping the risk set (round 184)
+            a.assigned_at = (datetime.now(UTC) - timedelta(days=1)
+                             if i == 2 else assigned_day)
             units.append((u.id, arm))
-        # one event per arm (day 2 treatment, day 5 control) — km_compare
-        # needs a curve on BOTH sides; the other four units censor
-        for arm_name, day in (("treatment", 2), ("control", 5)):
-            placed_unit = next(u for u, arm in units if arm == arm_name)
+        # treatment: events day 0 (exactly at assigned_at) and day 2;
+        # control: one event day 5; everyone else censors
+        placements = {}
+        for unit_idx, day in ((1, 2), (3, 0), (0, 5)):
+            placed_unit = units[unit_idx][0]
             application = Application(opportunity_id=opp.id,
                                       user_id=placed_unit, status="hired")
             db.add(application)
@@ -2029,6 +2033,7 @@ async def test_km_block_rides_time_to_event_primary(db):
             db.add(placement)
             await db.flush()
             placement.created_at = assigned_day + timedelta(days=day)
+            placements[unit_idx] = placement
         # snapshots so the primary itself computes
         ws = datetime(2026, 9, 1, tzinfo=UTC)
         for variant, num in (("control", 0.0), ("treatment", 1.0)):
@@ -2039,14 +2044,25 @@ async def test_km_block_rides_time_to_event_primary(db):
         result = await AnalysisService(db).run(exp.id, actor=admin)
         km = result["metrics"]["placement_outcome_rate"].get("km")
         assert km is not None
-        # each arm: 3 units, 1 event -> S = 2/3 (censorings AFTER the event
-        # day do not shrink the risk set before it)
-        assert km["survival_treatment"] == pytest.approx(2.0 / 3.0)
-        assert km["survival_control"] == pytest.approx(2.0 / 3.0)
-        assert km["diff"] == pytest.approx(0.0, abs=1e-12)
+        # treatment: events day 0 and day 2 over n0=3 -> 2/3 * 1/2 = 1/3
+        # control: censor day 1 shrinks the risk set to 2 BEFORE the day-5
+        # event -> S = 1/2 (binary-at-horizon would say 2/3 — the point)
+        assert km["survival_treatment"] == pytest.approx(1.0 / 3.0)
+        assert km["survival_control"] == pytest.approx(0.5)
+        assert km["diff"] == pytest.approx(-1.0 / 6.0)
         assert "censoring-correct" in km["caveat"]
         # the binary-at-horizon engine read stays alongside
         assert "comparisons" in result["metrics"]["placement_outcome_rate"]
+
+        # a cancelled placement is NOT an event: cancelling the only
+        # control event leaves the control curve absent -> the whole km
+        # block stays off (never a half-attached None)
+        placements[0].status = "cancelled"
+        await db.flush()
+        result_c = await AnalysisService(db).run(exp.id, actor=admin)
+        assert "km" not in result_c["metrics"]["placement_outcome_rate"]
+        placements[0].status = "active"
+        await db.flush()
 
         # knob OFF -> no block
         definition.spec = {k: v for k, v in definition.spec.items()

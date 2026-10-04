@@ -1319,3 +1319,37 @@ def test_km_refusals_and_compare():
     assert out["ci"][0] <= out["diff"] <= out["ci"][1]
     assert "censoring-correct" in out["caveat"]
     assert km_compare(None, treatment) is None
+    # exact-SE pin (round 184): combined Greenwood se = sqrt(.016 + .024)
+    assert out["se"] == pytest.approx(0.2, abs=1e-12)
+    assert out["z"] == pytest.approx(-2.0, abs=1e-9)
+    assert out["p"] == pytest.approx(0.0455, abs=1e-3)
+
+
+def test_km_boundaries_round184():
+    """Wave-37 killers: exact boundary pins on the product-limit guards."""
+    from app.experiments.services.analysis import km_compare, km_curve
+
+    # n0 == 2 is ADMISSIBLE (the floor is < 2, not <= 2 or < 3)
+    out = km_curve({1: 1}, {}, 2)
+    assert out is not None and out["survival"] == pytest.approx(0.5)
+    assert out["n0"] == 2
+
+    # zero-count event entries are FILTERED (int(v) > 0, not >= 0):
+    # an all-zero events dict is "no events" -> refusal
+    assert km_curve({1: 0}, {}, 5) is None
+
+    # total death: d == at_risk is valid (S hits 0; Greenwood term skipped,
+    # no division by the empty risk set)
+    out = km_curve({1: 2}, {}, 2)
+    assert out is not None and out["survival"] == 0.0 and out["se"] == 0.0
+    assert out["curve"] == [{"day": 1, "survival": 0.0, "at_risk": 2}]
+
+    # anything AFTER the risk set empties (at_risk == 0 exactly) refuses
+    assert km_curve({1: 2}, {2: 1}, 2) is None
+
+    # zero-SE compare: two total-death curves -> the degenerate branch
+    # (z 0, p 1, point CI), never a division by zero
+    cmp_out = km_compare(km_curve({1: 2}, {}, 2), km_curve({1: 3}, {}, 3))
+    assert cmp_out is not None
+    assert cmp_out["z"] == 0.0 and cmp_out["p"] == 1.0
+    assert cmp_out["ci"] == [0.0, 0.0]

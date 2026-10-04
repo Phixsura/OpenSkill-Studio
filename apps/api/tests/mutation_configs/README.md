@@ -275,3 +275,20 @@ internal). Ledgered: the trend dummy's >= at t == t0 (the (t - t0) factor
 is zero there, so both comparisons agree), the dof <= 0 guard (the < 3
 floors force n >= 6, dof >= 2), and the se == 0 branch (float OLS
 residuals are ~1e-15, never exactly zero — integer-input defense).
+
+## wave37_km.json (round 184)
+
+km_curve/km_compare: 21/23 after boundary pins (n0 == 2 admissible,
+zero-count event filter, total-death day d == at_risk with the Greenwood
+term skipped, refusal after the risk set empties, exact combined-SE pin
+se == 0.2 / z == -2, zero-SE degenerate compare). Ledgered: the
+zero-count CENSOR filter (a kept zero-censor entry changes no risk set
+and emits no curve point) and the greenwood > 0 SE gate (both branches
+yield 0.0 at equality). AnalysisService.run re-wave: 79/98 — the four
+KM-wiring survivors killed by reshaping the DB fixture (day-0 event
+exactly at assigned_at; an early censor BEFORE the control event day so
+the risk set shape is visible; arms with DIFFERENT survival so comparing
+control-to-control cannot pass; a cancelled-only-event arm pinning that
+the block stays off rather than half-attaching None). Still surviving:
+the 8 wave-34 ledgered equivalents at shifted lines, and the 10
+ITS-service-block mutants (L897-L959) — round 185's target.

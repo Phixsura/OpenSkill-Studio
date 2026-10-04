@@ -1151,6 +1151,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 184 — mutation wave 37 over the KM epoch: the pure core lands at
+21/23 (two ledgered equivalents: the zero-censor filter and the
+greenwood-zero SE gate) after exact boundary pins — n0 == 2 admissible,
+total-death days, refusal past an empty risk set, the combined Greenwood
+SE pinned to 0.2 exactly. The service re-wave (98 mutants over run())
+kills all four KM-wiring survivors by reshaping the DB fixture: a day-0
+event exactly at assigned_at, an early censor BEFORE the control event
+day, arms with different survival, and a cancelled-only-event arm
+pinning block-off over half-attached None. 79/98 — the remainder is the
+eight wave-34 ledgered equivalents plus the ten ITS-service-block
+mutants, queued as round 185.
+
 Round 183 — the KM strip on the analysis console (the ITS pattern):
 an indigo strip under the metric card shows survival per arm, the
 horizon diff with p/CI, and the censoring-correct caveat verbatim.
