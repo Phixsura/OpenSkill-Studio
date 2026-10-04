@@ -1951,3 +1951,109 @@ async def test_its_rides_observational_analysis(db):
     await db.flush()
     result_r = await AnalysisService(db).run(exp_r.id, actor=admin_r)
     assert "its" not in result_r["metrics"]["exposure_rate"]
+
+
+async def test_km_block_rides_time_to_event_primary(db):
+    """Round 182 (§4.15 step 2): a time_to_event primary whose definition
+    opts in (spec.km) carries a censoring-correct `km` block computed from
+    on-demand assignment/placement reads; without the knob no block; the
+    binary-at-horizon engine read stays alongside."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentAssignment, MetricDefinition
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+    from app.talent.models.application import Application, Placement
+    from app.talent.models.employer import Opportunity
+
+    exp, admin = await _mk_running(
+        db, analysis_type="observational",
+        metrics={"primary": ["placement_outcome_rate"], "secondary": [],
+                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                 "threshold": 100.0}]},
+    )
+    definition = (
+        await db.execute(_select(MetricDefinition).where(
+            MetricDefinition.key == "placement_outcome_rate"))
+    ).scalar_one()
+    original_spec = dict(definition.spec)
+    definition.spec = {**definition.spec, "km": True}
+    await db.flush()
+    try:
+        from app.controlplane.models.tenant import TenantAccount
+        from app.models.organization import Organization
+
+        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                               slug=f"t-{str(ULID()).lower()}")
+        db.add(tenant)
+        await db.flush()
+        org = Organization(name=f"o-{str(ULID()).lower()}",
+                           slug=f"o-{str(ULID()).lower()}",
+                           tenant_id=tenant.id)
+        db.add(org)
+        await db.flush()
+        opp = Opportunity(employer_org_id=org.id, title="Role",
+                          opportunity_type="contract", status="open")
+        db.add(opp)
+        await db.flush()
+        assigned_day = datetime.now(UTC) - timedelta(days=10)
+        units = []
+        for i in range(6):
+            u = _User(email=f"km-{i}-{ULID()}@example.com", display_name=f"K{i}",
+                      role=_Role.STUDENT, status=_Status.ACTIVE)
+            db.add(u)
+            await db.flush()
+            arm = "control" if i % 2 == 0 else "treatment"
+            a = ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=u.id,
+                variant_key=arm, assigned_version=1, bucket=0,
+                is_holdout=False,
+            )
+            db.add(a)
+            await db.flush()
+            a.assigned_at = assigned_day
+            units.append((u.id, arm))
+        # one event per arm (day 2 treatment, day 5 control) — km_compare
+        # needs a curve on BOTH sides; the other four units censor
+        for arm_name, day in (("treatment", 2), ("control", 5)):
+            placed_unit = next(u for u, arm in units if arm == arm_name)
+            application = Application(opportunity_id=opp.id,
+                                      user_id=placed_unit, status="hired")
+            db.add(application)
+            await db.flush()
+            placement = Placement(application_id=application.id,
+                                  opportunity_id=opp.id,
+                                  employer_org_id=org.id,
+                                  user_id=placed_unit, status="active")
+            db.add(placement)
+            await db.flush()
+            placement.created_at = assigned_day + timedelta(days=day)
+        # snapshots so the primary itself computes
+        ws = datetime(2026, 9, 1, tzinfo=UTC)
+        for variant, num in (("control", 0.0), ("treatment", 1.0)):
+            db.add(_snapshot(exp.id, "placement_outcome_rate", variant, ws,
+                             n=3, numerator=num, denominator=3.0))
+        await db.flush()
+
+        result = await AnalysisService(db).run(exp.id, actor=admin)
+        km = result["metrics"]["placement_outcome_rate"].get("km")
+        assert km is not None
+        # each arm: 3 units, 1 event -> S = 2/3 (censorings AFTER the event
+        # day do not shrink the risk set before it)
+        assert km["survival_treatment"] == pytest.approx(2.0 / 3.0)
+        assert km["survival_control"] == pytest.approx(2.0 / 3.0)
+        assert km["diff"] == pytest.approx(0.0, abs=1e-12)
+        assert "censoring-correct" in km["caveat"]
+        # the binary-at-horizon engine read stays alongside
+        assert "comparisons" in result["metrics"]["placement_outcome_rate"]
+
+        # knob OFF -> no block
+        definition.spec = {k: v for k, v in definition.spec.items()
+                           if k != "km"}
+        await db.flush()
+        result_off = await AnalysisService(db).run(exp.id, actor=admin)
+        assert "km" not in result_off["metrics"]["placement_outcome_rate"]
+    finally:
+        definition.spec = original_spec
+        await db.flush()

@@ -1404,6 +1404,17 @@ class MetricService:
                       "winsorize_pct", "cap_value"):
             if changes.get(field) is not None:
                 setattr(definition, field, changes[field])
+        if changes.get("km") is not None:
+            if definition.kind != "time_to_event":
+                raise AppError(
+                    "VALIDATION_ERROR",
+                    f"km requires a time_to_event metric (kind: {definition.kind})",
+                    422,
+                )
+            spec = {k: v for k, v in (definition.spec or {}).items() if k != "km"}
+            if changes["km"]:
+                spec["km"] = True
+            definition.spec = spec
         if changes.get("quantiles") is not None:
             _validate_quantiles(changes["quantiles"], definition.kind)
             definition.spec = {**(definition.spec or {}),

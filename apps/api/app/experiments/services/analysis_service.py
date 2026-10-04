@@ -812,6 +812,88 @@ class AnalysisService:
                     warnings.append("SAMPLE_BELOW_POWER_TARGET")
                 break
 
+        # §4.15 (round 182): Kaplan-Meier at the horizon for time_to_event
+        # primaries whose definition opts in (spec.km) — counts computed ON
+        # DEMAND (cumulative-from-assignment does not fit additive snapshot
+        # folds). The horizon reads the DB clock (#68 law: event rows
+        # timestamp with server_default now()).
+        km_keys = [
+            key for key in spec.metrics.primary
+            if (definitions.get(key) is not None
+                and definitions[key].kind == "time_to_event"
+                and (definitions[key].spec or {}).get("km"))
+        ]
+        if km_keys:
+            from sqlalchemy import func as _func
+
+            from app.experiments.models import ExperimentAssignment
+            from app.talent.models.application import Placement
+
+            horizon = (
+                await self.db.execute(select(_func.clock_timestamp()))
+            ).scalar_one()
+            if horizon.tzinfo is None:
+                horizon = horizon.replace(tzinfo=UTC)
+            rows = (
+                await self.db.execute(
+                    select(
+                        ExperimentAssignment.variant_key,
+                        ExperimentAssignment.unit_id,
+                        ExperimentAssignment.assigned_at,
+                    ).where(
+                        ExperimentAssignment.experiment_id == experiment_id,
+                        ExperimentAssignment.is_holdout.is_(False),
+                    )
+                )
+            ).all()
+            by_arm: dict[str, list] = {}
+            for variant_key, unit_id, assigned_at in rows:
+                if assigned_at.tzinfo is None:
+                    assigned_at = assigned_at.replace(tzinfo=UTC)
+                by_arm.setdefault(variant_key, []).append((unit_id, assigned_at))
+            all_unit_ids = [u for arm in by_arm.values() for u, _ in arm]
+            first_event: dict[str, object] = {}
+            if all_unit_ids:
+                event_rows = (
+                    await self.db.execute(
+                        select(
+                            Placement.user_id,
+                            _func.min(Placement.created_at),
+                        )
+                        .where(
+                            Placement.user_id.in_(all_unit_ids),
+                            Placement.status != "cancelled",
+                        )
+                        .group_by(Placement.user_id)
+                    )
+                ).all()
+                first_event = dict(event_rows)
+            for key in km_keys:
+                curves = {}
+                for variant_key, members in by_arm.items():
+                    events: dict[int, int] = {}
+                    censored: dict[int, int] = {}
+                    for unit_id, assigned_at in members:
+                        placed = first_event.get(unit_id)
+                        if placed is not None and placed.tzinfo is None:
+                            placed = placed.replace(tzinfo=UTC)
+                        if placed is not None and placed >= assigned_at:
+                            day = (placed - assigned_at).days
+                            events[day] = events.get(day, 0) + 1
+                        else:
+                            day = max((horizon - assigned_at).days, 0)
+                            censored[day] = censored.get(day, 0) + 1
+                    curves[variant_key] = stats.km_curve(
+                        events, censored, len(members)
+                    )
+                km_cmp = stats.km_compare(
+                    curves.get(control_key),
+                    next((c for v, c in curves.items() if v != control_key),
+                         None),
+                )
+                if km_cmp is not None and key in metrics_out:
+                    metrics_out[key]["km"] = km_cmp
+
         if spec.analysis_type == "observational" and exp.started_at is not None:
             # §10 v3 (round 178): INTERRUPTED TIME SERIES over on-demand
             # daily source reads — "no pre-period" only meant no pre-period

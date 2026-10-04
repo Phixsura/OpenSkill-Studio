@@ -352,6 +352,8 @@ class UpdateMetricDefinitionRequest(_StrictReq):
     # §4.14: quantile reporting (operational — changes what is REPORTED,
     # not what stored sufficient stats mean); continuous-kind only
     quantiles: list[float] | None = Field(default=None, min_length=1, max_length=3)
+    # §4.15: Kaplan-Meier opt-in (time_to_event kind only)
+    km: bool | None = None
     clear_winsorize: bool = False
     clear_cap: bool = False
     clear_quantiles: bool = False

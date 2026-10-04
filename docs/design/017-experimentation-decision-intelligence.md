@@ -351,13 +351,17 @@ with a conservative combined CI (the quantile-comparison pattern) and a
 log-rank style z over pooled increments. Refusals: n0 < 2, no events on
 either side, malformed counts.
 
-**Step 2 — source + analysis.** The time_to_event sources (placements,
-retention) emit per-arm day-bucketed event/censor counts under a
-`km: true` definition knob (same opt-in shape as quantiles — no silent
-write amplification); snapshots carry them in a `km_counts` JSONB
-(migration exp15); analysis attaches a `km` block (horizon survival per
-arm + the comparison) next to the binary-at-horizon read, which stays
-authoritative. Console strip mirrors the ITS pattern.
+**Step 2 — analysis-time counts (REVISED, the ITS precedent).** KM counts
+are cumulative-from-assignment, so per-window snapshot rows would need
+latest-window (not additive) aggregation — the wrong shape for the
+snapshot store. Instead the analysis computes counts ON DEMAND for
+time_to_event primaries: per arm, each unit's day = (event_time -
+its assigned_at).days (events) or (horizon - assigned_at).days
+(censorings for units with no event), fed to km_curve/km_compare. No
+migration, no fold semantics, no write amplification; the cost is one
+assignment scan plus one event query per analysis run. The `km` block
+rides next to the binary-at-horizon read, which stays authoritative;
+console strip mirrors the ITS pattern.
 
 ## 5. Lifecycle state machine
 
@@ -1144,6 +1148,15 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 182 — KM step 2 of 2: a time_to_event primary whose definition
+opts in (the km knob, time_to_event-kind-gated on the PATCH) carries a
+censoring-correct `km` block — counts computed ON DEMAND per arm (each
+unit's event day from its own assigned_at; horizon via the DB clock, the
+#68 law), product-limit curves compared at the horizon, the
+binary-at-horizon engine read staying authoritative alongside; knob off
+means no block. The deferred list shrinks to synthetic control,
+ML covariates and write-side org delegation.
 
 Round 181 — the KM epoch opens (§4.15, step 1): the product-limit pure
 core lands — km_curve over day-granular event/censor counts (risk set
