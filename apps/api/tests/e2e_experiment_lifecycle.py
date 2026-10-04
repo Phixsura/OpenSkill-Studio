@@ -140,8 +140,10 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
         # crashed earlier run may have left orphan experiments (e.g. clones)
         # on historical lyr-org-% layers; delete riders first, always.
         doomed_layers = (
-            ExperimentLayer.key == layer_key
-        ) | ExperimentLayer.key.like("lyr-org-%")
+            (ExperimentLayer.key == layer_key)
+            | ExperimentLayer.key.like("lyr-org-%")
+            | ExperimentLayer.key.like("e2e-obs-%")  # round 200: obs lane
+        )
         await db.execute(
             _delete(Experiment).where(
                 Experiment.layer_key.in_(
@@ -161,6 +163,32 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
         await db.execute(
             _delete(TenantAccount).where(TenantAccount.slug.like("e2e-t-%"))
         )
+        # Round 200: the observational section (round 199) seeds its own
+        # tenant/org/project/users/submissions — sweep them too (the
+        # round-155 residue law: E2E debris in the shared test DB is how
+        # global-count flakes are born)
+        from app.models.project import Project as _CleanProj
+        from app.models.project import Submission as _CleanSub
+        from app.models.user import User as _CleanUser
+
+        obs_user_ids = (
+            await db.execute(
+                _select(_CleanUser.id).where(
+                    _CleanUser.email.like("e2e-obs-%@example.com"))
+            )
+        ).scalars().all()
+        if obs_user_ids:
+            await db.execute(
+                _delete(_CleanSub).where(_CleanSub.user_id.in_(obs_user_ids)))
+        await db.execute(
+            _delete(_CleanProj).where(_CleanProj.slug.like("obs-%")))
+        if obs_user_ids:
+            await db.execute(
+                _delete(_CleanUser).where(_CleanUser.id.in_(obs_user_ids)))
+        await db.execute(
+            _delete(Organization).where(Organization.slug.like("e2e-obs-%")))
+        await db.execute(
+            _delete(TenantAccount).where(TenantAccount.slug.like("e2e-obs-%")))
         await db.execute(
             _delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
         )

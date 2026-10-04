@@ -1203,6 +1203,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 200 — residue hygiene for the observational lane: the round-199
+section seeded its own tenant/org/project/users/submissions and layer,
+none of which the crash-safe cleanup swept (the round-155 residue law) —
+now all e2e-obs-% debris is deleted in the finally-wrapper, verified
+zero after a full wall run (which also swept round 199's own leftovers).
+
 Round 199 — the observational lane over the wire: the live wall grows
 110 -> 122 — a learning-domain observational experiment created,
 checklisted (ethics_screened included — the first failing run proved the
