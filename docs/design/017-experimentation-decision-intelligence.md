@@ -1108,6 +1108,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 162 — mutation wave 29 over the exposure path: 4/5 after pinning
+the stored exposure context verbatim; the unreachable lost-write defense
+ledgered.
+
 Round 161 — mutation wave 28 over the holdout lifecycle: 12/12 after
 pinning the race branch's 409 (two raise sites need two status pins).
 

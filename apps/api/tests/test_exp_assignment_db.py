@@ -269,6 +269,24 @@ async def test_exposure_funnel_and_dedup(db):
     stats = await svc.exposure_stats(exp.id)
     assert stats["funnel"][r.variant_key]["assigned"] == 1
     assert stats["funnel"][r.variant_key]["exposed_units"] == 1
+    # wave-29: the exposure CONTEXT persists verbatim (a truthy context was
+    # droppable by an or->and mutant with nothing pinning the stored value)
+    assert await svc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="e" * 26,
+        dedup_key="k2", context={"surface": "dashboard", "variant_seen": True},
+    )
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentExposure as _Exposure
+    stored = (
+        await db.execute(
+            _select(_Exposure).where(
+                _Exposure.experiment_id == exp.id,
+                _Exposure.dedup_key == "k2",
+            )
+        )
+    ).scalar_one()
+    assert stored.context == {"surface": "dashboard", "variant_seen": True}
 
 
 async def test_exposure_without_assignment_is_failsafe_false(db):

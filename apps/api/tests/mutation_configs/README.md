@@ -207,3 +207,11 @@ apply-race pin and the status-gate pins left nothing alive.
 holdouts create/release/active_groups_for_domain: 12/12 after pinning the
 RACE branch's 409 status (the pre-check 409 was pinned; the IntegrityError
 branch's status was not — two raise sites, two pins).
+
+## wave29_exposure.json (round 162)
+
+record_exposure + resolve: 4/5 after pinning the stored exposure CONTEXT
+verbatim (a truthy context was droppable by an or->and mutant). Ledgered:
+the pragma-no-cover 500 on a lost assignment write (the unique constraint
+guarantees the row — unreachable defense-in-depth, status constant
+included).
