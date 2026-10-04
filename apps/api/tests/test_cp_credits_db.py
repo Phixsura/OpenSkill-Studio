@@ -682,6 +682,21 @@ async def test_review_gated_reservation_extends_past_bounded_limit():
 
     try:
         async with AsyncSessionLocal() as db:
+            # §106.25 (round 88, committed variant): this test COMMITS, so the
+            # push-out persists — harmless, the residue is test debris the
+            # sweep would release anyway
+            from sqlalchemy import update as _resupd
+
+            from app.controlplane.models.credit import (
+                CreditReservation as _ResGuard,
+            )
+
+            await db.execute(
+                _resupd(_ResGuard)
+                .where(_ResGuard.status == "held",
+                       _ResGuard.expires_at < datetime.now(UTC))
+                .values(expires_at=datetime.now(UTC) + timedelta(days=30))
+            )
             user = await _mk_user(db)
             tenant = await _mk_tenant(db, user)
             org = Organization(
@@ -2271,6 +2286,18 @@ async def test_expire_stale_reservations_isolates_one_bad_reservation(db, monkey
     whole reservation-expiry cron (the expire_promotional per-lot isolation
     class). The healthy stale hold still expires; the poison one is left held
     (its savepoint rolled back) for a later pass / manual handling."""
+    # §106.25 (round 88): bounded oldest-first sweep vs shared-DB residue —
+    # push any stale held residue out of the window so OUR rows own the batch
+    from sqlalchemy import update as _resupd
+
+    from app.controlplane.models.credit import CreditReservation as _ResGuard
+
+    await db.execute(
+        _resupd(_ResGuard)
+        .where(_ResGuard.status == "held",
+               _ResGuard.expires_at < datetime.now(UTC))
+        .values(expires_at=datetime.now(UTC) + timedelta(days=30))
+    )
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     a = _actor(user)
@@ -2545,6 +2572,18 @@ async def test_expiry_crons_bounded_batches(db):
     back the single commit and every rerun retries the identical ever-growing
     batch — expiry wedges platform-wide. Bound respected + progress across
     successive calls."""
+    # §106.25 (round 88): bounded oldest-first sweep vs shared-DB residue —
+    # push any stale held residue out of the window so OUR rows own the batch
+    from sqlalchemy import update as _resupd
+
+    from app.controlplane.models.credit import CreditReservation as _ResGuard
+
+    await db.execute(
+        _resupd(_ResGuard)
+        .where(_ResGuard.status == "held",
+               _ResGuard.expires_at < datetime.now(UTC))
+        .values(expires_at=datetime.now(UTC) + timedelta(days=30))
+    )
     user = await _mk_user(db)
     tenant = await _mk_tenant(db, user)
     await credit_svc.top_up(
@@ -3145,6 +3184,21 @@ async def test_stale_reservation_expiry_extension_ladder(db):
     await db.flush()
     await credit_svc.top_up(db, tenant.id, "USD", 10000, actor=_actor(user))
     now = datetime.now(UTC)
+    # §106.25 (round 85): the expiry sweep is a bounded oldest-first batch
+    # (limit 500) — committed stale residue in the shared dev DB eventually
+    # crowds OUR three holds out of the batch (observed at exactly 499
+    # residue rows: review squeaked in as #500, running was cut at #501).
+    # Push the residue out of the stale window in-txn; the rollback fixture
+    # restores it.
+    from sqlalchemy import update as _update
+
+    from app.controlplane.models.credit import CreditReservation as _Res
+
+    await db.execute(
+        _update(_Res)
+        .where(_Res.status == "held", _Res.expires_at < now)
+        .values(expires_at=now + timedelta(days=30))
+    )
 
     def _run(status):
         return WorkflowRun(

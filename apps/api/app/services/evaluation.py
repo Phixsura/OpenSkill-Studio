@@ -366,11 +366,24 @@ class EvaluationService:
             # Build prompt — multimodal types get content blocks with images
             org_settings = await self.get_eval_settings(task.org_id)
 
+            # ADR-017 §7 (Part F): rubric-wording experiment, clustered by
+            # project (one rubric serves every submission of the project).
+            # Fail-safe: control keeps the project's own rubric. The override
+            # is used consistently for the prompt AND the response parse.
+            from app.experiments import hooks as exp_hooks
+
+            effective_rubric = (
+                await exp_hooks.rubric_override(self.db, project_id=project.id)
+                or project.rubric
+            )
+
             if task.type in _MULTIMODAL_EVAL_TYPES:
-                user_prompt = await self._build_multimodal_prompt(project, items, task)
+                user_prompt = await self._build_multimodal_prompt(
+                    project, items, task, rubric=effective_rubric
+                )
                 system = _MULTIMODAL_SYSTEM_PROMPTS[task.type]
             else:
-                user_prompt = self._build_user_prompt(project, items)
+                user_prompt = self._build_user_prompt(project, items, rubric=effective_rubric)
                 system = SYSTEM_PROMPT
 
             llm = create_llm_client(org_settings.get("default_model"))
@@ -417,7 +430,7 @@ class EvaluationService:
             task.cost_usd = Decimal(str(calculate_cost(response)))
 
             # Parse result
-            result = self._parse_evaluation_response(response.content, project.rubric)
+            result = self._parse_evaluation_response(response.content, effective_rubric)
             total_score = result.get("total_score", 0)
             max_score = result.get("max_score", 0)
 
@@ -989,8 +1002,13 @@ class EvaluationService:
 
     # ── Helpers ──
 
-    def _build_user_prompt(self, project: Project, items: list[SubmissionItem]) -> str:
-        rubric_text = self._format_rubric(project.rubric)
+    def _build_user_prompt(
+        self,
+        project: Project,
+        items: list[SubmissionItem],
+        rubric: list | dict | None = None,
+    ) -> str:
+        rubric_text = self._format_rubric(rubric if rubric is not None else project.rubric)
         content_text = self._format_submission(items)
 
         return f"""## Project Information
@@ -1015,6 +1033,7 @@ Please evaluate the submission against the rubric above."""
         project: Project,
         items: list[SubmissionItem],
         task: EvaluationTask,
+        rubric: list | dict | None = None,
     ) -> list:
         """Build a content-block prompt for multimodal evaluation.
 
@@ -1035,7 +1054,7 @@ Please evaluate the submission against the rubric above."""
             return [{"type": "text", "text": "No submission items to evaluate."}]
 
         # ── Project context ──
-        rubric_text = self._format_rubric(project.rubric)
+        rubric_text = self._format_rubric(rubric if rubric is not None else project.rubric)
         context = f"## Project: {project.title}\n{project.description}\n\n## Rubric\n{rubric_text}"
 
         # ── Client brief context (commercial eval) ──

@@ -1,0 +1,11 @@
+[
+  {
+    "path": "app/experiments/services/experiments.py",
+    "funcs": ["create", "validate_spec", "set_ramp", "_check_schedule_preconditions",
+              "create_version"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_e2e_flow.py",
+            "tests/test_exp_spec_validation.py", "tests/test_exp_assignment_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  }
+]

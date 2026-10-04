@@ -1,0 +1,20 @@
+[
+  {
+    "path": "app/experiments/services/layers.py",
+    "funcs": ["allocate", "create", "list_allocations"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_assignment_db.py",
+            "tests/test_exp_e2e_flow.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  },
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_experiment_windows", "sweep_experiment_closures",
+              "prune_experiment_history", "sweep_experiment_guardrails",
+              "previous_utc_day"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "tests/test_exp_guardrails_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  }
+]

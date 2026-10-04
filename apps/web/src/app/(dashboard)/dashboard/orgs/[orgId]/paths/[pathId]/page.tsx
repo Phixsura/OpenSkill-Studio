@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -50,10 +52,13 @@ export default function PathDetailPage() {
   const queryClient = useQueryClient();
 
   // ── Path data ──
-  const { data: pathData, isLoading, isError } = useQuery({
+  const {
+    data: pathData,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["path", orgId, pathId],
-    queryFn: () =>
-      apiWithAuth<{ data: PathDetail }>(`/orgs/${orgId}/paths/${pathId}`),
+    queryFn: () => apiWithAuth<{ data: PathDetail }>(`/orgs/${orgId}/paths/${pathId}`),
   });
 
   const path = pathData?.data;
@@ -61,10 +66,7 @@ export default function PathDetailPage() {
   // ── Path items ──
   const { data: itemsData } = useQuery({
     queryKey: ["path-items", orgId, pathId],
-    queryFn: () =>
-      apiWithAuth<{ data: PathItem[] }>(
-        `/orgs/${orgId}/paths/${pathId}/items`,
-      ),
+    queryFn: () => apiWithAuth<{ data: PathItem[] }>(`/orgs/${orgId}/paths/${pathId}/items`),
   });
 
   const items = itemsData?.data ?? [];
@@ -73,14 +75,12 @@ export default function PathDetailPage() {
   // ── Org skills & projects (for add item dropdowns) ──
   const { data: skillsData } = useQuery({
     queryKey: ["org-skills-options", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: SkillOption[] }>(`/orgs/${orgId}/skills?per_page=100`),
+    queryFn: () => apiWithAuth<{ data: SkillOption[] }>(`/orgs/${orgId}/skills?per_page=100`),
   });
 
   const { data: projectsData } = useQuery({
     queryKey: ["org-projects-options", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: ProjectOption[] }>(`/orgs/${orgId}/projects`),
+    queryFn: () => apiWithAuth<{ data: ProjectOption[] }>(`/orgs/${orgId}/projects`),
   });
 
   const orgSkills = skillsData?.data ?? [];
@@ -146,9 +146,8 @@ export default function PathDetailPage() {
 
     const body: Record<string, unknown> = {
       item_type: addType,
-      sort_order: sortedItems.length > 0
-        ? (sortedItems[sortedItems.length - 1]?.sort_order ?? 0) + 1
-        : 0,
+      sort_order:
+        sortedItems.length > 0 ? (sortedItems[sortedItems.length - 1]?.sort_order ?? 0) + 1 : 0,
     };
 
     if (addType === "skill") {
@@ -208,7 +207,8 @@ export default function PathDetailPage() {
   };
 
   if (isLoading) return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
-  if (isError) return <p className="text-sm text-red-600">Failed to load path. Please try again.</p>;
+  if (isError)
+    return <p className="text-sm text-red-600">Failed to load path. Please try again.</p>;
   if (!path) return null;
 
   return (
@@ -228,10 +228,14 @@ export default function PathDetailPage() {
             >
               {path.status}
             </span>
+            <Link
+              href="/dashboard/experiments/new"
+              className="ml-3 text-xs font-normal text-slate-500 underline"
+            >
+              Run experiment
+            </Link>
           </div>
-          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-            {path.description}
-          </p>
+          <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{path.description}</p>
         </div>
         <div className="ml-4 flex items-center gap-2">
           {path.status === "draft" && (
@@ -240,12 +244,7 @@ export default function PathDetailPage() {
             </Button>
           )}
           {path.status !== "archived" && (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={handleArchive}
-              disabled={saving}
-            >
+            <Button size="sm" variant="secondary" onClick={handleArchive} disabled={saving}>
               Archive
             </Button>
           )}
@@ -265,10 +264,7 @@ export default function PathDetailPage() {
           {sortedItems.map((item) => {
             if (item.item_type === "section") {
               return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between border-b pb-2 pt-4"
-                >
+                <div key={item.id} className="flex items-center justify-between border-b pb-2 pt-4">
                   <h3 className="text-sm font-bold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
                     {item.section_title}
                   </h3>
@@ -286,8 +282,8 @@ export default function PathDetailPage() {
 
             const itemName =
               item.item_type === "skill"
-                ? skillNameMap.get(item.skill_id ?? "") ?? item.skill_id
-                : projectNameMap.get(item.project_id ?? "") ?? item.project_id;
+                ? (skillNameMap.get(item.skill_id ?? "") ?? item.skill_id)
+                : (projectNameMap.get(item.project_id ?? "") ?? item.project_id);
 
             return (
               <div
@@ -320,17 +316,17 @@ export default function PathDetailPage() {
       </div>
 
       {/* Add item form */}
-      <div className="rounded-lg border p-4 space-y-3">
+      <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">Add Item</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label htmlFor="add-item-type" className="block text-sm font-medium">Type</label>
+            <label htmlFor="add-item-type" className="block text-sm font-medium">
+              Type
+            </label>
             <select
               id="add-item-type"
               value={addType}
-              onChange={(e) =>
-                setAddType(e.target.value as "skill" | "project" | "section")
-              }
+              onChange={(e) => setAddType(e.target.value as "skill" | "project" | "section")}
               className="mt-1 rounded-md border bg-transparent px-3 py-2 text-sm"
             >
               <option value="skill">Skill</option>
@@ -341,7 +337,9 @@ export default function PathDetailPage() {
 
           {addType === "skill" && (
             <div className="flex-1">
-              <label htmlFor="add-item-skill" className="block text-sm font-medium">Skill</label>
+              <label htmlFor="add-item-skill" className="block text-sm font-medium">
+                Skill
+              </label>
               <select
                 id="add-item-skill"
                 value={addSkillId}
@@ -360,7 +358,9 @@ export default function PathDetailPage() {
 
           {addType === "project" && (
             <div className="flex-1">
-              <label htmlFor="add-item-project" className="block text-sm font-medium">Project</label>
+              <label htmlFor="add-item-project" className="block text-sm font-medium">
+                Project
+              </label>
               <select
                 id="add-item-project"
                 value={addProjectId}
@@ -379,7 +379,9 @@ export default function PathDetailPage() {
 
           {addType === "section" && (
             <div className="flex-1">
-              <label htmlFor="add-item-section" className="block text-sm font-medium">Section title</label>
+              <label htmlFor="add-item-section" className="block text-sm font-medium">
+                Section title
+              </label>
               <Input
                 id="add-item-section"
                 value={addSectionTitle}
@@ -390,10 +392,7 @@ export default function PathDetailPage() {
             </div>
           )}
 
-          <Button
-            onClick={handleAddItem}
-            disabled={addingItem}
-          >
+          <Button onClick={handleAddItem} disabled={addingItem}>
             {addingItem ? "Adding..." : "Add Item"}
           </Button>
         </div>

@@ -62,6 +62,7 @@ def load_handlers() -> None:
     import app.controlplane.services.revenue_share  # noqa: F401
     import app.controlplane.services.settlement_handlers  # noqa: F401
     import app.ecosystem.worker  # noqa: F401 — eco.* topics (ADR-016)
+    import app.experiments.worker  # noqa: F401 — exp.* topics (ADR-017)
 
 
 def _worker_id() -> str:
@@ -476,6 +477,114 @@ async def _sweep_workflow_runtime(ctx: dict) -> None:
         )
 
 
+async def _exp_guardrail_sweep(ctx: dict) -> None:
+    """ADR-017 §9: enqueue guardrail evaluation, oldest-checked first."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_guardrails
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_guardrails(db)
+        if n:
+            await db.commit()
+            log.info("exp_guardrails_enqueued", count=n)
+
+
+async def _exp_window_sweep(ctx: dict) -> None:
+    """ADR-017 §13: enqueue yesterday's UTC-day snapshot windows."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_windows
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_windows(db)
+        if n:
+            await db.commit()
+            log.info("exp_windows_enqueued", count=n)
+
+
+async def _exp_weekly_digest(ctx: dict) -> None:
+    """ADR-017 round 135: weekly owner digest of running experiments."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_weekly_digest
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_weekly_digest(db)
+        if n:
+            await db.commit()
+            log.info("exp_weekly_digests_sent", count=n)
+
+
+async def _exp_interaction_sweep(ctx: dict) -> None:
+    """ADR-017 §4.13 v2: weekly cross-experiment interaction scan."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_interactions
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_interactions(db)
+        if n:
+            await db.commit()
+            log.warning("exp_interactions_alerted", pairs=n)
+
+
+async def _exp_retention(ctx: dict) -> None:
+    """ADR-017 §13: prune archived experiments' raw exposures past retention."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import prune_experiment_history
+
+    async with AsyncSessionLocal() as db:
+        pruned = await prune_experiment_history(db)
+        if any(pruned.values()):
+            await db.commit()
+            log.info("exp_history_pruned", **pruned)
+
+
+async def _exp_analysis_sweep(ctx: dict) -> None:
+    """ADR-017 round 69: daily automated mSPRT analysis + significance notify."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_analyses
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_analyses(db)
+        if n:
+            await db.commit()
+            log.info("exp_auto_analyses_ran", count=n)
+
+
+async def _exp_start_sweep(ctx: dict) -> None:
+    """ADR-017 exp10: launch scheduled experiments whose start_at is due."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_starts
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_starts(db)
+        if n:
+            await db.commit()
+            log.info("exp_experiments_auto_started", count=n)
+
+
+async def _exp_ramp_plan_sweep(ctx: dict) -> None:
+    """ADR-017 round 129: apply due scheduled-ramp steps."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_ramp_plans
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_ramp_plans(db)
+        if n:
+            await db.commit()
+            log.info("exp_ramp_plans_applied", count=n)
+
+
+async def _exp_closure_sweep(ctx: dict) -> None:
+    """ADR-017 §13: auto-complete running experiments past max_days."""
+    from app.core.database import AsyncSessionLocal
+    from app.experiments.worker import sweep_experiment_closures
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_experiment_closures(db)
+        if n:
+            await db.commit()
+            log.info("exp_experiments_auto_completed", count=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -513,6 +622,27 @@ def _cron_jobs() -> list:
         # R66[2]: workflow sweeper (review due_at expiry + stalled-run
         # recovery) every 5 minutes — off-minute by design.
         cron(_sweep_workflow_runtime, minute=set(range(3, 60, 5)), name="cp_workflow_sweep"),
+        # ADR-017 experiments: guardrails every 10 min (off-minute),
+        # daily snapshot windows at 00:52 UTC, max_days closures hourly :21
+        cron(_exp_guardrail_sweep, minute={6, 16, 26, 36, 46, 56}, name="exp_guardrail_sweep"),
+        cron(_exp_window_sweep, hour=0, minute=52, timeout=1800, name="exp_window_sweep"),
+        cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
+        cron(_exp_start_sweep, minute={9, 39}, name="exp_start_sweep"),
+        cron(_exp_ramp_plan_sweep, minute={14, 44}, name="exp_ramp_plan_sweep"),
+        cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800,
+             name="exp_analysis_sweep"),
+        cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
+        cron(_exp_weekly_digest, weekday=2, hour=8, minute=23,
+             name="exp_weekly_digest"),
+        # Cross-experiment interaction scan: weekly (Tue 04:37 UTC)
+        cron(
+            _exp_interaction_sweep,
+            weekday=1,
+            hour=4,
+            minute=37,
+            timeout=1800,
+            name="exp_interaction_sweep",
+        ),
         # P10: tls refresh
     ]
 

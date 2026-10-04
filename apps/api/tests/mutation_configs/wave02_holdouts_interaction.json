@@ -1,0 +1,18 @@
+[
+  {
+    "path": "app/experiments/services/holdouts.py",
+    "funcs": ["create", "release", "active_holdout_groups"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_holdouts_db.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread",
+            "-k", "holdout"],
+    "timeout": 300
+  },
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_experiment_interactions"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_holdouts_db.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread",
+            "-k", "interaction"],
+    "timeout": 300
+  }
+]

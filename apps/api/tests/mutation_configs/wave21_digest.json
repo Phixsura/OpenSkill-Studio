@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_weekly_digest"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]
