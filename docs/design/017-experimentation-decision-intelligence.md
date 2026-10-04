@@ -608,6 +608,20 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
 9. **exp09** — E2E + hardening sweep (enum guards, pagination uniformity, audit parity)
 10. **exp10 (v2 stats)** — CUPED + Bayesian engine + mSPRT + winsorization/percentile metrics + triggered analysis + post-stratification (mutation clean)
 11. **exp11 (v2 designs & ops)** — switchback design + scoped bandits + global holdouts + health-check suite (A/A, exposure-SRM, pre-balance, novelty, interaction) + guardrail policies + hourly fast-lane + launch checklist + meta-analysis + `useExperiment` TS hook with batched exposure endpoint
+12. **v3 epochs (rounds 113–172, migrations exp10–exp14)** — scheduled
+    auto-start (exp10) + per-assignment exposure dedup (exp11) +
+    MULTI-COVARIATE CUPED (§4.6 v3, exp12: provider registry, joint OLS at
+    1e-9 vs a per-unit oracle) + BINARY CUPED (§4.6 v4, regression-adjusted
+    proportions) + QUANTILE METRICS (§4.14, exp13: log-histogram sketch,
+    distribution-free CIs, percentile guardrails) + SCHEDULED RAMP PLANS
+    (exp14, monotone steps via a crash-tolerant sweep) + weekly owner
+    digest + look history + the export trio with console downloads + the
+    #63 schedule gate + the CALIBRATION QUARTET (null alpha, power at the
+    planner's exact n, sequential anytime-validity, quantile CI coverage —
+    all deterministic Monte-Carlo in the main suite). Verification stack at
+    this writing: mutation waves 1–35 (~1100 mutants, every module waved),
+    fuzz totality, 131 full-suite certifications (latest 6946/6946), live
+    E2E 106 checks, defects #1–#69 each fixed with a kill-proof.
 
 ## 17. Known edges & explicit decisions
 
