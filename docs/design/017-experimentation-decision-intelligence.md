@@ -1108,6 +1108,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 154c — the #68 clock audit swept every remaining app-clock use in
+the package: the SRM/interaction/significance dedup windows (hour-coarse —
+skew-insensitive), the day-level sweep windows, switchback's bucketing
+instant (inherent boundary under any clock), started_at/ends_at record
+values and start_at comparisons (user input, not DB-written timestamps).
+Conclusion: the holdout report was the ONLY window comparison mixing the
+app clock with DB-written row timestamps. Audit rule: any window whose
+UPPER bound gates rows written with server_default now() must read the DB
+clock.
+
 Round 154b — defect #68 (the clock-skew class strikes the holdout
 report): the report's window upper bound used the APP clock while rows
 timestamp with the DB's server_default now() — with the DB clock 119ms
