@@ -1353,3 +1353,62 @@ def test_km_boundaries_round184():
     assert cmp_out is not None
     assert cmp_out["z"] == 0.0 and cmp_out["p"] == 1.0
     assert cmp_out["ci"] == [0.0, 0.0]
+
+
+def test_synthetic_control_exact_mixture_oracle():
+    """Round 194 (§4.16 step 1): treated pre IS 0.5*d0 + 0.5*d1 exactly —
+    the simplex fit must find those weights, the pre-fit must be perfect,
+    and the post gap reads 4 - (0.5*5 + 0.5*1) = 1.0. Two donors only, so
+    placebo inference refuses (needs >= 3)."""
+    from app.experiments.services.analysis import synthetic_control
+
+    out = synthetic_control(
+        [2.0, 2.0, 2.0, 2.0], [4.0],
+        [[1.0, 2.0, 3.0, 4.0], [3.0, 2.0, 1.0, 0.0]],
+        [[5.0], [1.0]],
+    )
+    assert out is not None
+    assert out["weights"][0] == pytest.approx(0.5, abs=1e-6)
+    assert out["weights"][1] == pytest.approx(0.5, abs=1e-6)
+    assert sum(out["weights"]) == pytest.approx(1.0, abs=1e-9)
+    assert out["pre_rmspe"] == pytest.approx(0.0, abs=1e-6)
+    assert out["gap"] == pytest.approx(1.0, abs=1e-6)
+    assert out["placebo_p"] is None and out["donors"] == 2
+    assert "association only" in out["caveat"]
+    # deterministic: identical calls give identical dicts
+    assert out == synthetic_control(
+        [2.0, 2.0, 2.0, 2.0], [4.0],
+        [[1.0, 2.0, 3.0, 4.0], [3.0, 2.0, 1.0, 0.0]],
+        [[5.0], [1.0]],
+    )
+
+
+def test_synthetic_control_placebo_and_refusals():
+    from app.experiments.services.analysis import synthetic_control
+
+    out = synthetic_control(
+        [1.0, 2.0, 3.0], [4.0],
+        [[1.0, 2.0, 3.0], [5.0, 5.0, 4.0], [0.0, 1.0, 1.0]],
+        [[4.0], [6.0], [1.0]],
+    )
+    assert out is not None
+    # three donors -> placebo permutation runs; the true ratio tops the
+    # placebo ratios here, so p = (1 + 0) / (3 + 1)
+    assert out["placebo_p"] == pytest.approx(0.25)
+    assert out["rmspe_ratio"] > 1.0
+
+    # refusals: short pre, lone donor, all-constant donor matrix,
+    # ragged shapes
+    assert synthetic_control([1.0, 2.0], [1.0],
+                             [[1.0, 2.0], [2.0, 1.0]], [[1.0], [1.0]]) is None
+    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
+                             [[1.0, 2.0, 3.0]], [[1.0]]) is None
+    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
+                             [[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]],
+                             [[1.0], [1.0]]) is None
+    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
+                             [[1.0, 2.0], [2.0, 1.0, 0.0]],
+                             [[1.0], [1.0]]) is None
+    assert synthetic_control([1.0, 2.0, 3.0], [],
+                             [[1.0, 2.0, 3.0], [2.0, 1.0, 0.0]],
+                             [[], []]) is None

@@ -670,6 +670,114 @@ def km_compare(control: dict | None, treatment: dict | None) -> dict | None:
     }
 
 
+def _project_simplex(v: list[float]) -> list[float]:
+    """Euclidean projection onto the probability simplex (Duchi et al.):
+    the unique w with w_i >= 0, sum w = 1 closest to v."""
+    n = len(v)
+    u = sorted(v, reverse=True)
+    css = 0.0
+    theta = 0.0
+    for i in range(n):
+        css += u[i]
+        t = (css - 1.0) / (i + 1)
+        if u[i] - t > 0:
+            theta = t
+    return [max(x - theta, 0.0) for x in v]
+
+
+def _sc_fit(target: list[float], donors: list[list[float]]) -> list[float]:
+    """Simplex-constrained least squares ||target - W . donors||^2 by
+    projected gradient with the exact Lipschitz step (deterministic:
+    uniform start, fixed iteration budget, no randomness)."""
+    k = len(donors)
+    n = len(target)
+    w = [1.0 / k] * k
+    # L = 2 * lambda_max(D D^T) <= 2 * trace(D D^T)
+    lip = 2.0 * sum(sum(x * x for x in d) for d in donors)
+    if lip <= 0.0:
+        return w
+    step = 1.0 / lip
+    for _ in range(1000):
+        synth = [sum(w[i] * donors[i][t] for i in range(k)) for t in range(n)]
+        resid = [target[t] - synth[t] for t in range(n)]
+        grad = [
+            -2.0 * sum(resid[t] * donors[j][t] for t in range(n))
+            for j in range(k)
+        ]
+        w = _project_simplex([w[j] - step * grad[j] for j in range(k)])
+    return w
+
+
+def _sc_rmspe(target: list[float], donors: list[list[float]],
+              w: list[float]) -> float:
+    k = len(donors)
+    n = len(target)
+    sq = 0.0
+    for t in range(n):
+        synth = sum(w[i] * donors[i][t] for i in range(k))
+        sq += (target[t] - synth) ** 2
+    return math.sqrt(sq / n)
+
+
+def synthetic_control(
+    pre_treated: list[float],
+    post_treated: list[float],
+    donors_pre: list[list[float]],
+    donors_post: list[list[float]],
+) -> dict | None:
+    """§4.16 (round 194): Abadie-style synthetic control over day-granular
+    series. Simplex-constrained donor weights fit on the pre-period, the
+    post-period gap read against the synthetic series, the post/pre RMSPE
+    ratio as the honesty readout, and PLACEBO permutation inference (each
+    donor refit as pseudo-treated; needs >= 3 donors, else p is None).
+    Refusals: < 3 pre points, empty post, < 2 donors, ragged or
+    all-constant donor matrices. Deterministic throughout."""
+    n_pre, n_post = len(pre_treated), len(post_treated)
+    if n_pre < 3 or n_post < 1:
+        return None
+    k = len(donors_pre)
+    if k < 2 or len(donors_post) != k:
+        return None
+    if any(len(d) != n_pre for d in donors_pre):
+        return None
+    if any(len(d) != n_post for d in donors_post):
+        return None
+    flat = [x for d in donors_pre for x in d]
+    if max(flat) == min(flat):
+        return None  # all-constant donor matrix: nothing to weight
+    w = _sc_fit(pre_treated, donors_pre)
+    pre_rmspe = _sc_rmspe(pre_treated, donors_pre, w)
+    post_rmspe = _sc_rmspe(post_treated, donors_post, w)
+    synth_post = [
+        sum(w[i] * donors_post[i][t] for i in range(k)) for t in range(n_post)
+    ]
+    gap = sum(post_treated[t] - synth_post[t] for t in range(n_post)) / n_post
+    ratio = post_rmspe / max(pre_rmspe, 1e-9)
+    p = None
+    if k >= 3:
+        worse = 0
+        for j in range(k):
+            rest_pre = [donors_pre[i] for i in range(k) if i != j]
+            rest_post = [donors_post[i] for i in range(k) if i != j]
+            wj = _sc_fit(donors_pre[j], rest_pre)
+            pre_j = _sc_rmspe(donors_pre[j], rest_pre, wj)
+            post_j = _sc_rmspe(donors_post[j], rest_post, wj)
+            if post_j / max(pre_j, 1e-9) >= ratio:
+                worse += 1
+        p = (1 + worse) / (k + 1)
+    return {
+        "gap": gap,
+        "weights": w,
+        "pre_rmspe": pre_rmspe,
+        "post_rmspe": post_rmspe,
+        "rmspe_ratio": ratio,
+        "placebo_p": p,
+        "donors": k,
+        "caveat": "synthetic control — association only; donor-weighted "
+                  "counterfactual, placebo permutation inference",
+    }
+
+
 def its_estimate(pre: list[float], post: list[float]) -> dict | None:
     """§10 v3 (round 177): interrupted time series for OBSERVATIONAL runs —
     segmented OLS y_t = b0 + b1*t + b2*post + b3*(t - t0)*post over daily

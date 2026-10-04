@@ -1188,6 +1188,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 194 — SC step 1: the pure core lands — Duchi simplex projection,
+projected gradient with the exact Lipschitz step (uniform start, 1000
+iterations, zero randomness), post-period gap, post/pre RMSPE honesty
+ratio, placebo permutation p (>= 3 donors). Hand oracle: a treated
+series that IS 0.5*d0 + 0.5*d1 recovers those weights to 1e-6 with a
+perfect pre-fit and gap exactly 1.0; refusal matrix (short pre, lone
+donor, all-constant donors, ragged shapes, empty post); byte-identical
+determinism pinned.
+
 Round 193 — the synthetic-control epoch opens (§4.16, step 0): design
 committed — simplex-constrained donor weights by deterministic projected
 gradient, placebo permutation inference, the post/pre RMSPE ratio as the
