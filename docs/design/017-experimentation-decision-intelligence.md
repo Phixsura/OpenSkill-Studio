@@ -1155,6 +1155,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 192 — the KM knob over the wire: the live E2E wall grows 106 ->
+110 (knob PATCHes onto the talent time_to_event definition and
+round-trips; billing time_to_event refused 422 (#70); continuous kind
+refused 422; km=False strips). Full wall green against a live server.
+
 Round 191 — segment-slice audit (suspected #71, acquitted): KM, ITS and
 DiD all compute from whole-population reads, so a segment-sliced run
 carrying them would caption population curves as segment results — but

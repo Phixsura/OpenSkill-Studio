@@ -503,6 +503,28 @@ async def main() -> int:
               and "quantiles" not in r.json()["data"]["spec"],
               r.text[:300])
 
+        # ── Round 192: §4.15 KM knob over the wire ─────────────────────
+        r = await c.patch("/experiments/metric-definitions/placement_outcome_rate",
+                          headers=admin, json={"km": True})
+        check("km knob PATCHes onto the talent time_to_event definition",
+              r.status_code == 200
+              and r.json()["data"]["spec"].get("km") is True,
+              r.text[:300])
+        r = await c.patch("/experiments/metric-definitions/retention_rate",
+                          headers=admin, json={"km": True})
+        check("km on a billing time_to_event refused over the wire (#70)",
+              r.status_code == 422, r.text[:300])
+        r = await c.patch("/experiments/metric-definitions/run_latency_ms",
+                          headers=admin, json={"km": True})
+        check("km on a continuous definition refused over the wire",
+              r.status_code == 422, r.text[:300])
+        r = await c.patch("/experiments/metric-definitions/placement_outcome_rate",
+                          headers=admin, json={"km": False})
+        check("km=False strips the knob",
+              r.status_code == 200
+              and "km" not in r.json()["data"]["spec"],
+              r.text[:300])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",
