@@ -351,3 +351,12 @@ KEYS surfaced. Exposing r as the cuped_auto readout (exact pins:
 threshold) plus the n == 2 floor, the default-cap-at-3 fixture, the
 constant-outcome skip and the binary y-mapping scenario killed all of
 them.
+
+## wave41_identity.json (round 212)
+
+link_identity + the resolve anonymous-namespace normalization: 16/18
+after pinning the length floor (a single-char id is admissible) and the
+422 status at BOTH validation raise sites (the two-raise-sites-two-pins
+law — the first pass had bare pytest.raises). Ledgered 2: the defensive
+500s behind the ON-CONFLICT re-read and the PK re-read (both
+pragma-no-cover — the constraint guarantees a row).

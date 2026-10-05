@@ -1307,9 +1307,16 @@ async def test_identity_link_conflict_keeps_user_row_and_audits(db):
                               unit_type="anonymous", unit_id=anon_id)
     assert after is not None and after.variant_key == via_user.variant_key
 
-    # malformed anonymous ids refuse
+    # malformed anonymous ids refuse — status pinned at BOTH raise sites
+    # (the two-raise-sites-two-pins law)
     from app.exceptions import AppError as _AppError
-    with pytest.raises(_AppError):
+    with pytest.raises(_AppError) as too_long:
         await svc.link_identity(anonymous_id="x" * 27, user_id=user.id)
-    with pytest.raises(_AppError):
+    assert too_long.value.status_code == 422
+    with pytest.raises(_AppError) as has_colon:
         await svc.link_identity(anonymous_id="a:b", user_id=user.id)
+    assert has_colon.value.status_code == 422
+
+    # boundary: a SINGLE-char id is admissible (the floor is 1, inclusive)
+    one = await svc.link_identity(anonymous_id="z", user_id=user.id)
+    assert one["anonymous_id"] == "z" and one["conflicts"] == 0

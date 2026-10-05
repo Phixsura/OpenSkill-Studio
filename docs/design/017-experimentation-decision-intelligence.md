@@ -1276,6 +1276,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 212 (closed) — wave 41 over the identity surface: 16/18 after the
+single-char floor pin and 422 status pins at both validation raise sites
+(bare pytest.raises had left the status codes unpinned — the
+two-raise-sites-two-pins law); the two survivors are the defensive 500s
+behind constraint-guaranteed re-reads, ledgered. Certification 143 green
+(6966). Bookkeeping from the first half of the round:
+
 Round 212 — identity epoch bookkeeping: the §16 deferred list drops
 anonymous→login resolution (shipped §4.17), the PR body syncs the epoch,
 and wave 41 (link_identity + the resolve namespace normalization) is
