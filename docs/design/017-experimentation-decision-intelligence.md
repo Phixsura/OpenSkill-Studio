@@ -1338,6 +1338,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 272 — the frozen evidence over the wire (wall 151): the decision
+create response AND the GET both carry evidence.cited_warnings as a
+list, so the round-270 packet downloads real data — the serialization
+seam (the #49/#51 class) pinned at the HTTP layer.
+
 Round 271 — the frozen audit gains its FORGERY pin: a caller-supplied
 cited_warnings in the evidence payload is overwritten by the look's real
 warnings (the spread order is the defense; honest sibling keys survive)

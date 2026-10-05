@@ -942,6 +942,20 @@ async def main() -> int:
         })
         check("record promote decision", r.status_code == 201, r.text[:300])
         decision_id = r.json()["data"]["id"]
+        # round 272: the FROZEN evidence rides the wire — the create
+        # response and the GET both carry evidence.cited_warnings (a list),
+        # so the decision packet (round 270) downloads real data
+        check("frozen cited_warnings ride the create response",
+              isinstance((r.json()["data"].get("evidence") or {})
+                         .get("cited_warnings"), list),
+              r.text[:300])
+        r = await c.get(f"/experiments/decisions/{decision_id}",
+                        headers=admin)
+        check("frozen cited_warnings ride the decision GET",
+              r.status_code == 200
+              and isinstance((r.json()["data"].get("evidence") or {})
+                             .get("cited_warnings"), list),
+              r.text[:300])
 
         r = await c.post(f"/experiments/decisions/{decision_id}/promotion-drafts",
                          headers=admin, json={
