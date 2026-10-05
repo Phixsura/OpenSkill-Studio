@@ -2964,6 +2964,69 @@ async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
     ).scalar_one()
     assert "AWAITING DECISION (2 analysis warnings)" in notif2.body
 
+    # wave-43 killers: with TWO looks the digest reads the LATEST only
+    # (limit(1) + desc — a widened limit crashes scalar_one_or_none, a
+    # flipped order shows the stale count), and sent counts notifications
+    # EXACTLY
+    db.add(_Event235(
+        experiment_id=exp.id, actor_user_id=admin.id,
+        event_type="analysis_look",
+        payload={"warnings": ["ONLY_ONE"], "result_hash": "y" * 64},
+    ))
+    await db.flush()
+    await db.execute(_delete_notif_235(admin.id))
+    await db.flush()
+    assert await sweep_weekly_digest(db) >= 1  # residue law: cross-owner total
+    notif3 = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_digest",
+            )
+        )
+    ).scalar_one()
+    assert "(1 analysis warnings)" in notif3.body
+
+
+async def test_digest_body_caps_at_twenty_lines(db):
+    """Wave-43 killer: one owner with 21 reportable experiments gets a
+    20-line digest body (the accumulation-cap law, mirrored from the
+    org-segment top-20)."""
+    from sqlalchemy import select as _select
+
+    from app.models.notification import Notification
+
+    exp, admin = await _mk_running_low_ramp(db)
+    svc = ExperimentService(db)
+    layer_svc = LayerService(db)
+    for i in range(20):
+        layer = await layer_svc.create(
+            key=f"dcap-{i}-{str(ULID()).lower()}", domain="learning")
+        extra = await svc.create(
+            key=f"dcap-{i}-{str(ULID()).lower()}", title=f"D{i}",
+            domain="learning", layer_key=layer.key,
+            owner_user_id=admin.id,
+        )
+        await svc.create_version(extra.id, spec=_spec(), actor=admin)
+        await layer_svc.allocate(layer_key=layer.key, experiment_id=extra.id,
+                                 slice_start=0, slice_end=9999)
+        await svc.transition(extra.id, to_status="review", actor=admin)
+        await svc.transition(extra.id, to_status="scheduled", actor=admin,
+                             checklist=_CHECKLIST)
+        await svc.transition(extra.id, to_status="running", actor=admin)
+    from app.experiments.worker import sweep_weekly_digest
+
+    assert await sweep_weekly_digest(db) >= 1  # residue law
+    notif = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_digest",
+            )
+        )
+    ).scalar_one()
+    assert len(notif.body.splitlines()) == 20  # the 21st line drops
+
 
 
 

@@ -558,7 +558,10 @@ async def sweep_weekly_digest(
                     ExperimentEvent.experiment_id == experiment_id,
                     ExperimentEvent.event_type == "analysis_look",
                 )
-                .order_by(ExperimentEvent.created_at.desc())
+                # same-transaction looks share created_at — the ULID id is
+                # the deterministic tiebreak (round 236)
+                .order_by(ExperimentEvent.created_at.desc(),
+                          ExperimentEvent.id.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()

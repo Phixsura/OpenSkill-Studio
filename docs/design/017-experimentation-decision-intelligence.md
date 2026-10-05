@@ -1306,6 +1306,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 236 — wave 43 over the digest sweep (17/20 first pass): killers
+landed for the latest-look semantics (two same-transaction looks share
+created_at — the ULID id is now the deterministic tiebreak, a real fix
+the test forced) and the 20-line body cap (a 21-experiment owner
+fixture); the sent counter is ledgered as a cross-owner total the
+residue-robustness law forbids pinning exactly. Confirm pass next.
+
 Round 235 — the warnings reach the OWNER's weekly pulse too: each digest
 line appends "N analysis warnings" from the experiment's latest look
 (awaiting-decision lines included — exactly where a stale caveat hurts).
