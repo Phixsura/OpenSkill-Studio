@@ -773,6 +773,18 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     blocks at ~1s wall against local Postgres (ITS 28 + SC 28 on-demand
     daily reads + KM's two queries) — informational cost, segment runs
     exempt via the early return.
+14. **Identity epoch (rounds 209–215, exp15)** — anonymous→login
+    resolution: the anonymous ID NAMESPACE normalized at the resolve and
+    exposure boundaries, a global first-link-wins identity link (422 on
+    rebinding), in-place assignment migration preserving ITT timing and
+    exposure FKs, user-row-wins conflicts with audit events, the
+    unauthenticated rate-limited anon resolve/exposure surfaces and the
+    authenticated self link claim. Defects #73 (the link/insert race
+    window, fixed on BOTH insert paths with post-insert re-checks), #74
+    (conflict deletion cascading exposure audit rows away — re-pointed
+    before delete) and #75 (pre-login exposures silently dropped by the
+    fail-safe False) each kill-proven; wave 41 at 21/26 with the
+    switchback config pin; live E2E 133 checks.
 
 ## 17. Known edges & explicit decisions
 
@@ -1275,6 +1287,9 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 216 — bookkeeping: §16 item 14 (the identity epoch) and the PR
+body sync through wave 41's extension.
 
 Round 215 (closed) — wave 41 extended over the whole identity surface
 (21/26; the switchback config lookup gained its missing pin — a flipped
