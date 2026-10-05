@@ -428,6 +428,47 @@ deterministic); smaller pools warn SC_DONOR_POOL_SMALL. Attaches as
 **Step 3 — console strip** mirroring ITS/KM: gap, placebo p, RMSPE
 ratio, donor count, caveat.
 
+### 4.17 Anonymous → login identity resolution (round 209 — design)
+
+Every compared vendor serves pre-login traffic and carries the
+assignment across login; we have neither. Honest minimal design in our
+idioms:
+
+**Unit type.** "anonymous" joins UNIT_TYPES — clients resolve with a
+device/visitor ULID before login. Bucketing, stickiness, holdouts and
+exposure dedup all work unchanged (it is just a unit).
+
+**exp15 migration.** `experiment_identity_links(anonymous_id PK,
+user_id, created_at)` — GLOBAL, one anon id links to exactly one user,
+ever. Re-linking the same pair is idempotent 200; linking a taken anon
+id to a DIFFERENT user is 422 EXPERIMENT_IDENTITY_CONFLICT (first link
+wins — silent rebinding is identity theft). Index on user_id for the
+reverse lookup.
+
+**Link endpoint.** POST /experiments/identity-links {anonymous_id} —
+authenticated; user_id is ALWAYS the caller (you can only claim your own
+pre-login history; platform admin may pass an explicit user_id for
+support flows). On link, every (anonymous, anon_id) assignment row
+MIGRATES IN PLACE to (user, user_id) — variant, bucket, version and
+assigned_at preserved (ITT timing intact, exposure FKs intact, no
+duplicate roster rows). Where the user ALREADY holds a row in the same
+experiment, the user row stays authoritative, the anon row is removed,
+and an experiment_identity_conflict EVENT records both variants — the
+audit trail is the memory, and the analysis caveat stands on the event.
+
+**Resolution law.** resolve(anonymous, X) first follows the link: a
+linked anon id serves the USER's assignments (one person, one
+experience, regardless of which id the client still holds). Unlinked
+anon ids resolve normally. resolve(user, U) needs no special casing —
+migration moved history under the user key.
+
+**Honesty.** Linking is treatment-independent only when login behavior
+is not an outcome of the treatment — the §4.7 exposure-SRM guard
+already covers the dilution class; the conflict event covers the rest.
+
+Three-step shape: design (this) → migration + link service + resolve
+forwarding (step 1) → endpoint + E2E + wave (step 2+).
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1230,6 +1271,12 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 209 — the identity epoch opens (§4.17, step 0): anonymous unit
+type, a global first-link-wins identity link (422 on rebinding),
+in-place assignment migration preserving ITT timing and exposure FKs,
+conflict events as the audit memory, and link-following resolution so
+one person gets one experience across login.
 
 Round 208 — runbook completeness: SC_DONOR_POOL_SMALL gets its §18a row
 (the round-195 warning had shipped without one — the
