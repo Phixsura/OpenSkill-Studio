@@ -1331,6 +1331,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 264 — wave 45, the ENDPOINT layer's first wave (8/13 via the
+round-257 ASGI suite): the self-exposure 201 pin landed; five ledgers —
+the org-context Eq (live-wall territory) and the four rate-limit
+constants, which APP_ENV=test skips entirely; writing their boundary
+test exposed that my own round-259 wall note (429 flake risk) was FALSE
+under the test env and it is now corrected. Honesty cuts at one's own
+docs first.
+
 Round 263 — the transparency listing over the wire (wall 149): the
 caller's links visible post-fold, auth required. Round 262 —
 certification 159 green (6983, the listing's first full pass); PR body

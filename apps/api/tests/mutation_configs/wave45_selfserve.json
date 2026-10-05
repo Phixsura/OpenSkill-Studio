@@ -1,0 +1,10 @@
+[
+  {
+    "path": "app/experiments/api/selfserve.py",
+    "funcs": ["self_resolve", "self_exposure", "anon_resolve",
+              "anon_exposure", "link_identity", "list_identity_links"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_identity_api.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  }
+]

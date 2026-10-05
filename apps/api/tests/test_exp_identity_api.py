@@ -143,3 +143,15 @@ async def test_identity_links_listing_is_own_rows_only(c):
 
     r = await c.get("/api/v1/experiments/self/identity-links")
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_self_exposure_status_code_pin(c):
+    """Wave-45 killer: the self exposure endpoint answers 201 (created-ish
+    append semantics) even for the fail-safe recorded=false shape."""
+    h, _u = await _auth(c, "ExpPin")
+    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
+                     json={"experiment_key": "idapi-no-such-exp",
+                           "dedup_key": "idapi-pin"})
+    assert r.status_code == 201
+    assert r.json()["data"]["recorded"] is False

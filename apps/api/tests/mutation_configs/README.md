@@ -416,3 +416,17 @@ Round 255 re-run (after the #79 per-row savepoint rework): 24/29 — every
 mutant of the retry branch and the shared conflict closure dies under
 the racing tests; the five survivors remain the standing defensive-500
 ledger (now including the closure's own re-read guards).
+
+## wave45_selfserve.json (round 264)
+
+The ENDPOINT layer's first wave, enabled by the round-257 ASGI suite:
+8/13. Killed: the 201 status pin on self exposures and every
+auth/override/shape mutant. Ledgered 5: the primary-org context lookup's
+Eq (org-scoped resolution is live-wall territory — the #32 delegated
+section exercises it against real org fixtures the ASGI suite doesn't
+build), and the four rate-limit constants (60/60, 120/60) — APP_ENV=test
+SKIPS rate limiting entirely, so the numbers are production semantics
+outside any in-suite test's reach; the boundary test written for them
+was removed as untestable-by-design, and the round-259 wall note
+claiming 429 flake risk was CORRECTED (the wall runs under the same
+skip).
