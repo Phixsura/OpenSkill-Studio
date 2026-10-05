@@ -2220,6 +2220,9 @@ async def test_synthetic_control_rides_observational_analysis(db):
         [[series[u]] * 14 for u in donor_ids],
     )
     assert expected is not None
+    # round 260: the service decorates the core's block with donor ids in
+    # weight order — strip them for the bit-for-bit core comparison
+    assert sc.pop("donor_units") == donor_ids
     assert sc == expected
     # the matched donor carries ~all the weight, so the gap is the raw
     # post difference against a 1.0 synthetic: mean([3,3,3,0*11]) - 1
@@ -2320,7 +2323,9 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
         [[series[u]] * 14 for u in donor_ids],
         [[series[u]] * 14 for u in donor_ids],
     )
-    assert expected is not None and sc == expected
+    assert expected is not None
+    assert sc.pop("donor_units") == donor_ids
+    assert sc == expected
 
     # (c): two CONSTANT donors (both approved daily -> both 1.0 series):
     # the core refuses the all-constant matrix; the block must be ABSENT,

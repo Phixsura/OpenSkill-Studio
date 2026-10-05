@@ -280,6 +280,8 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
         rmspe_ratio: 4.2,
         placebo_p: 0.25,
         donors: 3,
+        weights: [0.1, 0.82, 0.08],
+        donor_units: ["AAAAAAAAAAAA", "BBBBBBBBBBBB", "CCCCCCCCCCCC"],
         caveat: "synthetic control — association only",
       },
     };
@@ -289,6 +291,8 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(await screen.findByText(/Synthetic control: gap -0\.3571/)).toBeTruthy();
     expect(screen.getByText(/3 donors/)).toBeTruthy();
     expect(screen.getByText(/placebo p 0\.2500/)).toBeTruthy();
+    // round 260: the heaviest donor is attributable on the strip
+    expect(screen.getByText(/top donor BBBBBBBB… w 0\.8200/)).toBeTruthy();
   });
 
   it("renders the auto-covariate evidence strip (round 205)", async () => {

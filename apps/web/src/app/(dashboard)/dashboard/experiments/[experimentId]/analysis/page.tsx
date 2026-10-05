@@ -95,6 +95,8 @@ interface AnalysisResult {
         rmspe_ratio: number;
         placebo_p: number | null;
         donors: number;
+        weights?: number[];
+        donor_units?: string[];
         caveat: string;
       };
     }
@@ -290,7 +292,15 @@ export default function AnalysisPage() {
                   {fmtNum(metric.synthetic_control.rmspe_ratio)}
                   {metric.synthetic_control.placebo_p != null
                     ? ` · placebo p ${fmtNum(metric.synthetic_control.placebo_p)}`
-                    : " · placebo p n/a"}{" "}
+                    : " · placebo p n/a"}
+                  {(() => {
+                    const sc = metric.synthetic_control;
+                    if (!sc.weights || !sc.donor_units) return null;
+                    const top = sc.weights
+                      .map((w, i) => ({ w, id: sc.donor_units?.[i] ?? "?" }))
+                      .sort((a, b) => b.w - a.w)[0];
+                    return top ? ` · top donor ${top.id.slice(0, 8)}… w ${fmtNum(top.w)}` : null;
+                  })()}{" "}
                   — {metric.synthetic_control.caveat}
                 </div>
               ) : null}

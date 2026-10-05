@@ -1331,6 +1331,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 260 — the SC weights become ATTRIBUTABLE evidence: the service
+decorates the core's block with donor_units in weight order (the core
+stays id-agnostic and the bit-for-bit pins strip the decoration), and
+the console strip names the heaviest donor with its weight — the same
+exposed-evidence standard cuped_auto set. A/A-probe runbook promise
+audited WIRED (API + console button). Web 731; exp 602.
+
 Round 259 — the wall header documents its anon RATE BUDGET (resolve
 60/min, exposures 120/min; ~26/~22 currently spent per run) so future
 growth flakes on purpose, not on 429 surprises. PR body synced 256-258;

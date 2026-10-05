@@ -1083,6 +1083,10 @@ class AnalysisService:
                         [per_unit[u][1] for u in donor_units],
                     )
                     if sc is not None and key in metrics_out:
+                        # round 260: weights without identities are
+                        # unreadable evidence — the donor ids ride along in
+                        # the same order the core weighted them
+                        sc["donor_units"] = list(donor_units)
                         metrics_out[key]["synthetic_control"] = sc
 
         if spec.analysis_type == "observational":
