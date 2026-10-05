@@ -291,6 +291,22 @@ describe("Analysis decision-support extras (v2 round 10)", () => {
     expect(screen.getByText(/placebo p 0\.2500/)).toBeTruthy();
   });
 
+  it("renders the auto-covariate evidence strip (round 205)", async () => {
+    const payload = analysisPayload();
+    const metrics = (payload.data as { metrics: Record<string, object> }).metrics;
+    metrics.exposure_rate = {
+      ...(metrics.exposure_rate as object),
+      cuped_auto: { revision_count: 0.9759, practical_pass_rate: -0.3162 },
+    };
+    api.mockResolvedValue(payload);
+    render(<AnalysisPage />, { wrapper: wrapper() });
+    fireEvent.click(screen.getByText("Run analysis"));
+    expect(
+      await screen.findByText(/Auto-selected covariates: revision_count \(r 0\.9759\)/),
+    ).toBeTruthy();
+    expect(screen.getByText(/practical_pass_rate \(r -0\.3162\)/)).toBeTruthy();
+  });
+
   it("renders the new health warnings verbatim", async () => {
     api.mockResolvedValue(
       analysisPayload({

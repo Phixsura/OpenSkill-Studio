@@ -1232,6 +1232,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 205 — the cuped_auto evidence reaches the console: a teal strip
+lists each auto-selected covariate with its pooled r, so the operator
+reads the selection's justification where they read the adjustment.
+Web 722.
+
 Round 204 — wave 40 over the auto-covariate epoch: first pass left
 seven core survivors because the selection's correlation was an
 invisible intermediate — the wave-36 dof lesson applied again: r is now

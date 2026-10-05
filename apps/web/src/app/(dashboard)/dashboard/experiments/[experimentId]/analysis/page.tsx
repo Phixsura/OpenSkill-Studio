@@ -89,6 +89,7 @@ interface AnalysisResult {
         ci: [number, number];
         caveat: string;
       };
+      cuped_auto?: Record<string, number>;
       synthetic_control?: {
         gap: number;
         rmspe_ratio: number;
@@ -272,6 +273,14 @@ export default function AnalysisPage() {
                   {fmtNum(metric.its.level_change.p)}) · trend{" "}
                   {fmtNum(metric.its.trend_change.estimate)} (p {fmtNum(metric.its.trend_change.p)})
                   · {metric.its.n_pre}+{metric.its.n_post} days — {metric.its.caveat}
+                </div>
+              ) : null}
+              {metric.cuped_auto ? (
+                <div className="mb-2 rounded border border-teal-200 bg-teal-50 p-2 text-xs">
+                  Auto-selected covariates:{" "}
+                  {Object.entries(metric.cuped_auto)
+                    .map(([k, r]) => `${k} (r ${fmtNum(r)})`)
+                    .join(" · ")}
                 </div>
               ) : null}
               {metric.synthetic_control ? (
