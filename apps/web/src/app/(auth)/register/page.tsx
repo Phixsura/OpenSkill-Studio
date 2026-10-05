@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { claimAnonymousId } from "@/lib/useAnonExperiment";
 import { type AuthUser, useAuthStore } from "@/stores/auth";
 
 interface AuthResponse {
@@ -81,13 +82,13 @@ export default function RegisterPage() {
         credentials: "include",
       });
       setAuth(data.access_token, data.user);
+      // §4.17 (round 220): the anonymous visitor who REGISTERS is the
+      // canonical identity-link case — carry their pre-signup experiment
+      // history; fire-and-forget, never blocks the signup path
+      void claimAnonymousId();
       setRegistered(true);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Registration failed. Please try again.",
-      );
+      setError(err instanceof ApiError ? err.message : "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -99,13 +100,16 @@ export default function RegisterPage() {
         <div className="text-center">
           <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
           <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-            We&apos;ve sent a verification link to <strong>{email}</strong>.
-            Please verify your email to unlock all features.
+            We&apos;ve sent a verification link to <strong>{email}</strong>. Please verify your
+            email to unlock all features.
           </p>
         </div>
-        <Button onClick={() => {
-          router.push(safeRedirect(searchParams.get("redirect")));
-        }} className="w-full">
+        <Button
+          onClick={() => {
+            router.push(safeRedirect(searchParams.get("redirect")));
+          }}
+          className="w-full"
+        >
           Continue to Dashboard
         </Button>
       </>
@@ -116,13 +120,14 @@ export default function RegisterPage() {
     <>
       <div className="text-center">
         <h1 className="text-2xl font-bold tracking-tight">Create an account</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          Join OpenSkill Studio
-        </p>
+        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Join OpenSkill Studio</p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div
+          role="alert"
+          className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+        >
           {error}
         </div>
       )}

@@ -25,6 +25,11 @@ const auth = vi.hoisted(() => ({
 vi.mock("@/stores/auth", () => ({
   useAuthStore: (sel: (s: typeof auth.state) => unknown) => sel(auth.state),
 }));
+const claimSpy = vi.fn().mockResolvedValue(true);
+vi.mock("@/lib/useAnonExperiment", () => ({
+  claimAnonymousId: (...args: unknown[]) => claimSpy(...args),
+}));
+
 vi.mock("@/lib/api", () => {
   class MockApiError extends Error {
     constructor(
@@ -69,6 +74,27 @@ describe("RegisterPage (R476)", () => {
     expect(await screen.findByText("Password must contain at least one digit.")).toBeTruthy();
     expect(apiMock).not.toHaveBeenCalled(); // no round-trip on client-side failure
     unmount();
+  });
+
+  it("successful signup fires the pre-signup identity claim once (round 220)", async () => {
+    apiMock.mockResolvedValue({
+      access_token: "tok",
+      token_type: "bearer",
+      expires_in: 900,
+      user: {
+        id: "u1",
+        email: "a@b.co",
+        email_verified: false,
+        display_name: "A",
+        avatar_url: null,
+        role: "user",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    } as never);
+    render(<RegisterPage />);
+    fill("Password1");
+    await screen.findByText(/Check your email/);
+    expect(claimSpy).toHaveBeenCalledTimes(1);
   });
 
   it("valid submit posts credentials, stores auth, shows verify screen; Continue uses safeRedirect", async () => {

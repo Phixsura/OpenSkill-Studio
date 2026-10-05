@@ -1288,6 +1288,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 220 — the claim wires into REGISTRATION too: the anonymous visitor
+who signs up is the canonical identity-link case (browse anonymously,
+convert, keep the experience) — the register success path now fires
+claimAnonymousId fire-and-forget, pinned by a register-page test.
+Web 729.
+
 Round 219 — the claim is WIRED: round 217 had shipped claimAnonymousId
 exported but uncalled — the login success path now fires it
 fire-and-forget (void, fail-safe), so the pre-login carry actually
