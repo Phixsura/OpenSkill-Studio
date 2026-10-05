@@ -1288,6 +1288,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 219 — the claim is WIRED: round 217 had shipped claimAnonymousId
+exported but uncalled — the login success path now fires it
+fire-and-forget (void, fail-safe), so the pre-login carry actually
+happens in the product, not just in the SDK. Pinned by a login-page test
+(the claim fires exactly once on success). Web 728. PR body synced
+through 218.
+
 Round 218 — fuzz totality catches up with the causal-inference epochs:
 hypothesis properties over its_estimate (p in [0,1], dof == n-4,
 length-honest), km_curve/km_compare (survival in [0,1], self-compare

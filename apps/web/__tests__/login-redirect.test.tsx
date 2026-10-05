@@ -22,6 +22,11 @@ vi.mock("@/lib/api", () => ({
   ApiError: class extends Error {},
 }));
 
+const claimSpy = vi.fn().mockResolvedValue(true);
+vi.mock("@/lib/useAnonExperiment", () => ({
+  claimAnonymousId: (...args: unknown[]) => claimSpy(...args),
+}));
+
 import LoginPage from "@/app/(auth)/login/page";
 import { api } from "@/lib/api";
 
@@ -59,6 +64,18 @@ async function loginWithRedirect(redirect: string | null): Promise<string> {
   unmount();
   return target;
 }
+
+describe("LoginPage identity claim (round 219)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("fires the pre-login identity claim on successful login", async () => {
+    await loginWithRedirect(null);
+    expect(claimSpy).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("LoginPage redirect guard", () => {
   beforeEach(() => {
