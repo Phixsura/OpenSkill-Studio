@@ -744,9 +744,7 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
 - Bandit + sticky coexistence: Thompson sampling shifts allocation
   probabilities for NEW units only; existing assignments never flip (no yanked
   experiences, ITT preserved within each allocation epoch).
-- Explicitly deferred (documented in the competitive analysis): synthetic
-  control, ML-learned covariates (plain multi-covariate CUPED SHIPPED in
-  rounds 113-115, §4.6 v3; binary CUPED in round 142, §4.6 v4),
+- Explicitly deferred (documented in the competitive analysis):
   anonymous→login identity resolution, feature-flag CDN/edge SDKs, session
   replay, warehouse connectors (we are the warehouse).
 - Base branch: the epic depends on the eco facade, so implementation chains on
@@ -1231,6 +1229,11 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 206 — matrix truth: every "deferred analytics" claim is de-staled
+(synthetic control and auto covariate selection both shipped) — the only
+open-by-choice item anywhere is write-side org delegation, a product
+scope call.
 
 Round 205 — the cuped_auto evidence reaches the console: a teal strip
 lists each auto-selected covariate with its pooled r, so the operator
