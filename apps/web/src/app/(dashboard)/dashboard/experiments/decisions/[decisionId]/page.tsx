@@ -45,7 +45,10 @@ export default function DecisionDetailPage() {
   const citedLook = (historyData?.data ?? []).find(
     (look) => look.result_hash === record?.analysis_result_hash,
   );
-  const citedWarnings = citedLook?.warnings ?? [];
+  // round 239: the record FREEZES its warnings at decide time — prefer the
+  // frozen copy; history is the fallback for pre-239 records only
+  const frozen = record?.evidence?.cited_warnings;
+  const citedWarnings = frozen ?? citedLook?.warnings ?? [];
 
   const createDraft = useMutation({
     mutationFn: () =>

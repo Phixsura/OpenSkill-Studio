@@ -32,10 +32,14 @@ class DecisionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _analysis_hash_exists(self, experiment_id: str, result_hash: str) -> bool:
-        row = (
+    async def _cited_look_payload(
+        self, experiment_id: str, result_hash: str
+    ) -> dict | None:
+        """The analysis_look this hash cites — None when no such look
+        exists (the no-decide-before-analyze gate reads this)."""
+        return (
             await self.db.execute(
-                select(ExperimentEvent.id)
+                select(ExperimentEvent.payload)
                 .where(
                     ExperimentEvent.experiment_id == experiment_id,
                     ExperimentEvent.event_type == "analysis_look",
@@ -44,7 +48,6 @@ class DecisionService:
                 .limit(1)
             )
         ).scalar_one_or_none()
-        return row is not None
 
     async def _guardrail_outcome(self, experiment_id: str) -> dict:
         rows = (
@@ -87,7 +90,10 @@ class DecisionService:
                 f"Decisions require status analyzed (got {exp.status})",
                 422,
             )
-        if not await self._analysis_hash_exists(experiment_id, analysis_result_hash):
+        cited_look = await self._cited_look_payload(
+            experiment_id, analysis_result_hash
+        )
+        if cited_look is None:
             raise AppError(
                 "DECISION_HASH_MISMATCH",
                 "analysis_result_hash does not match any recorded analysis run",
@@ -125,7 +131,10 @@ class DecisionService:
             uncertainty=uncertainty or {},
             segments=segments or {},
             guardrail_outcome=await self._guardrail_outcome(experiment_id),
-            evidence=evidence or {},
+            # round 239: the cited look's WARNINGS freeze into the decision
+            # record — the audit outlives event retention and history limits
+            evidence={**(evidence or {}),
+                      "cited_warnings": cited_look.get("warnings", [])},
             approver_user_id=actor.id,
         )
         self.db.add(record)

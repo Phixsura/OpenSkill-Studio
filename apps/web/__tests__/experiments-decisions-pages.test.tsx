@@ -96,4 +96,22 @@ describe("Decision registry pages (ADR-017 Part L, round 103)", () => {
     // only the CITED look's warnings — not another look's
     expect(screen.queryByText("OTHER_LOOK")).toBeNull();
   });
+
+  it("prefers the record's FROZEN warnings over history (round 239)", async () => {
+    api.mockImplementation((async (rawPath: unknown) => {
+      const path = String(rawPath ?? "");
+      if (path.endsWith(`/experiments/decisions/${"D".repeat(26)}`))
+        return {
+          data: { ...RECORD, evidence: { cited_warnings: ["FROZEN_ONE"] } },
+        };
+      if (path.includes("/analysis/history"))
+        return {
+          data: [{ result_hash: "c".repeat(64), warnings: ["STALE_HISTORY"] }],
+        };
+      return { data: [] };
+    }) as never);
+    render(<DecisionDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("FROZEN_ONE")).toBeTruthy();
+    expect(screen.queryByText("STALE_HISTORY")).toBeNull();
+  });
 });

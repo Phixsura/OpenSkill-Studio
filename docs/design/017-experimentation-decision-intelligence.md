@@ -1306,6 +1306,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 239 — the warnings FREEZE into the decision record: decide-time
+copies the cited look's warnings into evidence.cited_warnings (the
+existing JSONB — no migration), so the audit outlives event retention
+and history limits; the decision page prefers the frozen copy, with the
+history match as the pre-239 fallback only. Service pin on the decide
+test; web pin that frozen beats stale history. Web 731.
+
 Round 238 — evidence-chain edges: the decision page's history fetch uses
 limit=200 (a cited look beyond the default 50 silently lost its chips),
 and the wall pins the warnings field on the history read (137 checks).

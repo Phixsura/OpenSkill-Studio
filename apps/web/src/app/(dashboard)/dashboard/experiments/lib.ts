@@ -178,6 +178,7 @@ export interface DecisionRecord {
   analysis_result_hash: string;
   approver_user_id: string;
   guardrail_outcome: { clean?: boolean };
+  evidence?: { cited_warnings?: string[] };
   created_at: string;
 }
 

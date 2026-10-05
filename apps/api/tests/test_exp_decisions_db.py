@@ -680,6 +680,9 @@ async def test_decide_after_repeated_identical_looks(db):
     assert outcome["events"] == [
         {"guardrail_key": "cost_usd", "action": "alerted", "count": 1}
     ]  # exactly OUR event; the neighbor's paused event stays out
+    # round 239: the cited look's warnings FREEZE into the record — the
+    # audit outlives event retention and history limits
+    assert record.evidence["cited_warnings"] == second["warnings"]
 
 
 async def test_concurrent_decides_single_terminal_record(db):
