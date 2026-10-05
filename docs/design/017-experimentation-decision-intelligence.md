@@ -1331,6 +1331,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 256 — the #78/#79 class surveyed package-wide: every service that
+writes against a unique constraint either goes through ON CONFLICT (six
+sites) or handles IntegrityError typed (all seven services) — the two
+gaps were both in the newest (identity) code and are closed; no third
+member of the class exists today. PR body synced 253-255.
+
 Round 255 — wave 41 re-run over the #79 rework: 24/29, every retry and
 shared-closure mutant killed by the racing tests; the five survivors are
 the standing defensive-500 ledger. Certification 157 green (6980).
