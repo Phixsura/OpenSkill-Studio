@@ -1276,6 +1276,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 215 — #73's switchback mirror: the same link/insert race window
+existed around the switchback PLACEHOLDER insert (an orphan roster row,
+though no variant flip — the day's variant serves either way). The
+post-insert re-check now mirrors into _resolve_switchback; kill-proven
+with the same monkeypatch race on a switchback spec (fails unmirrored).
+
 Round 214 — defects #74 and #75, both found auditing the identity
 epoch's exposure seam: (#74) the link conflict path deleted the anon
 assignment row and ondelete=CASCADE silently destroyed its EXPOSURE

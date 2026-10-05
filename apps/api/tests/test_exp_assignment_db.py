@@ -1395,3 +1395,52 @@ async def test_identity_link_racing_resolve_not_stranded(db, monkeypatch):
     assert via_user is not None and via_anon is not None
     assert via_user.variant_key == resolved.variant_key
     assert via_anon.variant_key == resolved.variant_key
+
+
+async def test_identity_link_racing_switchback_not_stranded(db, monkeypatch):
+    """Round 215: #73's race window exists around the SWITCHBACK placeholder
+    insert too — the mirror re-check migrates the placeholder so the ITT
+    roster holds one row for the person."""
+    from sqlalchemy import select as _select
+
+    exp, admin = await _mk_running(
+        db, spec_overrides={"design": "switchback",
+                            "switchback": {"switch_unit": "platform_day",
+                                           "window_minutes": 1440}})
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idsw-{ULID()}@example.com", display_name="S",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+
+    original_compute = AssignmentService.compute
+    fired = {"done": False}
+
+    async def racing_compute(self, **kwargs):
+        out = await original_compute(self, **kwargs)
+        if not fired["done"]:
+            fired["done"] = True
+            await AssignmentService(self.db).link_identity(
+                anonymous_id=anon_id, user_id=user.id
+            )
+        return out
+
+    monkeypatch.setattr(AssignmentService, "compute", racing_compute)
+    resolved = await svc.resolve(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
+    )
+    assert resolved is not None  # the day's variant serves
+
+    orphan = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == anon_id))
+    ).scalar_one_or_none()
+    assert orphan is None
+    user_row = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == user.id))
+    ).scalar_one()
+    assert user_row is not None  # exactly one roster row for the person

@@ -449,7 +449,8 @@ class AssignmentService:
 
         if spec.design == "switchback":
             return await self._resolve_switchback(
-                exp, spec, unit_type=unit_type, unit_id=unit_id, context=context
+                exp, spec, unit_type=unit_type, unit_id=unit_id,
+                context=context, anon_pending=anon_pending,
             )
 
         # Sticky first: an existing assignment keeps serving through
@@ -596,6 +597,7 @@ class AssignmentService:
         unit_type: str,
         unit_id: str,
         context: dict | None,
+        anon_pending: str | None = None,
     ) -> ResolvedVariant | None:
         """Switchback resolution: no per-unit stickiness (the whole cohort
         switches together, per §4.5) — a placeholder assignment row keeps the
@@ -629,6 +631,24 @@ class AssignmentService:
             existing = await self._existing(exp.id, unit_type, unit_id)
             if existing is None:  # pragma: no cover — unique constraint guarantees a row
                 raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
+            if anon_pending is not None:
+                # #73's switchback mirror (round 215): the same race window
+                # exists around the placeholder insert — re-check the link
+                # and migrate immediately so no orphan ITT row survives.
+                late_link = await self.db.get(
+                    ExperimentIdentityLink, anon_pending
+                )
+                if late_link is not None:
+                    await self.link_identity(
+                        anonymous_id=anon_pending, user_id=late_link.user_id
+                    )
+                    existing = await self._existing(
+                        exp.id, "user", late_link.user_id
+                    )
+                    if existing is None:  # pragma: no cover — migration guarantees one
+                        raise AppError(
+                            "EXPERIMENT_NOT_FOUND", "Assignment write lost", 500
+                        )
         elif exp.status not in _SERVE_EXISTING_STATUSES:
             return None
         if existing.is_holdout:
