@@ -1311,7 +1311,7 @@ landed for the latest-look semantics (two same-transaction looks share
 created_at — the ULID id is now the deterministic tiebreak, a real fix
 the test forced) and the 20-line body cap (a 21-experiment owner
 fixture); the sent counter is ledgered as a cross-owner total the
-residue-robustness law forbids pinning exactly. Confirm pass next.
+residue-robustness law forbids pinning exactly. Confirm: 19/20.
 
 Round 235 — the warnings reach the OWNER's weekly pulse too: each digest
 line appends "N analysis warnings" from the experiment's latest look

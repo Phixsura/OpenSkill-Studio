@@ -386,3 +386,14 @@ and the single-covariate joint-path routing gate (routing a lone
 explicit covariate through the multi branch yields identical sufficient
 statistics — the providers mirror the inline math by round-117
 construction; the branch exists for economy, not semantics).
+
+## wave43_digest.json (round 236)
+
+sweep_weekly_digest: 19/20. The wave forced a REAL fix — two
+same-transaction looks share created_at, so "latest" was
+nondeterministic until the ULID id became the explicit tiebreak; the
+two-look test then pins latest-only semantics (and limit(1) via the
+scalar crash). The 20-line body cap got its 21-experiment owner fixture.
+Ledgered 1: the sent counter is a cross-owner total — exact pinning
+conflicts with the residue-robustness law in the shared test DB; the
+per-owner row (the thing users see) is pinned instead.
