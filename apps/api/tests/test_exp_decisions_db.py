@@ -684,6 +684,18 @@ async def test_decide_after_repeated_identical_looks(db):
     # audit outlives event retention and history limits
     assert record.evidence["cited_warnings"] == second["warnings"]
 
+    # round 271 (forgery pin): a caller-supplied cited_warnings is
+    # OVERWRITTEN by the look's real warnings — the frozen audit cannot be
+    # spoofed through the evidence payload
+    forged = await DecisionService(db).create(
+        neighbor.id, decision="extend",
+        summary="forgery attempt rides the evidence payload",
+        analysis_result_hash=_n_hash, actor=_n_admin,
+        evidence={"cited_warnings": ["FORGED_CLEAN"], "note": "kept"},
+    )
+    assert forged.evidence["cited_warnings"] != ["FORGED_CLEAN"]
+    assert forged.evidence["note"] == "kept"  # honest keys survive
+
 
 async def test_concurrent_decides_single_terminal_record(db):
     """Round 155: two racing PROMOTE decisions must leave exactly ONE

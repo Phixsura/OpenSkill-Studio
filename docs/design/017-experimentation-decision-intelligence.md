@@ -1338,6 +1338,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 271 — the frozen audit gains its FORGERY pin: a caller-supplied
+cited_warnings in the evidence payload is overwritten by the look's real
+warnings (the spread order is the defense; honest sibling keys survive)
+— the packet downloaded in round 270 cannot be spoofed at write time.
+
 Round 270 — the DECISION PACKET: one click on the decision page downloads
 the record with its frozen evidence (and the cited look's warnings) as a
 JSON file — the audit artifact a reviewer attaches. Round 269 — PR body
