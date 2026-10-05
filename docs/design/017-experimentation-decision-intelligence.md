@@ -1331,6 +1331,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 253 — #78 over the wire (wall 147): both identities record the
+same dedup key through the real endpoints, and the conflict fold links
+cleanly with conflicts == 1 — never a 500. PR body synced 250-252.
+
 Round 252 — wave 41 re-run over the #78 fold (23/28, five standing
 defensive-500 ledgers): the delete needed a SIDE-distinguishing pin — an
 Eq flip deleted the survivor's original instead of the anon duplicate

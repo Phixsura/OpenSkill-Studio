@@ -865,6 +865,37 @@ async def main() -> int:
         winners = [resp for resp in link_storm if resp.status_code == 200]
         losers = [resp for resp in link_storm if resp.status_code == 422]
         winner_users = {resp.json()["data"]["user_id"] for resp in winners}
+        # round 253 (#78 over the wire): both identities hold the SAME
+        # dedup key; the conflict fold must still link cleanly (the
+        # colliding duplicate folds away server-side — never a 500)
+        collide_anon = f"E2EANON{uid().upper()}"[:26]
+        r = await c.post("/experiments/anon/resolve",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": collide_anon})
+        check("collision setup: anon assigned", r.status_code == 200
+              and r.json()["data"]["variant_key"] is not None, r.text[:200])
+        r = await c.post("/experiments/anon/exposures",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": collide_anon,
+                               "dedup_key": "e2e-shared-collision"})
+        check("collision setup: anon exposure", r.status_code == 201
+              and r.json()["data"]["recorded"] is True, r.text[:200])
+        r = await c.post("/experiments/self/resolve", headers=admin,
+                         json={"experiment_key": obs_key})
+        check("collision setup: admin assigned", r.status_code == 200,
+              r.text[:200])
+        r = await c.post("/experiments/self/exposures", headers=admin,
+                         json={"experiment_key": obs_key,
+                               "dedup_key": "e2e-shared-collision"})
+        check("collision setup: user exposure same key",
+              r.status_code == 201, r.text[:200])
+        r = await c.post("/experiments/self/identity-link", headers=admin,
+                         json={"anonymous_id": collide_anon})
+        check("#78: the dedup-colliding conflict fold links cleanly",
+              r.status_code == 200
+              and r.json()["data"]["conflicts"] == 1,
+              r.text[:300])
+
         check("link storm: one identity wins, losers get the typed 422",
               len(winners) >= 1 and len(winner_users) == 1
               and len(winners) + len(losers) == 20
