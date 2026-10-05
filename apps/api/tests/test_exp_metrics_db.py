@@ -1920,10 +1920,15 @@ async def test_workflow_runs_latency_cuped_per_unit(db):
         )
 
     # pre: mean (100+300)/2 = 200ms; window: mean (400+600)/2 = 500ms
+    # wave-42 killer: an in-flight run (finished_at None) must be SKIPPED
+    # by the per-unit guard, never crash the latency arithmetic
+    inflight = _run(window_start + timedelta(hours=1), 0)
+    inflight.finished_at = None
     db.add_all([
         _run(pre_at, 100), _run(pre_at, 300),
         _run(window_start + timedelta(hours=1), 400),
         _run(window_start + timedelta(hours=1), 600),
+        inflight,
     ])
     await db.flush()
     vr = VarianceReductionSpec(
@@ -3400,3 +3405,60 @@ async def test_multi_branch_winsorizes_like_single(db):
     finally:
         definition.winsorize_pct = None  # the seeded definition is shared
         await db.flush()
+
+
+async def test_segment_org_cap_takes_twenty(db):
+    """Round 228 (wave-42 killer): the org-segment fanout caps at the 20
+    biggest orgs (accumulation-bomb law) — a 21st org writes NO rows, and
+    the tie-break is deterministic (the lexicographically largest org id
+    drops)."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.tenant import TenantAccount
+    from app.experiments.models import ExperimentAssignment, MetricSnapshot
+    from app.models.organization import Organization, OrgMember, OrgRole
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    exp, admin = await _mk_running_spec(db, {"segments": ["org"]})
+    tenant = TenantAccount(name=f"segcap-{str(ULID()).lower()}",
+                           slug=f"segcap-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org_ids = []
+    for i in range(21):
+        org = Organization(name=f"segcap-{i}",
+                           slug=f"segcap-{i}-{str(ULID()).lower()}",
+                           tenant_id=tenant.id)
+        db.add(org)
+        await db.flush()
+        u = _User(email=f"segcap-{i}-{ULID()}@example.com",
+                  display_name=f"S{i}", role=_Role.STUDENT,
+                  status=_Status.ACTIVE)
+        db.add(u)
+        await db.flush()
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
+        db.add(ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=u.id,
+            variant_key="control" if i % 2 == 0 else "treatment",
+            assigned_version=1, bucket=0, is_holdout=False,
+        ))
+        org_ids.append(org.id)
+    await db.flush()
+    window_start, window_end = _today_window()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_end
+    )
+    segs = {
+        r.segment
+        for r in (
+            await db.execute(_select(MetricSnapshot).where(
+                MetricSnapshot.experiment_id == exp.id,
+                MetricSnapshot.segment != ""))
+        ).scalars()
+    }
+    assert len(segs) == 20
+    # equal-size tie-break by org id ascending: the largest id drops
+    dropped = f"org:{max(org_ids)}"
+    assert dropped not in segs
