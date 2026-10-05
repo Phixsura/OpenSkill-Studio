@@ -474,12 +474,16 @@ migration moved history under the user key.
 is not an outcome of the treatment — the §4.7 exposure-SRM guard
 already covers the dilution class; the conflict event covers the rest.
 
-Shipped rounds 209-225: migration exp15/exp16 (links + the privacy
-CASCADE), the link service with in-place migration, both resolve paths
-race-hardened (#73), exposure survival and namespace (#74/#75), the
-nested-savepoint exposure retry (#76), wave 41 (21/26), the web SDK
-wired into login AND register, live E2E 136 (the wall keeps growing
-with each seam: full-fold, admin override).
+Shipped rounds 209-225, hardened through 251: migration exp15/exp16
+(links + the privacy CASCADE), the link service with in-place migration,
+the web SDK wired into login AND register. The seam's defect genealogy —
+each kill-proven: #73 the link/insert race window (both resolve paths),
+#74 the conflict fold cascade-destroying exposure audit rows, #75 the
+exposure surface not speaking the anonymous namespace, #76 an exposure
+in flight racing the fold (nested-savepoint retry onto the survivor),
+#78 the re-point colliding with the per-assignment dedup unique (the
+duplicate folds away). Wave 41 at 21/26; live wall 142 including the
+resolve and link concurrency storms.
 
 ## 5. Lifecycle state machine
 
