@@ -155,3 +155,21 @@ async def test_self_exposure_status_code_pin(c):
                            "dedup_key": "idapi-pin"})
     assert r.status_code == 201
     assert r.json()["data"]["recorded"] is False
+
+
+@pytest.mark.asyncio
+async def test_identity_links_listing_caps_at_hundred(c):
+    """Round 267 (accumulation-bomb law): 101 links list as the newest
+    100 — the oldest drops; the deterministic tiebreak keeps
+    same-timestamp rows stable."""
+    h, _u = await _auth(c, "Capped")
+    ids = [_anon_id() for _ in range(101)]
+    for anon in ids:
+        r = await c.post("/api/v1/experiments/self/identity-link",
+                         headers=h, json={"anonymous_id": anon})
+        assert r.status_code == 200
+    r = await c.get("/api/v1/experiments/self/identity-links", headers=h)
+    assert r.status_code == 200
+    listed = [row["anonymous_id"] for row in r.json()["data"]]
+    assert len(listed) == 100
+    assert set(listed) <= set(ids)

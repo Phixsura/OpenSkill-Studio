@@ -1338,6 +1338,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 267 — the transparency listing gains its accumulation cap: a
+client minting ids and claiming them could grow the response unbounded —
+the newest 100 list (deterministic tiebreak), pinned by a 101-link
+fixture. Exp 605.
+
 Round 266 — the production fail-closed path reaches the client pins: the
 hook's REJECTED-request fallback (429 under a Redis outage, network
 errors) now has its own test — the default experience, never a crash;

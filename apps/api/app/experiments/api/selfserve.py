@@ -185,7 +185,12 @@ async def list_identity_links(
         await db.execute(
             select(ExperimentIdentityLink)
             .where(ExperimentIdentityLink.user_id == user.id)
-            .order_by(ExperimentIdentityLink.created_at.desc())
+            .order_by(ExperimentIdentityLink.created_at.desc(),
+                      ExperimentIdentityLink.anonymous_id.desc())
+            # round 267 (accumulation-bomb law): a client minting ids and
+            # claiming them could grow this unbounded — newest 100 suffice
+            # for transparency
+            .limit(100)
         )
     ).scalars().all()
     return {
