@@ -832,11 +832,23 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     digest (with the ULID latest-look tiebreak wave 43 forced). Defects
     #70–#77 all kill-proven this epoch cycle; mutation waves 36–44
     (~500 new mutants, every survivor a reasoned ledger); live API wall
-    139 checks including the two genuine HTTP concurrency storms (resolve
-    convergence, link arbitration); browser wall 3; fuzz totality 19
-    properties over every pure core; certifications 136–154 consecutive
-    green (6951 → 6977 tests); the delegation and deferred-list claims
-    audited to word-level precision in both directions.
+    139 checks at the item's writing (151 by round 272) including the two
+    genuine HTTP concurrency storms; browser wall 3; fuzz totality 19;
+    certifications 136–154 consecutive green (6951 → 6977; 161 at 6985 by
+    round 273); the delegation and deferred-list claims audited to
+    word-level precision in both directions.
+16. **Evidence security + signal contract (rounds 246–280)** — the frozen
+    audit loop (freeze at decide → one-click packet → forgery pin → wire
+    pins on create and GET); defects #78/#79 (the check-then-write class:
+    dedup collision and the migration race, red-first, then the class
+    surveyed package-wide and closed); the transparency listing with its
+    accumulation cap; the endpoint layer's first mutation wave (45) via
+    the new ASGI suite — which exposed the env-gate blind-spot class
+    (test skips rate limiting; Redis outage fails open in dev/test,
+    closed in production) and forced a correction of this ADR's own
+    round-259 note; the signal contract completed across all four domains
+    (§18a warnings and events, §12 error codes and audit event types);
+    PR-body hygiene (the 11–175 evolution digest).
 
 ## 17. Known edges & explicit decisions
 
@@ -1354,6 +1366,13 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 281 — §16 item 15 de-staled (as-of annotations) and item 16
+records the evidence-security + signal-contract era (246-280). Rounds
+279-280 — periodic wall 151/151 fresh; the make-lint truth (76-file
+branch-wide ruff-format nonconformance PREDATES this session; the
+documented gate is ruff check, green throughout; no unprompted mass
+reformat of shared base-branch code).
 
 Round 278 — PR-body hygiene: rounds 11-175 compressed into one evolution
 digest (40.5KB -> 22.7KB of the 64KB cap) — the §18 log remains the full
