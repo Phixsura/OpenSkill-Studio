@@ -901,6 +901,17 @@ async def main() -> int:
               r.status_code == 200
               and r.json()["data"]["conflicts"] == 1,
               r.text[:300])
+        # round 263: §4.17 transparency over the wire — the listing shows
+        # the caller exactly their links; unauthenticated is 401
+        r = await c.get("/experiments/self/identity-links", headers=admin)
+        check("identity-links listing shows the caller's links",
+              r.status_code == 200
+              and any(row["anonymous_id"] == collide_anon
+                      for row in r.json()["data"]),
+              r.text[:300])
+        r = await c.get("/experiments/self/identity-links")
+        check("identity-links listing requires auth",
+              r.status_code == 401, r.text[:200])
 
         check("link storm: one identity wins, losers get the typed 422",
               len(winners) >= 1 and len(winner_users) == 1

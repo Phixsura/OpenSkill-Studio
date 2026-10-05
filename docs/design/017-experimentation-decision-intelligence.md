@@ -1331,6 +1331,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 263 — the transparency listing over the wire (wall 149): the
+caller's links visible post-fold, auth required. Round 262 —
+certification 159 green (6983, the listing's first full pass); PR body
+synced 259-261.
+
 Round 261 — §4.17 transparency: GET /experiments/self/identity-links —
 each caller sees exactly THEIR linked anonymous ids (newest first,
 own-rows by construction, 401 unauthenticated; another user's listing
