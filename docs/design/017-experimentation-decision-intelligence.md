@@ -821,7 +821,9 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
 
 - Unit deletion / GDPR: assignments keep anonymous ULIDs (no PII); exposure
   context forbids PII bodies; the GDPR deletion hook excludes the unit from
-  future snapshots (talent/gdpr.py pattern).
+  future snapshots (talent/gdpr.py pattern). The §4.17 identity links are
+  the one anon↔user mapping and CASCADE with user deletion (exp16,
+  round 222) — no orphaned re-identification table survives a delete.
 - Timezones: all UTC; window_start is always UTC midnight.
 - Version bumps: allowed only in draft/review; assignments pin
   `assigned_version`; variant sets can therefore never change mid-run.
@@ -1324,6 +1326,10 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 248 — §17 re-audit: current except the GDPR bullet, which now
+names the exp16 identity-link cascade (the one anon↔user mapping dies
+with the user — no re-identification table survives a delete).
 
 Round 247 — the §4.6 RATE boundary becomes typed and documented: ratio
 metrics are the one kind the CUPED cores deliberately do not adjust
