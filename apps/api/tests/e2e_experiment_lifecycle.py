@@ -583,10 +583,24 @@ async def main() -> int:
                         "guardrails": [{"metric_key": "cost_usd", "op": "lte",
                                         "threshold": 100.0}]},
             "population": {"rules": []},
+            # round 207: §4.6b auto covariate selection over the wire
+            "variance_reduction": {"method": "cuped",
+                                   "covariate_metrics": ["auto"],
+                                   "lookback_days": 14},
         }
+        bad_auto = dict(obs_spec, variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["auto", "revision_count"],
+            "lookback_days": 14,
+        })
+        r = await c.post(f"/experiments/{obs_id}/versions", headers=admin,
+                         json={"spec": bad_auto})
+        check("auto mixed with explicit covariates refused over the wire",
+              r.status_code == 422, r.text[:300])
         r = await c.post(f"/experiments/{obs_id}/versions", headers=admin,
                          json={"spec": obs_spec})
-        check("observational spec v1", r.status_code == 201, r.text[:300])
+        check("observational spec v1 (auto covariates pass the gate)",
+              r.status_code == 201, r.text[:300])
         r = await c.post(f"/experiments/layers/{obs_layer}/allocations",
                          headers=admin,
                          json={"experiment_id": obs_id, "slice_start": 0,
@@ -697,6 +711,9 @@ async def main() -> int:
               str(obs_metric.get("synthetic_control"))[:300])
         check("no km block without the knob",
               "km" not in obs_metric, str(obs_metric)[:200])
+        check("auto covariates warn honestly with no aggregates",
+              "CUPED_AUTO_NONE" in obs_result.get("warnings", []),
+              str(obs_result.get("warnings"))[:200])
 
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)

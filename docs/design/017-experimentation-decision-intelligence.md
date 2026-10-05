@@ -1230,6 +1230,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 207 — the auto literal over the wire: the live wall grows 122 ->
+124 (auto mixed with explicit covariates refused 422 by the validator;
+a lone ["auto"] passes the #63 schedule gate because the gate checks
+what it RESOLVES to; an aggregate-less observational run warns
+CUPED_AUTO_NONE over HTTP).
+
 Round 206 — matrix truth: every "deferred analytics" claim is de-staled
 (synthetic control and auto covariate selection both shipped) — the only
 open-by-choice item anywhere is write-side org delegation, a product
