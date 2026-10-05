@@ -1288,6 +1288,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 218 — fuzz totality catches up with the causal-inference epochs:
+hypothesis properties over its_estimate (p in [0,1], dof == n-4,
+length-honest), km_curve/km_compare (survival in [0,1], self-compare
+exactly null), synthetic_control (simplex weights to 1e-6, non-negative
+RMSPEs, finite gap, placebo p in (0,1]) and auto_select_covariates
+(<= max_k, threshold-honest, finite r) — four cores, zero crashes over
+garbage, the refusal-first design holding total. Also audited and
+CONFIRMED present this round: cross-experiment interaction sweep,
+scoped bandit posteriors, meta-analysis corpus, time post-stratification
+— the P1 ledger is fully implemented, not just folded.
+
 Round 217 — the pre-login web SDK: useAnonExperiment mirrors the
 self-serve hook over the anon surfaces (device-held 26-char id in
 localStorage with try/catch degradation, the #57 identity-stable

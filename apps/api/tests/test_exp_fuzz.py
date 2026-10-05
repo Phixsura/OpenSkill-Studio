@@ -367,3 +367,119 @@ def test_fuzz_validate_quantiles_total(quantiles):
         _validate_quantiles(quantiles, "continuous")
     except AppError as exc:
         assert exc.status_code == 422
+
+
+# ── Round 218: totality over the causal-inference cores ──────────────
+
+
+@given(
+    pre=st.lists(st.floats(min_value=-1e9, max_value=1e9), max_size=20),
+    post=st.lists(st.floats(min_value=-1e9, max_value=1e9), max_size=20),
+)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
+          deadline=None)
+def test_its_estimate_total(pre, post):
+    from app.experiments.services.analysis import its_estimate
+
+    out = its_estimate(pre, post)
+    if out is not None:
+        assert 0.0 <= out["level_change"]["p"] <= 1.0
+        assert 0.0 <= out["trend_change"]["p"] <= 1.0
+        assert out["n_pre"] == len(pre) and out["n_post"] == len(post)
+        assert out["dof"] == len(pre) + len(post) - 4
+
+
+@given(
+    events=st.dictionaries(
+        st.one_of(st.integers(min_value=-5, max_value=40), st.text(max_size=4)),
+        st.one_of(st.integers(min_value=-3, max_value=30), st.text(max_size=4)),
+        max_size=8,
+    ),
+    censored=st.dictionaries(
+        st.integers(min_value=-5, max_value=40),
+        st.integers(min_value=-3, max_value=30),
+        max_size=8,
+    ),
+    n0=st.integers(min_value=-2, max_value=60),
+)
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow],
+          deadline=None)
+def test_km_curve_and_compare_total(events, censored, n0):
+    from app.experiments.services.analysis import km_compare, km_curve
+
+    out = km_curve(events, censored, n0)
+    if out is not None:
+        assert 0.0 <= out["survival"] <= 1.0
+        assert out["se"] >= 0.0
+        assert out["n0"] == n0
+    cmp_out = km_compare(out, out)
+    if cmp_out is not None:
+        assert 0.0 <= cmp_out["p"] <= 1.0
+        assert cmp_out["diff"] == 0.0  # self-compare is exactly null
+
+
+@given(
+    pre_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6),
+                         max_size=10),
+    post_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6),
+                          max_size=6),
+    donors_pre=st.lists(
+        st.lists(st.floats(min_value=-1e6, max_value=1e6), max_size=10),
+        max_size=5,
+    ),
+    donors_post=st.lists(
+        st.lists(st.floats(min_value=-1e6, max_value=1e6), max_size=6),
+        max_size=5,
+    ),
+)
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow],
+          deadline=None)
+def test_synthetic_control_total(pre_treated, post_treated,
+                                 donors_pre, donors_post):
+    from app.experiments.services.analysis import synthetic_control
+
+    out = synthetic_control(pre_treated, post_treated,
+                            donors_pre, donors_post)
+    if out is not None:
+        assert abs(sum(out["weights"]) - 1.0) < 1e-6
+        assert all(w >= 0.0 for w in out["weights"])
+        assert out["pre_rmspe"] >= 0.0 and out["post_rmspe"] >= 0.0
+        assert math.isfinite(out["gap"])
+        if out["placebo_p"] is not None:
+            assert 0.0 < out["placebo_p"] <= 1.0
+
+
+@given(
+    arms=st.lists(
+        st.fixed_dictionaries({
+            "n": st.floats(min_value=-5, max_value=1e6),
+            "sum": st.floats(min_value=-1e9, max_value=1e9),
+            "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+            "covariates": st.one_of(
+                st.none(),
+                st.dictionaries(
+                    st.text(min_size=1, max_size=6),
+                    st.fixed_dictionaries({
+                        "sum": st.floats(min_value=-1e9, max_value=1e9),
+                        "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                        "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
+                    }),
+                    max_size=4,
+                ),
+            ),
+        }),
+        max_size=4,
+    ),
+    candidates=st.lists(st.text(min_size=1, max_size=6), max_size=6),
+)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
+          deadline=None)
+def test_auto_select_covariates_total(arms, candidates):
+    from app.experiments.services.analysis import auto_select_covariates
+
+    out = auto_select_covariates(arms, candidates)
+    assert len(out) <= 3
+    for chosen in out:
+        assert chosen["key"] in candidates
+        assert abs(chosen["r"]) >= 0.1
+        assert math.isfinite(chosen["r"])
