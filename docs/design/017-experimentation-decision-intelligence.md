@@ -1276,6 +1276,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 215 (closed) — wave 41 extended over the whole identity surface
+(21/26; the switchback config lookup gained its missing pin — a flipped
+Eq served another variant's payload; five defensive-500 ledgers).
+Certifications 145-146 green (6967). The mirror itself:
+
 Round 215 — #73's switchback mirror: the same link/insert race window
 existed around the switchback PLACEHOLDER insert (an orphan roster row,
 though no variant flip — the day's variant serves either way). The

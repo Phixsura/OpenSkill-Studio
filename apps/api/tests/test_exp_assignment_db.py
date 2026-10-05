@@ -1444,3 +1444,9 @@ async def test_identity_link_racing_switchback_not_stranded(db, monkeypatch):
             ExperimentAssignment.unit_id == user.id))
     ).scalar_one()
     assert user_row is not None  # exactly one roster row for the person
+
+    # wave-41 killer: the served CONFIG belongs to the day's variant —
+    # a flipped lookup serves another variant's payload
+    expected_config = ({"rubric_template_id": "x"}
+                       if resolved.variant_key == "treatment" else {})
+    assert resolved.config == expected_config

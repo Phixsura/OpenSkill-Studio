@@ -1,9 +1,22 @@
 [
   {
     "path": "app/experiments/services/assignment.py",
-    "funcs": ["link_identity", "resolve"],
-    "cmd": ["uv", "run", "pytest", "tests/test_exp_assignment_db.py",
-            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "funcs": [
+      "link_identity",
+      "resolve",
+      "_resolve_switchback",
+      "record_exposure"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_exp_assignment_db.py",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
     "timeout": 3600
   }
 ]
