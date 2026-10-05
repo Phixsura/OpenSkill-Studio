@@ -411,3 +411,8 @@ fold's delete needed a SIDE-distinguishing pin (an Eq flip deleted the
 survivor's original instead of the anon duplicate while every COUNT
 stayed identical; the context tag tells the rows apart). The five
 survivors remain the standing defensive-500 ledger.
+
+Round 255 re-run (after the #79 per-row savepoint rework): 24/29 — every
+mutant of the retry branch and the shared conflict closure dies under
+the racing tests; the five survivors remain the standing defensive-500
+ledger (now including the closure's own re-read guards).

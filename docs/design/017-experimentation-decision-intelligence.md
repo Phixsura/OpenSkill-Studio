@@ -1331,6 +1331,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 255 — wave 41 re-run over the #79 rework: 24/29, every retry and
+shared-closure mutant killed by the racing tests; the five survivors are
+the standing defensive-500 ledger. Certification 157 green (6980).
+
 Round 254 — defect #79, the #78 class generalized: the migration's
 check-then-UPDATE raced a concurrent resolve creating the user row
 inside the window — the assignment unique fired and the whole link
