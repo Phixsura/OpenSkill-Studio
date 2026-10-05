@@ -1288,6 +1288,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 217 — the pre-login web SDK: useAnonExperiment mirrors the
+self-serve hook over the anon surfaces (device-held 26-char id in
+localStorage with try/catch degradation, the #57 identity-stable
+exposure callback, the #54 null-safe fail-safe shape) and
+claimAnonymousId posts the link after login, failing safe on the
+shared-device 422 so login never blocks on experiment plumbing. Web 727.
+
 Round 216 — bookkeeping: §16 item 14 (the identity epoch) and the PR
 body sync through wave 41's extension.
 
