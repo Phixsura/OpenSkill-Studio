@@ -1306,6 +1306,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 242 — the browser wall grows 2 -> 3: the unprivileged deep-link
+posture (403s render an alive error state, never a blank crash) now
+covers every console surface added since round 174 — the Metric Explorer
+and the decision registry — verified in a real Chromium against the live
+stack. Round 241 — PR body 237-240; periodic full wall 137/137.
+
 Round 240 — wave 44 over the freeze path: 24/24 outright (the decide
 suite's exact pins leave it no place to hide). Certification 154 green
 (6977).

@@ -31,4 +31,17 @@ test.describe("Experiments console wall (round 174)", () => {
     await expect(page.locator("text=Settings")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("table tbody tr")).toHaveCount(0);
   });
+
+  // round 242: the deep-link posture holds on every console surface added
+  // since round 174 — 403s render an alive error state, never a blank crash
+  test("Explorer and Decisions deep links stay alive for a plain user", async ({ page }) => {
+    await loginInBrowser(page, student.email, "TestPass123!");
+    for (const path of ["/dashboard/experiments/metrics", "/dashboard/experiments/decisions"]) {
+      await page.goto(path);
+      await page.waitForLoadState("domcontentloaded");
+      await expect(page.locator("text=Settings")).toBeVisible({
+        timeout: 30_000,
+      });
+    }
+  });
 });
