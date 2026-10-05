@@ -1327,6 +1327,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 249 — segment slices over the wire (wall 142): a segment-sliced
+analysis runs informationally, the look-budget pin holds over real HTTP
+(history length unchanged — segment runs record no look, the §4.8
+contract), and the segments listing responds.
+
 Round 248 — §17 re-audit: current except the GDPR bullet, which now
 names the exp16 identity-link cascade (the one anon↔user mapping dies
 with the user — no re-identification table survives a delete).

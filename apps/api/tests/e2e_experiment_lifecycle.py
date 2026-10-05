@@ -744,6 +744,26 @@ async def main() -> int:
               and all(isinstance(v, (int, float)) for v in evidence.values()),
               str(evidence)[:300])
 
+        # ── Round 249: segment slices over the wire ────────────────────
+        r = await c.get(f"/experiments/{obs_id}/analysis/history",
+                        headers=admin)
+        looks_before = len(r.json()["data"])
+        r = await c.post(
+            f"/experiments/{obs_id}/analysis?segment=org:zzzzzzzzzzzzzzzzzzzzzzzzzz",
+            headers=admin, json={})
+        check("segment slice analysis runs informationally",
+              r.status_code == 200
+              and r.json()["data"].get("segment")
+              == "org:zzzzzzzzzzzzzzzzzzzzzzzzzz",
+              r.text[:300])
+        r = await c.get(f"/experiments/{obs_id}/analysis/history",
+                        headers=admin)
+        check("a segment run burns NO look budget",
+              len(r.json()["data"]) == looks_before, r.text[:200])
+        r = await c.get(f"/experiments/{obs_id}/segments", headers=admin)
+        check("segments listing responds over the wire",
+              r.status_code == 200, r.text[:200])
+
         # ── Round 211: §4.17 identity resolution over the wire ─────────
         r = await c.patch(f"/experiments/{obs_id}/ramp", headers=admin,
                           json={"ramp_bp": 10000})
