@@ -784,6 +784,20 @@ async def main() -> int:
                          json={"anonymous_id": "a:b"})
         check("malformed anonymous ids refuse at the schema wall",
               r.status_code == 422, r.text[:200])
+        # round 232: the support override is platform-admin only
+        support_anon = f"E2EANON{uid().upper()}"[:26]
+        r = await c.post("/experiments/self/identity-link", headers=student,
+                         json={"anonymous_id": support_anon,
+                               "user_id": admin_id})
+        check("naming another user without admin is 403",
+              r.status_code == 403, r.text[:200])
+        r = await c.post("/experiments/self/identity-link", headers=admin,
+                         json={"anonymous_id": support_anon,
+                               "user_id": student_id})
+        check("platform admin links on behalf of a user (support flow)",
+              r.status_code == 200
+              and r.json()["data"]["user_id"] == student_id,
+              r.text[:300])
         # round 214 (#75): pre-login exposures record through the anon
         # namespace — after the link they land on the user's assignment
         r = await c.post("/experiments/anon/exposures",

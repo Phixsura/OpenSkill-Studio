@@ -1304,6 +1304,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 232 — design/code drift repaid: §4.17 promised the platform-admin
+support override on the link endpoint; the implementation had silently
+narrowed it to caller-only. The optional user_id now works — naming
+another user without platform admin is 403 FORBIDDEN, the admin path
+links on behalf (support flows). Wall 134 -> 136 with both checks over
+the wire.
+
 Round 231 — hot-path honesty readout after the identity epoch: user
 resolves are UNTOUCHED (3.05 ms new / 1.17 ms sticky vs the 2.56/0.89
 pre-identity baseline — same order, local-Postgres noise), and the

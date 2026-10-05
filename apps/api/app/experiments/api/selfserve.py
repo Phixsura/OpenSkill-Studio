@@ -125,11 +125,21 @@ async def link_identity(
     """§4.17: claim a pre-login anonymous id as the CALLER's — first link
     wins (422 EXPERIMENT_IDENTITY_CONFLICT on rebinding), re-linking the
     same pair is idempotent, and every anon assignment migrates in place
-    to the user key."""
+    to the user key. A platform admin may link on BEHALF of a user
+    (support flows, round 232); anyone else naming another user is 403."""
+    from app.exceptions import AppError
     from app.experiments.services.assignment import AssignmentService
+    from app.models.user import UserRole
 
+    target_user_id = body.user_id or user.id
+    if target_user_id != user.id and user.role != UserRole.ADMIN:
+        raise AppError(
+            "FORBIDDEN",
+            "Only platform admins may link an anonymous id for another user",
+            403,
+        )
     out = await AssignmentService(db).link_identity(
-        anonymous_id=body.anonymous_id, user_id=user.id
+        anonymous_id=body.anonymous_id, user_id=target_user_id
     )
     await db.commit()
     return {"data": out}

@@ -460,10 +460,13 @@ class AnonExposureRequest(_StrictReq):
 
 
 class IdentityLinkRequest(_StrictReq):
-    """§4.17: the authenticated caller claims their own pre-login id."""
+    """§4.17: the authenticated caller claims their own pre-login id.
+    user_id (round 232) is the platform-admin support override — anyone
+    else passing someone ELSE's id is 403."""
 
     anonymous_id: str = Field(min_length=1, max_length=26,
                               pattern=r"^[^:]+$")
+    user_id: str | None = Field(default=None, min_length=1, max_length=26)
 
 
 class SelfExposureRequest(_StrictReq):
