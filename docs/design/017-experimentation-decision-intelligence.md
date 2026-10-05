@@ -789,8 +789,9 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   probabilities for NEW units only; existing assignments never flip (no yanked
   experiences, ITT preserved within each allocation epoch).
 - Explicitly deferred (documented in the competitive analysis):
-  anonymous→login identity resolution, feature-flag CDN/edge SDKs, session
-  replay, warehouse connectors (we are the warehouse).
+  feature-flag CDN/edge SDKs, session replay, warehouse connectors (we
+  are the warehouse). Anonymous→login identity resolution SHIPPED in
+  rounds 209-211 (§4.17).
 - Base branch: the epic depends on the eco facade, so implementation chains on
   the issue-35 branch (PR #36) until it merges.
 
@@ -1274,6 +1275,11 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 212 — identity epoch bookkeeping: the §16 deferred list drops
+anonymous→login resolution (shipped §4.17), the PR body syncs the epoch,
+and wave 41 (link_identity + the resolve namespace normalization) is
+staged to run after certification 143.
 
 Round 211 — identity step 2: the wire surface — POST
 /experiments/anon/resolve (unauthenticated, rate-limited 60/min,
