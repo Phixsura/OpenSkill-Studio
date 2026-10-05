@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
-import { ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../../components";
+import { ErrorBanner, ExperimentsNav, JsonPacketButton, Pill, SectionCard } from "../../components";
 import {
   PROMOTION_TARGET_TYPES,
   STATUS_STYLES,
@@ -115,6 +115,12 @@ export default function DecisionDetailPage() {
             <dt className="text-xs text-slate-500">Analysis result hash (evidence link)</dt>
             <dd>
               <code className="text-xs">{record.analysis_result_hash}</code>
+              <div className="mt-1">
+                <JsonPacketButton
+                  data={{ decision: record, cited_look_warnings: citedWarnings }}
+                  filename={`decision-${record.id}.json`}
+                />
+              </div>
               {citedWarnings.length > 0 ? (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {citedWarnings.map((w) => (

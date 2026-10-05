@@ -126,3 +126,26 @@ export function CsvExportButton({ path, filename }: { path: string; filename: st
     </button>
   );
 }
+
+/** Round 270: one-click DECISION PACKET — the record with its frozen
+ * evidence as a JSON file (the audit artifact reviewers attach). */
+export function JsonPacketButton({ data, filename }: { data: unknown; filename: string }) {
+  return (
+    <button
+      type="button"
+      className="rounded-md border px-2 py-1 text-xs"
+      onClick={() => {
+        const url = URL.createObjectURL(
+          new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+        );
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }}
+    >
+      Download packet
+    </button>
+  );
+}

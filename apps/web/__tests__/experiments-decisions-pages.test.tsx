@@ -113,5 +113,7 @@ describe("Decision registry pages (ADR-017 Part L, round 103)", () => {
     render(<DecisionDetailPage />, { wrapper: wrapper() });
     expect(await screen.findByText("FROZEN_ONE")).toBeTruthy();
     expect(screen.queryByText("STALE_HISTORY")).toBeNull();
+    // round 270: the decision packet is one click away from the evidence
+    expect(screen.getByText("Download packet")).toBeTruthy();
   });
 });

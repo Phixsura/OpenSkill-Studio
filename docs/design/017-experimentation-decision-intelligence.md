@@ -1338,6 +1338,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 270 — the DECISION PACKET: one click on the decision page downloads
+the record with its frozen evidence (and the cited look's warnings) as a
+JSON file — the audit artifact a reviewer attaches. Round 269 — PR body
+266-268; fuzz fresh.
+
 Round 268 — wave 45 re-run 9/14 (the listing cap's own mutant dies under
 the 101-link fixture; the five standing ledgers hold). Certification 160
 green (6985).
