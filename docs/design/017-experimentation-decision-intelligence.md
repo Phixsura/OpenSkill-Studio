@@ -1289,6 +1289,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 224 — wave 41 re-run over the reworked exposure path: 21/26, every
+retry-branch mutant killed by the racing-exposure test, the five
+defensive-500 ledgers standing. Certification 148 green (6973); PR body
+synced through #76.
+
 Round 223 — defect #76, the last identity-seam race: an exposure in
 flight when the link's CONFLICT fold deletes its anon assignment row hit
 the FK and was absorbed by the fail-safe as a silently LOST exposure.

@@ -366,3 +366,9 @@ Round 215 extension (+_resolve_switchback, +record_exposure after the
 lookup gained its pin (an Eq->NotEq flip served another variant's
 payload unnoticed); the five survivors are the same defensive-500 class
 behind constraint-guaranteed re-reads, ledgered.
+
+Round 224 re-run (after the #76 nested-savepoint retry rework of
+record_exposure): 21/26 — every mutant of the new retry branch (the
+re-normalization guards, the survivor lookup, the original-anon gate)
+dies under the racing-exposure test; the five survivors remain the
+ledgered defensive-500 class.
