@@ -32,6 +32,21 @@ export default function DecisionDetailPage() {
   });
   const record = data?.data;
 
+  // round 234: the cited look's WARNINGS belong next to the evidence —
+  // the decision-maker sees the caveats without leaving the page
+  const { data: historyData } = useQuery({
+    queryKey: ["experiment-analysis-history", record?.experiment_id],
+    enabled: Boolean(record?.experiment_id),
+    queryFn: () =>
+      apiWithAuth<{ data: { result_hash?: string; warnings?: string[] }[] }>(
+        `/experiments/${record?.experiment_id}/analysis/history`,
+      ),
+  });
+  const citedLook = (historyData?.data ?? []).find(
+    (look) => look.result_hash === record?.analysis_result_hash,
+  );
+  const citedWarnings = citedLook?.warnings ?? [];
+
   const createDraft = useMutation({
     mutationFn: () =>
       apiWithAuth<{ data: PromotionDraft }>(
@@ -97,6 +112,18 @@ export default function DecisionDetailPage() {
             <dt className="text-xs text-slate-500">Analysis result hash (evidence link)</dt>
             <dd>
               <code className="text-xs">{record.analysis_result_hash}</code>
+              {citedWarnings.length > 0 ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {citedWarnings.map((w) => (
+                    <span
+                      key={w}
+                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800"
+                    >
+                      {w}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </dd>
           </div>
         </dl>

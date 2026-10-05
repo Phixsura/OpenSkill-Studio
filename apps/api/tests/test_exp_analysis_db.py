@@ -1361,6 +1361,9 @@ async def test_latest_look_scorecard(db):
     assert latest["sequential"] == "msprt"
     assert latest["automated"] is False
     assert "exposure_rate" in latest["primary_effects"]
+    # round 234: the look's warnings ride the scorecard — decisions citing
+    # this hash can show the caveats the evidence carried
+    assert latest["warnings"] == first["warnings"]
 
 
 async def test_multi_covariate_analysis_end_to_end(db):

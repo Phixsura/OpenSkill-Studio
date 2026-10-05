@@ -73,4 +73,27 @@ describe("Decision registry pages (ADR-017 Part L, round 103)", () => {
     expect(await screen.findByText(/Clear win on exposure/)).toBeTruthy();
     expect(screen.getByText("c".repeat(64))).toBeTruthy();
   });
+
+  it("detail shows the cited look's warnings next to the evidence (round 234)", async () => {
+    api.mockImplementation((async (rawPath: unknown) => {
+      const path = String(rawPath ?? "");
+      if (path.endsWith(`/experiments/decisions/${"D".repeat(26)}`)) return { data: RECORD };
+      if (path.endsWith("/analysis/history"))
+        return {
+          data: [
+            { result_hash: "d".repeat(64), warnings: ["OTHER_LOOK"] },
+            {
+              result_hash: "c".repeat(64),
+              warnings: ["PRE_BALANCE_SUSPECT", "CUPED_AUTO_NONE"],
+            },
+          ],
+        };
+      return { data: [] };
+    }) as never);
+    render(<DecisionDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("PRE_BALANCE_SUSPECT")).toBeTruthy();
+    expect(screen.getByText("CUPED_AUTO_NONE")).toBeTruthy();
+    // only the CITED look's warnings — not another look's
+    expect(screen.queryByText("OTHER_LOOK")).toBeNull();
+  });
 });

@@ -460,6 +460,7 @@ class AnalysisService:
             "sequential": payload.get("sequential"),
             "look": payload.get("look"),
             "result_hash": payload.get("result_hash"),
+            "warnings": payload.get("warnings", []),
             "primary_effects": payload.get("primary_effects", {}),
             "automated": event.actor_user_id is None,
         }
@@ -487,6 +488,7 @@ class AnalysisService:
         return [
             {
                 "at": (event.payload or {}).get("at"),
+                "warnings": (event.payload or {}).get("warnings", []),
                 "sequential": (event.payload or {}).get("sequential"),
                 "look": (event.payload or {}).get("look"),
                 "result_hash": (event.payload or {}).get("result_hash"),
@@ -1203,6 +1205,9 @@ class AnalysisService:
                     "look": look_number,
                     "result_hash": payload["result_hash"],
                     "at": datetime.now(UTC).isoformat(),
+                    # round 234: the look's WARNINGS ride the audit trail —
+                    # a decision that cites this hash can show its caveats
+                    "warnings": payload.get("warnings", []),
                     # Corpus raw material (§11 meta-analysis): the primary
                     # effects this look observed, se included
                     "primary_effects": {

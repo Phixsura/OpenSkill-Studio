@@ -1306,6 +1306,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 234 — warnings join the decision evidence chain: the analysis_look
+event now stores the run's warnings, the scorecard and history return
+them, and the decision detail page shows the CITED look's warnings as
+amber chips next to the hash (matched by result_hash — never another
+look's). The decision-maker reads the caveats where they approve.
+Web 730; exp 596.
+
+Round 233 — the PR body syncs 229-232 and three stale E2E counts gain
+as-of annotations. Certification 151 green (6976).
+
 Round 232 — design/code drift repaid: §4.17 promised the platform-admin
 support override on the link endpoint; the implementation had silently
 narrowed it to caller-only. The optional user_id now works — naming
