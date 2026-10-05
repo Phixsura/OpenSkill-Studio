@@ -99,7 +99,9 @@ class ExperimentIdentityLink(Base):
     __tablename__ = "experiment_identity_links"
 
     anonymous_id: Mapped[str] = mapped_column(String(26), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(26), index=True)
+    user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

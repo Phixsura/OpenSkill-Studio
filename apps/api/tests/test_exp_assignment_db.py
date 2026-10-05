@@ -1450,3 +1450,27 @@ async def test_identity_link_racing_switchback_not_stranded(db, monkeypatch):
     expected_config = ({"rubric_template_id": "x"}
                        if resolved.variant_key == "treatment" else {})
     assert resolved.config == expected_config
+
+
+async def test_identity_link_cascades_with_user_deletion(db):
+    """Round 222 (exp16): the anon<->user mapping is privacy-relevant —
+    deleting the user deletes their identity links too, never an orphan."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentIdentityLink
+
+    svc = AssignmentService(db)
+    user = User(email=f"idd-{ULID()}@example.com", display_name="D",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+    anon_id = str(ULID())
+    await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+
+    await db.delete(user)
+    await db.flush()
+    gone = (
+        await db.execute(_select(ExperimentIdentityLink).where(
+            ExperimentIdentityLink.anonymous_id == anon_id))
+    ).scalar_one_or_none()
+    assert gone is None

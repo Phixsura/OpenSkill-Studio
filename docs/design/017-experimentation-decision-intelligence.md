@@ -1289,6 +1289,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 222 — exp16: the identity link's user_id gains its CASCADE foreign
+key — the anon↔user mapping is privacy-relevant, so user deletion must
+never orphan it (the audit found the column shipped as a bare String;
+assignments' unit_id is bare BY DESIGN for multi-unit-type, but the link
+is user-only). Pinned by a deletion-cascade test; migrations now
+exp01–exp16.
+
 Round 221 — §18a gains the experiment_identity_conflict event row (the
 new-signal-ships-with-its-row law, applied to events as well as
 warnings); certification 147 recorded green (6972).
