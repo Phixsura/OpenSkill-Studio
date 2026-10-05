@@ -1331,6 +1331,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 252 — wave 41 re-run over the #78 fold (23/28, five standing
+defensive-500 ledgers): the delete needed a SIDE-distinguishing pin — an
+Eq flip deleted the survivor's original instead of the anon duplicate
+while every count stayed identical; a context tag now tells the physical
+rows apart. Certification 156 green (6979). §4.17 carries the defect
+genealogy #73-#78.
+
 Round 251 — defect #78, found pressing on #74's seam: a dedup key
 recorded under BOTH identities made the conflict fold's exposure
 re-point violate the per-assignment dedup unique — the whole link 500'd.

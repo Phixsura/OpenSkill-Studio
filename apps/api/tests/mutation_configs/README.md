@@ -405,3 +405,9 @@ rework: 24/24 outright — the decide suite's exact pins (frozen warnings
 equality, the default {"cited_warnings": []} shape, the no-look 422, the
 repeated-identical-looks limit-1) leave the freeze path no place to
 hide.
+
+Round 252 re-run (after the #78 dedup-collision fold): 23/28 — the
+fold's delete needed a SIDE-distinguishing pin (an Eq flip deleted the
+survivor's original instead of the anon duplicate while every COUNT
+stayed identical; the context tag tells the rows apart). The five
+survivors remain the standing defensive-500 ledger.
