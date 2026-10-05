@@ -1189,3 +1189,127 @@ async def test_read_scope_dep_arms(db):
     admin = await _mk_admin(db)
     assert (await experiment_read_scope(user=admin, db=db)).org_ids is None
     assert (await require_self_serve_user(user=plain)) is plain
+
+
+# ── §4.17 identity resolution (round 210) ────────────────────────────
+
+
+async def test_identity_link_migrates_anonymous_history(db):
+    """An unlinked anonymous id resolves as a user-typed unit; linking
+    migrates its assignment IN PLACE (variant/bucket/assigned_at intact)
+    and both id forms serve the same experience afterwards."""
+    from sqlalchemy import select as _select
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+
+    first = await svc.resolve(experiment_key=exp.key,
+                              unit_type="anonymous", unit_id=anon_id)
+    assert first is not None
+    again = await svc.resolve(experiment_key=exp.key,
+                              unit_type="anonymous", unit_id=anon_id)
+    assert again is not None and again.variant_key == first.variant_key
+
+    user = User(email=f"idl-{ULID()}@example.com", display_name="L",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+    pre_row = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == anon_id))
+    ).scalar_one()
+    original_assigned_at = pre_row.assigned_at
+
+    out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+    assert out["migrated"] == 1 and out["conflicts"] == 0
+
+    migrated_row = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == user.id))
+    ).scalar_one()
+    assert migrated_row.variant_key == first.variant_key
+    assert migrated_row.assigned_at == original_assigned_at  # ITT intact
+    gone = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == anon_id))
+    ).scalar_one_or_none()
+    assert gone is None
+
+    # both id forms now serve the user's assignment
+    via_anon = await svc.resolve(experiment_key=exp.key,
+                                 unit_type="anonymous", unit_id=anon_id)
+    via_user = await svc.resolve(experiment_key=exp.key,
+                                 unit_type="user", unit_id=user.id)
+    assert via_anon is not None and via_user is not None
+    assert via_anon.variant_key == first.variant_key
+    assert via_user.variant_key == first.variant_key
+
+    # idempotent re-link; rebinding to a DIFFERENT user refused
+    out2 = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+    assert out2["migrated"] == 0 and out2["conflicts"] == 0
+    other = User(email=f"idl2-{ULID()}@example.com", display_name="O",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(other)
+    await db.flush()
+    from app.exceptions import AppError as _AppError
+    with pytest.raises(_AppError) as exc:
+        await svc.link_identity(anonymous_id=anon_id, user_id=other.id)
+    assert exc.value.code == "EXPERIMENT_IDENTITY_CONFLICT"
+    assert exc.value.status_code == 422
+
+
+async def test_identity_link_conflict_keeps_user_row_and_audits(db):
+    """When BOTH ids were assigned in the same experiment, the user row
+    stays authoritative, the anon row is removed, and the
+    experiment_identity_conflict event records both variants."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models.audit import ExperimentEvent
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idc-{ULID()}@example.com", display_name="C",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+
+    via_anon = await svc.resolve(experiment_key=exp.key,
+                                 unit_type="anonymous", unit_id=anon_id)
+    via_user = await svc.resolve(experiment_key=exp.key,
+                                 unit_type="user", unit_id=user.id)
+    assert via_anon is not None and via_user is not None
+
+    out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+    assert out["migrated"] == 0 and out["conflicts"] == 1
+
+    kept = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == user.id))
+    ).scalar_one()
+    assert kept.variant_key == via_user.variant_key
+    event = (
+        await db.execute(_select(ExperimentEvent).where(
+            ExperimentEvent.experiment_id == exp.id,
+            ExperimentEvent.event_type == "experiment_identity_conflict"))
+    ).scalar_one()
+    assert event.payload["anon_variant"] == via_anon.variant_key
+    assert event.payload["user_variant"] == via_user.variant_key
+
+    # the anon id now serves the USER's variant (one person, one
+    # experience — even where the histories disagreed)
+    after = await svc.resolve(experiment_key=exp.key,
+                              unit_type="anonymous", unit_id=anon_id)
+    assert after is not None and after.variant_key == via_user.variant_key
+
+    # malformed anonymous ids refuse
+    from app.exceptions import AppError as _AppError
+    with pytest.raises(_AppError):
+        await svc.link_identity(anonymous_id="x" * 27, user_id=user.id)
+    with pytest.raises(_AppError):
+        await svc.link_identity(anonymous_id="a:b", user_id=user.id)

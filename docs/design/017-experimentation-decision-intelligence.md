@@ -434,9 +434,12 @@ Every compared vendor serves pre-login traffic and carries the
 assignment across login; we have neither. Honest minimal design in our
 idioms:
 
-**Unit type.** "anonymous" joins UNIT_TYPES — clients resolve with a
-device/visitor ULID before login. Bucketing, stickiness, holdouts and
-exposure dedup all work unchanged (it is just a unit).
+**Unit namespace (REVISED at build).** "anonymous" is an ID NAMESPACE
+normalized at the resolve boundary, NOT a spec unit type — eligibility
+compares unit_type against spec.unit_type, so an unlinked anon id
+resolves as a user-typed unit under its own ULID (specs stay "user";
+bucketing, stickiness, holdouts and exposure dedup all work unchanged)
+and its history migrates in place when the link lands.
 
 **exp15 migration.** `experiment_identity_links(anonymous_id PK,
 user_id, created_at)` — GLOBAL, one anon id links to exactly one user,
@@ -1271,6 +1274,16 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 210 — identity step 1: exp15 (experiment_identity_links),
+the ExperimentIdentityLink model, AssignmentService.link_identity
+(first-link-wins 422 on rebinding, idempotent re-link, in-place row
+migration with assigned_at preserved, user-row-wins conflict handling
+with the audit event) and resolve's anonymous-namespace normalization —
+REVISING the design at build: anonymous is an id namespace, not a spec
+unit type, because eligibility compares against spec.unit_type. Service
+tests cover migration, both-id serving, conflict audit, rebinding 422
+and malformed-id refusal.
 
 Round 209 — the identity epoch opens (§4.17, step 0): anonymous unit
 type, a global first-link-wins identity link (422 on rebinding),

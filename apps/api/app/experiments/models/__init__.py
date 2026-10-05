@@ -1,6 +1,10 @@
 """Experiment models package — imported by app.models for Alembic discovery."""
 
-from app.experiments.models.assignment import ExperimentAssignment, ExperimentExposure
+from app.experiments.models.assignment import (
+    ExperimentAssignment,
+    ExperimentExposure,
+    ExperimentIdentityLink,
+)
 from app.experiments.models.audit import EXPERIMENT_EVENT_TYPES, ExperimentEvent
 from app.experiments.models.decision import (
     DECISIONS,
@@ -59,6 +63,7 @@ __all__ = [
     "MetricSnapshot",
     "Experiment",
     "ExperimentAssignment",
+    "ExperimentIdentityLink",
     "ExperimentEvent",
     "ExperimentExposure",
     "ExperimentLayer",

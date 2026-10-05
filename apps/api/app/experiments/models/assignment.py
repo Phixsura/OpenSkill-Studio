@@ -88,3 +88,18 @@ class ExperimentExposure(Base):
             postgresql_where=text("dedup_key IS NOT NULL"),
         ),
     )
+
+
+class ExperimentIdentityLink(Base):
+    """§4.17 (round 210): a GLOBAL anonymous->user identity link. One anon
+    id links to exactly one user, ever — first link wins; rebinding is a
+    422 at the service. The link is the forwarding table resolution
+    follows; assignment history migrates in place at link time."""
+
+    __tablename__ = "experiment_identity_links"
+
+    anonymous_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(26), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

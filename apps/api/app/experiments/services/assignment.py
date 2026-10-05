@@ -28,6 +28,7 @@ from app.experiments.models import (
     Experiment,
     ExperimentAssignment,
     ExperimentExposure,
+    ExperimentIdentityLink,
     ExperimentLayerAllocation,
     ExperimentVersion,
 )
@@ -421,7 +422,18 @@ class AssignmentService:
     ) -> ResolvedVariant | None:
         """Sticky, race-safe resolution (ADR-017 §6 steps 1–7). An unknown
         key is the normal no-experiment-on-this-surface case → None, cheap,
-        no logging."""
+        no logging.
+
+        §4.17: "anonymous" is an ID NAMESPACE, not a spec unit type — a
+        linked anon id serves the USER's assignments (one person, one
+        experience, whichever id the client still holds); an unlinked one
+        resolves as a user-typed unit under its own ULID and its history
+        migrates in place when the link lands."""
+        if unit_type == "anonymous":
+            unit_type = "user"
+            link = await self.db.get(ExperimentIdentityLink, unit_id)
+            if link is not None:
+                unit_id = link.user_id
         exp = await self._load_or_none(experiment_key)
         if exp is None:
             return None
@@ -467,6 +479,76 @@ class AssignmentService:
         if row is None:  # pragma: no cover — unique constraint guarantees a row
             raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
         return self._to_resolved(exp, spec, row)
+
+    async def link_identity(
+        self, *, anonymous_id: str, user_id: str
+    ) -> dict:
+        """§4.17 (round 210): bind an anonymous id to a user — first link
+        wins (rebinding to a DIFFERENT user is 422), re-linking the same
+        pair is idempotent. Every assignment the anon id holds migrates IN
+        PLACE to the user key (variant/bucket/version/assigned_at intact —
+        ITT timing and exposure FKs preserved); where the user already
+        holds a row in the same experiment, the user row stays
+        authoritative, the anon row is removed, and an
+        experiment_identity_conflict event keeps both variants on the
+        audit trail."""
+        from app.experiments.models.audit import ExperimentEvent
+
+        if not (1 <= len(anonymous_id) <= 26) or ":" in anonymous_id:
+            raise AppError(
+                "VALIDATION_ERROR",
+                "anonymous_id must be 1-26 chars with no ':'",
+                422,
+            )
+        insert = (
+            pg_insert(ExperimentIdentityLink)
+            .values(anonymous_id=anonymous_id, user_id=user_id)
+            .on_conflict_do_nothing(index_elements=["anonymous_id"])
+        )
+        await self.db.execute(insert)
+        link = await self.db.get(ExperimentIdentityLink, anonymous_id)
+        if link is None:  # pragma: no cover — PK guarantees a row
+            raise AppError("EXPERIMENT_NOT_FOUND", "Link write lost", 500)
+        if link.user_id != user_id:
+            raise AppError(
+                "EXPERIMENT_IDENTITY_CONFLICT",
+                "This anonymous id is already linked to a different user",
+                422,
+            )
+        anon_rows = (
+            await self.db.execute(
+                select(ExperimentAssignment).where(
+                    ExperimentAssignment.unit_type == "user",
+                    ExperimentAssignment.unit_id == anonymous_id,
+                )
+            )
+        ).scalars().all()
+        migrated = 0
+        conflicts = 0
+        for row in anon_rows:
+            existing_user_row = await self._existing(
+                row.experiment_id, "user", user_id
+            )
+            if existing_user_row is not None:
+                conflicts += 1
+                self.db.add(ExperimentEvent(
+                    experiment_id=row.experiment_id,
+                    actor_user_id=user_id,
+                    event_type="experiment_identity_conflict",
+                    payload={
+                        "anonymous_id": anonymous_id,
+                        "user_id": user_id,
+                        "anon_variant": row.variant_key,
+                        "user_variant": existing_user_row.variant_key,
+                    },
+                ))
+                await self.db.delete(row)
+            else:
+                row.unit_id = user_id
+                migrated += 1
+        await self.db.flush()
+        return {"anonymous_id": anonymous_id, "user_id": user_id,
+                "migrated": migrated, "conflicts": conflicts}
 
     async def _resolve_switchback(
         self,
