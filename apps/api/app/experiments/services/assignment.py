@@ -679,7 +679,9 @@ class AssignmentService:
         # namespace as resolve — without this, every pre-login exposure was
         # silently dropped (False, the fail-safe) and triggered analyses
         # undercounted linked users.
+        original_anon: str | None = None
         if unit_type == "anonymous":
+            original_anon = unit_id
             unit_type = "user"
             link = await self.db.get(ExperimentIdentityLink, unit_id)
             if link is not None:
@@ -690,17 +692,42 @@ class AssignmentService:
         assignment = await self._existing(exp.id, unit_type, unit_id)
         if assignment is None:
             return False
-        insert = pg_insert(ExperimentExposure).values(
-            assignment_id=assignment.id,
-            experiment_id=exp.id,
-            context=context or {},
-            dedup_key=dedup_key,
-        )
-        if dedup_key is not None:
-            # Targetless DO NOTHING: absorbs the partial-unique dedup conflict
-            insert = insert.on_conflict_do_nothing()
-        await self.db.execute(insert)
-        return True
+
+        def _insert_for(assignment_id: str):
+            stmt = pg_insert(ExperimentExposure).values(
+                assignment_id=assignment_id,
+                experiment_id=exp.id,
+                context=context or {},
+                dedup_key=dedup_key,
+            )
+            if dedup_key is not None:
+                # Targetless DO NOTHING: absorbs the partial-unique dedup
+                # conflict
+                stmt = stmt.on_conflict_do_nothing()
+            return stmt
+
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                await self.db.execute(_insert_for(assignment.id))
+            return True
+        except IntegrityError:
+            # #76 (round 223): the assignment row vanished mid-write — an
+            # identity-link CONFLICT fold deleted the anon row between our
+            # lookup and the insert. The exposure belongs to the PERSON,
+            # not the row: re-normalize once under the current link state
+            # and retry against the surviving assignment.
+            if original_anon is None:
+                return False
+            link = await self.db.get(ExperimentIdentityLink, original_anon)
+            if link is None:
+                return False
+            survivor = await self._existing(exp.id, "user", link.user_id)
+            if survivor is None:
+                return False
+            await self.db.execute(_insert_for(survivor.id))
+            return True
 
     # ── diagnostics (§12) ────────────────────────────────────────────
 

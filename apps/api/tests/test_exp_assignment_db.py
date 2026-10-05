@@ -1474,3 +1474,56 @@ async def test_identity_link_cascades_with_user_deletion(db):
             ExperimentIdentityLink.anonymous_id == anon_id))
     ).scalar_one_or_none()
     assert gone is None
+
+
+async def test_exposure_racing_link_conflict_lands_on_survivor(db, monkeypatch):
+    """#76 (round 223): an exposure in flight when the identity-link
+    CONFLICT fold deletes its anon assignment row must not be lost — the
+    nested-savepoint retry re-normalizes and attaches it to the surviving
+    user assignment."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentExposure
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idx-{ULID()}@example.com", display_name="X",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+    # both ids assigned -> a later link takes the CONFLICT fold
+    assert await svc.resolve(experiment_key=exp.key,
+                             unit_type="anonymous", unit_id=anon_id)
+    assert await svc.resolve(experiment_key=exp.key,
+                             unit_type="user", unit_id=user.id)
+
+    original_existing = AssignmentService._existing
+    fired = {"done": False}
+
+    async def racing_existing(self, experiment_id, unit_type, unit_id):
+        row = await original_existing(self, experiment_id, unit_type, unit_id)
+        if not fired["done"] and unit_id == anon_id:
+            fired["done"] = True
+            # the link lands AFTER the exposure's assignment lookup —
+            # the conflict fold deletes the row the exposure points at
+            await AssignmentService(self.db).link_identity(
+                anonymous_id=anon_id, user_id=user.id
+            )
+        return row
+
+    monkeypatch.setattr(AssignmentService, "_existing", racing_existing)
+    recorded = await svc.record_exposure(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
+        dedup_key=f"race-{anon_id}")
+    assert recorded is True  # never silently lost
+    monkeypatch.setattr(AssignmentService, "_existing", original_existing)
+
+    survivor = await svc._existing(exp.id, "user", user.id)
+    rows = (
+        await db.execute(_select(ExperimentExposure).where(
+            ExperimentExposure.experiment_id == exp.id,
+            ExperimentExposure.dedup_key == f"race-{anon_id}"))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].assignment_id == survivor.id

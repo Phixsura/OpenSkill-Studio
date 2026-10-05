@@ -1289,6 +1289,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 223 — defect #76, the last identity-seam race: an exposure in
+flight when the link's CONFLICT fold deletes its anon assignment row hit
+the FK and was absorbed by the fail-safe as a silently LOST exposure.
+The insert now runs in a nested savepoint; on IntegrityError it
+re-normalizes once under the current link state and retries against the
+surviving user assignment — the exposure belongs to the person, not the
+row. Kill-proven (the monkeypatch race fails unfixed); the retry row
+asserted to land on the survivor exactly once.
+
 Round 222 — exp16: the identity link's user_id gains its CASCADE foreign
 key — the anon↔user mapping is privacy-relevant, so user deletion must
 never orphan it (the audit found the column shipped as a bare String;
