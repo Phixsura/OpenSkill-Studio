@@ -1306,6 +1306,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 235 — the warnings reach the OWNER's weekly pulse too: each digest
+line appends "N analysis warnings" from the experiment's latest look
+(awaiting-decision lines included — exactly where a stale caveat hurts).
+One capped query per experiment; per-owner failure confinement unchanged.
+
 Round 234 — warnings join the decision evidence chain: the analysis_look
 event now stores the run's warnings, the scorecard and history return
 them, and the decision detail page shows the CITED look's warnings as

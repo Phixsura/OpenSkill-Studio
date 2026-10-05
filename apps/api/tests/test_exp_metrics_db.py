@@ -2941,6 +2941,42 @@ async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
     ).scalar_one()
     assert "T: AWAITING DECISION" in notif.body
 
+    # round 235: a look with warnings surfaces its count in the digest line
+    from app.experiments.models import ExperimentEvent as _Event235
+
+    db.add(_Event235(
+        experiment_id=exp.id, actor_user_id=admin.id,
+        event_type="analysis_look",
+        payload={"warnings": ["PRE_BALANCE_SUSPECT", "CUPED_AUTO_NONE"],
+                 "result_hash": "x" * 64},
+    ))
+    await db.flush()
+    await db.execute(_delete_notif_235(admin.id))
+    await db.flush()
+    assert await sweep_weekly_digest(db) >= 1
+    notif2 = (
+        await db.execute(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "experiment_digest",
+            )
+        )
+    ).scalar_one()
+    assert "AWAITING DECISION (2 analysis warnings)" in notif2.body
+
+
+
+
+def _delete_notif_235(user_id):
+    from sqlalchemy import delete as _delete
+
+    from app.models.notification import Notification
+
+    return _delete(Notification).where(
+        Notification.user_id == user_id,
+        Notification.type == "experiment_digest",
+    )
+
 
 async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypatch):
     """#67 (the #66 family applied everywhere): the start and closure

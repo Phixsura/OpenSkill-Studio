@@ -505,7 +505,11 @@ async def sweep_weekly_digest(
     running experiments — 7-day exposure volume and guardrail-event count
     per experiment. Query-side dedup (DIGEST_DEDUP_DAYS) makes re-runs and
     restarts idempotent; per-owner failures are confined (#42/#66 laws)."""
-    from app.experiments.models import ExperimentExposure, GuardrailEvent
+    from app.experiments.models import (
+        ExperimentEvent,
+        ExperimentExposure,
+        GuardrailEvent,
+    )
     from app.models.notification import Notification
 
     now = now or datetime.now(UTC)
@@ -545,8 +549,23 @@ async def sweep_weekly_digest(
                 )
             )
         ).scalar_one()
+        # round 235: the latest look's warning count rides the digest —
+        # owners see "N analysis warnings" where they read the weekly pulse
+        latest_look = (
+            await db.execute(
+                select(ExperimentEvent.payload)
+                .where(
+                    ExperimentEvent.experiment_id == experiment_id,
+                    ExperimentEvent.event_type == "analysis_look",
+                )
+                .order_by(ExperimentEvent.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        warning_count = len((latest_look or {}).get("warnings", []))
         by_owner.setdefault(owner_user_id, []).append(
-            (experiment_id, title, int(exposures), int(events), status)
+            (experiment_id, title, int(exposures), int(events), status,
+             warning_count)
         )
     sent = 0
     cutoff = now - timedelta(days=DIGEST_DEDUP_DAYS)
@@ -567,10 +586,15 @@ async def sweep_weekly_digest(
         lines = [
             (
                 f"{title}: AWAITING DECISION"
+                + (f" ({warning_count} analysis warnings)" if warning_count
+                   else "")
                 if status == "analyzed"
-                else f"{title}: {exposures} exposures, {events} guardrail events (7d)"
+                else f"{title}: {exposures} exposures, "
+                     f"{events} guardrail events (7d)"
+                     + (f", {warning_count} analysis warnings"
+                        if warning_count else "")
             )
-            for _id, title, exposures, events, status in items
+            for _id, title, exposures, events, status, warning_count in items
         ]
         try:
             from app.services.notification import NotificationService
