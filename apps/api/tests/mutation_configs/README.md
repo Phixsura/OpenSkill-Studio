@@ -360,3 +360,9 @@ after pinning the length floor (a single-char id is admissible) and the
 law — the first pass had bare pytest.raises). Ledgered 2: the defensive
 500s behind the ON-CONFLICT re-read and the PK re-read (both
 pragma-no-cover — the constraint guarantees a row).
+
+Round 215 extension (+_resolve_switchback, +record_exposure after the
+#73-mirror/#74/#75 fixes): 21/26 — the switchback day-variant CONFIG
+lookup gained its pin (an Eq->NotEq flip served another variant's
+payload unnoticed); the five survivors are the same defensive-500 class
+behind constraint-guaranteed re-reads, ledgered.
