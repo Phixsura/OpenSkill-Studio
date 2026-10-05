@@ -1232,6 +1232,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 204 — wave 40 over the auto-covariate epoch: first pass left
+seven core survivors because the selection's correlation was an
+invisible intermediate — the wave-36 dof lesson applied again: r is now
+EXPOSED as the per-metric cuped_auto readout (operators see why each
+covariate was chosen), pinned exactly in tests, and the wave closes at
+18/18 core, 1/1 resolver, 114/124 run() (all ten survivors standing
+ledgers). §18a gains the two auto warnings' rows.
+
 Round 203 — §4.6b step 3: the builder's covariates input documents the
 "auto" literal (the free-text field already passed it through; the
 selected keys surface on the analysis page via the cuped block's

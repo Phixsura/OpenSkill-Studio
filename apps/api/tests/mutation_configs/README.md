@@ -337,3 +337,17 @@ docs commit during the wave's first pass shipped a live mutant
 (d9bd2d26, reverted in 6a349d60). Law: never stage or commit a wave's
 target files while the wave runs; the harness's dirty-target refusal is
 the tripwire that catches it.
+
+## wave40_auto_covariates.json (round 204)
+
+auto_select_covariates 18/18 + resolve_covariates 1/1 + the run()
+re-wave 114/124 (the 10 survivors are the standing ledgered equivalents
+at shifted lines). The decisive move was the wave-36 lesson applied
+again: the selection's correlation was an INVISIBLE intermediate — seven
+first-pass survivors (variance-formula sign flips, the n and |r|
+boundaries, the default cap) were all invisible while only the chosen
+KEYS surfaced. Exposing r as the cuped_auto readout (exact pins:
+20/sqrt(420) continuous, 6/sqrt(20) binary, 0.1 exactly at the
+threshold) plus the n == 2 floor, the default-cap-at-3 fixture, the
+constant-outcome skip and the binary y-mapping scenario killed all of
+them.
