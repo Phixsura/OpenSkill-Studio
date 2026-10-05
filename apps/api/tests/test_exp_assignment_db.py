@@ -1527,3 +1527,52 @@ async def test_exposure_racing_link_conflict_lands_on_survivor(db, monkeypatch):
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].assignment_id == survivor.id
+
+
+async def test_link_conflict_survives_dedup_key_collision(db):
+    """#78 (round 251): BOTH identities recorded an exposure under the SAME
+    dedup key before the link — the conflict fold's exposure re-point must
+    not violate the per-assignment dedup unique (the colliding anon row is
+    a semantic duplicate and folds away); the link succeeds and exactly one
+    exposure with that key survives on the user assignment."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models import ExperimentExposure
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idk-{ULID()}@example.com", display_name="K",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+    assert await svc.resolve(experiment_key=exp.key,
+                             unit_type="anonymous", unit_id=anon_id)
+    assert await svc.resolve(experiment_key=exp.key,
+                             unit_type="user", unit_id=user.id)
+    # the same client-side natural key lands under BOTH identities
+    shared_key = f"day-{anon_id[:8]}"
+    assert await svc.record_exposure(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
+        dedup_key=shared_key) is True
+    assert await svc.record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id=user.id,
+        dedup_key=shared_key) is True
+    # a second anon exposure with a NON-colliding key must survive the fold
+    assert await svc.record_exposure(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
+        dedup_key=f"unique-{anon_id[:8]}") is True
+
+    out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+    assert out["conflicts"] == 1  # the fold itself succeeded
+
+    survivor = await svc._existing(exp.id, "user", user.id)
+    rows = (
+        await db.execute(_select(ExperimentExposure).where(
+            ExperimentExposure.experiment_id == exp.id))
+    ).scalars().all()
+    assert all(r.assignment_id == survivor.id for r in rows)
+    shared = [r for r in rows if r.dedup_key == shared_key]
+    unique = [r for r in rows if r.dedup_key == f"unique-{anon_id[:8]}"]
+    assert len(shared) == 1   # the colliding duplicate folded away
+    assert len(unique) == 1   # the non-colliding exposure re-pointed

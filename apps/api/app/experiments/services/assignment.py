@@ -563,8 +563,27 @@ class AssignmentService:
                 # cascade them away. Re-point them at the surviving user
                 # assignment first (the exposure happened to this person;
                 # the surviving row is this person).
+                from sqlalchemy import delete as _delete
                 from sqlalchemy import update as _update
 
+                # #78 (round 251): a dedup key recorded under BOTH
+                # identities would make the re-point violate the
+                # per-assignment dedup unique — the colliding anon row is a
+                # semantic DUPLICATE of an exposure the survivor already
+                # holds, so it folds away; only non-colliding rows re-point.
+                await self.db.execute(
+                    _delete(ExperimentExposure).where(
+                        ExperimentExposure.assignment_id == row.id,
+                        ExperimentExposure.dedup_key.isnot(None),
+                        ExperimentExposure.dedup_key.in_(
+                            select(ExperimentExposure.dedup_key).where(
+                                ExperimentExposure.assignment_id
+                                == existing_user_row.id,
+                                ExperimentExposure.dedup_key.isnot(None),
+                            )
+                        ),
+                    )
+                )
                 await self.db.execute(
                     _update(ExperimentExposure)
                     .where(ExperimentExposure.assignment_id == row.id)

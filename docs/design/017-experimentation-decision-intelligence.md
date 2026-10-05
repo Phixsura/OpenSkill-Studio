@@ -1327,6 +1327,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 251 — defect #78, found pressing on #74's seam: a dedup key
+recorded under BOTH identities made the conflict fold's exposure
+re-point violate the per-assignment dedup unique — the whole link 500'd.
+The colliding anon exposure is a semantic DUPLICATE of one the survivor
+already holds, so it folds away and only non-colliding rows re-point;
+red-first TDD (the reproduction failed with the exact IntegrityError
+before the fix), and the test pins both sides: the collision folds to
+one row, the unique key survives the migration.
+
 Round 250 — milestone census, every verification layer re-run fresh this
 round: web 731, exp 598, fuzz 19, API wall 142, browser wall 3,
 certification 155 (6978) — all green simultaneously. Session arc at this
