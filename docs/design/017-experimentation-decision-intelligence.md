@@ -798,6 +798,19 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     before delete) and #75 (pre-login exposures silently dropped by the
     fail-safe False) each kill-proven; wave 41 at 21/26 with the
     switchback config pin; live E2E 133 checks at the item's writing (136 as of round 232).
+15. **Evidence-chain + hardening census (rounds 234–245)** — warnings
+    became first-class evidence end to end: stored on every analysis_look,
+    returned by the scorecard and history, FROZEN into the decision
+    record's evidence at decide time (the audit outlives retention), shown
+    as amber chips at the approval point and counted in the owner's weekly
+    digest (with the ULID latest-look tiebreak wave 43 forced). Defects
+    #70–#77 all kill-proven this epoch cycle; mutation waves 36–44
+    (~500 new mutants, every survivor a reasoned ledger); live API wall
+    139 checks including the two genuine HTTP concurrency storms (resolve
+    convergence, link arbitration); browser wall 3; fuzz totality 19
+    properties over every pure core; certifications 136–154 consecutive
+    green (6951 → 6977 tests); the delegation and deferred-list claims
+    audited to word-level precision in both directions.
 
 ## 17. Known edges & explicit decisions
 
@@ -1305,6 +1318,10 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 246 — §16 gains item 15, the evidence-chain and hardening census
+(rounds 234-245) — the ADR stays the single source of truth for the
+posture the PR body summarizes.
 
 Round 245 — the delegation claim sharpened: "write-side org delegation
 still open" OVERSTATED the gap — org admins already create, transition,
