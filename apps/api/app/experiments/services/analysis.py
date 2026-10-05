@@ -432,14 +432,16 @@ def _solve_spd(a: list[list[float]], b: list[float]) -> list[float] | None:
 def auto_select_covariates(
     arms: list[dict], candidates: list[str],
     min_abs_r: float = 0.1, max_k: int = 3,
-) -> list[str]:
+) -> list[dict]:
     """§4.6b (round 202): data-driven covariate selection from STORED
     aggregates alone. Each arm dict carries n, sum, sum_sq and the
     per-covariate {sum, sum_sq, xy_sum} map under "covariates"; the pooled
     Pearson r over all arms needs nothing else. Keeps |r| >= min_abs_r,
     strongest first (deterministic tie-break by key), at most max_k.
     Candidates missing from any arm, or with degenerate variance, are
-    skipped — selection never guesses."""
+    skipped — selection never guesses. Returns [{key, r}] so the chosen
+    correlations are an EXPOSED, pinnable readout (the wave-36 dof
+    lesson), not an invisible intermediate."""
     selected: list[tuple[float, str]] = []
     for key in candidates:
         n = sx = sxx = sy = syy = sxy = 0.0
@@ -464,9 +466,9 @@ def auto_select_covariates(
             continue
         r = (sxy - sx * sy / n) / math.sqrt(var_x * var_y)
         if abs(r) >= min_abs_r:
-            selected.append((-abs(r), key))
+            selected.append((-abs(r), key, r))
     selected.sort()
-    return [key for _, key in selected[:max_k]]
+    return [{"key": key, "r": r} for _, key, r in selected[:max_k]]
 
 
 def multi_cuped_adjusted_welch(

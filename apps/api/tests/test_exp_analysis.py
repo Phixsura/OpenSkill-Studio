@@ -1474,7 +1474,12 @@ def test_auto_select_covariates_hand_oracle():
     out = auto_select_covariates(arms, ["strong", "anti", "flat"])
     # |r| equal for strong/anti (same magnitude) -> tie-break by key:
     # "anti" < "strong"; the constant covariate is skipped (zero variance)
-    assert out == ["anti", "strong"]
+    assert [c["key"] for c in out] == ["anti", "strong"]
+    # the correlation is an EXPOSED readout, pinned exactly:
+    # pooled cov 20 (or -20), var_x 10, var_y 42 -> r = 20/sqrt(420)
+    import math as _m
+    assert out[0]["r"] == pytest.approx(-20.0 / _m.sqrt(420.0), abs=1e-12)
+    assert out[1]["r"] == pytest.approx(20.0 / _m.sqrt(420.0), abs=1e-12)
 
     # threshold: an |r| below 0.1 is excluded
     weak_arms = [
@@ -1494,8 +1499,42 @@ def test_auto_select_covariates_hand_oracle():
     ]
     assert auto_select_covariates(partial, ["strong"]) == []
 
-    # max_k caps the list
-    assert auto_select_covariates(arms, ["strong", "anti"], max_k=1) == ["anti"]
+    # max_k caps the list — explicitly AND at its default of 3
+    capped = auto_select_covariates(arms, ["strong", "anti"], max_k=1)
+    assert [c["key"] for c in capped] == ["anti"]
+    four = {
+        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0,
+                  "xy_sum": 140.0 * sign}
+        for i, sign in enumerate((1, -1, 1, -1))
+    }
+    four2 = {
+        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0,
+                  "xy_sum": 150.0 * sign}
+        for i, sign in enumerate((1, -1, 1, -1))
+    }
+    out4 = auto_select_covariates(
+        [arm(4, 52.0, 696.0, four), arm(4, 56.0, 804.0, four2)],
+        ["c0", "c1", "c2", "c3"],
+    )
+    assert len(out4) == 3  # the DEFAULT cap
+
+    # pooled n == 2 is ADMISSIBLE (the floor is < 2)
+    two = [arm(2, 10.0, 100.0,
+               {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 20.0}})]
+    assert [c["key"] for c in auto_select_covariates(two, ["k"])] == ["k"]
+
+    # |r| == 0.1 EXACTLY is selected (>= is the contract): var_x 2,
+    # var_y 50, cov 1 -> r = 1/10
+    edge = [arm(2, 10.0, 100.0,
+                {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 11.0}})]
+    out_edge = auto_select_covariates(edge, ["k"])
+    assert [c["key"] for c in out_edge] == ["k"]
+    assert out_edge[0]["r"] == pytest.approx(0.1, abs=1e-12)
+
+    # a CONSTANT OUTCOME (var_y == 0) skips the candidate, never divides
+    y_const = [arm(4, 8.0, 16.0,
+                   {"k": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 20.0}})]
+    assert auto_select_covariates(y_const, ["k"]) == []
 
 
 def test_variance_reduction_auto_literal_validation():

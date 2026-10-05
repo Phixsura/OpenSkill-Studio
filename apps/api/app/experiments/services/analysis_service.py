@@ -633,10 +633,19 @@ class AnalysisService:
                                 "sum_sq": a.get("sum_sq") or 0.0,
                                 "covariates": a.get("covariates")}
 
-                    metric_covariate_keys = stats.auto_select_covariates(
+                    chosen = stats.auto_select_covariates(
                         [_y_arm(a) for a in aggregated.values()],
                         resolve_covariates(spec.variance_reduction),
-                    ) or None
+                    )
+                    metric_covariate_keys = (
+                        [c["key"] for c in chosen] or None
+                    )
+                    if chosen:
+                        # the selection's evidence is part of the result —
+                        # operators see WHY each covariate was chosen
+                        entry["cuped_auto"] = {
+                            c["key"]: c["r"] for c in chosen
+                        }
                     flag = ("CUPED_AUTO_SELECTED" if metric_covariate_keys
                             else "CUPED_AUTO_NONE")
                     if flag not in warnings:

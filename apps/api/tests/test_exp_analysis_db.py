@@ -2274,6 +2274,40 @@ async def test_auto_covariate_selection_rides_analysis(db):
     # the joint estimator
     assert cuped.get("covariates") == ["revision_count"]
     assert cuped.get("mode") == "multi"
+    # round 204: the selection's evidence is exposed and exact — pooled
+    # cov 20, var_x 10, var_y 42 -> r = 20/sqrt(420)
+    import math as _m
+    auto_evidence = result["metrics"]["revision_count"].get("cuped_auto")
+    assert auto_evidence is not None
+    assert auto_evidence["revision_count"] == pytest.approx(
+        20.0 / _m.sqrt(420.0), abs=1e-9)
+
+    # round 204: a BINARY primary drives the numerator/denominator branch
+    # of the selection's y-mapping (sum == sum_sq == numerator)
+    exp_b, admin_b = await _mk_running(db, variance_reduction={
+        "method": "cuped", "covariate_metrics": ["auto"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["project_approval_rate"], "secondary": [],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    db.add(_snapshot(exp_b.id, "project_approval_rate", "control", ws,
+                     n=4, numerator=1.0, denominator=4.0,
+                     covariates={"revision_count":
+                                 {"sum": 10.0, "sum_sq": 30.0,
+                                  "xy_sum": 4.0}}))
+    db.add(_snapshot(exp_b.id, "project_approval_rate", "treatment", ws,
+                     n=4, numerator=3.0, denominator=4.0,
+                     covariates={"revision_count":
+                                 {"sum": 10.0, "sum_sq": 30.0,
+                                  "xy_sum": 12.0}}))
+    await db.flush()
+    result_b = await AnalysisService(db).run(exp_b.id, actor=admin_b)
+    assert "CUPED_AUTO_SELECTED" in result_b["warnings"]
+    evidence_b = result_b["metrics"]["project_approval_rate"]["cuped_auto"]
+    # pooled: n 8, sx 20, sxx 60 (var_x 10); y: sy 4, syy 4 (var_y 2);
+    # sxy 16 -> cov 16 - 20*4/8 = 6 -> r = 6/sqrt(20)
+    assert evidence_b["revision_count"] == pytest.approx(
+        6.0 / _m.sqrt(20.0), abs=1e-9)
 
     # auto with NO covariate aggregates: honest refusal, single bark
     exp2, admin2 = await _mk_running(db, variance_reduction={
