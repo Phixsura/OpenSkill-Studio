@@ -199,7 +199,10 @@ async def test_honesty_warnings_for_triggered_and_cuped(db):
     assert "TRIGGERED_DILUTION_UNCORRECTED" in result["warnings"]
     # every snapshot carries the exposed marker → no mixed-population warning
     assert "TRIGGERED_SNAPSHOTS_MIXED_POPULATION" not in result["warnings"]
-    assert "CUPED_COVARIATES_UNAVAILABLE" in result["warnings"]
+    # round 247: the primary here is RATE-kind, so the TYPED boundary
+    # warning fires instead of the misleading "sources computed nothing"
+    assert "CUPED_RATE_UNSUPPORTED" in result["warnings"]
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
 
     # a legacy snapshot without the marker flips the mixed warning on
     db.add(_snapshot(exp.id, "exposure_rate", "control",
@@ -2593,3 +2596,27 @@ async def test_km_block_rides_time_to_event_primary(db):
     finally:
         definition.spec = original_spec
         await db.flush()
+
+
+async def test_rate_primary_with_cuped_warns_typed_not_misleading(db):
+    """Round 247 (§4.6 boundary): a RATE-kind primary under
+    variance_reduction gets the TYPED CUPED_RATE_UNSUPPORTED — the generic
+    UNAVAILABLE would mislead (the sources computed fine; the ratio kind is
+    the deliberate boundary, delta-method CUPED being the documented
+    deferral)."""
+    exp, admin = await _mk_running(db, variance_reduction={
+        "method": "cuped", "covariate_metrics": ["revision_count"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["exposure_rate"], "secondary": [],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    ws = datetime(2026, 9, 1, tzinfo=UTC)
+    for variant, num in (("control", 5.0), ("treatment", 7.0)):
+        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
+                         n=10, numerator=num, denominator=20.0))
+    await db.flush()
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "CUPED_RATE_UNSUPPORTED" in result["warnings"]
+    assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
+    comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
+    assert "cuped" not in comparison  # the boundary holds, honestly labeled

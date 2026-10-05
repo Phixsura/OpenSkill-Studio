@@ -351,6 +351,11 @@ provider (a small registry AUTO_COVARIATE_DEFAULTS maps provider source
 every candidate — selection can then happen at analysis time with no
 extra reads.
 
+**Kind boundary (round 247).** RATE-kind metrics are deliberately NOT
+adjusted by any CUPED core — a per-unit ratio needs the delta-method
+treatment, which stays a documented deferral; the analysis warns
+CUPED_RATE_UNSUPPORTED rather than attaching a wrong-model adjustment.
+
 **Analysis side.** For each candidate the pooled pre-period correlation
 is computable from the stored sums alone (cov_xy_sum, cov_sum,
 cov_sum_sq, sum_value/numerator, n). Candidates with |r| >= 0.1 are kept
@@ -857,6 +862,7 @@ Every signal below is surfaced in the Console; none requires DB access.
 | `SNAPSHOT_VERSION_MIXED`                              | The aggregation window mixes snapshot rows computed under different query_versions of a definition                                                                                                                 | Re-sweep the affected windows after a definition change, or read with the mixed-provenance discount                                        |
 | `TRIGGERED_DILUTION_UNCORRECTED`                      | The spec asked for triggered (exposed-only) analysis but stored snapshots predate the exposed-population computation — ITT rows dilute the triggered read                                                          | Wait for fresh exposed-population windows (or re-sweep); the dilution biases toward null                                                   |
 | `TRIGGERED_SNAPSHOTS_MIXED_POPULATION`                | Some windows were computed exposed-only and some ITT — the aggregate mixes populations                                                                                                                             | Same as above: re-sweep for a uniform population before trusting magnitudes                                                                |
+| `CUPED_RATE_UNSUPPORTED`                              | The primary is RATE-kind — the CUPED cores deliberately do not adjust ratio metrics (a delta-method treatment is the documented §4.6 boundary)                                                                     | Use a binary/continuous primary for the adjusted read, or accept the unadjusted rate; the covariate folds are fine                         |
 | `CUPED_AUTO_SELECTED`                                 | The "auto" covariate spec picked data-driven covariates for this run (the chosen keys ride each comparison's cuped.covariates)                                                                                     | Nothing — informational; check cuped.covariates if the selection surprises you                                                             |
 | `CUPED_AUTO_NONE`                                     | The "auto" covariate spec found NO candidate with pooled abs(r) >= 0.1 (or no covariate aggregates exist) — the run fell back to plain Welch                                                                       | Expected on sparse pre-periods; if persistent, name covariates explicitly or accept the unadjusted read                                    |
 | `KM_SOURCE_UNSUPPORTED`                               | A time_to_event primary opted into KM but its source is not talent_outcomes — the placement-based event reader cannot serve it (#70)                                                                               | Strip the km knob (PATCH km=false) or wait for a per-source event reader; the binary-at-horizon read is unaffected                         |
@@ -1318,6 +1324,13 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 247 — the §4.6 RATE boundary becomes typed and documented: ratio
+metrics are the one kind the CUPED cores deliberately do not adjust
+(delta-method CUPED is the documented deferral) — a rate primary under
+variance_reduction now warns CUPED_RATE_UNSUPPORTED instead of the
+misleading "sources computed nothing"; the old honesty test asserted the
+misleading code and is upgraded to the typed one. §18a row included.
 
 Round 246 — §16 gains item 15, the evidence-chain and hardening census
 (rounds 234-245) — the ADR stays the single source of truth for the

@@ -1125,9 +1125,20 @@ class AnalysisService:
                 for comparison in (metric.get("comparisons") or {}).values()
             )
             if not any_cuped:
+                # round 247: a RATE-kind primary is the one kind the CUPED
+                # cores deliberately do not adjust (ratio metrics need a
+                # delta-method treatment, §4.6 boundary) — say THAT, not the
+                # misleading "sources computed nothing"
+                rate_primary = any(
+                    (metrics_out.get(key) or {}).get("kind") == "rate"
+                    for key in spec.metrics.primary
+                )
+                if rate_primary:
+                    if "CUPED_RATE_UNSUPPORTED" not in warnings:
+                        warnings.append("CUPED_RATE_UNSUPPORTED")
                 # Configured but no source computed covariate aggregates yet
                 # (auto-none already explains itself — no double bark)
-                if "CUPED_AUTO_NONE" not in warnings:
+                elif "CUPED_AUTO_NONE" not in warnings:
                     warnings.append("CUPED_COVARIATES_UNAVAILABLE")
             elif len(spec.variance_reduction.covariates()) > 1 and not any(
                 (comparison.get("cuped") or {}).get("mode") == "multi"
