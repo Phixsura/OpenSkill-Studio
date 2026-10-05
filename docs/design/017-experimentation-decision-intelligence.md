@@ -1338,6 +1338,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 268 — wave 45 re-run 9/14 (the listing cap's own mutant dies under
+the 101-link fixture; the five standing ledgers hold). Certification 160
+green (6985).
+
 Round 267 — the transparency listing gains its accumulation cap: a
 client minting ids and claiming them could grow the response unbounded —
 the newest 100 list (deterministic tiebreak), pinned by a 101-link
