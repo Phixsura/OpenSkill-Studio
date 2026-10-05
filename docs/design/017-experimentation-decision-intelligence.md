@@ -1306,6 +1306,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 244 — the symmetric link storm (wall 139): twenty racing claims on
+one anonymous id from TWO identities — the primary key arbitrates
+exactly one winner, every loser gets the typed
+EXPERIMENT_IDENTITY_CONFLICT 422 (never a 500, never a second identity),
+and the storm total reconciles to 20.
+
 Round 243 — the wall gains its first true CONCURRENCY check (138): a
 20-way parallel resolve storm on one fresh anonymous id converges on a
 single variant over real HTTP — the ON-CONFLICT re-read's arbitration

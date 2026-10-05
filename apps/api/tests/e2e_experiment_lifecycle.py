@@ -832,6 +832,26 @@ async def main() -> int:
                     resp.json()["data"].get("variant_key"))
                    for resp in storm[:5]])[:300])
 
+        # round 244: a two-user LINK storm on one anon id — the PK is the
+        # arbiter: exactly one identity wins, every losing racer gets the
+        # typed 422, and the winner's claim is idempotent thereafter
+        link_storm_id = f"E2EANON{uid().upper()}"[:26]
+        link_storm = await asyncio.gather(*[
+            c.post("/experiments/self/identity-link",
+                   headers=(student if i % 2 == 0 else admin),
+                   json={"anonymous_id": link_storm_id})
+            for i in range(20)
+        ])
+        winners = [resp for resp in link_storm if resp.status_code == 200]
+        losers = [resp for resp in link_storm if resp.status_code == 422]
+        winner_users = {resp.json()["data"]["user_id"] for resp in winners}
+        check("link storm: one identity wins, losers get the typed 422",
+              len(winners) >= 1 and len(winner_users) == 1
+              and len(winners) + len(losers) == 20
+              and all(resp.json()["error"]["code"]
+                      == "EXPERIMENT_IDENTITY_CONFLICT" for resp in losers),
+              str([(resp.status_code) for resp in link_storm])[:200])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",
