@@ -397,3 +397,11 @@ scalar crash). The 20-line body cap got its 21-experiment owner fixture.
 Ledgered 1: the sent counter is a cross-owner total — exact pinning
 conflicts with the residue-robustness law in the shared test DB; the
 per-owner row (the thing users see) is pinned instead.
+
+## wave44_decide_freeze.json (round 240)
+
+DecisionService.create + _cited_look_payload after the round-239 freeze
+rework: 24/24 outright — the decide suite's exact pins (frozen warnings
+equality, the default {"cited_warnings": []} shape, the no-look 422, the
+repeated-identical-looks limit-1) leave the freeze path no place to
+hide.

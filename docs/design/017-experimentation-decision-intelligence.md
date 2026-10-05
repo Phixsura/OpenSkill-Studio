@@ -1306,6 +1306,10 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 240 — wave 44 over the freeze path: 24/24 outright (the decide
+suite's exact pins leave it no place to hide). Certification 154 green
+(6977).
+
 Round 239 — the warnings FREEZE into the decision record: decide-time
 copies the cited look's warnings into evidence.cited_warnings (the
 existing JSONB — no migration), so the audit outlives event retention
