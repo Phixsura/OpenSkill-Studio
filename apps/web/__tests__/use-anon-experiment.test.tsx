@@ -85,6 +85,15 @@ describe("useAnonExperiment (ADR-017 §4.17 pre-login hook)", () => {
     expect(hookValue.config).toEqual({});
   });
 
+  it("fails safe on a REJECTED request too (429/network — round 266)", async () => {
+    // production fails rate limiting CLOSED on a Redis outage: the hook
+    // must degrade to the default experience, never crash the page
+    anonApi.mockRejectedValue(new Error("429"));
+    render(<Probe k="landing-cta" />, { wrapper: wrapper() });
+    expect(await screen.findByText("default")).toBeTruthy();
+    expect(hookValue.config).toEqual({});
+  });
+
   it("claimAnonymousId posts the device id to the link endpoint", async () => {
     getAnonymousId(); // mint
     authedApi.mockResolvedValue({ data: { migrated: 1, conflicts: 0 } });

@@ -1338,6 +1338,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 266 — the production fail-closed path reaches the client pins: the
+hook's REJECTED-request fallback (429 under a Redis outage, network
+errors) now has its own test — the default experience, never a crash;
+the env-gate inventory's client-side consequence is covered. Web 732;
+PR body synced 262-265.
+
 Round 265 — the env-gate blind-spot class inventoried app-wide: exactly
 two gates touch experiment surfaces (the test-skip on rate limiting and
 the dev/test fail-open vs production fail-closed on Redis outage), now a
