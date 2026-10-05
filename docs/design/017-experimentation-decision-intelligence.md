@@ -1275,6 +1275,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 211 — identity step 2: the wire surface — POST
+/experiments/anon/resolve (unauthenticated, rate-limited 60/min,
+fail-safe like the self-serve surface, strict 26-char no-colon schema)
+and POST /experiments/self/identity-link (the caller claims their OWN
+pre-login id). The live wall grows 124 -> 132: anonymous assign +
+stickiness, link migration, the logged-in user inheriting the anon
+variant, the anon id serving the SAME experience post-link, rebinding
+422, malformed-id 422 — all over real HTTP; link debris swept by the
+cleanup (verified zero).
+
 Round 210 — identity step 1: exp15 (experiment_identity_links),
 the ExperimentIdentityLink model, AssignmentService.link_identity
 (first-link-wins 422 on rebinding, idempotent re-link, in-place row

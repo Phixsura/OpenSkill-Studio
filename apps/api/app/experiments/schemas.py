@@ -439,6 +439,23 @@ class SelfResolveRequest(_StrictReq):
     experiment_key: str = Field(min_length=1, max_length=64)
 
 
+class AnonResolveRequest(_StrictReq):
+    """§4.17: pre-login resolution — the anonymous id is a client-held
+    ULID-class token, column-bound to 26 chars (the import/write-boundary
+    law)."""
+
+    experiment_key: str = Field(min_length=1, max_length=64)
+    anonymous_id: str = Field(min_length=1, max_length=26,
+                              pattern=r"^[^:]+$")
+
+
+class IdentityLinkRequest(_StrictReq):
+    """§4.17: the authenticated caller claims their own pre-login id."""
+
+    anonymous_id: str = Field(min_length=1, max_length=26,
+                              pattern=r"^[^:]+$")
+
+
 class SelfExposureRequest(_StrictReq):
     experiment_key: str = Field(min_length=1, max_length=64)
     # must match the column bound exactly (String(64)) — a wider schema let

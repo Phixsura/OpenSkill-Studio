@@ -9,9 +9,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.core.rate_limit import rate_limit
 from app.experiments import facade
 from app.experiments.api.deps import require_self_serve_user
-from app.experiments.schemas import SelfExposureRequest, SelfResolveRequest
+from app.experiments.schemas import (
+    AnonResolveRequest,
+    IdentityLinkRequest,
+    SelfExposureRequest,
+    SelfResolveRequest,
+)
 from app.models.user import User
 from app.schemas.base import DataResponse
 
@@ -70,3 +76,59 @@ async def self_exposure(
     )
     await db.commit()
     return {"data": {"recorded": bool(recorded)}}
+
+
+# ── §4.17: pre-login surface (round 211) ──────────────────────────────
+anon_router = APIRouter(prefix="/experiments/anon",
+                        tags=["Experiments — Anonymous"])
+
+
+@anon_router.post(
+    "/resolve",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def anon_resolve(
+    body: AnonResolveRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Unauthenticated pre-login resolution: the anonymous id is an ID
+    NAMESPACE the service normalizes — a linked id serves the linked
+    user's assignments, an unlinked one its own sticky user-typed row.
+    Fail-safe like the self-serve surface: errors resolve to the default
+    experience."""
+    resolved = await facade.resolve_variant(
+        db,
+        experiment_key=body.experiment_key,
+        unit_type="anonymous",
+        unit_id=body.anonymous_id,
+    )
+    await db.commit()
+    if resolved is None:
+        return {"data": {"variant_key": None, "config": {}}}
+    return {
+        "data": {
+            "variant_key": resolved.variant_key,
+            "config": resolved.config,
+            "assigned_version": resolved.assigned_version,
+        }
+    }
+
+
+@router.post("/identity-link", response_model=DataResponse[dict])
+async def link_identity(
+    body: IdentityLinkRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_self_serve_user),
+):
+    """§4.17: claim a pre-login anonymous id as the CALLER's — first link
+    wins (422 EXPERIMENT_IDENTITY_CONFLICT on rebinding), re-linking the
+    same pair is idempotent, and every anon assignment migrates in place
+    to the user key."""
+    from app.experiments.services.assignment import AssignmentService
+
+    out = await AssignmentService(db).link_identity(
+        anonymous_id=body.anonymous_id, user_id=user.id
+    )
+    await db.commit()
+    return {"data": out}

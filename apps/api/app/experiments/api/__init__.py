@@ -16,6 +16,7 @@ from app.experiments.api.guardrails import router as guardrails_router
 from app.experiments.api.holdouts import router as holdouts_router
 from app.experiments.api.layers import router as layers_router
 from app.experiments.api.metrics import router as metrics_router
+from app.experiments.api.selfserve import anon_router as anon_selfserve_router
 from app.experiments.api.selfserve import router as selfserve_router
 
 experiments_router = APIRouter(dependencies=[Depends(rate_limit(120, 60))])
@@ -27,6 +28,7 @@ experiments_router.include_router(metrics_router)
 experiments_router.include_router(decisions_router)
 experiments_router.include_router(assignments_router)
 experiments_router.include_router(selfserve_router)
+experiments_router.include_router(anon_selfserve_router)
 experiments_router.include_router(holdouts_router)
 experiments_router.include_router(guardrails_router)
 experiments_router.include_router(analysis_router)

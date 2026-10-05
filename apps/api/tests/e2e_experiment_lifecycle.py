@@ -189,6 +189,12 @@ async def cleanup(experiment_ids: list[str], layer_key: str, entity_type: str) -
             _delete(Organization).where(Organization.slug.like("e2e-obs-%")))
         await db.execute(
             _delete(TenantAccount).where(TenantAccount.slug.like("e2e-obs-%")))
+        from app.experiments.models import (
+            ExperimentIdentityLink as _CleanLink,
+        )
+
+        await db.execute(_delete(_CleanLink).where(
+            _CleanLink.anonymous_id.like("E2EANON%")))
         await db.execute(
             _delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
         )
@@ -714,6 +720,50 @@ async def main() -> int:
         check("auto covariates warn honestly with no aggregates",
               "CUPED_AUTO_NONE" in obs_result.get("warnings", []),
               str(obs_result.get("warnings"))[:200])
+
+        # ── Round 211: §4.17 identity resolution over the wire ─────────
+        r = await c.patch(f"/experiments/{obs_id}/ramp", headers=admin,
+                          json={"ramp_bp": 10000})
+        check("ramp the observational experiment for serving",
+              r.status_code == 200, r.text[:200])
+        anon_ulid = f"E2EANON{uid().upper()}"[:26]
+        r = await c.post("/experiments/anon/resolve",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": anon_ulid})
+        check("anonymous resolve needs NO auth and assigns",
+              r.status_code == 200
+              and r.json()["data"]["variant_key"] is not None,
+              r.text[:300])
+        anon_variant = r.json()["data"]["variant_key"]
+        r = await c.post("/experiments/anon/resolve",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": anon_ulid})
+        check("anonymous resolve is sticky",
+              r.json()["data"]["variant_key"] == anon_variant, r.text[:200])
+        r = await c.post("/experiments/self/identity-link", headers=student,
+                         json={"anonymous_id": anon_ulid})
+        check("identity link migrates the anon history",
+              r.status_code == 200 and r.json()["data"]["migrated"] >= 1,
+              r.text[:300])
+        r = await c.post("/experiments/self/resolve", headers=student,
+                         json={"experiment_key": obs_key})
+        check("the logged-in user inherits the anon variant",
+              r.json()["data"]["variant_key"] == anon_variant, r.text[:300])
+        r = await c.post("/experiments/anon/resolve",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": anon_ulid})
+        check("the anon id keeps serving the SAME experience post-link",
+              r.json()["data"]["variant_key"] == anon_variant, r.text[:200])
+        r = await c.post("/experiments/self/identity-link", headers=admin,
+                         json={"anonymous_id": anon_ulid})
+        check("rebinding a linked anon id to another user is 422",
+              r.status_code == 422
+              and r.json()["error"]["code"] == "EXPERIMENT_IDENTITY_CONFLICT",
+              r.text[:300])
+        r = await c.post("/experiments/self/identity-link", headers=student,
+                         json={"anonymous_id": "a:b"})
+        check("malformed anonymous ids refuse at the schema wall",
+              r.status_code == 422, r.text[:200])
 
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
