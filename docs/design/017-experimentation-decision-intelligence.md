@@ -1331,6 +1331,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 259 — the wall header documents its anon RATE BUDGET (resolve
+60/min, exposures 120/min; ~26/~22 currently spent per run) so future
+growth flakes on purpose, not on 429 surprises. PR body synced 256-258;
+certification 158 green (6982 — the identity-endpoint suite's first full
+pass). Round 258 — the enumerate audit itself audited: its one diff was
+the audit regex's own digit-less character class splitting "e2e".
+
 Round 257 — the identity endpoints enter the CERT SUITES: the live wall
 had been their only coverage, so no certification ever exercised the
 endpoint layer (the 232 support-override 403 in particular).

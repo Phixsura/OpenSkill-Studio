@@ -14,6 +14,12 @@ Usage: make infra-up, then (a dedicated port avoids stale-server 404s):
   cd apps/api && APP_ENV=test uv run uvicorn app.main:app --port 8442 &
   cd apps/api && E2E_EXP_API=http://localhost:8442/api/v1 \
       PYTHONPATH=. uv run python tests/e2e_experiment_lifecycle.py
+
+RATE BUDGET (round 259): the unauthenticated anon surfaces are
+rate-limited per client ip — resolve 60/min, exposures 120/min. This
+wall currently spends ~26 resolves (the 20-way storm included) and ~22
+exposures in one run; grow those sections with the headroom in mind or
+the wall will flake on 429s, not on real defects.
 """
 
 import asyncio
