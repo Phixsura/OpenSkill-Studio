@@ -1557,7 +1557,7 @@ async def test_link_conflict_survives_dedup_key_collision(db):
         dedup_key=shared_key) is True
     assert await svc.record_exposure(
         experiment_key=exp.key, unit_type="user", unit_id=user.id,
-        dedup_key=shared_key) is True
+        dedup_key=shared_key, context={"side": "user"}) is True
     # a second anon exposure with a NON-colliding key must survive the fold
     assert await svc.record_exposure(
         experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
@@ -1575,4 +1575,7 @@ async def test_link_conflict_survives_dedup_key_collision(db):
     shared = [r for r in rows if r.dedup_key == shared_key]
     unique = [r for r in rows if r.dedup_key == f"unique-{anon_id[:8]}"]
     assert len(shared) == 1   # the colliding duplicate folded away
+    # the SURVIVOR's physical row is the one that remains — the fold
+    # deletes the anon duplicate, never the user's original
+    assert shared[0].context == {"side": "user"}
     assert len(unique) == 1   # the non-colliding exposure re-pointed
