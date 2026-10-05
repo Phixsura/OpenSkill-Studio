@@ -372,3 +372,17 @@ record_exposure): 21/26 — every mutant of the new retry branch (the
 re-normalization guards, the survivor lookup, the original-anon gate)
 dies under the racing-exposure test; the five survivors remain the
 ledgered defensive-500 class.
+
+## wave42_fold_gates.json (round 228)
+
+The four fold functions re-waved after #77's resolve_covariates gate
+rework: 66/77. Killed by new fixtures: the per-unit latency guard's Or
+(an in-flight run with finished_at None must be SKIPPED, never crash the
+arithmetic) and the org-segment cap (a 21-org fixture pins the top-20
+take and the deterministic equal-size tie-break). Ledgered 11: the ten
+per-source window-boundary pairs (template copies of the
+exposures-pinned half-open contract, the standing sources ledger above)
+and the single-covariate joint-path routing gate (routing a lone
+explicit covariate through the multi branch yields identical sufficient
+statistics — the providers mirror the inline math by round-117
+construction; the branch exists for economy, not semantics).

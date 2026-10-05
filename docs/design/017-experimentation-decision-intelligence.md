@@ -1308,7 +1308,7 @@ to be skipped by the per-unit latency guard rather than crash it, and a
 21-org fixture pinning the org-segment cap at twenty with its
 deterministic tie-break; the single-covariate joint-path routing is
 ledgered as equivalent (the providers mirror the inline math by
-round-117 construction).
+round-117 construction). Confirm: 66/77 — both killers landed.
 
 Round 227 — §7 gains the pre-login surface row and the client-SDK
 summary; §4.17's three-step placeholder becomes the shipped record.
