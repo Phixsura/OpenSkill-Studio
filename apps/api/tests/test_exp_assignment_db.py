@@ -1320,3 +1320,63 @@ async def test_identity_link_conflict_keeps_user_row_and_audits(db):
     # boundary: a SINGLE-char id is admissible (the floor is 1, inclusive)
     one = await svc.link_identity(anonymous_id="z", user_id=user.id)
     assert one["anonymous_id"] == "z" and one["conflicts"] == 0
+
+
+async def test_identity_link_racing_resolve_not_stranded(db, monkeypatch):
+    """#73 (round 213): a link landing BETWEEN resolve's forward-check and
+    its insert must not strand an orphan anon-keyed row — the post-insert
+    re-check migrates it immediately, so one person holds one row and both
+    id forms serve the same variant."""
+    from sqlalchemy import select as _select
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idr-{ULID()}@example.com", display_name="R",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+
+    original_compute = AssignmentService.compute
+    fired = {"done": False}
+
+    async def racing_compute(self, **kwargs):
+        out = await original_compute(self, **kwargs)
+        if not fired["done"]:
+            fired["done"] = True
+            # the link lands in the race window (forward-check already
+            # passed, insert not yet written)
+            await AssignmentService(self.db).link_identity(
+                anonymous_id=anon_id, user_id=user.id
+            )
+        return out
+
+    monkeypatch.setattr(AssignmentService, "compute", racing_compute)
+    resolved = await svc.resolve(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
+    )
+    assert resolved is not None
+
+    orphan = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == anon_id))
+    ).scalar_one_or_none()
+    assert orphan is None  # the race window closed behind us
+    user_row = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id == user.id))
+    ).scalar_one()
+    assert user_row.variant_key == resolved.variant_key
+
+    monkeypatch.setattr(AssignmentService, "compute", original_compute)
+    via_user = await svc.resolve(
+        experiment_key=exp.key, unit_type="user", unit_id=user.id
+    )
+    via_anon = await svc.resolve(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
+    )
+    assert via_user is not None and via_anon is not None
+    assert via_user.variant_key == resolved.variant_key
+    assert via_anon.variant_key == resolved.variant_key

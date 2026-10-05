@@ -1276,6 +1276,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 213 — defect #73: a link landing BETWEEN resolve's forward-check
+and its assignment insert stranded an orphan anon-keyed row — future
+resolves forwarded to the user, who drew a FRESH variant: one person,
+two experiences, plus a phantom ITT row. Fixed with a post-insert link
+re-check that migrates the just-written row immediately (link_identity
+is idempotent; the user-row-wins rule applies), plus an entry-time
+idempotent re-link that self-heals any pre-fix orphans. Kill-proven with
+a monkeypatch race injecting the link inside the window (fails on the
+unfixed code); both id forms asserted to serve one variant afterwards.
+
 Round 212 (closed) — wave 41 over the identity surface: 16/18 after the
 single-char floor pin and 422 status pins at both validation raise sites
 (bare pytest.raises had left the status codes unpinned — the

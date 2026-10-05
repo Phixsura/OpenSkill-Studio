@@ -429,11 +429,19 @@ class AssignmentService:
         experience, whichever id the client still holds); an unlinked one
         resolves as a user-typed unit under its own ULID and its history
         migrates in place when the link lands."""
+        anon_pending: str | None = None
         if unit_type == "anonymous":
             unit_type = "user"
             link = await self.db.get(ExperimentIdentityLink, unit_id)
             if link is not None:
+                # #73 self-heal: idempotent re-link sweeps any orphan
+                # anon-keyed rows a pre-fix race may have stranded
+                await self.link_identity(
+                    anonymous_id=unit_id, user_id=link.user_id
+                )
                 unit_id = link.user_id
+            else:
+                anon_pending = unit_id
         exp = await self._load_or_none(experiment_key)
         if exp is None:
             return None
@@ -478,6 +486,24 @@ class AssignmentService:
         row = await self._existing(exp.id, unit_type, unit_id)
         if row is None:  # pragma: no cover — unique constraint guarantees a row
             raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
+        if anon_pending is not None:
+            # #73 (round 213): a link may have LANDED between the forward
+            # check and our insert — without this re-check the anon-keyed
+            # row we just wrote is stranded (future resolves forward to the
+            # user, who then draws a FRESH variant: one person, two
+            # experiences, plus an orphan ITT row). Re-read the link and
+            # migrate immediately; link_identity is idempotent and applies
+            # the standard user-row-wins conflict rule.
+            late_link = await self.db.get(ExperimentIdentityLink, anon_pending)
+            if late_link is not None:
+                await self.link_identity(
+                    anonymous_id=anon_pending, user_id=late_link.user_id
+                )
+                row = await self._existing(exp.id, "user", late_link.user_id)
+                if row is None:  # pragma: no cover — migration guarantees one
+                    raise AppError(
+                        "EXPERIMENT_NOT_FOUND", "Assignment write lost", 500
+                    )
         return self._to_resolved(exp, spec, row)
 
     async def link_identity(
