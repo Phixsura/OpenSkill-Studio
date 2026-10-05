@@ -13,6 +13,7 @@ from app.core.rate_limit import rate_limit
 from app.experiments import facade
 from app.experiments.api.deps import require_self_serve_user
 from app.experiments.schemas import (
+    AnonExposureRequest,
     AnonResolveRequest,
     IdentityLinkRequest,
     SelfExposureRequest,
@@ -132,3 +133,27 @@ async def link_identity(
     )
     await db.commit()
     return {"data": out}
+
+
+@anon_router.post(
+    "/exposures",
+    response_model=DataResponse[dict],
+    status_code=201,
+    dependencies=[Depends(rate_limit(120, 60))],
+)
+async def anon_exposure(
+    body: AnonExposureRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """§4.17 (#75): pre-login exposure recording — the anonymous namespace
+    normalizes exactly as resolve does, so a linked id's exposures land on
+    the user's assignment."""
+    recorded = await facade.record_exposure(
+        db,
+        experiment_key=body.experiment_key,
+        unit_type="anonymous",
+        unit_id=body.anonymous_id,
+        dedup_key=body.dedup_key,
+    )
+    await db.commit()
+    return {"data": {"recorded": bool(recorded)}}

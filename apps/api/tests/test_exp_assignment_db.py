@@ -1283,6 +1283,11 @@ async def test_identity_link_conflict_keeps_user_row_and_audits(db):
     via_user = await svc.resolve(experiment_key=exp.key,
                                  unit_type="user", unit_id=user.id)
     assert via_anon is not None and via_user is not None
+    # an exposure recorded under the ANON id before the link (#74 setup)
+    recorded = await svc.record_exposure(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
+        dedup_key=f"idc-{anon_id}")
+    assert recorded is True  # #75: the anon namespace records exposures
 
     out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
     assert out["migrated"] == 0 and out["conflicts"] == 1
@@ -1306,6 +1311,16 @@ async def test_identity_link_conflict_keeps_user_row_and_audits(db):
     after = await svc.resolve(experiment_key=exp.key,
                               unit_type="anonymous", unit_id=anon_id)
     assert after is not None and after.variant_key == via_user.variant_key
+
+    # #74: the anon row's exposures SURVIVED the conflict deletion,
+    # re-pointed at the surviving user assignment (append-only contract)
+    from app.experiments.models import ExperimentExposure
+    exposure_rows = (
+        await db.execute(_select(ExperimentExposure).where(
+            ExperimentExposure.experiment_id == exp.id))
+    ).scalars().all()
+    assert len(exposure_rows) == 1
+    assert exposure_rows[0].assignment_id == kept.id
 
     # malformed anonymous ids refuse — status pinned at BOTH raise sites
     # (the two-raise-sites-two-pins law)

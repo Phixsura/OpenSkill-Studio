@@ -557,6 +557,18 @@ class AssignmentService:
             )
             if existing_user_row is not None:
                 conflicts += 1
+                # #74 (round 214): the anon row's EXPOSURES are an
+                # append-only audit surface — deleting the row would
+                # cascade them away. Re-point them at the surviving user
+                # assignment first (the exposure happened to this person;
+                # the surviving row is this person).
+                from sqlalchemy import update as _update
+
+                await self.db.execute(
+                    _update(ExperimentExposure)
+                    .where(ExperimentExposure.assignment_id == row.id)
+                    .values(assignment_id=existing_user_row.id)
+                )
                 self.db.add(ExperimentEvent(
                     experiment_id=row.experiment_id,
                     actor_user_id=user_id,
@@ -643,6 +655,15 @@ class AssignmentService:
         """Append one exposure for an assigned unit. Returns False when the
         unit has no assignment (exposure without assignment is a caller bug —
         fail-safe, never crash the product path). Idempotent per dedup_key."""
+        # #75 (round 214): the exposure surface speaks the same anonymous
+        # namespace as resolve — without this, every pre-login exposure was
+        # silently dropped (False, the fail-safe) and triggered analyses
+        # undercounted linked users.
+        if unit_type == "anonymous":
+            unit_type = "user"
+            link = await self.db.get(ExperimentIdentityLink, unit_id)
+            if link is not None:
+                unit_id = link.user_id
         exp = await self._load_or_none(experiment_key)
         if exp is None:
             return False

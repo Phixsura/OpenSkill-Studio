@@ -764,6 +764,15 @@ async def main() -> int:
                          json={"anonymous_id": "a:b"})
         check("malformed anonymous ids refuse at the schema wall",
               r.status_code == 422, r.text[:200])
+        # round 214 (#75): pre-login exposures record through the anon
+        # namespace — after the link they land on the user's assignment
+        r = await c.post("/experiments/anon/exposures",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": anon_ulid,
+                               "dedup_key": f"e2e-anonexp-{anon_ulid}"})
+        check("anonymous exposure records without auth",
+              r.status_code == 201 and r.json()["data"]["recorded"] is True,
+              r.text[:300])
 
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)

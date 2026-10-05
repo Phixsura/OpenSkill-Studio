@@ -449,6 +449,16 @@ class AnonResolveRequest(_StrictReq):
                               pattern=r"^[^:]+$")
 
 
+class AnonExposureRequest(_StrictReq):
+    """§4.17: pre-login exposure — same column bounds as the self surface
+    (#36 write-boundary law)."""
+
+    experiment_key: str = Field(min_length=1, max_length=64)
+    anonymous_id: str = Field(min_length=1, max_length=26,
+                              pattern=r"^[^:]+$")
+    dedup_key: str | None = Field(default=None, max_length=64)
+
+
 class IdentityLinkRequest(_StrictReq):
     """§4.17: the authenticated caller claims their own pre-login id."""
 

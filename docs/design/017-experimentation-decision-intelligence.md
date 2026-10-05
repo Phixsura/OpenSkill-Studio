@@ -1276,6 +1276,20 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 214 — defects #74 and #75, both found auditing the identity
+epoch's exposure seam: (#74) the link conflict path deleted the anon
+assignment row and ondelete=CASCADE silently destroyed its EXPOSURE
+audit rows — violating the exposures' append-only contract; fixed by
+re-pointing them at the surviving user assignment before the delete
+(the exposure happened to this person; the surviving row IS this
+person). (#75) record_exposure never learned the anonymous namespace —
+every pre-login exposure silently dropped as the fail-safe False and
+triggered analyses undercounted linked users; fixed with the same
+normalization resolve uses, plus the missing POST
+/experiments/anon/exposures surface (rate-limited, strict schema). The
+wall grows to 133 with the unauthenticated exposure check; §4.17 now
+covers resolve, link and exposure end to end.
+
 Round 213 — defect #73: a link landing BETWEEN resolve's forward-check
 and its assignment insert stranded an orphan anon-keyed row — future
 resolves forwarded to the user, who drew a FRESH variant: one person,
