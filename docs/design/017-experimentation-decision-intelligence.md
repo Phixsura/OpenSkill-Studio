@@ -709,7 +709,16 @@ look — no decide-before-analyze), `EXPERIMENT_IDENTITY_CONFLICT`
 `EXPERIMENT_HOLDOUT_BP_INVALID` (holdout-group CRUD), and
 `PROMOTION_APPLY_IN_FLIGHT` (a second apply while one is running —
 serialize on the draft). The app-wide `VALIDATION_ERROR` and `FORBIDDEN`
-carry their global semantics. Every enum query param goes through `check_enum`
+carry their global semantics.
+
+Audit event types (round 276 canonical list — every `experiment_events`
+row carries one of): `created`, `version_created`, `transition`,
+`ramp_changed`, `ramp_plan_set`, `cloned_from`, `analysis_look` (the
+look record: hash, sequential state, primary effects, warnings),
+`guardrail_paused` (auto-pause provenance), `decision_recorded`,
+`promotion_drafted`, `experiment_identity_conflict` (§4.17). The audit
+trail is append-only; events are the memory the scorecard, corpus priors
+and conflict forensics read. Every enum query param goes through `check_enum`
 (silent-empty is a lie — ADR-016 §106.6). All new routes join the route-table
 auth sweep (ADR-016 §96).
 
@@ -1345,6 +1354,12 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 276 — the companion diff for EVENTS: five of eleven audit event
+types were narrative-only (decision_recorded, guardrail_paused,
+promotion_drafted, ramp_plan_set, version_created) — §12 now carries the
+canonical eleven-type list. The signal contract is complete across all
+four domains: warnings, events, error codes, event types.
 
 Round 275 — error-contract completeness: a code-vs-ADR diff found six
 real error codes undocumented (DECISION_HASH_MISMATCH among them — long
