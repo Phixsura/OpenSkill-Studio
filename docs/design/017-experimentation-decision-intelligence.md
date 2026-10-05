@@ -701,7 +701,15 @@ GET|POST /metric-definitions                     admin
 Additional error codes: `EXPERIMENT_NOT_FOUND` (uniform 404),
 `EXPERIMENT_SPEC_INVALID`, `EXPERIMENT_FORBIDDEN_TARGETING`,
 `EXPERIMENT_UNIT_OUT_OF_SCOPE`, `EXPERIMENT_NO_GUARDRAILS`,
-`METRIC_KEY_UNKNOWN`. Every enum query param goes through `check_enum`
+`METRIC_KEY_UNKNOWN`, `EXPERIMENT_DOMAIN_INVALID` (unknown domain at
+create), `DECISION_HASH_MISMATCH` (the cited hash matches no recorded
+look — no decide-before-analyze), `EXPERIMENT_IDENTITY_CONFLICT`
+(first-link-wins rebinding refusal, §4.17),
+`EXPERIMENT_HOLDOUT_NOT_FOUND` / `EXPERIMENT_HOLDOUT_KEY_TAKEN` /
+`EXPERIMENT_HOLDOUT_BP_INVALID` (holdout-group CRUD), and
+`PROMOTION_APPLY_IN_FLIGHT` (a second apply while one is running —
+serialize on the draft). The app-wide `VALIDATION_ERROR` and `FORBIDDEN`
+carry their global semantics. Every enum query param goes through `check_enum`
 (silent-empty is a lie — ADR-016 §106.6). All new routes join the route-table
 auth sweep (ADR-016 §96).
 
@@ -1337,6 +1345,13 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 275 — error-contract completeness: a code-vs-ADR diff found six
+real error codes undocumented (DECISION_HASH_MISMATCH among them — long
+pinned in tests and the wall, never in the §12 list) — all six now
+documented with their meanings; the two false positives were constant
+names my regex misread. Round 274 — the browser wall re-ran fresh (3/3).
+Round 273 — PR body 269-272; certification 161 green (6985).
 
 Round 272 — the frozen evidence over the wire (wall 151): the decision
 create response AND the GET both carry evidence.cited_warnings as a
