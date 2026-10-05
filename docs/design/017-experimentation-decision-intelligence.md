@@ -1331,6 +1331,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 261 — §4.17 transparency: GET /experiments/self/identity-links —
+each caller sees exactly THEIR linked anonymous ids (newest first,
+own-rows by construction, 401 unauthenticated; another user's listing
+never leaks them) — visibility precedes the delete right the exp16
+cascade already grants. ASGI-pinned in the identity suite; exp 603.
+
 Round 260 — the SC weights become ATTRIBUTABLE evidence: the service
 decorates the core's block with donor_units in weight order (the core
 stays id-agnostic and the bit-for-bit pins strip the decoration), and

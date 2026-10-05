@@ -167,3 +167,31 @@ async def anon_exposure(
     )
     await db.commit()
     return {"data": {"recorded": bool(recorded)}}
+
+
+@router.get("/identity-links", response_model=DataResponse[list])
+async def list_identity_links(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_self_serve_user),
+):
+    """§4.17 transparency (round 261): the caller sees every anonymous id
+    linked to THEM — visibility precedes the delete right (user deletion
+    cascades the links, exp16). Own rows only, by construction."""
+    from sqlalchemy import select
+
+    from app.experiments.models import ExperimentIdentityLink
+
+    rows = (
+        await db.execute(
+            select(ExperimentIdentityLink)
+            .where(ExperimentIdentityLink.user_id == user.id)
+            .order_by(ExperimentIdentityLink.created_at.desc())
+        )
+    ).scalars().all()
+    return {
+        "data": [
+            {"anonymous_id": row.anonymous_id,
+             "created_at": row.created_at.isoformat()}
+            for row in rows
+        ]
+    }

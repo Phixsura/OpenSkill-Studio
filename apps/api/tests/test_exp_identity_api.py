@@ -114,3 +114,32 @@ async def test_anon_surfaces_fail_safe_without_auth(c):
                            "dedup_key": "idapi-x"})
     assert r.status_code == 201
     assert r.json()["data"]["recorded"] is False
+
+
+@pytest.mark.asyncio
+async def test_identity_links_listing_is_own_rows_only(c):
+    """§4.17 transparency (round 261): each caller sees exactly THEIR
+    linked anonymous ids, newest first; another user's listing never leaks
+    them; unauthenticated is 401."""
+    h1, u1 = await _auth(c, "Lister")
+    h2, _u2 = await _auth(c, "Other")
+
+    a1, a2 = _anon_id(), _anon_id()
+    for anon in (a1, a2):
+        r = await c.post("/api/v1/experiments/self/identity-link",
+                         headers=h1, json={"anonymous_id": anon})
+        assert r.status_code == 200
+
+    r = await c.get("/api/v1/experiments/self/identity-links", headers=h1)
+    assert r.status_code == 200
+    mine = [row["anonymous_id"] for row in r.json()["data"]]
+    assert set(mine) >= {a1, a2}
+    assert mine.index(a2) < mine.index(a1)  # newest first
+
+    r = await c.get("/api/v1/experiments/self/identity-links", headers=h2)
+    assert r.status_code == 200
+    theirs = {row["anonymous_id"] for row in r.json()["data"]}
+    assert not ({a1, a2} & theirs)  # never another user's links
+
+    r = await c.get("/api/v1/experiments/self/identity-links")
+    assert r.status_code == 401
