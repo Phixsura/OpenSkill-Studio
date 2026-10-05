@@ -841,6 +841,13 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   feature-flag CDN/edge SDKs, session replay, warehouse connectors (we
   are the warehouse). Anonymous→login identity resolution SHIPPED in
   rounds 209-211 (§4.17).
+- Env-gated blind spots (round 265 inventory): behaviors the experiment
+  test stack CANNOT observe because APP_ENV=test changes them — (1) rate
+  limiting is skipped outright (the four limit constants on the anon
+  surfaces are production semantics; wave-45 ledger), and (2) a Redis
+  outage fails rate-limiting OPEN in dev/test but CLOSED in production.
+  Email and billing gates exist app-wide but touch no experiment surface.
+  Anything added behind this gate must land with its own ledger entry.
 - Base branch: the epic depends on the eco facade, so implementation chains on
   the issue-35 branch (PR #36) until it merges.
 
@@ -1330,6 +1337,13 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 265 — the env-gate blind-spot class inventoried app-wide: exactly
+two gates touch experiment surfaces (the test-skip on rate limiting and
+the dev/test fail-open vs production fail-closed on Redis outage), now a
+standing §17 bullet with the rule that anything new behind the gate
+ships with its own ledger entry. Email/billing gates exist but touch no
+experiment surface.
 
 Round 264 — wave 45, the ENDPOINT layer's first wave (8/13 via the
 round-257 ASGI suite): the self-exposure 201 pin landed; five ledgers —
