@@ -552,58 +552,78 @@ class AssignmentService:
         ).scalars().all()
         migrated = 0
         conflicts = 0
+        from sqlalchemy import delete as _delete
+        from sqlalchemy import update as _update
+        from sqlalchemy.exc import IntegrityError
+
+        async def _fold_conflict(row, existing_user_row):
+            # #74 (round 214): the anon row's EXPOSURES are an append-only
+            # audit surface — deleting the row would cascade them away.
+            # Re-point them at the surviving user assignment first (the
+            # exposure happened to this person; the surviving row is this
+            # person).
+            # #78 (round 251): a dedup key recorded under BOTH identities
+            # would make the re-point violate the per-assignment dedup
+            # unique — the colliding anon row is a semantic DUPLICATE of an
+            # exposure the survivor already holds, so it folds away; only
+            # non-colliding rows re-point.
+            await self.db.execute(
+                _delete(ExperimentExposure).where(
+                    ExperimentExposure.assignment_id == row.id,
+                    ExperimentExposure.dedup_key.isnot(None),
+                    ExperimentExposure.dedup_key.in_(
+                        select(ExperimentExposure.dedup_key).where(
+                            ExperimentExposure.assignment_id
+                            == existing_user_row.id,
+                            ExperimentExposure.dedup_key.isnot(None),
+                        )
+                    ),
+                )
+            )
+            await self.db.execute(
+                _update(ExperimentExposure)
+                .where(ExperimentExposure.assignment_id == row.id)
+                .values(assignment_id=existing_user_row.id)
+            )
+            self.db.add(ExperimentEvent(
+                experiment_id=row.experiment_id,
+                actor_user_id=user_id,
+                event_type="experiment_identity_conflict",
+                payload={
+                    "anonymous_id": anonymous_id,
+                    "user_id": user_id,
+                    "anon_variant": row.variant_key,
+                    "user_variant": existing_user_row.variant_key,
+                },
+            ))
+            await self.db.delete(row)
+
         for row in anon_rows:
             existing_user_row = await self._existing(
                 row.experiment_id, "user", user_id
             )
             if existing_user_row is not None:
                 conflicts += 1
-                # #74 (round 214): the anon row's EXPOSURES are an
-                # append-only audit surface — deleting the row would
-                # cascade them away. Re-point them at the surviving user
-                # assignment first (the exposure happened to this person;
-                # the surviving row is this person).
-                from sqlalchemy import delete as _delete
-                from sqlalchemy import update as _update
-
-                # #78 (round 251): a dedup key recorded under BOTH
-                # identities would make the re-point violate the
-                # per-assignment dedup unique — the colliding anon row is a
-                # semantic DUPLICATE of an exposure the survivor already
-                # holds, so it folds away; only non-colliding rows re-point.
-                await self.db.execute(
-                    _delete(ExperimentExposure).where(
-                        ExperimentExposure.assignment_id == row.id,
-                        ExperimentExposure.dedup_key.isnot(None),
-                        ExperimentExposure.dedup_key.in_(
-                            select(ExperimentExposure.dedup_key).where(
-                                ExperimentExposure.assignment_id
-                                == existing_user_row.id,
-                                ExperimentExposure.dedup_key.isnot(None),
-                            )
-                        ),
-                    )
-                )
-                await self.db.execute(
-                    _update(ExperimentExposure)
-                    .where(ExperimentExposure.assignment_id == row.id)
-                    .values(assignment_id=existing_user_row.id)
-                )
-                self.db.add(ExperimentEvent(
-                    experiment_id=row.experiment_id,
-                    actor_user_id=user_id,
-                    event_type="experiment_identity_conflict",
-                    payload={
-                        "anonymous_id": anonymous_id,
-                        "user_id": user_id,
-                        "anon_variant": row.variant_key,
-                        "user_variant": existing_user_row.variant_key,
-                    },
-                ))
-                await self.db.delete(row)
+                await _fold_conflict(row, existing_user_row)
             else:
-                row.unit_id = user_id
-                migrated += 1
+                try:
+                    async with self.db.begin_nested():
+                        row.unit_id = user_id
+                        await self.db.flush()
+                    migrated += 1
+                except IntegrityError:
+                    # #79 (round 254, the #78 class generalized): a
+                    # concurrent resolve created the user row INSIDE the
+                    # check-then-update window — re-read and take the
+                    # conflict branch; the user row wins, as always.
+                    await self.db.refresh(row)  # rollback expired the attrs
+                    late_row = await self._existing(
+                        row.experiment_id, "user", user_id
+                    )
+                    if late_row is None:  # pragma: no cover — the violator
+                        raise
+                    conflicts += 1
+                    await _fold_conflict(row, late_row)
         await self.db.flush()
         return {"anonymous_id": anonymous_id, "user_id": user_id,
                 "migrated": migrated, "conflicts": conflicts}

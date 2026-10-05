@@ -1579,3 +1579,56 @@ async def test_link_conflict_survives_dedup_key_collision(db):
     # deletes the anon duplicate, never the user's original
     assert shared[0].context == {"side": "user"}
     assert len(unique) == 1   # the non-colliding exposure re-pointed
+
+
+async def test_link_migration_racing_user_resolve(db, monkeypatch):
+    """#79 (round 254, the #78 class generalized): the migration's
+    check-then-UPDATE races a concurrent resolve that creates the user row
+    between them — the unique constraint fired and the whole link 500'd.
+    The per-row nested savepoint retries through the conflict branch: the
+    user row wins, the anon row folds with the audit event."""
+    from sqlalchemy import select as _select
+
+    from app.experiments.models.audit import ExperimentEvent
+
+    exp, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    anon_id = str(ULID())
+    user = User(email=f"idm-{ULID()}@example.com", display_name="M",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+    anon_resolved = await svc.resolve(
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+    assert anon_resolved is not None
+
+    original_existing = AssignmentService._existing
+    fired = {"done": False}
+
+    async def racing_existing(self, experiment_id, unit_type, unit_id):
+        row = await original_existing(self, experiment_id, unit_type, unit_id)
+        if not fired["done"] and unit_id == user.id and row is None:
+            fired["done"] = True
+            # the user resolves themselves INSIDE the race window — their
+            # row lands after the migration's existence check
+            await AssignmentService(self.db).resolve(
+                experiment_key=exp.key, unit_type="user", unit_id=user.id)
+        return row
+
+    monkeypatch.setattr(AssignmentService, "_existing", racing_existing)
+    out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
+    monkeypatch.setattr(AssignmentService, "_existing", original_existing)
+    assert out["conflicts"] == 1 and out["migrated"] == 0
+
+    rows = (
+        await db.execute(_select(ExperimentAssignment).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.unit_id.in_([anon_id, user.id])))
+    ).scalars().all()
+    assert len(rows) == 1 and rows[0].unit_id == user.id
+    event = (
+        await db.execute(_select(ExperimentEvent).where(
+            ExperimentEvent.experiment_id == exp.id,
+            ExperimentEvent.event_type == "experiment_identity_conflict"))
+    ).scalar_one()
+    assert event.payload["anonymous_id"] == anon_id

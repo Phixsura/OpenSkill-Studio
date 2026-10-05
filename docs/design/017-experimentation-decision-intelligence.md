@@ -1331,6 +1331,16 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 254 — defect #79, the #78 class generalized: the migration's
+check-then-UPDATE raced a concurrent resolve creating the user row
+inside the window — the assignment unique fired and the whole link
+500'd. The migrate branch now runs per-row in a nested savepoint and, on
+IntegrityError, refreshes the expired row and takes the conflict branch
+(the user row wins, as always); the conflict handling is one closure
+shared by both paths. Red-first reproduction, then the race pinned
+(exactly one surviving row, the audit event present). The genealogy
+grows to #73-#79; exp 600.
+
 Round 253 — #78 over the wire (wall 147): both identities record the
 same dedup key through the real endpoints, and the conflict fold links
 cleanly with conflicts == 1 — never a 500. PR body synced 250-252.
