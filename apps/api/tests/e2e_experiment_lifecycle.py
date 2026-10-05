@@ -811,6 +811,27 @@ async def main() -> int:
               r.status_code == 201 and r.json()["data"]["recorded"] is True,
               r.text[:300])
 
+        # round 243: a 20-way concurrent resolve STORM on one fresh anon id
+        # — the ON-CONFLICT re-read must converge every racer on ONE
+        # variant (the unique constraint is the arbiter, over real HTTP)
+        storm_id = f"E2EANON{uid().upper()}"[:26]
+        storm = await asyncio.gather(*[
+            c.post("/experiments/anon/resolve",
+                   json={"experiment_key": obs_key,
+                         "anonymous_id": storm_id})
+            for _ in range(20)
+        ])
+        storm_variants = {
+            resp.json()["data"]["variant_key"] for resp in storm
+        }
+        check("20 concurrent resolves converge on one variant",
+              all(resp.status_code == 200 for resp in storm)
+              and len(storm_variants) == 1
+              and None not in storm_variants,
+              str([(resp.status_code,
+                    resp.json()["data"].get("variant_key"))
+                   for resp in storm[:5]])[:300])
+
         # Round 87: the standing scorecard mirrors the newest look
         r = await c.get(f"/experiments/{exp_id}/analysis/latest", headers=admin)
         check("latest-look scorecard matches the run's hash",

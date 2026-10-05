@@ -1306,6 +1306,11 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 243 — the wall gains its first true CONCURRENCY check (138): a
+20-way parallel resolve storm on one fresh anonymous id converges on a
+single variant over real HTTP — the ON-CONFLICT re-read's arbitration
+exercised with genuine racing requests, not a monkeypatch.
+
 Round 242 — the browser wall grows 2 -> 3: the unprivileged deep-link
 posture (403s render an alive error state, never a blank crash) now
 covers every console surface added since round 174 — the Metric Explorer
