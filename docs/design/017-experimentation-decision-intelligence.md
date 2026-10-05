@@ -469,8 +469,11 @@ migration moved history under the user key.
 is not an outcome of the treatment — the §4.7 exposure-SRM guard
 already covers the dilution class; the conflict event covers the rest.
 
-Three-step shape: design (this) → migration + link service + resolve
-forwarding (step 1) → endpoint + E2E + wave (step 2+).
+Shipped rounds 209-225: migration exp15/exp16 (links + the privacy
+CASCADE), the link service with in-place migration, both resolve paths
+race-hardened (#73), exposure survival and namespace (#74/#75), the
+nested-savepoint exposure retry (#76), wave 41 (21/26), the web SDK
+wired into login AND register, live E2E 133.
 
 ## 5. Lifecycle state machine
 
@@ -556,8 +559,16 @@ Resolution response example:
 | Registry presentation      | registry list ordering/badges              | user                  | ordering strategy key                                                                                                                                |
 | Operational/cost           | eco rollout / retry policy                 | tenant                | policy parameters                                                                                                                                    |
 
+| Pre-login surfaces (§4.17) | useAnonExperiment (web SDK) | user (anon namespace) | same as the user surface — the device-held anon id resolves through the identity link |
+
 Facade is the only entry point (eco facade discipline). Configs returned to a
 domain still pass ALL of that domain's existing validations and approval gates.
+
+Client SDK surfaces (round 227 summary): useExperiment (authed self-serve,
+§7 above), useAnonExperiment + claimAnonymousId (pre-login, §4.17 — the
+claim fires on BOTH conversion points, login and register), each with the
+#54 null-safe fail-safe shape and the #57 identity-stable exposure
+callback.
 
 ## 8. Metrics & long-term outcomes (Part C/I)
 
