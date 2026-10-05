@@ -1300,6 +1300,17 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 229 — the observational wall goes FULL-FOLD: the manual snapshot
+seeds are gone — a real compute_experiment_window produces everything
+the section asserts (engine comparisons, ITS, SC, and NOW the auto
+selection firing over the wire with its exposed per-covariate evidence).
+Two instructive failures en route: mixed windows (one seeded without
+covariates) honestly degrade the cross-window fold to AUTO_NONE, and
+the as-of pinning law excludes units assigned after window_end (the
+roster was EMPTY until the assignments were backdated into the
+pre-period) — both already-designed behaviors, each now exercised by the
+wall. 134 checks.
+
 Round 228 — wave 42 over the resolved fold gates (64/77 -> confirm in
 flight): ten survivors are the standing per-source window-boundary
 ledger (template copies of the exposures-pinned half-open contract);

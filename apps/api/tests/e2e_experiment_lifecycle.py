@@ -660,10 +660,16 @@ async def main() -> int:
                          status=_UsrStatus.ACTIVE)
                 db.add(u)
                 await db.flush()
-                db.add(_Assign(experiment_id=obs_id, unit_type="user",
-                               unit_id=u.id, variant_key=variant,
-                               assigned_version=1, bucket=0,
-                               is_holdout=False))
+                assignment = _Assign(experiment_id=obs_id,
+                                     unit_type="user",
+                                     unit_id=u.id, variant_key=variant,
+                                     assigned_version=1, bucket=0,
+                                     is_holdout=False)
+                db.add(assignment)
+                await db.flush()
+                # the fold's as_of pinning only rosters units assigned
+                # BEFORE window_end — backdate to the pre-period
+                assignment.assigned_at = obs_start - _tdlt(hours=1)
                 users[tag] = u
             # treated: steady 1/day pre, a 3-revision jump for 3 days post;
             # donor d0 tracks the pre exactly; d1 sits at 3/day throughout
@@ -686,15 +692,22 @@ async def main() -> int:
                                 status=_SubStatus.APPROVED, version=ver,
                                 created_at=obs_start + _tdlt(days=off,
                                                              hours=6)))
-            obs_ws = obs_start + _tdlt(days=1)
-            db.add(_Snap(experiment_id=obs_id, metric_key="revision_count",
-                         variant_key="control", window_start=obs_ws,
-                         window_end=obs_ws + _tdlt(days=1), n=10,
-                         sum_value=10.0, sum_sq=25.0))
-            db.add(_Snap(experiment_id=obs_id, metric_key="revision_count",
-                         variant_key="treatment", window_start=obs_ws,
-                         window_end=obs_ws + _tdlt(days=1), n=10,
-                         sum_value=14.0, sum_sq=35.0))
+            await db.commit()
+        await _eng.dispose()
+        # round 229: NO seeded snapshots — a REAL window fold produces them
+        # (covariates included), so the whole observational stack below
+        # (comparisons, ITS, SC, auto selection) runs on folded data
+        from app.experiments.services.metrics import (
+            MetricService as MetricSvc,
+        )
+
+        await _eng.dispose(close=False)
+        async with SessionL() as db:
+            await MetricSvc(db).compute_experiment_window(
+                obs_id,
+                window_start=obs_start,
+                window_end=obs_start + _tdlt(days=1),
+            )
             await db.commit()
         await _eng.dispose()
 
@@ -717,9 +730,16 @@ async def main() -> int:
               str(obs_metric.get("synthetic_control"))[:300])
         check("no km block without the knob",
               "km" not in obs_metric, str(obs_metric)[:200])
-        check("auto covariates warn honestly with no aggregates",
-              "CUPED_AUTO_NONE" in obs_result.get("warnings", []),
-              str(obs_result.get("warnings"))[:200])
+        # round 229 (#77 proven over the wire): the fold carried the
+        # covariates, so the auto selection fires with exposed evidence
+        check("auto selection fires over the wire after a real fold",
+              "CUPED_AUTO_SELECTED" in obs_result.get("warnings", []),
+              str(obs_result.get("warnings"))[:300])
+        evidence = (obs_metric or {}).get("cuped_auto")
+        check("the selection evidence (per-covariate r) rides the wire",
+              isinstance(evidence, dict) and len(evidence) >= 1
+              and all(isinstance(v, (int, float)) for v in evidence.values()),
+              str(evidence)[:300])
 
         # ── Round 211: §4.17 identity resolution over the wire ─────────
         r = await c.patch(f"/experiments/{obs_id}/ramp", headers=admin,
