@@ -1304,6 +1304,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 231 — hot-path honesty readout after the identity epoch: user
+resolves are UNTOUCHED (3.05 ms new / 1.17 ms sticky vs the 2.56/0.89
+pre-identity baseline — same order, local-Postgres noise), and the
+anonymous namespace costs one link lookup (~0.5 ms: 3.59 new / 1.65
+sticky). No regression; the forwarding design keeps the authed product
+path query-free.
+
 Round 230 — §18a completeness sweep: every warning the analysis can emit
 now has its runbook row (four were missing — the clustered-SE caveat,
 the mixed-version provenance, and the two triggered-population mixes;
