@@ -1327,6 +1327,14 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 250 — milestone census, every verification layer re-run fresh this
+round: web 731, exp 598, fuzz 19, API wall 142, browser wall 3,
+certification 155 (6978) — all green simultaneously. Session arc at this
+marker: rounds 182-250, defects #70-#77 kill-proven, waves 36-44, four
+analytics epochs plus identity plus the evidence chain shipped
+design-to-console-to-audit, and the claims audited to word level in both
+directions.
+
 Round 249 — segment slices over the wire (wall 142): a segment-sliced
 analysis runs informationally, the look-budget pin holds over real HTTP
 (history length unchanged — segment runs record no look, the §4.8
