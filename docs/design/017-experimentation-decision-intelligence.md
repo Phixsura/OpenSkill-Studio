@@ -1331,6 +1331,18 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 257 — the identity endpoints enter the CERT SUITES: the live wall
+had been their only coverage, so no certification ever exercised the
+endpoint layer (the 232 support-override 403 in particular).
+test_exp_identity_api.py now runs ASGI-level in every full run — claim /
+idempotent / rebind 422 / override 403 / schema-wall 422s / unauth 401,
+plus the fail-safe shapes on the unauthenticated anon surfaces (unknown
+experiment resolves to the default experience; unassigned exposure
+reports recorded=false). The Makefile target also quietly SKIPPED new
+test files by enumeration — test-exp now lists the new file (exp 602);
+law: an enumerating make target silently drops new suites — grep the
+target when adding a test file.
+
 Round 256 — the #78/#79 class surveyed package-wide: every service that
 writes against a unique constraint either goes through ON CONFLICT (six
 sites) or handles IntegrityError typed (all seven services) — the two
