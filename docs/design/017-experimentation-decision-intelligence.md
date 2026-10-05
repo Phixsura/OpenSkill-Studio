@@ -1300,6 +1300,21 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 228 — wave 42 over the resolved fold gates (64/77 -> confirm in
+flight): ten survivors are the standing per-source window-boundary
+ledger (template copies of the exposures-pinned half-open contract);
+the real ones got killers — an IN-FLIGHT run (finished_at None) pinned
+to be skipped by the per-unit latency guard rather than crash it, and a
+21-org fixture pinning the org-segment cap at twenty with its
+deterministic tie-break; the single-covariate joint-path routing is
+ledgered as equivalent (the providers mirror the inline math by
+round-117 construction).
+
+Round 227 — §7 gains the pre-login surface row and the client-SDK
+summary; §4.17's three-step placeholder becomes the shipped record.
+Round 226 — the knob seam audit (every spec knob confirmed to have a
+through-the-fold path; #77 was the only gap) and wave 42 staged.
+
 Round 225 — defect #77, found auditing the fold path the alarm's
 "segment write amplification" angle led into: EVERY covariate gate in
 the metrics sweep keyed on the RAW spec list — for an "auto" spec the
