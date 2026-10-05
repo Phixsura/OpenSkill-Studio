@@ -39,7 +39,7 @@ export default function DecisionDetailPage() {
     enabled: Boolean(record?.experiment_id),
     queryFn: () =>
       apiWithAuth<{ data: { result_hash?: string; warnings?: string[] }[] }>(
-        `/experiments/${record?.experiment_id}/analysis/history`,
+        `/experiments/${record?.experiment_id}/analysis/history?limit=200`,
       ),
   });
   const citedLook = (historyData?.data ?? []).find(

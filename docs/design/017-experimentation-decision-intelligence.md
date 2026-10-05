@@ -1306,6 +1306,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 238 — evidence-chain edges: the decision page's history fetch uses
+limit=200 (a cited look beyond the default 50 silently lost its chips),
+and the wall pins the warnings field on the history read (137 checks).
+Round 237 — PR body 234-236; certification 153 survived a system
+low-memory kill on retry (6977/6977 — the first run died to the user's
+dev API pressure, not a leak of ours).
+
 Round 236 — wave 43 over the digest sweep (17/20 first pass): killers
 landed for the latest-look semantics (two same-transaction looks share
 created_at — the ULID id is now the deterministic tiebreak, a real fix

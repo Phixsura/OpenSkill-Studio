@@ -78,7 +78,7 @@ describe("Decision registry pages (ADR-017 Part L, round 103)", () => {
     api.mockImplementation((async (rawPath: unknown) => {
       const path = String(rawPath ?? "");
       if (path.endsWith(`/experiments/decisions/${"D".repeat(26)}`)) return { data: RECORD };
-      if (path.endsWith("/analysis/history"))
+      if (path.includes("/analysis/history"))
         return {
           data: [
             { result_hash: "d".repeat(64), warnings: ["OTHER_LOOK"] },

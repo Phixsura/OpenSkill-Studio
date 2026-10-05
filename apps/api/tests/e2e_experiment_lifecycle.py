@@ -398,6 +398,9 @@ async def main() -> int:
               and len(r.json()["data"]) >= 1
               and r.json()["data"][0]["result_hash"] == result_hash,
               r.text[:300])
+        check("the look carries its warnings for the evidence chain (234)",
+              isinstance(r.json()["data"][0].get("warnings"), list),
+              r.text[:300])
 
         # Round 92/93: clone + console text search over the wire
         clone_key = f"clone-{uid()}"
