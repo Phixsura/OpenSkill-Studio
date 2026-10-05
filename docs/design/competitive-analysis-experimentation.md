@@ -37,8 +37,12 @@ and added depth the matrix's vendors do not ship:
 - Defects #1-#69 each fixed with a kill-proof; mutation waves 1-35
   (~1100 mutants) cover every module; 131 full-suite certifications.
 
-Still open by choice: write-side org delegation only (auto covariate
-selection SHIPPED rounds 201-205, §4.6b).
+Still open by choice: org-admin SPEC AUTHORING only — org delegation
+already ships creation, transitions, incident pause/resume, diagnostics
+and CSV exports for org-scoped experiments; spec versions stay
+platform-only as the §2 safety posture (analysis semantics are baked
+into stored snapshots). Auto covariate selection SHIPPED rounds 201-205
+(§4.6b).
 (ITS SHIPPED rounds 177-178, full Kaplan-Meier SHIPPED rounds 181-192
 (censoring-correct horizon block, source-gated #70), synthetic control
 SHIPPED rounds 193-196 — simplex donor weights, placebo inference,
@@ -60,8 +64,10 @@ TS hook + self-serve endpoints, and CUPED covariates on three sources
 (projects, cost_ledger, workflow_runs). The "hourly guardrail lane" was
 already satisfied: guardrail evaluation runs every 10 minutes on live
 sliding windows (only ANALYSIS windows are daily). Still open by choice:
-write-side org delegation (ITS, full KM, multi-covariate CUPED,
-synthetic control and auto covariate selection have all since shipped).
+org-admin SPEC AUTHORING (the rest of write-side delegation — creation,
+transitions, incidents, exports — already ships; ITS, full KM,
+multi-covariate CUPED, synthetic control and auto covariate selection
+have all since shipped).
 
 ## 1. Feature matrix (industry standard vs ADR-017 v1)
 
