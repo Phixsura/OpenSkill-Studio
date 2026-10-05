@@ -1355,6 +1355,12 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 278 — PR-body hygiene: rounds 11-175 compressed into one evolution
+digest (40.5KB -> 22.7KB of the 64KB cap) — the §18 log remains the full
+record; the PR reads as a review document again, newest epochs verbose.
+Round 277 — the web signal-rendering audit: the generic warnings.map
+covers every code by construction.
+
 Round 276 — the companion diff for EVENTS: five of eleven audit event
 types were narrative-only (decision_recorded, guardrail_paused,
 promotion_drafted, ramp_plan_set, version_created) — §12 now carries the
