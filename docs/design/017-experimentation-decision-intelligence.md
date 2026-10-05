@@ -473,7 +473,8 @@ Shipped rounds 209-225: migration exp15/exp16 (links + the privacy
 CASCADE), the link service with in-place migration, both resolve paths
 race-hardened (#73), exposure survival and namespace (#74/#75), the
 nested-savepoint exposure retry (#76), wave 41 (21/26), the web SDK
-wired into login AND register, live E2E 133.
+wired into login AND register, live E2E 136 (the wall keeps growing
+with each seam: full-fold, admin override).
 
 ## 5. Lifecycle state machine
 
@@ -779,8 +780,9 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     bit-for-bit against the core → console strip → mutation wave (36–39)
     with reasoned ledgers. Defects #70–#72 (wrong-source KM opt-in; the
     Explorer offering what the API refuses; a mid-wave commit shipping a
-    live mutant — now an iron law). Live E2E 110 checks; certifications
-    through 139 (6955/6955). Observational analyses carry the three
+    live mutant — now an iron law). Live E2E at this item's writing: 110
+    checks (136 as of round 232); certifications through 139 (6955/6955;
+    151 as of round 232). Observational analyses carry the three
     blocks at ~1s wall against local Postgres (ITS 28 + SC 28 on-demand
     daily reads + KM's two queries) — informational cost, segment runs
     exempt via the early return.
@@ -795,7 +797,7 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     (conflict deletion cascading exposure audit rows away — re-pointed
     before delete) and #75 (pre-login exposures silently dropped by the
     fail-safe False) each kill-proven; wave 41 at 21/26 with the
-    switchback config pin; live E2E 133 checks.
+    switchback config pin; live E2E 133 checks at the item's writing (136 as of round 232).
 
 ## 17. Known edges & explicit decisions
 
