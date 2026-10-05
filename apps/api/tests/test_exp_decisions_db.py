@@ -1053,7 +1053,8 @@ async def test_decision_optional_fields_default_to_empty_dicts(db):
     )
     assert record.uncertainty == {}
     assert record.segments == {}
-    assert record.evidence == {}
+    # round 239: evidence always carries the frozen cited_warnings key
+    assert record.evidence == {"cited_warnings": []}
 
 
 async def test_inconclusive_never_extends_the_close(db):
