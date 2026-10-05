@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/decisions.py",
+    "funcs": ["create", "_cited_look_payload"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_decisions_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  }
+]
