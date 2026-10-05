@@ -363,7 +363,7 @@ async def _source_workflow_runs(
         if measure == "latency_ms":
             if (
                 variance_reduction is not None
-                and definition.key in variance_reduction.covariates()
+                and definition.key in resolve_covariates(variance_reduction)
             ):
                 # CUPED mode (§4.6 v2, third source on the shared contract):
                 # per-UNIT mean latency — y over the window, x over the
@@ -489,7 +489,7 @@ async def _source_projects(
         if measure == "revision_count":
             if (
                 variance_reduction is not None
-                and len(variance_reduction.covariates()) > 1
+                and len(resolve_covariates(variance_reduction)) > 1
             ):
                 # §4.6 v3 (round 114): multi-covariate mode — the source
                 # emits per-unit y only; the assembler computes EVERY
@@ -526,7 +526,7 @@ async def _source_projects(
                 continue
             if (
                 variance_reduction is not None
-                and definition.key in variance_reduction.covariates()
+                and definition.key in resolve_covariates(variance_reduction)
             ):
                 # CUPED mode (§4.6 v2): per-UNIT aggregation so each unit
                 # contributes one (y, x) pair — y = revisions in the window,
@@ -584,7 +584,7 @@ async def _source_projects(
         else:
             if (
                 variance_reduction is not None
-                and definition.key not in variance_reduction.covariates()
+                and definition.key not in resolve_covariates(variance_reduction)
             ):
                 # Binary CUPED (round 142, Statsig-parity regression
                 # adjustment on proportions): per-UNIT y — 1 when the unit
@@ -643,7 +643,7 @@ async def _source_cost_ledger(
             continue
         if (
             variance_reduction is not None
-            and definition.key in variance_reduction.covariates()
+            and definition.key in resolve_covariates(variance_reduction)
         ):
             # CUPED mode (§4.6 v2, same contract as projects): per-UNIT
             # totals — y = unit's cost in the window, x = its cost in the
@@ -1697,7 +1697,11 @@ class MetricService:
                             window_start=window_start,
                         )
                         _vals["covariates"] = cov_map
-                        first = variance_reduction.covariates()[0]
+                        # #77 (round 225): the mirror must key on the first
+                        # RESOLVED covariate — the "auto" literal matched
+                        # nothing, leaving cov_* NULL and silently disabling
+                        # the PRE_BALANCE guard for auto specs
+                        first = resolve_covariates(variance_reduction)[0]
                         mirror = cov_map.get(first)
                         if mirror is not None:
                             _vals["cov_sum"] = mirror["sum"]

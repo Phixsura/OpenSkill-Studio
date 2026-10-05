@@ -1289,6 +1289,20 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 225 — defect #77, found auditing the fold path the alarm's
+"segment write amplification" angle led into: EVERY covariate gate in
+the metrics sweep keyed on the RAW spec list — for an "auto" spec the
+literal matched nothing, so the sources never emitted per-unit y, the
+assembler never ran, snapshots carried NO covariates and the whole auto
+feature silently degraded to plain Welch at fold time (the round-202
+tests missed it by seeding snapshots directly). All six gates now
+consult resolve_covariates; pinned by a fold-to-analysis END-TO-END auto
+test (snapshot covariates carry both resolved candidates, the legacy
+cov_* mirror keys on the first resolved name so the PRE_BALANCE guard
+works, CUPED_AUTO_SELECTED rides the analysis). Law: a feature tested
+only ABOVE a seam (seeded snapshots) is untested BELOW it — every spec
+knob needs one end-to-end path through the fold.
+
 Round 224 — wave 41 re-run over the reworked exposure path: 21/26, every
 retry-branch mutant killed by the racing-exposure test, the five
 defensive-500 ledgers standing. Certification 148 green (6973); PR body

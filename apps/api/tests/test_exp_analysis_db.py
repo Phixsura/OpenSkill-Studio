@@ -1447,6 +1447,105 @@ async def test_multi_covariate_analysis_end_to_end(db):
     assert "CUPED_MULTI_DEGRADED" not in result["warnings"]
 
 
+async def test_auto_covariates_fold_to_analysis_end_to_end(db):
+    """Round 225 (#77): the AUTO spec flows fold -> snapshot -> selection
+    -> joint adjustment end to end; the legacy cov_* MIRROR keys on the
+    first RESOLVED covariate (the auto literal left it NULL and
+    silently disabled the PRE_BALANCE guard)."""
+    from datetime import timedelta as _td
+
+    from app.models.project import Project, Submission, SubmissionStatus
+    from app.models.user import User as _User
+
+    exp, admin = await _mk_running(db, variance_reduction={
+        "method": "cuped",
+        "covariate_metrics": ["auto"],
+        "lookback_days": 14,
+    }, metrics={"primary": ["revision_count"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
+                                "threshold": 100.0}]})
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
+                           slug=f"t-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    project = Project(org_id=org.id, title="MP",
+                      slug=f"mp-{str(ULID()).lower()}", description="d",
+                      instructions="i",
+                      rubric=[{"criterion": "c", "max_score": 5}])
+    db.add(project)
+    await db.flush()
+
+    from app.experiments.models.assignment import ExperimentAssignment
+
+    window_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+    pre = window_start - _td(days=3)
+    rng_rows = [
+        # (pre_version, pre_status, window_version)
+        (3, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.REJECTED, 3),
+        (1, SubmissionStatus.APPROVED, 1),
+        (4, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.REJECTED, 1),
+        (3, SubmissionStatus.REJECTED, 4),
+        (1, SubmissionStatus.APPROVED, 2),
+        (2, SubmissionStatus.APPROVED, 3),
+    ]
+    from app.models.user import UserRole as _Role
+    from app.models.user import UserStatus as _Status
+
+    for i, (pv, pstat, wv) in enumerate(rng_rows):
+        u = _User(email=f"mca-{i}-{ULID()}@example.com", display_name=f"A{i}",
+                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        db.add(u)
+        await db.flush()
+        # #60: resolve() hash-buckets random ULIDs — ~7% of runs land an
+        # arm with n <= 1 and BOTH adjustments rightly refuse (cert-92 flake).
+        # Deterministic 4/4 split keeps the test about the covariate flow.
+        db.add(ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=u.id,
+            variant_key="control" if i % 2 == 0 else "treatment",
+            assigned_version=1, bucket=0, is_holdout=False,
+        ))
+        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
+                          status=pstat, version=pv, created_at=pre))
+        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
+                          status=SubmissionStatus.REJECTED, version=wv,
+                          created_at=window_start + _td(hours=2)))
+    await db.flush()
+    await MetricService(db).compute_experiment_window(
+        exp.id, window_start=window_start, window_end=window_start + _td(days=1)
+    )
+    # #77: the fold's legacy mirror keys on the first RESOLVED covariate
+    from sqlalchemy import select as _select
+
+    from app.experiments.models.metric import MetricSnapshot as _Snap77
+    snap_rows = (
+        await db.execute(_select(_Snap77).where(
+            _Snap77.experiment_id == exp.id,
+            _Snap77.metric_key == "revision_count"))
+    ).scalars().all()
+    assert snap_rows and all(r.cov_sum is not None for r in snap_rows)
+    assert all(
+        set(r.covariates or {}) >= {"practical_pass_rate", "revision_count"}
+        for r in snap_rows
+    )
+
+    result = await AnalysisService(db).run(exp.id, actor=admin)
+    assert "CUPED_AUTO_SELECTED" in result["warnings"]
+    comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
+    cuped = comparison.get("cuped")
+    assert cuped is not None and cuped.get("mode") == "multi"
+    evidence = result["metrics"]["revision_count"].get("cuped_auto")
+    assert evidence and set(cuped["covariates"]) == set(evidence)
+
+
 async def test_quantile_comparison_rides_the_analysis(db):
     """§4.14 round 124: snapshots carrying value_histogram fold across
     windows (counts add) and the continuous comparison gains a quantiles
