@@ -1367,6 +1367,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 283 — switchback x identity-link interaction audited: the
+hypothesis was a window-collision gap in the conflict fold, but
+switchback stores exactly ONE placeholder row per unit (no window
+column; the variant is computed statelessly per window), so migration
+has the same shape as sticky assignments and _fold_conflict applies
+type-agnostically; and because the served variant is cohort-wide,
+linking cannot flip a user's experience mid-window. No defect; recorded
+so the next reviewer need not re-derive it.
+
 Round 281 — §16 item 15 de-staled (as-of annotations) and item 16
 records the evidence-security + signal-contract era (246-280). Rounds
 279-280 — periodic wall 151/151 fresh; the make-lint truth (76-file
