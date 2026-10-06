@@ -977,6 +977,16 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   the one anon↔user mapping and CASCADE with user deletion (exp16,
   round 222) — no orphaned re-identification table survives a delete.
 - Timezones: all UTC; window_start is always UTC midnight.
+- Sweep-cap bounds reviewed after #84/#85 (round 337): the starts sweep's
+  skip is race-only (the row leaves "scheduled" when the human wins, so
+  the predicate self-drains; a PERSISTENTLY AppError-ing scheduled
+  experiment would squat a head slot — bounded by cap 200, surfaced in
+  logs, judged a visible config error, not a silent class). The weekly
+  digest caps at 500 under id-order on a recurring population — an
+  informational surface, not statistical safety; revisit with ISO-week
+  rotation if the live population approaches the cap. transition.reason
+  is bounded (1000) and NUL-in-JSONB is absorbed by the R88 global
+  DBAPIError backstop (22021/22P05 -> 422).
 - Version bumps: allowed only in draft/review; assignments pin
   `assigned_version`; variant sets can therefore never change mid-run.
 - Zero-weight variants rejected at spec validation.
@@ -1492,6 +1502,12 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Rounds 335-339 — the cadence tightened to a 10-minute loop with a
+mandatory visible artifact per round (the user's stop-perception is the
+spec); §16 item 17 records the 284-335 era; the remaining sweep bounds
+reviewed and recorded in §17 (starts: race-only skip; digest: capped
+informational surface; transition.reason: bounded + backstopped).
 
 Round 334 — defect #85 (#84's sibling, found by sweeping the class):
 the auto-analysis sweep filtered mSPRT INSIDE the loop, AFTER the
