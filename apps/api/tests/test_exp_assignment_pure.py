@@ -323,3 +323,22 @@ def test_version_salt_prefix_pinned():
 
     assert SALT_PREFIX_LEN == 8
     assert version_salt_of("abcdef0123456789" * 4) == "abcdef01"
+
+
+def test_interaction_rotation_coverage_law():
+    """#88 (round 343): every pair must be scanned within ceil(P/cap)
+    consecutive weeks — the old 1-pair/week stride needed P weeks."""
+    import math
+
+    from app.experiments.worker import _interaction_window
+
+    for n_pairs in (1, 7, 20, 21, 55, 400):
+        pairs = list(range(n_pairs))
+        cap = 20
+        weeks_needed = math.ceil(n_pairs / cap)
+        for start_week in (0, 3, 52):
+            seen: set = set()
+            for w in range(start_week, start_week + weeks_needed):
+                seen.update(_interaction_window(pairs, w, cap))
+            assert seen == set(pairs), (n_pairs, start_week, len(seen))
+    assert _interaction_window([], 5, 20) == []

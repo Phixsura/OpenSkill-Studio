@@ -101,6 +101,18 @@ async def sweep_experiment_guardrails(
     return enqueued
 
 
+def _interaction_window(pairs: list, week: int, cap: int) -> list:
+    """#88 (round 343): the rotation STRIDE was 1 pair/week (start = week %
+    len, window sliding one slot while re-scanning cap-1 old pairs) — full
+    coverage of P pairs took P weeks (~8 years at 30 running experiments).
+    The stride must be the cap: every pair is scanned within ceil(P/cap)
+    weeks (the coverage law, pinned by a pure property test)."""
+    if not pairs:
+        return []
+    start = (week * cap) % len(pairs)
+    return (pairs + pairs)[start : start + cap]
+
+
 INTERACTION_MIN_SHARED = 100
 INTERACTION_PAIR_CAP = 20
 _INTERACTION_REALERT_HOURS = 7 * 24
@@ -147,8 +159,8 @@ async def sweep_experiment_interactions(
     ]
     if not cross_layer_pairs:
         return 0
-    start = (now or datetime.now(UTC)).isocalendar().week % len(cross_layer_pairs)
-    window = (cross_layer_pairs + cross_layer_pairs)[start : start + cap_pairs]
+    week = (now or datetime.now(UTC)).isocalendar().week
+    window = _interaction_window(cross_layer_pairs, week, cap_pairs)
     alerts = 0
     for (id1, key1, _layer1, owner1, title1), (id2, key2, _layer2, owner2, title2) in window:
         rows = (

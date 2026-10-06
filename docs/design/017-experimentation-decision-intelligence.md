@@ -1504,6 +1504,16 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 343 — defect #88 (the class's FIFTH member, an arithmetic one):
+the interaction sweep's ISO-week rotation used stride 1 (start = week %
+P) with a cap-20 window — 19 of 20 pairs re-scanned every week, net ONE
+new pair per week: at 400 cross-layer pairs, full coverage took 381
+weeks (~7 years) while claiming §106.26 fairness. The stride is now the
+cap (start = week*cap % P): every pair scanned within ceil(P/cap)
+weeks, extracted as a pure _interaction_window and pinned by a coverage
+law property test (n in {1,7,20,21,55,400}, arbitrary start weeks).
+Math-red recorded: the old stride covered 39/400 in 20 weeks.
+
 Round 341 — defect #87 (the class's FOURTH member): a fully-applied
 ramp plan never left the ramp sweep's predicate — exhausted plans
 squatted the id-ordered cap permanently (the round-334 "self-draining"
