@@ -776,6 +776,26 @@ async def main() -> int:
                           json={"ramp_bp": 10000})
         check("ramp the observational experiment for serving",
               r.status_code == 200, r.text[:200])
+        # Round 312: the planning calculator — oracle via the pure core
+        from app.experiments.services import analysis as _stats
+
+        r = await c.get("/experiments/planning/sample-size"
+                        "?baseline_rate=0.1&mde_rel=0.1", headers=admin)
+        expected_n = _stats.required_n_per_arm(0.1, 0.1)
+        check("planning sample-size matches the §4.13 core",
+              r.status_code == 200
+              and r.json()["data"]["required_n_per_arm"] == expected_n
+              and expected_n is not None, r.text[:200])
+        r = await c.get("/experiments/planning/sample-size"
+                        "?baseline_rate=0.6&mde_rel=0.9", headers=admin)
+        check("planning degenerate inputs are honest (lifted rate >= 1)",
+              r.status_code == 200
+              and r.json()["data"]["degenerate"] is True, r.text[:200])
+        r = await c.get("/experiments/planning/sample-size"
+                        "?baseline_rate=1.5&mde_rel=0.1", headers=admin)
+        check("planning out-of-range baseline is 422",
+              r.status_code == 422, r.text[:200])
+
         # #83 (round 302): formula-shaped ids die at the write boundary
         r = await c.post("/experiments/anon/resolve",
                          json={"experiment_key": obs_key,

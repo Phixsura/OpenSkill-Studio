@@ -49,6 +49,39 @@ async def create_experiment(
     return {"data": exp}
 
 
+@router.get("/planning/sample-size", response_model=dict)
+async def planning_sample_size(
+    baseline_rate: float = Query(..., gt=0.0, lt=1.0),
+    mde_rel: float = Query(..., gt=-1.0, le=10.0),
+    alpha: float = Query(0.05, gt=0.0, lt=0.5),
+    power: float = Query(0.8, gt=0.5, lt=1.0),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """Round 312: the design-time planning calculator (§4.13's
+    required_n_per_arm core, previously reachable only as a look-time
+    underpower warning). Pure computation — no DB reads; the read-scope
+    guard keeps the console posture (#59 wall). STATIC ROUTE registered
+    before the /{experiment_id} matcher — a path-param route would
+    swallow it."""
+    from app.experiments.services import analysis as stats
+
+    n = stats.required_n_per_arm(
+        baseline_rate, mde_rel, alpha=alpha, power=power
+    )
+    return {
+        "data": {
+            "required_n_per_arm": n,
+            "degenerate": n is None,
+            "inputs": {
+                "baseline_rate": baseline_rate,
+                "mde_rel": mde_rel,
+                "alpha": alpha,
+                "power": power,
+            },
+        }
+    }
+
+
 @router.get("", response_model=dict)
 async def list_experiments(
     status: str | None = None,

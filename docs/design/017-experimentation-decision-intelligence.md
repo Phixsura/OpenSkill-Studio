@@ -1470,6 +1470,16 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 312 — the planning calculator ships: §4.13's required_n_per_arm
+core was reachable only as a look-time underpower warning — the
+design-time question ("how many users do I need?") every vendor console
+answers had NO endpoint. GET /experiments/planning/sample-size
+(read-scope guard, pure computation, static route before the
+path-param matcher) returns required_n_per_arm + an honest `degenerate`
+flag for impossible inputs. The delegated-surface manifest pin caught
+the new read-scope route exactly as designed (a conscious 6 -> 7 edit).
+Wall 156 -> 159 (core-oracle equality, degenerate honesty, 422 bounds).
+
 Round 310 — the error-code re-diff (the round-275 method, re-run after
 the #80-#83 era): 55 uppercase literals scanned, one genuinely
 undocumented code found (ORG_NOT_FOUND from holdout-group creation) and

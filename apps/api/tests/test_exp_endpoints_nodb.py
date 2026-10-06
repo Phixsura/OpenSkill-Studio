@@ -31,6 +31,7 @@ WRITE_ENDPOINTS = [
 
 READ_ENDPOINTS = [
     "/api/v1/experiments",
+    "/api/v1/experiments/planning/sample-size?baseline_rate=0.1&mde_rel=0.1",
     f"/api/v1/experiments/{EXP_ID}",
     f"/api/v1/experiments/{EXP_ID}/versions",
     f"/api/v1/experiments/{EXP_ID}/events",
@@ -150,7 +151,7 @@ def test_delegated_surface_manifest_pinned():
         "analysis.py": (4, 0),  # round 137: + look history  # round 87: + latest-look scorecard (read scope)
         "assignments.py": (4, 0),  # round 133: + assignments CSV export
         "decisions.py": (0, 9),
-        "experiments.py": (6, 4),  # round 92 clone; round 129 ramp-plan (platform)
+        "experiments.py": (7, 4),  # round 92 clone; round 129 ramp-plan (platform); round 312 planning calculator (read scope)
         "guardrails.py": (2, 2),  # round 96: + events CSV export (read scope)
         "holdouts.py": (0, 4),  # round 54: + holdout report (platform admin)
         "layers.py": (0, 5),
