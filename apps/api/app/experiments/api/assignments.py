@@ -35,12 +35,23 @@ async def export_assignments(
 ):
     """Round 133: CSV export of raw assignment rows (the audit/compliance
     third of the export trio — snapshots and guardrail events already
-    ship). Same read scope and uniform 404 as the stats endpoint; unit ids
-    are ULIDs/opaque ids, no free text, so no formula-injection surface."""
+    ship). Same read scope and uniform 404 as the stats endpoint. #83
+    (round 301): unit ids stopped being purely system-minted when exp15
+    added client-supplied anonymous ids — the write boundary now pins
+    them to [A-Za-z0-9_-], and this export keeps a defense-in-depth guard
+    (any cell starting with = + - @ or a control char is prefixed with
+    a quote) so a future id namespace cannot reopen the Excel hole."""
     import csv
     import io
 
     from fastapi.responses import Response
+
+    def _csv_cell_safe(value):
+        # Excel formula-injection guard: neutralize leading = + - @ and
+        # tab/CR by prefixing a single quote (OWASP CSV-injection guidance)
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + value
+        return value
 
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await AssignmentService(db).list_assignments(experiment_id, limit=limit)
@@ -52,8 +63,11 @@ async def export_assignments(
     for row in rows:
         writer.writerow(
             [
-                value.isoformat() if hasattr(value := getattr(row, col), "isoformat")
-                else value
+                _csv_cell_safe(
+                    value.isoformat()
+                    if hasattr(value := getattr(row, col), "isoformat")
+                    else value
+                )
                 for col in columns
             ]
         )

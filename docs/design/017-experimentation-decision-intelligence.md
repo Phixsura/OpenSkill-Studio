@@ -1442,6 +1442,17 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 301 — defect #83 (CSV formula injection via anonymous ids): the
+round-133 claim "unit ids are system-minted, no formula surface" went
+STALE when exp15 added client-supplied anonymous ids whose only wall was
+no-colon — "=1+2", "+cmd", "@SUM(A1)" were storable as unit_id and rode
+the assignments CSV into Excel. Fixed at the write boundary (#36 law):
+all three anonymous_id fields pin [A-Za-z0-9_-] (the SDK's Crockford
+shape passes untouched), plus defense-in-depth in the export itself
+(leading = + - @ / control chars get a quote prefix per OWASP), and the
+stale docstring corrected. Kill-proof: six formula/sigil payloads 422
+across all three endpoints; the ULID shape stays accepted.
+
 Rounds 297-299 — PR body synced through 296; the competitive analysis
 gains section 0c (the webhook + identity epochs — two staples the
 original matrix never listed); certification 164 = 6996 all-green;

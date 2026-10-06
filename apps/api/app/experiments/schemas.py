@@ -446,7 +446,7 @@ class AnonResolveRequest(_StrictReq):
 
     experiment_key: str = Field(min_length=1, max_length=64)
     anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[^:]+$")
+                              pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class AnonExposureRequest(_StrictReq):
@@ -455,7 +455,7 @@ class AnonExposureRequest(_StrictReq):
 
     experiment_key: str = Field(min_length=1, max_length=64)
     anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[^:]+$")
+                              pattern=r"^[A-Za-z0-9_-]+$")
     dedup_key: str | None = Field(default=None, max_length=64)
 
 
@@ -465,7 +465,7 @@ class IdentityLinkRequest(_StrictReq):
     else passing someone ELSE's id is 403."""
 
     anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[^:]+$")
+                              pattern=r"^[A-Za-z0-9_-]+$")
     user_id: str | None = Field(default=None, min_length=1, max_length=26)
 
 

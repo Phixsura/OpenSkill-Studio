@@ -173,3 +173,28 @@ async def test_identity_links_listing_caps_at_hundred(c):
     listed = [row["anonymous_id"] for row in r.json()["data"]]
     assert len(listed) == 100
     assert set(listed) <= set(ids)
+
+
+@pytest.mark.asyncio
+async def test_formula_shaped_anonymous_ids_are_422(c):
+    """#83 (round 301): the colon-only wall let Excel formula payloads
+    ("=1+2", "+cmd", "@SUM(1)", "-2+3") become unit_id and ride the
+    assignments CSV export. The write boundary pins [A-Za-z0-9_-]."""
+    payloads = ["=1+2", "+cmd|calc", "@SUM(A1)", "-2+3", "a b", "a:b"]
+    for bad in payloads:
+        r = await c.post("/api/v1/experiments/anon/resolve",
+                         json={"experiment_key": "any", "anonymous_id": bad})
+        assert r.status_code == 422, (bad, r.status_code, r.text[:200])
+        r = await c.post("/api/v1/experiments/anon/exposures",
+                         json={"experiment_key": "any", "anonymous_id": bad})
+        assert r.status_code == 422, (bad, r.status_code)
+    h, _u = await _auth(c, "CsvWall")
+    r = await c.post("/api/v1/experiments/self/identity-link",
+                     headers=h, json={"anonymous_id": "=HYPERLINK(1)"})
+    assert r.status_code == 422
+    # the SDK's Crockford shape still passes the wall (resolve may 404 the
+    # unknown experiment or fail-safe — anything but a validation error)
+    r = await c.post("/api/v1/experiments/anon/resolve",
+                     json={"experiment_key": "any",
+                           "anonymous_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"})
+    assert r.status_code != 422
