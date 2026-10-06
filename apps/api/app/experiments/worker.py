@@ -14,6 +14,8 @@ from datetime import UTC, datetime, time, timedelta
 
 import structlog
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy import cast as sa_cast
+from sqlalchemy.dialects.postgresql import JSONPATH
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -651,6 +653,19 @@ async def sweep_ramp_plans(
             .where(
                 Experiment.status == "running",
                 Experiment.ramp_plan.is_not(None),
+                # #87 (round 341, the #84-86 class, fourth member): a fully
+                # APPLIED plan never left this predicate — exhausted plans
+                # squatted the id-ordered cap permanently. The numeric
+                # jsonpath filter (no datetime — stored `at` may be naive)
+                # keeps only plans with some step ABOVE the current ramp;
+                # time-dueness stays the loop's authority, so a future-dated
+                # head squats at most until its own step lands (bounded),
+                # never forever.
+                func.jsonb_path_exists(
+                    Experiment.ramp_plan,
+                    sa_cast("$[*] ? (@.ramp_bp > $bp)", JSONPATH),
+                    func.jsonb_build_object("bp", Experiment.ramp_bp),
+                ),
             )
             .order_by(Experiment.id.asc())
             .limit(cap)

@@ -3561,3 +3561,38 @@ async def test_segment_org_cap_takes_twenty(db):
     # equal-size tie-break by org id ascending: the largest id drops
     dropped = f"org:{max(org_ids)}"
     assert dropped not in segs
+
+
+async def test_ramp_sweep_cap_not_squatted_by_exhausted_plans(db):
+    """#87 (round 341, the #84-86 class): a fully-applied plan never left
+    the sweep predicate — exhausted plans squatted the id-ordered cap
+    permanently. With cap=1 and a lower-id EXHAUSTED plan in front, the
+    due one must still be applied."""
+    from datetime import timedelta as _td
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.worker import sweep_ramp_plans
+
+    past = (datetime.now(UTC) - _td(hours=1)).isoformat()
+    # lower-id squatter: plan fully applied (current ramp at the max step)
+    squatter, _ = await _mk_running(db)
+    sq = await db.get(_Exp, squatter.id)
+    sq.ramp_plan = [{"at": past, "ramp_bp": 5000}]
+    sq.ramp_bp = 10_000  # already above every step
+    # higher-id due experiment
+    due, _ = await _mk_running(db)
+    du = await db.get(_Exp, due.id)
+    du.ramp_plan = [{"at": past, "ramp_bp": 9000}]
+    du.ramp_bp = 1000
+    await db.flush()
+    from sqlalchemy import update as _update
+
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status == "running",
+               _Exp.id.notin_([squatter.id, due.id]))
+        .values(status="paused")
+    )
+    applied = await sweep_ramp_plans(db, cap=1)
+    assert applied == 1, "an exhausted plan must not shadow the due one"
+    assert (await db.get(_Exp, due.id)).ramp_bp == 9000

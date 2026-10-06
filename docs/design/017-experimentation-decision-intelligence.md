@@ -1504,6 +1504,18 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 341 — defect #87 (the class's FOURTH member): a fully-applied
+ramp plan never left the ramp sweep's predicate — exhausted plans
+squatted the id-ordered cap permanently (the round-334 "self-draining"
+claim was wrong here too). Fixed with a NUMERIC jsonpath filter in SQL
+(some step's ramp_bp above the current ramp) — datetime stays the
+loop's authority because stored `at` strings may be naive; a
+future-dated head therefore squats at most until its own step lands,
+bounded, never forever. RampPlanStep.at now normalizes naive -> UTC at
+the write boundary (#56 law), so stored plans become uniformly aware
+and a future full-SQL time filter stays available. Red-by-reversal;
+metrics 71/71 + spec-validation 138/138.
+
 Round 340 — defect #86 (the #85 class, third member): the closures
 sweep's max_days due-check also lived after its started_at-ordered cap —
 the OLDEST long-max_days experiments squatted every slot while newer,

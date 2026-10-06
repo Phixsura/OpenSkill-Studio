@@ -294,6 +294,16 @@ class RampPlanStep(_StrictReq):
     at: datetime
     ramp_bp: int = Field(ge=1, le=10_000)
 
+    @field_validator("at")
+    @classmethod
+    def _at_utc(cls, v: datetime) -> datetime:
+        # #56 law (round 341): naive means UTC, deterministically — stored
+        # plans are uniformly tz-aware so a future SQL-side time filter
+        # stays type-safe.
+        from datetime import UTC as _UTC
+
+        return v.replace(tzinfo=_UTC) if v.tzinfo is None else v
+
 
 class RampPlanRequest(_StrictReq):
     """Round 129: scheduled ramp steps; null/empty clears the plan."""
