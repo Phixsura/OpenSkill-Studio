@@ -1169,12 +1169,12 @@ async def test_closure_cap_not_squatted_by_long_max_days(db):
     sq = await db.get(Experiment, squatter.id)
     sq.started_at = datetime.now(UTC) - _td(days=30)
     # its spec default max_days=28 would make it DUE — give it a long one
-    from app.experiments.models import ExperimentVersion as _EV
+    from app.experiments.models import ExperimentVersion as ExpVer
 
     v = (
         await db.execute(
-            select(_EV).where(_EV.experiment_id == squatter.id,
-                              _EV.version == sq.current_version)
+            select(ExpVer).where(ExpVer.experiment_id == squatter.id,
+                                 ExpVer.version == sq.current_version)
         )
     ).scalar_one()
     spec = dict(v.spec)
