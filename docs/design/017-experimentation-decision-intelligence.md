@@ -1476,6 +1476,11 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 314-317 — PR body synced through 313; §4.13 and the competitive
+analysis cross-reference the planner; the browser wall re-ran 3/3 after
+the shared-bundle change; certification 166 = 6998 all-green (the
+planner's nodb pin joins).
+
 Round 313 — the planner reaches the product: a PlanningCalculator card
 on the experiment builder (debounce-free useQuery keyed on inputs,
 client-side bounds gate so invalid input never hits the API, the
