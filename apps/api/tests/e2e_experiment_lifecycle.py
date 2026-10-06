@@ -1133,6 +1133,33 @@ async def main() -> int:
         check("org admin transitions own-org experiment",
               r.status_code == 200 and r.json()["data"]["status"] == "review",
               r.text[:200])
+
+        # ── §4.18 webhooks over HTTP (round 287): the public subscription
+        # API accepts experiment.* types; bad types name them in the error ──
+        r = await c.post(f"/orgs/{org_id}/webhooks", headers=student, json={
+            "url": "https://example.com/exp-hook",
+            "events": ["experiment.decision_recorded",
+                       "experiment.status_changed"],
+        })
+        check("webhook subscription accepts experiment.* events",
+              r.status_code == 201 and r.json()["data"]["secret"], r.text[:200])
+        wh_id = r.json()["data"]["id"]
+        r = await c.post(f"/orgs/{org_id}/webhooks", headers=student, json={
+            "url": "https://example.com/exp-hook",
+            "events": ["experiment.nonsense"],
+        })
+        check("unknown webhook event 422 names experiment.* in valid list",
+              r.status_code == 422
+              and "experiment.decision_recorded" in r.text, r.text[:300])
+        r = await c.get(f"/orgs/{org_id}/webhooks", headers=student)
+        rows = r.json()["data"] if r.status_code == 200 else []
+        check("webhook listing masks the secret",
+              r.status_code == 200
+              and any(w["id"] == wh_id and "****" in w["secret"] for w in rows),
+              r.text[:200])
+        r = await c.delete(f"/orgs/{org_id}/webhooks/{wh_id}", headers=student)
+        check("webhook subscription deleted", r.status_code in (200, 204),
+              r.text[:200])
         r = await c.post(f"/experiments/{experiment_ids[0]}/transition", headers=student,
                          json={"to_status": "paused"})
         check("org admin cannot touch a platform experiment (uniform 404)",
