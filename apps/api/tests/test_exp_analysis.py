@@ -1550,3 +1550,16 @@ def test_variance_reduction_auto_literal_validation():
     from app.experiments.services.metrics import resolve_covariates
     assert resolve_covariates(spec) == ["practical_pass_rate",
                                         "revision_count"]
+
+
+def test_required_n_boundary_rates_are_none():
+    """Wave 48 strengthening (round 323): the (0,1) OPEN interval on the
+    baseline is load-bearing — at p1=1.0 with a negative mde the lifted
+    rate is interior and the closed-interval mutant returns a finite n
+    for a degenerate design (p1*(1-p1)=0). Both edges pinned."""
+    from app.experiments.services.analysis import required_n_per_arm
+
+    assert required_n_per_arm(1.0, -0.5) is None
+    assert required_n_per_arm(0.0, 0.5) is None
+    # interior sanity stays finite
+    assert required_n_per_arm(0.1, 0.1) is not None
