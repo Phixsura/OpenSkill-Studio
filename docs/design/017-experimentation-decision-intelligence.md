@@ -1505,6 +1505,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 348-349 — PR synced through 347; mutation wave 49 puts the
+fairness-class fixes themselves under mutation: guardrails
+evaluate_experiment 9/9, worker sweeps 36/40 after one strengthening
+pass (the SQL COALESCE default pinned at exactly 28 by a 28.5-day
+defaulted-spec case), four reasoned survivors (alert-threshold and
+timestamp measure-zero boundaries; the closure loop's belt-and-braces
+re-check behind the SQL authority).
+
 Rounds 346-347 — certification 169 came back RED (1/7007): the
 deployment suite's own lint gate caught an N814 alias in the #86
 kill-proof (the per-round ruff pass had covered the source files but

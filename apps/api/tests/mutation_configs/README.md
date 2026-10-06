@@ -459,3 +459,17 @@ mde -1.0/+1.0 — zero-variance arms must be None). The one standing
 survivor (0.0 <= p1) is EQUIVALENT: p1=0 forces p2=0, which the p2
 strict check rejects on both variants, and negative p1 fails both forms
 identically.
+
+
+Wave 49 (fairness-class fixes #84-#88, round 349): guardrails
+evaluate_experiment 9/9; worker sweeps 36/40 after one strengthening
+pass (the COALESCE default 28->29 survivor died to a 28.5-day
+defaulted-spec case). Four reasoned survivors stand: the significance
+filter's `p is not None AND p < alpha` pair (L435/436 — an alert-only
+threshold on a continuous mSPRT p; the =alpha boundary is measure-zero
+and operationally indistinguishable), the notification dedup's 24h
+`>=` (L449 — timestamp-equality measure-zero, the ULID-tiebreak
+family), and the closure loop's `started_at + max_days` re-check
+(L786 — belt-and-braces BEHIND the SQL due-filter, which is the
+authority; the belt only matters under clock skew between SQL now()
+and Python now, where either sign errs safe by one sweep cycle).
