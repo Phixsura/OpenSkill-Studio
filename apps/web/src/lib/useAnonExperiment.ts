@@ -31,7 +31,9 @@ export function getAnonymousId(): string | null {
   // hook degrades to the default experience rather than crashing the page
   try {
     let id = window.localStorage.getItem(STORAGE_KEY);
-    if (!id) {
+    // #83 (round 303): the API pins [A-Za-z0-9_-] — a tampered or legacy
+    // stored id outside that shape would 422 forever; re-mint instead
+    if (!id || !/^[A-Za-z0-9_-]{1,26}$/.test(id)) {
       id = generateAnonId();
       window.localStorage.setItem(STORAGE_KEY, id);
     }

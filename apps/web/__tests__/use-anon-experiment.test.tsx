@@ -44,6 +44,13 @@ describe("useAnonExperiment (ADR-017 §4.17 pre-login hook)", () => {
     expect(getAnonymousId()).toBe(first); // sticky per device
   });
 
+  it("re-mints when the stored id is tampered outside the charset (#83)", () => {
+    window.localStorage.setItem("osk-anon-id", "=HYPERLINK(1)");
+    const id = getAnonymousId();
+    expect(id).toHaveLength(26);
+    expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
   it("resolves through the anon surface and records exposures with the id", async () => {
     anonApi.mockResolvedValue({
       data: { variant_key: "treatment", config: { cta: "big" } },

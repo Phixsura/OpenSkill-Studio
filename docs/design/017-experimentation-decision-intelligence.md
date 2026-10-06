@@ -1442,6 +1442,11 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 302-303 — #83's wire and SDK: a wall check (formula-shaped
+anonymous id 422 over HTTP, run pending cert 165) and the SDK's
+re-mint guard (a tampered/legacy localStorage id outside [A-Za-z0-9_-]
+would 422 forever — getAnonymousId now validates shape and re-mints).
+
 Round 301 — defect #83 (CSV formula injection via anonymous ids): the
 round-133 claim "unit ids are system-minted, no formula surface" went
 STALE when exp15 added client-supplied anonymous ids whose only wall was
