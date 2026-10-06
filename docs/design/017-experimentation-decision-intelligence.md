@@ -1392,6 +1392,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 286 — the UNMOCKED trigger path proven: a real org +
+ACTIVE-tenant subscription created through WebhookService.create (the
+whitelist accepts experiment.*), emit_experiment_event flows through the
+real trigger_event — tenant entitlement gate (R77[2]), per-subscription
+event-type filter (the status-only subscription is NOT handed a
+decision event), fire-and-forget delivery scheduling — with only the
+HTTP layer mocked. Rounds 284-285 mocked trigger_event to test the
+wire; this closes the seam between the wire and the platform service.
+
 Round 285 — the breach wire's DB-level kill-proof: an org-scoped
 experiment driven to a real exposure_rate breach emits
 guardrail_breach (with detail) THEN the pause's status_changed, both

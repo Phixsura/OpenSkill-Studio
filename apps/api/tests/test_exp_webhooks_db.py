@@ -172,3 +172,55 @@ async def test_guardrail_breach_emits_detail_then_pause(db, captured):
     _o, _t2, pause_payload = captured[1]
     assert pause_payload["from_status"] == "running"
     assert pause_payload["to_status"] == "paused"
+
+
+async def test_unmocked_trigger_path_subscribes_filters_delivers(db, monkeypatch):
+    """Round 286: drop the trigger_event mock — the REAL path must accept an
+    experiment.* subscription (whitelist), pass the tenant entitlement gate,
+    match by event-type filter, and schedule delivery (HTTP layer mocked)."""
+    import asyncio
+
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    admin = await _mk_admin(db)
+    org = await OrgService(db).create(
+        name=f"WHX {ULID()}", slug=f"whx-{str(ULID()).lower()}",
+        description=None, created_by=admin.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+
+    svc = WebhookService(db)
+    # subscription CREATE must accept the new experiment.* types (whitelist)
+    sub_decisions = await svc.create(
+        org_id=org.id, url="https://example.com/exp-hook",
+        events=["experiment.decision_recorded"],
+    )
+    sub_status = await svc.create(
+        org_id=org.id, url="https://example.com/status-hook",
+        events=["experiment.status_changed"],
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append((webhook_id, event_type))
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    await emit_experiment_event(
+        db, scope_org_id=org.id,
+        event_type="experiment.decision_recorded",
+        payload={"experiment_id": "x", "decision": "promote"},
+    )
+    await asyncio.sleep(0.05)  # fire-and-forget task
+    # the decision sub got it; the status-only sub was filtered out
+    assert scheduled == [(sub_decisions.id, "experiment.decision_recorded")]
+    assert sub_status.id not in [w for w, _ in scheduled]
