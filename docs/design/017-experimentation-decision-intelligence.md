@@ -1509,6 +1509,20 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 400-500 — the sustained-verification era. Cycles five through
+twenty-five of the battery rotation (experiments 630, live wall 161,
+web 742, browser wall 3 — every pass green, every count from run
+output); certifications 171-175 (7008 -> 7010); the digest ISO-week
+rotation (round 351) and the #89-doc pause-truth correction (round
+354); wave 49/50 put the fairness fixes and the digest rotation under
+mutation (45/49 + 20/20); the coverage map closed the layers-service
+seam (80% -> 96%); one low-memory kill and one premature-sweep abort
+both recorded honestly and re-run green. From round 455 the user's
+no-background rule holds: every battery runs foreground inside the
+turn, test servers are same-call scaffolding killed before return.
+Round 500 marks: 89 red-proven defects, 50 mutation waves, 175
+certifications, four ledgers current, the branch in sync with origin.
+
 Rounds 385-399 — cycles three and four of the in-flight cadence, every
 battery green on every pass: core 241/241, analytics 164/164 and
 132/132, decisions/flow 105/105, identity+webhooks 77/77, pure logic
