@@ -1424,6 +1424,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 294 — the pre-login story's last mile: useAnonExperiment had
+tests and auth-path claiming but NO page consumer. The register page's
+sign-up CTA now rides the "register-cta" anonymous experiment
+(config.cta_label, fail-safe default "Sign up"), with a daily-deduped
+exposure recorded on successful registration — the conversion the
+experiment measures. Web 734/734 (two CTA pins), type-check clean.
+
 Round 293 — the savepoint boundary documented + defended (see §4.18);
 certification 163 = 6992 all-green (the #80/#81 suite joins).
 

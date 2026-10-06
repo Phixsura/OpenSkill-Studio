@@ -26,8 +26,15 @@ vi.mock("@/stores/auth", () => ({
   useAuthStore: (sel: (s: typeof auth.state) => unknown) => sel(auth.state),
 }));
 const claimSpy = vi.fn().mockResolvedValue(true);
+const exposureSpy = vi.fn();
+let anonConfig: Record<string, unknown> = {};
 vi.mock("@/lib/useAnonExperiment", () => ({
   claimAnonymousId: (...args: unknown[]) => claimSpy(...args),
+  useAnonExperiment: () => ({
+    variantKey: null,
+    config: anonConfig,
+    recordExposure: exposureSpy,
+  }),
 }));
 
 vi.mock("@/lib/api", () => {
@@ -169,5 +176,19 @@ describe("RegisterPage (R476)", () => {
     render(<RegisterPage />);
     fill("Abcdefg1");
     expect(await screen.findByText(/Registration failed/)).toBeTruthy();
+  });
+});
+
+describe("register CTA experiment (round 294)", () => {
+  it("renders the default label without experiment config", () => {
+    anonConfig = {};
+    render(<RegisterPage />);
+    expect(screen.getByRole("button", { name: "Sign up" })).toBeTruthy();
+  });
+
+  it("renders the experiment CTA label when configured", () => {
+    anonConfig = { cta_label: "Start creating — free" };
+    render(<RegisterPage />);
+    expect(screen.getByRole("button", { name: "Start creating — free" })).toBeTruthy();
   });
 });
