@@ -36,7 +36,9 @@ async def emit_experiment_event(
     try:
         from app.services.webhook import WebhookService
 
-        await WebhookService(db).trigger_event(scope_org_id, event_type, payload)
+        await WebhookService(db).trigger_event(
+            scope_org_id, event_type, payload, defer_until_commit=True
+        )
     except Exception:
         log.warning(
             "experiment_webhook_emit_failed",

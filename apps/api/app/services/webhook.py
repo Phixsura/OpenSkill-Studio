@@ -213,11 +213,25 @@ class WebhookService:
         await self.db.delete(sub)
         await self.db.flush()
 
-    async def trigger_event(self, org_id: str, event_type: str, payload: dict) -> None:
+    async def trigger_event(
+        self,
+        org_id: str,
+        event_type: str,
+        payload: dict,
+        *,
+        defer_until_commit: bool = False,
+    ) -> None:
         """Fire-and-forget HTTP POSTs to all matching active subscriptions.
 
         This method is fully fail-safe: any DB or delivery error is logged
         and swallowed so it never corrupts the caller's session or transaction.
+
+        defer_until_commit (round 290, defect #80): with the default False the
+        HTTP tasks spawn immediately — BEFORE the caller's endpoint commits —
+        so a commit failure or rollback leaks a webhook for a write that never
+        happened (a phantom event). Pass True to compute the deliveries now
+        (the DB reads) but spawn them only on the session's after_commit; a
+        rollback simply never fires them.
         """
         try:
             # Use a nested savepoint so any DB error (e.g. missing column
@@ -267,20 +281,34 @@ class WebhookService:
         if not deliveries:
             return
 
-        # Fire-and-forget: don't block the caller.
-        # Keep strong references so tasks aren't GC'd before completion.
-        for delivery in deliveries:
-            task = asyncio.create_task(
-                self._deliver_background(
-                    delivery["url"],
-                    delivery["secret"],
-                    delivery["webhook_id"],
-                    event_type,
-                    payload,
+        def _spawn_all() -> None:
+            # Fire-and-forget: don't block the caller.
+            # Keep strong references so tasks aren't GC'd before completion.
+            for delivery in deliveries:
+                task = asyncio.create_task(
+                    self._deliver_background(
+                        delivery["url"],
+                        delivery["secret"],
+                        delivery["webhook_id"],
+                        event_type,
+                        payload,
+                    )
                 )
-            )
-            _pending_tasks.add(task)
-            task.add_done_callback(_pending_tasks.discard)
+                _pending_tasks.add(task)
+                task.add_done_callback(_pending_tasks.discard)
+
+        if not defer_until_commit:
+            _spawn_all()
+            return
+
+        from sqlalchemy import event as sa_event
+
+        @sa_event.listens_for(self.db.sync_session, "after_commit", once=True)
+        def _fire_on_commit(_session) -> None:  # pragma: no branch
+            # Runs in the loop's thread (greenlet context) — create_task is
+            # safe here. A rollback means this listener never fires, which is
+            # exactly the phantom-prevention contract.
+            _spawn_all()
 
     @staticmethod
     async def _deliver_background(

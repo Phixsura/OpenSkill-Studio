@@ -510,6 +510,19 @@ Fail-safe: emission errors are logged and swallowed (a dead webhook
 endpoint must never 500 a transition or a decision). Kill-proofs:
 tests/test_exp_webhooks_db.py (wire + containment + fail-safe).
 
+Defect #80 (round 290, phantom events): the endpoint pattern is
+service-then-`db.commit()` — but `trigger_event` spawned its HTTP tasks
+immediately, BEFORE the commit, so a commit failure or rollback leaked a
+webhook for a decision/transition that never happened. Fix:
+`trigger_event(defer_until_commit=True)` (opt-in, platform-safe default
+unchanged) computes the deliveries now but spawns them on the session's
+`after_commit` (once-listener); a rollback never fires them. The
+experiment emitter always opts in — experiment events are always tied to
+a transactional write. Kill-proofs: nothing-before-commit pin,
+rollback-leaks-nothing, delivery-after-commit. The same hazard exists
+for pack/talent/eco callers (default False keeps their semantics) —
+noted as a platform-wide follow-up, out of ADR-017 scope.
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1391,6 +1404,11 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 290 — defect #80 (phantom webhooks): see §4.18 — delivery now
+defers to after_commit for experiment events; red-first (the unmocked
+test's pre-commit assertion), rollback kill-proof, cleanup sweeps the
+committed fixture rows (tenant does NOT cascade org — delete org first).
 
 Rounds 287-288 — the webhook subscription HTTP contract on the live
 wall (4 checks: experiment.* accepted with a one-time secret, unknown

@@ -36,7 +36,7 @@ def captured(monkeypatch):
     test here (it has its own suite) — the WIRE is."""
     calls: list[tuple[str, str, dict]] = []
 
-    async def _fake(self, org_id, event_type, payload):
+    async def _fake(self, org_id, event_type, payload, **kw):
         calls.append((org_id, event_type, payload))
 
     from app.services.webhook import WebhookService
@@ -129,7 +129,7 @@ async def test_platform_wide_experiment_never_fans_out(db, captured):
 
 
 async def test_delivery_failure_never_breaks_transition(db, monkeypatch):
-    async def _boom(self, org_id, event_type, payload):
+    async def _boom(self, org_id, event_type, payload, **kw):
         raise RuntimeError("delivery exploded")
 
     from app.services.webhook import WebhookService
@@ -220,7 +220,72 @@ async def test_unmocked_trigger_path_subscribes_filters_delivers(db, monkeypatch
         event_type="experiment.decision_recorded",
         payload={"experiment_id": "x", "decision": "promote"},
     )
-    await asyncio.sleep(0.05)  # fire-and-forget task
-    # the decision sub got it; the status-only sub was filtered out
-    assert scheduled == [(sub_decisions.id, "experiment.decision_recorded")]
-    assert sub_status.id not in [w for w, _ in scheduled]
+    await asyncio.sleep(0.05)
+    # #80 (round 290): BEFORE the commit nothing may leave the building —
+    # a rollback after this point must leak no phantom event
+    assert scheduled == []
+    try:
+        await db.commit()
+        await asyncio.sleep(0.05)  # fire-and-forget task
+        # the decision sub got it; the status-only sub was filtered out
+        assert scheduled == [(sub_decisions.id, "experiment.decision_recorded")]
+        assert sub_status.id not in [w for w, _ in scheduled]
+    finally:
+        # the commit persisted real rows — sweep them (tenant cascades org,
+        # org cascades subscriptions/memberships)
+        from app.controlplane.models.tenant import TenantAccount as TenantAcc
+        from app.models.organization import Organization as OrgModel
+
+        org_row = await db.get(OrgModel, org.id)
+        if org_row is not None:
+            await db.delete(org_row)  # cascades subscriptions + memberships
+            await db.flush()
+        tenant_row = await db.get(TenantAcc, org.tenant_id)
+        if tenant_row is not None:
+            await db.delete(tenant_row)
+        admin_row = await db.get(User, admin.id)
+        if admin_row is not None:
+            await db.delete(admin_row)
+        await db.commit()
+
+
+async def test_rollback_leaks_no_phantom_webhook(db, monkeypatch):
+    """#80 (round 290): the caller's transaction rolls back — the webhook
+    must never have left. Kill-proof for defer_until_commit."""
+    import asyncio
+
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    admin = await _mk_admin(db)
+    org = await OrgService(db).create(
+        name=f"WHR {ULID()}", slug=f"whr-{str(ULID()).lower()}",
+        description=None, created_by=admin.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    svc = WebhookService(db)
+    await svc.create(org_id=org.id, url="https://example.com/ghost",
+                     events=["experiment.decision_recorded"])
+
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(webhook_id)
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    await emit_experiment_event(
+        db, scope_org_id=org.id,
+        event_type="experiment.decision_recorded",
+        payload={"experiment_id": "ghost", "decision": "promote"},
+    )
+    await db.rollback()  # the decision never happened
+    await asyncio.sleep(0.05)
+    assert scheduled == [], "rollback must not leak a phantom webhook"
