@@ -1561,5 +1561,10 @@ def test_required_n_boundary_rates_are_none():
 
     assert required_n_per_arm(1.0, -0.5) is None
     assert required_n_per_arm(0.0, 0.5) is None
+    # the LIFTED rate's edges too (the same compound line's other two ops):
+    # mde=-1.0 drives p2 to exactly 0; mde=+1.0 from 0.5 drives p2 to 1.0 —
+    # both degenerate designs (a zero-variance arm), both must be None
+    assert required_n_per_arm(0.5, -1.0) is None
+    assert required_n_per_arm(0.5, 1.0) is None
     # interior sanity stays finite
     assert required_n_per_arm(0.1, 0.1) is not None
