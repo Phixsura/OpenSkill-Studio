@@ -15,6 +15,7 @@ from app.experiments.schemas import (
     CreateExperimentRequest,
     CreateVersionRequest,
     ExperimentEventResponse,
+    ExperimentNoteRequest,
     ExperimentResponse,
     RampPlanRequest,
     RampRequest,
@@ -223,6 +224,28 @@ async def set_ramp_plan(
     )
     await db.commit()
     return {"data": exp}
+
+
+@router.post("/{experiment_id}/notes", response_model=dict, status_code=201)
+async def add_note(
+    experiment_id: str,
+    body: ExperimentNoteRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: ReadScope = Depends(experiment_read_scope),
+):
+    """Round 318: timeline annotation — event_type "note" (the 12th
+    canonical type). Append-only like every event; shows up in the same
+    events feed the console already renders."""
+    svc = ExperimentService(db)
+    await svc.get_scoped(experiment_id, scope.org_ids)
+    await svc._record_event(  # noqa: SLF001 — same package
+        experiment_id,
+        event_type="note",
+        actor_user_id=scope.user.id,
+        payload={"text": body.text},
+    )
+    await db.commit()
+    return {"data": {"recorded": True}}
 
 
 @router.get("/{experiment_id}/events", response_model=dict)

@@ -776,6 +776,17 @@ async def main() -> int:
                           json={"ramp_bp": 10000})
         check("ramp the observational experiment for serving",
               r.status_code == 200, r.text[:200])
+        # Round 318: timeline note -> the events feed (12th event type)
+        r = await c.post(f"/experiments/{exp_id}/notes", headers=admin,
+                         json={"text": "wall: raised MDE after week one"})
+        check("timeline note accepted", r.status_code == 201, r.text[:200])
+        r = await c.get(f"/experiments/{exp_id}/events?limit=50", headers=admin)
+        notes = [e for e in r.json()["data"]
+                 if e["event_type"] == "note"
+                 and e["payload"].get("text") == "wall: raised MDE after week one"]
+        check("note rides the events feed with its text", len(notes) == 1,
+              r.text[:300])
+
         # Round 312: the planning calculator — oracle via the pure core
         from app.experiments.services import analysis as _stats
 

@@ -198,3 +198,23 @@ async def test_formula_shaped_anonymous_ids_are_422(c):
                      json={"experiment_key": "any",
                            "anonymous_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"})
     assert r.status_code != 422
+
+
+@pytest.mark.asyncio
+async def test_timeline_note_wall_and_boundary(c):
+    """Round 318: a plain user hits the #59 wall (403 BEFORE validation);
+    the text boundary (#87 class: ctrl chars, oversize) is pinned on the
+    schema directly."""
+    import pydantic
+
+    from app.experiments.schemas import ExperimentNoteRequest
+
+    h, _u = await _auth(c, "Noter")
+    r = await c.post(f"/api/v1/experiments/{'x' * 26}/notes",
+                     headers=h, json={"text": "hello"})
+    assert r.status_code == 403  # read-scope wall holds for writes too
+    with pytest.raises(pydantic.ValidationError):
+        ExperimentNoteRequest(text="bad\x00ctrl")
+    with pytest.raises(pydantic.ValidationError):
+        ExperimentNoteRequest(text="y" * 501)
+    assert ExperimentNoteRequest(text="  ok note  ").text == "ok note"

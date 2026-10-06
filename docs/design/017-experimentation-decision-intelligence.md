@@ -811,7 +811,10 @@ row carries one of): `created`, `version_created`, `transition`,
 `ramp_changed`, `ramp_plan_set`, `cloned_from`, `analysis_look` (the
 look record: hash, sequential state, primary effects, warnings),
 `guardrail_paused` (auto-pause provenance), `decision_recorded`,
-`promotion_drafted`, `experiment_identity_conflict` (§4.17). The audit
+`promotion_drafted`, `experiment_identity_conflict` (§4.17), and
+`note` (round 318 — the human timeline annotation; bounded,
+control-char-rejected free text that NEVER rides a CSV export, §12
+injection law). The audit
 trail is append-only; events are the memory the scorecard, corpus priors
 and conflict forensics read. Every enum query param goes through `check_enum`
 (silent-empty is a lie — ADR-016 §106.6). All new routes join the route-table
@@ -1476,6 +1479,15 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 318 — timeline notes ship (the vendor-console annotation staple):
+POST /{id}/notes lands event_type "note" (the 12th canonical type) in
+the append-only events feed the console already renders; read-scope
+surface (manifest pin consciously 7 -> 8); text bounded 500,
+control-char-rejected (#87 class), stripped; never exported to CSV.
+Wall 159 -> 161 (accept + feed round-trip); nodb 43 (401 + wall-403
+pins; the boundary pinned on the schema because the #59 wall fires
+before validation for plain users).
+
 Rounds 314-317 — PR body synced through 313; §4.13 and the competitive
 analysis cross-reference the planner; the browser wall re-ran 3/3 after
 the shared-bundle change; certification 166 = 6998 all-green (the
@@ -1632,7 +1644,7 @@ covers every code by construction.
 Round 276 — the companion diff for EVENTS: five of eleven audit event
 types were narrative-only (decision_recorded, guardrail_paused,
 promotion_drafted, ramp_plan_set, version_created) — §12 now carries the
-canonical eleven-type list. The signal contract is complete across all
+canonical twelve-type list. The signal contract is complete across all
 four domains: warnings, events, error codes, event types.
 
 Round 275 — error-contract completeness: a code-vs-ADR diff found six

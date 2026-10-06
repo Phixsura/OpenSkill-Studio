@@ -459,6 +459,22 @@ class AnonExposureRequest(_StrictReq):
     dedup_key: str | None = Field(default=None, max_length=64)
 
 
+class ExperimentNoteRequest(_StrictReq):
+    """Round 318: a human timeline annotation — the 12th audit event type.
+    Free text is bounded and control-char-rejected (#87 class); it rides
+    the append-only events table, NEVER a CSV export (§12 injection law)."""
+
+    text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def _no_ctrl(cls, v: str) -> str:
+        from app.schemas.base import reject_ctrl_str
+
+        reject_ctrl_str(v, "text")
+        return v.strip()
+
+
 class IdentityLinkRequest(_StrictReq):
     """§4.17: the authenticated caller claims their own pre-login id.
     user_id (round 232) is the platform-admin support override — anyone
