@@ -1509,6 +1509,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 359-363 — certification 174 = 7009 all-green; the in-flight
+battery cadence (one background computation always spanning the gap to
+the next trigger) carried the browser wall 3/3, the experiments batch
+629/629, the live wall 161/161 and web 742/742 — and surfaced one
+honesty fix: the PR footer's "exp suites 631" was +2 of arithmetic
+drift across rounds; counts now come only from run output (629
+measured, corrected).
+
 Rounds 355-358 — PR synced through 354; the periodic battery ran green
 in flight (wall 161/161, certification 173 = 7008); the competitive
 analysis records the fairness audit; mutation wave 50 on the digest
