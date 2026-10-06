@@ -1479,6 +1479,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 323 — mutation wave 48 (the new surface): endpoints 0/1 (the 201
+literal is the wall's authority), required_n_per_arm 16/17 with a
+two-pass strengthening lesson — the harness's line numbers are
+AST-unparsed, and L979 carried FOUR Lt ops; pinning p1's edges first
+killed nothing (the survivors were p2's edges: mde -1.0/+1.0 drive the
+lifted rate to exactly 0/1, zero-variance arms that must be None). The
+last survivor is equivalent (p1=0 forces p2=0 into the strict p2 check).
+
 Round 320 — the note INPUT ships (319 gave rendering, nothing could
 write from the console): an inline form on the audit-trail card
 (maxLength 500 mirrors the schema, submit disabled on empty, clears and

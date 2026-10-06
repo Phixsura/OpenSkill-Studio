@@ -447,3 +447,15 @@ matched nothing — configs use BARE function names); the defer/cancel
 semantics themselves are pinned by the five empirical kill-proofs from
 rounds 290-296, which wave 46's ledger entry already names as the
 coverage authority for this family.
+
+Wave 48 (planner + notes endpoints, required_n_per_arm core, round 323):
+endpoints 0/1 — the lone mutant is the add_note 201 status literal,
+pinned by the LIVE WALL (out of this wave's cmd by design; the wall is
+the status-code authority). Core 16/17 after two strengthening passes:
+the harness's L979 is the AST-unparsed compound line with FOUR Lt ops —
+the first pass pinned only p1's edges and changed nothing (survivors
+were p2's), the second pinned all four (p1 in {0,1}, p2 in {0,1} via
+mde -1.0/+1.0 — zero-variance arms must be None). The one standing
+survivor (0.0 <= p1) is EQUIVALENT: p1=0 forces p2=0, which the p2
+strict check rejects on both variants, and negative p1 fails both forms
+identically.
