@@ -1509,6 +1509,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 370-375 — certification 175 = 7010 all-green (the layers
+negative battery joins); alembic verified single-head (exp16a00016,
+sixteen linear migrations); the in-flight cadence carried web gates
+(type-check + eslint clean), the stats trio 131/131, identity+webhook
+59/59, governance 99/99, flow 144/144, browser wall 3/3 twice and the
+live wall 161/161 — every gate in the project fresh-green inside one
+cycle.
+
 Rounds 368-369 — a coverage map of app/experiments (93% total; the
 api/* routers read low ONLY because the live wall exercises them in a
 separate process, outside pytest-cov) surfaced one real seam:
