@@ -6,6 +6,36 @@ Amplitude), **Eppo / Datadog Experiments** (acquired 2025), **GrowthBook** (OSS)
 platforms (Microsoft ExP, Netflix XP, Uber/DoorDash switchbacks, Airbnb ERF,
 Spotify Confidence). Feeds ADR-017 v2.
 
+## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
+
+Two capability families shipped since 0b that the original matrix never
+even listed (found by scanning the staples the matrix omitted):
+
+- **Anonymous -> login identity resolution** (§4.17, exp15/16) — the
+  pre-login story every vendor SDK ships: a device-minted anonymous id
+  resolves and records exposures through rate-limited public endpoints,
+  login/register claim the id, assignments migrate IN PLACE (ITT and
+  exposure FKs preserved), first-link-wins with a 422 conflict contract,
+  and a transparency listing. Seven defects (#73-#79) found and killed
+  red-first during hardening. The register page's CTA is the first real
+  pre-login consumer (round 294) — anonymous -> register -> link ->
+  attribution runs end-to-end.
+- **Outbound webhooks** (§4.18, rounds 284-296) — Statsig/GrowthBook-class
+  event delivery: experiment.status_changed / guardrail_breach /
+  decision_recorded through the platform's hardened WebhookService
+  (HMAC-SHA256, SSRF blocklist incl. CGNAT/NAT64), org-scoped
+  containment (platform-wide experiments reach no tenant), and
+  commit-safe delivery the vendors don't document: #80 (no delivery
+  before the caller's commit), #81 (a rollback cancels — the event never
+  rides a later commit), and the savepoint matrix pinned empirically
+  (the outbox runner wraps handlers in savepoints; an unrelated
+  sibling's rollback must not cancel). Five DB kill-proofs double as the
+  SQLAlchemy-drift alarm.
+
+Still open by choice: webhook subscription UI (a platform-wide console
+surface shared by pack/talent/eco events), edge SDKs, session replay,
+warehouse connectors, org-admin spec authoring (§2 posture).
+
 ## 0b. Status update (2026-10-04, v3 rounds 113-176)
 
 The v3 epochs since the note below closed the last deliberate deferrals
