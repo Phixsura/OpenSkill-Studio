@@ -1479,6 +1479,11 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 328-329 — the periodic walls stay fresh: live E2E 161/161 and
+the full experiments suite 622/622 (2m17s), both re-run green with no
+code change pending; the audit-saturation era's conclusions (rounds
+324-325: dedup_key write-only, events expose opaque ULIDs only) hold.
+
 Rounds 324-327 — dedup_key confirmed write-only (no export surface, the
 #83 class stays closed); the events response exposes only opaque ULIDs;
 certification 168 = 7001 all-green; fuzz grows to 20 properties — the
