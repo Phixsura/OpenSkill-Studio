@@ -236,3 +236,37 @@ describe("Experiment detail lifecycle (ADR-017 Part L)", () => {
     expect(screen.queryByText("→ rejected")).toBeNull();
   });
 });
+
+describe("events feed note rendering (round 319)", () => {
+  it("renders a note's text as prose, other payloads as JSON", async () => {
+    api.mockImplementation(async (path: string) => {
+      if (String(path).endsWith(`/experiments/${"E".repeat(26)}`)) {
+        return { data: experiment("running") };
+      }
+      if (String(path).includes("/events")) {
+        return {
+          data: [
+            {
+              id: "e1",
+              event_type: "note",
+              created_at: "2026-10-06T00:00:00Z",
+              payload: { text: "raised MDE after week one" },
+            },
+            {
+              id: "e2",
+              event_type: "transition",
+              created_at: "2026-10-06T00:00:00Z",
+              payload: { from: "review", to: "running" },
+            },
+          ],
+        };
+      }
+      if (String(path).endsWith("/analysis/latest")) return { data: null };
+      return { data: [] };
+    });
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("raised MDE after week one")).toBeTruthy();
+    expect(screen.queryByText(/"text":"raised MDE/)).toBeNull();
+    expect(screen.getByText(/"from":"review"/)).toBeTruthy();
+  });
+});

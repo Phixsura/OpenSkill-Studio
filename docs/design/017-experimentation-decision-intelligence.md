@@ -1479,6 +1479,12 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 319 — 318 adversarially re-reviewed: the feed renders payloads
+through React text nodes (no dangerouslySetInnerHTML anywhere in the
+console), so note text cannot XSS; and notes now render as PROSE in the
+feed (italic text line) instead of a JSON blob — pinned (note text
+visible, its JSON form absent, sibling events still JSON). Web 739/739.
+
 Round 318 — timeline notes ship (the vendor-console annotation staple):
 POST /{id}/notes lands event_type "note" (the 12th canonical type) in
 the append-only events feed the console already renders; read-scope

@@ -445,7 +445,12 @@ POST /api/v1/experiments/self/exposures { "experiment_key": ${JSON.stringify(exp
                 {fmtDate(e.created_at)}
               </span>
               <span className="font-medium">{e.event_type}</span>
-              <span className="truncate text-xs text-slate-500">{JSON.stringify(e.payload)}</span>
+              {e.event_type === "note" && typeof e.payload.text === "string" ? (
+                // round 319: human annotations read as prose, not JSON
+                <span className="text-xs italic text-slate-600">{e.payload.text}</span>
+              ) : (
+                <span className="truncate text-xs text-slate-500">{JSON.stringify(e.payload)}</span>
+              )}
             </li>
           ))}
         </ul>
