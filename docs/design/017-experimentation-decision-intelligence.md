@@ -983,9 +983,9 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
   WRONG for not-yet-due rows — fixed as #86, round 340; a PERSISTENTLY AppError-ing scheduled
   experiment would squat a head slot — bounded by cap 200, surfaced in
   logs, judged a visible config error, not a silent class). The weekly
-  digest caps at 500 under id-order on a recurring population — an
-  informational surface, not statistical safety; revisit with ISO-week
-  rotation if the live population approaches the cap. transition.reason
+  digest rotates its cap-500 window by ISO week (round 351 — the
+  "revisit" debt retired; beyond-cap owners digest within ceil(P/cap)
+  weeks). transition.reason
   is bounded (1000) and NUL-in-JSONB is absorbed by the R88 global
   DBAPIError backstop (22021/22P05 -> 422).
 - Version bumps: allowed only in draft/review; assignments pin
@@ -1504,6 +1504,13 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Rounds 350-351 — certification 171 = 7008 all-green; the digest's
+id-ordered cap becomes an ISO-week rotating window (the proven
+_interaction_window), retiring §17's "revisit if the population
+approaches the cap" debt — beyond-cap owners now digest within
+ceil(P/cap) weeks instead of never (digest tests green, the
+query-side dedup makes the rotation idempotent per owner-week).
 
 Rounds 348-349 — PR synced through 347; mutation wave 49 puts the
 fairness-class fixes themselves under mutation: guardrails

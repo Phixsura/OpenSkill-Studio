@@ -542,7 +542,7 @@ async def sweep_weekly_digest(
 
     now = now or datetime.now(UTC)
     week_ago = now - timedelta(days=7)
-    rows = (
+    all_rows = (
         await db.execute(
             select(Experiment.id, Experiment.title, Experiment.owner_user_id,
                    Experiment.status)
@@ -550,9 +550,13 @@ async def sweep_weekly_digest(
             # exactly the place to keep that from going stale (round 141)
             .where(Experiment.status.in_(("running", "analyzed")))
             .order_by(Experiment.id.asc())
-            .limit(cap)
         )
     ).all()
+    # Round 351: the id-ordered cap becomes an ISO-week ROTATING window
+    # (the wave-43/49-proven _interaction_window), so beyond-cap owners
+    # still get their digest within ceil(P/cap) weeks instead of never.
+    week = now.isocalendar().week
+    rows = _interaction_window(list(all_rows), week, cap)
     by_owner: dict[str, list] = {}
     for experiment_id, title, owner_user_id, status in rows:
         if owner_user_id is None:
