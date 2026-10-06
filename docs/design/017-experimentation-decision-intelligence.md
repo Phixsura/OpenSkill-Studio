@@ -1479,6 +1479,12 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 324-327 — dedup_key confirmed write-only (no export surface, the
+#83 class stays closed); the events response exposes only opaque ULIDs;
+certification 168 = 7001 all-green; fuzz grows to 20 properties — the
+planner core gains totality over the sane design space plus
+MDE-monotonicity (a larger effect never needs more users per arm).
+
 Round 323 — mutation wave 48 (the new surface): endpoints 0/1 (the 201
 literal is the wall's authority), required_n_per_arm 16/17 with a
 two-pass strengthening lesson — the harness's line numbers are

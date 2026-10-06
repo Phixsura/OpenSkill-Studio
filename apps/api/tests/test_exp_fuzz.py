@@ -483,3 +483,25 @@ def test_auto_select_covariates_total(arms, candidates):
         assert chosen["key"] in candidates
         assert abs(chosen["r"]) >= 0.1
         assert math.isfinite(chosen["r"])
+
+
+@given(
+    p1=st.floats(min_value=0.01, max_value=0.9),
+    mde=st.floats(min_value=0.02, max_value=0.5),
+)
+@settings(max_examples=120, deadline=None)
+def test_required_n_totality_and_mde_monotonicity(p1, mde):
+    """Round 327 (§4.13 planner core): total over the sane design space —
+    a positive int or None, never an exception; and a LARGER effect needs
+    FEWER (or equal) users per arm. Degenerate lifts (p2 >= 1) are None."""
+    from app.experiments.services.analysis import required_n_per_arm
+
+    n_small = required_n_per_arm(p1, mde)
+    n_big = required_n_per_arm(p1, mde * 2.0)
+    for n, m in ((n_small, mde), (n_big, mde * 2.0)):
+        if p1 * (1.0 + m) >= 1.0:
+            assert n is None
+        else:
+            assert isinstance(n, int) and n >= 1
+    if n_small is not None and n_big is not None:
+        assert n_big <= n_small, (p1, mde, n_small, n_big)
