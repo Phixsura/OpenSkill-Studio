@@ -473,3 +473,10 @@ family), and the closure loop's `started_at + max_days` re-check
 (L786 — belt-and-braces BEHIND the SQL due-filter, which is the
 authority; the belt only matters under clock skew between SQL now()
 and Python now, where either sign errs safe by one sweep cycle).
+
+
+Wave 50 (digest rotation, round 358): 20/20 killed after one
+strengthening pass — the sent-counter survivor (telemetry return) died
+to an exact-count test that pauses residue (the residue-law >=1 tests
+deliberately cannot pin a cross-owner total; pausing residue makes the
+per-owner count exact without weakening the law).

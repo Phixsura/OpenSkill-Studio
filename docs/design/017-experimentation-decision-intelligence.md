@@ -1509,6 +1509,13 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 355-358 — PR synced through 354; the periodic battery ran green
+in flight (wall 161/161, certification 173 = 7008); the competitive
+analysis records the fairness audit; mutation wave 50 on the digest
+rotation: 20/20 after one strengthening pass (the exact-count test
+pauses residue, so the sent counter is pinned without weakening the
+residue law's cross-owner >=1 convention).
+
 Round 354 — doc-safety correction (#89-doc): §4.19 claimed "pause stops
 assignment servicing immediately" — the code (deliberately, per its own
 comment and the serve-existing status set) keeps serving EXISTING
