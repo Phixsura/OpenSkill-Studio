@@ -795,7 +795,9 @@ look — no decide-before-analyze), `EXPERIMENT_IDENTITY_CONFLICT`
 `EXPERIMENT_HOLDOUT_NOT_FOUND` / `EXPERIMENT_HOLDOUT_KEY_TAKEN` /
 `EXPERIMENT_HOLDOUT_BP_INVALID` (holdout-group CRUD), and
 `PROMOTION_APPLY_IN_FLIGHT` (a second apply while one is running —
-serialize on the draft). The app-wide `VALIDATION_ERROR` and `FORBIDDEN`
+serialize on the draft), and `ORG_NOT_FOUND` (a holdout group naming a
+nonexistent org — round 310, the one code the re-diff found undocumented).
+The app-wide `VALIDATION_ERROR` and `FORBIDDEN`
 carry their global semantics.
 
 Audit event types (round 276 canonical list — every `experiment_events`
@@ -1467,6 +1469,13 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 310 — the error-code re-diff (the round-275 method, re-run after
+the #80-#83 era): 55 uppercase literals scanned, one genuinely
+undocumented code found (ORG_NOT_FOUND from holdout-group creation) and
+added; seven initial hits were false positives (documented in prose
+without backticks — the diff tool must strip formatting before crying
+drift).
 
 Round 309 — doc-truth: the audit-event canonical list re-diffed against
 code literals (11 = 11, zero drift); §13's worker inventory was STALE —
