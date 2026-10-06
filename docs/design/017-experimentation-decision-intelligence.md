@@ -1505,7 +1505,19 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
-Round 344 — §18a gains the **spec_invalid**/**spec_missing** auto-pause
+Rounds 346-347 — certification 169 came back RED (1/7007): the
+deployment suite's own lint gate caught an N814 alias in the #86
+kill-proof (the per-round ruff pass had covered the source files but
+skipped the test file — the gate worked exactly as designed). Fixed;
+certification 170 = 7007/7007 all-green over #84-#88, and the live wall
+re-ran 161/161. Process upgrades recorded: certification gaps are now
+BRIDGED inside the working turn (blocking until-waits interleaved with
+non-DB work), so a red certificate is diagnosed and fixed in the same
+breath it lands; and prettier eats bare dunder names in prose into bold
+(the round-344 line was silently corrupted — reserved keys in this log
+must be backticked).
+
+Round 344 — §18a gains the `__spec_invalid__`/`__spec_missing__` auto-pause
 row (the #84 event key was undocumented in the operator table).
 
 Round 343 — defect #88 (the class's FIFTH member, an arithmetic one):
