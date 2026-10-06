@@ -60,4 +60,17 @@ describe("PlanningCalculator (round 313, §4.13 planner)", () => {
       expect(String(call[0])).not.toContain("baseline_rate=1.5");
     }
   });
+
+  it("adds a duration estimate when daily traffic is given (round 330)", async () => {
+    apiMock.mockResolvedValue({
+      data: { required_n_per_arm: 1000, degenerate: false },
+    });
+    wrap(<PlanningCalculator />);
+    await screen.findByText(/1,000 users per arm/);
+    fireEvent.change(screen.getByLabelText("daily eligible users"), {
+      target: { value: "400" },
+    });
+    // 2 * 1000 / 400 = 5 days
+    expect(await screen.findByText(/≈ 5 days at 400\/day/)).toBeTruthy();
+  });
 });

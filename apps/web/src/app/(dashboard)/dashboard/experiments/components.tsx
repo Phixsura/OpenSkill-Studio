@@ -157,6 +157,7 @@ export function JsonPacketButton({ data, filename }: { data: unknown; filename: 
 export function PlanningCalculator() {
   const [baseline, setBaseline] = useState("0.1");
   const [mde, setMde] = useState("0.1");
+  const [daily, setDaily] = useState(""); // round 330: optional duration
   const b = Number(baseline);
   const m = Number(mde);
   const valid = Number.isFinite(b) && b > 0 && b < 1 && Number.isFinite(m) && m !== 0;
@@ -191,13 +192,26 @@ export function PlanningCalculator() {
             aria-label="relative MDE"
           />
         </label>
+        <label className="flex flex-col text-xs">
+          Daily eligible users
+          <input
+            className="mt-1 w-28 rounded border px-2 py-1"
+            value={daily}
+            onChange={(e) => setDaily(e.target.value)}
+            placeholder="optional"
+            aria-label="daily eligible users"
+          />
+        </label>
         <div className="text-muted-foreground text-xs">
           {!valid
             ? "Enter a baseline in (0,1) and a non-zero MDE"
             : plan.data?.data.degenerate
               ? "No detectable difference at these inputs"
               : typeof n === "number"
-                ? `≈ ${n.toLocaleString()} users per arm (α=0.05, power=0.8)`
+                ? `≈ ${n.toLocaleString()} users per arm (α=0.05, power=0.8)` +
+                  (Number(daily) > 0
+                    ? ` · ≈ ${Math.ceil((n * 2) / Number(daily))} days at ${Number(daily).toLocaleString()}/day`
+                    : "")
                 : plan.isLoading
                   ? "Computing…"
                   : ""}

@@ -1479,6 +1479,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 330 — the planner answers the SECOND design question ("how many
+days?"): an optional daily-traffic input computes ceil(2n/traffic)
+client-side (pure arithmetic over the server's n — no new endpoint).
+Web 742/742. Gotcha recorded: prettier reorders class strings at commit,
+so patch anchors must be taken from the committed file, and an aborted
+multi-replace script persists NOTHING (the write is at the end) — re-read
+before re-anchoring.
+
 Rounds 328-329 — the periodic walls stay fresh: live E2E 161/161 and
 the full experiments suite 622/622 (2m17s), both re-run green with no
 code change pending; the audit-saturation era's conclusions (rounds
