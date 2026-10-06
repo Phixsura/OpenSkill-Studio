@@ -3596,3 +3596,23 @@ async def test_ramp_sweep_cap_not_squatted_by_exhausted_plans(db):
     applied = await sweep_ramp_plans(db, cap=1)
     assert applied == 1, "an exhausted plan must not shadow the due one"
     assert (await db.get(_Exp, due.id)).ramp_bp == 9000
+
+
+async def test_digest_sent_count_is_exact_when_residue_paused(db):
+    """Wave 50 strengthening (round 358): with residue PAUSED (the
+    established pattern) the sweep's return is an exact per-owner count —
+    pinning the sent counter the residue-law >=1 tests deliberately
+    cannot."""
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.worker import sweep_weekly_digest
+
+    exp, admin = await _mk_running(db)
+    from sqlalchemy import update as _update
+
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status.in_(("running", "analyzed")),
+               _Exp.id != exp.id)
+        .values(status="paused")
+    )
+    assert await sweep_weekly_digest(db) == 1
