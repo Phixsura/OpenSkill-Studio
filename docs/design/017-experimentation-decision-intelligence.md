@@ -1442,6 +1442,12 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 297-299 — PR body synced through 296; the competitive analysis
+gains section 0c (the webhook + identity epochs — two staples the
+original matrix never listed); certification 164 = 6996 all-green;
+mutation wave 47 on trigger_event: 2/2 killed (bare func names in
+configs — a class-qualified name matches nothing).
+
 Round 296 — the savepoint verdict overturned by evidence (see §4.18):
 the worker's outbox runner puts every handler inside a savepoint, the
 293 warning would have cried wolf on every legit sweep breach, and the

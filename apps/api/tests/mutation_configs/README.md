@@ -439,3 +439,11 @@ coverage claim stands on the suite instead: each guard and the fail-safe
 has a dedicated kill-proof in test_exp_webhooks_db.py (containment,
 unknown-type, delivery-explosion), and the unmocked-path test pins the
 delegation itself. Recorded as a 0-mutant wave, not a skipped one.
+
+Wave 47 (trigger_event defer/cancel core, round 299): 2 mutants, 2
+killed, 0 survivors. The harness's operator set finds little to flip in
+guard-and-dispatch code (the first run with a class-qualified func name
+matched nothing — configs use BARE function names); the defer/cancel
+semantics themselves are pinned by the five empirical kill-proofs from
+rounds 290-296, which wave 46's ledger entry already names as the
+coverage authority for this family.
