@@ -1442,6 +1442,9 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 304 — certification 165 = 6997 all-green; the wall runs 156/156
+(the #83 formula-422 check live over HTTP).
+
 Rounds 302-303 — #83's wire and SDK: a wall check (formula-shaped
 anonymous id 422 over HTTP, run pending cert 165) and the SDK's
 re-mint guard (a tampered/legacy localStorage id outside [A-Za-z0-9_-]
