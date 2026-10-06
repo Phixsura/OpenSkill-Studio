@@ -979,7 +979,8 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
 - Timezones: all UTC; window_start is always UTC midnight.
 - Sweep-cap bounds reviewed after #84/#85 (round 337): the starts sweep's
   skip is race-only (the row leaves "scheduled" when the human wins, so
-  the predicate self-drains; a PERSISTENTLY AppError-ing scheduled
+  the predicate self-drains; the closures sweep's claim of the same was
+  WRONG for not-yet-due rows — fixed as #86, round 340; a PERSISTENTLY AppError-ing scheduled
   experiment would squat a head slot — bounded by cap 200, surfaced in
   logs, judged a visible config error, not a silent class). The weekly
   digest caps at 500 under id-order on a recurring population — an
@@ -1502,6 +1503,17 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 340 — defect #86 (the #85 class, third member): the closures
+sweep's max_days due-check also lived after its started_at-ordered cap —
+the OLDEST long-max_days experiments squatted every slot while newer,
+actually-due ones starved. The due filter moves into SQL
+(COALESCE(spec->stop_policy->max_days, 28) + make_interval, the schema
+default preserved for stored specs predating the key); verified
+red-by-reversal (the fix temporarily reverted via apply -R — the
+kill-proof fails on the old code, passes on the new). The round-337
+note's "closures self-drain" claim was WRONG for not-yet-due rows;
+corrected.
 
 Rounds 335-339 — the cadence tightened to a 10-minute loop with a
 mandatory visible artifact per round (the user's stop-perception is the

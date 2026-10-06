@@ -706,10 +706,35 @@ async def sweep_experiment_closures(
     from app.experiments.services.guardrails import _system_actor
 
     now = now or datetime.now(UTC)
+    # #86 (round 340, the #85 class): the max_days due-check lived INSIDE the
+    # loop, AFTER the started_at-ordered cap — the oldest long-max_days
+    # experiments squatted every capped slot while newer, actually-due ones
+    # starved. The due filter moves into SQL (filter BEFORE the cap law);
+    # COALESCE keeps the schema default (28) for stored specs that predate
+    # the key. The in-loop re-check stays as belt-and-braces.
+    from sqlalchemy import Integer
+    from sqlalchemy import cast as sa_cast
+
+    max_days_sql = func.coalesce(
+        sa_cast(ExperimentVersion.spec["stop_policy"]["max_days"].astext, Integer),
+        28,
+    )
     rows = (
         await db.execute(
             select(Experiment.id, Experiment.started_at, Experiment.current_version)
-            .where(Experiment.status == "running", Experiment.started_at.is_not(None))
+            .join(
+                ExperimentVersion,
+                and_(
+                    ExperimentVersion.experiment_id == Experiment.id,
+                    ExperimentVersion.version == Experiment.current_version,
+                ),
+            )
+            .where(
+                Experiment.status == "running",
+                Experiment.started_at.is_not(None),
+                Experiment.started_at
+                + func.make_interval(0, 0, 0, max_days_sql) <= now,
+            )
             .order_by(Experiment.started_at.asc())
             .limit(cap)
         )

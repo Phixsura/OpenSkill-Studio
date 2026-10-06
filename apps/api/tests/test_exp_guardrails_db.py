@@ -1153,3 +1153,48 @@ async def test_missing_version_row_pauses_like_poison_spec(db):
     row = await db.get(Experiment, exp.id)
     assert row.status == "paused"
     assert row.last_guardrail_check_at is not None
+
+
+async def test_closure_cap_not_squatted_by_long_max_days(db):
+    """#86 (round 340, the #85 class): the max_days due-check lived after
+    the started_at-ordered cap — an OLDER running experiment with a long
+    max_days squatted the capped slot while a newer, actually-due one
+    starved. With cap=1 the due one must still close."""
+    from datetime import timedelta as _td
+
+    from app.experiments.worker import sweep_experiment_closures
+
+    # older, NOT due (long max_days)
+    squatter, _ = await _mk_running(db)
+    sq = await db.get(Experiment, squatter.id)
+    sq.started_at = datetime.now(UTC) - _td(days=30)
+    # its spec default max_days=28 would make it DUE — give it a long one
+    from app.experiments.models import ExperimentVersion as _EV
+
+    v = (
+        await db.execute(
+            select(_EV).where(_EV.experiment_id == squatter.id,
+                              _EV.version == sq.current_version)
+        )
+    ).scalar_one()
+    spec = dict(v.spec)
+    spec["stop_policy"] = {"max_days": 365, "max_looks": 4}
+    v.spec = spec
+    # newer, DUE (default 28 days, started 29 days ago)
+    due, _ = await _mk_running(db)
+    du = await db.get(Experiment, due.id)
+    du.started_at = datetime.now(UTC) - _td(days=29)
+    await db.flush()
+    # residue law: only our two run
+    from sqlalchemy import update as _update
+
+    await db.execute(
+        _update(Experiment)
+        .where(Experiment.status == "running",
+               Experiment.id.notin_([squatter.id, due.id]))
+        .values(status="paused")
+    )
+    closed = await sweep_experiment_closures(db, cap=1)
+    assert closed == 1, "the long-max_days squatter must not shadow the due one"
+    assert (await db.get(Experiment, due.id)).status == "completed"
+    assert (await db.get(Experiment, squatter.id)).status == "running"
