@@ -954,6 +954,20 @@ detail pages with prefilled domain. All lists: keyset pagination + meta totals
     round-259 note; the signal contract completed across all four domains
     (§18a warnings and events, §12 error codes and audit event types);
     PR-body hygiene (the 11–175 evolution digest).
+17. **Webhooks, injection law, design-time tools, sweep fairness (rounds
+    284–335)** — outbound webhooks (§4.18) with commit-safe delivery
+    (#80/#81, the savepoint matrix pinned empirically); the CSV
+    formula-injection defect (#83) killed at the write boundary with
+    OWASP defense-in-depth and the class swept across every export; the
+    planner (§4.13 endpoint + builder card + duration estimate, fuzz
+    totality + MDE monotonicity, wave 48's four-corner boundary pins);
+    timeline notes (the 12th audit event type, born under the no-CSV
+    injection law, prose rendering, inline input); the rollback posture
+    (§4.19); doc-truth re-diffs (§13's phantom topic + five unlisted
+    sweeps, ORG_NOT_FOUND); and the sweep-fairness pair #84/#85 (an
+    unstamped skip squatting the guardrail cap; the mSPRT filter living
+    after the analysis cap) — both red-first, the eight-sweep class
+    surveyed to closure.
 
 ## 17. Known edges & explicit decisions
 
