@@ -1442,6 +1442,14 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 305 — the #83 class swept package-wide: all three CSV exports
+audited against every client-influenced column — metrics (metric_key and
+variant_key are pattern-locked to ^[a-z0-9]..., segment cells are org
+ULIDs or "all"), guardrail events (system-set identifier columns only;
+the free-text incident note and detail JSONB are NOT exported), and
+assignments (fixed + defense-in-depth at round 301). No further
+injection surface; the class is closed.
+
 Round 304 — certification 165 = 6997 all-green; the wall runs 156/156
 (the #83 formula-422 check live over HTTP).
 
