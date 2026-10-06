@@ -32,6 +32,11 @@ even listed (found by scanning the staples the matrix omitted):
   sibling's rollback must not cancel). Five DB kill-proofs double as the
   SQLAlchemy-drift alarm.
 
+Also closed since 0b: the design-time sample-size planner (rounds
+312-313) — the §4.13 power core was look-time-only; now a read-scope
+planning endpoint plus a builder-page calculator card, the staple every
+vendor console leads with.
+
 Still open by choice: webhook subscription UI (a platform-wide console
 surface shared by pack/talent/eco events), edge SDKs, session replay,
 warehouse connectors, org-admin spec authoring (§2 posture).

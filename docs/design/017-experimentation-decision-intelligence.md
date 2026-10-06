@@ -297,6 +297,12 @@ diagnostics endpoints. The console surfaces them via the diagnostics
 page, the SRM banner, the detail page's guardrail-freshness line and the
 round-146 list data-flow badge.
 
+Design-time power (round 312): the `required_n_per_arm` two-proportion
+core also serves the PLANNING question over
+`GET /experiments/planning/sample-size` (read-scope; pure computation;
+honest `degenerate` flag), surfaced as the builder page's sample-size
+planner card (round 313).
+
 ### 4.14 Quantile metrics (v3 round 124 — the quantile epoch)
 
 Mean-based sufficient stats cannot answer "did p95 latency regress?" —
