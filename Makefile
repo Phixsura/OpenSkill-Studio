@@ -71,6 +71,7 @@ test-exp: ## Run the experimentation-platform suites (ADR-017, needs infra-up + 
 		tests/test_exp_analysis.py tests/test_exp_analysis_db.py tests/test_exp_decisions_db.py \
 		tests/test_exp_integrations_db.py tests/test_exp_e2e_flow.py tests/test_exp_endpoints_nodb.py \
 		tests/test_exp_identity_api.py \
+		tests/test_exp_webhooks_db.py \
 		tests/test_exp_web_parity.py tests/test_exp_holdouts_db.py tests/test_exp_fuzz.py \
 		-q --timeout=600 --timeout-method=thread
 

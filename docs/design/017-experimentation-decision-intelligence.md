@@ -485,6 +485,31 @@ in flight racing the fold (nested-savepoint retry onto the survivor),
 duplicate folds away). Wave 41 at 21/26; live wall 142 including the
 resolve and link concurrency storms.
 
+### 4.18 Outbound webhooks (round 284 — shipped)
+
+The platform's existing `WebhookService` (HMAC-SHA256 signing, SSRF
+block-list incl. CGNAT/NAT64, 25-per-org cap) gains three experiment
+event types; a fail-safe emitter (`experiments/services/webhook_events.py`,
+the talent idiom) wires them:
+
+- `experiment.status_changed` — every `transition()`, payload
+  `{experiment_id, experiment_key, from_status, to_status, reason}`.
+  Covers guardrail auto-pause and decision-driven promote/reject since
+  both go through the same locked state machine.
+- `experiment.guardrail_breach` — on breach, BEFORE the auto-pause,
+  payload `{experiment_id, experiment_key, breaches: [...], action:
+"paused"}` (the breach detail the status event cannot carry).
+- `experiment.decision_recorded` — after the decision row and in-DB
+  event, payload `{experiment_id, experiment_key, decision, record_id,
+analysis_result_hash}`; delivery is never a condition on the audit.
+
+Containment rule: only org-scoped experiments (`scope_org_id` set) fan
+out, to THAT org's webhooks; platform-wide experiments reach no tenant
+webhook — a platform experiment's existence is not tenant-visible data.
+Fail-safe: emission errors are logged and swallowed (a dead webhook
+endpoint must never 500 a transition or a decision). Kill-proofs:
+tests/test_exp_webhooks_db.py (wire + containment + fail-safe).
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1366,6 +1391,14 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 284 — outbound webhooks (§4.18): the gap scan against industry
+staples (SRM: shipped; interaction: shipped; Bayesian/winsorization:
+shipped; webhooks: ZERO hits) found decision/guardrail/status events
+unreachable by external systems although the platform has a hardened
+WebhookService. Three event types whitelisted and wired fail-safe;
+org-scoped containment (platform-wide experiments fan out to no
+tenant). 3 wire kill-proofs.
 
 Round 283 — switchback x identity-link interaction audited: the
 hypothesis was a window-collision gap in the conflict fold, but

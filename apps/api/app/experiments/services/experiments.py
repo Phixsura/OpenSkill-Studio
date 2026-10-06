@@ -498,6 +498,21 @@ class ExperimentService:
                 **({"checklist": checklist} if checklist else {}),
             },
         )
+        # §4.18: org-scoped experiments notify tenant webhooks (fail-safe)
+        from app.experiments.services.webhook_events import emit_experiment_event
+
+        await emit_experiment_event(
+            self.db,
+            scope_org_id=exp.scope_org_id,
+            event_type="experiment.status_changed",
+            payload={
+                "experiment_id": exp.id,
+                "experiment_key": exp.key,
+                "from_status": from_status,
+                "to_status": to_status,
+                "reason": reason,
+            },
+        )
         await self.db.flush()
         return exp
 

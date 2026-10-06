@@ -41,6 +41,11 @@ VALID_EVENT_TYPES = frozenset(
         "talent_pool.member_added",
         # Ecosystem intelligence (Issue #35, ADR-016 §13)
         "ecosystem.change",
+        # Experimentation (Issue #42, ADR-017 §4.18) — org-scoped only:
+        # platform-wide experiments never fan out to tenant webhooks
+        "experiment.status_changed",
+        "experiment.guardrail_breach",
+        "experiment.decision_recorded",
     }
 )
 

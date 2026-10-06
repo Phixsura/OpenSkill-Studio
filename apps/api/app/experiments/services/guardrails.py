@@ -403,6 +403,21 @@ class GuardrailService:
                 )
 
         if breaches:
+            # §4.18: breach detail to tenant webhooks before the pause (the
+            # pause itself also emits status_changed through transition)
+            from app.experiments.services.webhook_events import emit_experiment_event
+
+            await emit_experiment_event(
+                self.db,
+                scope_org_id=exp.scope_org_id,
+                event_type="experiment.guardrail_breach",
+                payload={
+                    "experiment_id": experiment_id,
+                    "experiment_key": exp.key,
+                    "breaches": summary["breaches"],
+                    "action": "paused",
+                },
+            )
             # One pause for any number of breaches — same locked state machine
             # every transition uses. NEVER a promote (§2.2).
             from app.experiments.services.experiments import ExperimentService

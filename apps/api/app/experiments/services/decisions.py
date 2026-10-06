@@ -163,6 +163,22 @@ class DecisionService:
             payload={"decision": decision, "record_id": record.id,
                      "analysis_result_hash": analysis_result_hash},
         )
+        # §4.18: tenant webhook (fail-safe; after the event row so the
+        # in-DB audit is never conditioned on delivery)
+        from app.experiments.services.webhook_events import emit_experiment_event
+
+        await emit_experiment_event(
+            self.db,
+            scope_org_id=exp.scope_org_id,
+            event_type="experiment.decision_recorded",
+            payload={
+                "experiment_id": experiment_id,
+                "experiment_key": exp.key,
+                "decision": decision,
+                "record_id": record.id,
+                "analysis_result_hash": analysis_result_hash,
+            },
+        )
         await self.db.flush()
         return record
 
