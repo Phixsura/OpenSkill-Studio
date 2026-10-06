@@ -45,7 +45,7 @@ def captured(monkeypatch):
     return calls
 
 
-def _spec() -> dict:
+def _spec(guardrails: list[dict] | None = None) -> dict:
     return {
         "hypothesis": "webhooks fire on the org-scoped lifecycle",
         "unit_type": "user",
@@ -55,9 +55,9 @@ def _spec() -> dict:
         ],
         "metrics": {
             "primary": ["exposure_rate"],
-            "guardrails": [
-                {"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}
-            ],
+            "guardrails": guardrails
+            if guardrails is not None
+            else [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
         },
     }
 
@@ -74,7 +74,8 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db, *, org_scoped: bool):
+async def _mk_running(db, *, org_scoped: bool,
+                      guardrails: list[dict] | None = None):
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
@@ -98,7 +99,7 @@ async def _mk_running(db, *, org_scoped: bool):
         key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
         layer_key=layer.key, owner_user_id=admin.id, scope_org_id=scope_org_id,
     )
-    await svc.create_version(exp.id, spec=_spec(), actor=admin)
+    await svc.create_version(exp.id, spec=_spec(guardrails), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -107,6 +108,7 @@ async def _mk_running(db, *, org_scoped: bool):
             exp.id, to_status=status, actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
+    await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     return exp, admin, scope_org_id
 
 
@@ -135,3 +137,38 @@ async def test_delivery_failure_never_breaks_transition(db, monkeypatch):
     monkeypatch.setattr(WebhookService, "trigger_event", _boom)
     exp, _admin, _ = await _mk_running(db, org_scoped=True)
     assert (await ExperimentService(db).get(exp.id)).status == "running"
+
+
+async def test_guardrail_breach_emits_detail_then_pause(db, captured):
+    """Round 285: the breach wire — detail event BEFORE the pause's
+    status_changed, both to the owning org only."""
+    from app.experiments.services.assignment import AssignmentService
+    from app.experiments.services.guardrails import GuardrailService
+    from app.experiments.services.metrics import MetricService
+
+    await MetricService(db).ensure_seed_definitions()
+    exp, _admin, org_id = await _mk_running(
+        db, org_scoped=True,
+        guardrails=[{"metric_key": "exposure_rate", "op": "lte",
+                     "threshold": 0.4, "window_hours": 24}],
+    )
+    captured.clear()  # drop the lifecycle transitions; the breach is under test
+    asvc = AssignmentService(db)
+    for i in range(10):
+        ctx = {"org_id": org_id}  # org-scoped eligibility needs org context
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
+                               unit_id=f"wh-{i}", context=ctx)
+        assert r is not None
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
+                                   unit_id=f"wh-{i}", context=ctx)
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert summary["breaches"]
+    kinds = [c[1] for c in captured]
+    assert kinds == ["experiment.guardrail_breach", "experiment.status_changed"]
+    breach_org, _t, breach_payload = captured[0]
+    assert breach_org == org_id
+    assert breach_payload["action"] == "paused"
+    assert breach_payload["breaches"][0]["metric_key"] == "exposure_rate"
+    _o, _t2, pause_payload = captured[1]
+    assert pause_payload["from_status"] == "running"
+    assert pause_payload["to_status"] == "paused"

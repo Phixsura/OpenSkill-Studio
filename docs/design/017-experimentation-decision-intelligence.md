@@ -1392,6 +1392,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 285 — the breach wire's DB-level kill-proof: an org-scoped
+experiment driven to a real exposure_rate breach emits
+guardrail_breach (with detail) THEN the pause's status_changed, both
+to the owning org; the drive surfaced that org-scoped resolves need
+org context (the eligibility gate — correct behavior the platform-wide
+guardrails suite never exercises).
+
 Round 284 — outbound webhooks (§4.18): the gap scan against industry
 staples (SRM: shipped; interaction: shipped; Bayesian/winsorization:
 shipped; webhooks: ZERO hits) found decision/guardrail/status events
