@@ -430,3 +430,12 @@ outside any in-suite test's reach; the boundary test written for them
 was removed as untestable-by-design, and the round-259 wall note
 claiming 429 flake risk was CORRECTED (the wall runs under the same
 skip).
+
+Wave 46 (webhook emitter, round 289): the harness generated ZERO mutants
+for emit_experiment_event — the function is pure guard-and-delegate
+(`is None` containment return, `not in` whitelist return, try/except
+swallow) with no operators in the harness's mutation set. The structural
+coverage claim stands on the suite instead: each guard and the fail-safe
+has a dedicated kill-proof in test_exp_webhooks_db.py (containment,
+unknown-type, delivery-explosion), and the unmocked-path test pins the
+delegation itself. Recorded as a 0-mutant wave, not a skipped one.
