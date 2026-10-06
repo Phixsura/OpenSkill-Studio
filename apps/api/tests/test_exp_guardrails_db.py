@@ -1198,3 +1198,39 @@ async def test_closure_cap_not_squatted_by_long_max_days(db):
     assert closed == 1, "the long-max_days squatter must not shadow the due one"
     assert (await db.get(Experiment, due.id)).status == "completed"
     assert (await db.get(Experiment, squatter.id)).status == "running"
+
+
+async def test_closure_default_max_days_is_exactly_28(db):
+    """Wave 49 strengthening: the SQL COALESCE default must be exactly the
+    schema default (28) — a spec stored WITHOUT stop_policy, started 28.5
+    days ago, is due under 28 and NOT under 29."""
+    from datetime import timedelta as _td
+
+    from app.experiments.worker import sweep_experiment_closures
+
+    exp, _ = await _mk_running(db)
+    row = await db.get(Experiment, exp.id)
+    row.started_at = datetime.now(UTC) - _td(days=28, hours=12)
+    # strip stop_policy from the stored spec so COALESCE's default governs
+    from app.experiments.models import ExperimentVersion as ExpVer
+
+    v = (
+        await db.execute(
+            select(ExpVer).where(ExpVer.experiment_id == exp.id,
+                                 ExpVer.version == row.current_version)
+        )
+    ).scalar_one()
+    spec = dict(v.spec)
+    spec.pop("stop_policy", None)
+    v.spec = spec
+    await db.flush()
+    from sqlalchemy import update as _update
+
+    await db.execute(
+        _update(Experiment)
+        .where(Experiment.status == "running", Experiment.id != exp.id)
+        .values(status="paused")
+    )
+    closed = await sweep_experiment_closures(db)
+    assert closed == 1
+    assert (await db.get(Experiment, exp.id)).status == "completed"
