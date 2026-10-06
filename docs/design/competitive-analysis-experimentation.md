@@ -37,6 +37,18 @@ Also closed since 0b: the design-time sample-size planner (rounds
 planning endpoint plus a builder-page calculator card, the staple every
 vendor console leads with.
 
+Also since 0c: the sweep-fairness audit the vendors never publish —
+one invariant ("filter before the cap, or the predicate self-drains")
+hunted through all eight background sweeps, five violations found and
+fixed red-first (#84 an unstamped skip leaving a running experiment
+silently unguarded; #85-#87 post-cap filters starving tails; #88 a
+rotation stride covering one pair per week — 381 weeks to full coverage
+at 400 pairs, now ceil(P/cap) weeks by a pinned coverage law); the
+fixes themselves then put under mutation (wave 49: 45/49, four reasoned
+survivors). And a doc-safety correction vendors rarely admit: pause
+freezes enrollment but keeps serving existing assignments — the
+operator table now says so and names archive as the full kill.
+
 Still open by choice: webhook subscription UI (a platform-wide console
 surface shared by pack/talent/eco events), edge SDKs, session replay,
 warehouse connectors, org-admin spec authoring (§2 posture).
