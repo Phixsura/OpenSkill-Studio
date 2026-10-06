@@ -303,12 +303,24 @@ class WebhookService:
 
         from sqlalchemy import event as sa_event
 
+        # #81 (round 291): a once-listener SURVIVES a rollback — if the same
+        # session later commits unrelated work (the retry pattern), the
+        # rolled-back transaction's event would fire anyway. The rollback
+        # listener cancels the pending spawn.
+        cancelled = False
+
         @sa_event.listens_for(self.db.sync_session, "after_commit", once=True)
         def _fire_on_commit(_session) -> None:  # pragma: no branch
             # Runs in the loop's thread (greenlet context) — create_task is
             # safe here. A rollback means this listener never fires, which is
             # exactly the phantom-prevention contract.
-            _spawn_all()
+            if not cancelled:
+                _spawn_all()
+
+        @sa_event.listens_for(self.db.sync_session, "after_rollback", once=True)
+        def _cancel_on_rollback(_session) -> None:  # pragma: no branch
+            nonlocal cancelled
+            cancelled = True
 
     @staticmethod
     async def _deliver_background(

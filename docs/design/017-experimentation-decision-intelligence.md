@@ -523,6 +523,15 @@ rollback-leaks-nothing, delivery-after-commit. The same hazard exists
 for pack/talent/eco callers (default False keeps their semantics) —
 noted as a platform-wide follow-up, out of ADR-017 scope.
 
+Defect #81 (round 291, #80's second act): the after_commit once-listener
+SURVIVES a rollback — on the retry pattern (rollback, then the same
+session commits later unrelated work) the rolled-back transaction's
+event fired anyway. Red-first: the stale-ride test failed against #80's
+fix exactly as predicted. Fix: a paired once after_rollback listener
+sets a cancelled flag the commit listener checks. Test gotchas recorded:
+expired ORM attribute access after commit/rollback raises
+MissingGreenlet (capture plain ids first).
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1404,6 +1413,11 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 291 — defect #81 (the stale listener, #80's second act): see
+§4.18; certification 163 was killed as TAINTED (source edited mid-run —
+pytest imports lazily, a mixed-state certification proves nothing) and
+relaunched clean after the commit.
 
 Round 290 — defect #80 (phantom webhooks): see §4.18 — delivery now
 defers to after_commit for experiment events; red-first (the unmocked

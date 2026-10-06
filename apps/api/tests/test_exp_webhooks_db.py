@@ -289,3 +289,74 @@ async def test_rollback_leaks_no_phantom_webhook(db, monkeypatch):
     await db.rollback()  # the decision never happened
     await asyncio.sleep(0.05)
     assert scheduled == [], "rollback must not leak a phantom webhook"
+
+
+async def test_rollback_then_later_commit_fires_no_stale_webhook(db, monkeypatch):
+    """#81 (round 291, #80's second act): the after_commit once-listener
+    survives a rollback — if the SAME session then commits unrelated later
+    work (the retry pattern), the rolled-back transaction's phantom event
+    fired anyway. The listener must cancel on rollback."""
+    import asyncio
+
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    admin = await _mk_admin(db)
+    org = await OrgService(db).create(
+        name=f"WHS {ULID()}", slug=f"whs-{str(ULID()).lower()}",
+        description=None, created_by=admin.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    svc = WebhookService(db)
+    await svc.create(org_id=org.id, url="https://example.com/stale",
+                     events=["experiment.decision_recorded"])
+
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(event_type)
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    # capture plain ids BEFORE commit — expired ORM attrs would lazy-load
+    org_id_s, tenant_id_s, admin_id_s = org.id, org.tenant_id, admin.id
+    # commit the fixture FIRST so the rollback below only drops the emit's txn
+    await db.commit()
+    try:
+        await emit_experiment_event(
+            db, scope_org_id=org_id_s,
+            event_type="experiment.decision_recorded",
+            payload={"experiment_id": "stale", "decision": "promote"},
+        )
+        await db.rollback()  # attempt 1 failed
+        # attempt 2: unrelated later work on the SAME session commits
+        # (re-fetch: the rollback expired the ORM objects)
+        tenant2 = await db.get(TenantAccount, tenant_id_s)
+        tenant2.status = TenantStatus.ACTIVE  # no-op write to have a txn
+        await db.flush()
+        await db.commit()
+        await asyncio.sleep(0.05)
+        assert scheduled == [], (
+            "a rolled-back emission must not ride a LATER commit"
+        )
+    finally:
+        from app.models.organization import Organization as OrgModel2
+
+        org_row = await db.get(OrgModel2, org_id_s)
+        if org_row is not None:
+            await db.delete(org_row)
+            await db.flush()
+        tenant_row = await db.get(TenantAccount, tenant_id_s)
+        if tenant_row is not None:
+            await db.delete(tenant_row)
+        admin_row = await db.get(User, admin_id_s)
+        if admin_row is not None:
+            await db.delete(admin_row)
+        await db.commit()
