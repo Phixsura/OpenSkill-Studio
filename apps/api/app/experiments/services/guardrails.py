@@ -313,7 +313,31 @@ class GuardrailService:
             summary["breaches"] = [{"metric_key": "__spec_invalid__"}]
             return summary
         if spec is None:
-            summary["skipped"] = True
+            # #84 (round 333): a RUNNING experiment with no current_version
+            # row is the poison-spec case in different clothes — unguarded
+            # while running, and (unstamped) squatting a fairness-cap slot at
+            # the head of every sweep. Same safety law: pause + stamp.
+            log.error("experiment_version_row_missing", experiment_id=experiment_id)
+            self.db.add(
+                GuardrailEvent(
+                    experiment_id=experiment_id,
+                    guardrail_key="__spec_missing__",
+                    action="paused",
+                    auto=True,
+                    detail={"reason": "current_version row missing — guardrails cannot run"},
+                )
+            )
+            from app.experiments.services.experiments import ExperimentService
+
+            await ExperimentService(self.db).transition(
+                experiment_id,
+                to_status="paused",
+                actor=_system_actor(),
+                reason="version row missing — guardrails cannot run",
+            )
+            exp.last_guardrail_check_at = now
+            await self.db.flush()
+            summary["breaches"] = [{"metric_key": "__spec_missing__"}]
             return summary
 
         srm = await self.check_srm(exp, spec)

@@ -1479,6 +1479,15 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 333 — defect #84 (the unguarded skip): sweep fairness (§106.26)
+holds for every path that STAMPS — but a running experiment whose
+current_version row is missing hit a "skipped" branch with no stamp:
+silently unguarded while running AND squatting an unstamped
+fairness-cap slot at the head of every 10-minute sweep forever. The
+poison-spec safety law now covers it (pause + **spec_missing** event +
+stamp); red-first (the old branch returned an empty summary), 30/30
+guardrails suite green.
+
 Round 330 — the planner answers the SECOND design question ("how many
 days?"): an optional daily-traffic input computes ceil(2n/traffic)
 client-side (pure arithmetic over the server's n — no new endpoint).

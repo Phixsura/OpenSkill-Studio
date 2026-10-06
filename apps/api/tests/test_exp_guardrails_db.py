@@ -1129,3 +1129,27 @@ async def test_alert_notify_failure_never_blocks_the_finding(db, monkeypatch):
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm" in summary  # the finding outlives the notify failure
     assert (await db.get(Experiment, exp.id)).status == "running"
+
+
+async def test_missing_version_row_pauses_like_poison_spec(db):
+    """#84 (round 333): a RUNNING experiment whose current_version row is
+    gone (corrupted edge state) was "skipped" WITHOUT a stamp — silently
+    unguarded while running, and squatting a fairness-cap slot at the head
+    of every sweep forever. It must take the poison-spec path: pause +
+    stamp (§106.26 + the spec-unparseable safety law)."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.experiments.models.experiment import ExperimentVersion
+
+    exp, _ = await _mk_running(db)
+    await db.execute(
+        sa_delete(ExperimentVersion).where(
+            ExperimentVersion.experiment_id == exp.id
+        )
+    )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert summary["breaches"] == [{"metric_key": "__spec_missing__"}]
+    row = await db.get(Experiment, exp.id)
+    assert row.status == "paused"
+    assert row.last_guardrail_check_at is not None
