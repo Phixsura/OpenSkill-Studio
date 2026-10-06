@@ -553,6 +553,25 @@ pinned EMPIRICALLY by five DB kill-proofs in test_exp_webhooks_db.py —
 the alarm if a SQLAlchemy upgrade shifts semantics — and the in-savepoint
 log is demoted to debug (a routine path must not cry wolf).
 
+### 4.19 Rollback posture (round 308 — a reviewer will ask)
+
+Industry consoles ship a "rollback" button next to "launch". This
+platform deliberately has NO promotion-revert endpoint, and that is a
+consequence of the apply invariant, not an omission: all four apply
+adapters create DRAFT-SHAPED artifacts in the target domain — an
+inactive MatchingConfig version (activation is a separate
+matching-domain decision), a LearningPath in status draft (Part F:
+active curricula are never silently rewritten), an UNCONFIRMED
+WorkflowStepBinding (D5), and an eco RolloutPlan in status draft. The
+platform's blast radius ends at a draft row; nothing goes live at
+apply time, so there is nothing for the platform to roll back.
+Rollback therefore lives where activation lives: the owning domain
+(matching's version activation history IS its rollback mechanism).
+The experiment-side kill switch is pause — manual transition or the
+guardrail auto-pause — which stops assignment servicing immediately.
+If a future adapter ever activates live state directly, it must land
+with its own revert, and this section is the gate that catches it.
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1441,6 +1460,12 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Rounds 306-308 — PR body synced through 305; promotion concurrency
+audited clean (FOR UPDATE + status gates + #47 savepoint confinement —
+no double-apply window); §4.19 records the rollback posture (apply
+creates draft artifacts only, so rollback belongs to the owning
+domain; the platform kill switch is pause).
 
 Round 305 — the #83 class swept package-wide: all three CSV exports
 audited against every client-influenced column — metrics (metric_key and
