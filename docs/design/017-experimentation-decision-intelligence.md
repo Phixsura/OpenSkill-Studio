@@ -832,7 +832,7 @@ Sweeps: `sweep_experiment_guardrails` (10 min, fairness cap),
 start_at), `sweep_experiment_analyses` (exp10 auto-run at close),
 `sweep_experiment_interactions` (weekly pairwise scan),
 `sweep_ramp_plans` (exp14 scheduled ramps), `sweep_weekly_digest`
-(owner digest incl. awaiting-decision flags and warning counts),
+(owner digest incl. awaiting-decision flags and warning counts; ISO-week rotating cap window, round 351),
 `prune_experiment_history` (exposures archived to
 `experiment_exposures_archive` after 400d — audit is never deleted).
 All handlers idempotent under at-least-once delivery (UPSERT / dedup_key).
@@ -1504,6 +1504,14 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 353 — scheduler cadence verified against the stride assumption
+(digest weekday=2, interactions weekday=1 — both weekly, matching the
+week-indexed rotation); one bounded edge recorded: at the ISO
+year-boundary the week index jumps (52/53 -> 1), breaking window
+consecutiveness once a year — affected owners/pairs are picked up
+within the next ceil(P/cap) weeks of the new sequence (bounded delay on
+informational/alert surfaces, accepted).
 
 Rounds 350-351 — certification 171 = 7008 all-green; the digest's
 id-ordered cap becomes an ISO-week rotating window (the proven
