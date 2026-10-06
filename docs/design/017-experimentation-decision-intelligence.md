@@ -1509,6 +1509,16 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 377-383 — the second full in-flight cycle, all green:
+experiments batch 630/630, the mixed battery 149/149, browser wall 3/3,
+web 742/742, live wall 161/161, analytics 132/132, decisions/flow
+105/105. The stop-taxonomy recorded for the record: two governable
+stops (turn ends -> the work-in-flight rule; trigger gaps -> the
+10-minute loop) and two irreducible ones (context compaction — this
+session already survived one; session death) — so the engineering goal
+is zero-loss self-resumption, which the four ledgers (commits, this
+log, memory, the PR) exist to guarantee.
+
 Rounds 370-375 — certification 175 = 7010 all-green (the layers
 negative battery joins); alembic verified single-head (exp16a00016,
 sixteen linear migrations); the in-flight cadence carried web gates
