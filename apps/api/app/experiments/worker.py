@@ -13,7 +13,7 @@ caps must price in DB lifetime, oldest-first ordering prevents starvation).
 from datetime import UTC, datetime, time, timedelta
 
 import structlog
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -361,11 +361,25 @@ async def sweep_experiment_analyses(
     from app.experiments.services.guardrails import _system_actor
     from app.models.notification import Notification
 
+    # #85 (round 334): the mSPRT filter must live in SQL BEFORE the cap
+    # (the windows sweep's own §106.26 law) — an id-ordered head of
+    # O'Brien-Fleming experiments must never squat the capped slots while
+    # the mSPRT tail starves. The in-loop check stays as belt-and-braces.
     rows = (
         await db.execute(
             select(Experiment.id, Experiment.owner_user_id, Experiment.title,
                    Experiment.current_version)
-            .where(Experiment.status == "running")
+            .join(
+                ExperimentVersion,
+                and_(
+                    ExperimentVersion.experiment_id == Experiment.id,
+                    ExperimentVersion.version == Experiment.current_version,
+                ),
+            )
+            .where(
+                Experiment.status == "running",
+                ExperimentVersion.spec["sequential"].astext == "msprt",
+            )
             .order_by(Experiment.id.asc())
             .limit(cap)
         )

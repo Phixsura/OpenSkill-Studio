@@ -1479,6 +1479,19 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 334 — defect #85 (#84's sibling, found by sweeping the class):
+the auto-analysis sweep filtered mSPRT INSIDE the loop, AFTER the
+id-ordered cap — a head of O'Brien-Fleming experiments squatted every
+capped slot and the mSPRT tail never got its free daily analysis,
+violating the windows sweep's own "filter in SQL BEFORE the cap" law.
+Red-first with cap=1 (a lower-id OF in front must not shadow the mSPRT);
+fix joins the version row and filters spec->sequential = msprt in SQL
+(in-loop check stays as belt-and-braces). Class survey of all 8 sweeps:
+guardrails stamps (fairness by recency), starts/ramps/closures are
+self-draining predicates, interactions rotates by ISO week, windows
+filters closure in SQL pre-cap, digest caps at 500 — analyses was the
+one violator.
+
 Round 333 — defect #84 (the unguarded skip): sweep fairness (§106.26)
 holds for every path that STAMPS — but a running experiment whose
 current_version row is missing hit a "skipped" branch with no stamp:

@@ -2625,3 +2625,32 @@ async def test_rate_primary_with_cuped_warns_typed_not_misleading(db):
     assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
     comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
     assert "cuped" not in comparison  # the boundary holds, honestly labeled
+
+
+async def test_auto_analysis_cap_cannot_be_squatted_by_of(db):
+    """#85 (round 334): the mSPRT filter lived INSIDE the loop, AFTER the
+    id-ordered cap — a head of O'Brien-Fleming experiments squatted every
+    capped slot and the mSPRT tail never got its free daily analysis
+    (the windows sweep's own "filter in SQL BEFORE the cap" law, §106.26).
+    With cap=1 and a LOWER-id OF in front, the mSPRT one must still run."""
+    from sqlalchemy import update as _update
+
+    from app.experiments.models import Experiment as _Exp
+    from app.experiments.worker import sweep_experiment_analyses
+
+    # OF first (lower ULID id), mSPRT second (higher id)
+    of_exp, _ = await _mk_running(
+        db, sequential="obrien_fleming", stop_policy={"max_days": 28, "max_looks": 2}
+    )
+    await _populate(db, of_exp)
+    exp, _admin = await _mk_running(db)
+    await _populate(db, exp)
+
+    # §106.25 residue law: only OUR two experiments stay running
+    await db.execute(
+        _update(_Exp)
+        .where(_Exp.status == "running", _Exp.id.notin_([exp.id, of_exp.id]))
+        .values(status="paused")
+    )
+    analyzed = await sweep_experiment_analyses(db, cap=1)
+    assert analyzed == 1, "the OF head must not squat the capped slot"
