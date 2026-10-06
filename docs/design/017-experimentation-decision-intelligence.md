@@ -811,10 +811,17 @@ auth sweep (ADR-016 §96).
 
 ## 13. Worker (reuses controlplane outbox)
 
-Topics: `exp.compute_snapshots`, `exp.evaluate_guardrails`,
-`exp.close_experiment` (ended_at reached → completed), `exp.apply_promotion`.
+Topics (round 309 — de-staled against the code; the once-listed
+`exp.close_experiment` topic never shipped as a handler — closures run
+as a sweep): `exp.compute_snapshots`, `exp.evaluate_guardrails`,
+`exp.apply_promotion`.
 Sweeps: `sweep_experiment_guardrails` (10 min, fairness cap),
-`sweep_experiment_windows` (daily), `sweep_experiment_closures`,
+`sweep_experiment_windows` (daily), `sweep_experiment_closures`
+(ended_at reached → completed), `sweep_experiment_starts` (exp10
+start_at), `sweep_experiment_analyses` (exp10 auto-run at close),
+`sweep_experiment_interactions` (weekly pairwise scan),
+`sweep_ramp_plans` (exp14 scheduled ramps), `sweep_weekly_digest`
+(owner digest incl. awaiting-decision flags and warning counts),
 `prune_experiment_history` (exposures archived to
 `experiment_exposures_archive` after 400d — audit is never deleted).
 All handlers idempotent under at-least-once delivery (UPSERT / dedup_key).
@@ -1460,6 +1467,11 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 309 — doc-truth: the audit-event canonical list re-diffed against
+code literals (11 = 11, zero drift); §13's worker inventory was STALE —
+it listed a topic that never shipped as a handler (exp.close_experiment;
+closures are a sweep) and named only 3 of the 8 sweeps. De-staled.
 
 Rounds 306-308 — PR body synced through 305; promotion concurrency
 audited clean (FOR UPDATE + status gates + #47 savepoint confinement —
