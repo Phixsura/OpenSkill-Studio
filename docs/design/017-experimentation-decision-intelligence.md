@@ -1470,6 +1470,12 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 313 — the planner reaches the product: a PlanningCalculator card
+on the experiment builder (debounce-free useQuery keyed on inputs,
+client-side bounds gate so invalid input never hits the API, the
+degenerate flag surfaced verbatim). Web 738/738 (3 pins: endpoint wire,
+degenerate honesty, no-query-on-invalid).
+
 Round 312 — the planning calculator ships: §4.13's required_n_per_arm
 core was reachable only as a look-time underpower warning — the
 design-time question ("how many users do I need?") every vendor console

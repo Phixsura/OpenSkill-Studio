@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-import { apiTextWithAuth } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { apiTextWithAuth, apiWithAuth } from "@/lib/api";
 
 import { usePlatformAdmin } from "@/lib/use-me";
 
@@ -147,5 +148,61 @@ export function JsonPacketButton({ data, filename }: { data: unknown; filename: 
     >
       Download packet
     </button>
+  );
+}
+
+/** Round 313: design-time sample-size calculator (GET /experiments/
+ * planning/sample-size, round 312). Pure read — answers "how many users
+ * per arm?" while the spec is being written. */
+export function PlanningCalculator() {
+  const [baseline, setBaseline] = useState("0.1");
+  const [mde, setMde] = useState("0.1");
+  const b = Number(baseline);
+  const m = Number(mde);
+  const valid = Number.isFinite(b) && b > 0 && b < 1 && Number.isFinite(m) && m !== 0;
+  const plan = useQuery({
+    queryKey: ["exp-planning", baseline, mde],
+    queryFn: () =>
+      apiWithAuth<{
+        data: { required_n_per_arm: number | null; degenerate: boolean };
+      }>(`/experiments/planning/sample-size?baseline_rate=${b}&mde_rel=${m}`),
+    enabled: valid,
+  });
+  const n = plan.data?.data.required_n_per_arm;
+  return (
+    <div className="rounded-md border p-3 text-sm" data-testid="planning-calc">
+      <div className="mb-2 font-medium">Sample-size planner</div>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col text-xs">
+          Baseline rate
+          <input
+            className="mt-1 w-24 rounded border px-2 py-1"
+            value={baseline}
+            onChange={(e) => setBaseline(e.target.value)}
+            aria-label="baseline rate"
+          />
+        </label>
+        <label className="flex flex-col text-xs">
+          Relative MDE
+          <input
+            className="mt-1 w-24 rounded border px-2 py-1"
+            value={mde}
+            onChange={(e) => setMde(e.target.value)}
+            aria-label="relative MDE"
+          />
+        </label>
+        <div className="text-muted-foreground text-xs">
+          {!valid
+            ? "Enter a baseline in (0,1) and a non-zero MDE"
+            : plan.data?.data.degenerate
+              ? "No detectable difference at these inputs"
+              : typeof n === "number"
+                ? `≈ ${n.toLocaleString()} users per arm (α=0.05, power=0.8)`
+                : plan.isLoading
+                  ? "Computing…"
+                  : ""}
+        </div>
+      </div>
+    </div>
   );
 }

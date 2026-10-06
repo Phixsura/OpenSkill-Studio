@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
-import { ErrorBanner, ExperimentsNav, SectionCard } from "../components";
+import { ErrorBanner, ExperimentsNav, PlanningCalculator, SectionCard } from "../components";
 import {
   ALLOCATION_MODES,
   ANALYSIS_TYPES,
@@ -177,6 +177,7 @@ export default function NewExperimentPage() {
       <h1 className="text-xl font-semibold">New experiment</h1>
       <ErrorBanner message={error} />
 
+      <PlanningCalculator />
       <SectionCard title="1 · Basics">
         <div className="grid gap-3 md:grid-cols-3">
           <div>
