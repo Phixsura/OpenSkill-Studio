@@ -1479,6 +1479,12 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Round 320 — the note INPUT ships (319 gave rendering, nothing could
+write from the console): an inline form on the audit-trail card
+(maxLength 500 mirrors the schema, submit disabled on empty, clears and
+invalidates the feed on success). Web 741/741 (post-body pin +
+empty-disabled pin).
+
 Round 319 — 318 adversarially re-reviewed: the feed renders payloads
 through React text nodes (no dangerouslySetInnerHTML anywhere in the
 console), so note text cannot XSS; and notes now render as PROSE in the

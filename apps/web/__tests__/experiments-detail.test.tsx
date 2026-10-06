@@ -270,3 +270,31 @@ describe("events feed note rendering (round 319)", () => {
     expect(screen.getByText(/"from":"review"/)).toBeTruthy();
   });
 });
+
+describe("timeline note input (round 320)", () => {
+  it("posts the note and clears the field", async () => {
+    mockApiFor("running");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("timeline note");
+    fireEvent.change(input, { target: { value: "ramped to 100%" } });
+    fireEvent.click(screen.getByText("Add note"));
+    await waitFor(() =>
+      expect(
+        api.mock.calls.some(
+          (c) =>
+            String(c[0]).endsWith("/notes") &&
+            (c[1] as { body?: string } | undefined)?.body ===
+              JSON.stringify({ text: "ramped to 100%" }),
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
+  });
+
+  it("disables submit on empty input", async () => {
+    mockApiFor("running");
+    render(<ExperimentDetailPage />, { wrapper: wrapper() });
+    const btn = (await screen.findByText("Add note")) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+});

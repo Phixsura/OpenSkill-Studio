@@ -86,6 +86,19 @@ export default function ExperimentDetailPage() {
     queryClient.invalidateQueries({ queryKey: ["experiment-events", experimentId] });
   };
 
+  const [noteText, setNoteText] = useState("");
+  const addNote = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`/experiments/${experimentId}/notes`, {
+        method: "POST",
+        body: JSON.stringify({ text: noteText.trim() }),
+      }),
+    onSuccess: () => {
+      setNoteText("");
+      invalidate();
+    },
+  });
+
   const transition = useMutation({
     mutationFn: (to_status: string) =>
       apiWithAuth(`/experiments/${experimentId}/transition`, {
@@ -438,6 +451,29 @@ POST /api/v1/experiments/self/exposures { "experiment_key": ${JSON.stringify(exp
       </SectionCard>
 
       <SectionCard title="Audit trail (append-only)">
+        <form
+          className="mb-3 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (noteText.trim()) addNote.mutate();
+          }}
+        >
+          <input
+            className="flex-1 rounded border px-2 py-1 text-sm"
+            placeholder="Add a timeline note (round 318)…"
+            maxLength={500}
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            aria-label="timeline note"
+          />
+          <button
+            type="submit"
+            className="rounded-md border px-2 py-1 text-xs"
+            disabled={addNote.isPending || !noteText.trim()}
+          >
+            {addNote.isPending ? "Saving…" : "Add note"}
+          </button>
+        </form>
         <ul className="space-y-1 text-sm">
           {(events.data?.data ?? []).map((e) => (
             <li key={e.id} className="flex gap-3">
