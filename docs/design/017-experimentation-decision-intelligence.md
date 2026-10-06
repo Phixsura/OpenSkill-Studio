@@ -532,6 +532,16 @@ sets a cancelled flag the commit listener checks. Test gotchas recorded:
 expired ORM attribute access after commit/rollback raises
 MissingGreenlet (capture plain ids first).
 
+Savepoint boundary (round 293): after_commit fires at the OUTER commit
+only — an emit inside a begin_nested savepoint whose savepoint rolls
+back would still deliver. Audited: no caller emits inside a savepoint
+(the guardrail savepoints wrap notifications only, #42's lesson), and a
+correct general cancel is not expressible with session-level events
+(after_soft_rollback cannot be scoped to the emit's own savepoint).
+Resolution: a loud structlog warning (webhook_defer_inside_savepoint)
+fires if a future caller ever does, pinned by test (structlog
+capture_logs — stdlib caplog sees nothing).
+
 ## 5. Lifecycle state machine
 
 ```
@@ -1413,6 +1423,9 @@ swaps and the segment-column removal) and the full suite passes on the
 rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
+
+Round 293 — the savepoint boundary documented + defended (see §4.18);
+certification 163 = 6992 all-green (the #80/#81 suite joins).
 
 Round 291 — defect #81 (the stale listener, #80's second act): see
 §4.18; certification 163 was killed as TAINTED (source edited mid-run —

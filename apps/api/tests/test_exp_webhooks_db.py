@@ -360,3 +360,40 @@ async def test_rollback_then_later_commit_fires_no_stale_webhook(db, monkeypatch
         if admin_row is not None:
             await db.delete(admin_row)
         await db.commit()
+
+
+async def test_emit_inside_savepoint_warns_loudly(db, monkeypatch):
+    """Round 293 (the #80/#81 boundary): after_commit fires at the OUTER
+    commit only, so an emit inside a begin_nested savepoint that later
+    rolls back would still deliver. No caller does this today — the
+    defensive warning must fire so a future one is caught in logs."""
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    admin = await _mk_admin(db)
+    org = await OrgService(db).create(
+        name=f"WHN {ULID()}", slug=f"whn-{str(ULID()).lower()}",
+        description=None, created_by=admin.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    await WebhookService(db).create(
+        org_id=org.id, url="https://example.com/sp",
+        events=["experiment.decision_recorded"],
+    )
+
+    from structlog.testing import capture_logs
+
+    with capture_logs() as cap:
+        async with db.begin_nested():
+            await emit_experiment_event(
+                db, scope_org_id=org.id,
+                event_type="experiment.decision_recorded",
+                payload={"experiment_id": "sp"},
+            )
+    assert any(e["event"] == "webhook_defer_inside_savepoint" for e in cap), cap

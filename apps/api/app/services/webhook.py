@@ -303,6 +303,19 @@ class WebhookService:
 
         from sqlalchemy import event as sa_event
 
+        # Round 293 (the #80/#81 boundary, documented): after_commit fires at
+        # the OUTER commit only — an emit inside a begin_nested savepoint
+        # whose savepoint later rolls back would still deliver. No current
+        # caller emits inside a savepoint (the guardrail savepoints wrap
+        # notifications only); warn loudly if one ever does.
+        if self.db.sync_session.in_nested_transaction():
+            log.warning(
+                "webhook_defer_inside_savepoint",
+                org_id=org_id,
+                webhook_event=event_type,
+                hint="a savepoint rollback after this emit still delivers",
+            )
+
         # #81 (round 291): a once-listener SURVIVES a rollback — if the same
         # session later commits unrelated work (the retry pattern), the
         # rolled-back transaction's event would fire anyway. The rollback
