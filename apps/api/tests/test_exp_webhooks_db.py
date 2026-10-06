@@ -397,3 +397,161 @@ async def test_emit_inside_savepoint_warns_loudly(db, monkeypatch):
                 payload={"experiment_id": "sp"},
             )
     assert any(e["event"] == "webhook_defer_inside_savepoint" for e in cap), cap
+
+
+async def _wh_fixture(db):
+    """Org + ACTIVE tenant + one decision-event subscription; plain ids."""
+    from app.controlplane.models.tenant import TenantAccount, TenantStatus
+    from app.controlplane.services.entitlements import invalidate_cache
+    from app.services.organization import OrgService
+    from app.services.webhook import WebhookService
+
+    admin = await _mk_admin(db)
+    org = await OrgService(db).create(
+        name=f"WSP {ULID()}", slug=f"wsp-{str(ULID()).lower()}",
+        description=None, created_by=admin.id,
+    )
+    tenant = await db.get(TenantAccount, org.tenant_id)
+    tenant.status = TenantStatus.ACTIVE
+    await db.flush()
+    await invalidate_cache(tenant.id)
+    await WebhookService(db).create(
+        org_id=org.id, url="https://example.com/sp",
+        events=["experiment.decision_recorded"],
+    )
+    return org.id, org.tenant_id, admin.id
+
+
+async def _wh_sweep(db, org_id, tenant_id, admin_id):
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization as OrgM
+
+    org_row = await db.get(OrgM, org_id)
+    if org_row is not None:
+        await db.delete(org_row)
+        await db.flush()
+    tenant_row = await db.get(TenantAccount, tenant_id)
+    if tenant_row is not None:
+        await db.delete(tenant_row)
+    admin_row = await db.get(User, admin_id)
+    if admin_row is not None:
+        await db.delete(admin_row)
+    await db.commit()
+
+
+async def test_savepoint_rollback_cancels_the_emit(db, monkeypatch):
+    """#82 (round 296): the outbox runner wraps EVERY handler in a
+    begin_nested savepoint — a handler that emits (guardrail breach, the
+    flagship case) then raises has its writes rolled back, but the
+    after_commit listener fired at the per-message batch commit anyway:
+    a phantom breach webhook. The cancel must scope to the emit's own
+    savepoint."""
+    import asyncio
+
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.webhook import WebhookService
+
+    org_id, tenant_id, admin_id = await _wh_fixture(db)
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(event_type)
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    await db.commit()  # fixture committed; ids are plain strings
+    try:
+        # the outbox-runner shape: handler inside a savepoint, raising
+        try:
+            async with db.begin_nested():
+                await emit_experiment_event(
+                    db, scope_org_id=org_id,
+                    event_type="experiment.decision_recorded",
+                    payload={"experiment_id": "sp-phantom"},
+                )
+                raise RuntimeError("handler exploded after emit")
+        except RuntimeError:
+            pass
+        await db.commit()  # the runner's per-message batch commit
+        await asyncio.sleep(0.05)
+        assert scheduled == [], (
+            "a savepoint-rolled-back emit must not ride the outer commit"
+        )
+    finally:
+        await _wh_sweep(db, org_id, tenant_id, admin_id)
+
+
+async def test_savepoint_release_still_delivers(db, monkeypatch):
+    """#82 counterpart: a handler that SUCCEEDS inside its savepoint must
+    still deliver at the outer commit — the cancel must not overreach."""
+    import asyncio
+
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.webhook import WebhookService
+
+    org_id, tenant_id, admin_id = await _wh_fixture(db)
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(event_type)
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    await db.commit()
+    try:
+        async with db.begin_nested():
+            await emit_experiment_event(
+                db, scope_org_id=org_id,
+                event_type="experiment.decision_recorded",
+                payload={"experiment_id": "sp-ok"},
+            )
+        await db.commit()
+        await asyncio.sleep(0.05)
+        assert scheduled == ["experiment.decision_recorded"], scheduled
+    finally:
+        await _wh_sweep(db, org_id, tenant_id, admin_id)
+
+
+async def test_unrelated_savepoint_rollback_must_not_cancel(db, monkeypatch):
+    """#82 (round 296, the REAL direction): SQLAlchemy fires after_rollback
+    on ANY savepoint rollback — in the outbox batch, message 1's successful
+    emit was cancelled when message 2's unrelated savepoint rolled back:
+    a legitimate breach webhook silently lost."""
+    import asyncio
+
+    from app.experiments.services.webhook_events import emit_experiment_event
+    from app.services.webhook import WebhookService
+
+    org_id, tenant_id, admin_id = await _wh_fixture(db)
+    scheduled: list = []
+
+    async def counting_deliver(url, secret, webhook_id, event_type, payload):
+        scheduled.append(event_type)
+
+    monkeypatch.setattr(
+        WebhookService, "_deliver_background", staticmethod(counting_deliver)
+    )
+    await db.commit()
+    try:
+        # message 1: handler succeeds, savepoint releases
+        async with db.begin_nested():
+            await emit_experiment_event(
+                db, scope_org_id=org_id,
+                event_type="experiment.decision_recorded",
+                payload={"experiment_id": "msg-1"},
+            )
+        # message 2: a LATER unrelated handler fails, its savepoint rolls back
+        try:
+            async with db.begin_nested():
+                raise RuntimeError("sibling handler exploded")
+        except RuntimeError:
+            pass
+        await db.commit()  # the batch commit — message 1 is COMMITTED
+        await asyncio.sleep(0.05)
+        assert scheduled == ["experiment.decision_recorded"], (
+            "an unrelated savepoint rollback cancelled a committed emit"
+        )
+    finally:
+        await _wh_sweep(db, org_id, tenant_id, admin_id)

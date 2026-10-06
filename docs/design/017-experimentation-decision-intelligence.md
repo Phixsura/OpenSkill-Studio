@@ -538,9 +538,20 @@ back would still deliver. Audited: no caller emits inside a savepoint
 (the guardrail savepoints wrap notifications only, #42's lesson), and a
 correct general cancel is not expressible with session-level events
 (after_soft_rollback cannot be scoped to the emit's own savepoint).
-Resolution: a loud structlog warning (webhook_defer_inside_savepoint)
-fires if a future caller ever does, pinned by test (structlog
-capture_logs — stdlib caplog sees nothing).
+Resolution at round 293: a loud warning. OVERTURNED at round 296: the
+outbox runner wraps EVERY handler in a begin_nested savepoint, so the
+guardrail sweep's breach emit — the flagship webhook use case — lands
+inside one routinely. Adversarial probing produced the full empirical
+matrix (savepoint releases -> delivers; the emit's own savepoint rolls
+back -> cancelled; an UNRELATED later savepoint rollback -> still
+delivers; a real rollback -> cancelled; never rides a later commit):
+every shape already behaves correctly under the #80/#81 listeners,
+though instrumentation showed the dispatch mechanism differs from the
+naive reading of the event docs (registration context affects which
+rollback dispatches reach the listener). The contract is therefore
+pinned EMPIRICALLY by five DB kill-proofs in test_exp_webhooks_db.py —
+the alarm if a SQLAlchemy upgrade shifts semantics — and the in-savepoint
+log is demoted to debug (a routine path must not cry wolf).
 
 ## 5. Lifecycle state machine
 
@@ -1430,6 +1441,12 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 296 — the savepoint verdict overturned by evidence (see §4.18):
+the worker's outbox runner puts every handler inside a savepoint, the
+293 warning would have cried wolf on every legit sweep breach, and the
+feared phantom/loss shapes were probed red-first in BOTH directions —
+all found already-correct; contract pinned empirically (5 kill-proofs).
 
 Round 294 — the pre-login story's last mile: useAnonExperiment had
 tests and auth-path claiming but NO page consumer. The register page's
