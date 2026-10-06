@@ -1,7 +1,7 @@
 [
   {
     "path": "app/services/webhook.py",
-    "funcs": ["WebhookService.trigger_event"],
+    "funcs": ["trigger_event"],
     "cmd": ["uv", "run", "pytest", "tests/test_exp_webhooks_db.py",
             "tests/test_cp_whitelabel_db.py::test_webhook_delivery_gated_by_entitlement",
             "-q", "-x", "--timeout=240", "--timeout-method=thread"],
