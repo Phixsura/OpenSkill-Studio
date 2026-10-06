@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/webhook_events.py",
+    "funcs": ["emit_experiment_event"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_webhooks_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  }
+]
