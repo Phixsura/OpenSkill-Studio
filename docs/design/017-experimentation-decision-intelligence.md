@@ -1392,6 +1392,15 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Rounds 287-288 — the webhook subscription HTTP contract on the live
+wall (4 checks: experiment.* accepted with a one-time secret, unknown
+types 422 naming the full valid list — discoverability without a new
+endpoint, masked listing, delete), wall 151 -> 155 all green;
+certification 162 = 6988 all-green (the webhook suite joins). Audited:
+the web console has no webhook subscription UI — a pre-existing
+platform-wide surface gap shared by pack/talent/eco events, not an
+ADR-017 scope item.
+
 Round 286 — the UNMOCKED trigger path proven: a real org +
 ACTIVE-tenant subscription created through WebhookService.create (the
 whitelist accepts experiment.*), emit_experiment_event flows through the
