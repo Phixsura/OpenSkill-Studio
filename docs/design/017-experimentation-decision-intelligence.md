@@ -1424,6 +1424,13 @@ rebuilt schema. Also: the #40 class is CLOSED globally — an app-wide sweep
 shows the only facade write-path callers are the six hooks and the
 self-serve endpoints, all with audited persistence.
 
+Round 295 — browser wall re-run after the register-CTA change: 3/3
+green on a SELF-CONTAINED stack (API :8445 APP_ENV=test + web :3000 via
+API_PROXY_URL — the server-only rewrite override built for e2e stacks;
+first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
+exactly the hazard the config comment warns about). The user's dev API
+on :8000 untouched.
+
 Round 294 — the pre-login story's last mile: useAnonExperiment had
 tests and auth-path claiming but NO page consumer. The register page's
 sign-up CTA now rides the "register-cta" anonymous experiment
