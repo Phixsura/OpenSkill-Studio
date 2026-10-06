@@ -1022,6 +1022,7 @@ Every signal below is surfaced in the Console; none requires DB access.
 | Exposure-SRM alert                                    | Exposure funnel imbalanced across arms — one arm's surface renders/exposes differently                                                                                                                             | Audit the host surface per arm (error rates, latency); exposure dilution biases toward null                                                |
 | Guardrail auto-pause                                  | A declared guardrail breached its threshold                                                                                                                                                                        | The experiment is already safe (paused). Review the breach in Diagnostics → fix or accept → resume via transition running                  |
 | `__incident__` event                                  | A human pressed the incident button                                                                                                                                                                                | Coordinate with the operator who filed it; resume only after the stated reason is addressed                                                |
+| `__spec_invalid__` / `__spec_missing__` auto-pause    | The RUNNING experiment's spec cannot parse, or its current_version row is gone — guardrails cannot evaluate, so it is unguarded (rounds 148/#84)                                                                   | The experiment is already safe (paused). Restore/repair the version (support path), then resume via transition running                     |
 | `PRE_BALANCE_SUSPECT`                                 | CUPED covariate differs across arms pre-experiment — randomization or feed broken                                                                                                                                  | Treat all effects as suspect; re-check assignment integrity (A/A probe, interaction sweep)                                                 |
 | `NOVELTY_EFFECT_DECAY_SUSPECT`                        | Early-window effect much larger than late-window                                                                                                                                                                   | Extend the run; judge on the late window; don't promote a novelty spike                                                                    |
 | `TRIGGERED_*` warnings                                | Exposed-only analysis population caveats                                                                                                                                                                           | Expected for triggered experiments; confirm provenance markers on snapshots                                                                |
@@ -1503,6 +1504,9 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Round 344 — §18a gains the **spec_invalid**/**spec_missing** auto-pause
+row (the #84 event key was undocumented in the operator table).
 
 Round 343 — defect #88 (the class's FIFTH member, an arithmetic one):
 the interaction sweep's ISO-week rotation used stride 1 (start = week %
