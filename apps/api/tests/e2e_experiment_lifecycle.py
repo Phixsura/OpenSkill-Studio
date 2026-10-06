@@ -776,6 +776,13 @@ async def main() -> int:
                           json={"ramp_bp": 10000})
         check("ramp the observational experiment for serving",
               r.status_code == 200, r.text[:200])
+        # #83 (round 302): formula-shaped ids die at the write boundary
+        r = await c.post("/experiments/anon/resolve",
+                         json={"experiment_key": obs_key,
+                               "anonymous_id": "=HYPERLINK(1)"})
+        check("formula-shaped anonymous id is 422 (CSV injection wall)",
+              r.status_code == 422, r.text[:200])
+
         anon_ulid = f"E2EANON{uid().upper()}"[:26]
         r = await c.post("/experiments/anon/resolve",
                          json={"experiment_key": obs_key,
