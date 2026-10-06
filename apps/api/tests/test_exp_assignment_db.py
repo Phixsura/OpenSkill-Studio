@@ -1632,3 +1632,72 @@ async def test_link_migration_racing_user_resolve(db, monkeypatch):
             ExperimentEvent.event_type == "experiment_identity_conflict"))
     ).scalar_one()
     assert event.payload["anonymous_id"] == anon_id
+
+
+async def test_layer_service_negative_paths(db):
+    """Round 369 (coverage map): the LayerService guard branches —
+    unknown domain, duplicate key, missing layer, slice validations and
+    the one-allocation-per-experiment constraint — pinned at the service
+    seam (the wall exercises them over HTTP, outside pytest-cov)."""
+    import pytest as _pytest
+
+    from app.exceptions import AppError
+    from app.experiments.services.layers import LayerService
+
+    svc = LayerService(db)
+    with _pytest.raises(AppError) as e:
+        await svc.create(key=f"neg-{str(ULID()).lower()}", domain="nope")
+    assert e.value.code == "VALIDATION_ERROR"
+
+    key = f"neg-{str(ULID()).lower()}"
+    await svc.create(key=key, domain="learning")
+    try:
+        async with db.begin_nested():
+            with _pytest.raises(AppError) as e:
+                await svc.create(key=key, domain="learning")
+    except Exception:  # noqa: BLE001 — savepoint absorbs the poisoned flush
+        pass
+    assert e.value.code == "EXPERIMENT_KEY_TAKEN"
+
+    with _pytest.raises(AppError) as e:
+        await svc.allocate(layer_key="layer-that-is-not-" + key,
+                           experiment_id="x" * 26,
+                           slice_start=0, slice_end=1)
+    assert e.value.code == "EXPERIMENT_NOT_FOUND"
+
+    admin = await _mk_admin(db)
+    from app.experiments.services.experiments import ExperimentService
+
+    exp = await ExperimentService(db).create(
+        key=f"neg-exp-{str(ULID()).lower()}", title="N", domain="learning",
+        layer_key=key, owner_user_id=admin.id,
+    )
+    with _pytest.raises(AppError) as e:
+        await svc.allocate(layer_key=key, experiment_id=exp.id,
+                           slice_start=5, slice_end=4)
+    assert e.value.code == "VALIDATION_ERROR"
+    with _pytest.raises(AppError) as e:
+        await svc.allocate(layer_key=key, experiment_id=exp.id,
+                           slice_start=0, slice_end=10_000)
+    assert e.value.code == "VALIDATION_ERROR"
+    with _pytest.raises(AppError) as e:
+        await svc.allocate(layer_key=key, experiment_id="x" * 26,
+                           slice_start=0, slice_end=1)
+    assert e.value.code == "EXPERIMENT_NOT_FOUND"
+    other_key = f"neg2-{str(ULID()).lower()}"
+    await svc.create(key=other_key, domain="learning")
+    with _pytest.raises(AppError) as e:
+        await svc.allocate(layer_key=other_key, experiment_id=exp.id,
+                           slice_start=0, slice_end=1)
+    assert e.value.code == "VALIDATION_ERROR"  # belongs to another layer
+
+    await svc.allocate(layer_key=key, experiment_id=exp.id,
+                       slice_start=0, slice_end=99)
+    try:
+        async with db.begin_nested():
+            with _pytest.raises(AppError) as e:
+                await svc.allocate(layer_key=key, experiment_id=exp.id,
+                                   slice_start=100, slice_end=199)
+    except Exception:  # noqa: BLE001
+        pass
+    assert e.value.code == "LAYER_SLICE_OVERLAP"
