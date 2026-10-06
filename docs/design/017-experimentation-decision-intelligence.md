@@ -1509,6 +1509,15 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 385-399 — cycles three and four of the in-flight cadence, every
+battery green on every pass: core 241/241, analytics 164/164 and
+132/132, decisions/flow 105/105, identity+webhooks 77/77, pure logic
+177/177, the experiments batch 630/630 twice, web 742/742 twice,
+browser wall 3/3 three times, live wall 161/161 three times. Round 400
+marks the ledger: 89 numbered defects found and killed across the
+campaign (#1-#89, every one red-proven), 50 mutation waves, 175
+full-suite certifications (latest 7010), four ledgers kept current.
+
 Rounds 377-383 — the second full in-flight cycle, all green:
 experiments batch 630/630, the mixed battery 149/149, browser wall 3/3,
 web 742/742, live wall 161/161, analytics 132/132, decisions/flow
