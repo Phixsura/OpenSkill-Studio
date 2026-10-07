@@ -35,6 +35,13 @@ SRM banner only matched `__srm__`, so the new windowed/exposure family
 alerts were invisible in the UI. The banner now maps the full family
 with per-key guidance text. Red-first (vitest).
 
+Round 647 addendum — defect #94: record_exposure accepted exposures for
+holdout units (resolve() never serves them) and returned True, writing
+garbage rows against the **holdout** assignment and feeding
+last_exposure_at with non-serving traffic. Now the same fail-safe as
+exposure-without-assignment: False, no row — on the primary path AND
+the identity-retry path. Red-first.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

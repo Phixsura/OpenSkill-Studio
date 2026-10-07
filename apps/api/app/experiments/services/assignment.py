@@ -731,6 +731,11 @@ class AssignmentService:
         assignment = await self._existing(exp.id, unit_type, unit_id)
         if assignment is None:
             return False
+        if assignment.is_holdout:
+            # Defect #94: a holdout unit is never served (resolve() returns
+            # None) — an exposure for it is a caller bug. Same fail-safe as
+            # exposure-without-assignment: refuse, never crash, no row.
+            return False
 
         def _insert_for(assignment_id: str):
             stmt = pg_insert(ExperimentExposure).values(
@@ -763,7 +768,7 @@ class AssignmentService:
             if link is None:
                 return False
             survivor = await self._existing(exp.id, "user", link.user_id)
-            if survivor is None:
+            if survivor is None or survivor.is_holdout:  # 94: same wall on retry
                 return False
             await self.db.execute(_insert_for(survivor.id))
             return True

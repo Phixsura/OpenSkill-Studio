@@ -1408,3 +1408,37 @@ async def test_exposure_srm_window_quiet_below_min_exposed(db):
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "exposure_srm_window" not in summary
+
+
+async def test_record_exposure_refuses_holdout_units(db):
+    """Defect #94: resolve() returns None for a holdout unit — it is never
+    served — so an exposure for it is a caller bug. record_exposure accepted
+    the write (True) and stored a garbage row against the __holdout__
+    assignment, feeding last_exposure_at with non-serving traffic. Contract:
+    fail-safe False, no row."""
+    from sqlalchemy import func as _f
+    from sqlalchemy import select as _sel
+
+    from app.experiments.models.assignment import ExperimentExposure
+
+    exp, _ = await _mk_running(db)
+    db.add(
+        ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id="h94-unit",
+            variant_key="__holdout__", assigned_version=1, bucket=1,
+            is_holdout=True,
+        )
+    )
+    await db.flush()
+    ok = await AssignmentService(db).record_exposure(
+        experiment_key=exp.key, unit_type="user", unit_id="h94-unit"
+    )
+    assert ok is False, "exposure for a never-served holdout unit must be refused"
+    n = (
+        await db.execute(
+            _sel(_f.count()).select_from(ExperimentExposure).where(
+                ExperimentExposure.experiment_id == exp.id
+            )
+        )
+    ).scalar_one()
+    assert n == 0, "no exposure row may be written for a holdout unit"
