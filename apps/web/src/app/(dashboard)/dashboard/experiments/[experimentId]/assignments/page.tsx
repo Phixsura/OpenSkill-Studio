@@ -44,7 +44,17 @@ export default function AssignmentsPage() {
         `/experiments/${experimentId}/guardrails/events?limit=50`,
       ),
   });
-  const srmAlert = (guardrails.data?.data ?? []).find((e) => e.guardrail_key === "__srm__");
+  // Defect #93: the banner must cover the whole SRM family, not just the
+  // cumulative key — windowed and exposure variants are the same alarm class
+  const SRM_FAMILY: Record<string, string> = {
+    __srm__: "assignment counts diverge from spec weights (χ² alert)",
+    __srm_window__:
+      "the last-24h assignment slice diverges from spec weights — a LATE randomization break",
+    __exposure_srm__: "exposed units diverge from assignment proportions — trigger bias (χ² alert)",
+    __exposure_srm_window__:
+      "the last-24h exposure slice diverges from assignment proportions — a LATE trigger-bias regression",
+  };
+  const srmAlert = (guardrails.data?.data ?? []).find((e) => e.guardrail_key in SRM_FAMILY);
 
   const runPreview = useMutation({
     mutationFn: () =>
@@ -78,8 +88,8 @@ export default function AssignmentsPage() {
           role="alert"
           className="rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900"
         >
-          <strong>Sample-ratio mismatch detected</strong> — assignment counts diverge from spec
-          weights (χ² alert). Treat results as suspect until the enrollment path is diagnosed.
+          <strong>Sample-ratio mismatch detected</strong> — {SRM_FAMILY[srmAlert.guardrail_key]}.
+          Treat results as suspect until the enrollment path is diagnosed.
         </div>
       ) : null}
       <SectionCard title="Assignments by variant (ITT)">

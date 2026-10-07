@@ -30,6 +30,11 @@ regression (red-first proof: 944 balanced historical exposures + 56
 all-treatment in 24h = cumulative chi2 3.14 quiet, window chi2 56
 flagrant). `check_exposure_srm_window`, own key, alert-only.
 
+Round 643 addendum — defect #93 (console wiring): the assignments-page
+SRM banner only matched `__srm__`, so the new windowed/exposure family
+alerts were invisible in the UI. The banner now maps the full family
+with per-key guidance text. Red-first (vitest).
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

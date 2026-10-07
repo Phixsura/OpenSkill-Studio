@@ -30,7 +30,7 @@ function wrapper() {
   return Wrapper;
 }
 
-function mockDiagnostics({ srm = false } = {}) {
+function mockDiagnostics({ srm = false, srmKey = "__srm__" } = {}) {
   api.mockImplementation(async (path: string) => {
     const p = String(path);
     if (p.endsWith("/assignments")) {
@@ -54,7 +54,7 @@ function mockDiagnostics({ srm = false } = {}) {
           ? [
               {
                 id: "G".repeat(26),
-                guardrail_key: "__srm__",
+                guardrail_key: srmKey,
                 action: "alerted",
                 auto: true,
                 detail: { chi2: 122.5, df: 1 },
@@ -87,6 +87,19 @@ describe("Assignment diagnostics (ADR-017 Part L)", () => {
     expect(await screen.findByText(/Sample-ratio mismatch detected/)).toBeTruthy();
     expect(screen.getByText("120")).toBeTruthy(); // control assigned
     expect(screen.getByText("70")).toBeTruthy(); // treatment exposed units
+  });
+
+  it("shows the banner for the whole SRM family — __srm_window__ included (defect #93)", async () => {
+    mockDiagnostics({ srm: true, srmKey: "__srm_window__" });
+    render(<AssignmentsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/Sample-ratio mismatch detected/)).toBeTruthy();
+    expect(screen.getByText(/last-24h/i)).toBeTruthy();
+  });
+
+  it("shows the banner for __exposure_srm_window__ too (defect #93)", async () => {
+    mockDiagnostics({ srm: true, srmKey: "__exposure_srm_window__" });
+    render(<AssignmentsPage />, { wrapper: wrapper() });
+    expect(await screen.findByText(/Sample-ratio mismatch detected/)).toBeTruthy();
   });
 
   it("no SRM banner without an __srm__ event; preview posts and renders", async () => {
