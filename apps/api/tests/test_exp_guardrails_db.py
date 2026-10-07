@@ -550,6 +550,10 @@ async def test_srm_runs_at_max_variant_count(db):
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm" in summary
     assert summary["srm"]["df"] == 9
+    # Wave 51 (window df-guard trio): the same 120 rows are in-window, so
+    # the windowed check must evaluate df = 9 too
+    assert "srm_window" in summary
+    assert summary["srm_window"]["df"] == 9
 
 
 # Mutation-survivor ledger (service-core sweep): the following mutants are
@@ -563,6 +567,14 @@ async def test_srm_runs_at_max_variant_count(db):
 #   the re-alert window's >= boundary needs microsecond-exact created_at;
 #   limit(1)→limit(2) is inert because suppression guarantees ≤1 row;
 #   round(chi2, 3)→4 changes display precision only.
+# Wave 51 (check_srm_window + webhook retry) adds the same classes for the
+# windowed check (its df/expected/chi2/re-alert/limit/round guards mirror
+# check_srm), plus:
+#   assigned_at >= window_start boundary needs microsecond-exact timestamps;
+#   webhook retry-loop index mutants (sleep-index shifts, sleep-before-first)
+#     are timing-equivalent under the uniform schedule the tests patch in —
+#     attempt COUNT and retry/no-retry semantics are pinned by the
+#     5xx/429/4xx/exhaustion quartet in test_new_services.py.
 
 
 def test_observed_scalar_all_aggregates():
@@ -1303,3 +1315,20 @@ async def test_srm_window_quiet_below_min_sample(db):
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm_window" not in summary
+
+
+async def test_srm_window_fires_exactly_at_min_sample_boundary(db):
+    """Wave 51 killer (L187 Lt->LtE): exactly SRM_WINDOW_MIN_ASSIGNMENTS
+    in-window rows must still be tested — the minimum is inclusive."""
+    exp, _ = await _mk_running(db)
+    for i in range(100):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"w51m-{i:04d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm_window" in summary
+    assert summary["srm_window"]["total"] == 100

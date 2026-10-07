@@ -1418,3 +1418,87 @@ async def test_webhook_delivery_does_not_retry_4xx(monkeypatch):
     server.close()
     await server.wait_closed()
     assert len(hits) == 1, f"4xx must not be retried, saw {len(hits)} attempts"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_retries_on_429(monkeypatch):
+    """Wave 51 killer (L437 429->430): 429 is rate-limiting — transient by
+    definition, must retry like a 5xx."""
+    import asyncio as aio
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    hits: list[int] = []
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        hits.append(1)
+        status = b"429 Too Many Requests" if len(hits) < 2 else b"200 OK"
+        writer.write(b"HTTP/1.1 " + status + b"\r\ncontent-length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await aio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+
+    async def _not_blocked(url):
+        return False
+
+    monkeypatch.setattr(wh, "_is_blocked_url_async", _not_blocked)
+    monkeypatch.setattr(wh, "WEBHOOK_RETRY_SCHEDULE", (0.05, 0.05, 0.05), raising=False)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", "s" * 48, "wh_r51", "pack.published", {"k": 1}
+    )
+    server.close()
+    await server.wait_closed()
+    assert len(hits) == 2, f"429 must retry once then succeed, saw {len(hits)}"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_exhausts_after_schedule(monkeypatch):
+    """Wave 51 killer (attempt-arithmetic family L395-L398): a receiver that
+    always 500s gets exactly 1 + len(WEBHOOK_RETRY_SCHEDULE) attempts —
+    no more, no fewer."""
+    import asyncio as aio
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    hits: list[int] = []
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        hits.append(1)
+        writer.write(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await aio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+
+    async def _not_blocked(url):
+        return False
+
+    monkeypatch.setattr(wh, "_is_blocked_url_async", _not_blocked)
+    monkeypatch.setattr(wh, "WEBHOOK_RETRY_SCHEDULE", (0.05, 0.05, 0.05), raising=False)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", "s" * 48, "wh_r51x", "pack.published", {"k": 1}
+    )
+    server.close()
+    await server.wait_closed()
+    assert len(hits) == 4, f"expected exactly 4 attempts (1+3), saw {len(hits)}"
