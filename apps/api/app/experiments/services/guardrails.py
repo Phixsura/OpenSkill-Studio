@@ -16,7 +16,7 @@ import re
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import AppError
@@ -28,6 +28,7 @@ from app.experiments.models import (
 )
 from app.experiments.models.guardrail import (
     EXPOSURE_SRM_GUARDRAIL_KEY,
+    EXPOSURE_SRM_WINDOW_GUARDRAIL_KEY,
     INCIDENT_GUARDRAIL_KEY,
     SRM_GUARDRAIL_KEY,
     SRM_WINDOW_GUARDRAIL_KEY,
@@ -158,6 +159,96 @@ class GuardrailService:
             await self._notify_alert(
                 exp, title=f"SRM alert on '{exp.title}'", detail=detail
             )
+        return detail
+
+    async def check_exposure_srm_window(
+        self, exp: Experiment, *, notify: bool = True
+    ) -> dict | None:
+        """Defect #92: the windowed-SRM argument (#90) applied to trigger
+        bias — chi-square of ONLY the last SRM_WINDOW_HOURS of exposed
+        units against the cumulative assignment proportions. A late bias
+        (deploy regression in the exposure call site) is diluted by the
+        healthy cumulative mass. Alert-only, 24h-suppressed, own key."""
+        spec = await self._spec(exp)
+        if spec is None or spec.design == "switchback":
+            return None  # same reason as check_srm (defect #28)
+        from app.experiments.models.assignment import ExperimentExposure
+        from app.experiments.services.assignment import AssignmentService
+
+        assigned = (await AssignmentService(self.db).assignment_stats(exp.id))["variants"]
+        total_assigned = sum(assigned.values())
+        if total_assigned <= 0:
+            return None
+        window_start = datetime.now(UTC) - timedelta(hours=SRM_WINDOW_HOURS)
+        exposed_q = (
+            select(
+                ExperimentAssignment.variant_key,
+                func.count(func.distinct(ExperimentExposure.assignment_id)),
+            )
+            .join(
+                ExperimentAssignment,
+                ExperimentAssignment.id == ExperimentExposure.assignment_id,
+            )
+            .where(
+                ExperimentExposure.experiment_id == exp.id,
+                ExperimentExposure.occurred_at >= window_start,
+            )
+            .group_by(ExperimentAssignment.variant_key)
+        )
+        exposed = dict((await self.db.execute(exposed_q)).all())
+        counts = {vk: exposed.get(vk, 0) for vk in assigned}
+        total_exposed = sum(counts.values())
+        if total_exposed < EXPOSURE_SRM_MIN_EXPOSED:
+            return None
+        df = len(assigned) - 1
+        if df < 1 or df > 9:
+            return None
+        chi2 = 0.0
+        for vk, n_assigned in assigned.items():
+            expected = total_exposed * n_assigned / total_assigned
+            if expected <= 0:
+                continue
+            chi2 += (counts.get(vk, 0) - expected) ** 2 / expected
+        if chi2 < _CHI2_CRIT_P001[df]:
+            return None
+        recent = (
+            await self.db.execute(
+                select(GuardrailEvent)
+                .where(
+                    GuardrailEvent.experiment_id == exp.id,
+                    GuardrailEvent.guardrail_key == EXPOSURE_SRM_WINDOW_GUARDRAIL_KEY,
+                    GuardrailEvent.created_at
+                    >= datetime.now(UTC) - timedelta(hours=_SRM_REALERT_HOURS),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        detail = {
+            "chi2": round(chi2, 3),
+            "df": df,
+            "counts": counts,
+            "total_exposed": total_exposed,
+            "window_hours": SRM_WINDOW_HOURS,
+        }
+        if recent is None:
+            self.db.add(
+                GuardrailEvent(
+                    experiment_id=exp.id,
+                    guardrail_key=EXPOSURE_SRM_WINDOW_GUARDRAIL_KEY,
+                    action="alerted",
+                    auto=True,
+                    detail=detail,
+                )
+            )
+            log.warning(
+                "experiment_exposure_srm_window_alert", experiment_id=exp.id, **detail
+            )
+            if notify:
+                await self._notify_alert(
+                    exp,
+                    title=f"Windowed exposure-SRM alert on '{exp.title}'",
+                    detail=detail,
+                )
         return detail
 
     async def check_srm_window(
@@ -431,6 +522,11 @@ class GuardrailService:
         exposure_srm = await self.check_exposure_srm(exp)
         if exposure_srm is not None:
             summary["exposure_srm"] = exposure_srm
+        exposure_srm_window = await self.check_exposure_srm_window(
+            exp, notify=exposure_srm is None
+        )
+        if exposure_srm_window is not None:
+            summary["exposure_srm_window"] = exposure_srm_window
 
         msvc = MetricService(self.db)
         variant_units = await msvc._variant_units(experiment_id)  # noqa: SLF001 — same package

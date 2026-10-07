@@ -1040,6 +1040,7 @@ Every signal below is surfaced in the Console; none requires DB access.
 | `SAMPLE_BELOW_POWER_TARGET` / Underpowered banner     | Not enough units against the declared MDE — a "no effect" read is not evidence of absence                                                                                                                          | Keep running, raise ramp_bp, or accept a bigger MDE; never promote on an underpowered primary                                                                                        |
 | SRM alert (`__srm__` guardrail event, alert-only)     | Assignment counts deviate from spec weights — randomization or data-feed suspect                                                                                                                                   | Check recent ramp changes and layer edits; run the layer A/A probe; if unexplained, pause and investigate before trusting ANY result                                                 |
 | Windowed SRM alert (`__srm_window__`, alert-only)     | Last-24h assignment slice deviates from spec weights while the cumulative test is still quiet — a LATE randomization break (post-ramp misconfig, differential dropout)                                             | Diff the last 24h of ramp/layer/spec changes first — the break started recently by construction; then as for SRM                                                                     |
+| Windowed exposure-SRM (`__exposure_srm_window__`)     | Last-24h exposed units deviate from assignment proportions while cumulative exposure-SRM is quiet — a LATE trigger-bias regression (a deploy recently broke an exposure call site)                                 | Diff the last 24h of deploys touching exposure call sites; treat exposed-only analyses as suspect until explained                                                                    |
 | Exposure-SRM alert                                    | Exposure funnel imbalanced across arms — one arm's surface renders/exposes differently                                                                                                                             | Audit the host surface per arm (error rates, latency); exposure dilution biases toward null                                                                                          |
 | Guardrail auto-pause                                  | A declared guardrail breached its threshold. NOTE: pause freezes NEW enrollment only — existing assignments KEEP SERVING their variant (round 354)                                                                 | New exposure stops; if the breach means the variant is actively harmful to its existing users, ARCHIVE to stop serving them too, else review in Diagnostics → fix or accept → resume |
 | `__incident__` event                                  | A human pressed the incident button                                                                                                                                                                                | Coordinate with the operator who filed it; resume only after the stated reason is addressed                                                                                          |
@@ -3749,7 +3750,13 @@ v2 batch 1 (round 8, 2026-10-01) — first slice of the §18 backlog:
   exposed-unit counts are χ²-tested against assignment proportions every
   guardrail sweep — divergence means the exposure decision is treatment-
   affected, poisoning any exposed-only analysis. Alert-only
-  (`__exposure_srm__`), min 50 exposed, 24h suppression.
+  (`__exposure_srm__`), min 50 exposed, 24h suppression. The windowed
+  variant (defect #92, round 640) applies the #90 argument to trigger
+  bias: a chi-square over ONLY the last 24h of exposed units against
+  cumulative assignment proportions (`__exposure_srm_window__`, min 50
+  in-window) — a late exposure-call-site regression is diluted by the
+  healthy cumulative mass; no second page when cumulative already
+  alerted in the same sweep.
 - **Winsorization actually applied** (§4.6): a shared empirical-percentile
   clamp now runs in the latency, revision-count and cost sources; provenance
   carries winsorize_pct ONLY on snapshots whose source applied it (the

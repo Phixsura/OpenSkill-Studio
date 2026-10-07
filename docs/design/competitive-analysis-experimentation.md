@@ -24,6 +24,12 @@ Industry (Svix/LaunchDarkly-class) retries transient failures; now
 SSRF re-validation, 4xx never retries. Red-first both ways (5xx
 retries to success; 400 stays single-attempt).
 
+Round 640 addendum — defect #92: the windowed-SRM argument applied to
+trigger bias. Cumulative exposure-SRM dilutes a late exposure-call-site
+regression (red-first proof: 944 balanced historical exposures + 56
+all-treatment in 24h = cumulative chi2 3.14 quiet, window chi2 56
+flagrant). `check_exposure_srm_window`, own key, alert-only.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

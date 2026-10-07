@@ -25,6 +25,9 @@ INCIDENT_GUARDRAIL_KEY = "__incident__"
 # §4.13 v2: per-variant exposure ratios diverging from assignment ratios flag
 # trigger bias (the exposure decision is being affected by the treatment)
 EXPOSURE_SRM_GUARDRAIL_KEY = "__exposure_srm__"
+# Defect #92: the #90 argument applied to trigger bias — the last-24h
+# exposure slice gets its own chi-square against assignment proportions
+EXPOSURE_SRM_WINDOW_GUARDRAIL_KEY = "__exposure_srm_window__"
 # Cross-experiment interaction alert (§4.13 v2) — weekly sweep, both sides
 INTERACTION_GUARDRAIL_KEY = "__interaction__"
 

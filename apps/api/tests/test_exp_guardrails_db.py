@@ -1332,3 +1332,79 @@ async def test_srm_window_fires_exactly_at_min_sample_boundary(db):
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm_window" in summary
     assert summary["srm_window"]["total"] == 100
+
+
+async def test_exposure_srm_window_catches_late_trigger_bias(db):
+    """Defect #92 (the #90 argument applied to trigger bias): cumulative
+    exposure-SRM dilutes a LATE bias. 944 balanced historical exposures +
+    56 all-treatment in the last 24h: cumulative chi2 = 3.14 (quiet at
+    p<0.001) while the 24h exposure slice is flagrant (chi2 = 56 against
+    the assignment proportions). Alert-only under __exposure_srm_window__,
+    dedup-windowed."""
+    from app.experiments.models.assignment import ExperimentExposure
+
+    exp, _ = await _mk_running(db)
+    week_ago = datetime.now(UTC) - timedelta(days=7)
+    rows: dict[str, list] = {"control": [], "treatment": []}
+    for i in range(528):
+        for vk in ("control", "treatment"):
+            row = ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user",
+                unit_id=f"x92-{vk[0]}-{i:04d}", variant_key=vk,
+                assigned_version=1, bucket=i % 10_000, assigned_at=week_ago,
+            )
+            db.add(row)
+            rows[vk].append(row)
+    await db.flush()
+    ids = {vk: [r.id for r in lst] for vk, lst in rows.items()}
+    # 472/472 balanced historical exposures, well outside the window
+    for vk in ("control", "treatment"):
+        for aid in ids[vk][:472]:
+            db.add(
+                ExperimentExposure(
+                    assignment_id=aid, experiment_id=exp.id,
+                    occurred_at=week_ago,
+                )
+            )
+    # 56 treatment-only exposures inside the window (distinct assignments)
+    for aid in ids["treatment"][472:528]:
+        db.add(
+            ExperimentExposure(assignment_id=aid, experiment_id=exp.id)
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "exposure_srm" not in summary, "cumulative must be diluted here"
+    assert "exposure_srm_window" in summary, "windowed check must fire"
+    win = summary["exposure_srm_window"]
+    assert win["counts"] == {"control": 0, "treatment": 56}
+    assert win["total_exposed"] == 56
+    assert win["window_hours"] == 24
+    assert (await db.get(Experiment, exp.id)).status == "running", "alert-only"
+    events = await GuardrailService(db).list_events(exp.id)
+    hits = [e for e in events if e.guardrail_key == "__exposure_srm_window__"]
+    assert len(hits) == 1 and hits[0].action == "alerted"
+    # Dedup within the suppression window
+    await GuardrailService(db).evaluate_experiment(exp.id)
+    events = await GuardrailService(db).list_events(exp.id)
+    assert len([e for e in events if e.guardrail_key == "__exposure_srm_window__"]) == 1
+
+
+async def test_exposure_srm_window_quiet_below_min_exposed(db):
+    """Defect #92 guard-band: under 50 in-window exposed units → quiet."""
+    from app.experiments.models.assignment import ExperimentExposure
+
+    exp, _ = await _mk_running(db)
+    rows = []
+    for i in range(49):
+        row = ExperimentAssignment(
+            experiment_id=exp.id, unit_type="user", unit_id=f"x92t-{i:03d}",
+            variant_key="control", assigned_version=1, bucket=i,
+        )
+        db.add(row)
+        rows.append(row)
+    await db.flush()
+    for row in rows:
+        db.add(ExperimentExposure(assignment_id=row.id, experiment_id=exp.id))
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "exposure_srm_window" not in summary
