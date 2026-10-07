@@ -47,6 +47,13 @@ exposure surfaces' dedup_key had only a length bound — a NUL/control
 char sailed toward String(64) where asyncpg raises an unmappable
 DataError. reject_ctrl_str wall at the schema boundary, 422. Red-first.
 
+Round 656 addendum — defect #96 (#95's twin): experiment_key on all
+four self-serve surfaces (anon/self resolve + exposures) had only a
+length bound — a control char rode into a SELECT text parameter (same
+unmappable-DataError class, absorbed by the fail-safe facade as log
+noise and a silent default experience). One shared _reject_ctrl_key
+wall, 422. Red-first across all four surfaces.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

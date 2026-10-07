@@ -245,3 +245,25 @@ async def test_exposure_dedup_key_rejects_control_chars(c):
                      json={"experiment_key": "idapi-no-such-exp",
                            "dedup_key": "x\x1by"})
     assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_experiment_key_rejects_control_chars(c):
+    """Defect #96 (#95's twin): experiment_key had only a length bound —
+    a NUL rides into a SELECT text parameter where asyncpg raises the same
+    unmappable DataError (R88 class). Wall at the boundary on every
+    key-taking self-serve surface: 422."""
+    bad = "a\x00b"
+    r = await c.post("/api/v1/experiments/anon/resolve",
+                     json={"experiment_key": bad, "anonymous_id": "k96anon"})
+    assert r.status_code == 422, r.text
+    r = await c.post("/api/v1/experiments/anon/exposures",
+                     json={"experiment_key": bad, "anonymous_id": "k96anon"})
+    assert r.status_code == 422, r.text
+    h, _u = await _auth(c, "Key96")
+    r = await c.post("/api/v1/experiments/self/resolve", headers=h,
+                     json={"experiment_key": bad})
+    assert r.status_code == 422, r.text
+    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
+                     json={"experiment_key": bad})
+    assert r.status_code == 422, r.text

@@ -445,8 +445,21 @@ class LayerResponse(BaseModel):
     created_at: datetime
 
 
+def _reject_ctrl_key(v: str) -> str:
+    """Defect #96 (#95's twin): experiment_key had only a length bound — a
+    control char rides into a SELECT text parameter (unmappable asyncpg
+    DataError class, swallowed by the fail-safe facade as log noise). One
+    wall for every key-taking self-serve surface."""
+    from app.schemas.base import reject_ctrl_str
+
+    reject_ctrl_str(v, "experiment_key")
+    return v
+
+
 class SelfResolveRequest(_StrictReq):
     experiment_key: str = Field(min_length=1, max_length=64)
+
+    _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
 
 
 class AnonResolveRequest(_StrictReq):
@@ -458,6 +471,8 @@ class AnonResolveRequest(_StrictReq):
     anonymous_id: str = Field(min_length=1, max_length=26,
                               pattern=r"^[A-Za-z0-9_-]+$")
 
+    _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
+
 
 class AnonExposureRequest(_StrictReq):
     """§4.17: pre-login exposure — same column bounds as the self surface
@@ -467,6 +482,8 @@ class AnonExposureRequest(_StrictReq):
     anonymous_id: str = Field(min_length=1, max_length=26,
                               pattern=r"^[A-Za-z0-9_-]+$")
     dedup_key: str | None = Field(default=None, max_length=64)
+
+    _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
 
     @field_validator("dedup_key")
     @classmethod
@@ -508,6 +525,8 @@ class IdentityLinkRequest(_StrictReq):
 
 class SelfExposureRequest(_StrictReq):
     experiment_key: str = Field(min_length=1, max_length=64)
+
+    _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
     # must match the column bound exactly (String(64)) — a wider schema let
     # 65-120 char keys through to a truncation error the fail-safe facade
     # swallowed as a SILENTLY DROPPED exposure (defect #36, R88 write-boundary)
