@@ -218,3 +218,30 @@ async def test_timeline_note_wall_and_boundary(c):
     with pytest.raises(pydantic.ValidationError):
         ExperimentNoteRequest(text="y" * 501)
     assert ExperimentNoteRequest(text="  ok note  ").text == "ok note"
+
+
+@pytest.mark.asyncio
+async def test_exposure_dedup_key_rejects_control_chars(c):
+    """Defect #95 (#87/#36 write-boundary class): dedup_key had only a
+    length bound — a NUL (or any control char) sailed through the schema
+    toward a String(64) column, where asyncpg raises a DataError with no
+    sqlstate the global backstop can map (R88). The wall belongs at the
+    boundary: 422 on both exposure surfaces."""
+    bad = "a\x00b"
+    r = await c.post("/api/v1/experiments/anon/exposures",
+                     json={"experiment_key": "idapi-no-such-exp",
+                           "anonymous_id": "ctrl95anon",
+                           "dedup_key": bad})
+    assert r.status_code == 422, r.text
+
+    h, _u = await _auth(c, "Ctrl95")
+    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
+                     json={"experiment_key": "idapi-no-such-exp",
+                           "dedup_key": bad})
+    assert r.status_code == 422, r.text
+
+    # Esc / DEL are control chars too
+    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
+                     json={"experiment_key": "idapi-no-such-exp",
+                           "dedup_key": "x\x1by"})
+    assert r.status_code == 422, r.text

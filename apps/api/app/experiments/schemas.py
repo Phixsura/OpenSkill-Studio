@@ -468,6 +468,17 @@ class AnonExposureRequest(_StrictReq):
                               pattern=r"^[A-Za-z0-9_-]+$")
     dedup_key: str | None = Field(default=None, max_length=64)
 
+    @field_validator("dedup_key")
+    @classmethod
+    def _dedup_no_ctrl(cls, v: str | None) -> str | None:
+        # Defect #95 (#87/#36 class): a NUL toward String(64) raises an
+        # unmappable asyncpg DataError — the wall belongs at the boundary
+        if v is not None:
+            from app.schemas.base import reject_ctrl_str
+
+            reject_ctrl_str(v, "dedup_key")
+        return v
+
 
 class ExperimentNoteRequest(_StrictReq):
     """Round 318: a human timeline annotation — the 12th audit event type.
@@ -501,6 +512,16 @@ class SelfExposureRequest(_StrictReq):
     # 65-120 char keys through to a truncation error the fail-safe facade
     # swallowed as a SILENTLY DROPPED exposure (defect #36, R88 write-boundary)
     dedup_key: str | None = Field(default=None, max_length=64)
+
+    @field_validator("dedup_key")
+    @classmethod
+    def _dedup_no_ctrl(cls, v: str | None) -> str | None:
+        # Defect #95: same control-char wall as the anon surface
+        if v is not None:
+            from app.schemas.base import reject_ctrl_str
+
+            reject_ctrl_str(v, "dedup_key")
+        return v
 
 
 class CreateHoldoutGroupRequest(_StrictReq):

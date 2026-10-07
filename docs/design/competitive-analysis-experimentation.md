@@ -42,6 +42,11 @@ last_exposure_at with non-serving traffic. Now the same fail-safe as
 exposure-without-assignment: False, no row — on the primary path AND
 the identity-retry path. Red-first.
 
+Round 654 addendum — defect #95 (#87/#36 write-boundary class): both
+exposure surfaces' dedup_key had only a length bound — a NUL/control
+char sailed toward String(64) where asyncpg raises an unmappable
+DataError. reject_ctrl_str wall at the schema boundary, 422. Red-first.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never
