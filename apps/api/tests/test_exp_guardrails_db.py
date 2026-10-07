@@ -1492,10 +1492,10 @@ async def test_note_cap_holds_under_concurrency(db, monkeypatch):
         arrived.append(1)
         if len(arrived) >= 2:
             gate.set()
-        try:
+        import contextlib as _ctx
+
+        with _ctx.suppress(TimeoutError):
             await _aio.wait_for(gate.wait(), timeout=1.0)
-        except TimeoutError:
-            pass
         return await orig_record(self, *a, **k)
 
     monkeypatch.setattr(exps.ExperimentService, "_record_event", gated_record)
