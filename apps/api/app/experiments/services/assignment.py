@@ -84,6 +84,10 @@ def forget_missing_key(experiment_key: str) -> None:
 SALT_PREFIX_LEN = 8
 
 
+# Defect #98: per-user cap on identity-graph edges (Segment-class norm)
+IDENTITY_LINK_CAP_PER_USER = 100
+
+
 def version_salt_of(spec_hash: str) -> str:
     """Version-1 randomization salt = the spec hash's first 8 hex chars —
     ONE definition shared by resolution and window attribution; a silent
@@ -527,6 +531,26 @@ class AssignmentService:
                 "anonymous_id must be 1-26 chars with no ':'",
                 422,
             )
+        # Defect #98: the link table is GLOBAL — without a per-user cap a
+        # hostile authenticated caller writes unbounded rows (storage
+        # amplification; every POST also runs migration scans). Re-linking
+        # an existing pair stays idempotent even at the cap.
+        existing_link = await self.db.get(ExperimentIdentityLink, anonymous_id)
+        if existing_link is None:
+            n_links = (
+                await self.db.execute(
+                    select(func.count()).select_from(ExperimentIdentityLink).where(
+                        ExperimentIdentityLink.user_id == user_id
+                    )
+                )
+            ).scalar_one()
+            if n_links >= IDENTITY_LINK_CAP_PER_USER:
+                raise AppError(
+                    "EXPERIMENT_IDENTITY_LINK_CAP",
+                    f"identity link cap reached ({IDENTITY_LINK_CAP_PER_USER} "
+                    "anonymous ids per user)",
+                    422,
+                )
         insert = (
             pg_insert(ExperimentIdentityLink)
             .values(anonymous_id=anonymous_id, user_id=user_id)

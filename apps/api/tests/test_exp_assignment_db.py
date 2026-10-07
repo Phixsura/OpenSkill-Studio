@@ -1701,3 +1701,34 @@ async def test_layer_service_negative_paths(db):
     except Exception:  # noqa: BLE001
         pass
     assert e.value.code == "LAYER_SLICE_OVERLAP"
+
+
+async def test_identity_link_per_user_cap(db, monkeypatch):
+    """Defect #98: link_identity had no per-user cap — a hostile
+    authenticated caller could write unbounded rows into the GLOBAL link
+    table (storage amplification; each POST also runs migration scans).
+    Contract: at the cap a NEW link is 422 EXPERIMENT_IDENTITY_LINK_CAP,
+    while re-linking an EXISTING pair stays idempotent-OK."""
+    import pytest as _pytest
+
+    import app.experiments.services.assignment as asg
+    from app.exceptions import AppError as _AppError
+
+    _, admin = await _mk_running(db)
+    svc = AssignmentService(db)
+    user = User(email=f"cap98-{ULID()}@example.com", display_name="C",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.flush()
+
+    monkeypatch.setattr(asg, "IDENTITY_LINK_CAP_PER_USER", 3, raising=False)
+    anons = [str(ULID()) for _ in range(3)]
+    for a in anons:
+        await svc.link_identity(anonymous_id=a, user_id=user.id)
+    # 4th NEW link: refused at the cap
+    with _pytest.raises(_AppError) as e:
+        await svc.link_identity(anonymous_id=str(ULID()), user_id=user.id)
+    assert e.value.code == "EXPERIMENT_IDENTITY_LINK_CAP"
+    # Re-linking an existing pair is still idempotent at the cap
+    out = await svc.link_identity(anonymous_id=anons[0], user_id=user.id)
+    assert out is not None

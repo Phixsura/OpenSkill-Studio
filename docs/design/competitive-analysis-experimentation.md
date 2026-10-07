@@ -62,6 +62,14 @@ reject_ctrl_str's every top-level str field (tab/newline stay legal for
 prose). Red-first at the schema level across four representative
 schemas.
 
+Round 661 addendum — defect #98: link_identity had no per-user cap — a
+hostile authenticated caller could write unbounded rows into the GLOBAL
+identity-link table (storage amplification; each POST also runs
+migration scans). IDENTITY_LINK_CAP_PER_USER = 100 (Segment-class
+identity-graph norm): the 101st NEW link is 422
+EXPERIMENT_IDENTITY_LINK_CAP; re-linking an existing pair stays
+idempotent at the cap. Red-first at service and HTTP levels.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

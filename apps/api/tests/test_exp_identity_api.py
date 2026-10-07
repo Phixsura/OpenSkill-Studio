@@ -159,20 +159,30 @@ async def test_self_exposure_status_code_pin(c):
 
 @pytest.mark.asyncio
 async def test_identity_links_listing_caps_at_hundred(c):
-    """Round 267 (accumulation-bomb law): 101 links list as the newest
-    100 — the oldest drops; the deterministic tiebreak keeps
-    same-timestamp rows stable."""
+    """Round 267 (accumulation-bomb law) + defect #98 (write cap): the
+    100th link lands, the 101st NEW link is 422
+    EXPERIMENT_IDENTITY_LINK_CAP, re-linking an existing pair stays
+    idempotent at the cap, and the listing shows exactly the 100."""
     h, _u = await _auth(c, "Capped")
-    ids = [_anon_id() for _ in range(101)]
+    ids = [_anon_id() for _ in range(100)]
     for anon in ids:
         r = await c.post("/api/v1/experiments/self/identity-link",
                          headers=h, json={"anonymous_id": anon})
         assert r.status_code == 200
+    # #98: the 101st NEW link hits the write cap
+    r = await c.post("/api/v1/experiments/self/identity-link",
+                     headers=h, json={"anonymous_id": _anon_id()})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "EXPERIMENT_IDENTITY_LINK_CAP"
+    # idempotent re-link of an existing pair still succeeds at the cap
+    r = await c.post("/api/v1/experiments/self/identity-link",
+                     headers=h, json={"anonymous_id": ids[0]})
+    assert r.status_code == 200
     r = await c.get("/api/v1/experiments/self/identity-links", headers=h)
     assert r.status_code == 200
     listed = [row["anonymous_id"] for row in r.json()["data"]]
     assert len(listed) == 100
-    assert set(listed) <= set(ids)
+    assert set(listed) == set(ids)
 
 
 @pytest.mark.asyncio
