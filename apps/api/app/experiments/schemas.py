@@ -26,6 +26,19 @@ from app.experiments.security import (
 class _StrictReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="after")
+    def _no_ctrl_in_strings(self):
+        # Defect #97 (the #95/#96 class closed for the WHOLE surface): any
+        # top-level str field carrying NUL/ESC/DEL-class control chars is a
+        # 422 at the boundary — never an asyncpg DataError downstream.
+        # reject_ctrl_str deliberately allows tab/newline for prose fields.
+        from app.schemas.base import reject_ctrl_str
+
+        for name, value in self.__dict__.items():
+            if isinstance(value, str):
+                reject_ctrl_str(value, name)
+        return self
+
 
 # ── Immutable spec (validated server-side in ExperimentService) ──────
 

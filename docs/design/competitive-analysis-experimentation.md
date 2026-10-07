@@ -54,6 +54,14 @@ unmappable-DataError class, absorbed by the fail-safe facade as log
 noise and a silent default experience). One shared _reject_ctrl_key
 wall, 422. Red-first across all four surfaces.
 
+Round 658 addendum — defect #97: the #95/#96 class closed for the WHOLE
+request surface. A schema audit found 29 str fields carrying only
+length bounds; instead of 29 per-field walls, _StrictReq (the base of
+every exp request schema) now runs one after-validator that
+reject_ctrl_str's every top-level str field (tab/newline stay legal for
+prose). Red-first at the schema level across four representative
+schemas.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

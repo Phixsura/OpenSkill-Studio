@@ -342,3 +342,39 @@ def test_interaction_rotation_coverage_law():
                 seen.update(_interaction_window(pairs, w, cap))
             assert seen == set(pairs), (n_pairs, start_week, len(seen))
     assert _interaction_window([], 5, 20) == []
+
+
+def test_strictreq_blanket_control_char_wall():
+    """Defect #97 (the #95/#96 class, closed for the whole surface): every
+    exp request schema derives from _StrictReq, so the base class carries
+    one blanket after-validator — any top-level str field containing a
+    control char (NUL, ESC, DEL; tab/newline stay legal for prose) is a
+    ValidationError at the boundary, never an asyncpg DataError downstream."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.experiments.schemas import (
+        CreateDecisionRequest,
+        CreateExperimentRequest,
+        ExperimentNoteRequest,
+        TransitionRequest,
+    )
+
+    with _pytest.raises(ValidationError):
+        CreateExperimentRequest(
+            key="k97-exp", title="a\x00b", domain="learning", layer_key="lyr-x"
+        )
+    with _pytest.raises(ValidationError):
+        TransitionRequest(to_status="paused", reason="x\x1by")
+    with _pytest.raises(ValidationError):
+        CreateDecisionRequest(
+            decision="ship",
+            summary="ten chars plus a DEL \x7f here",
+            analysis_result_hash="0" * 64,
+        )
+    # Prose control-char allowance: tab/newline are legal (multi-line reason)
+    ok = TransitionRequest(to_status="paused", reason="line one\nline two\tend")
+    assert ok.reason == "line one\nline two\tend"
+    # The existing per-field walls stay intact
+    with _pytest.raises(ValidationError):
+        ExperimentNoteRequest(text="note\x00")
