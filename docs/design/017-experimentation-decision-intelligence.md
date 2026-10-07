@@ -1527,6 +1527,21 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 575-651 — the second gap-hunting epoch. The operator re-demanded
+gap closure, and five defects fell in one arc, all red-first: #90
+windowed SRM (cumulative chi-square dilutes a late randomization
+break), #91 webhook retry with backoff (delivery was fire-once and a
+500 was logged as delivered), #92 windowed exposure-SRM (the same
+dilution argument applied to trigger bias), #93 the console banner only
+matched **srm** (the new family was invisible), #94 record_exposure
+accepted holdout units. Supporting work: exp17 gives the windowed check
+its (experiment_id, assigned_at) index; mutation wave 51 audited both
+new cores (three real gaps red-killed, the remainder leddered); two
+hypotheses were audited and falsified on evidence (ramp/SRM
+correlation — three independent salts; fold-eats-exposures — #74
+re-points first). Certifications 176-180, latest 7020/7020, all run as
+sharded foreground passes.
+
 Rounds 501-574 — the foreground era. At round 454 the operator added a
 new constraint — no background tasks — so from round 455 every battery
 runs inside the turn: launch, wait, read, kill, all foreground. The
