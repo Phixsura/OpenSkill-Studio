@@ -76,6 +76,15 @@ append-only events table. EXPERIMENT_NOTE_CAP = 500 per experiment,
 422 at the limit; the AST error-contract test pins the new code.
 Red-first.
 
+Round 667 addendum — defect #100 (concurrency): the #99 cap check was a
+bare COUNT — two concurrent transactions both read cap-1 and both
+inserted (TOCTOU overshoot; proven red with a gated two-session race).
+add_note now locks the experiment row first (the state machine's own
+FOR-UPDATE idiom), so note writers serialize and the cap is exact.
+Test-hygiene lesson: a committing test must clean up — its leaked
+running experiment skewed the global interaction sweep's weekly window
+in an unrelated test.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

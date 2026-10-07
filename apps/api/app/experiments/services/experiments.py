@@ -80,7 +80,15 @@ class ExperimentService:
         """Defect #99 (the round-267 accumulation-bomb law): notes are the
         one event type ANY read-scope member can append — cap them per
         experiment so the append-only events table cannot be spammed
-        unboundedly."""
+        unboundedly. Defect #100: the bare COUNT was a TOCTOU — two
+        concurrent writers both read cap-1 and both inserted; lock the
+        experiment row first (the state machine's own FOR-UPDATE idiom)
+        so note writers serialize and the cap is exact."""
+        await self.db.execute(
+            select(Experiment.id)
+            .where(Experiment.id == experiment_id)
+            .with_for_update()
+        )
         n_notes = (
             await self.db.execute(
                 select(func.count())

@@ -1462,3 +1462,69 @@ async def test_timeline_note_cap_per_experiment(db, monkeypatch):
     with _pytest.raises(_AppError) as e:
         await svc.add_note(exp.id, actor_user_id=admin.id, text="one too many")
     assert e.value.code == "EXPERIMENT_NOTE_CAP"
+
+
+async def test_note_cap_holds_under_concurrency(db, monkeypatch):
+    """Defect #100: the #99 cap check was a bare COUNT — two concurrent
+    transactions both read cap-1 and both insert (TOCTOU overshoot). The
+    fix locks the experiment row (FOR UPDATE, the state machine's own
+    idiom) before counting, so concurrent note writers serialize and the
+    cap is exact."""
+    import asyncio as _aio
+
+    from sqlalchemy import func as _func
+
+    import app.experiments.services.experiments as exps
+    from app.exceptions import AppError as _AppError
+
+    exp, admin = await _mk_running(db)
+    await db.commit()  # the two writer sessions must SEE the experiment
+    monkeypatch.setattr(exps, "EXPERIMENT_NOTE_CAP", 1, raising=False)
+
+    # Force the overlap: both writers must pass the COUNT before either
+    # inserts. With the FOR-UPDATE fix the second writer never reaches this
+    # gate (it blocks on the row lock), so the first times out and proceeds.
+    orig_record = exps.ExperimentService._record_event
+    gate = _aio.Event()
+    arrived: list[int] = []
+
+    async def gated_record(self, *a, **k):
+        arrived.append(1)
+        if len(arrived) >= 2:
+            gate.set()
+        try:
+            await _aio.wait_for(gate.wait(), timeout=1.0)
+        except TimeoutError:
+            pass
+        return await orig_record(self, *a, **k)
+
+    monkeypatch.setattr(exps.ExperimentService, "_record_event", gated_record)
+
+    async def writer(tag: str) -> bool:
+        async with AsyncSessionLocal() as s:
+            svc = ExperimentService(s)
+            try:
+                await svc.add_note(exp.id, actor_user_id=admin.id, text=f"c100 {tag}")
+                await s.commit()
+                return True
+            except _AppError:
+                await s.rollback()
+                return False
+
+    results = await _aio.gather(writer("a"), writer("b"))
+    assert sum(results) == 1, f"exactly one writer may land at cap=1, got {results}"
+    n = (
+        await db.execute(
+            select(_func.count()).select_from(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == exp.id,
+                ExperimentEvent.event_type == "note",
+            )
+        )
+    ).scalar_one()
+    assert n == 1, f"cap must be exact under concurrency, found {n} notes"
+    # This test COMMITS (two sessions must see the experiment) — clean up,
+    # or the leaked running experiment skews global sweeps in later tests
+    from sqlalchemy import delete as _delete
+
+    await db.execute(_delete(Experiment).where(Experiment.id == exp.id))
+    await db.commit()
