@@ -2216,7 +2216,9 @@ key — the anon↔user mapping is privacy-relevant, so user deletion must
 never orphan it (the audit found the column shipped as a bare String;
 assignments' unit_id is bare BY DESIGN for multi-unit-type, but the link
 is user-only). Pinned by a deletion-cascade test; migrations now
-exp01–exp16.
+exp01–exp17 (exp17, round 633: the windowed-SRM hot path gets its
+(experiment_id, assigned_at) index — parity with the exposures table's
+(experiment_id, occurred_at) idiom).
 
 Round 221 — §18a gains the experiment_identity_conflict event row (the
 new-signal-ships-with-its-row law, applied to events as well as

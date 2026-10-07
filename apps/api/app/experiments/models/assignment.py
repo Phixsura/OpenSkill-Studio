@@ -50,6 +50,10 @@ class ExperimentAssignment(Base):
         ),
         Index("ix_experiment_assignments_unit", "unit_type", "unit_id"),
         Index("ix_experiment_assignments_exp_variant", "experiment_id", "variant_key"),
+        # Defect #90 follow-up (round 633): the windowed SRM check filters by
+        # experiment_id + assigned_at every guardrail sweep — same idiom as
+        # ix_experiment_exposures_exp_occurred below
+        Index("ix_experiment_assignments_exp_assigned", "experiment_id", "assigned_at"),
     )
 
 
