@@ -1733,3 +1733,62 @@ async def test_identity_link_per_user_cap(db, monkeypatch):
     # Re-linking an existing pair is still idempotent at the cap
     out = await svc.link_identity(anonymous_id=anons[0], user_id=user.id)
     assert out is not None
+
+
+async def test_identity_link_cap_holds_under_concurrency(db, monkeypatch):
+    """Defect #101 (#100's twin): the #98 cap check was a bare COUNT — two
+    concurrent transactions both read cap-1 and both inserted. The fix
+    locks the User row (FOR UPDATE) before counting so link writers for
+    the same user serialize and the cap is exact."""
+    import asyncio as _aio
+    import contextlib as _ctx
+
+    import app.experiments.services.assignment as asg
+    from app.exceptions import AppError as _AppError
+
+    user = User(email=f"c101-{ULID()}@example.com", display_name="R",
+                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add(user)
+    await db.commit()  # writer sessions must SEE the user
+    monkeypatch.setattr(asg, "IDENTITY_LINK_CAP_PER_USER", 1, raising=False)
+
+    # Overlap gate BETWEEN link_identity and commit: both writers must pass
+    # the COUNT before either commits. With the FOR-UPDATE fix the second
+    # writer blocks inside link_identity at the user-row lock, never reaches
+    # the gate, and the first times out and proceeds.
+    gate = _aio.Event()
+    arrived: list[int] = []
+    run_tag = str(ULID()).lower()[:10]
+
+    async def gated_writer(tag: str) -> bool:
+        async with AsyncSessionLocal() as s:
+            svc = AssignmentService(s)
+            try:
+                await svc.link_identity(anonymous_id=f"c101{run_tag}{tag}", user_id=user.id)
+                arrived.append(1)
+                if len(arrived) >= 2:
+                    gate.set()
+                with _ctx.suppress(TimeoutError):
+                    await _aio.wait_for(gate.wait(), timeout=1.0)
+                await s.commit()
+                return True
+            except _AppError:
+                await s.rollback()
+                return False
+
+    results = await _aio.gather(gated_writer("a"), gated_writer("b"))
+    assert sum(results) == 1, f"exactly one link may land at cap=1, got {results}"
+    from sqlalchemy import delete as _delete
+    from sqlalchemy import func as _func
+
+    from app.experiments.models import ExperimentIdentityLink as _Lnk
+
+    n = (
+        await db.execute(
+            select(_func.count()).select_from(_Lnk).where(_Lnk.user_id == user.id)
+        )
+    ).scalar_one()
+    assert n == 1, f"cap must be exact under concurrency, found {n} links"
+    # cleanup: this test commits — remove the links it created
+    await db.execute(_delete(_Lnk).where(_Lnk.user_id == user.id))
+    await db.commit()

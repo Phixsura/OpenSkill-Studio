@@ -537,6 +537,14 @@ class AssignmentService:
         # an existing pair stays idempotent even at the cap.
         existing_link = await self.db.get(ExperimentIdentityLink, anonymous_id)
         if existing_link is None:
+            # Defect #101 (#100's twin): the bare COUNT was a TOCTOU — lock
+            # the User row first so same-user link writers serialize and
+            # the cap is exact.
+            from app.models.user import User as _User
+
+            await self.db.execute(
+                select(_User.id).where(_User.id == user_id).with_for_update()
+            )
             n_links = (
                 await self.db.execute(
                     select(func.count()).select_from(ExperimentIdentityLink).where(

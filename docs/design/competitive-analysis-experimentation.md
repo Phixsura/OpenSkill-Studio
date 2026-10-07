@@ -85,6 +85,14 @@ Test-hygiene lesson: a committing test must clean up — its leaked
 running experiment skewed the global interaction sweep's weekly window
 in an unrelated test.
 
+Round 672 addendum — defect #101 (#100's twin): the identity-link cap
+check (#98) was the same bare-COUNT TOCTOU — a gated two-session race
+landed [True, True] at cap=1. link_identity now locks the User row
+(FOR UPDATE) before counting, so same-user link writers serialize.
+Second test-hygiene lesson in the family: race tests that commit must
+use run-unique ids AND clean up, or first-link-wins turns reruns into
+CONFLICT false reds.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never
