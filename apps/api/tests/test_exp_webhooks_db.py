@@ -566,9 +566,9 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
     import contextlib as _ctx
 
     import app.services.webhook as wh
+    from app.controlplane.models.tenant import TenantAccount
     from app.exceptions import AppError as _AppError
     from app.models.organization import Organization
-    from app.controlplane.models.tenant import TenantAccount
     from app.services.webhook import WebhookService
 
     tenant = TenantAccount(name=f"whc-{str(ULID()).lower()}",
@@ -606,10 +606,9 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
     results = await _aio.gather(gated_writer("a"), gated_writer("b"))
     from sqlalchemy import delete as _delete
     from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
 
     from app.models.webhook import WebhookSubscription as _Sub
-
-    from sqlalchemy import select as _select
 
     n = (
         await db.execute(
