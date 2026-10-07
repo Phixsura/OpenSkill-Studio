@@ -1527,6 +1527,22 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 652-700 — the abuse-surface and TOCTOU epochs. The boundary
+sweep (#95-#97) ended in one blanket law: _StrictReq runs a
+reject_ctrl_str after-validator over every top-level str field, closing
+the control-char-to-DataError class for the whole request surface. The
+accumulation sweep capped the two unbounded write paths (#98 identity
+links per user, #99 notes per experiment), and the TOCTOU sweep made
+all three caps exact under concurrency (#100 notes, #101 links, #102
+webhooks — each proven red with a gated two-session race, each fixed
+with the state machine's own FOR-UPDATE idiom). Mutation wave 52
+audited the new cores (27/33 killed outright; killers added for the
+note-count predicate and all code+status pins; lock-where and
+PK-guaranteed mutants ledgered as equivalence classes). Certifications
+187-188, latest 7028/7028; two in-suite ruff-gate catches (SIM105,
+I001) each fixed and re-certified honestly. At round 700 the ledger
+reads: 102 red-proven defects, 52 mutation waves, 188 certifications.
+
 Rounds 575-651 — the second gap-hunting epoch. The operator re-demanded
 gap closure, and five defects fell in one arc, all red-first: #90
 windowed SRM (cumulative chi-square dilutes a late randomization
