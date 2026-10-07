@@ -179,7 +179,14 @@ class WebhookService:
                     422,
                 )
 
-        # Limit webhooks per org (use SELECT COUNT for efficiency)
+        # Limit webhooks per org. Defect #102 (#100/#101 family): the bare
+        # COUNT was a TOCTOU — lock the Org row first so same-org creators
+        # serialize and the cap is exact.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(
+            select(_Org.id).where(_Org.id == org_id).with_for_update()
+        )
         count_r = await self.db.execute(
             select(func.count()).where(WebhookSubscription.org_id == org_id)
         )

@@ -555,3 +555,69 @@ async def test_unrelated_savepoint_rollback_must_not_cancel(db, monkeypatch):
         )
     finally:
         await _wh_sweep(db, org_id, tenant_id, admin_id)
+
+
+async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
+    """Defect #102 (#100/#101 family, platform-level): the 25-per-org
+    webhook cap was a bare COUNT — two concurrent creators both read
+    cap-1 and both inserted. WebhookService.create now locks the Org row
+    (FOR UPDATE) before counting, so same-org creators serialize."""
+    import asyncio as _aio
+    import contextlib as _ctx
+
+    import app.services.webhook as wh
+    from app.exceptions import AppError as _AppError
+    from app.models.organization import Organization
+    from app.controlplane.models.tenant import TenantAccount
+    from app.services.webhook import WebhookService
+
+    tenant = TenantAccount(name=f"whc-{str(ULID()).lower()}",
+                           slug=f"whc-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="whcap", slug=f"whc-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.commit()  # writer sessions must SEE the org
+    monkeypatch.setattr(wh, "MAX_WEBHOOKS_PER_ORG", 1, raising=False)
+
+    gate = _aio.Event()
+    arrived: list[int] = []
+
+    async def gated_writer(tag: str) -> bool:
+        async with AsyncSessionLocal() as s:
+            try:
+                await WebhookService(s).create(
+                    org_id=org.id,
+                    url=f"https://hooks.example.com/{tag}",
+                    events=["pack.published"],
+                )
+                arrived.append(1)
+                if len(arrived) >= 2:
+                    gate.set()
+                with _ctx.suppress(TimeoutError):
+                    await _aio.wait_for(gate.wait(), timeout=1.0)
+                await s.commit()
+                return True
+            except _AppError:
+                await s.rollback()
+                return False
+
+    results = await _aio.gather(gated_writer("a"), gated_writer("b"))
+    from sqlalchemy import delete as _delete
+    from sqlalchemy import func as _func
+
+    from app.models.webhook import WebhookSubscription as _Sub
+
+    from sqlalchemy import select as _select
+
+    n = (
+        await db.execute(
+            _select(_func.count()).select_from(_Sub).where(_Sub.org_id == org.id)
+        )
+    ).scalar_one()
+    # cleanup first (this test commits), then assert
+    await db.execute(_delete(_Sub).where(_Sub.org_id == org.id))
+    await db.commit()
+    assert sum(results) == 1, f"exactly one webhook may land at cap=1, got {results}"
+    assert n == 1, f"cap must be exact under concurrency, found {n} subscriptions"

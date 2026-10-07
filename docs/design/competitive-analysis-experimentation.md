@@ -93,6 +93,13 @@ Second test-hygiene lesson in the family: race tests that commit must
 use run-unique ids AND clean up, or first-link-wins turns reruns into
 CONFLICT false reds.
 
+Round 675 addendum — defect #102 (the TOCTOU family, platform-level):
+the 25-per-org webhook cap was the same bare COUNT — gated race landed
+[True, True] at cap=1. WebhookService.create locks the Org row (FOR
+UPDATE) before counting. The family sweep is complete: every cap in the
+exp+platform surface (notes #100, identity links #101, webhooks #102)
+now serializes its writers.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never
