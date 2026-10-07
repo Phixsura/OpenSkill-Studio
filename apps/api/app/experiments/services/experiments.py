@@ -64,11 +64,45 @@ def canonical_spec_hash(spec: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# Defect #99: per-experiment cap on timeline notes (accumulation-bomb law)
+EXPERIMENT_NOTE_CAP = 500
+
+
 class ExperimentService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
     # ── helpers ──────────────────────────────────────────────────────
+
+    async def add_note(
+        self, experiment_id: str, *, actor_user_id: str | None, text: str
+    ) -> None:
+        """Defect #99 (the round-267 accumulation-bomb law): notes are the
+        one event type ANY read-scope member can append — cap them per
+        experiment so the append-only events table cannot be spammed
+        unboundedly."""
+        n_notes = (
+            await self.db.execute(
+                select(func.count())
+                .select_from(ExperimentEvent)
+                .where(
+                    ExperimentEvent.experiment_id == experiment_id,
+                    ExperimentEvent.event_type == "note",
+                )
+            )
+        ).scalar_one()
+        if n_notes >= EXPERIMENT_NOTE_CAP:
+            raise AppError(
+                "EXPERIMENT_NOTE_CAP",
+                f"note cap reached ({EXPERIMENT_NOTE_CAP} per experiment)",
+                422,
+            )
+        await self._record_event(
+            experiment_id,
+            event_type="note",
+            actor_user_id=actor_user_id,
+            payload={"text": text},
+        )
 
     async def _record_event(
         self,

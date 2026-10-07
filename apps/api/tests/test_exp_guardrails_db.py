@@ -1442,3 +1442,23 @@ async def test_record_exposure_refuses_holdout_units(db):
         )
     ).scalar_one()
     assert n == 0, "no exposure row may be written for a holdout unit"
+
+
+async def test_timeline_note_cap_per_experiment(db, monkeypatch):
+    """Defect #99 (the round-267 accumulation-bomb law applied to notes):
+    the notes surface had no cap — any read-scope member could write
+    unbounded rows into the append-only events table. At the cap a new
+    note is 422 EXPERIMENT_NOTE_CAP."""
+    import pytest as _pytest
+
+    import app.experiments.services.experiments as exps
+    from app.exceptions import AppError as _AppError
+
+    exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    monkeypatch.setattr(exps, "EXPERIMENT_NOTE_CAP", 3, raising=False)
+    for i in range(3):
+        await svc.add_note(exp.id, actor_user_id=admin.id, text=f"note {i}")
+    with _pytest.raises(_AppError) as e:
+        await svc.add_note(exp.id, actor_user_id=admin.id, text="one too many")
+    assert e.value.code == "EXPERIMENT_NOTE_CAP"

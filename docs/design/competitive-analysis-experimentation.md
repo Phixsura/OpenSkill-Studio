@@ -70,6 +70,12 @@ identity-graph norm): the 101st NEW link is 422
 EXPERIMENT_IDENTITY_LINK_CAP; re-linking an existing pair stays
 idempotent at the cap. Red-first at service and HTTP levels.
 
+Round 664 addendum — defect #99: the notes surface (the one event type
+ANY read-scope member can append) had no cap — unbounded spam into the
+append-only events table. EXPERIMENT_NOTE_CAP = 500 per experiment,
+422 at the limit; the AST error-contract test pins the new code.
+Red-first.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

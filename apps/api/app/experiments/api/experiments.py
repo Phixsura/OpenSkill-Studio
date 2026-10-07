@@ -238,12 +238,8 @@ async def add_note(
     events feed the console already renders."""
     svc = ExperimentService(db)
     await svc.get_scoped(experiment_id, scope.org_ids)
-    await svc._record_event(  # noqa: SLF001 — same package
-        experiment_id,
-        event_type="note",
-        actor_user_id=scope.user.id,
-        payload={"text": body.text},
-    )
+    # Defect #99: capped append — 422 EXPERIMENT_NOTE_CAP at the limit
+    await svc.add_note(experiment_id, actor_user_id=scope.user.id, text=body.text)
     await db.commit()
     return {"data": {"recorded": True}}
 
