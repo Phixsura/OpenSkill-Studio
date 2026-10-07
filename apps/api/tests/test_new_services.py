@@ -1321,3 +1321,100 @@ def test_ssrf_gate_v6_edges():
     assert _ip_blocked(ipaddress.ip_address("::ffff:10.0.0.5")) is True
     assert _ip_blocked(ipaddress.ip_address("64:ff9b::a9fe:a9fe")) is True
     assert _ip_blocked(ipaddress.ip_address("2600:1901:0:ab8::")) is False
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_retries_on_5xx_with_backoff(monkeypatch):
+    """Defect #91: delivery was fire-once best-effort — a receiver blip
+    (500/429, connection reset) silently dropped the event. Industry
+    (Svix/LaunchDarkly-class) retries transient failures on a backoff
+    schedule. Contract: retry on 429/5xx/network error up to
+    len(WEBHOOK_RETRY_SCHEDULE) extra attempts; a 2xx stops retrying."""
+    import asyncio as aio
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    hits: list[int] = []
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        # drain body per content-length
+        head, _, rest = data.partition(b"\r\n\r\n")
+        import re as _re
+
+        m = _re.search(rb"content-length: (\d+)", head.lower())
+        need = int(m.group(1)) - len(rest) if m else 0
+        while need > 0:
+            chunk = await reader.read(need)
+            if not chunk:
+                break
+            need -= len(chunk)
+        hits.append(1)
+        status = b"500 Internal Server Error" if len(hits) < 3 else b"200 OK"
+        writer.write(b"HTTP/1.1 " + status + b"\r\ncontent-length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await aio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+
+    async def _not_blocked(url):
+        return False
+
+    monkeypatch.setattr(wh, "_is_blocked_url_async", _not_blocked)
+    monkeypatch.setattr(wh, "WEBHOOK_RETRY_SCHEDULE", (0.05, 0.05, 0.05), raising=False)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", "s" * 48, "wh_r91", "pack.published", {"k": 1}
+    )
+    server.close()
+    await server.wait_closed()
+    assert len(hits) == 3, f"expected 2 retries then success, saw {len(hits)} attempts"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_does_not_retry_4xx(monkeypatch):
+    """Defect #91 guard-band: a 4xx is the receiver rejecting THIS event —
+    deterministic, retrying is abuse. Exactly one attempt."""
+    import asyncio as aio
+
+    from app.services import webhook as wh
+    from app.services.webhook import WebhookService
+
+    hits: list[int] = []
+
+    async def handle(reader, writer):
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += await reader.read(1024)
+        hits.append(1)
+        writer.write(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await aio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(wh, "_is_blocked_url", lambda url: False)
+
+    async def _not_blocked(url):
+        return False
+
+    monkeypatch.setattr(wh, "_is_blocked_url_async", _not_blocked)
+    monkeypatch.setattr(wh, "WEBHOOK_RETRY_SCHEDULE", (0.05, 0.05, 0.05), raising=False)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    await WebhookService._deliver_background(
+        f"http://127.0.0.1:{port}/hook", "s" * 48, "wh_r91b", "pack.published", {"k": 1}
+    )
+    server.close()
+    await server.wait_closed()
+    assert len(hits) == 1, f"4xx must not be retried, saw {len(hits)} attempts"

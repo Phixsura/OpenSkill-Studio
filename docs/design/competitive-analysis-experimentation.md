@@ -17,6 +17,13 @@ p<0.001; the 24h slice alone is chi2 120). Closed with
 `__srm_window__` key, alert-only, no second page when cumulative
 already alerted in the same sweep.
 
+Round 630 addendum — webhook delivery reliability (defect #91):
+delivery was fire-once best-effort and logged a 500 as "delivered".
+Industry (Svix/LaunchDarkly-class) retries transient failures; now
+429/5xx/network errors retry on a 1s/5s/25s backoff with per-retry
+SSRF re-validation, 4xx never retries. Red-first both ways (5xx
+retries to success; 400 stays single-attempt).
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

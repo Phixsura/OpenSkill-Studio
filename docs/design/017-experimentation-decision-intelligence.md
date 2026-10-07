@@ -509,6 +509,15 @@ the talent idiom) wires them:
   event, payload `{experiment_id, experiment_key, decision, record_id,
 analysis_result_hash}`; delivery is never a condition on the audit.
 
+Delivery reliability (defect #91, round 630): a delivery retries
+transient receiver failures — 429, any 5xx, or a network error — on a
+`WEBHOOK_RETRY_SCHEDULE` backoff (1s/5s/25s, so four attempts total);
+2xx/3xx stops, and a non-429 4xx is the receiver deterministically
+rejecting THIS event, never retried. The SSRF block-list re-validates
+before every retry (the backoff window is long enough for a DNS
+rebind), and exhaustion logs `webhook_delivery_exhausted`. Before this,
+delivery was fire-once AND a 500 was logged as `webhook_delivered`.
+
 Containment rule: only org-scoped experiments (`scope_org_id` set) fan
 out, to THAT org's webhooks; platform-wide experiments reach no tenant
 webhook — a platform experiment's existence is not tenant-visible data.

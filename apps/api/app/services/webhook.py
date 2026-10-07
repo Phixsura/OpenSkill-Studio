@@ -91,6 +91,12 @@ async def drain_webhook_tasks(timeout: float = 10.0) -> None:
         log.warning("webhook_drain_timeout", pending=len(_pending_tasks))
 
 
+# Defect #91: transient receiver failures (429/5xx/network) are retried on
+# this backoff schedule — len() extra attempts after the first. 4xx is the
+# receiver rejecting THIS event (deterministic); it is never retried.
+WEBHOOK_RETRY_SCHEDULE: tuple[float, ...] = (1.0, 5.0, 25.0)
+
+
 def _is_blocked_url(url: str) -> bool:
     """Check if a URL resolves to a blocked (internal) IP address."""
     from urllib.parse import urlparse
@@ -384,34 +390,73 @@ class WebhookService:
         )
         signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # R171: stream and discard the response — a plain .post()
-                # buffers the receiver's ENTIRE body into memory. The receiver
-                # is an org-controlled server: one returning multi-GB bodies
-                # across 25 subscriptions per org was an unbounded memory
-                # amplification against the API worker. We only care that the
-                # POST was accepted; never read the body.
-                async with client.stream(
-                    "POST",
-                    url,
-                    content=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Webhook-Signature": signature,
-                        "X-Webhook-Event": event_type,
-                    },
-                ) as resp:
-                    log.info(
-                        "webhook_delivered",
+        # Defect #91: retry transient failures (429/5xx/network error) on the
+        # backoff schedule; 2xx/3xx stops, 4xx (minus 429) never retries.
+        attempts = 1 + len(WEBHOOK_RETRY_SCHEDULE)
+        for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                await asyncio.sleep(WEBHOOK_RETRY_SCHEDULE[attempt - 2])
+                # The backoff window is long enough for a DNS rebind —
+                # re-validate the target before every retry, not just once
+                if await _is_blocked_url_async(url):
+                    log.warning(
+                        "webhook_delivery_blocked_dns_rebind",
                         webhook_id=webhook_id,
-                        webhook_event=event_type,
-                        status=resp.status_code,
+                        url=url,
                     )
-        except Exception:
-            log.warning(
-                "webhook_delivery_failed",
-                webhook_id=webhook_id,
-                webhook_event=event_type,
-                url=url,
-            )
+                    return
+            status: int | None = None
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # R171: stream and discard the response — a plain .post()
+                    # buffers the receiver's ENTIRE body into memory. The
+                    # receiver is an org-controlled server: one returning
+                    # multi-GB bodies across 25 subscriptions per org was an
+                    # unbounded memory amplification against the API worker.
+                    # We only care that the POST was accepted; never read the
+                    # body.
+                    async with client.stream(
+                        "POST",
+                        url,
+                        content=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Webhook-Signature": signature,
+                            "X-Webhook-Event": event_type,
+                        },
+                    ) as resp:
+                        status = resp.status_code
+            except Exception:
+                log.warning(
+                    "webhook_delivery_failed",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    url=url,
+                    attempt=attempt,
+                )
+            if status is not None and status < 500 and status != 429:
+                # 2xx/3xx accepted; a non-429 4xx is a deterministic
+                # rejection of THIS event — retrying it is abuse
+                log.info(
+                    "webhook_delivered",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    status=status,
+                    attempt=attempt,
+                )
+                return
+            if status is not None:
+                log.warning(
+                    "webhook_delivery_retryable",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    status=status,
+                    attempt=attempt,
+                )
+        log.warning(
+            "webhook_delivery_exhausted",
+            webhook_id=webhook_id,
+            webhook_event=event_type,
+            url=url,
+            attempts=attempts,
+        )
