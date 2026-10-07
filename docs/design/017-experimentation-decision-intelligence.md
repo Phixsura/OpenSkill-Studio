@@ -1509,6 +1509,16 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 501-574 — the foreground era. At round 454 the operator added a
+new constraint — no background tasks — so from round 455 every battery
+runs inside the turn: launch, wait, read, kill, all foreground. The
+rotation (experiments 630 -> live wall 161 -> web 742 + browser wall 3)
+completed roughly forty full cycles with zero failures and zero flake;
+one wall run died to a low-memory kill and one to a premature sweep,
+both recorded and re-run green. Nothing in the code changed in this
+span, so certification holds at 175 = 7010; the ledgers (commits, this
+log, memory, the PR) stayed current per cycle.
+
 Rounds 400-500 — the sustained-verification era. Cycles five through
 twenty-five of the battery rotation (experiments 630, live wall 161,
 web 742, browser wall 3 — every pass green, every count from run
