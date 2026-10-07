@@ -1234,3 +1234,72 @@ async def test_closure_default_max_days_is_exactly_28(db):
     closed = await sweep_experiment_closures(db)
     assert closed == 1
     assert (await db.get(Experiment, exp.id)).status == "completed"
+
+
+async def test_srm_window_catches_late_randomization_break(db):
+    """Defect #90: cumulative SRM dilutes a late break. 5000 balanced
+    assignments from last week + 120 all-control in the last 24h: the
+    cumulative chi2 is 2.8125 (quiet at p<0.001) while the 24h window is
+    flagrant (chi2=120). Industry (Statsig/Eppo) slices SRM by time; a
+    windowed check must alert under its own __srm_window__ key —
+    alert-only, never a pause, dedup-windowed like cumulative SRM."""
+    exp, _ = await _mk_running(db)
+    week_ago = datetime.now(UTC) - timedelta(days=7)
+    for i in range(2500):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"w90-a-{i:05d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                assigned_at=week_ago,
+            )
+        )
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"w90-b-{i:05d}",
+                variant_key="treatment", assigned_version=1, bucket=i % 10_000,
+                assigned_at=week_ago,
+            )
+        )
+    for i in range(120):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"w90-c-{i:04d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    # Cumulative SRM must stay quiet (2620/2500, chi2 = 2.8125 < 10.83)
+    assert "srm" not in summary, "cumulative SRM should be diluted here"
+    # The 24h window must fire: 120/0 on a 50/50 spec, chi2 = 120, df = 1
+    assert "srm_window" in summary, "windowed SRM must catch the late break"
+    win = summary["srm_window"]
+    assert win["counts"] == {"control": 120, "treatment": 0}
+    assert win["total"] == 120
+    assert win["df"] == 1
+    assert win["chi2"] == pytest.approx(120.0, abs=1e-6)
+    assert win["window_hours"] == 24
+    assert (await db.get(Experiment, exp.id)).status == "running", "alert-only"
+    events = await GuardrailService(db).list_events(exp.id)
+    win_events = [e for e in events if e.guardrail_key == "__srm_window__"]
+    assert len(win_events) == 1 and win_events[0].action == "alerted"
+    # Dedup within the 24h re-alert window
+    await GuardrailService(db).evaluate_experiment(exp.id)
+    events = await GuardrailService(db).list_events(exp.id)
+    assert len([e for e in events if e.guardrail_key == "__srm_window__"]) == 1
+
+
+async def test_srm_window_quiet_below_min_sample(db):
+    """Defect #90 guard-band: a thin 24h slice (under the window minimum)
+    must not fire — small recent samples are noisy by nature."""
+    exp, _ = await _mk_running(db)
+    for i in range(99):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id, unit_type="user", unit_id=f"w90t-{i:04d}",
+                variant_key="control", assigned_version=1, bucket=i % 10_000,
+            )
+        )
+    await db.flush()
+    summary = await GuardrailService(db).evaluate_experiment(exp.id)
+    assert "srm_window" not in summary

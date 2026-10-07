@@ -699,7 +699,14 @@ processing — the §106.26 accumulation-bomb lesson):
    path exists anywhere in the codebase** (asserted by a grep-level test).
 3. Built-in SRM check (not disableable): chi-square of assignment counts vs
    weights; p < 0.001 → `guardrail_events(action='alerted',
-guardrail_key='__srm__')` + red banner in the analysis view.
+guardrail_key='__srm__')` + red banner in the analysis view. A
+   **windowed SRM** (defect #90) runs the same chi-square over ONLY the
+   last 24h of assignments (`__srm_window__`, min 100 in-window): a late
+   randomization break — post-ramp misconfig, differential dropout — is
+   diluted by the healthy cumulative mass, so the cumulative test stays
+   quiet for days while the recent slice is flagrant. Alert-only,
+   24h-suppressed; when cumulative SRM already paged in the same sweep,
+   the window finding records its event without a second page.
 
 Built-in guardrail metrics: cost_usd (controlplane rating), run_failure_rate,
 p95_latency_ms (WorkflowRun), complaint_count, client_rejection_rate,
@@ -1023,6 +1030,7 @@ Every signal below is surfaced in the Console; none requires DB access.
 | `NO_RECENT_EXPOSURES` warning / stale "Last exposure" | The surface stopped recording exposures — almost always a broken host integration, not a finished experiment                                                                                                       | Check the host surface's deploy/logs; verify with POST /experiments/self/exposures on a test account; if intended, complete the experiment                                           |
 | `SAMPLE_BELOW_POWER_TARGET` / Underpowered banner     | Not enough units against the declared MDE — a "no effect" read is not evidence of absence                                                                                                                          | Keep running, raise ramp_bp, or accept a bigger MDE; never promote on an underpowered primary                                                                                        |
 | SRM alert (`__srm__` guardrail event, alert-only)     | Assignment counts deviate from spec weights — randomization or data-feed suspect                                                                                                                                   | Check recent ramp changes and layer edits; run the layer A/A probe; if unexplained, pause and investigate before trusting ANY result                                                 |
+| Windowed SRM alert (`__srm_window__`, alert-only)     | Last-24h assignment slice deviates from spec weights while the cumulative test is still quiet — a LATE randomization break (post-ramp misconfig, differential dropout)                                             | Diff the last 24h of ramp/layer/spec changes first — the break started recently by construction; then as for SRM                                                                     |
 | Exposure-SRM alert                                    | Exposure funnel imbalanced across arms — one arm's surface renders/exposes differently                                                                                                                             | Audit the host surface per arm (error rates, latency); exposure dilution biases toward null                                                                                          |
 | Guardrail auto-pause                                  | A declared guardrail breached its threshold. NOTE: pause freezes NEW enrollment only — existing assignments KEEP SERVING their variant (round 354)                                                                 | New exposure stops; if the breach means the variant is actively harmful to its existing users, ARCHIVE to stop serving them too, else review in Diagnostics → fix or accept → resume |
 | `__incident__` event                                  | A human pressed the incident button                                                                                                                                                                                | Coordinate with the operator who filed it; resume only after the stated reason is addressed                                                                                          |

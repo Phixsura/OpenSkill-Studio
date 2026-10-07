@@ -6,6 +6,17 @@ Amplitude), **Eppo / Datadog Experiments** (acquired 2025), **GrowthBook** (OSS)
 platforms (Microsoft ExP, Netflix XP, Uber/DoorDash switchbacks, Airbnb ERF,
 Spotify Confidence). Feeds ADR-017 v2.
 
+## 0d. Status update (2026-10-07, round 628): windowed SRM (defect #90)
+
+Cumulative-only SRM was the one diagnostic where we still trailed
+Statsig/Eppo: both slice SRM by time because a late randomization break
+is diluted by the healthy cumulative mass (our red-first proof: 5000
+balanced + 120 all-control in 24h = cumulative chi2 2.81, quiet at
+p<0.001; the 24h slice alone is chi2 120). Closed with
+`check_srm_window` — same chi-square, last-24h slice, own
+`__srm_window__` key, alert-only, no second page when cumulative
+already alerted in the same sweep.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

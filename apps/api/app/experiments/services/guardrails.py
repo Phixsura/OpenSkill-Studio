@@ -30,6 +30,7 @@ from app.experiments.models.guardrail import (
     EXPOSURE_SRM_GUARDRAIL_KEY,
     INCIDENT_GUARDRAIL_KEY,
     SRM_GUARDRAIL_KEY,
+    SRM_WINDOW_GUARDRAIL_KEY,
     GuardrailEvent,
 )
 from app.experiments.schemas import ExperimentSpec
@@ -47,6 +48,10 @@ _CHI2_CRIT_P001 = {
 
 # SRM needs a sample before the ratio test means anything
 SRM_MIN_ASSIGNMENTS = 100
+
+# Defect #90: windowed SRM — slice width and its own minimum sample
+SRM_WINDOW_HOURS = 24
+SRM_WINDOW_MIN_ASSIGNMENTS = 100
 
 # Exposure-SRM (§4.13 v2) needs a real exposed sample too
 EXPOSURE_SRM_MIN_EXPOSED = 50
@@ -153,6 +158,83 @@ class GuardrailService:
             await self._notify_alert(
                 exp, title=f"SRM alert on '{exp.title}'", detail=detail
             )
+        return detail
+
+    async def check_srm_window(
+        self, exp: Experiment, spec: ExperimentSpec, *, notify: bool = True
+    ) -> dict | None:
+        """Defect #90: chi-square over ONLY the last SRM_WINDOW_HOURS of
+        assignments. A late randomization break (post-ramp misconfig,
+        differential dropout) is diluted by the healthy cumulative mass —
+        the cumulative test stays under the p<0.001 bar for days while the
+        recent slice is flagrant. Alert-only, 24h-suppressed, own key."""
+        if spec.design == "switchback":
+            return None  # defect #28: the design randomizes TIME, not units
+        window_start = datetime.now(UTC) - timedelta(hours=SRM_WINDOW_HOURS)
+        counts_q = (
+            select(ExperimentAssignment.variant_key, ExperimentAssignment.id)
+            .where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.is_holdout.is_(False),
+                ExperimentAssignment.assigned_at >= window_start,
+            )
+        )
+        counts: dict[str, int] = {}
+        for variant_key, _id in (await self.db.execute(counts_q)).all():
+            counts[variant_key] = counts.get(variant_key, 0) + 1
+        counts = {**{v.key: 0 for v in spec.variants}, **counts}
+        total = sum(counts.values())
+        if total < SRM_WINDOW_MIN_ASSIGNMENTS:
+            return None
+        weights = {v.key: v.weight_bp for v in spec.variants}
+        df = len(weights) - 1
+        if df < 1 or df > 9:
+            return None
+        chi2 = 0.0
+        for key, weight_bp in weights.items():
+            expected = total * weight_bp / 10_000
+            if expected <= 0:
+                continue
+            observed = counts.get(key, 0)
+            chi2 += (observed - expected) ** 2 / expected
+        if chi2 < _CHI2_CRIT_P001[df]:
+            return None
+        recent = (
+            await self.db.execute(
+                select(GuardrailEvent)
+                .where(
+                    GuardrailEvent.experiment_id == exp.id,
+                    GuardrailEvent.guardrail_key == SRM_WINDOW_GUARDRAIL_KEY,
+                    GuardrailEvent.created_at
+                    >= datetime.now(UTC) - timedelta(hours=_SRM_REALERT_HOURS),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        detail = {
+            "chi2": round(chi2, 3),
+            "df": df,
+            "counts": counts,
+            "total": total,
+            "window_hours": SRM_WINDOW_HOURS,
+        }
+        if recent is None:
+            self.db.add(
+                GuardrailEvent(
+                    experiment_id=exp.id,
+                    guardrail_key=SRM_WINDOW_GUARDRAIL_KEY,
+                    action="alerted",
+                    auto=True,
+                    detail=detail,
+                )
+            )
+            log.warning("experiment_srm_window_alert", experiment_id=exp.id, **detail)
+            if notify:
+                # When cumulative SRM already paged this cycle, the window
+                # finding is the same underlying break — event, no second page
+                await self._notify_alert(
+                    exp, title=f"Windowed SRM alert on '{exp.title}'", detail=detail
+                )
         return detail
 
     async def check_exposure_srm(self, exp: Experiment) -> dict | None:
@@ -343,6 +425,9 @@ class GuardrailService:
         srm = await self.check_srm(exp, spec)
         if srm is not None:
             summary["srm"] = srm
+        srm_window = await self.check_srm_window(exp, spec, notify=srm is None)
+        if srm_window is not None:
+            summary["srm_window"] = srm_window
         exposure_srm = await self.check_exposure_srm(exp)
         if exposure_srm is not None:
             summary["exposure_srm"] = exposure_srm

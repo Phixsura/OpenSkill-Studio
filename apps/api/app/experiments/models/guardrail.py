@@ -18,6 +18,9 @@ GUARDRAIL_ACTIONS = frozenset({"paused", "alerted"})
 
 # Reserved guardrail keys (not spec-defined metrics)
 SRM_GUARDRAIL_KEY = "__srm__"
+# Defect #90: time-sliced SRM — a late randomization break is diluted by the
+# healthy cumulative mass, so the last-24h slice gets its own chi-square
+SRM_WINDOW_GUARDRAIL_KEY = "__srm_window__"
 INCIDENT_GUARDRAIL_KEY = "__incident__"
 # §4.13 v2: per-variant exposure ratios diverging from assignment ratios flag
 # trigger bias (the exposure decision is being affected by the treatment)

@@ -24,6 +24,7 @@ from app.experiments.models.guardrail import (
     GUARDRAIL_ACTIONS,
     INCIDENT_GUARDRAIL_KEY,
     SRM_GUARDRAIL_KEY,
+    SRM_WINDOW_GUARDRAIL_KEY,
     GuardrailEvent,
 )
 from app.experiments.models.holdout import (
@@ -50,6 +51,7 @@ __all__ = [
     "GUARDRAIL_ACTIONS",
     "INCIDENT_GUARDRAIL_KEY",
     "SRM_GUARDRAIL_KEY",
+    "SRM_WINDOW_GUARDRAIL_KEY",
     "GuardrailEvent",
     "HOLDOUT_GROUP_MAX_BP",
     "HOLDOUT_GROUP_STATUSES",
