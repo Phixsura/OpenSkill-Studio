@@ -575,6 +575,12 @@ async def test_srm_runs_at_max_variant_count(db):
 #     are timing-equivalent under the uniform schedule the tests patch in —
 #     attempt COUNT and retry/no-retry semantics are pinned by the
 #     5xx/429/4xx/exhaustion quartet in test_new_services.py.
+# Wave 52 (cap/lock cores) survivors:
+#   the FOR-UPDATE lock SELECTs' where predicates (Experiment.id ==,
+#     Org.id ==) mutate into locks over OTHER committed rows — in any
+#     populated database they still serialize, so the mutant is
+#     environment-equivalent (the race tests pin the LOCKING semantics);
+#   the "Link write lost" 500 is behind a PK guarantee (pragma no cover).
 
 
 def test_observed_scalar_all_aggregates():
@@ -1462,6 +1468,22 @@ async def test_timeline_note_cap_per_experiment(db, monkeypatch):
     with _pytest.raises(_AppError) as e:
         await svc.add_note(exp.id, actor_user_id=admin.id, text="one too many")
     assert e.value.code == "EXPERIMENT_NOTE_CAP"
+    assert e.value.status_code == 422  # wave 52: pin the status
+
+
+async def test_note_cap_counts_only_notes(db, monkeypatch):
+    """Wave 52 killer (Eq->NotEq on event_type == "note"): a fresh running
+    experiment already carries NON-note events (create/transitions) — the
+    cap must count only notes, so at cap=1 the FIRST note still lands."""
+    import pytest as _pytest  # noqa: F401
+
+    import app.experiments.services.experiments as exps
+    from app.exceptions import AppError as _AppError  # noqa: F401
+
+    exp, admin = await _mk_running(db)
+    svc = ExperimentService(db)
+    monkeypatch.setattr(exps, "EXPERIMENT_NOTE_CAP", 1, raising=False)
+    await svc.add_note(exp.id, actor_user_id=admin.id, text="first note lands")
 
 
 async def test_note_cap_holds_under_concurrency(db, monkeypatch):

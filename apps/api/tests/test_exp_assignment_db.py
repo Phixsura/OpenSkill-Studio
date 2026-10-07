@@ -1772,7 +1772,10 @@ async def test_identity_link_cap_holds_under_concurrency(db, monkeypatch):
                     await _aio.wait_for(gate.wait(), timeout=1.0)
                 await s.commit()
                 return True
-            except _AppError:
+            except _AppError as e:
+                # wave 52: pin code AND status on the cap refusal
+                assert e.code == "EXPERIMENT_IDENTITY_LINK_CAP"
+                assert e.status_code == 422
                 await s.rollback()
                 return False
 

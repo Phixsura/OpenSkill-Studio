@@ -599,7 +599,10 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
                     await _aio.wait_for(gate.wait(), timeout=1.0)
                 await s.commit()
                 return True
-            except _AppError:
+            except _AppError as e:
+                # wave 52: pin code AND status on the cap refusal
+                assert e.code == "WEBHOOK_LIMIT_REACHED"
+                assert e.status_code == 422
                 await s.rollback()
                 return False
 
@@ -620,3 +623,21 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
     await db.commit()
     assert sum(results) == 1, f"exactly one webhook may land at cap=1, got {results}"
     assert n == 1, f"cap must be exact under concurrency, found {n} subscriptions"
+
+
+async def test_webhook_invalid_event_pins_code_and_status(db):
+    """Wave 52 killer (L179 422->423): an unknown event type is a 422
+    INVALID_EVENT — pin both fields."""
+    import pytest as _pytest
+
+    from app.exceptions import AppError as _AppError
+    from app.services.webhook import WebhookService
+
+    with _pytest.raises(_AppError) as e:
+        await WebhookService(db).create(
+            org_id="O" * 26,
+            url="https://hooks.example.com/x",
+            events=["no.such.event"],
+        )
+    assert e.value.code == "INVALID_EVENT"
+    assert e.value.status_code == 422
