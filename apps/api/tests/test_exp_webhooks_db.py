@@ -724,3 +724,49 @@ def test_webhook_events_cap_boundary():
     with _pytest.raises(ValidationError):
         CreateWebhookRequest(url="https://hooks.example.com/cap",
                              events=kinds[:MAX_EVENTS_PER_WEBHOOK + 1])
+
+
+async def test_webhook_ops_write_audit_trail(db):
+    """Defect #105: webhook create/delete/secret-rotate — credential
+    lifecycle operations — left NO trace in the append-only commercial
+    audit trail. With actor_user_id supplied, each op records its action;
+    the audit payload NEVER carries the secret."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.controlplane.models.tenant import TenantAccount
+    from app.models.organization import Organization
+    from app.models.user import User, UserRole, UserStatus
+    from app.services.webhook import WebhookService
+
+    tenant = TenantAccount(name=f"aud-{str(ULID()).lower()}",
+                           slug=f"aud-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="aud", slug=f"aud-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    actor = User(email=f"aud-{ULID()}@example.com", display_name="A",
+                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    db.add_all([org, actor])
+    await db.flush()
+    svc = WebhookService(db)
+    sub = await svc.create(org.id, "https://hooks.example.com/aud",
+                           ["pack.published"], actor_user_id=actor.id)
+    await svc.rotate_secret(sub.id, org.id, actor_user_id=actor.id)
+    sub_id = sub.id
+    await svc.delete(sub.id, org.id, actor_user_id=actor.id)
+    rows = (
+        await db.execute(
+            _select(CommercialAuditEvent).where(
+                CommercialAuditEvent.target_type == "webhook",
+                CommercialAuditEvent.target_id == sub_id,
+            ).order_by(CommercialAuditEvent.created_at)
+        )
+    ).scalars().all()
+    actions = [r.action for r in rows]
+    assert actions == ["webhook.created", "webhook.secret_rotated", "webhook.deleted"]
+    for r in rows:
+        assert r.actor_user_id == actor.id
+        assert r.tenant_id == tenant.id
+        blob = str(r.before) + str(r.after)
+        assert "secret" not in blob.lower(), "audit must never carry the secret"

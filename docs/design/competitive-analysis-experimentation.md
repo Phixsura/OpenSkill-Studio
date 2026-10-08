@@ -114,6 +114,14 @@ boundary (empty means none, not all); the falsy guard stays as a
 legacy-row defense. Four fixture tests that passed [] casually updated
 to explicit event lists.
 
+Round 936 addendum — defect #105: webhook create/delete/secret-rotate —
+credential-lifecycle operations — left no trace in the append-only
+commercial audit trail (SOC2 norm: credential lifecycle is audited).
+Three registered actions (webhook.created/.deleted/.secret_rotated),
+tenant-visible, written from the service layer with the actor the
+endpoint resolves; the audit payload carries url+events only, never the
+secret; an audit hiccup logs and never fails the operation. Red-first.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

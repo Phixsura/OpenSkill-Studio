@@ -109,7 +109,7 @@ async def create_webhook(
     tenant = await cp_facade.get_tenant_for_org(db, org_id)
     await cp_facade.require_feature(db, tenant, "webhooks")
     svc = WebhookService(db)
-    sub = await svc.create(org_id, body.url, body.events)
+    sub = await svc.create(org_id, body.url, body.events, actor_user_id=user.id)
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 
@@ -145,7 +145,7 @@ async def rotate_webhook_secret(
     returned once, in the same created-response shape."""
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WebhookService(db)
-    sub = await svc.rotate_secret(webhook_id, org_id)
+    sub = await svc.rotate_secret(webhook_id, org_id, actor_user_id=user.id)
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 
@@ -163,5 +163,5 @@ async def delete_webhook(
 ):
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WebhookService(db)
-    await svc.delete(webhook_id, org_id)
+    await svc.delete(webhook_id, org_id, actor_user_id=user.id)
     await db.commit()

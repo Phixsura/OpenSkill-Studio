@@ -155,11 +155,42 @@ class WebhookService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+
+    async def _record_webhook_audit(
+        self, sub: WebhookSubscription, *, action: str, actor_user_id: str | None
+    ) -> None:
+        """Defect #105: credential-lifecycle ops (create/delete/rotate) write
+        the append-only commercial audit trail. The payload carries url and
+        events only — NEVER the secret. Best-effort: an audit hiccup is
+        logged, not allowed to fail the operation."""
+        if actor_user_id is None:
+            return
+        try:
+            from app.controlplane import facade as cp_facade
+            from app.controlplane.services.audit import Actor, record_audit
+
+            tenant = await cp_facade.get_tenant_for_org(self.db, sub.org_id)
+            await record_audit(
+                self.db,
+                actor=Actor(user_id=actor_user_id, type="tenant"),
+                action=action,
+                target_type="webhook",
+                target_id=sub.id,
+                tenant_id=tenant.id,
+                after={"url": sub.url, "events": list(sub.events or [])},
+            )
+        except Exception:  # noqa: BLE001 — audit must not break the op
+            log.warning(
+                "webhook_audit_write_failed", webhook_id=sub.id, audit_action=action
+            )
+
     async def create(
         self,
         org_id: str,
         url: str,
         events: list[str],
+        *,
+        actor_user_id: str | None = None,
     ) -> WebhookSubscription:
         # SSRF: validate URL doesn't point to internal services
         # (R171: async wrapper — DNS resolution must not block the event loop)
@@ -209,6 +240,9 @@ class WebhookService:
         self.db.add(sub)
         await self.db.flush()
         log.info("webhook_created", webhook_id=sub.id, org_id=org_id, events=events)
+        await self._record_webhook_audit(
+            sub, action="webhook.created", actor_user_id=actor_user_id
+        )
         return sub
 
     async def list_subscriptions(self, org_id: str) -> list[WebhookSubscription]:
@@ -219,7 +253,9 @@ class WebhookService:
         )
         return list(result.scalars().all())
 
-    async def rotate_secret(self, webhook_id: str, org_id: str) -> WebhookSubscription:
+    async def rotate_secret(
+        self, webhook_id: str, org_id: str, *, actor_user_id: str | None = None
+    ) -> WebhookSubscription:
         """Defect #103 (industry staple): retire a leaked signing secret in
         place — same id/url/events, fresh token_hex(32). Org-scoped with the
         uniform 404; the new secret is returned ONCE (the created-response
@@ -229,12 +265,20 @@ class WebhookService:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
         sub.secret = secrets.token_hex(32)
         await self.db.flush()
+        await self._record_webhook_audit(
+            sub, action="webhook.secret_rotated", actor_user_id=actor_user_id
+        )
         return sub
 
-    async def delete(self, webhook_id: str, org_id: str) -> None:
+    async def delete(
+        self, webhook_id: str, org_id: str, *, actor_user_id: str | None = None
+    ) -> None:
         sub = await self.db.get(WebhookSubscription, webhook_id)
         if sub is None or sub.org_id != org_id:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
+        await self._record_webhook_audit(
+            sub, action="webhook.deleted", actor_user_id=actor_user_id
+        )
         await self.db.delete(sub)
         await self.db.flush()
 
