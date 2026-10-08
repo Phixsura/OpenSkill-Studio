@@ -39,6 +39,11 @@ class CreateWebhookRequest(BaseModel):
     @field_validator("events")
     @classmethod
     def validate_events(cls, v: list[str]) -> list[str]:
+        # Defect #104: an empty list used to create a subscription that the
+        # delivery path's falsy guard treats as receive-EVERYTHING — an
+        # accidental wildcard. Empty means none, not all: reject it.
+        if not v:
+            raise ValueError("events must list at least one event type")
         if len(v) > MAX_EVENTS_PER_WEBHOOK:
             raise ValueError(f"Maximum {MAX_EVENTS_PER_WEBHOOK} events per webhook")
         for event in v:

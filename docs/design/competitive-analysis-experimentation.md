@@ -107,6 +107,13 @@ mints a fresh token_hex(32) in place — same id/url/events, org-scoped
 uniform 404, the new secret returned once in the created-response
 shape. Red-first at the service level.
 
+Round 926 addendum — defect #104: events=[] passed webhook-create
+validation, and the delivery path's falsy guard turned that empty list
+into receive-EVERYTHING — an accidental wildcard. Empty now 422s at the
+boundary (empty means none, not all); the falsy guard stays as a
+legacy-row defense. Four fixture tests that passed [] casually updated
+to explicit event lists.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

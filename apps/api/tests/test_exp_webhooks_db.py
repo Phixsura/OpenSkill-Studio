@@ -693,3 +693,16 @@ async def test_webhook_mask_secret_boundary(db):
                 created_at=_dt.now(_UTC))
     assert WebhookResponse(secret="12345678", **base).secret == "****"
     assert WebhookResponse(secret="123456789", **base).secret == "1234****6789"
+
+
+def test_webhook_empty_events_rejected():
+    """Defect #104: events=[] passed validation and created a subscription
+    that trigger_event's falsy guard treats as receive-EVERYTHING — an
+    accidental wildcard. Empty means none, not all: 422 at the boundary."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.api.v1.endpoints.webhooks import CreateWebhookRequest
+
+    with _pytest.raises(ValidationError):
+        CreateWebhookRequest(url="https://hooks.example.com/x", events=[])

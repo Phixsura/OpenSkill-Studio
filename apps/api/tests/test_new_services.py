@@ -170,7 +170,7 @@ async def test_webhook_delete(c):
         f"/api/v1/orgs/{oid}/webhooks",
         json={
             "url": "https://example.com/hook",
-            "events": [],
+            "events": ["pack.published"],
         },
         headers=h,
     )
@@ -194,7 +194,7 @@ async def test_webhook_blocked_url(c):
         f"/api/v1/orgs/{oid}/webhooks",
         json={
             "url": "http://169.254.169.254/latest/meta-data/",
-            "events": [],
+            "events": ["pack.published"],
         },
         headers=h,
     )
@@ -832,8 +832,8 @@ def test_review_discussion_webhook_schemas_reject_control_chars():
         (ReplyRequest, {"reply_text": "r" + nul}),
         (CreateCommentRequest, {"body": "c" + nul}),
         (CreateCommentRequest, {"body": "c" + soh + "x"}),
-        (CreateWebhookRequest, {"url": "http://example.com/a" + nul + "b", "events": []}),
-        (CreateWebhookRequest, {"url": "http://example.com/a" + soh + "b", "events": []}),
+        (CreateWebhookRequest, {"url": "http://example.com/a" + nul + "b", "events": ["pack.published"]}),
+        (CreateWebhookRequest, {"url": "http://example.com/a" + soh + "b", "events": ["pack.published"]}),
     ]
     for model, payload in cases:
         with pytest.raises(pydantic.ValidationError):
@@ -843,7 +843,7 @@ def test_review_discussion_webhook_schemas_reject_control_chars():
     CreateReviewRequest(rating=5, title="Good", body="b" * 20)
     ReplyRequest(reply_text="thanks")
     CreateCommentRequest(body="nice pack")
-    CreateWebhookRequest(url="http://example.com/hook", events=[])
+    CreateWebhookRequest(url="http://example.com/hook", events=["pack.published"])
 
 
 # ═══════════════ R89a: duplicate name/slug length safety ═══════════════
@@ -1073,7 +1073,7 @@ async def test_webhook_blocked_cgnat_endpoint(c):
     oid = await _org(c, h)
     r = await c.post(
         f"/api/v1/orgs/{oid}/webhooks",
-        json={"url": "http://100.64.0.5/hook", "events": []},
+        json={"url": "http://100.64.0.5/hook", "events": ["pack.published"]},
         headers=h,
     )
     assert r.status_code == 422
