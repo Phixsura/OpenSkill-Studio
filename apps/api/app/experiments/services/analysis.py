@@ -877,6 +877,15 @@ def its_estimate(pre: list[float], post: list[float]) -> dict | None:
     return out
 
 
+def _pow2(exponent: int) -> float:
+    """Defect #106 (hypothesis-found): 2.0**bucket overflows float for a
+    corrupt/hostile bucket index (>=1024) — the quantile walk turned a bad
+    histogram KEY into a 500. Clamp to the double-precision domain: above
+    it the value saturates at 2**1023, below it underflows to 0.0, and the
+    quantile stays a finite, monotone estimate."""
+    return 2.0 ** min(max(exponent, -1074), 1023)
+
+
 def _hist_value_at_rank(entries: list[tuple[int, int]], rank: float) -> float | None:
     """Value at a (possibly fractional) 1-based rank in a base-2 log
     histogram: walk cumulative counts, geometric interpolation between the
@@ -888,11 +897,13 @@ def _hist_value_at_rank(entries: list[tuple[int, int]], rank: float) -> float | 
     seen = 0
     for bucket, count in entries:
         if seen + count >= rank:
-            lo, hi = 2.0 ** bucket, 2.0 ** (bucket + 1)
+            lo, hi = _pow2(bucket), _pow2(bucket + 1)
             frac = (rank - seen) / count
+            if lo <= 0.0 or hi <= lo:  # clamped/underflowed edge: no ratio
+                return hi
             return lo * (hi / lo) ** frac
         seen += count
-    return 2.0 ** (entries[-1][0] + 1)
+    return _pow2(entries[-1][0] + 1)
 
 
 def histogram_quantile(hist: dict, p: float) -> dict | None:

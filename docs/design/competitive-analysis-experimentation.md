@@ -122,6 +122,14 @@ tenant-visible, written from the service layer with the actor the
 endpoint resolves; the audit payload carries url+events only, never the
 secret; an audit hiccup logs and never fails the operation. Red-first.
 
+Round 1152 addendum — defect #106 (caught LIVE by the in-loop
+hypothesis fuzz): a corrupt/hostile value_histogram bucket key (2000)
+overflowed 2.0**bucket in the quantile walk — OverflowError 500. The
+exponent now clamps to the double domain (saturate at 2**1023,
+underflow to 0.0), keeping the estimate finite and monotone. This is
+the loop's thesis vindicated: round ~90 of identical green batteries,
+then the fuzzer's random seed walked into a real crash.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

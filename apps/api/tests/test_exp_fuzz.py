@@ -505,3 +505,21 @@ def test_required_n_totality_and_mde_monotonicity(p1, mde):
             assert isinstance(n, int) and n >= 1
     if n_small is not None and n_big is not None:
         assert n_big <= n_small, (p1, mde, n_small, n_big)
+
+
+def test_histogram_quantile_extreme_bucket_regression():
+    """Defect #106 regression (hypothesis-found): a corrupt/hostile bucket
+    key like 2000 overflowed 2.0**bucket into an OverflowError 500. The
+    exponent now clamps to the double domain: finite, no raise, and the
+    saturated estimate stays at the float ceiling."""
+    import math
+
+    from app.experiments.services.analysis import histogram_quantile
+
+    out = histogram_quantile({"2000": 2}, 0.5)
+    assert out is not None
+    assert math.isfinite(out["estimate"])
+    # deep-negative buckets underflow to 0.0 rather than raising
+    out = histogram_quantile({"-2000": 2}, 0.5)
+    assert out is not None
+    assert out["estimate"] >= 0.0
