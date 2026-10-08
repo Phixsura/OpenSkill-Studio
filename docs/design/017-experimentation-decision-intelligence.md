@@ -509,6 +509,13 @@ the talent idiom) wires them:
   event, payload `{experiment_id, experiment_key, decision, record_id,
 analysis_result_hash}`; delivery is never a condition on the audit.
 
+Replay protection (receiver guidance, round 944): every delivery body
+carries an ISO `timestamp` field UNDER the HMAC — a receiver that
+verifies the signature and then rejects bodies older than a small
+freshness window (five minutes is conventional) is replay-proof; a
+receiver that checks only the signature is not, since a captured
+delivery re-POSTs verbatim with a valid signature forever.
+
 Secret lifecycle (defect #103, round 879): a leaked signing secret
 rotates in place — POST /orgs/{org}/webhooks/{id}/rotate-secret mints a
 fresh token_hex(32) (same id/url/events, org-scoped uniform 404); the
