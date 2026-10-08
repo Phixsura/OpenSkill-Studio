@@ -1,0 +1,37 @@
+[
+  {
+    "path": "app/services/webhook.py",
+    "funcs": [
+      "rotate_secret"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_exp_webhooks_db.py::test_webhook_secret_rotation",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  },
+  {
+    "path": "app/api/v1/endpoints/webhooks.py",
+    "funcs": [
+      "mask_secret"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_new_services.py",
+      "tests/test_exp_webhooks_db.py::test_webhook_mask_secret_boundary",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  }
+]

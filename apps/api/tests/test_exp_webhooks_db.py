@@ -677,3 +677,19 @@ async def test_webhook_secret_rotation(db):
     with _pytest.raises(_AppError) as e:
         await svc.rotate_secret(sub.id, "X" * 26)
     assert e.value.code == "WEBHOOK_NOT_FOUND"
+    assert e.value.status_code == 404  # wave 53: pin the status
+
+
+async def test_webhook_mask_secret_boundary(db):
+    """Wave 53 killer (len>8 boundary): exactly 8 chars masks fully;
+    9 chars shows first/last 4 — the boundary is exclusive."""
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from app.api.v1.endpoints.webhooks import WebhookResponse
+
+    base = dict(id="W" * 26, org_id="O" * 26, url="https://x.example.com",
+                events=["pack.published"], active=True,
+                created_at=_dt.now(_UTC))
+    assert WebhookResponse(secret="12345678", **base).secret == "****"
+    assert WebhookResponse(secret="123456789", **base).secret == "1234****6789"
