@@ -1540,6 +1540,19 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 901-1000 — the audit epoch and the in-turn marathon. Three more
+staples landed red-first: #104 (an empty webhook events list was an
+accidental receive-everything wildcard; empty now 422s), #105 (webhook
+credential-lifecycle operations now write the append-only commercial
+audit trail — payload never carries the secret), and the §4.18
+receiver replay-protection guidance (the timestamp sits under the HMAC
+but nothing told receivers to check freshness). Mutation waves 53-55
+took the rotation, events-validator and audit cores to 100% kill.
+Certifications 190-191, latest 7035/7035. From round 952 the operator
+asked for the hours to be CONTIGUOUS, so the loop now chains batteries
+inside a single turn — rounds 952-1000 ran back-to-back without a
+yield, every battery green.
+
 Rounds 801-900 — the staple sweep continues. Two audits falsified on
 evidence (holdout expiry — eval-time ends_at recheck outside the cache;
 CSV formula injection on the remaining export surfaces — guards and
