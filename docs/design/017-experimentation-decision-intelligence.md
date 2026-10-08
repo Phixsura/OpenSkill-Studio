@@ -1527,6 +1527,18 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 701-800 — the long hold. After the TOCTOU epoch closed, ~45
+foreground verification cycles (experiments 646, live wall 161, web
+744 + browser wall 3, plus a full web type-check/eslint gate pass) ran
+without a single failure or flake. Three gap hypotheses were audited
+and falsified on evidence in this span: CUPED numerical stability
+(degenerate-variance skip, singular-solve None, division guards all in
+place), ramp/SRM correlation (three independent salts, re-confirmed),
+and formula injection on the metrics/guardrails CSV exports (the
+assignments guard, the metric-key pattern wall and the UNKNOWN_METRICS
+validation chain close all three surfaces). The ledger holds at 102
+red-proven defects, 52 mutation waves, 188 certifications (7028).
+
 Rounds 652-700 — the abuse-surface and TOCTOU epochs. The boundary
 sweep (#95-#97) ended in one blanket law: _StrictReq runs a
 reject_ctrl_str after-validator over every top-level str field, closing
