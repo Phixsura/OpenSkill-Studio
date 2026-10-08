@@ -706,3 +706,21 @@ def test_webhook_empty_events_rejected():
 
     with _pytest.raises(ValidationError):
         CreateWebhookRequest(url="https://hooks.example.com/x", events=[])
+
+
+def test_webhook_events_cap_boundary():
+    """Wave 54 killer (len>MAX boundary): exactly MAX_EVENTS_PER_WEBHOOK
+    events is legal (the cap is inclusive); MAX+1 rejects."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.api.v1.endpoints.webhooks import CreateWebhookRequest
+    from app.services.webhook import MAX_EVENTS_PER_WEBHOOK, VALID_EVENT_TYPES
+
+    kinds = sorted(VALID_EVENT_TYPES)
+    ok = CreateWebhookRequest(url="https://hooks.example.com/cap",
+                              events=kinds[:MAX_EVENTS_PER_WEBHOOK])
+    assert len(ok.events) == MAX_EVENTS_PER_WEBHOOK
+    with _pytest.raises(ValidationError):
+        CreateWebhookRequest(url="https://hooks.example.com/cap",
+                             events=kinds[:MAX_EVENTS_PER_WEBHOOK + 1])
