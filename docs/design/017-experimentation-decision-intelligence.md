@@ -509,6 +509,12 @@ the talent idiom) wires them:
   event, payload `{experiment_id, experiment_key, decision, record_id,
 analysis_result_hash}`; delivery is never a condition on the audit.
 
+Secret lifecycle (defect #103, round 879): a leaked signing secret
+rotates in place — POST /orgs/{org}/webhooks/{id}/rotate-secret mints a
+fresh token_hex(32) (same id/url/events, org-scoped uniform 404); the
+new secret is returned once in the created-response shape and never
+listed afterwards.
+
 Delivery reliability (defect #91, round 630): a delivery retries
 transient receiver failures — 429, any 5xx, or a network error — on a
 `WEBHOOK_RETRY_SCHEDULE` backoff (1s/5s/25s, so four attempts total);
@@ -1526,6 +1532,15 @@ API_PROXY_URL — the server-only rewrite override built for e2e stacks;
 first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
+
+Rounds 801-900 — the staple sweep continues. Two audits falsified on
+evidence (holdout expiry — eval-time ends_at recheck outside the cache;
+CSV formula injection on the remaining export surfaces — guards and
+validation chains close all three), and one real industry staple landed
+red-first: #103 webhook secret rotation (a leak no longer forces
+delete+recreate). Certification 189 = 7031 all-green; ~40 more
+foreground verification cycles without a failure. Ledger: 103
+red-proven defects, 52 mutation waves, 189 certifications.
 
 Rounds 701-800 — the long hold. After the TOCTOU epoch closed, ~45
 foreground verification cycles (experiments 646, live wall 161, web
