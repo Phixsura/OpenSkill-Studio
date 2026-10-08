@@ -219,6 +219,18 @@ class WebhookService:
         )
         return list(result.scalars().all())
 
+    async def rotate_secret(self, webhook_id: str, org_id: str) -> WebhookSubscription:
+        """Defect #103 (industry staple): retire a leaked signing secret in
+        place — same id/url/events, fresh token_hex(32). Org-scoped with the
+        uniform 404; the new secret is returned ONCE (the created-response
+        shape), never listed afterwards."""
+        sub = await self.db.get(WebhookSubscription, webhook_id)
+        if sub is None or sub.org_id != org_id:
+            raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
+        sub.secret = secrets.token_hex(32)
+        await self.db.flush()
+        return sub
+
     async def delete(self, webhook_id: str, org_id: str) -> None:
         sub = await self.db.get(WebhookSubscription, webhook_id)
         if sub is None or sub.org_id != org_id:

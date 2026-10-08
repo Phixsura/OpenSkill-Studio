@@ -125,6 +125,26 @@ async def list_webhooks(
     return DataResponse(data=[WebhookResponse.model_validate(s) for s in subs])
 
 
+@router.post(
+    "/orgs/{org_id}/webhooks/{webhook_id}/rotate-secret",
+    response_model=DataResponse[WebhookCreatedResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def rotate_webhook_secret(
+    org_id: str,
+    webhook_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Defect #103: rotate the signing secret in place — the new secret is
+    returned once, in the same created-response shape."""
+    await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    svc = WebhookService(db)
+    sub = await svc.rotate_secret(webhook_id, org_id)
+    await db.commit()
+    return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
+
+
 @router.delete(
     "/orgs/{org_id}/webhooks/{webhook_id}",
     status_code=204,

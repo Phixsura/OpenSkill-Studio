@@ -100,6 +100,13 @@ UPDATE) before counting. The family sweep is complete: every cap in the
 exp+platform surface (notes #100, identity links #101, webhooks #102)
 now serializes its writers.
 
+Round 879 addendum — defect #103 (industry staple): a leaked webhook
+signing secret could only be retired by delete+recreate (receiver
+downtime, new id anyway). POST /orgs/{org}/webhooks/{id}/rotate-secret
+mints a fresh token_hex(32) in place — same id/url/events, org-scoped
+uniform 404, the new secret returned once in the created-response
+shape. Red-first at the service level.
+
 ## 0c. Status update (2026-10-06, the webhook + identity epochs, rounds 209-296)
 
 Two capability families shipped since 0b that the original matrix never

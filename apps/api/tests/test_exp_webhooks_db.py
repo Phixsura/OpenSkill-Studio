@@ -641,3 +641,39 @@ async def test_webhook_invalid_event_pins_code_and_status(db):
         )
     assert e.value.code == "INVALID_EVENT"
     assert e.value.status_code == 422
+
+
+async def test_webhook_secret_rotation(db):
+    """Defect #103 (industry staple): a leaked signing secret could only be
+    retired by delete+recreate — receiver downtime and a new id anyway.
+    rotate_secret mints a fresh secret in place (same id/url/events), is
+    org-scoped (foreign org sees uniform 404), and the old secret stops
+    signing."""
+    import pytest as _pytest
+
+    from app.controlplane.models.tenant import TenantAccount
+    from app.exceptions import AppError as _AppError
+    from app.models.organization import Organization
+    from app.services.webhook import WebhookService
+
+    tenant = TenantAccount(name=f"rot-{str(ULID()).lower()}",
+                           slug=f"rot-{str(ULID()).lower()}")
+    db.add(tenant)
+    await db.flush()
+    org = Organization(name="rot", slug=f"rot-{str(ULID()).lower()}",
+                       tenant_id=tenant.id)
+    db.add(org)
+    await db.flush()
+    svc = WebhookService(db)
+    sub = await svc.create(org.id, "https://hooks.example.com/rot",
+                           ["pack.published"])
+    old_secret = sub.secret
+    rotated = await svc.rotate_secret(sub.id, org.id)
+    assert rotated.id == sub.id
+    assert rotated.secret != old_secret
+    assert len(rotated.secret) == 64  # token_hex(32)
+    assert rotated.url == "https://hooks.example.com/rot"
+    # org containment: a foreign org gets the uniform 404
+    with _pytest.raises(_AppError) as e:
+        await svc.rotate_secret(sub.id, "X" * 26)
+    assert e.value.code == "WEBHOOK_NOT_FOUND"
