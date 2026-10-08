@@ -768,5 +768,8 @@ async def test_webhook_ops_write_audit_trail(db):
     for r in rows:
         assert r.actor_user_id == actor.id
         assert r.tenant_id == tenant.id
+        # wave 55: pin the payload content, not just secret-absence
+        assert r.after == {"url": "https://hooks.example.com/aud",
+                           "events": ["pack.published"]}
         blob = str(r.before) + str(r.after)
         assert "secret" not in blob.lower(), "audit must never carry the secret"

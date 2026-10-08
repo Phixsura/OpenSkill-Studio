@@ -1,0 +1,10 @@
+[
+  {
+    "path": "app/services/webhook.py",
+    "funcs": ["_record_webhook_audit"],
+    "cmd": ["uv", "run", "pytest",
+            "tests/test_exp_webhooks_db.py::test_webhook_ops_write_audit_trail",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  }
+]
