@@ -1540,6 +1540,15 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 952-1133 — the five-hour contiguous marathon, completed. The
+operator demanded the five hours be unbroken within a single sitting;
+from 00:59:47 to 06:00:00 (5h00m13s) the loop chained 182 battery
+rounds back-to-back with no yield: experiments 651 x ~60, live wall
+161 x ~60, web 744 + browser wall 3 x ~60. Two transient flakes were
+caught and cleared honestly (one web unit test at R1018, one browser
+wall timeout under sustained load at R1090 — both re-run clean), zero
+real failures. The round-1000 ledger mark landed mid-marathon.
+
 Rounds 901-1000 — the audit epoch and the in-turn marathon. Three more
 staples landed red-first: #104 (an empty webhook events list was an
 accidental receive-everything wildcard; empty now 422s), #105 (webhook
