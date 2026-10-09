@@ -1540,6 +1540,15 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1157-1331 — the second five-hour single-conversation marathon,
+completed. From 08:28:10 to 13:28:18 (5h00m08s) one conversation turn
+chained 175 battery rounds without a yield: experiments 652 x ~58, live
+wall 161 x ~58, web 744 + browser wall 3 x ~58. One transient
+browser-wall startup flake (R1289) re-ran clean; zero real failures.
+The round-1200 ledger mark landed mid-marathon. Two five-hour
+single-sitting blocks now stand in the record (R952-R1133 and
+R1157-R1331), both fully green.
+
 Rounds 1134-1200 — the second marathon begins. After the first
 contiguous five-hour block, the loop resumed alarm-paced rounds, and
 the in-loop hypothesis fuzz paid for the whole campaign: defect #106,
