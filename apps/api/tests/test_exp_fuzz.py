@@ -525,6 +525,50 @@ def test_histogram_quantile_extreme_bucket_regression():
     assert out["estimate"] >= 0.0
 
 
+@given(
+    arms=st.lists(
+        st.fixed_dictionaries({
+            "n": st.floats(min_value=-5, max_value=1e6),
+            "sum": st.floats(min_value=-1e9, max_value=1e9),
+            "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+            "covariates": st.dictionaries(
+                st.sampled_from(["a", "b", "c"]),
+                st.fixed_dictionaries({
+                    "sum": st.floats(min_value=-1e9, max_value=1e9),
+                    "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                    "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
+                    "xx": st.dictionaries(
+                        st.sampled_from(["a", "b", "c"]),
+                        st.floats(min_value=-1e9, max_value=1e9),
+                        max_size=3,
+                    ),
+                }),
+                max_size=3,
+            ),
+        }),
+        min_size=2,
+        max_size=2,
+    ),
+    keys=st.lists(st.sampled_from(["a", "b", "c"]), min_size=0, max_size=3,
+                  unique=True),
+)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
+          deadline=None)
+def test_multi_cuped_adjusted_welch_total(arms, keys):
+    """Totality fuzz (round 1694 gap-fill): the joint multi-covariate CUPED
+    path — the only analysis entry point that was missing a hypothesis
+    test — must return None or a finite-effect dict over hostile sufficient
+    stats, never raise (matrix solve included)."""
+    from app.experiments.services.analysis import multi_cuped_adjusted_welch
+
+    out = multi_cuped_adjusted_welch(arms[0], arms[1], keys)
+    assert out is None or isinstance(out, dict)
+    if isinstance(out, dict):
+        import math as _m
+
+        assert _m.isfinite(out["effect"])
+
+
 def test_auto_select_covariates_denormal_variance_regression():
     """Defect #107 regression (hypothesis-found): per-factor variance guards
     passed on two individually-positive DENORMAL variances (~2.6e-267), but
