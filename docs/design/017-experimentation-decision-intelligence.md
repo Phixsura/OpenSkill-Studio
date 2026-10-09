@@ -1540,6 +1540,21 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1540-1692 — the fourth five-hour single-conversation marathon,
+completed, and the first to land a live defect mid-stream. From 22:29:42
+to 03:32:23 (5h02m41s) one conversation turn chained 153 battery rounds
+without a yield. At R1549 the fuzz suite caught defect #107 live
+(denormal-variance underflow dividing by zero in covariate
+auto-selection); the fix, its deterministic regression, a repo-wide ruff
+pass and full certification #193 (924+1207+1541+3365 = 7037/7037, all
+green) all ran INSIDE the marathon without breaking the chain. Two
+transient flakes re-ran clean and are recorded honestly: R1571
+(uvicorn startup ConnectError — the wall's startup wait was raised from
+6s to 15s for the rest of the run) and R1688 (a single wall test, clean
+on re-run). Four five-hour single-sitting blocks now stand in the
+record (R952-R1133, R1157-R1331, R1344-R1520, R1540-R1692), all fully
+green.
+
 Rounds 1530-1536 — the audit epoch widens beyond webhooks. Six more
 adversarial hypotheses, all falsified against the code: SRM suppression
 keys are fully isolated per guardrail (cumulative, window and
