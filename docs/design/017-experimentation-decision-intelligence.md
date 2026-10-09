@@ -1540,6 +1540,19 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1521-1529 — the post-marathon audit epoch on the webhook
+subsystem. Eight adversarial hypotheses, all falsified against the code:
+admin gates on all four endpoints; masked secrets on list/detail
+(show-once only on create/rotate); rate limits on every route
+(10/60 writes, 30/60 reads); doc-truth on the retry schedule
+(1s/5s/25s, non-429 4xx stops); per-retry SSRF re-check after each
+backoff sleep plus streamed-and-discarded response bodies; signed
+payload timestamp under the HMAC with documented receiver freshness
+window; per-delivery secret snapshot at enqueue (rotation cannot mix
+signatures mid-retry); and active+entitlement+event-type filtering on
+the delivery path. Battery rounds stayed green throughout (two
+ERR_ABORTED browser-wall flakes re-ran clean).
+
 Rounds 1344-1520 — the third five-hour single-conversation marathon,
 completed. From 14:19:13 to 19:20:01 (5h00m48s) one conversation turn
 chained 177 battery rounds without a yield: experiments 652 x ~59, live
