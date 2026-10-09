@@ -315,3 +315,14 @@ from hostile/corrupt sufficient stats. The fix guards the computed
 denominator itself (`denom <= 0 → skip the candidate`): at those scales
 there is no usable correlation signal, so skipping matches the estimator's
 intent. Deterministic regression + the hypothesis case now pin it.
+
+### Round-1715 addendum — defect #108 (hypothesis-found live, during marathon #5)
+
+Sibling of #107, caught by the totality fuzz added at round 1694 on its
+second exploration pass: `welch_from_stats` guarded `se2 <= 0`, but one
+zero variance plus one **denormal** variance (~2.8e-208) keeps `se2 > 0`
+while every squared Welch–Satterthwaite denominator term underflows to
+exactly 0.0 — division by zero, a crashing 500 from hostile sufficient
+stats. The df now falls back to the pooled `n1+n2-2` when the denominator
+vanishes, the same stance the degenerate `se2 <= 0` branch already takes.
+The round-1694 gap-fill paid for itself within 21 rounds.

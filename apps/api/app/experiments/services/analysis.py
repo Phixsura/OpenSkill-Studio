@@ -355,7 +355,13 @@ def welch_from_stats(
         }
     se = math.sqrt(se2)
     t = effect / se
-    df = se2 * se2 / ((v1 / n1) ** 2 / (n1 - 1.0) + (v2 / n2) ** 2 / (n2 - 1.0))
+    # Defect #108 (hypothesis-found, sibling of #107): with one variance 0 and
+    # the other DENORMAL (~1e-208), se2 stays > 0 but each squared term of the
+    # Welch-Satterthwaite denominator underflows to exactly 0.0 — division by
+    # zero. At that scale the df is numerically unbounded; fall back to the
+    # pooled df, the same stance the se2<=0 degenerate branch takes.
+    df_den = (v1 / n1) ** 2 / (n1 - 1.0) + (v2 / n2) ** 2 / (n2 - 1.0)
+    df = se2 * se2 / df_den if df_den > 0.0 else n1 + n2 - 2.0
     tcrit = t_ppf(0.975, df)
     p_value = 2.0 * t_sf(abs(t), df)
     return {

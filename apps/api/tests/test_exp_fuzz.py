@@ -569,6 +569,21 @@ def test_multi_cuped_adjusted_welch_total(arms, keys):
         assert _m.isfinite(out["effect"])
 
 
+def test_welch_denormal_variance_df_regression():
+    """Defect #108 regression (hypothesis-found, sibling of #107): one zero
+    variance plus one DENORMAL variance (~2.8e-208) keeps se2 > 0 but every
+    squared Welch-Satterthwaite denominator term underflows to 0.0 — division
+    by zero. The df now falls back to the pooled n1+n2-2."""
+    import math as _m
+
+    from app.experiments.services.analysis import welch_from_stats
+
+    out = welch_from_stats(2.0, 0.0, 0.0, 2.0, 0.0, 2.797866070824815e-208)
+    assert "insufficient_data" not in out
+    assert _m.isfinite(out["effect"]) and _m.isfinite(out["df"])
+    assert out["df"] == 2.0
+
+
 def test_auto_select_covariates_denormal_variance_regression():
     """Defect #107 regression (hypothesis-found): per-factor variance guards
     passed on two individually-positive DENORMAL variances (~2.6e-267), but
