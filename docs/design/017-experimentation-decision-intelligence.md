@@ -1540,6 +1540,18 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1693-1698 — the post-marathon sweep after defect #107. Three
+hypotheses falsified: no other #107-style unguarded division survives in
+analysis.py (welch guards se<=0 before dividing, CUPED theta guards its
+single variance, variance-reduction ratios guard var_raw>0); the
+promotion path cannot bypass the decision gate (promote-only drafts,
+observational block, draft-time target validation, idempotent apply);
+and the randomization salt cannot drift (explicit version.asc ordering,
+salt from versions[0], typed 422 + cache purge on poison specs). One
+real gap found and closed: multi_cuped_adjusted_welch — the only
+analysis entry point without a totality fuzz — now has one (200 hostile
+examples, probe green, so no sixth live defect behind it).
+
 Rounds 1540-1692 — the fourth five-hour single-conversation marathon,
 completed, and the first to land a live defect mid-stream. From 22:29:42
 to 03:32:23 (5h02m41s) one conversation turn chained 153 battery rounds
