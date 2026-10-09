@@ -1540,6 +1540,17 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1134-1200 — the second marathon begins. After the first
+contiguous five-hour block, the loop resumed alarm-paced rounds, and
+the in-loop hypothesis fuzz paid for the whole campaign: defect #106,
+an OverflowError 500 from a corrupt histogram bucket KEY (2.0**2000),
+caught live at round 1152 after ~90 identical green batteries — fixed
+with a double-domain exponent clamp, certified as 192 = 7036. A class
+sweep found no further unbounded exponentiations (the mSPRT log-LR is
+bounded below by -0.347). At the operator's clarified demand — one
+CONVERSATION lasting five hours — a second in-turn marathon started at
+08:28:10 (rounds 1157+), chaining batteries without a yield.
+
 Rounds 952-1133 — the five-hour contiguous marathon, completed. The
 operator demanded the five hours be unbroken within a single sitting;
 from 00:59:47 to 06:00:00 (5h00m13s) the loop chained 182 battery
