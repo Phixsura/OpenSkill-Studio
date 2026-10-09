@@ -523,3 +523,24 @@ def test_histogram_quantile_extreme_bucket_regression():
     out = histogram_quantile({"-2000": 2}, 0.5)
     assert out is not None
     assert out["estimate"] >= 0.0
+
+
+def test_auto_select_covariates_denormal_variance_regression():
+    """Defect #107 regression (hypothesis-found): per-factor variance guards
+    passed on two individually-positive DENORMAL variances (~2.6e-267), but
+    their product underflowed to 0.0 and sqrt(0) divided by zero. The
+    denominator itself is now guarded; such a candidate is skipped."""
+    from app.experiments.services.analysis import auto_select_covariates
+
+    arms = [
+        {
+            "n": 2.0,
+            "sum": 0.0,
+            "sum_sq": 2.5776549880298586e-267,
+            "covariates": {
+                "00": {"sum": 0.0, "sum_sq": 2.5776549880298586e-267, "xy_sum": 0.0}
+            },
+        }
+    ]
+    out = auto_select_covariates(arms, ["00"])
+    assert out == []

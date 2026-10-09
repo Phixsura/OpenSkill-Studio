@@ -464,7 +464,15 @@ def auto_select_covariates(
         var_y = syy - sy * sy / n
         if var_x <= 0.0 or var_y <= 0.0:
             continue
-        r = (sxy - sx * sy / n) / math.sqrt(var_x * var_y)
+        # Defect #107 (hypothesis-found): two individually-positive denormal
+        # variances (~1e-267 each) UNDERFLOW to 0.0 when multiplied, so the
+        # per-factor guard above passes and sqrt(0) divides by zero. Guard
+        # the computed denominator itself — at those scales there is no
+        # usable correlation signal, so skipping the candidate is correct.
+        denom = math.sqrt(var_x * var_y)
+        if denom <= 0.0:
+            continue
+        r = (sxy - sx * sy / n) / denom
         if abs(r) >= min_abs_r:
             selected.append((-abs(r), key, r))
     selected.sort()

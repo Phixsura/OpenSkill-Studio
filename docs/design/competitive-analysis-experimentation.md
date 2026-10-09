@@ -304,3 +304,14 @@ All P0/P1/P2 items are folded into ADR-017 v2 (§4, §6, §9–§11, §16 phases
 - DoorDash/Lyft switchback literature; Regular Balanced Switchback Designs (arXiv 2506)
 - Microsoft ExP (CUPED origin), Statsig Meta Analysis / Autotune / holdouts docs
 - Industry consolidation context: Datadog×Eppo (2025), OpenAI×Statsig (2025)
+
+### Round-1549 addendum — defect #107 (hypothesis-found live, during marathon #4)
+
+`auto_select_covariates` guarded `var_x <= 0` and `var_y <= 0` per factor,
+but two individually-positive **denormal** variances (~2.6e-267 each)
+underflow to exactly 0.0 when multiplied, so `math.sqrt(var_x * var_y)`
+returned 0 and the correlation divided by zero — a crashing 500 reachable
+from hostile/corrupt sufficient stats. The fix guards the computed
+denominator itself (`denom <= 0 → skip the candidate`): at those scales
+there is no usable correlation signal, so skipping matches the estimator's
+intent. Deterministic regression + the hypothesis case now pin it.
