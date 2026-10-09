@@ -1540,6 +1540,16 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1344-1520 — the third five-hour single-conversation marathon,
+completed. From 14:19:13 to 19:20:01 (5h00m48s) one conversation turn
+chained 177 battery rounds without a yield: experiments 652 x ~59, live
+wall 161 x ~59, web 744 + browser wall 3 x ~59. Two transient
+infrastructure flakes, both re-run clean and honestly recorded: R1469
+(login-form render timeout, same signature as R1090/R1289) and R1478
+(page.goto net::ERR_ABORTED, frame detached during navigation). Zero
+real failures. Three five-hour single-sitting blocks now stand in the
+record (R952-R1133, R1157-R1331, R1344-R1520), all fully green.
+
 Rounds 1157-1331 — the second five-hour single-conversation marathon,
 completed. From 08:28:10 to 13:28:18 (5h00m08s) one conversation turn
 chained 175 battery rounds without a yield: experiments 652 x ~58, live
