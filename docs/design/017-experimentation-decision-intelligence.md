@@ -1540,6 +1540,19 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1530-1536 — the audit epoch widens beyond webhooks. Six more
+adversarial hypotheses, all falsified against the code: SRM suppression
+keys are fully isolated per guardrail (cumulative, window and
+exposure-window each query and write their own key); the assignment
+window index matches between model and migration exp17 with symmetric
+up/down; the holdout exposure wall covers both the primary and the
+identity-retry survivor paths (plus both assignment-read sites); the
+note cap counts under a FOR UPDATE experiment-row lock; the only
+exponentiation in analysis.py lives inside the clamped _pow2 with all
+three quantile call sites routed through it; and the identity-link cap
+counts under a FOR UPDATE user-row lock. Battery rounds stayed green
+throughout.
+
 Rounds 1521-1529 — the post-marathon audit epoch on the webhook
 subsystem. Eight adversarial hypotheses, all falsified against the code:
 admin gates on all four endpoints; masked secrets on list/detail
