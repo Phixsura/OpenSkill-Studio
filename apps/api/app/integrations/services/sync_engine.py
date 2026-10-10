@@ -265,6 +265,58 @@ class SyncProfileService:
             q = q.where(SyncRecordResult.outcome == outcome)
         return list((await self.db.execute(q)).scalars())
 
+    async def resolve_conflict(
+        self, org_id: str, run_id: str, result_id: str, *, action: str, actor_id: str
+    ) -> SyncRecordResult:
+        """Admin adjudication of a recorded conflict (drives the
+        resolved_by/resolved_action columns).
+
+        - keep_ours / dismiss: mark only — local data stands, the source may
+          re-raise the conflict on a future run if it still disagrees.
+        - accept_theirs: only for clock_unresolvable (the row stored both
+          sides) — applies the source value to the staged record so the next
+          run sees matching hashes instead of the same tie.
+        """
+        run, profile = await self._run_scoped(org_id, run_id)
+        result = await self.db.get(SyncRecordResult, result_id)
+        if result is None or result.run_id != run.id:
+            raise AppError("SYNC_CONFLICT_NOT_FOUND", "Conflict not found", 404)
+        if result.outcome != "conflict":
+            raise AppError("SYNC_CONFLICT_INVALID", "Record is not a conflict", 422)
+        if result.resolved_action is not None:
+            raise AppError("SYNC_CONFLICT_RESOLVED", "Conflict already resolved", 409)
+        if action not in ("accept_theirs", "keep_ours", "dismiss"):
+            raise AppError(
+                "SYNC_CONFLICT_INVALID", "action must be accept_theirs|keep_ours|dismiss", 422
+            )
+        if action == "accept_theirs":
+            if result.conflict_class != "clock_unresolvable" or "field" not in result.detail:
+                raise AppError(
+                    "SYNC_CONFLICT_INVALID",
+                    "accept_theirs applies only to clock_unresolvable conflicts",
+                    422,
+                )
+            staged = (
+                await self.db.execute(
+                    select(StagedRecord).where(
+                        StagedRecord.connection_id == profile.connection_id,
+                        StagedRecord.model == result.model,
+                        StagedRecord.external_id == result.external_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if staged is None:
+                raise AppError("SYNC_CONFLICT_INVALID", "Staged record no longer exists", 422)
+            payload = dict(staged.payload)
+            payload[result.detail["field"]] = result.detail.get("theirs")
+            staged.payload = payload  # fresh dict — JSONB identity gotcha
+            staged.raw_hash = _payload_hash(payload)
+            staged.status = "active"
+        result.resolved_by = actor_id
+        result.resolved_action = action
+        await self.db.flush()
+        return result
+
 
 # ── engine execution (outbox handler + inline test driver) ──
 
@@ -511,7 +563,9 @@ async def _apply_record(
                         model=profile.model,
                         outcome="conflict",
                         conflict_class="clock_unresolvable",
-                        detail={"field": key},
+                        # Both sides stored so an admin can RESOLVE the
+                        # conflict (accept_theirs applies this value).
+                        detail={"field": key, "ours": merged.get(key), "theirs": incoming},
                     )
                 )
                 continue

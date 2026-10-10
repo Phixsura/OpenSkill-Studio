@@ -101,7 +101,14 @@ class RecordResultResponse(BaseModel):
     outcome: str
     conflict_class: str | None
     detail: dict
+    resolved_by: str | None
+    resolved_action: str | None
     created_at: datetime
+
+
+class ResolveConflictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(pattern="^(accept_theirs|keep_ours|dismiss)$")
 
 
 # ── mapping profiles ──
@@ -286,3 +293,24 @@ async def sync_run_records(
     await _admin(org_id, user, db)
     rows = await SyncProfileService(db).run_records(org_id, run_id, outcome)
     return {"data": [RecordResultResponse.model_validate(r, from_attributes=True) for r in rows]}
+
+
+@router.post(
+    "/sync-runs/{run_id}/records/{result_id}/resolve",
+    response_model=DataResponse[RecordResultResponse],
+)
+async def resolve_sync_conflict(
+    org_id: str,
+    run_id: str,
+    result_id: str,
+    body: ResolveConflictRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _admin(org_id, user, db)
+    result = await SyncProfileService(db).resolve_conflict(
+        org_id, run_id, result_id, action=body.action, actor_id=user.id
+    )
+    resp = RecordResultResponse.model_validate(result, from_attributes=True)
+    await db.commit()
+    return {"data": resp}

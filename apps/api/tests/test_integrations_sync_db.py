@@ -529,6 +529,83 @@ async def test_field_policy_ours_theirs_prefer_and_clock(db):
 
 
 @pytest.mark.asyncio
+async def test_conflict_resolution_accept_theirs_keep_ours(db):
+    """R22: drives resolved_by/resolved_action — accept_theirs applies the
+    stored source value to the staged record; double-resolve is 409;
+    cross-org resolve is a uniform 404."""
+    org, owner = await _org(db)
+    policy = {"timed": "most_recent", "_default": "theirs"}
+    fake = FakeRosterConnector([[{"external_id": "c1", "timed": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake, field_policy=policy)
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "c1"
+            )
+        )
+    ).scalar_one()
+    staged.payload = {"timed": "LOCAL"}  # no _updated_at -> clock tie
+    staged.raw_hash = "seeded"
+    await db.commit()
+
+    from app.integrations import registry
+
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "c1", "timed": "REMOTE"}]], respect_state=False
+    )
+    run2 = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)
+    svc = SyncProfileService(db)
+    conflicts = await svc.run_records(org.id, run2.id, outcome="conflict")
+    row = next(r for r in conflicts if r.conflict_class == "clock_unresolvable")
+    assert row.detail == {"field": "timed", "ours": "LOCAL", "theirs": "REMOTE"}
+
+    # accept_theirs applies the source value and recomputes the hash.
+    resolved = await svc.resolve_conflict(
+        org.id, run2.id, row.id, action="accept_theirs", actor_id=owner.id
+    )
+    await db.commit()
+    assert resolved.resolved_action == "accept_theirs" and resolved.resolved_by == owner.id
+    await db.refresh(staged)
+    assert staged.payload["timed"] == "REMOTE"
+
+    # Double resolve -> 409.
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_conflict(org.id, run2.id, row.id, action="dismiss", actor_id=owner.id)
+    assert exc.value.status_code == 409
+
+    # Cross-org: uniform 404 on the run.
+    org2, _ = await _org(db)
+    with pytest.raises(AppError) as exc2:
+        await svc.resolve_conflict(org2.id, run2.id, row.id, action="dismiss", actor_id=owner.id)
+    assert exc2.value.status_code == 404
+
+    # keep_ours on a fresh conflict marks without touching staged data.
+    staged.payload = {"timed": "LOCAL2"}
+    staged.raw_hash = "seeded3"
+    await db.commit()
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "c1", "timed": "REMOTE2"}]], respect_state=False
+    )
+    run3 = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run3.id)
+    row3 = next(
+        r
+        for r in await svc.run_records(org.id, run3.id, outcome="conflict")
+        if r.conflict_class == "clock_unresolvable"
+    )
+    await svc.resolve_conflict(org.id, run3.id, row3.id, action="keep_ours", actor_id=owner.id)
+    await db.commit()
+    await db.refresh(staged)
+    assert staged.payload["timed"] == "LOCAL2"
+
+
+@pytest.mark.asyncio
 async def test_echo_suppression(db):
     org, owner = await _org(db)
     fake = FakeRosterConnector([[{"external_id": "e1", "v": "ours"}]])
@@ -658,8 +735,10 @@ async def test_sweep_scheduled_profiles_triggers_due_only(db):
     conn, profile = await _setup_profile(db, org, owner, fake)
     profile.schedule = "hourly"
     await db.commit()
-    # No prior run -> due now.
-    assert await sweep_scheduled_profiles(db) == 1
+    # No prior run -> due now. Assert on OUR profile, not the global count —
+    # the shared DB may hold hourly profiles from prior test runs that come
+    # due again an hour later (time-dependent pollution).
+    assert await sweep_scheduled_profiles(db) >= 1
     run = (
         await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
     ).scalars().first()
@@ -671,7 +750,11 @@ async def test_sweep_scheduled_profiles_triggers_due_only(db):
         await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
     ).scalars().all()
     assert len(runs) == 1
-    # Finish the run recently -> NOT due within the hour.
+    # Finish the run recently -> NOT due within the hour (profile-scoped).
     runs[0].status = "succeeded"
     await db.commit()
-    assert await sweep_scheduled_profiles(db) == 0
+    await sweep_scheduled_profiles(db)
+    runs_after = (
+        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
+    ).scalars().all()
+    assert len(runs_after) == 1

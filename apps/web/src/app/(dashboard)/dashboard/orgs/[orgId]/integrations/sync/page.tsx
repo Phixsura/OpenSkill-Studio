@@ -48,6 +48,7 @@ interface RecordResult {
   outcome: string;
   conflict_class: string | null;
   detail: Record<string, unknown>;
+  resolved_action: string | null;
 }
 
 const RUN_COLORS: Record<string, string> = {
@@ -93,6 +94,19 @@ export default function SyncIntegrationsPage() {
         `${base}/sync-runs/${openRun}/records?outcome=conflict`,
       ),
     enabled: openRun !== null,
+  });
+
+  const resolveConflict = useMutation({
+    mutationFn: ({ resultId, action }: { resultId: string; action: string }) =>
+      apiWithAuth(`${base}/sync-runs/${openRun}/records/${resultId}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }),
+    onSuccess: () => {
+      toast.success("Conflict resolved");
+      queryClient.invalidateQueries({ queryKey: ["intg-run-records", orgId, openRun] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Resolve failed"),
   });
 
   const onError = (err: unknown) =>
@@ -352,10 +366,49 @@ export default function SyncIntegrationsPage() {
               {openRun === r.id && (
                 <ul className="mt-2 space-y-1 border-t pt-2 text-xs">
                   {(conflictsQ.data?.data ?? []).map((c) => (
-                    <li key={c.id} className="font-mono">
-                      {c.external_id} — {c.conflict_class}
-                      {Object.keys(c.detail ?? {}).length > 0 && (
-                        <span className="text-muted-foreground"> {JSON.stringify(c.detail)}</span>
+                    <li key={c.id} className="flex flex-wrap items-center gap-2 font-mono">
+                      <span>
+                        {c.external_id} — {c.conflict_class}
+                        {Object.keys(c.detail ?? {}).length > 0 && (
+                          <span className="text-muted-foreground"> {JSON.stringify(c.detail)}</span>
+                        )}
+                      </span>
+                      {c.resolved_action ? (
+                        <span className="rounded bg-green-100 px-1.5 py-0.5 text-green-800">
+                          {c.resolved_action}
+                        </span>
+                      ) : (
+                        <span className="flex gap-1">
+                          {c.conflict_class === "clock_unresolvable" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                resolveConflict.mutate({ resultId: c.id, action: "accept_theirs" })
+                              }
+                            >
+                              Accept theirs
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              resolveConflict.mutate({ resultId: c.id, action: "keep_ours" })
+                            }
+                          >
+                            Keep ours
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              resolveConflict.mutate({ resultId: c.id, action: "dismiss" })
+                            }
+                          >
+                            Dismiss
+                          </Button>
+                        </span>
                       )}
                     </li>
                   ))}
