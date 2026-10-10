@@ -319,9 +319,9 @@ def test_mixed_resolution_set_is_refused_and_first_addr_returned(monkeypatch):
     """A hostname resolving to {public, private} is an attack (DNS pinning
     games) — refused outright, never 'skip to the public one'. An all-public
     set returns the FIRST address (the one that gets dialed)."""
-    from app.config import settings
     import socket as _socket
 
+    from app.config import settings
     from app.integrations.security import EgressBlockedError, _resolve_and_validate
 
     monkeypatch.setattr(settings, "egress_allow_private", False)

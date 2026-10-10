@@ -650,3 +650,124 @@ async def test_link_list_and_unlink_frees_subject_for_relink(db):
 
     # Re-link after revoke produced a NEW active link for the same subject.
     assert res2.link.id != res.link.id
+
+
+# ── R29: identity-resolution mutation-probe killers ──
+
+
+async def _add_member(db, org, email, status=MemberStatus.ACTIVE):
+    u = await _user(db, email=email)
+    db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT, status=status))
+    await db.flush()
+    return u
+
+
+@pytest.mark.asyncio
+async def test_resolution_email_match_is_case_insensitive(db):
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "case-r29.io")
+    member = await _add_member(db, org, "alice@case-r29.io")
+    svc = IdentityService(db)
+    # IdP sends mixed case; member stored lowercase — must still match.
+    res = await svc.resolve(_ident(org, subject="case-sub", email="ALICE@CASE-R29.io"))
+    assert res.user.id == member.id and not res.jit_created
+
+
+@pytest.mark.asyncio
+async def test_resolution_two_members_same_email_queue_not_takeover(db):
+    """Exactly two active members sharing an email: NEVER link to either —
+    queue for the admin. (>=1 mutant would hand the account to the first.)"""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "dup-r29.io")
+    shared = "shared@dup-r29.io"
+    await _add_member(db, org, shared)
+    # Second user with the same email but different row (simulate legacy dupes
+    # via distinct casing — stored emails differ, lower() collides).
+    await _add_member(db, org, "SHARED@dup-r29.io")
+    svc = IdentityService(db)
+    with pytest.raises(AppError) as exc:
+        await svc.resolve(_ident(org, subject="dup-sub", email=shared))
+    assert exc.value.code == "IDENTITY_AMBIGUOUS"
+    q = await svc.list_queue(org.id)
+    assert any(i.subject == "dup-sub" and i.reason == "multiple_member_matches" for i in q)
+
+
+@pytest.mark.asyncio
+async def test_resolution_archived_member_never_matches(db):
+    """An ARCHIVED membership must not resolve: zero active matches -> queue
+    (no JIT) rather than silently reactivating access."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "arch-r29.io")
+    await _add_member(db, org, "gone@arch-r29.io", status=MemberStatus.ARCHIVED)
+    svc = IdentityService(db)
+    with pytest.raises(AppError) as exc:
+        await svc.resolve(_ident(org, subject="arch-sub", email="gone@arch-r29.io"))
+    assert exc.value.code == "SSO_NO_ACCOUNT"
+    q = await svc.list_queue(org.id)
+    assert any(i.subject == "arch-sub" and i.reason == "no_member_match" for i in q)
+
+
+@pytest.mark.asyncio
+async def test_jit_user_properties_and_inactive_platform_account(db):
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "jit-r29.io")
+    svc = IdentityService(db)
+    # Fresh JIT: account is email_verified (verified domain + verified IdP
+    # email) and email normalized to lowercase.
+    res = await svc.resolve(
+        _ident(org, subject="jit-sub", email="NewPerson@JIT-R29.io"), allow_jit=True
+    )
+    assert res.jit_created and res.user.email == "newperson@jit-r29.io"
+    assert res.user.email_verified is True
+    # A SUSPENDED platform account with that email: membership-only JIT must
+    # refuse and queue, never attach an org to a disabled account.
+    dead = await _user(db, email="dead@jit-r29.io")
+    dead.status = UserStatus.SUSPENDED
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.resolve(
+            _ident(org, subject="dead-sub", email="dead@jit-r29.io"), allow_jit=True
+        )
+    assert exc.value.code == "IDENTITY_AMBIGUOUS"
+    q = await svc.list_queue(org.id)
+    assert any(i.reason == "existing_account_inactive" for i in q)
+
+
+@pytest.mark.asyncio
+async def test_queue_link_refuses_archived_target(db):
+    """Admin queue 'link' action must only accept an ACTIVE member target."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = IdentityService(db)
+    ghost = await _add_member(db, org, f"ghost-{uuid.uuid4().hex[:6]}@q-r29.io",
+                              status=MemberStatus.ARCHIVED)
+    with pytest.raises(AppError):
+        await svc.resolve(_ident(org, subject="q-sub", email=None, verified=False))
+    item = next(i for i in await svc.list_queue(org.id) if i.subject == "q-sub")
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_queue_item(
+            org.id, item.id, action="link", user_id=ghost.id, actor_id=owner.id
+        )
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_linked_but_suspended_user_refused_on_hot_path(db):
+    """R29: an EXISTING link must not grant access once the user is
+    suspended — the hot path re-checks account status on every login."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "hot-r29.io")
+    member = await _add_member(db, org, "hot@hot-r29.io")
+    svc = IdentityService(db)
+    res = await svc.resolve(_ident(org, subject="hot-sub", email="hot@hot-r29.io"))
+    assert res.user.id == member.id
+    member.status = UserStatus.SUSPENDED
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.resolve(_ident(org, subject="hot-sub", email="hot@hot-r29.io"))
+    assert exc.value.code == "SSO_NO_ACCOUNT"
