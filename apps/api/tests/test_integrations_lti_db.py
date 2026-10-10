@@ -452,8 +452,8 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
 
     teach = (
         await db.execute(
-            select(_OM.role).join(_U, _U.id == _OM.user_id).where(
-                _OM.org_id == org.id, _f.lower(_U.email) == f"n2@{_mint.domain}".lower()
+            select(MemberModel.role).join(UserModel, UserModel.id == MemberModel.user_id).where(
+                MemberModel.org_id == org.id, _f.lower(UserModel.email) == f"n2@{_mint.domain}".lower()
             )
         )
     ).scalar_one()
