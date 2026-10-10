@@ -419,3 +419,122 @@ async def test_oneroster_token_rejection(db):
         async for _ in OneRosterConnector().read(ctx, "roster.class", {}):
             pass
     assert e.value.code == "CONNECTION_AUTH_REJECTED"
+
+
+# ── R38: roster probe killers ──
+
+
+async def _run_for(db, conn, org):
+    """Minimal profile+run so provision conflicts attach to record rows."""
+    from app.integrations.models import SyncProfile, SyncRun
+
+    prof = SyncProfile(
+        org_id=org.id, connection_id=conn.id, name=f"rp-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull",
+    )
+    db.add(prof)
+    await db.flush()
+    run = SyncRun(profile_id=prof.id, status="succeeded", trigger="manual",
+                  cursor_in={}, cursor_out={})
+    db.add(run)
+    await db.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_conflict_classes_pinned_and_auto_create_off(db):
+    """Kills: auto_create flag, missing_reference and role_conflict classes
+    (the aggregate count alone passes even when a mutant reroutes the
+    failure through a different arm)."""
+    from app.integrations.models import SyncRecordResult
+
+    org, owner = await _org(db)
+    await _domain(db, org, "sch5.example.edu")
+    conn = await _conn(db, org, owner)
+    run = await _run_for(db, conn, org)
+    _stage(db, conn, "roster.class", "c-off", {"title": "NoCreate"})
+    _stage(db, conn, "roster.user", "u-5", {"email": "five@sch5.example.edu"})
+    _stage(
+        db, conn, "roster.enrollment", "e-dang",
+        {"class_external_id": "c-NOPE", "user_external_id": "u-5", "role": "student"},
+    )
+    await db.flush()
+    svc = RosterProvisioningService(db)
+    report = await svc.provision(
+        org.id, conn.id, actor_id=owner.id,
+        options={"auto_create_cohorts": False, "jit_users": True},
+    )
+    assert report["cohorts_created"] == 0  # auto_create off honored
+    rows = (
+        await db.execute(
+            select(SyncRecordResult).where(SyncRecordResult.run_id == run.id)
+        )
+    ).scalars().all()
+    by_ext = {r.external_id: r for r in rows}
+    assert by_ext["c-off"].detail == {"reason": "no_cohort_and_auto_create_off"}
+    assert by_ext["e-dang"].conflict_class == "missing_reference"
+    assert by_ext["e-dang"].detail == {"class_external_id": "c-NOPE"}
+
+    # Second pass with auto_create ON: the cohort exists, so an unknown SIS
+    # role is reported as role_conflict (not masked by missing_reference).
+    _stage(
+        db, conn, "roster.enrollment", "e-role",
+        {"class_external_id": "c-off", "user_external_id": "u-5", "role": "principal"},
+    )
+    await db.flush()
+    await svc.provision(org.id, conn.id, actor_id=owner.id, options={"jit_users": True})
+    rows2 = (
+        await db.execute(
+            select(SyncRecordResult).where(
+                SyncRecordResult.run_id == run.id,
+                SyncRecordResult.external_id == "e-role",
+            )
+        )
+    ).scalars().all()
+    assert rows2 and rows2[0].conflict_class == "role_conflict"
+    assert rows2[0].detail == {"role": "principal"}
+
+
+@pytest.mark.asyncio
+async def test_revoked_link_never_drives_unenroll(db):
+    """A REVOKED identity link is not authoritative: a tombstoned enrollment
+    for that subject must not remove the member."""
+    from datetime import UTC, datetime
+
+    from app.integrations.models import ExternalIdentityLink
+
+    org, owner = await _org(db)
+    await _domain(db, org, "sch6.example.edu")
+    conn = await _conn(db, org, owner)
+    await _user_member(db, org, "six@sch6.example.edu")
+    _stage(db, conn, "roster.class", "c-6", {"title": "C6"})
+    _stage(db, conn, "roster.user", "u-6", {"email": "six@sch6.example.edu"})
+    _stage(
+        db, conn, "roster.enrollment", "e-6",
+        {"class_external_id": "c-6", "user_external_id": "u-6", "role": "student"},
+    )
+    await db.flush()
+    svc = RosterProvisioningService(db)
+    r = await svc.provision(org.id, conn.id, actor_id=owner.id)
+    assert r["members_added"] == 1
+    link = (
+        await db.execute(
+            select(ExternalIdentityLink).where(
+                ExternalIdentityLink.connection_ref == conn.id,
+                ExternalIdentityLink.subject == "u-6",
+            )
+        )
+    ).scalar_one()
+    link.revoked_at = datetime.now(UTC)
+    rec = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id,
+                StagedRecord.external_id == "e-6",
+            )
+        )
+    ).scalar_one()
+    rec.status = "tombstoned"
+    await db.flush()
+    r2 = await svc.provision(org.id, conn.id, actor_id=owner.id)
+    assert r2["members_removed"] == 0

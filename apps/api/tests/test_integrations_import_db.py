@@ -283,3 +283,59 @@ async def test_concurrent_commit_single_winner(db):
     with pytest.raises(AppError) as e:
         await svc.commit(org.id, job.id, file_bytes=data)
     assert e.value.code == "IMPORT_NOT_COMMITTABLE"
+
+
+# ── R38: bulk-import probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_display_truncation_error_cap_and_committing_claim(db):
+    from app.integrations.models import ImportRowError
+    from app.integrations.models.bulk import MAX_ROW_ERRORS
+
+    org, owner = await _org(db)
+    svc = BulkImportService(db)
+
+    # 1. 150-char display name is truncated to 100, not a row failure.
+    email = f"long-{uuid.uuid4().hex[:6]}@x.edu"
+    data = _csv([f"{email},{'D' * 150},student"])
+    job = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="t1", created_by=owner.id, idempotency_key=f"r38-{uuid.uuid4().hex[:8]}",
+    )
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1 and committed.stats.get("row_errors", 0) == 0
+    u = (
+        await db.execute(select(User).where(func.lower(User.email) == email))
+    ).scalar_one()
+    assert len(u.display_name) == 100
+
+    # 2. Preview stores at most MAX_ROW_ERRORS row errors (JSONB blow-up cap).
+    bad = _csv([f"not-an-email-{i},X,student" for i in range(MAX_ROW_ERRORS + 5)])
+    job2 = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=bad,
+        file_key="t2", created_by=owner.id, idempotency_key=f"r38b-{uuid.uuid4().hex[:8]}",
+    )
+    stored = (
+        await db.execute(
+            select(func.count()).select_from(ImportRowError).where(
+                ImportRowError.job_id == job2.id
+            )
+        )
+    ).scalar_one()
+    assert stored == MAX_ROW_ERRORS
+    assert job2.dry_stats["errors"] == MAX_ROW_ERRORS + 5  # true count still reported
+
+    # 3. A job stuck in 'committing' (crashed commit / concurrent winner)
+    # must refuse a second commit — the claim is previewed-only.
+    email3 = f"claim-{uuid.uuid4().hex[:6]}@x.edu"
+    data3 = _csv([f"{email3},C,student"])
+    job3 = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data3,
+        file_key="t3", created_by=owner.id, idempotency_key=f"r38c-{uuid.uuid4().hex[:8]}",
+    )
+    job3.status = "committing"
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.commit(org.id, job3.id, file_bytes=data3)
+    assert exc.value.code == "IMPORT_NOT_COMMITTABLE"
