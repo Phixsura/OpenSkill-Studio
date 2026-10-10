@@ -354,6 +354,49 @@ class ConnectionService:
         await self.db.flush()
         return conn
 
+    async def sweep_connection_health(self) -> int:
+        """R41 worker cron: ping every ACTIVE/DEGRADED connection so health
+        decays without an admin clicking Ping. Each failure feeds the same
+        _record_failure state machine (degraded after repeats, error on auth
+        rejection); the first transition INTO degraded/error emits a
+        daily-deduped integration.connection.unhealthy mesh event."""
+        rows = (
+            await self.db.execute(
+                select(IntegrationConnection).where(
+                    IntegrationConnection.status.in_(("active", "degraded"))
+                )
+            )
+        ).scalars().all()
+        swept = 0
+        for conn in rows:
+            before = conn.status
+            try:
+                await self.ping(conn.org_id, conn.id)
+            except AppError:
+                pass  # failure already recorded by ping()
+            except Exception:
+                self._record_failure(conn, "CONNECTOR_CRASH")
+            swept += 1
+            if conn.status != before and conn.status in ("degraded", "error"):
+                try:
+                    from app.integrations.facade import emit_event
+
+                    await emit_event(
+                        self.db,
+                        conn.org_id,
+                        "integration.connection.unhealthy",
+                        subject=conn.id,
+                        data={
+                            "connection_id": conn.id,
+                            "status": conn.status,
+                            "error_class": (conn.health or {}).get("last_error_class"),
+                        },
+                    )
+                except Exception:
+                    pass  # alerting must never break the sweep
+            await self.db.flush()
+        return swept
+
     def _record_success(self, conn: IntegrationConnection) -> None:
         health = dict(conn.health or {})
         health["last_ok_at"] = datetime.now(UTC).isoformat()

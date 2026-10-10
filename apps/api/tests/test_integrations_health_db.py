@@ -165,3 +165,69 @@ async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
         await ep.test_webhook(other.id, sub.id, user=mallory, db=db)
     assert exc.value.status_code == 404
     assert legacy is not None  # module import sanity
+
+
+@pytest.mark.asyncio
+async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
+    """R41: the sweep pings active/degraded connections, feeds the health
+    state machine, and emits integration.connection.unhealthy exactly on
+    the transition INTO an unhealthy status."""
+    from sqlalchemy import select as _select
+
+    from app.exceptions import AppError
+    from app.integrations import registry
+    from app.integrations.models import IntegrationEvent
+    from app.integrations.services.connections import ConnectionService
+
+    user = await _user(db)
+    org = await _org(db, user)
+    svc = ConnectionService(db)
+    await svc.sync_provider_catalog()
+    await db.flush()
+    conn = await svc.create(
+        org.id, provider_key="oneroster", name=f"hs-{uuid.uuid4().hex[:6]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+    )
+    conn.status = "active"
+    await db.flush()
+
+    class _DeadConnector:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read"})
+
+        async def ping(self, ctx):
+            raise AppError("CONNECTION_AUTH_REJECTED", "401 from source", 502)
+
+    old = registry.CONNECTORS.get("oneroster")
+    registry.CONNECTORS["oneroster"] = _DeadConnector()
+    try:
+        swept = await svc.sweep_connection_health()
+        assert swept >= 1
+        await db.refresh(conn)
+        assert conn.status == "active"  # first rejection only records
+        await svc.sweep_connection_health()  # second consecutive -> parks
+        await db.refresh(conn)
+        assert conn.status == "error"
+        events = (
+            await db.execute(
+                _select(IntegrationEvent).where(
+                    IntegrationEvent.subject == conn.id,
+                    IntegrationEvent.type
+                    == "com.openskill.integration.connection.unhealthy.v1",
+                )
+            )
+        ).scalars().all()
+        assert len(events) == 1
+        assert events[0].data["error_class"] == "CONNECTION_AUTH_REJECTED"
+        # Error connections are NOT re-swept (not in active/degraded).
+        await svc.sweep_connection_health()
+        events2 = (
+            await db.execute(
+                _select(IntegrationEvent).where(IntegrationEvent.subject == conn.id)
+            )
+        ).scalars().all()
+        assert len(events2) == 1
+    finally:
+        if old is not None:
+            registry.CONNECTORS["oneroster"] = old
