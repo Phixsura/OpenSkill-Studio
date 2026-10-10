@@ -30,7 +30,9 @@ from app.models.organization import MemberStatus, Organization, OrgMember, OrgRo
 from app.models.user import User, UserRole, UserStatus
 from app.models.webhook import WebhookSubscription
 
-INTG_TOPICS = ["intg.event.created", "intg.delivery.attempt", "intg.sync.run"]
+# Drain EVENT topics only: pulling intg.sync.run here would execute stale
+# queued runs from earlier committed test sessions mid-chain (flake source).
+INTG_TOPICS = ["intg.event.created", "intg.delivery.attempt"]
 
 IDP = "https://idp.acceptance.example.com"
 LMS = "https://lms.acceptance.example.com"
@@ -339,7 +341,9 @@ async def test_full_acceptance_chain(db, monkeypatch):
     reg = await lti.create_registration(
         org.id,
         issuer=LMS,
-        client_id="acc-tool",
+        # unique per run: (issuer, client_id) is globally unique and the
+        # chain COMMITS (outbox drains) — re-runs must not collide.
+        client_id=f"acc-tool-{uuid.uuid4().hex[:8]}",
         auth_login_url=f"{LMS}/auth",
         auth_token_url=f"{LMS}/token",
         jwks_url=f"{LMS}/jwks",
@@ -401,15 +405,20 @@ async def test_full_acceptance_chain(db, monkeypatch):
         },
     )
     await db.commit()
-    for _ in range(6):
-        if await process_outbox_once(db, topics=INTG_TOPICS) == 0:
+    # Drain until OUR delivery is terminal — the shared outbox can hold due
+    # retry messages from earlier (committed) test runs that would starve a
+    # fixed round count.
+    delivery = None
+    for _ in range(40):
+        await process_outbox_once(db, topics=INTG_TOPICS)
+        delivery = (
+            await db.execute(
+                select(EventDelivery).where(EventDelivery.event_id == event.id)
+            )
+        ).scalar_one_or_none()
+        if delivery is not None and delivery.status in ("succeeded", "exhausted"):
             break
-
-    # signed webhook delivered
-    delivery = (
-        await db.execute(select(EventDelivery).where(EventDelivery.event_id == event.id))
-    ).scalar_one()
-    assert delivery.status == "succeeded"
+    assert delivery is not None and delivery.status == "succeeded"
     hook = world.webhook_payloads[0]
     assert hook["body"]["type"] == "com.openskill.project.approved.v1"
     assert hook["headers"]["webhook-id"] == event.id

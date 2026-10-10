@@ -196,6 +196,9 @@ class Settings(BaseSettings):
                     ) from exc
         return v
 
+    # Public base URL of the API (SAML SP entity id / ACS, LTI tool URLs).
+    public_base_url: str = "http://localhost:8000"
+
     # ── Integration fabric (ADR-018) ──
     # Allow egress to private/reserved ranges — TEST ONLY (E2E suites hit
     # localhost; R79 pattern). The validator refuses it anywhere else, so a

@@ -781,6 +781,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 19. Known edges & explicit decisions
 
+- **SAML SP (P3b) uses signxml**, not python3-saml/pysaml2: pure-python XML-DSIG
+  avoids the xmlsec1 native dependency, and the verifier returns ONLY the signed
+  subtree — the XSW family (unsigned sibling assertions) cannot be consumed by
+  construction. SAML mandates exclusive c14n; inclusive-c14n signatures break once
+  wrapped (pinned by test). IdP-initiated (unsolicited) responses are rejected in v1.
 - **No /Bulk SCIM in v1** (advertised unsupported); Entra works without it.
 - **SCIM payload layer is hand-rolled** (P4 decision, supersedes the §5.3
   scim2-models recommendation): the production rules that matter — lenient Entra

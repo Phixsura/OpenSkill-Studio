@@ -70,6 +70,9 @@ class SsoCreateRequest(BaseModel):
     oidc_issuer: str | None = Field(default=None, max_length=500)
     oidc_client_id: str | None = Field(default=None, max_length=255)
     oidc_client_secret: str | None = Field(default=None, max_length=500)
+    idp_entity_id: str | None = Field(default=None, max_length=500)
+    idp_sso_url: str | None = Field(default=None, max_length=500)
+    idp_certificates: list[dict] = Field(default_factory=list, max_length=5)
     attribute_map: dict = Field(default_factory=dict)
     allow_jit: bool = False
     default_role: str = "student"
@@ -203,6 +206,9 @@ async def create_sso_connection(
         oidc_issuer=body.oidc_issuer,
         oidc_client_id=body.oidc_client_id,
         oidc_client_secret=body.oidc_client_secret,
+        idp_entity_id=body.idp_entity_id,
+        idp_sso_url=body.idp_sso_url,
+        idp_certificates=body.idp_certificates,
         attribute_map=body.attribute_map,
         allow_jit=body.allow_jit,
         default_role=body.default_role,
@@ -349,6 +355,80 @@ async def sso_discovery(
             "authorize_url": f"/api/v1/sso/oidc/authorize?connection={conn.id}",
         }
     }
+
+
+# ── SAML protocol endpoints (P3b) ──
+
+
+@protocol_router.get("/saml/metadata")
+async def saml_sp_metadata():
+    from fastapi.responses import Response as _Response
+
+    from app.integrations.services.sso_saml import sp_metadata_xml
+
+    return _Response(sp_metadata_xml(), media_type="application/samlmetadata+xml")
+
+
+@protocol_router.get("/saml/authorize")
+async def saml_authorize(
+    connection: str = Query(min_length=1, max_length=26),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.integrations.services.sso_saml import SamlService
+
+    url = await SamlService(db).build_authn_redirect(connection)
+    await db.commit()
+    return RedirectResponse(url, status_code=302)
+
+
+@protocol_router.post("/saml/acs/{connection_id}")
+async def saml_acs(
+    connection_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.integrations.services.sso_saml import SamlService
+
+    form = await request.form()
+    saml_response = str(form.get("SAMLResponse", ""))
+    relay_state = form.get("RelayState")
+    if not saml_response:
+        raise AppError("SSO_ASSERTION_INVALID", "SAMLResponse missing", 401)
+    svc = SamlService(db)
+    conn, result = await svc.handle_acs(
+        connection_id=connection_id,
+        saml_response_b64=saml_response,
+        relay_state=str(relay_state) if relay_state is not None else None,
+    )
+    from app.services.auth import AuthService
+
+    pair = await AuthService(db)._create_token_pair(result.user)  # noqa: SLF001
+    result.user.last_login_at = datetime.now(UTC)
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        from app.integrations.facade import emit_event
+
+        await emit_event(
+            db,
+            conn.org_id,
+            "org.sso.login",
+            subject=result.user.id,
+            data={"user_id": result.user.id, "jit": result.jit_created, "via": "saml"},
+        )
+    await db.commit()
+    body = {
+        "access_token": pair.access_token,
+        "refresh_token": pair.refresh_token,
+        "token_type": "bearer",
+        "jit_created": result.jit_created,
+    }
+    if settings.app_env in ("development", "test"):
+        return {"data": body}
+    return RedirectResponse(
+        f"/auth/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
+        status_code=302,
+    )
 
 
 @protocol_router.get("/oidc/authorize")

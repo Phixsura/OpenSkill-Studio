@@ -25,6 +25,7 @@ dependencies = [
     "cryptography>=43.0",
     "stripe>=11,<13",
     "dnspython>=2",
+    "signxml>=5.1.0",
 ]
 
 [project.optional-dependencies]
