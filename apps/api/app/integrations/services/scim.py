@@ -13,6 +13,7 @@ payload echoes (PII) and no stack traces.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from datetime import UTC, datetime
 from typing import Any
@@ -63,6 +64,93 @@ class ScimError(Exception):
         if self.scim_type:
             out["scimType"] = self.scim_type
         return out
+
+
+MAX_BULK_OPERATIONS = 100
+BULK_REQUEST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:BulkRequest"
+BULK_RESPONSE_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:BulkResponse"
+
+
+async def apply_bulk(db, token, payload: dict) -> dict:
+    """RFC 7644 §3.7 /Bulk (R52): apply up to MAX_BULK_OPERATIONS user/group
+    operations in one request. Each operation runs in its own SAVEPOINT —
+    one failure never poisons the session or the other operations.
+    failOnErrors stops processing after N failures (0/absent = never stop).
+    bulkId cross-references are NOT supported (no parent-child resources in
+    our model) — a data payload referencing "bulkId:" fails that operation.
+    """
+    schemas = payload.get("schemas") or []
+    if BULK_REQUEST_SCHEMA not in schemas:
+        raise ScimError(400, "BulkRequest schema required", "invalidSyntax")
+    ops = payload.get("Operations")
+    if not isinstance(ops, list) or not ops:
+        raise ScimError(400, "Operations required", "invalidSyntax")
+    if len(ops) > MAX_BULK_OPERATIONS:
+        raise ScimError(413, f"At most {MAX_BULK_OPERATIONS} operations", "tooMany")
+    fail_on = payload.get("failOnErrors") or 0
+    if not isinstance(fail_on, int) or fail_on < 0:
+        raise ScimError(400, "failOnErrors must be a non-negative integer", "invalidValue")
+
+    users = ScimUserService(db, token)
+    groups = ScimGroupService(db, token)
+    results: list[dict] = []
+    failures = 0
+    for op in ops:
+        if not isinstance(op, dict):
+            raise ScimError(400, "Invalid operation", "invalidSyntax")
+        method = str(op.get("method", "")).upper()
+        path = str(op.get("path", ""))
+        data = op.get("data")
+        entry: dict = {"method": method}
+        if op.get("bulkId"):
+            entry["bulkId"] = str(op["bulkId"])
+        try:
+            if "bulkId:" in json.dumps(data or {}):
+                raise ScimError(501, "bulkId references not supported", "invalidValue")
+            async with db.begin_nested():
+                entry.update(await _apply_bulk_op(users, groups, method, path, data))
+        except ScimError as exc:
+            failures += 1
+            entry["status"] = str(exc.status)
+            entry["response"] = exc.body
+        results.append(entry)
+        if fail_on and failures >= fail_on:
+            break
+    return {"schemas": [BULK_RESPONSE_SCHEMA], "Operations": results}
+
+
+async def _apply_bulk_op(users, groups, method: str, path: str, data) -> dict:
+    def _require_data():
+        if not isinstance(data, dict):
+            raise ScimError(400, "data required", "invalidSyntax")
+        return data
+
+    if path == "/Users" and method == "POST":
+        res, _created = await users.create(_require_data())
+        return {"status": "201", "location": f"/Users/{res['id']}"}
+    if path.startswith("/Users/"):
+        uid = path.removeprefix("/Users/")
+        if method == "PUT":
+            res = await users.replace(uid, _require_data())
+            return {"status": "200", "location": f"/Users/{res['id']}"}
+        if method == "PATCH":
+            res = await users.patch(uid, _require_data())
+            return {"status": "200", "location": f"/Users/{res['id']}"}
+        if method == "DELETE":
+            await users.delete(uid)
+            return {"status": "204"}
+    if path == "/Groups" and method == "POST":
+        res = await groups.create(_require_data())
+        return {"status": "201", "location": f"/Groups/{res['id']}"}
+    if path.startswith("/Groups/"):
+        gid = path.removeprefix("/Groups/")
+        if method == "PATCH":
+            res = await groups.patch(gid, _require_data())
+            return {"status": "200", "location": f"/Groups/{res['id']}"}
+        if method == "DELETE":
+            await groups.delete(gid)
+            return {"status": "204"}
+    raise ScimError(400, f"Unsupported bulk op {method} {path}", "invalidPath")
 
 
 # ── token admin (org-scoped surface) ──

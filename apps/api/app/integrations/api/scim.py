@@ -64,7 +64,7 @@ async def service_provider_config():
         {
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
             "patch": {"supported": True},
-            "bulk": {"supported": False, "maxOperations": 0, "maxPayloadSize": 0},
+            "bulk": {"supported": True, "maxOperations": 100, "maxPayloadSize": 1_048_576},
             "filter": {"supported": True, "maxResults": 200},
             "changePassword": {"supported": False},
             "sort": {"supported": False},
@@ -121,6 +121,26 @@ async def schemas():
 
 
 # ── Users ──
+
+
+@scim_router.post("/Bulk", dependencies=[Depends(rate_limit(60, 60))])
+async def bulk(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """RFC 7644 §3.7 (R52): bulk user/group operations under one request."""
+    from app.integrations.services.scim import apply_bulk
+
+    raw = await request.body()
+    if len(raw) > 1_048_576:
+        return _scim_json(ScimError(413, "Payload exceeds 1MB", "tooLarge").body(), 413)
+    body = await _json_body(request)
+
+    async def run(token):
+        return _scim_json(await apply_bulk(db, token, body))
+
+    return await _run(db, authorization, run)
 
 
 @scim_router.get("/Users", dependencies=[Depends(rate_limit(240, 60))])

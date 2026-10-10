@@ -455,3 +455,82 @@ async def test_group_patch_invalid_op_rejected(ctx):
     with pytest.raises(ScimError) as e:
         await _gsvc(ctx).patch(g["id"], {"Operations": [{"op": "upsert", "value": {}}]})
     assert e.value.status == 400
+
+
+# ── R52: /Bulk ──
+
+
+@pytest.mark.asyncio
+async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
+    from app.integrations.services.scim import (
+        MAX_BULK_OPERATIONS,
+        apply_bulk,
+    )
+
+    db, token = ctx["db"], ctx["token"]
+    e1 = f"b1-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    e2 = f"b2-{uuid.uuid4().hex[:8]}@corp.example.edu"
+
+    out = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "Operations": [
+            {"method": "POST", "path": "/Users", "bulkId": "a",
+             "data": {"userName": e1, "displayName": "B One"}},
+            {"method": "POST", "path": "/Users", "bulkId": "b",
+             "data": {"userName": e2}},
+            # duplicate -> per-op 409, others unaffected (savepoint)
+            {"method": "POST", "path": "/Users", "bulkId": "c",
+             "data": {"userName": e1}},
+            {"method": "POST", "path": "/Groups",
+             "data": {"displayName": f"BG-{uuid.uuid4().hex[:6]}"}},
+        ],
+    })
+    assert out["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:BulkResponse"]
+    st = [op["status"] for op in out["Operations"]]
+    assert st == ["201", "201", "409", "201"]
+    uid1 = out["Operations"][0]["location"].removeprefix("/Users/")
+
+    # PATCH deactivate + DELETE inside bulk.
+    out2 = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "Operations": [
+            {"method": "PATCH", "path": f"/Users/{uid1}",
+             "data": {"Operations": [
+                 {"op": "replace", "path": "active", "value": False}]}},
+            {"method": "DELETE", "path": f"/Users/{uid1}"},
+            {"method": "TRACE", "path": "/Users"},
+        ],
+    })
+    assert [op["status"] for op in out2["Operations"]] == ["200", "204", "400"]
+
+    # failOnErrors stops after the first failure.
+    out3 = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "failOnErrors": 1,
+        "Operations": [
+            {"method": "DELETE", "path": "/Users/01NOPENOPENOPENOPENOPENOPE"},
+            {"method": "POST", "path": "/Users",
+             "data": {"userName": f"never-{uuid.uuid4().hex[:6]}@corp.example.edu"}},
+        ],
+    })
+    assert len(out3["Operations"]) == 1 and out3["Operations"][0]["status"] == "404"
+
+    # bulkId cross-references unsupported -> per-op 501.
+    out4 = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "Operations": [
+            {"method": "POST", "path": "/Groups",
+             "data": {"displayName": "X", "members": [{"value": "bulkId:a"}]}},
+        ],
+    })
+    assert out4["Operations"][0]["status"] == "501"
+
+    # Caps: schema + op count.
+    with pytest.raises(ScimError):
+        await apply_bulk(db, token, {"schemas": [], "Operations": [{}]})
+    with pytest.raises(ScimError):
+        await apply_bulk(db, token, {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [{"method": "DELETE", "path": "/Users/x"}]
+            * (MAX_BULK_OPERATIONS + 1),
+        })

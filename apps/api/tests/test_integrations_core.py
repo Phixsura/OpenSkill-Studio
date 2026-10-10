@@ -237,7 +237,11 @@ async def test_scim_discovery_endpoints(client):
     resp = await client.get("/api/v1/scim/v2/ServiceProviderConfig")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["bulk"]["supported"] is False  # advertised unsupported (ADR §19)
+    assert body["bulk"] == {
+        "supported": True,
+        "maxOperations": 100,
+        "maxPayloadSize": 1_048_576,
+    }  # R52
     assert body["patch"]["supported"] is True
     rt = await client.get("/api/v1/scim/v2/ResourceTypes")
     assert {r["id"] for r in rt.json()["Resources"]} == {"User", "Group"}
