@@ -56,6 +56,110 @@ async def _to_response(db: AsyncSession, conn: IntegrationConnection) -> Connect
     )
 
 
+@router.get("/health", response_model=DataResponse[dict])
+async def fabric_health(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """One-glance operator summary (R36): connection/subscription health,
+    delivery backlog, identity queue depth, recent sync failures. Pure
+    aggregate counts — no payloads, cheap enough to poll."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import func
+
+    from app.integrations.models import (
+        EventDelivery,
+        IdentityMatchQueue,
+        SsoConnection,
+        SyncProfile,
+        SyncRun,
+    )
+    from app.models.webhook import WebhookSubscription
+
+    await _admin(org_id, user, db)
+    day_ago = datetime.now(UTC) - timedelta(hours=24)
+
+    async def one(q):
+        return (await db.execute(q)).scalar_one()
+
+    conn_rows = (
+        await db.execute(
+            select(IntegrationConnection.status, func.count())
+            .where(IntegrationConnection.org_id == org_id)
+            .group_by(IntegrationConnection.status)
+        )
+    ).all()
+    conn_by_status = {status: n for status, n in conn_rows}
+
+    subs_total = await one(
+        select(func.count()).select_from(WebhookSubscription).where(
+            WebhookSubscription.org_id == org_id
+        )
+    )
+    subs_disabled = await one(
+        select(func.count()).select_from(WebhookSubscription).where(
+            WebhookSubscription.org_id == org_id, WebhookSubscription.active.is_(False)
+        )
+    )
+    deliveries_pending = await one(
+        select(func.count())
+        .select_from(EventDelivery)
+        .join(WebhookSubscription, WebhookSubscription.id == EventDelivery.subscription_id)
+        .where(WebhookSubscription.org_id == org_id, EventDelivery.status == "pending")
+    )
+    deliveries_exhausted_24h = await one(
+        select(func.count())
+        .select_from(EventDelivery)
+        .join(WebhookSubscription, WebhookSubscription.id == EventDelivery.subscription_id)
+        .where(
+            WebhookSubscription.org_id == org_id,
+            EventDelivery.status == "exhausted",
+            EventDelivery.created_at >= day_ago,
+        )
+    )
+    queue_pending = await one(
+        select(func.count()).select_from(IdentityMatchQueue).where(
+            IdentityMatchQueue.org_id == org_id, IdentityMatchQueue.status == "pending"
+        )
+    )
+    sync_profiles = await one(
+        select(func.count()).select_from(SyncProfile).where(SyncProfile.org_id == org_id)
+    )
+    sync_failed_24h = await one(
+        select(func.count())
+        .select_from(SyncRun)
+        .join(SyncProfile, SyncProfile.id == SyncRun.profile_id)
+        .where(
+            SyncProfile.org_id == org_id,
+            SyncRun.status == "failed",
+            SyncRun.created_at >= day_ago,
+        )
+    )
+    sso_active = await one(
+        select(func.count()).select_from(SsoConnection).where(
+            SsoConnection.org_id == org_id, SsoConnection.status == "active"
+        )
+    )
+    return {
+        "data": {
+            "connections": {
+                "total": sum(conn_by_status.values()),
+                "by_status": conn_by_status,
+            },
+            "subscriptions": {"total": subs_total, "disabled": subs_disabled},
+            "deliveries": {
+                "pending": deliveries_pending,
+                "exhausted_24h": deliveries_exhausted_24h,
+            },
+            "identity_queue_pending": queue_pending,
+            "sync": {"profiles": sync_profiles, "failed_runs_24h": sync_failed_24h},
+            "sso_connections_active": sso_active,
+        }
+    }
+
+
 @router.get("/providers", response_model=DataResponse[list[ProviderResponse]])
 async def list_providers(
     org_id: str,

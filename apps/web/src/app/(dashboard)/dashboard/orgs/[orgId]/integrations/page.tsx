@@ -14,6 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
+interface FabricHealth {
+  connections: { total: number; by_status: Record<string, number> };
+  subscriptions: { total: number; disabled: number };
+  deliveries: { pending: number; exhausted_24h: number };
+  identity_queue_pending: number;
+  sync: { profiles: number; failed_runs_24h: number };
+  sso_connections_active: number;
+}
+
 interface Provider {
   id: string;
   key: string;
@@ -53,6 +62,13 @@ export default function IntegrationsHubPage() {
   const [credKind, setCredKind] = useState("api_key");
   const [credValue, setCredValue] = useState("");
   const [credFor, setCredFor] = useState<string | null>(null);
+
+  const { data: healthData } = useQuery({
+    queryKey: ["intg-health", orgId],
+    queryFn: () => apiWithAuth<{ data: FabricHealth }>(`${base}/health`),
+    refetchInterval: 60_000,
+  });
+  const health = healthData?.data;
 
   const { data: providersData, isLoading: providersLoading } = useQuery({
     queryKey: ["intg-providers", orgId],
@@ -151,6 +167,50 @@ export default function IntegrationsHubPage() {
           never shown again.
         </p>
       </div>
+
+      {health?.connections && (
+        <div className="flex flex-wrap gap-4 rounded-lg border p-4 text-sm">
+          <span>
+            Connections: <strong>{health.connections.total}</strong>
+            {(health.connections.by_status.error ?? 0) > 0 && (
+              <strong className="ml-1 text-red-700">
+                ({health.connections.by_status.error} error)
+              </strong>
+            )}
+          </span>
+          <span>
+            Subscriptions: <strong>{health.subscriptions.total}</strong>
+            {health.subscriptions.disabled > 0 && (
+              <strong className="ml-1 text-red-700">
+                ({health.subscriptions.disabled} disabled)
+              </strong>
+            )}
+          </span>
+          <span>
+            Deliveries pending: <strong>{health.deliveries.pending}</strong>
+            {health.deliveries.exhausted_24h > 0 && (
+              <strong className="ml-1 text-red-700">
+                ({health.deliveries.exhausted_24h} exhausted 24h)
+              </strong>
+            )}
+          </span>
+          <span>
+            Identity queue:{" "}
+            <strong className={health.identity_queue_pending > 0 ? "text-amber-700" : ""}>
+              {health.identity_queue_pending}
+            </strong>
+          </span>
+          <span>
+            Sync failures 24h:{" "}
+            <strong className={health.sync.failed_runs_24h > 0 ? "text-red-700" : ""}>
+              {health.sync.failed_runs_24h}
+            </strong>
+          </span>
+          <span>
+            Active SSO: <strong>{health.sso_connections_active}</strong>
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {SECTIONS.map((s) => (

@@ -435,6 +435,30 @@ describe("sync page", () => {
   });
 });
 
+describe("fabric health strip", () => {
+  it("renders aggregate counts with alert accents", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/health": {
+        data: {
+          connections: { total: 3, by_status: { active: 2, error: 1 } },
+          subscriptions: { total: 2, disabled: 1 },
+          deliveries: { pending: 4, exhausted_24h: 2 },
+          identity_queue_pending: 5,
+          sync: { profiles: 2, failed_runs_24h: 1 },
+          sso_connections_active: 1,
+        },
+      },
+      "/orgs/ORG1234567890123456789012/integrations/providers": { data: [] },
+      "/orgs/ORG1234567890123456789012/integrations/connections": { data: [] },
+    });
+    render(<IntegrationsHubPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText(/1 error/)).toBeTruthy());
+    expect(screen.getByText(/1 disabled/)).toBeTruthy();
+    expect(screen.getByText(/2 exhausted 24h/)).toBeTruthy();
+    expect(screen.getByText("5")).toBeTruthy();
+  });
+});
+
 describe("identity links", () => {
   it("lists active links and unlinks reversibly", async () => {
     route({
