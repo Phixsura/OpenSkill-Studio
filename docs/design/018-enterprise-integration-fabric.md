@@ -864,6 +864,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R49-R54 (second window, continued)**: LTI NRPS v2 membership
+  pre-provisioning (launch captures namesroleservice; paginated fetch via
+  generalized service_token; identity-resolution ladder, instructor/student
+  ceiling) + LTI admin UI with one-click roster sync; SAML metadata
+  auto-refresh (daily + manual, hardened parse, signing-keys only,
+  pem-diff rotation detection) driving the formerly never-driven
+  idp_metadata_url column; SCIM /Bulk (100 ops, per-op SAVEPOINT,
+  failOnErrors, bulkId refs 501); immediate-rotation UI action.
+
 - **R35-R47 (second marathon window)**: fabric health summary endpoint +
   hub status strip (R36); webhook test-send, Svix parity (R37); connection
   health sweep cron with unhealthy-transition alerts (R41); OIDC
