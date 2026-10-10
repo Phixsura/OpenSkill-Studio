@@ -968,7 +968,6 @@ async def test_sync_run_drivable_through_outbox_handler(db):
     the per-batch commits inside execute_run are incompatible with the
     handler SAVEPOINT. Drives the real handler via process_outbox_once."""
     import app.integrations.worker  # noqa: F401 — registers handlers
-
     from app.controlplane.worker import process_outbox_once
     from app.integrations.models import SyncRun
 
