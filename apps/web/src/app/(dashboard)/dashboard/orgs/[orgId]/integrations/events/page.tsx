@@ -259,6 +259,15 @@ export default function IntegrationEventsPage() {
                 >
                   Rotate secret
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-700"
+                  onClick={() => rotateSub.mutate({ id: sub.id, immediate: true })}
+                  title="Leaked-secret path: the old key stops signing immediately"
+                >
+                  Rotate now
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => deleteSub.mutate(sub.id)}>
                   Delete
                 </Button>

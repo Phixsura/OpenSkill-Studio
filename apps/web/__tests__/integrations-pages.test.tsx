@@ -240,6 +240,13 @@ describe("events page", () => {
       "/orgs/ORG1234567890123456789012/webhooks/w1/rotate-secret?immediate=false",
       expect.objectContaining({ method: "POST" }),
     );
+    fireEvent.click(screen.getByText("Rotate now"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/webhooks/w1/rotate-secret?immediate=true",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
 
     // Create path: POST then the once-only secret banner swaps to the new one.
     api.mockImplementationOnce(() =>
