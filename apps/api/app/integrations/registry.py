@@ -140,10 +140,22 @@ class GenericRestConnector:
 
 
 class OneRosterConnector:
-    """P6 fills in read(); P1 ships ping (token endpoint reachability)."""
+    """OneRoster 1.2 Rostering consumer (pull-only; the REST binding permits
+    reading only — S3.2). OAuth2 client-credentials, offset pagination.
+
+    State shape: {"endpoint_offset": N} per model; a run reads every page
+    (tombstones ride the backfill trigger, §11.3)."""
 
     key = "oneroster"
     capabilities = frozenset({"roster.read"})
+
+    # canonical model -> (endpoint, response collection key)
+    MODEL_ENDPOINTS = {
+        "roster.term": ("academicSessions", "academicSessions"),
+        "roster.class": ("classes", "classes"),
+        "roster.enrollment": ("enrollments", "enrollments"),
+        "roster.user": ("users", "users"),
+    }
 
     async def ping(self, ctx: ConnCtx) -> None:
         from app.exceptions import AppError
@@ -152,6 +164,118 @@ class OneRosterConnector:
             raise AppError("CONNECTION_CONFIG_INVALID", "base_url is required", 422)
         validate_egress_url(ctx.base_url)
         validate_egress_url(ctx.config["token_url"])
+
+    async def _token(self, ctx: ConnCtx) -> str:
+        from urllib.parse import urlencode
+
+        from app.exceptions import AppError
+
+        secret = await ctx.get_secret()
+        resp = await ctx.egress.request(
+            "POST",
+            ctx.config["token_url"],
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            content=urlencode(
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": secret.get("client_id", ""),
+                    "client_secret": secret.get("client_secret", ""),
+                    "scope": "https://purl.imsglobal.org/spec/or/v1p2/scope/roster.readonly",
+                }
+            ).encode(),
+        )
+        if resp.status_code != 200:
+            raise AppError("CONNECTION_AUTH_REJECTED", "OneRoster token refused", 422)
+        token = resp.json().get("access_token", "")
+        if not token:
+            raise AppError("CONNECTION_AUTH_REJECTED", "No access_token in response", 422)
+        return token
+
+    @staticmethod
+    def _map_record(model: str, item: dict) -> dict:
+        """OneRoster JSON -> canonical payload; sourcedId -> external_id.
+        A MappingProfile can replace/extend this via the sync profile — this
+        is the sensible default so OneRoster works with zero mapping config."""
+        out: dict = {"external_id": str(item.get("sourcedId", ""))}
+        if model == "roster.term":
+            out.update(
+                {
+                    "name": item.get("title"),
+                    "start_date": item.get("startDate"),
+                    "end_date": item.get("endDate"),
+                    "school_year": item.get("schoolYear"),
+                }
+            )
+        elif model == "roster.class":
+            out.update(
+                {
+                    "title": item.get("title"),
+                    "course_code": item.get("classCode"),
+                    "term_external_id": ((item.get("terms") or [{}])[0] or {}).get("sourcedId"),
+                    "school_external_id": (item.get("school") or {}).get("sourcedId"),
+                    "subjects": item.get("subjects") or [],
+                    "grades": item.get("grades") or [],
+                }
+            )
+        elif model == "roster.enrollment":
+            out.update(
+                {
+                    "class_external_id": (item.get("class") or {}).get("sourcedId"),
+                    "user_external_id": (item.get("user") or {}).get("sourcedId"),
+                    "role": item.get("role"),
+                    "begin_date": item.get("beginDate"),
+                    "end_date": item.get("endDate"),
+                    "primary": item.get("primary"),
+                }
+            )
+        elif model == "roster.user":
+            out.update(
+                {
+                    "email": item.get("email"),
+                    "display_name": (
+                        f"{item.get('givenName', '')} {item.get('familyName', '')}".strip()
+                        or item.get("username")
+                    ),
+                    "role": item.get("role"),
+                    "username": item.get("username"),
+                }
+            )
+        return out
+
+    async def read(self, ctx: ConnCtx, model: str, state: dict):
+        from app.exceptions import AppError
+
+        endpoint = self.MODEL_ENDPOINTS.get(model)
+        if endpoint is None:
+            raise AppError("SYNC_PROFILE_INVALID", f"oneroster cannot read {model}", 422)
+        path, collection_key = endpoint
+        page_size = int(ctx.config.get("page_size", 100))
+        token = await self._token(ctx)
+        offset = int(state.get("endpoint_offset", 0))
+        base = (ctx.base_url or "").rstrip("/")
+        while True:
+            url = f"{base}/{path}?limit={page_size}&offset={offset}"
+            resp = await ctx.egress.request(
+                "GET", url, headers={"authorization": f"Bearer {token}"}
+            )
+            if resp.status_code == 401:
+                raise AppError("CONNECTION_AUTH_REJECTED", "OneRoster 401", 422)
+            if resp.status_code != 200:
+                raise AppError("CONNECTION_PING_FAILED", f"OneRoster {resp.status_code}", 422)
+            items = resp.json().get(collection_key, []) or []
+            records = [self._map_record(model, i) for i in items if isinstance(i, dict)]
+            offset += len(items)
+            last_page = len(items) < page_size
+            # Mid-run checkpoints carry the live offset (a crashed run
+            # resumes mid-pagination); the FINAL batch resets to 0 so the
+            # next run re-reads the full collection (offset pagination has
+            # no durable delta cursor — unchanged rows dedupe by raw_hash).
+            yield {
+                "records": records,
+                "state": {"endpoint_offset": 0 if last_page else offset},
+            }
+            if last_page:
+                break
 
 
 CONNECTORS: dict[str, Connector] = {

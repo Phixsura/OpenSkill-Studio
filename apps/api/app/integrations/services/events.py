@@ -166,6 +166,15 @@ async def handle_event_created(db: AsyncSession, payload: dict) -> None:
         if delivery_id is not None:
             enqueue(db, TOPIC_DELIVERY_ATTEMPT, {"delivery_id": delivery_id})
 
+    # AGS grade push for gradeable events (fail-safe; ADR-018 §8.2 — grade
+    # return rides the same at-least-once fan-out as webhook delivery).
+    try:
+        from app.integrations.services.lti_ags import handle_gradeable_event
+
+        await handle_gradeable_event(db, event)
+    except Exception:
+        log.warning("ags_event_hook_failed", event_id=event.id)
+
 
 def sign_payload(secret: str, message_id: str, timestamp: int, body: bytes) -> str:
     """Standard Webhooks signature: base64(HMAC-SHA256(secret, id.ts.body))."""

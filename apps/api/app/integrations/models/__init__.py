@@ -1,6 +1,14 @@
 """Integration fabric models (ADR-018). Importing this module registers all
 intg_* tables on the shared SQLAlchemy Base metadata."""
 
+from app.integrations.models.bulk import (  # noqa: F401
+    IMPORT_KINDS,
+    IMPORT_MODES,
+    IMPORT_STATUSES,
+    MAX_IMPORT_BYTES,
+    ImportJob,
+    ImportRowError,
+)
 from app.integrations.models.connection import (  # noqa: F401
     CONNECTION_STATUSES,
     CONNECTION_TRANSITIONS,
@@ -20,11 +28,27 @@ from app.integrations.models.events import (  # noqa: F401
     EventDelivery,
     IntegrationEvent,
 )
+from app.integrations.models.export import (  # noqa: F401
+    ANONYMIZE_MODES,
+    EXPORT_RUN_STATUSES,
+    EXPORT_SCHEDULES,
+    ExportRun,
+    ExportStream,
+)
 from app.integrations.models.identity import (  # noqa: F401
     LINK_SOURCES,
     MATCH_QUEUE_STATUSES,
     ExternalIdentityLink,
     IdentityMatchQueue,
+)
+from app.integrations.models.lti import (  # noqa: F401
+    LTI_MESSAGE_TYPES,
+    LTI_RESOURCE_KINDS,
+    LtiDeployment,
+    LtiLaunchState,
+    LtiRegistration,
+    LtiResourceLink,
+    LtiToolKey,
 )
 from app.integrations.models.provider import (  # noqa: F401
     AUTH_MODES,

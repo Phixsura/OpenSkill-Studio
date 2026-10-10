@@ -810,6 +810,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   brief.created, client.accepted at their domain sites; credential.issued,
   placement.started, ecosystem.change_verified (mapped from ecosystem.change) and
   every other legacy webhook event via the trigger_event mirror.
+- **Staging is one generic table** (P5 decision, supersedes §6.1's per-entity tables):
+  `intg_staged_records` discriminated by `model` — the engine, tombstone pass and
+  conflict reporting are written once and cover roster/talent/CRM uniformly.
+- **Unenroll policy is `remove_membership`, not `archive_membership`** (P6): the
+  product CohortMember model has no archived state; removal never touches
+  submissions/portfolio data (§2.4 holds).
+- **Roster user trust**: SIS data arrives over the org's authenticated connection —
+  the org vouches for roster emails the way an IdP does (same trust root as SCIM),
+  so roster identity resolution treats them as verified; ambiguity still queues.
+- **LTI AGS lineitem URLs are egress-screened at launch**: a platform asserting a
+  private-range lineitem endpoint is logged and ignored, never stored.
 - **Provider version upgrades**: explicit `POST /connections/{id}/upgrade` re-validates
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.

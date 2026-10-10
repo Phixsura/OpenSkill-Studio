@@ -6,12 +6,26 @@ No DB required (egress + validator are pure; API tests only reach auth).
 import socket
 
 import pytest
+import pytest_asyncio
 
 from app.integrations.security import (
     EgressBlockedError,
     EgressClient,
     validate_egress_url,
 )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_engine_pool():
+    """The SCIM protocol tests below reach the DB through the HTTP client on
+    THIS test's event loop; without a dispose the pooled connection outlives
+    the loop and poisons the NEXT file's first DB test ("Event loop is
+    closed" — same class as the known cross-file ordering flake)."""
+    yield
+    from app.core.database import engine
+
+    await engine.dispose()
+
 
 # ── validate_egress_url matrix (ADR-018 §14.1) ──
 

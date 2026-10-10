@@ -99,9 +99,11 @@ class SyncProfileService:
             field_policy=field_policy or {},
             options=options or {},
         )
-        self.db.add(profile)
         try:
-            await self.db.flush()
+            # SAVEPOINT: a unique-index loser must not poison the session (R422).
+            async with self.db.begin_nested():
+                self.db.add(profile)
+                await self.db.flush()
         except Exception as exc:
             raise AppError(
                 "SYNC_PROFILE_EXISTS", "A profile for this connection/model/direction exists", 409
@@ -179,9 +181,10 @@ class SyncProfileService:
         run = SyncRun(
             profile_id=profile.id, status="queued", trigger=trigger, cursor_in=cursor_in
         )
-        self.db.add(run)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(run)
+                await self.db.flush()
         except Exception:
             # Unique live-run index arbitrated a race — return the winner.
             live = (
