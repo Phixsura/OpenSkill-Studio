@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { claimAnonymousId, useAnonExperiment } from "@/lib/useAnonExperiment";
 import { type AuthUser, useAuthStore } from "@/stores/auth";
 
 interface AuthResponse {
@@ -31,6 +32,11 @@ function safeRedirect(target: string | null): string {
 }
 
 export default function RegisterPage() {
+  // Round 294: the first real PRE-LOGIN consumer — the sign-up CTA copy
+  // rides an anonymous experiment; fail-safe default keeps "Sign up".
+  const { config, recordExposure } = useAnonExperiment("register-cta");
+  const ctaLabel =
+    typeof config.cta_label === "string" && config.cta_label ? config.cta_label : "Sign up";
   const router = useRouter();
   const searchParams = useSearchParams();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -81,13 +87,14 @@ export default function RegisterPage() {
         credentials: "include",
       });
       setAuth(data.access_token, data.user);
+      // §4.17 (round 220): the anonymous visitor who REGISTERS is the
+      // canonical identity-link case — carry their pre-signup experiment
+      // history; fire-and-forget, never blocks the signup path
+      recordExposure(`registered-${new Date().toISOString().slice(0, 10)}`);
+      void claimAnonymousId();
       setRegistered(true);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Registration failed. Please try again.",
-      );
+      setError(err instanceof ApiError ? err.message : "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -99,13 +106,16 @@ export default function RegisterPage() {
         <div className="text-center">
           <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
           <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-            We&apos;ve sent a verification link to <strong>{email}</strong>.
-            Please verify your email to unlock all features.
+            We&apos;ve sent a verification link to <strong>{email}</strong>. Please verify your
+            email to unlock all features.
           </p>
         </div>
-        <Button onClick={() => {
-          router.push(safeRedirect(searchParams.get("redirect")));
-        }} className="w-full">
+        <Button
+          onClick={() => {
+            router.push(safeRedirect(searchParams.get("redirect")));
+          }}
+          className="w-full"
+        >
           Continue to Dashboard
         </Button>
       </>
@@ -116,13 +126,14 @@ export default function RegisterPage() {
     <>
       <div className="text-center">
         <h1 className="text-2xl font-bold tracking-tight">Create an account</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          Join OpenSkill Studio
-        </p>
+        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Join OpenSkill Studio</p>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div
+          role="alert"
+          className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300"
+        >
           {error}
         </div>
       )}
@@ -179,7 +190,7 @@ export default function RegisterPage() {
         </div>
 
         <Button type="submit" disabled={loading} className="w-full">
-          {loading ? "Creating account..." : "Sign up"}
+          {loading ? "Creating account..." : ctaLabel}
         </Button>
       </form>
 

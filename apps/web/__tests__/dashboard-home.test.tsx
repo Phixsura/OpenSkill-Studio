@@ -118,6 +118,47 @@ describe("DashboardPage (R417)", () => {
     expect(screen.getByText("Create your first organization")).toBeTruthy();
   });
 
+  it("renders the experiment headline and records a day-deduped exposure", async () => {
+    api.mockImplementation(((rawPath: unknown, init?: { body?: string }) => {
+      const path = String(rawPath ?? "");
+      if (path === "/orgs") return Promise.resolve({ data: [] });
+      if (path === "/me/overview") return Promise.resolve({ data: OVERVIEW });
+      if (path === "/experiments/self/resolve")
+        return Promise.resolve({
+          data: { variant_key: "nudge", config: { headline: "Finish these today" } },
+        });
+      if (path === "/experiments/self/exposures") {
+        expect(String(init?.body)).toContain("todo-");
+        return Promise.resolve({ data: { recorded: true } });
+      }
+      return Promise.resolve({ data: null });
+    }) as never);
+    const view = render(<DashboardPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("Finish these today")).toBeTruthy();
+    expect(screen.queryByText("To do")).toBeNull();
+    await vi.waitFor(() =>
+      expect(api.mock.calls.some((c) => String(c[0]) === "/experiments/self/exposures")).toBe(true),
+    );
+    // defect #57: re-renders must NOT re-fire the exposure effect
+    view.rerender(<DashboardPage />);
+    view.rerender(<DashboardPage />);
+    expect(
+      api.mock.calls.filter((c) => String(c[0]) === "/experiments/self/exposures").length,
+    ).toBe(1);
+  });
+
+  it("experiment failure is invisible — the default headline renders", async () => {
+    api.mockImplementation((rawPath: unknown) => {
+      const path = String(rawPath ?? "");
+      if (path === "/orgs") return Promise.resolve({ data: [] });
+      if (path === "/me/overview") return Promise.resolve({ data: OVERVIEW });
+      if (path === "/experiments/self/resolve") return Promise.reject(new Error("backend down"));
+      return Promise.resolve({ data: null });
+    });
+    render(<DashboardPage />, { wrapper: wrapper() });
+    expect(await screen.findByText("To do")).toBeTruthy();
+  });
+
   it("org cards render role chip + member pluralization and link to the org", async () => {
     route(
       {

@@ -1,0 +1,28 @@
+[
+  {
+    "path": "app/experiments/services/experiments.py",
+    "funcs": ["add_note"],
+    "cmd": ["uv", "run", "pytest",
+            "tests/test_exp_guardrails_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  },
+  {
+    "path": "app/experiments/services/assignment.py",
+    "funcs": ["link_identity"],
+    "cmd": ["uv", "run", "pytest",
+            "tests/test_exp_assignment_db.py",
+            "tests/test_exp_identity_api.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  },
+  {
+    "path": "app/services/webhook.py",
+    "funcs": ["create"],
+    "cmd": ["uv", "run", "pytest",
+            "tests/test_exp_webhooks_db.py",
+            "tests/test_new_services.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  }
+]

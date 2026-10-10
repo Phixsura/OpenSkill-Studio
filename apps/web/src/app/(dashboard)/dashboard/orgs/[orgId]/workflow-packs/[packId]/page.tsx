@@ -56,16 +56,13 @@ export default function WorkflowPackDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["workflow-pack", orgId, packId],
-    queryFn: () =>
-      apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
+    queryFn: () => apiWithAuth<{ data: PackDetail }>(`/orgs/${orgId}/workflow-packs/${packId}`),
   });
 
   const { data: releasesData } = useQuery({
     queryKey: ["workflow-releases", orgId, packId],
     queryFn: () =>
-      apiWithAuth<{ data: Release[] }>(
-        `/orgs/${orgId}/workflow-packs/${packId}/releases`,
-      ),
+      apiWithAuth<{ data: Release[] }>(`/orgs/${orgId}/workflow-packs/${packId}/releases`),
   });
 
   const pack = data?.data;
@@ -92,8 +89,7 @@ export default function WorkflowPackDetailPage() {
       invalidate();
       toast.success("Pack updated");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Update failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Update failed"),
   });
 
   const publishMutation = useMutation({
@@ -112,34 +108,31 @@ export default function WorkflowPackDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["workflow-releases", orgId, packId] });
       toast.success("Release published");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Publish failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Publish failed"),
   });
 
   const reviewMutation = useMutation({
     mutationFn: (action: "submit-review" | "approve" | "reject") =>
       apiWithAuth(`/orgs/${orgId}/workflow-packs/${packId}/${action}`, {
         method: "POST",
-        body: action === "reject" ? JSON.stringify({ reason: rejectReason || undefined }) : undefined,
+        body:
+          action === "reject" ? JSON.stringify({ reason: rejectReason || undefined }) : undefined,
       }),
     onSuccess: () => {
       invalidate();
       toast.success("Review status updated");
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Action failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Action failed"),
   });
 
   const archiveMutation = useMutation({
-    mutationFn: () =>
-      apiWithAuth(`/orgs/${orgId}/workflow-packs/${packId}`, { method: "DELETE" }),
+    mutationFn: () => apiWithAuth(`/orgs/${orgId}/workflow-packs/${packId}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workflow-packs", orgId] });
       toast.success("Pack archived");
       router.replace(`/dashboard/orgs/${orgId}/workflow-packs`);
     },
-    onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : "Archive failed"),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Archive failed"),
   });
 
   if (isLoading) {
@@ -175,7 +168,9 @@ export default function WorkflowPackDetailPage() {
         </div>
         <div className="flex gap-2">
           <Link href={`/dashboard/orgs/${orgId}/workflow-packs/${packId}/import-comfyui`}>
-            <Button size="sm" variant="secondary">Import ComfyUI</Button>
+            <Button size="sm" variant="secondary">
+              Import ComfyUI
+            </Button>
           </Link>
           <Link href={`/dashboard/orgs/${orgId}/workflow-packs/${packId}/editor`}>
             <Button size="sm">Open Editor</Button>
@@ -185,6 +180,13 @@ export default function WorkflowPackDetailPage() {
 
       {/* Metadata */}
       <section>
+        {/* ADR-017 Part L: domain entry point into the Experiment Console */}
+        <Link
+          href="/dashboard/experiments/new"
+          className="mb-2 inline-block text-xs text-slate-500 underline"
+        >
+          Run experiment on this surface
+        </Link>
         <h2 className="text-xl font-semibold">Details</h2>
         <div className="mt-3 space-y-3 rounded-lg border p-4">
           <div>
@@ -279,9 +281,7 @@ export default function WorkflowPackDetailPage() {
             {steps.map((step, i) => (
               <li key={step.id} className="rounded border px-3 py-2 text-sm">
                 {i + 1}. <span className="font-medium">{step.name}</span>{" "}
-                <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                  ({step.type})
-                </span>
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">({step.type})</span>
               </li>
             ))}
           </ol>
@@ -297,8 +297,8 @@ export default function WorkflowPackDetailPage() {
               <div className="flex items-center justify-between">
                 <span className="font-mono font-semibold">v{release.version}</span>
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                  {new Date(release.released_at).toLocaleDateString()} ·{" "}
-                  {release.step_count} step{release.step_count !== 1 ? "s" : ""}
+                  {new Date(release.released_at).toLocaleDateString()} · {release.step_count} step
+                  {release.step_count !== 1 ? "s" : ""}
                 </span>
               </div>
               {release.changelog && (

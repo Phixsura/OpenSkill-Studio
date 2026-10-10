@@ -1,0 +1,24 @@
+[
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_experiment_analyses", "sweep_experiment_closures",
+              "sweep_ramp_plans", "_interaction_window"],
+    "cmd": ["uv", "run", "pytest",
+            "tests/test_exp_analysis_db.py::test_auto_analysis_cap_cannot_be_squatted_by_of",
+            "tests/test_exp_analysis_db.py::test_auto_analysis_sweep_msprt_only_and_notifies_once",
+            "tests/test_exp_guardrails_db.py::test_closure_cap_not_squatted_by_long_max_days",
+            "tests/test_exp_guardrails_db.py::test_closure_default_max_days_is_exactly_28",
+            "tests/test_exp_metrics_db.py::test_ramp_sweep_cap_not_squatted_by_exhausted_plans",
+            "tests/test_exp_assignment_pure.py::test_interaction_rotation_coverage_law",
+            "tests/test_exp_metrics_db.py", "-q", "-x",
+            "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  },
+  {
+    "path": "app/experiments/services/guardrails.py",
+    "funcs": ["evaluate_experiment"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_guardrails_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  }
+]

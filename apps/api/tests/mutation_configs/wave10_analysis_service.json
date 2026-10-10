@@ -1,0 +1,10 @@
+[
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["_aggregate_metric", "_compare", "_latest_version_rows",
+              "_time_strata", "_novelty_suspect", "_corpus_prior"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  }
+]

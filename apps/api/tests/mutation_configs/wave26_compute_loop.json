@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/metrics.py",
+    "funcs": ["compute_experiment_window", "_write_snapshots"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 900
+  }
+]

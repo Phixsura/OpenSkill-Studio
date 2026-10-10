@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/experiments.py",
+    "funcs": ["_check_schedule_preconditions"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_guardrails_db.py", "tests/test_exp_assignment_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 900
+  }
+]

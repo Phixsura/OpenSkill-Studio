@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { apiWithAuth } from "@/lib/api";
+import { useExperiment } from "@/lib/useExperiment";
 import { useAuthStore } from "@/stores/auth";
 
 interface OrgItem {
@@ -57,12 +59,29 @@ export default function DashboardPage() {
     queryFn: () => apiWithAuth<{ data: Overview }>("/me/overview"),
   });
 
+  // ADR-017 §7: first real client-side experiment surface — the To-do
+  // nudge headline. Fail-safe: no experiment / paused / any error renders
+  // the default copy; exposure fires once per day when the section shows.
+  const { variantKey, config, recordExposure } = useExperiment("dashboard-todo-nudge");
+  const todoHeadline =
+    typeof config.headline === "string" && config.headline.trim().length > 0
+      ? config.headline.slice(0, 80)
+      : "To do";
+
   const orgs = orgsData?.data ?? [];
   const ov = overviewData?.data;
   const hasTodos =
     (ov?.drafts.length ?? 0) > 0 ||
     (ov?.peer_assessments_pending ?? 0) > 0 ||
     (ov?.pending_reviews_to_grade ?? 0) > 0;
+
+  // assignment != exposure: record only when the experimented section is
+  // actually on screen (hooks run before any early return)
+  useEffect(() => {
+    if (variantKey && hasTodos) {
+      recordExposure(`todo-${new Date().toISOString().slice(0, 10)}`);
+    }
+  }, [variantKey, hasTodos, recordExposure]);
 
   if (isError) return <div className="p-8 text-center text-red-600">Failed to load data</div>;
 
@@ -80,7 +99,7 @@ export default function DashboardPage() {
       {/* To-dos: actionable work, not infrastructure status */}
       {hasTodos && (
         <div className="space-y-3">
-          <h2 className="text-xl font-semibold">To do</h2>
+          <h2 className="text-xl font-semibold">{todoHeadline}</h2>
 
           {(ov?.pending_reviews_to_grade ?? 0) > 0 && (
             <div className="flex items-center justify-between rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950">

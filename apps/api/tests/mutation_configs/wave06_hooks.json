@@ -1,0 +1,11 @@
+[
+  {
+    "path": "app/experiments/hooks.py",
+    "funcs": ["matching_config_override", "workflow_binding_override",
+              "registry_sort_override", "cohort_path_override",
+              "rubric_override", "retry_policy_override", "_expose", "_dedup_key"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_integrations_db.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread"],
+    "timeout": 300
+  }
+]

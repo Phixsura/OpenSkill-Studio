@@ -1,0 +1,31 @@
+[
+  {
+    "path": "app/experiments/facade.py",
+    "funcs": ["resolve_variant", "record_exposure"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_assignment_db.py",
+            "tests/test_exp_integrations_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  },
+  {
+    "path": "app/experiments/hooks.py",
+    "funcs": ["_shield"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_integrations_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  },
+  {
+    "path": "app/experiments/services/promotion.py",
+    "funcs": ["finish_async_apply"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_decisions_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  },
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_experiment_windows"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  }
+]

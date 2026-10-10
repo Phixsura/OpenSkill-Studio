@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["km_curve", "km_compare"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  },
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["run"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 1800
+  }
+]

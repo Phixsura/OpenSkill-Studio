@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["multi_cuped_adjusted_welch", "_solve_spd"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  },
+  {
+    "path": "app/experiments/services/metrics.py",
+    "funcs": ["assemble_covariates", "_cov_projects"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

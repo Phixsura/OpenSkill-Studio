@@ -1,0 +1,18 @@
+[
+  {
+    "path": "app/experiments/api/experiments.py",
+    "funcs": ["planning_sample_size", "add_note"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_endpoints_nodb.py",
+            "tests/test_exp_identity_api.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 5400
+  },
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["required_n_per_arm"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "tests/test_exp_fuzz.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 5400
+  }
+]

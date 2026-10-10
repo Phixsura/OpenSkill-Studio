@@ -56,6 +56,7 @@ class RegistryService:
         per_page: int = 20,
         min_rating: float | None = None,
         max_results: int | None = None,
+        viewer_user_id: str | None = None,
     ) -> tuple[list[SkillPack], int]:
         """Search public, published packs.
 
@@ -71,6 +72,19 @@ class RegistryService:
         # default 50 cap for the actual LIMIT and the cache key, or
         # ?per_page=100 returns 100 rows while meta says 50.
         effective_per_page = min(per_page, max_results or 50)
+        # ADR-017 §7 (marketplace presentation): ordering-strategy experiment
+        # for authenticated viewers who did not choose a sort themselves —
+        # only among the existing sort vocabulary. Applied BEFORE the cache
+        # key so cached pages never leak across variants. Anonymous visitors
+        # are never enrolled.
+        if viewer_user_id and sort == "newest":
+            from app.experiments import hooks as exp_hooks
+
+            experiment_sort = await exp_hooks.registry_sort_override(
+                self.db, user_id=viewer_user_id
+            )
+            if experiment_sort:
+                sort = experiment_sort
         # ── Check cache ──
         # Canonical JSON key, not a raw ':'-join: a ':'-join collides when a
         # user-controlled value itself contains ':' (search='a:b' vs

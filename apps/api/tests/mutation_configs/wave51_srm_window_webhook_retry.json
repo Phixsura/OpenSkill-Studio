@@ -1,0 +1,40 @@
+[
+  {
+    "path": "app/experiments/services/guardrails.py",
+    "funcs": [
+      "check_srm_window"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_exp_guardrails_db.py",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  },
+  {
+    "path": "app/services/webhook.py",
+    "funcs": [
+      "_deliver_background"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_new_services.py::test_webhook_delivery_retries_on_5xx_with_backoff",
+      "tests/test_new_services.py::test_webhook_delivery_does_not_retry_4xx",
+      "tests/test_new_services.py::test_webhook_delivery_retries_on_429",
+      "tests/test_new_services.py::test_webhook_delivery_streams_and_signs",
+      "tests/test_new_services.py::test_webhook_delivery_exhausts_after_schedule",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  }
+]

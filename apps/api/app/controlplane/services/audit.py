@@ -16,6 +16,10 @@ from app.controlplane.models.audit import CommercialAuditEvent
 # every record_audit call site uses a registered action).
 AUDIT_ACTIONS = frozenset(
     {
+        # webhooks (defect #105: credential lifecycle must be audited)
+        "webhook.created",
+        "webhook.deleted",
+        "webhook.secret_rotated",
         # tenants
         "tenant.created",
         "tenant.suspended",
@@ -189,6 +193,9 @@ async def record_audit(
 # tenants' users) are filtered out of the tenant-scoped audit endpoint.
 TENANT_VISIBLE_ACTIONS = frozenset(
     {
+        "webhook.created",
+        "webhook.deleted",
+        "webhook.secret_rotated",
         "tenant.created",
         "tenant.suspended",
         "tenant.reactivated",

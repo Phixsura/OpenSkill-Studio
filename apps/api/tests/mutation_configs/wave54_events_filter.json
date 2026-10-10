@@ -1,0 +1,38 @@
+[
+  {
+    "path": "app/api/v1/endpoints/webhooks.py",
+    "funcs": [
+      "validate_events"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_new_services.py",
+      "tests/test_exp_webhooks_db.py::test_webhook_empty_events_rejected",
+      "tests/test_exp_webhooks_db.py::test_webhook_events_cap_boundary",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  },
+  {
+    "path": "app/services/webhook.py",
+    "funcs": [
+      "trigger_event"
+    ],
+    "cmd": [
+      "uv",
+      "run",
+      "pytest",
+      "tests/test_exp_webhooks_db.py",
+      "-q",
+      "-x",
+      "--timeout=240",
+      "--timeout-method=thread"
+    ],
+    "timeout": 7200
+  }
+]

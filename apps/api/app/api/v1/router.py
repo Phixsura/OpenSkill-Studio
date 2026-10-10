@@ -49,6 +49,7 @@ from app.controlplane.api import tenants as cp_tenants
 from app.controlplane.api import usage as cp_usage
 from app.controlplane.api import whitelabel as cp_whitelabel
 from app.ecosystem.api import ecosystem_router
+from app.experiments.api import experiments_router
 from app.talent.api import talent_router
 
 api_v1_router = APIRouter()
@@ -106,3 +107,6 @@ api_v1_router.include_router(talent_router)
 
 # ── Ecosystem intelligence (Issue #35, ADR-016) ──
 api_v1_router.include_router(ecosystem_router)
+
+# ── Experimentation & decision intelligence (Issue #42, ADR-017) ──
+api_v1_router.include_router(experiments_router)

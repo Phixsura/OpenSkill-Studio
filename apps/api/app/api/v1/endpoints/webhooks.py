@@ -39,6 +39,11 @@ class CreateWebhookRequest(BaseModel):
     @field_validator("events")
     @classmethod
     def validate_events(cls, v: list[str]) -> list[str]:
+        # Defect #104: an empty list used to create a subscription that the
+        # delivery path's falsy guard treats as receive-EVERYTHING — an
+        # accidental wildcard. Empty means none, not all: reject it.
+        if not v:
+            raise ValueError("events must list at least one event type")
         if len(v) > MAX_EVENTS_PER_WEBHOOK:
             raise ValueError(f"Maximum {MAX_EVENTS_PER_WEBHOOK} events per webhook")
         for event in v:
@@ -104,7 +109,7 @@ async def create_webhook(
     tenant = await cp_facade.get_tenant_for_org(db, org_id)
     await cp_facade.require_feature(db, tenant, "webhooks")
     svc = WebhookService(db)
-    sub = await svc.create(org_id, body.url, body.events)
+    sub = await svc.create(org_id, body.url, body.events, actor_user_id=user.id)
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 
@@ -125,6 +130,26 @@ async def list_webhooks(
     return DataResponse(data=[WebhookResponse.model_validate(s) for s in subs])
 
 
+@router.post(
+    "/orgs/{org_id}/webhooks/{webhook_id}/rotate-secret",
+    response_model=DataResponse[WebhookCreatedResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def rotate_webhook_secret(
+    org_id: str,
+    webhook_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Defect #103: rotate the signing secret in place — the new secret is
+    returned once, in the same created-response shape."""
+    await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    svc = WebhookService(db)
+    sub = await svc.rotate_secret(webhook_id, org_id, actor_user_id=user.id)
+    await db.commit()
+    return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
+
+
 @router.delete(
     "/orgs/{org_id}/webhooks/{webhook_id}",
     status_code=204,
@@ -138,5 +163,5 @@ async def delete_webhook(
 ):
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WebhookService(db)
-    await svc.delete(webhook_id, org_id)
+    await svc.delete(webhook_id, org_id, actor_user_id=user.id)
     await db.commit()

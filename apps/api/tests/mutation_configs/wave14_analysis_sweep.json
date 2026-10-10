@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_experiment_analyses"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

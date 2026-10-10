@@ -41,6 +41,11 @@ VALID_EVENT_TYPES = frozenset(
         "talent_pool.member_added",
         # Ecosystem intelligence (Issue #35, ADR-016 §13)
         "ecosystem.change",
+        # Experimentation (Issue #42, ADR-017 §4.18) — org-scoped only:
+        # platform-wide experiments never fan out to tenant webhooks
+        "experiment.status_changed",
+        "experiment.guardrail_breach",
+        "experiment.decision_recorded",
     }
 )
 
@@ -84,6 +89,12 @@ async def drain_webhook_tasks(timeout: float = 10.0) -> None:
         )
     except TimeoutError:
         log.warning("webhook_drain_timeout", pending=len(_pending_tasks))
+
+
+# Defect #91: transient receiver failures (429/5xx/network) are retried on
+# this backoff schedule — len() extra attempts after the first. 4xx is the
+# receiver rejecting THIS event (deterministic); it is never retried.
+WEBHOOK_RETRY_SCHEDULE: tuple[float, ...] = (1.0, 5.0, 25.0)
 
 
 def _is_blocked_url(url: str) -> bool:
@@ -144,11 +155,42 @@ class WebhookService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+
+    async def _record_webhook_audit(
+        self, sub: WebhookSubscription, *, action: str, actor_user_id: str | None
+    ) -> None:
+        """Defect #105: credential-lifecycle ops (create/delete/rotate) write
+        the append-only commercial audit trail. The payload carries url and
+        events only — NEVER the secret. Best-effort: an audit hiccup is
+        logged, not allowed to fail the operation."""
+        if actor_user_id is None:
+            return
+        try:
+            from app.controlplane import facade as cp_facade
+            from app.controlplane.services.audit import Actor, record_audit
+
+            tenant = await cp_facade.get_tenant_for_org(self.db, sub.org_id)
+            await record_audit(
+                self.db,
+                actor=Actor(user_id=actor_user_id, type="tenant"),
+                action=action,
+                target_type="webhook",
+                target_id=sub.id,
+                tenant_id=tenant.id,
+                after={"url": sub.url, "events": list(sub.events or [])},
+            )
+        except Exception:  # noqa: BLE001 — audit must not break the op
+            log.warning(
+                "webhook_audit_write_failed", webhook_id=sub.id, audit_action=action
+            )
+
     async def create(
         self,
         org_id: str,
         url: str,
         events: list[str],
+        *,
+        actor_user_id: str | None = None,
     ) -> WebhookSubscription:
         # SSRF: validate URL doesn't point to internal services
         # (R171: async wrapper — DNS resolution must not block the event loop)
@@ -168,7 +210,14 @@ class WebhookService:
                     422,
                 )
 
-        # Limit webhooks per org (use SELECT COUNT for efficiency)
+        # Limit webhooks per org. Defect #102 (#100/#101 family): the bare
+        # COUNT was a TOCTOU — lock the Org row first so same-org creators
+        # serialize and the cap is exact.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(
+            select(_Org.id).where(_Org.id == org_id).with_for_update()
+        )
         count_r = await self.db.execute(
             select(func.count()).where(WebhookSubscription.org_id == org_id)
         )
@@ -191,6 +240,9 @@ class WebhookService:
         self.db.add(sub)
         await self.db.flush()
         log.info("webhook_created", webhook_id=sub.id, org_id=org_id, events=events)
+        await self._record_webhook_audit(
+            sub, action="webhook.created", actor_user_id=actor_user_id
+        )
         return sub
 
     async def list_subscriptions(self, org_id: str) -> list[WebhookSubscription]:
@@ -201,18 +253,54 @@ class WebhookService:
         )
         return list(result.scalars().all())
 
-    async def delete(self, webhook_id: str, org_id: str) -> None:
+    async def rotate_secret(
+        self, webhook_id: str, org_id: str, *, actor_user_id: str | None = None
+    ) -> WebhookSubscription:
+        """Defect #103 (industry staple): retire a leaked signing secret in
+        place — same id/url/events, fresh token_hex(32). Org-scoped with the
+        uniform 404; the new secret is returned ONCE (the created-response
+        shape), never listed afterwards."""
         sub = await self.db.get(WebhookSubscription, webhook_id)
         if sub is None or sub.org_id != org_id:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
+        sub.secret = secrets.token_hex(32)
+        await self.db.flush()
+        await self._record_webhook_audit(
+            sub, action="webhook.secret_rotated", actor_user_id=actor_user_id
+        )
+        return sub
+
+    async def delete(
+        self, webhook_id: str, org_id: str, *, actor_user_id: str | None = None
+    ) -> None:
+        sub = await self.db.get(WebhookSubscription, webhook_id)
+        if sub is None or sub.org_id != org_id:
+            raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
+        await self._record_webhook_audit(
+            sub, action="webhook.deleted", actor_user_id=actor_user_id
+        )
         await self.db.delete(sub)
         await self.db.flush()
 
-    async def trigger_event(self, org_id: str, event_type: str, payload: dict) -> None:
+    async def trigger_event(
+        self,
+        org_id: str,
+        event_type: str,
+        payload: dict,
+        *,
+        defer_until_commit: bool = False,
+    ) -> None:
         """Fire-and-forget HTTP POSTs to all matching active subscriptions.
 
         This method is fully fail-safe: any DB or delivery error is logged
         and swallowed so it never corrupts the caller's session or transaction.
+
+        defer_until_commit (round 290, defect #80): with the default False the
+        HTTP tasks spawn immediately — BEFORE the caller's endpoint commits —
+        so a commit failure or rollback leaks a webhook for a write that never
+        happened (a phantom event). Pass True to compute the deliveries now
+        (the DB reads) but spawn them only on the session's after_commit; a
+        rollback simply never fires them.
         """
         try:
             # Use a nested savepoint so any DB error (e.g. missing column
@@ -262,20 +350,62 @@ class WebhookService:
         if not deliveries:
             return
 
-        # Fire-and-forget: don't block the caller.
-        # Keep strong references so tasks aren't GC'd before completion.
-        for delivery in deliveries:
-            task = asyncio.create_task(
-                self._deliver_background(
-                    delivery["url"],
-                    delivery["secret"],
-                    delivery["webhook_id"],
-                    event_type,
-                    payload,
+        def _spawn_all() -> None:
+            # Fire-and-forget: don't block the caller.
+            # Keep strong references so tasks aren't GC'd before completion.
+            for delivery in deliveries:
+                task = asyncio.create_task(
+                    self._deliver_background(
+                        delivery["url"],
+                        delivery["secret"],
+                        delivery["webhook_id"],
+                        event_type,
+                        payload,
+                    )
                 )
+                _pending_tasks.add(task)
+                task.add_done_callback(_pending_tasks.discard)
+
+        if not defer_until_commit:
+            _spawn_all()
+            return
+
+        from sqlalchemy import event as sa_event
+
+        # Rounds 293/296: emits inside a begin_nested savepoint are a
+        # SUPPORTED, routine path — the outbox runner wraps every handler in
+        # one, so the guardrail sweep's breach emit lands here. The observed
+        # contract (pinned by five DB kill-proofs in test_exp_webhooks_db —
+        # the alarm if a SQLAlchemy upgrade shifts event semantics):
+        # savepoint releases -> delivers at the outer commit; the emit's own
+        # savepoint rolls back -> cancelled; an UNRELATED later savepoint
+        # rollback -> still delivers; a real rollback -> cancelled, and never
+        # rides a later commit (#81).
+        if self.db.sync_session.in_nested_transaction():
+            log.debug(
+                "webhook_defer_inside_savepoint",
+                org_id=org_id,
+                webhook_event=event_type,
             )
-            _pending_tasks.add(task)
-            task.add_done_callback(_pending_tasks.discard)
+
+        # #81 (round 291): a once-listener SURVIVES a rollback — if the same
+        # session later commits unrelated work (the retry pattern), the
+        # rolled-back transaction's event would fire anyway. The rollback
+        # listener cancels the pending spawn.
+        cancelled = False
+
+        @sa_event.listens_for(self.db.sync_session, "after_commit", once=True)
+        def _fire_on_commit(_session) -> None:  # pragma: no branch
+            # Runs in the loop's thread (greenlet context) — create_task is
+            # safe here. A rollback means this listener never fires, which is
+            # exactly the phantom-prevention contract.
+            if not cancelled:
+                _spawn_all()
+
+        @sa_event.listens_for(self.db.sync_session, "after_rollback", once=True)
+        def _cancel_on_rollback(_session) -> None:  # pragma: no branch
+            nonlocal cancelled
+            cancelled = True
 
     @staticmethod
     async def _deliver_background(
@@ -323,34 +453,73 @@ class WebhookService:
         )
         signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # R171: stream and discard the response — a plain .post()
-                # buffers the receiver's ENTIRE body into memory. The receiver
-                # is an org-controlled server: one returning multi-GB bodies
-                # across 25 subscriptions per org was an unbounded memory
-                # amplification against the API worker. We only care that the
-                # POST was accepted; never read the body.
-                async with client.stream(
-                    "POST",
-                    url,
-                    content=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Webhook-Signature": signature,
-                        "X-Webhook-Event": event_type,
-                    },
-                ) as resp:
-                    log.info(
-                        "webhook_delivered",
+        # Defect #91: retry transient failures (429/5xx/network error) on the
+        # backoff schedule; 2xx/3xx stops, 4xx (minus 429) never retries.
+        attempts = 1 + len(WEBHOOK_RETRY_SCHEDULE)
+        for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                await asyncio.sleep(WEBHOOK_RETRY_SCHEDULE[attempt - 2])
+                # The backoff window is long enough for a DNS rebind —
+                # re-validate the target before every retry, not just once
+                if await _is_blocked_url_async(url):
+                    log.warning(
+                        "webhook_delivery_blocked_dns_rebind",
                         webhook_id=webhook_id,
-                        webhook_event=event_type,
-                        status=resp.status_code,
+                        url=url,
                     )
-        except Exception:
-            log.warning(
-                "webhook_delivery_failed",
-                webhook_id=webhook_id,
-                webhook_event=event_type,
-                url=url,
-            )
+                    return
+            status: int | None = None
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # R171: stream and discard the response — a plain .post()
+                    # buffers the receiver's ENTIRE body into memory. The
+                    # receiver is an org-controlled server: one returning
+                    # multi-GB bodies across 25 subscriptions per org was an
+                    # unbounded memory amplification against the API worker.
+                    # We only care that the POST was accepted; never read the
+                    # body.
+                    async with client.stream(
+                        "POST",
+                        url,
+                        content=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Webhook-Signature": signature,
+                            "X-Webhook-Event": event_type,
+                        },
+                    ) as resp:
+                        status = resp.status_code
+            except Exception:
+                log.warning(
+                    "webhook_delivery_failed",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    url=url,
+                    attempt=attempt,
+                )
+            if status is not None and status < 500 and status != 429:
+                # 2xx/3xx accepted; a non-429 4xx is a deterministic
+                # rejection of THIS event — retrying it is abuse
+                log.info(
+                    "webhook_delivered",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    status=status,
+                    attempt=attempt,
+                )
+                return
+            if status is not None:
+                log.warning(
+                    "webhook_delivery_retryable",
+                    webhook_id=webhook_id,
+                    webhook_event=event_type,
+                    status=status,
+                    attempt=attempt,
+                )
+        log.warning(
+            "webhook_delivery_exhausted",
+            webhook_id=webhook_id,
+            webhook_event=event_type,
+            url=url,
+            attempts=attempts,
+        )

@@ -1,0 +1,10 @@
+[
+  {
+    "path": "app/experiments/worker.py",
+    "funcs": ["sweep_weekly_digest"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "tests/test_exp_assignment_pure.py::test_interaction_rotation_coverage_law",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 7200
+  }
+]

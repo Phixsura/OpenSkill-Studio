@@ -959,6 +959,19 @@ class LearningPathService:
         )
         path_ids = list(path_assignments_r.scalars().all())
 
+        # ADR-017 §7 (Part F): alternative path-structure experiment for a
+        # slice of cohorts. The assignment rows are untouched — only this
+        # cohort's effective read is redirected to a same-org alternative
+        # (curricula are never silently rewritten). Fail-safe: control keeps
+        # the assigned paths.
+        from app.experiments import hooks as exp_hooks
+
+        alternative_path_id = await exp_hooks.cohort_path_override(
+            self.db, cohort_id=cohort_id, org_id=org_id
+        )
+        if alternative_path_id:
+            path_ids = [alternative_path_id]
+
         path_skill_ids: set[str] = set()
         for pid in path_ids:
             items_r = await self.db.execute(

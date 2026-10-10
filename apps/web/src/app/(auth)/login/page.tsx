@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { claimAnonymousId } from "@/lib/useAnonExperiment";
 import { type AuthUser, useAuthStore } from "@/stores/auth";
 
 interface AuthResponse {
@@ -66,6 +67,10 @@ export default function LoginPage() {
         credentials: "include",
       });
       setAuth(data.access_token, data.user);
+      // §4.17 (round 219): carry the device's pre-login experiment history
+      // to this user — fire-and-forget, fail-safe on shared devices (422),
+      // never blocks the login path
+      void claimAnonymousId();
       router.push(safeRedirect(searchParams.get("redirect")));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed. Please try again.");

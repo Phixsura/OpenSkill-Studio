@@ -215,3 +215,37 @@ export async function apiWithAuth<T>(path: string, init?: RequestInit): Promise<
   if (res.status === 204) return undefined as T;
   return safeJson<T>(res);
 }
+
+/**
+ * Authenticated raw-text fetch (CSV exports) — same Bearer + 401-refresh
+ * behavior as apiWithAuth, but returns the body as text instead of JSON.
+ */
+export async function apiTextWithAuth(path: string, init?: RequestInit): Promise<string> {
+  const { useAuthStore } = await import("@/stores/auth");
+  let token = useAuthStore.getState().accessToken;
+
+  const doFetch = (t: string | null) =>
+    safeFetch(`${API_BASE}/api/v1${path}`, {
+      ...init,
+      headers: {
+        ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        ...init?.headers,
+      },
+      credentials: "include",
+    });
+
+  let res = await doFetch(token);
+  if (res.status === 401 && !isImpersonationToken(token)) {
+    token = await sharedRefresh();
+    res = await doFetch(token);
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(
+      res.status,
+      body?.error?.code ?? "UNKNOWN",
+      body?.error?.message ?? `HTTP ${res.status}`,
+    );
+  }
+  return res.text();
+}

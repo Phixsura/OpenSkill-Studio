@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/analysis.py",
+    "funcs": ["synthetic_control", "_sc_fit", "_sc_rmspe", "_project_simplex"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  },
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["run"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 3600
+  }
+]

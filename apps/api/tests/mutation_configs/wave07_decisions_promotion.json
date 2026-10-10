@@ -1,0 +1,17 @@
+[
+  {
+    "path": "app/experiments/services/decisions.py",
+    "funcs": ["create", "list_decisions", "meta"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_decisions_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  },
+  {
+    "path": "app/experiments/services/promotion.py",
+    "funcs": ["create_draft", "approve", "reject", "apply", "apply_async",
+              "finish_async_apply"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_decisions_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 420
+  }
+]

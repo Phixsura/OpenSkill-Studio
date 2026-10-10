@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["_compare"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py", "tests/test_exp_analysis.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 900
+  }
+]

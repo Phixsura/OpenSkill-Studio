@@ -1,0 +1,11 @@
+[
+  {
+    "path": "app/experiments/services/metrics.py",
+    "funcs": ["_source_billing", "_source_learning_paths", "_source_evaluations",
+              "_source_talent_outcomes", "_source_capabilities"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=180", "--timeout-method=thread",
+            "-k", "billing or learning_paths or evaluations or talent or capabilities or cuped"],
+    "timeout": 300
+  }
+]

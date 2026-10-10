@@ -5328,9 +5328,17 @@ async def test_close_two_segment_proration_boundaries(db):
             )
         )
     ).scalar_one()
-    now = billing_svc._now()
-    p1.period_start = now - timedelta(days=30)
-    p1.period_end = now + timedelta(seconds=2)
+    # §97 law (pin the time): the golden total below assumes a 31-day
+    # proration denominator. Backdating from now() made the denominator the
+    # CURRENT month's length — the test silently held in 31-day months and
+    # drifted +4001 whenever the window fell in a 30-day month (first blew up
+    # on Sep 30). Pin the period to a fixed window whose start AND end months
+    # are both 31 days so the denominator is 31 regardless of the run date.
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    p1.period_start = _dt(2026, 7, 5, 12, 0, 0, tzinfo=_UTC)
+    p1.period_end = p1.period_start + timedelta(days=30)
     sub.current_period_start = p1.period_start
     sub.current_period_end = p1.period_end
     await db.flush()

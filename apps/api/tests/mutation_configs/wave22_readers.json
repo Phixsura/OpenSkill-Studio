@@ -1,0 +1,16 @@
+[
+  {
+    "path": "app/experiments/services/analysis_service.py",
+    "funcs": ["look_history"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_analysis_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  },
+  {
+    "path": "app/experiments/services/assignment.py",
+    "funcs": ["list_assignments"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_metrics_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

@@ -1,0 +1,9 @@
+[
+  {
+    "path": "app/experiments/services/holdouts.py",
+    "funcs": ["create", "release", "active_groups_for_domain"],
+    "cmd": ["uv", "run", "pytest", "tests/test_exp_holdouts_db.py",
+            "-q", "-x", "--timeout=240", "--timeout-method=thread"],
+    "timeout": 600
+  }
+]

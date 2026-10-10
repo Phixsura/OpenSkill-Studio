@@ -63,6 +63,18 @@ class MatchingEngine:
                 500,
             )
 
+        # ADR-017 §7 (Part H): controlled test of an alternative config
+        # version for a slice of orgs. Soft weights/thresholds only — hard
+        # constraints (S2 below) are untouched by construction. Fail-safe:
+        # any resolution problem serves the active config.
+        from app.experiments import hooks as exp_hooks
+
+        experiment_config = await exp_hooks.matching_config_override(
+            self.db, org_id=spec.org_id, target_entity_type=spec.target_entity_type
+        )
+        if experiment_config is not None:
+            config = experiment_config
+
         # S1 — eligibility (silent)
         eligible = await candidates_mod.get_candidates(self.db, spec)
 
