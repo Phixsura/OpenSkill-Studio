@@ -862,6 +862,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   extractors (models + engine support exist; vendor connectors are issue #44
   marketplace territory).
 
+## 20a. Issue #43 acceptance-criteria mapping (final audit)
+
+| Criterion                                | Evidence                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enterprise SSO + SCIM                    | OIDC RP + SAML SP + metadata rotation + enforced-SSO/break-glass + back-channel logout; /scim/v2 incl. /Bulk, Entra dialects, safe deprovision (session sweep)                                                                            |
+| Canonical sync engine across categories  | SyncProfile/SyncRun engine: cursors, idempotent claims, pagination, backfill, tombstones, conflicts+adjudication, echo suppression; connectors: OneRoster (roster), generic REST (any), generic ATS (talent push), generic webhook (mesh) |
+| SIS/LMS roster provisions cohorts safely | staged roster → RosterProvisioningService: never-guess conflicts, role ceiling, unenroll policies; NRPS pre-provisioning                                                                                                                  |
+| ATS/HRIS/CRM respect privacy/consent     | push engine gated by ats_share ConsentLog; consent_missing conflicts; warehouse allowlists + org-salted hashing                                                                                                                           |
+| Event mesh with replay/dead-letter       | CloudEvents + Standard-Webhooks signing, Svix ladder, exhausted=dead-letter + first-class event, replay endpoint, auto-disable, test-send, response snippets                                                                              |
+| Mappings declarative, non-executable     | JMESPath + fixed transform table, compile-at-save, caps; no user code paths                                                                                                                                                               |
+| Warehouse exports incremental + governed | cursor advances only on success; allowlist-BUILT projection; manifest freshness; schedules + retention                                                                                                                                    |
+| Connector health/conflicts observable    | health summary endpoint + hub strip, half-hourly ping sweep + unhealthy transitions, per-subscription stats, record-level conflict rows + UI adjudication                                                                                 |
+| Full E2E chain                           | tests/e2e_integration_lifecycle.py: 39 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→export→IDOR walls) + acceptance-chain DB test                                                                  |
+
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
 - **R55-R62**: e2e-caught /Bulk serialization crash (exc.body unbound
