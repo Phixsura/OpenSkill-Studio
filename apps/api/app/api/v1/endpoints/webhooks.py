@@ -46,12 +46,19 @@ class CreateWebhookRequest(BaseModel):
             raise ValueError("events must list at least one event type")
         if len(v) > MAX_EVENTS_PER_WEBHOOK:
             raise ValueError(f"Maximum {MAX_EVENTS_PER_WEBHOOK} events per webhook")
+        # Marathon R15 (E2E-caught): this SCHEMA validator duplicated the
+        # service check and silently missed the R7 mesh-pattern arm — the
+        # live API rejected com.openskill.* subscriptions that service-level
+        # tests accepted. Keep both layers in lockstep via the shared regex.
+        from app.services.webhook import _MESH_PATTERN_RE
+
         for event in v:
-            if event not in VALID_EVENT_TYPES:
-                raise ValueError(
-                    f"Unknown event type: {event}. "
-                    f"Valid types: {', '.join(sorted(VALID_EVENT_TYPES))}"
-                )
+            if event in VALID_EVENT_TYPES or _MESH_PATTERN_RE.fullmatch(event):
+                continue
+            raise ValueError(
+                f"Unknown event type: {event}. Valid: a com.openskill.* mesh "
+                f"pattern or one of: {', '.join(sorted(VALID_EVENT_TYPES))}"
+            )
         return v
 
 

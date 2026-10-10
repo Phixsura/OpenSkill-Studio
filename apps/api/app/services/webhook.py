@@ -114,6 +114,13 @@ def _is_blocked_url(url: str) -> bool:
     """Check if a URL resolves to a blocked (internal) IP address."""
     from urllib.parse import urlparse
 
+    # ADR-018 §14.1 parity: E2E suites deliver to localhost sinks under the
+    # boot-guarded test-only flag (config refuses it outside dev/test).
+    from app.config import settings as _settings
+
+    if _settings.egress_allow_private:
+        return False
+
     parsed = urlparse(url)
     hostname = parsed.hostname
     if not hostname:
