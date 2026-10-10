@@ -102,7 +102,11 @@ async def _client_assertion(db: AsyncSession, reg: LtiRegistration) -> str:
     )
 
 
-async def _ags_token(db: AsyncSession, reg: LtiRegistration, egress: EgressClient) -> str | None:
+async def service_token(
+    db: AsyncSession, reg: LtiRegistration, egress: EgressClient, *, scope: str
+) -> str | None:
+    """client_credentials + private_key_jwt token for any LTI service scope
+    (AGS score push, NRPS membership read — R49)."""
     from urllib.parse import urlencode
 
     assertion = await _client_assertion(db, reg)
@@ -117,7 +121,7 @@ async def _ags_token(db: AsyncSession, reg: LtiRegistration, egress: EgressClien
                     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
                 ),
                 "client_assertion": assertion,
-                "scope": AGS_SCORE_SCOPE,
+                "scope": scope,
             }
         ).encode(),
     )
@@ -125,6 +129,10 @@ async def _ags_token(db: AsyncSession, reg: LtiRegistration, egress: EgressClien
         log.warning("ags_token_refused", registration_id=reg.id, status=resp.status_code)
         return None
     return resp.json().get("access_token") or None
+
+
+async def _ags_token(db: AsyncSession, reg: LtiRegistration, egress: EgressClient) -> str | None:
+    return await service_token(db, reg, egress, scope=AGS_SCORE_SCOPE)
 
 
 async def push_score(

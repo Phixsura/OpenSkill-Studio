@@ -81,6 +81,8 @@ class LtiResourceLink(Base):
     # AGS: grade return is explicit + configurable per link (issue Part J).
     ags_lineitem_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     grade_sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # NRPS (R49): platform-provided membership endpoint captured at launch.
+    nrps_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

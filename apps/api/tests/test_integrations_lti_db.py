@@ -360,3 +360,129 @@ async def test_launch_expired_state_inactive_reg_and_missing_exp(db):
     token = pyjwt.encode(claims, _PRIV, algorithm="RS256", headers={"kid": "lms-k1"})
     with pytest.raises(AppError):
         await svc.handle_launch(state_value=state, id_token=token)
+
+
+# ── R49: NRPS membership sync ──
+
+
+@pytest.mark.asyncio
+async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
+    """Launch captures the NRPS claim; sync pre-provisions members through
+    identity resolution with pagination, role mapping and the JIT ceiling."""
+    import json as _json
+
+    from app.integrations.models import IdentityMatchQueue
+    from app.integrations.services.lti_ags import ensure_tool_key, tool_jwks
+    from app.integrations.services.lti_nrps import sync_memberships
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    svc.egress = FakePlatform()
+    await ensure_tool_key(db)
+    jwks = await tool_jwks(db)
+
+    # Launch with the NRPS claim: link captures the membership URL.
+    link = await svc.map_resource_link(
+        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-1",
+        kind="skill", target_id="SKILL1",
+    )
+    state, nonce = await _start(svc, reg)
+    nrps_claim = {
+        "context_memberships_url": "https://lms.example.com/api/nrps/ctx-1",
+        "service_versions": ["2.0"],
+    }
+    token = _mint(
+        nonce,
+        **{"https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice": nrps_claim},
+    )
+    await svc.handle_launch(state_value=state, id_token=token)
+    await db.flush()
+    assert link.nrps_url == "https://lms.example.com/api/nrps/ctx-1"
+
+    # Fake platform: token endpoint verifies our assertion; two NRPS pages.
+    page2_url = "https://lms.example.com/api/nrps/ctx-1?page=2"
+    m1 = {"user_id": "stu-1", "status": "Active", "email": f"n1@{_mint.domain}",
+          "name": "N One", "roles": [
+              "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"]}
+    m2 = {"user_id": "teach-1", "status": "Active", "email": f"n2@{_mint.domain}",
+          "name": "N Two", "roles": [
+              "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"]}
+    m3 = {"user_id": "gone-1", "status": "Deleted", "email": f"n3@{_mint.domain}",
+          "roles": []}
+    m4 = {"user_id": "noemail-1", "status": "Active", "roles": []}
+
+    class NrpsPlatform:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            self.calls.append(url)
+            path = urlsplit(url).path
+            if path.endswith("/token"):
+                return httpx.Response(
+                    200, json={"access_token": "nrps-tok"},
+                    request=httpx.Request(method, url),
+                )
+            assert headers["authorization"] == "Bearer nrps-tok"
+            assert "membershipcontainer" in headers["accept"]
+            if "page=2" in url:
+                return httpx.Response(
+                    200, json={"members": [m2, m3, m4]},
+                    request=httpx.Request(method, url),
+                )
+            return httpx.Response(
+                200, json={"members": [m1]},
+                headers={"link": f'<{page2_url}>; rel="next"'},
+                request=httpx.Request(method, url),
+            )
+
+    platform = NrpsPlatform()
+    report = await sync_memberships(db, org.id, link.id, egress=platform)
+    assert report["read"] == 4
+    assert report["resolved"] == 2 and report["jit_created"] == 2
+    assert report["skipped"] == 1  # deleted member
+    assert report["queued"] == 1   # no email -> admin queue
+    assert _json is not None and jwks is not None
+
+    # Instructor got the instructor role; learner got student.
+    from sqlalchemy import func as _f
+
+    from app.models.organization import OrgMember as _OM
+    from app.models.user import User as _U
+
+    teach = (
+        await db.execute(
+            select(_OM.role).join(_U, _U.id == _OM.user_id).where(
+                _OM.org_id == org.id, _f.lower(_U.email) == f"n2@{_mint.domain}".lower()
+            )
+        )
+    ).scalar_one()
+    assert teach.value == "instructor"
+    q = (
+        await db.execute(
+            select(IdentityMatchQueue).where(
+                IdentityMatchQueue.org_id == org.id,
+                IdentityMatchQueue.subject == f"{ISS}|noemail-1",
+            )
+        )
+    ).scalars().all()
+    assert len(q) == 1
+
+    # Second sync: everyone linked -> resolved, nothing new.
+    report2 = await sync_memberships(db, org.id, link.id, egress=platform)
+    assert report2["jit_created"] == 0 and report2["resolved"] == 2
+
+    # Cross-org: uniform 404.
+    org2, _ = await _org(db)
+    with pytest.raises(AppError) as exc:
+        await sync_memberships(db, org2.id, link.id, egress=platform)
+    assert exc.value.status_code == 404
+
+    # No NRPS URL -> explicit 422 with guidance.
+    link2 = await svc.map_resource_link(
+        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-2",
+        kind="skill", target_id="SKILL2",
+    )
+    with pytest.raises(AppError) as exc2:
+        await sync_memberships(db, org.id, link2.id, egress=platform)
+    assert exc2.value.code == "LTI_NRPS_UNAVAILABLE"

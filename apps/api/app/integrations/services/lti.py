@@ -331,5 +331,20 @@ class LtiService:
                     link.ags_lineitem_url = lineitem
                 except AppError:
                     log.warning("lti_ags_lineitem_blocked", url=lineitem[:100])
+            # NRPS claim: remember the membership endpoint for roster sync.
+            nrps = claims.get(
+                f"{CLAIM.replace('lti/claim/', 'lti-nrps/claim/')}namesroleservice"
+            ) or {}
+            if (
+                link is not None
+                and isinstance(nrps, dict)
+                and nrps.get("context_memberships_url")
+            ):
+                nrps_url = str(nrps["context_memberships_url"])[:500]
+                try:
+                    validate_egress_url(nrps_url)
+                    link.nrps_url = nrps_url
+                except AppError:
+                    log.warning("lti_nrps_url_blocked", url=nrps_url[:100])
 
         return reg, link, result, claims

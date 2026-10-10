@@ -170,6 +170,25 @@ class DeepLinkSelectRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+@admin_router.post(
+    "/resource-links/{link_id}/nrps-sync", response_model=DataResponse[dict]
+)
+async def nrps_sync(
+    org_id: str,
+    link_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R49: pull the course roster via NRPS and pre-provision members
+    through identity resolution (link/match/JIT/queue)."""
+    from app.integrations.services.lti_nrps import sync_memberships
+
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    report = await sync_memberships(db, org_id, link_id)
+    await db.commit()
+    return {"data": report}
+
+
 @admin_router.post("/deep-link/select", response_model=DataResponse[dict])
 async def deep_link_select(
     org_id: str,
