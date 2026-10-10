@@ -393,3 +393,80 @@ def test_every_fabric_sweep_has_a_registered_cron():
 
     src = Path(cp_worker.__file__).read_text()
     assert "app.integrations.worker" in src  # outbox handlers registered
+
+
+# ── R61: generic connector contracts (previously untested) ──
+
+
+def test_generic_connector_contracts():
+    """GenericRest ping auth/5xx classification, api-key header placement;
+    GenericAts write url join, auth header, per-record ack fidelity."""
+    import asyncio
+    import json as _json
+
+    import httpx
+
+    from app.exceptions import AppError
+    from app.integrations.registry import (
+        ConnCtx,
+        GenericAtsConnector,
+        GenericRestConnector,
+    )
+
+    class Scripted:
+        def __init__(self, code):
+            self.code = code
+            self.calls = []
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            self.calls.append({"method": method, "url": url, "headers": headers,
+                               "body": content})
+            return httpx.Response(self.code, request=httpx.Request(method, url))
+
+    async def loader():
+        return {"api_key": "sk-123"}
+
+    def ctx(egress, config=None, base="https://api.vendor.example.com"):
+        c = ConnCtx(connection_id="x", config=config or {}, base_url=base,
+                    _secret_loader=loader)
+        c.egress = egress
+        return c
+
+    async def main():
+        rest = GenericRestConnector()
+        # 401/403 -> AUTH_REJECTED; 5xx -> PING_FAILED; 2xx/4xx-other pass.
+        for code in (401, 403):
+            try:
+                await rest.ping(ctx(Scripted(code)))
+                raise AssertionError("auth rejection not raised")
+            except AppError as exc:
+                assert exc.code == "CONNECTION_AUTH_REJECTED"
+        try:
+            await rest.ping(ctx(Scripted(503)))
+            raise AssertionError("5xx not raised")
+        except AppError as exc:
+            assert exc.code == "CONNECTION_PING_FAILED"
+        sc = Scripted(200)
+        await rest.ping(ctx(sc, config={"auth_header": "X-Api-Key"}))
+        assert sc.calls[0]["headers"] == {"X-Api-Key": "sk-123"}
+        await rest.ping(ctx(Scripted(404)))  # non-auth 4xx is fine
+
+        ats = GenericAtsConnector()
+        sc2 = Scripted(202)
+        out = await ats.write(
+            ctx(sc2, base="https://ats.example.com/"),  # trailing slash
+            "talent.application",
+            [{"external_id": "a1"}, {"external_id": "a2"}],
+        )
+        assert sc2.calls[0]["url"] == "https://ats.example.com/applications"
+        assert sc2.calls[0]["headers"]["Authorization"] == "sk-123"
+        body = _json.loads(sc2.calls[0]["body"])
+        assert [r["external_id"] for r in body["applications"]] == ["a1", "a2"]
+        assert all(r["ok"] is True and r["error"] is None for r in out)
+        # Non-2xx -> every record reports the failure, never ok.
+        out2 = await ats.write(
+            ctx(Scripted(422)), "talent.application", [{"external_id": "b1"}]
+        )
+        assert out2 == [{"external_id": "b1", "ok": False, "error": "http_422"}]
+
+    asyncio.run(main())
