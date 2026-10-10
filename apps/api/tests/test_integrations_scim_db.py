@@ -528,6 +528,39 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
     })
     assert out4["Operations"][0]["status"] == "501"
 
+    # Failed-op response carries the real RFC error body and status
+    # (kills the swallow-the-body and constant-400 mutants).
+    dup = out["Operations"][2]
+    assert dup["response"]["status"] == "409"
+    assert dup["response"]["scimType"] == "uniqueness"
+    assert "urn:ietf:params:scim:api:messages:2.0:Error" in dup["response"]["schemas"]
+
+    # SAVEPOINT isolation: a PATCH that mutates displayName then fails on a
+    # bad active value must roll back the mutation — without the savepoint
+    # the half-applied displayName would commit with the rest of the bulk.
+    e3 = f"b3-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    out5 = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "Operations": [
+            {"method": "POST", "path": "/Users",
+             "data": {"userName": e3, "displayName": "Before"}},
+        ],
+    })
+    uid3 = out5["Operations"][0]["location"].removeprefix("/Users/")
+    out6 = await apply_bulk(db, token, {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+        "Operations": [
+            {"method": "PATCH", "path": f"/Users/{uid3}",
+             "data": {"Operations": [
+                 {"op": "replace", "path": "displayName", "value": "HalfApplied"},
+                 {"op": "replace", "path": "active", "value": "garbage"},
+             ]}},
+        ],
+    })
+    assert out6["Operations"][0]["status"] == "400"
+    got = await _usvc(ctx).get(uid3)
+    assert got["displayName"] == "Before"  # savepoint rolled the mutation back
+
     # Caps: schema + op count.
     with pytest.raises(ScimError):
         await apply_bulk(db, token, {"schemas": [], "Operations": [{}]})
