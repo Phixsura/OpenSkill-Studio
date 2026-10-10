@@ -103,6 +103,13 @@ export default function IntegrationEventsPage() {
   });
   const subs = subsData?.data ?? [];
 
+  const { data: subStatsData } = useQuery({
+    queryKey: ["intg-sub-stats", orgId],
+    queryFn: () =>
+      apiWithAuth<{ data: Record<string, Record<string, number>> }>(`${base}/subscription-stats`),
+  });
+  const subStats = subStatsData?.data ?? {};
+
   const createSub = useMutation({
     mutationFn: () =>
       apiWithAuth<{ data: Subscription }>(`/orgs/${orgId}/webhooks`, {
@@ -227,6 +234,19 @@ export default function IntegrationEventsPage() {
                 <span className="font-mono text-xs">{sub.url}</span>
                 <span className="text-muted-foreground ml-2 text-xs">{sub.events.join(", ")}</span>
                 {!sub.active && <span className="ml-2 text-xs text-red-700">disabled</span>}
+                {(() => {
+                  const st = subStats[sub.id];
+                  if (!st) return null;
+                  return (
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      {st.succeeded ?? 0} ok
+                      {(st.exhausted ?? 0) > 0 && (
+                        <span className="text-red-700"> / {st.exhausted} exhausted</span>
+                      )}
+                      {(st.pending ?? 0) > 0 && <span> / {st.pending} pending</span>}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => testSub.mutate(sub.id)}>

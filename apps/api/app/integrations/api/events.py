@@ -96,6 +96,35 @@ def _delivery_response(
     )
 
 
+@router.get("/subscription-stats", response_model=DataResponse[dict])
+async def subscription_stats(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R46: per-subscription delivery counts by status (one grouped query)
+    so the subscriptions UI can show endpoint health at a glance."""
+    from sqlalchemy import func
+
+    from app.models.webhook import WebhookSubscription
+
+    await _admin(org_id, user, db)
+    rows = (
+        await db.execute(
+            select(
+                EventDelivery.subscription_id, EventDelivery.status, func.count()
+            )
+            .join(WebhookSubscription, WebhookSubscription.id == EventDelivery.subscription_id)
+            .where(WebhookSubscription.org_id == org_id)
+            .group_by(EventDelivery.subscription_id, EventDelivery.status)
+        )
+    ).all()
+    out: dict[str, dict[str, int]] = {}
+    for sub_id, status, n in rows:
+        out.setdefault(sub_id, {})[status] = n
+    return {"data": out}
+
+
 @router.get("/deliveries", response_model=DataResponse[list[DeliveryResponse]])
 async def list_deliveries(
     org_id: str,

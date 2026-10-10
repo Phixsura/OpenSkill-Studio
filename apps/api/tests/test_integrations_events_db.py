@@ -533,3 +533,32 @@ async def test_retention_sweep_ages_out_terminal_data_only(db):
     (await db.get(EventDelivery, ids["d_pend"])).status = "cancelled"
     await db.commit()
     assert sub is not None and WebhookSubscription is not None
+
+
+@pytest.mark.asyncio
+async def test_subscription_stats_grouped_and_org_scoped(db, egress):
+    from app.integrations.api.events import subscription_stats
+
+    org = await _org(db)
+    other = await _org(db)
+    sub = await _sub(db, org)
+    foreign_sub = await _sub(db, other)
+    ev = await emit_event(db, org.id, "project.approved", subject="st-1", data={})
+    ev2 = await emit_event(db, other.id, "project.approved", subject="st-2", data={})
+    await db.commit()
+    await _drain(db)
+
+    # The org owner sees only its own subscription's counts.
+    owner = (
+        await db.execute(
+            select(OrgMember).where(OrgMember.org_id == org.id)
+        )
+    ).scalars().first()
+    from app.models.user import User as _User
+
+    user = await db.get(_User, owner.user_id)
+    out = await subscription_stats(org.id, db=db, user=user)
+    stats = out["data"]
+    assert sub.id in stats and stats[sub.id].get("succeeded", 0) >= 1
+    assert foreign_sub.id not in stats
+    assert ev.id != ev2.id

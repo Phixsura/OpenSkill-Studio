@@ -215,6 +215,9 @@ describe("events page", () => {
           active: true,
         },
       },
+      "/orgs/ORG1234567890123456789012/integrations/subscription-stats": {
+        data: { w1: { succeeded: 7, exhausted: 2 } },
+      },
       "/orgs/ORG1234567890123456789012/webhooks": {
         data: [
           {
@@ -229,6 +232,8 @@ describe("events page", () => {
     });
     render(<EventsPage />, { wrapper: wrapper() });
     await waitFor(() => expect(screen.getByText("https://r.example.com/h")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/7 ok/)).toBeTruthy());
+    expect(screen.getByText(/2 exhausted/)).toBeTruthy();
     fireEvent.click(screen.getByText("Rotate secret"));
     await waitFor(() => expect(screen.getByText(/whsec_ROTATED/)).toBeTruthy());
     expect(api).toHaveBeenCalledWith(
