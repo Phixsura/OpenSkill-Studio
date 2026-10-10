@@ -831,8 +831,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.
 
+- **Deferred (explicit, as of R19)**: import template kinds `roster` and
+  `opportunities` (users shipped; the pipeline is template-agnostic); LTI NRPS
+  (roster arrives via OneRoster/SCIM instead); SAML idp_metadata_url auto-polling
+  (certs are pinned manually; the R19 expiry sweep alerts 30 days out); per-key
+  selection of the events `data` payload in warehouse exports; CRM outbound
+  extractors (models + engine support exist; vendor connectors are issue #44
+  marketplace territory).
+
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R19**: SAML cert-expiry sweep (30-day window, daily-deduped mesh alert,
+  06:18 cron); ADR deferred-items audit. **R18**: SCIM group-map editor UI.
+- **R17**: deep-linking response signing (tool-key JWT; opaque `data`
+  round-trip) + select endpoint; hub Upgrade button.
 - **R16**: scheduled EXPORTS were never driven (same gap class as R11's
   scheduled syncs) — sweep + nightly cron (02:47).
 - **R15**: live-API E2E lifecycle (tests/e2e_integration_lifecycle.py, 32

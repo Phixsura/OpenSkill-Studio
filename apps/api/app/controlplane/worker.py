@@ -622,6 +622,18 @@ async def _intg_stale_run_reaper(ctx: dict) -> None:
             log.warning("intg_stale_runs_reaped", count=n)
 
 
+async def _intg_cert_expiry_sweep(ctx: dict) -> None:
+    """ADR-018 §5.2: daily-deduped expiry alerts for pinned SAML certs."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.sso_admin import SsoAdminService
+
+    async with AsyncSessionLocal() as db:
+        n = await SsoAdminService(db).sweep_expiring_certificates()
+        if n:
+            await db.commit()
+            log.warning("intg_certs_expiring", count=n)
+
+
 async def _intg_scheduled_exports(ctx: dict) -> None:
     """ADR-018 §16.2: drive daily export streams (R16)."""
     from app.core.database import AsyncSessionLocal
@@ -657,6 +669,7 @@ def _cron_jobs() -> list:
         cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
         cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
         cron(_intg_scheduled_exports, hour=2, minute=47, timeout=1800, name="intg_exports"),
+        cron(_intg_cert_expiry_sweep, hour=6, minute=18, name="intg_cert_expiry"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single

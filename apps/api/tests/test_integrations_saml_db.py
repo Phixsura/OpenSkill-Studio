@@ -373,3 +373,44 @@ async def test_saml_admin_config_rules(db):
         )
     ).scalars().all()
     assert isinstance(states, list)
+
+
+# ── R19: SAML cert-expiry sweep ──
+
+
+@pytest.mark.asyncio
+async def test_cert_expiry_sweep_alerts_once_per_day(db):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import IntegrationEvent
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    # Pin an expiry 10 days out (inside the 30-day window).
+    certs = list(conn.idp_certificates)
+    certs[0] = dict(certs[0], not_after=(datetime.now(UTC) + timedelta(days=10)).isoformat())
+    conn.idp_certificates = certs
+    await db.flush()
+    svc = SsoAdminService(db)
+    assert await svc.sweep_expiring_certificates() == 1
+    events = (
+        await db.execute(
+            _select(IntegrationEvent).where(
+                IntegrationEvent.subject == conn.id,
+                IntegrationEvent.type
+                == "com.openskill.integration.sso.cert_expiring.v1",
+            )
+        )
+    ).scalars().all()
+    assert len(events) == 1 and 9 <= events[0].data["days_left"] <= 10
+    # Daily dedup: a second sweep within 23h stays quiet.
+    assert await svc.sweep_expiring_certificates() == 0
+    # A healthy (365-day) cert never alerts.
+    certs[0] = dict(certs[0], not_after=(datetime.now(UTC) + timedelta(days=300)).isoformat())
+    conn.idp_certificates = list(certs)
+    await db.flush()
+    # (still deduped this day for THIS conn; a fresh conn proves the window)
+    await _saml_conn(db, (await _org(db))[0])  # healthy cert, no alert
+    assert await svc.sweep_expiring_certificates() == 0

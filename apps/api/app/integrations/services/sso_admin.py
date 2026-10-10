@@ -194,6 +194,79 @@ class SsoAdminService:
                 409,
             )
 
+    async def sweep_expiring_certificates(self, *, days: int = 30) -> int:
+        """Worker cron (ADR §5.2 R19): emit a daily-deduped mesh event for
+        every active SAML connection with a pinned cert expiring within
+        ``days`` — rotation reminders are observable + webhook-able."""
+        from datetime import UTC, datetime, timedelta
+
+        from app.integrations.models import IntegrationEvent
+
+        conns = (
+            await self.db.execute(
+                select(SsoConnection).where(
+                    SsoConnection.protocol == "saml",
+                    SsoConnection.status.in_(("testing", "active")),
+                )
+            )
+        ).scalars().all()
+        now = datetime.now(UTC)
+        emitted = 0
+        for conn in conns:
+            soonest: datetime | None = None
+            for cert in conn.idp_certificates or []:
+                raw = cert.get("not_after")
+                if not raw:
+                    continue
+                try:
+                    exp = datetime.fromisoformat(str(raw))
+                except ValueError:
+                    continue
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=UTC)
+                if soonest is None or exp < soonest:
+                    soonest = exp
+            if soonest is None or soonest - now > timedelta(days=days):
+                continue
+            # Daily dedup: skip when we already alerted in the last 23h.
+            recent = (
+                await self.db.execute(
+                    select(IntegrationEvent.id)
+                    .where(
+                        IntegrationEvent.org_id == conn.org_id,
+                        IntegrationEvent.type
+                        == "com.openskill.integration.sso.cert_expiring.v1",
+                        IntegrationEvent.subject == conn.id,
+                        IntegrationEvent.time > now - timedelta(hours=23),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if recent is not None:
+                continue
+            try:
+                from app.integrations.facade import emit_event
+
+                await emit_event(
+                    self.db,
+                    conn.org_id,
+                    "integration.sso.cert_expiring",
+                    subject=conn.id,
+                    data={
+                        "sso_connection_id": conn.id,
+                        "not_after": soonest.isoformat(),
+                        "days_left": max(0, (soonest - now).days),
+                    },
+                )
+                emitted += 1
+            except Exception:  # fail-safe sweep
+                import structlog
+
+                structlog.get_logger().warning(
+                    "cert_expiry_emit_failed", sso_connection_id=conn.id
+                )
+        return emitted
+
     async def set_break_glass(
         self, org_id: str, member_user_id: str, *, enabled: bool, actor_role
     ) -> None:
