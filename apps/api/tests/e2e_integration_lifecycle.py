@@ -362,6 +362,34 @@ async def main() -> int:
             r.text[:300],
         )
 
+        # ── R36/R52: health summary + SCIM /Bulk over HTTP ──
+        r = await c.get(f"{base}/health", headers=h)
+        check(
+            "fabric health summary",
+            r.status_code == 200 and "connections" in r.json()["data"],
+            r.text[:200],
+        )
+        bulk_email = f"bulk-{uid()}@{domain}"
+        r = await c.post(
+            "/scim/v2/Bulk",
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [
+                    {"method": "POST", "path": "/Users",
+                     "data": {"userName": bulk_email}},
+                    {"method": "POST", "path": "/Users",
+                     "data": {"userName": bulk_email}},
+                ],
+            },
+            headers=scim_h,
+        )
+        ops = r.json().get("Operations", [])
+        check(
+            "scim bulk mixed statuses",
+            r.status_code == 200 and [o["status"] for o in ops] == ["201", "409"],
+            r.text[:300],
+        )
+
         # ── R20/R22: identity links + webhook rotation over HTTP ──
         r = await c.get(f"{base}/identity-links", headers=h)
         check("identity links list (R20)", r.status_code == 200, r.text[:200])
