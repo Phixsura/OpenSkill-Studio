@@ -296,6 +296,12 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
     conn = await db.get(IntegrationConnection, profile.connection_id)
     provider = await db.get(IntegrationProvider, conn.provider_id)
     connector = CONNECTORS.get(provider.key) if provider else None
+    if profile.direction == "push":
+        if connector is None or not hasattr(connector, "write"):
+            await _finish(db, run, "failed", error={"class": "connector_missing"})
+            return
+        await _execute_push(db, run, profile, conn, connector)
+        return
     if connector is None or not hasattr(connector, "read"):
         await _finish(db, run, "failed", error={"class": "connector_missing"})
         return
@@ -525,6 +531,203 @@ async def _apply_record(
         )
     )
     return "updated", {}
+
+
+# ── outbound push (P10 — talent.application v1) ──
+
+
+async def _extract_push_applications(db: AsyncSession, org_id: str) -> list[dict]:
+    """Employer-side application pipeline rows, consent-gated per candidate.
+
+    Privacy shape (ADR-018 §7): ids + pipeline position ONLY — no passport
+    content, no evidence bundles. Candidate rows WITHOUT an active ats_share
+    grant come back flagged so the engine records consent_missing conflicts
+    instead of silently sending or silently skipping.
+    """
+    from app.talent.models.application import Application
+    from app.talent.models.consent_log import ConsentLog
+    from app.talent.models.employer import Opportunity
+
+    rows = (
+        await db.execute(
+            select(Application, Opportunity.title)
+            .join(Opportunity, Opportunity.id == Application.opportunity_id)
+            .where(Opportunity.employer_org_id == org_id)
+            .order_by(Application.id)
+        )
+    ).all()
+    if not rows:
+        return []
+    user_ids = {app.user_id for app, _ in rows}
+    # Latest ats_share decision per user: granted/updated = active, revoked = not.
+    consent_rows = (
+        await db.execute(
+            select(ConsentLog.user_id, ConsentLog.action, ConsentLog.created_at)
+            .where(
+                ConsentLog.user_id.in_(user_ids),
+                ConsentLog.consent_type == "ats_share",
+            )
+            .order_by(ConsentLog.user_id, ConsentLog.created_at)
+        )
+    ).all()
+    latest: dict[str, str] = {}
+    for user_id, action, _at in consent_rows:
+        latest[user_id] = action  # ordered ASC — last write wins
+    out = []
+    for app, opp_title in rows:
+        out.append(
+            {
+                "external_id": app.id,
+                "application_id": app.id,
+                "opportunity_id": app.opportunity_id,
+                "opportunity_title": opp_title,
+                "candidate_user_id": app.user_id,
+                "status": app.status,
+                "_consented": latest.get(app.user_id) in ("granted", "updated"),
+            }
+        )
+    return out
+
+
+async def _execute_push(
+    db: AsyncSession,
+    run: SyncRun,
+    profile: SyncProfile,
+    conn: IntegrationConnection,
+    connector,
+) -> None:
+    if profile.model != "talent.application":
+        await _finish(db, run, "failed", error={"class": "push_model_unsupported"})
+        return
+    run.started_at = run.started_at or datetime.now(UTC)
+    stats = {"read": 0, "pushed": 0, "unchanged": 0, "conflicts": 0, "errors": 0}
+    mapping_doc = None
+    if profile.mapping_profile_id:
+        mp = await db.get(MappingProfile, profile.mapping_profile_id)
+        if mp is None or (
+            profile.mapping_version is not None and mp.version != profile.mapping_version
+        ):
+            await _finish(db, run, "failed", error={"class": "mapping_version_drift"})
+            return
+        mapping_doc = mp.document
+
+    records = await _extract_push_applications(db, profile.org_id)
+    stats["read"] = len(records)
+    to_send: list[dict] = []
+    staged_by_id: dict[str, StagedRecord] = {}
+    for raw in records:
+        external_id = raw["external_id"]
+        if not raw.pop("_consented"):
+            stats["conflicts"] += 1
+            db.add(
+                SyncRecordResult(
+                    run_id=run.id,
+                    external_id=external_id,
+                    model=profile.model,
+                    outcome="conflict",
+                    conflict_class="consent_missing",
+                    detail={"candidate_user_id": raw["candidate_user_id"]},
+                )
+            )
+            continue
+        if mapping_doc is not None:
+            mapped, errors = apply_mapping(mapping_doc, raw)
+            if errors:
+                stats["conflicts"] += 1
+                db.add(
+                    SyncRecordResult(
+                        run_id=run.id,
+                        external_id=external_id,
+                        model=profile.model,
+                        outcome="conflict",
+                        conflict_class="schema_invalid",
+                        detail={"errors": errors[:10]},
+                    )
+                )
+                continue
+            mapped["external_id"] = external_id
+        else:
+            mapped = raw
+        new_hash = _payload_hash(mapped)
+        staged = (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.connection_id == conn.id,
+                    StagedRecord.model == profile.model,
+                    StagedRecord.external_id == external_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if staged is not None and (staged.last_outbound or {}).get("fields_hash") == new_hash:
+            stats["unchanged"] += 1
+            continue
+        if staged is None:
+            staged = StagedRecord(
+                connection_id=conn.id,
+                model=profile.model,
+                external_id=external_id,
+                payload=mapped,
+                raw_hash=new_hash,
+                status="active",
+                first_seen_run_id=run.id,
+            )
+            db.add(staged)
+        staged_by_id[external_id] = staged
+        to_send.append(mapped)
+
+    sent_ok = 0
+    from app.integrations.registry import ConnCtx
+
+    ctx = ConnCtx(connection_id=conn.id, config=conn.config or {}, base_url=conn.base_url)
+    try:
+        for i in range(0, len(to_send), 100):
+            batch = to_send[i : i + 100]
+            results = await connector.write(ctx, profile.model, batch)
+            now_iso = datetime.now(UTC).isoformat()
+            for record, result in zip(batch, results, strict=True):
+                external_id = record["external_id"]
+                staged = staged_by_id[external_id]
+                if result.get("ok"):
+                    sent_ok += 1
+                    staged.payload = record
+                    staged.raw_hash = _payload_hash(record)
+                    staged.last_seen_run_id = run.id
+                    # Echo suppression sidecar: a provider reflecting this
+                    # exact write back within 24h counts as unchanged.
+                    staged.last_outbound = {
+                        "fields_hash": _payload_hash(record),
+                        "written_at": now_iso,
+                    }
+                    db.add(
+                        SyncRecordResult(
+                            run_id=run.id,
+                            external_id=external_id,
+                            model=profile.model,
+                            outcome="updated",
+                        )
+                    )
+                else:
+                    stats["errors"] += 1
+                    db.add(
+                        SyncRecordResult(
+                            run_id=run.id,
+                            external_id=external_id,
+                            model=profile.model,
+                            outcome="error",
+                            detail={"error": str(result.get("error", ""))[:200]},
+                        )
+                    )
+            run.stats = dict(stats, pushed=sent_ok)
+            run.heartbeat_at = datetime.now(UTC)
+            await db.commit()  # checkpoint per write batch
+    except Exception as exc:
+        log.warning("push_run_crashed", run_id=run.id, error=type(exc).__name__)
+        await _finish(db, run, "failed", error={"class": type(exc).__name__[:60]})
+        return
+    stats["pushed"] = sent_ok
+    run.stats = dict(stats)
+    status = "partial" if stats["conflicts"] or stats["errors"] else "succeeded"
+    await _finish(db, run, status)
 
 
 def _ts(value) -> datetime | None:

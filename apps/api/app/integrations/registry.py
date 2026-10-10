@@ -50,6 +50,24 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         },
         "version": 1,
     },
+    "generic_ats": {
+        "category": "ats",
+        "auth_mode": "api_key",
+        "display_name": "Generic ATS (REST)",
+        "capabilities": ["talent.write"],
+        "config_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "auth_header": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "default": "Authorization",
+                },
+            },
+        },
+        "version": 1,
+    },
     "oneroster": {
         "category": "roster",
         "auth_mode": "oauth2_cc",
@@ -137,6 +155,44 @@ class GenericRestConnector:
             raise AppError("CONNECTION_AUTH_REJECTED", "Provider rejected the credential", 422)
         if resp.status_code >= 500:
             raise AppError("CONNECTION_PING_FAILED", f"Provider returned {resp.status_code}", 422)
+
+
+class GenericAtsConnector:
+    """Outbound-only ATS sink: POSTs application batches to
+    {base_url}/applications with the configured API-key header. A 2xx
+    acknowledges the whole batch (per-record acks need a vendor connector)."""
+
+    key = "generic_ats"
+    capabilities = frozenset({"talent.write"})
+
+    async def ping(self, ctx: ConnCtx) -> None:
+        from app.exceptions import AppError
+
+        if not ctx.base_url:
+            raise AppError("CONNECTION_CONFIG_INVALID", "base_url is required", 422)
+        validate_egress_url(ctx.base_url)
+
+    async def write(self, ctx: ConnCtx, model: str, records: list[dict]) -> list[dict]:
+        import json as _json
+
+        from app.exceptions import AppError
+
+        if not ctx.base_url:
+            raise AppError("CONNECTION_CONFIG_INVALID", "base_url is required", 422)
+        secret = await ctx.get_secret()
+        header = ctx.config.get("auth_header", "Authorization")
+        headers = {"content-type": "application/json"}
+        if secret.get("api_key"):
+            headers[header] = secret["api_key"]
+        resp = await ctx.egress.request(
+            "POST",
+            ctx.base_url.rstrip("/") + "/applications",
+            headers=headers,
+            content=_json.dumps({"applications": records}).encode(),
+        )
+        ok = 200 <= resp.status_code < 300
+        error = None if ok else f"http_{resp.status_code}"
+        return [{"external_id": r.get("external_id"), "ok": ok, "error": error} for r in records]
 
 
 class OneRosterConnector:
@@ -280,5 +336,10 @@ class OneRosterConnector:
 
 CONNECTORS: dict[str, Connector] = {
     c.key: c  # type: ignore[misc]
-    for c in (GenericWebhookConnector(), GenericRestConnector(), OneRosterConnector())
+    for c in (
+        GenericWebhookConnector(),
+        GenericRestConnector(),
+        GenericAtsConnector(),
+        OneRosterConnector(),
+    )
 }

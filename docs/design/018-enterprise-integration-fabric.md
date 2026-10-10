@@ -803,9 +803,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **Webhook secret size**: existing `secret` column VARCHAR(64) holds base64 32-byte
   keys; `whsec_` prefix added at the API presentation layer to match Standard
   Webhooks tooling.
-- **invoice.finalized is tenant-scoped**, not org-scoped — the mesh is org-scoped
-  by design, so its wiring is deferred to P10 (talent/CRM + commercial pass) where a
-  tenant→org routing decision is made deliberately rather than implied. All other
+- **invoice.finalized routing (P10 decision)**: the tenant fact fans out to each of
+  the tenant's orgs as a PRIVACY-SAFE notification — invoice id + tenant id only,
+  never amounts (org admins are not tenant billing admins). Org-level automation can
+  react; billing figures stay on the control plane. All other
   catalog events are wired (P2b): learner.enrolled, skill.completed, project.approved,
   brief.created, client.accepted at their domain sites; credential.issued,
   placement.started, ecosystem.change_verified (mapped from ecosystem.change) and

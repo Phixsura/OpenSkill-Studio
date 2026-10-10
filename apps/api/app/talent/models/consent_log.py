@@ -25,6 +25,9 @@ CONSENT_TYPES = frozenset(
         "data_export",
         "snapshot_share",
         "endorsement_opt_in",
+        # ADR-018 §7 (issue #43): candidate/application data may sync to an
+        # external ATS only under an active grant of this scope.
+        "ats_share",
     }
 )
 

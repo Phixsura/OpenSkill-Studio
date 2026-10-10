@@ -50,6 +50,9 @@ CONFLICT_CLASSES = frozenset(
         "enum_unmapped",
         "schema_invalid",
         "clock_unresolvable",
+        # Outbound push (P10): candidate data without an active ats_share
+        # consent is SKIPPED with this class — never silently sent.
+        "consent_missing",
     }
 )
 FIELD_POLICIES = frozenset({"ours", "theirs", "most_recent", "prefer_ours_unless_blank"})

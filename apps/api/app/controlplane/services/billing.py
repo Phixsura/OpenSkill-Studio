@@ -1704,6 +1704,29 @@ async def finalize_invoice(db: AsyncSession, invoice: Invoice, *, actor: Actor) 
         after={"number": invoice.number, "total_minor": invoice.total_minor},
     )
     enqueue(db, "invoice.finalized", {"invoice_id": invoice.id})
+    # ADR-018 §12/P10 routing decision: invoice.finalized is a TENANT fact;
+    # the org-scoped mesh gets a privacy-safe notification (ids only — never
+    # amounts) emitted to each org under the tenant, so org-level automation
+    # can react without exposing billing figures. Fail-safe.
+    try:
+        from sqlalchemy import select as _select
+
+        from app.integrations.facade import emit_event
+        from app.models.organization import Organization as _Org
+
+        org_ids = (
+            await db.execute(_select(_Org.id).where(_Org.tenant_id == invoice.tenant_id))
+        ).scalars().all()
+        for org_id in org_ids:
+            await emit_event(
+                db,
+                org_id,
+                "invoice.finalized",
+                subject=invoice.id,
+                data={"invoice_id": invoice.id, "tenant_id": invoice.tenant_id},
+            )
+    except Exception:
+        log.warning("mesh_emit_failed", event="invoice.finalized", invoice_id=invoice.id)
     return invoice
 
 
