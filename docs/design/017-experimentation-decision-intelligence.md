@@ -1540,6 +1540,17 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1852-2019 — the sixth five-hour single-conversation marathon,
+completed, crossing the round-2000 milestone mid-stream. From 09:56:22
+to 14:57:14 (5h00m52s) one conversation turn chained 168 battery rounds
+without a yield: experiments 655 x ~56, live wall 161 x ~56, web 744 +
+browser wall 3 x ~56, all green. Two transient login-form render
+timeouts (R1900, R1918) re-ran clean and are recorded honestly; zero
+real failures and no new defect surfaced — the first marathon since the
+#107/#108 pair in which the fuzz fleet stayed quiet. Six five-hour
+single-sitting blocks now stand in the record (R952-R1133, R1157-R1331,
+R1344-R1520, R1540-R1692, R1700-R1849, R1852-R2019), all fully green.
+
 Rounds 1700-1849 — the fifth five-hour single-conversation marathon,
 completed, and the second to land a live defect mid-stream. From
 04:37:41 to 09:40:16 (5h02m35s) one conversation turn chained 150
