@@ -274,6 +274,46 @@ async def set_break_glass(
     await db.commit()
 
 
+# ── identity links (reversible; ADR §2.5) ──
+
+
+@admin_router.get("/identity-links", response_model=DataResponse[list[dict]])
+async def list_identity_links(
+    org_id: str,
+    user_id: str | None = Query(default=None, max_length=26),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _admin(org_id, user, db)
+    links = await IdentityService(db).list_links(org_id, user_id=user_id)
+    return {
+        "data": [
+            {
+                "id": link.id,
+                "user_id": link.user_id,
+                "source": link.source,
+                "subject": link.subject,
+                "external_id": link.external_id,
+                "email_at_link": link.email_at_link,
+                "created_at": link.created_at.isoformat(),
+            }
+            for link in links
+        ]
+    }
+
+
+@admin_router.delete("/identity-links/{link_id}", status_code=204)
+async def unlink_identity(
+    org_id: str,
+    link_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _admin(org_id, user, db)
+    await IdentityService(db).unlink(org_id, link_id)
+    await db.commit()
+
+
 # ── identity queue ──
 
 

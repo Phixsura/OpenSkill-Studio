@@ -236,6 +236,34 @@ class IdentityService:
         )
         await self.db.flush()
 
+    # ── link administration (ADR §2.5: linking is REVERSIBLE) ──
+
+    async def list_links(
+        self, org_id: str, *, user_id: str | None = None
+    ) -> list[ExternalIdentityLink]:
+        q = (
+            select(ExternalIdentityLink)
+            .where(
+                ExternalIdentityLink.org_id == org_id,
+                ExternalIdentityLink.revoked_at.is_(None),
+            )
+            .order_by(ExternalIdentityLink.created_at.desc())
+            .limit(500)
+        )
+        if user_id:
+            q = q.where(ExternalIdentityLink.user_id == user_id)
+        return list((await self.db.execute(q)).scalars())
+
+    async def unlink(self, org_id: str, link_id: str) -> ExternalIdentityLink:
+        """Revoke (not delete): history survives for audit; the partial
+        unique index frees (connection, subject) for a future re-link."""
+        link = await self.db.get(ExternalIdentityLink, link_id)
+        if link is None or link.org_id != org_id or link.revoked_at is not None:
+            raise AppError("IDENTITY_LINK_NOT_FOUND", "Link not found", 404)
+        link.revoked_at = datetime.now(UTC)
+        await self.db.flush()
+        return link
+
     # ── admin queue resolution ──
 
     async def list_queue(self, org_id: str, status: str = "pending") -> list[IdentityMatchQueue]:

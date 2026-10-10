@@ -39,6 +39,14 @@ interface Delivery {
   attempts?: Attempt[] | null;
 }
 
+interface Subscription {
+  id: string;
+  url: string;
+  events: string[];
+  secret: string;
+  active: boolean;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   succeeded: "bg-green-100 text-green-800",
   exhausted: "bg-red-100 text-red-800",
@@ -53,6 +61,9 @@ export default function IntegrationEventsPage() {
   const base = `/orgs/${orgId}/integrations`;
 
   const [typePrefix, setTypePrefix] = useState("");
+  const [subUrl, setSubUrl] = useState("");
+  const [subEvents, setSubEvents] = useState("");
+  const [revealedSecret, setRevealedSecret] = useState<{ id: string; secret: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [openDelivery, setOpenDelivery] = useState<string | null>(null);
 
@@ -84,6 +95,57 @@ export default function IntegrationEventsPage() {
     enabled: openDelivery !== null,
   });
 
+  const { data: subsData, isLoading: subsLoading } = useQuery({
+    queryKey: ["intg-subs", orgId],
+    queryFn: () => apiWithAuth<{ data: Subscription[] }>(`/orgs/${orgId}/webhooks`),
+  });
+  const subs = subsData?.data ?? [];
+
+  const createSub = useMutation({
+    mutationFn: () =>
+      apiWithAuth<{ data: Subscription }>(`/orgs/${orgId}/webhooks`, {
+        method: "POST",
+        body: JSON.stringify({
+          url: subUrl,
+          events: subEvents
+            .split(",")
+            .map((e) => e.trim())
+            .filter(Boolean),
+        }),
+      }),
+    onSuccess: (res) => {
+      setRevealedSecret({ id: res.data.id, secret: res.data.secret });
+      setSubUrl("");
+      setSubEvents("");
+      toast.success("Subscription created — copy the signing secret now");
+      queryClient.invalidateQueries({ queryKey: ["intg-subs", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Create failed"),
+  });
+
+  const rotateSub = useMutation({
+    mutationFn: ({ id, immediate }: { id: string; immediate: boolean }) =>
+      apiWithAuth<{ data: Subscription }>(
+        `/orgs/${orgId}/webhooks/${id}/rotate-secret?immediate=${immediate}`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) => {
+      setRevealedSecret({ id: res.data.id, secret: res.data.secret });
+      toast.success("Secret rotated — old key co-signs 7 days unless immediate");
+      queryClient.invalidateQueries({ queryKey: ["intg-subs", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Rotate failed"),
+  });
+
+  const deleteSub = useMutation({
+    mutationFn: (id: string) => apiWithAuth(`/orgs/${orgId}/webhooks/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Subscription deleted");
+      queryClient.invalidateQueries({ queryKey: ["intg-subs", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Delete failed"),
+  });
+
   const replay = useMutation({
     mutationFn: (id: string) => apiWithAuth(`${base}/deliveries/${id}/replay`, { method: "POST" }),
     onSuccess: () => {
@@ -102,6 +164,72 @@ export default function IntegrationEventsPage() {
           replayable after exhaustion.
         </p>
       </div>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-medium">Subscriptions</h2>
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            createSub.mutate();
+          }}
+        >
+          <Input
+            aria-label="Webhook URL"
+            className="max-w-sm"
+            placeholder="https://receiver.example.com/hooks"
+            value={subUrl}
+            onChange={(e) => setSubUrl(e.target.value)}
+            required
+          />
+          <Input
+            aria-label="Event patterns"
+            className="max-w-sm"
+            placeholder="com.openskill.integration.*, project.approved"
+            value={subEvents}
+            onChange={(e) => setSubEvents(e.target.value)}
+            required
+          />
+          <Button type="submit" size="sm" disabled={createSub.isPending}>
+            Subscribe
+          </Button>
+        </form>
+        {revealedSecret && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-2 font-mono text-xs">
+            Signing secret (shown once): {revealedSecret.secret}
+          </p>
+        )}
+        {subsLoading && <p>Loading subscriptions…</p>}
+        {!subsLoading && subs.length === 0 && (
+          <p className="text-muted-foreground text-sm">No subscriptions yet.</p>
+        )}
+        <ul className="space-y-2">
+          {subs.map((sub) => (
+            <li
+              key={sub.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3"
+            >
+              <div className="min-w-0">
+                <span className="font-mono text-xs">{sub.url}</span>
+                <span className="text-muted-foreground ml-2 text-xs">{sub.events.join(", ")}</span>
+                {!sub.active && <span className="ml-2 text-xs text-red-700">disabled</span>}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => rotateSub.mutate({ id: sub.id, immediate: false })}
+                >
+                  Rotate secret
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => deleteSub.mutate(sub.id)}>
+                  Delete
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">

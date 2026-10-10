@@ -203,6 +203,60 @@ describe("events page", () => {
       ),
     );
   });
+
+  it("manages subscriptions: create reveals secret once, rotate re-reveals", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/webhooks/w1/rotate-secret": {
+        data: {
+          id: "w1",
+          url: "https://r.example.com/h",
+          events: ["project.approved"],
+          secret: "whsec_ROTATED",
+          active: true,
+        },
+      },
+      "/orgs/ORG1234567890123456789012/webhooks": {
+        data: [
+          {
+            id: "w1",
+            url: "https://r.example.com/h",
+            events: ["project.approved"],
+            secret: "whse****TED",
+            active: true,
+          },
+        ],
+      },
+    });
+    render(<EventsPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("https://r.example.com/h")).toBeTruthy());
+    fireEvent.click(screen.getByText("Rotate secret"));
+    await waitFor(() => expect(screen.getByText(/whsec_ROTATED/)).toBeTruthy());
+    expect(api).toHaveBeenCalledWith(
+      "/orgs/ORG1234567890123456789012/webhooks/w1/rotate-secret?immediate=false",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    // Create path: POST then the once-only secret banner swaps to the new one.
+    api.mockImplementationOnce(() =>
+      Promise.resolve({
+        data: {
+          id: "w2",
+          url: "https://r2.example.com/h",
+          events: ["com.openskill.integration.*"],
+          secret: "whsec_NEW2",
+          active: true,
+        },
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Webhook URL"), {
+      target: { value: "https://r2.example.com/h" },
+    });
+    fireEvent.change(screen.getByLabelText("Event patterns"), {
+      target: { value: "com.openskill.integration.*" },
+    });
+    fireEvent.click(screen.getByText("Subscribe"));
+    await waitFor(() => expect(screen.getByText(/whsec_NEW2/)).toBeTruthy());
+  });
 });
 
 describe("identity page", () => {

@@ -604,3 +604,49 @@ async def test_domain_sweep_verifies_and_expires(db, monkeypatch):
     await db.refresh(stale)
     assert fresh.status == "verified"
     assert stale.status == "failed"  # expired before DNS was consulted
+
+
+# ── R20: link administration (list + reversible unlink) ──
+
+
+@pytest.mark.asyncio
+async def test_link_list_and_unlink_frees_subject_for_relink(db):
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "corp-r20.io")
+    member = await _user(db, email="r20@corp-r20.io")
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=member.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
+    await db.flush()
+    svc = IdentityService(db)
+    res = await svc.resolve(_ident(org, subject="r20-sub", email="r20@corp-r20.io"))
+    assert res.user.id == member.id
+
+    links = await svc.list_links(org.id)
+    assert [link.id for link in links] == [res.link.id]
+    assert await svc.list_links(org.id, user_id=member.id) != []
+    assert await svc.list_links(org.id, user_id=owner.id) == []
+
+    # Reversible (ADR §2.5): revoke keeps the row but frees (conn, subject).
+    await svc.unlink(org.id, res.link.id)
+    assert await svc.list_links(org.id) == []
+    import pytest as _pytest
+
+    from app.exceptions import AppError as _AppError
+
+    with _pytest.raises(_AppError) as exc:  # idempotence: second revoke is 404
+        await svc.unlink(org.id, res.link.id)
+    assert exc.value.status_code == 404
+
+    # Cross-org revoke is a uniform 404 (no existence oracle).
+    other = await _org(db, await _user(db))
+    res2 = await svc.resolve(_ident(org, subject="r20-sub", email="r20@corp-r20.io"))
+    with _pytest.raises(_AppError) as exc2:
+        await svc.unlink(other.id, res2.link.id)
+    assert exc2.value.status_code == 404
+
+    # Re-link after revoke produced a NEW active link for the same subject.
+    assert res2.link.id != res.link.id
