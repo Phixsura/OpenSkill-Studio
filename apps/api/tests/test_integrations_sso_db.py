@@ -940,3 +940,55 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
         == 0
     )
     assert AuthService is not None
+
+
+@pytest.mark.asyncio
+async def test_sso_admin_input_screens(db):
+    """R43: protocol whitelist, issuer/SSO-URL egress screening, connection
+    limit, and oversized/non-string cert entries."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+
+    with pytest.raises(AppError) as e1:
+        await svc.create(org.id, protocol="ldap")
+    assert e1.value.code == "SSO_PROTOCOL_INVALID"
+
+    from app.integrations.security import EgressBlockedError
+
+    with pytest.raises(EgressBlockedError):
+        await svc.create(
+            org.id, protocol="oidc", oidc_issuer="https://169.254.169.254/",
+            oidc_client_id="c", oidc_client_secret="s",
+        )
+    with pytest.raises(EgressBlockedError):
+        await svc.create(
+            org.id, protocol="saml", idp_entity_id="e",
+            idp_sso_url="ftp://idp.example.com/sso",
+        )
+
+    with pytest.raises(AppError) as e2:
+        await svc.create(
+            org.id, protocol="saml", idp_entity_id="e",
+            idp_sso_url="https://idp.example.com/sso",
+            idp_certificates=[{"pem": "x" * 10_001}],
+        )
+    assert e2.value.code == "SSO_CONFIG_INVALID"
+    with pytest.raises(AppError):
+        await svc.create(
+            org.id, protocol="saml", idp_entity_id="e",
+            idp_sso_url="https://idp.example.com/sso",
+            idp_certificates=[{"pem": 123}],
+        )
+
+    # Connection limit enforced.
+    made = 0
+    with pytest.raises(AppError) as e3:
+        for i in range(25):
+            await svc.create(
+                org.id, protocol="oidc",
+                oidc_issuer=f"https://idp{i}.example.com",
+                oidc_client_id=f"c{i}", oidc_client_secret="s",
+            )
+            made += 1
+    assert e3.value.code == "SSO_LIMIT_REACHED" and made >= 1

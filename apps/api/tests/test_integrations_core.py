@@ -361,3 +361,27 @@ def test_egress_trailing_dot_and_mapped_literal(monkeypatch):
     ):
         with pytest.raises(EgressBlockedError):
             validate_egress_url(url)
+
+
+def test_every_fabric_sweep_has_a_registered_cron():
+    """R43 guard (R11 class: schedule columns/sweeps nobody drives): every
+    fabric sweep function must be wired into the worker cron registry, and
+    the outbox handler module must be imported by load_handlers."""
+    from app.controlplane.worker import _cron_jobs
+
+    names = {j.name for j in _cron_jobs()}
+    required = {
+        "intg_domain_sweep",     # pending-domain DNS polling
+        "intg_scheduled_syncs",  # SyncProfile.schedule driver
+        "intg_stale_run_reaper", # crashed-run reaper
+        "intg_exports",          # ExportStream.schedule driver
+        "intg_cert_expiry",      # SAML cert expiry alerts
+        "intg_conn_health",      # connection health decay + alerts
+    }
+    missing = required - names
+    assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"
+
+    import app.controlplane.worker as cp_worker
+
+    src = open(cp_worker.__file__).read()
+    assert "app.integrations.worker" in src  # outbox handlers registered
