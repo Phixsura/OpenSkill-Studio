@@ -646,7 +646,7 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     from app.integrations.models import DeliveryAttempt
 
     org = await _org(db)
-    sub = await _sub(db, org)
+    await _sub(db, org)
     egress.codes = [500, 200]
     ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
     await db.commit()
