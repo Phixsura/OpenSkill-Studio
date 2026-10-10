@@ -362,11 +362,30 @@ async def main() -> int:
             r.text[:300],
         )
 
+        # ── R20/R22: identity links + webhook rotation over HTTP ──
+        r = await c.get(f"{base}/identity-links", headers=h)
+        check("identity links list (R20)", r.status_code == 200, r.text[:200])
+        r = await c.delete(f"{base}/identity-links/01JUNKJUNKJUNKJUNKJUNKJUNK", headers=h)
+        check("unlink unknown id is uniform 404", r.status_code == 404, str(r.status_code))
+        r = await c.get(f"/orgs/{org_id}/webhooks", headers=h)
+        hooks = r.json().get("data", [])
+        check("subscription list", r.status_code == 200 and len(hooks) >= 1, r.text[:200])
+        if hooks:
+            r = await c.post(
+                f"/orgs/{org_id}/webhooks/{hooks[0]['id']}/rotate-secret", headers=h
+            )
+            check(
+                "rotate returns fresh secret once",
+                r.status_code == 200 and r.json()["data"]["secret"].count("*") == 0,
+                r.text[:200],
+            )
+
         # ── IDOR spot wall (second real user, not a member) ──
         for path in (
             f"{base}/connections/{conn_id}",
             f"{base}/sync-runs/{run_id}",
             f"{base}/scim-tokens",
+            f"{base}/identity-links",
         ):
             r = await c.get(path, headers=mallory)
             check(f"wall {path.split('/')[-1]}", r.status_code in (403, 404), str(r.status_code))
