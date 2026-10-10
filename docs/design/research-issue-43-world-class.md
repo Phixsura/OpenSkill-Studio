@@ -607,6 +607,30 @@ admin mapping/connection mutation.
 10. Export field filtering as a denylist or applied downstream of serialization
     (new fields leak by default — R82's `_card_fields` lesson at warehouse scale).
 
+## Closing assessment (post-implementation, 2026-10-11)
+
+Scored against the eight streams above after the two marathon windows
+(R1-R47). "Shipped" means implemented, regression-green, probe-hardened
+(mutation survivors individually dispositioned) and exercised by the
+37-check live-HTTP E2E.
+
+| Stream      | Benchmark            | Shipped                                                                                                                             | Remaining gap vs best-in-class                                         |
+| ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| SSO         | WorkOS               | OIDC RP + SAML SP (signxml, XSW-safe), domain verification, enforce-SSO + break-glass, cert-expiry alerts, back-channel logout      | SAML SLO; IdP metadata-URL auto-polling; per-conn attribute-mapping UI |
+| SCIM        | Okta/Entra           | hand-rolled /scim/v2, Entra dialect table, deactivate≡DELETE + session sweep, group→cohort/role maps (ceilinged)                    | /Bulk endpoint; SCIM event feed                                        |
+| Rostering   | Clever/Edlink        | OneRoster CC+pagination connector, provision pass (never-guess conflicts), unenroll policies                                        | more SIS vendors (Clever/ClassLink APIs) — marketplace scope           |
+| LTI         | 1EdTech              | 1.3 launch + deep linking + AGS score push w/ tool keys                                                                             | NRPS; Dynamic Registration                                             |
+| Event mesh  | Svix                 | CloudEvents + Standard-Webhooks signing, co-signed rotation, Svix ladder, auto-disable, replay, test-send, per-sub stats, retention | endpoint-scoped signing keys; delivery payload archive                 |
+| Sync engine | Airbyte              | destination-confirmed cursors, echo suppression, field policies, conflict adjudication w/ stale guard, schedules + reaper           | typed per-model schemas beyond roster/talent; CDC sources              |
+| Bulk import | Flatfile             | fingerprinted preview→commit, atomic/partial, error report CSV, injection-safe                                                      | column mapping UI; streaming >50MB files                               |
+| Warehouse   | Stripe Data Pipeline | NDJSON parts + manifest, allowlist-built projection, org-salted hashing, incremental cursors, scheduled runs, retention             | Parquet; warehouse-native (Snowflake share) delivery                   |
+
+Platform hardening unique to this build: single-egress SSRF discipline
+(resolve-validate-pin + mixed-set refusal) enforced by lint test, uniform-404
+IDOR walls across every surface, protocol-route rate-limit guard test,
+cron-registration guard test, and ~140 hand-rolled mutation probes across
+all nine fabric cores with every true survivor killed.
+
 ## Primary sources
 
 - WorkOS: [SSO](https://workos.com/docs/sso) · [domain verification](https://workos.com/docs/domain-verification/api) · [SAML security best practices](https://workos.com/blog/saml-security-best-practices)
