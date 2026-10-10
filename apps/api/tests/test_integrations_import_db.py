@@ -263,3 +263,23 @@ async def test_import_cross_org_404_and_caps(db):
         with pytest.raises(AppError) as e2:
             await call()
         assert e2.value.status_code == 404
+
+
+# ── R7 adversarial-review regression pins ──
+
+
+@pytest.mark.asyncio
+async def test_concurrent_commit_single_winner(db):
+    org, owner = await _org(db)
+    data = _csv([f"cc-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
+    svc = BulkImportService(db)
+    job = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="k", created_by=owner.id,
+    )
+    # First commit wins; a racer that lost the claim gets 409 even with the
+    # right fingerprint.
+    await svc.commit(org.id, job.id, file_bytes=data)
+    with pytest.raises(AppError) as e:
+        await svc.commit(org.id, job.id, file_bytes=data)
+    assert e.value.code == "IMPORT_NOT_COMMITTABLE"

@@ -393,3 +393,15 @@ async def test_group_cohort_mapping(ctx):
         )
     ).scalar_one_or_none()
     assert cm2 is None
+
+
+# ── R7 adversarial-review regression pins ──
+
+
+@pytest.mark.asyncio
+async def test_scim_formula_username_rejected(ctx):
+    with pytest.raises(ScimError) as e:
+        await _usvc(ctx).create({"userName": "=HYPERLINK(evil)@bad"})
+    assert e.value.status == 400 and e.value.scim_type == "invalidValue"
+    with pytest.raises(ScimError):
+        await _usvc(ctx).create({"userName": "x@nodot"})

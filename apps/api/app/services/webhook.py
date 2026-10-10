@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import re
 import secrets
 import socket
 from datetime import UTC, datetime
@@ -72,6 +73,11 @@ _BLOCKED_NETWORKS = [
 
 MAX_WEBHOOKS_PER_ORG = 25
 MAX_EVENTS_PER_WEBHOOK = 20
+
+# Canonical mesh subscription patterns: exact versioned type
+# (com.openskill.project.approved.v1) or a prefix wildcard
+# (com.openskill.project.*). Segments are lowercase tokens.
+_MESH_PATTERN_RE = re.compile(r"com\.openskill\.[a-z0-9_]+(\.[a-z0-9_]+)*(\.v[0-9]+|\.\*)")
 
 # Legacy event name -> canonical mesh catalog name where they differ
 # (ADR-018 §12.1). The eco change event only fires for verified changes, so
@@ -208,14 +214,21 @@ class WebhookService:
                 422,
             )
 
-        # Validate event types
+        # Validate event types: legacy names from the fixed set, OR canonical
+        # mesh patterns (ADR-018 §12 — exact type or 'prefix.*' wildcard).
+        # Without this arm, nobody could subscribe to com.openskill.* events
+        # through the API at all (marathon R7 defect #7).
         for event in events:
-            if event not in VALID_EVENT_TYPES:
-                raise AppError(
-                    "INVALID_EVENT",
-                    f"Unknown event type: {event}. Valid: {', '.join(sorted(VALID_EVENT_TYPES))}",
-                    422,
-                )
+            if event in VALID_EVENT_TYPES:
+                continue
+            if _MESH_PATTERN_RE.fullmatch(event):
+                continue
+            raise AppError(
+                "INVALID_EVENT",
+                f"Unknown event type: {event}. Valid: a com.openskill.* mesh "
+                f"pattern or one of: {', '.join(sorted(VALID_EVENT_TYPES))}",
+                422,
+            )
 
         # Limit webhooks per org. Defect #102 (#100/#101 family): the bare
         # COUNT was a TOCTOU — lock the Org row first so same-org creators

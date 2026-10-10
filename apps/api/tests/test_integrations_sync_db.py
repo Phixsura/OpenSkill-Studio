@@ -596,3 +596,50 @@ async def test_run_scoping_uniform_404(db):
         with pytest.raises(AppError) as e:
             await call()
         assert e.value.status_code == 404
+
+
+# ── R7 adversarial-review regression pins ──
+
+
+def test_mapping_document_size_cap():
+    from app.integrations.services.mapping import validate_document
+
+    huge = {"fields": [{"target": "x", "path": "a", "default": "y" * 70_000}]}
+    assert validate_document(huge) == ["document: exceeds 64KB"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_provider_refuses_trigger(db):
+    from app.integrations.models import IntegrationProvider
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    provider = (
+        await db.execute(
+            select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+        )
+    ).scalars().first()
+    provider.enabled = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await SyncProfileService(db).trigger(org.id, profile.id)
+    assert e.value.code == "PROVIDER_DISABLED"
+    provider.enabled = True  # restore for sibling tests
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_trigger_reaps_stale_run_and_starts_fresh(db):
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+    stuck = await svc.trigger(org.id, profile.id)
+    stuck.status = "running"
+    stuck.heartbeat_at = datetime.now(UTC) - timedelta(minutes=30)
+    await db.commit()
+    fresh = await svc.trigger(org.id, profile.id)
+    assert fresh.id != stuck.id
+    await db.refresh(stuck)
+    assert stuck.status == "failed" and stuck.error["class"] == "stale_heartbeat"

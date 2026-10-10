@@ -242,16 +242,27 @@ class BulkImportService:
 
     async def commit(self, org_id: str, job_id: str, *, file_bytes: bytes) -> ImportJob:
         job = await self.get(org_id, job_id)
-        if job.status != "previewed":
-            raise AppError("IMPORT_NOT_COMMITTABLE", f"job is {job.status}", 409)
         if fingerprint(file_bytes, job.template_version) != job.fingerprint:
             raise AppError(
                 "IMPORT_DRY_RUN_STALE",
                 "File changed since the preview — re-upload and preview again",
                 409,
             )
-        job.status = "committing"
-        await self.db.flush()
+        # Atomic claim (review defect #5): two concurrent commits must not
+        # both apply — only the UPDATE winner proceeds.
+        from sqlalchemy import update as _update
+
+        claimed = (
+            await self.db.execute(
+                _update(ImportJob)
+                .where(ImportJob.id == job.id, ImportJob.status == "previewed")
+                .values(status="committing")
+                .returning(ImportJob.id)
+            )
+        ).scalar_one_or_none()
+        if claimed is None:
+            raise AppError("IMPORT_NOT_COMMITTABLE", f"job is {job.status}", 409)
+        await self.db.refresh(job)
         rows, errors = parse_users_csv(file_bytes)
         if job.mode == "atomic" and errors:
             job.status = "failed"

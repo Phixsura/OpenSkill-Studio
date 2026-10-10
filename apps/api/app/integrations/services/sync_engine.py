@@ -127,6 +127,10 @@ class SyncProfileService:
         connector = CONNECTORS.get(provider.key) if provider else None
         if provider is None or connector is None:
             raise AppError("CAPABILITY_MISSING", "No connector for provider", 409)
+        if not provider.enabled:
+            # Review defect #4: a kill-switched provider must refuse new runs,
+            # not just hide from the catalog listing.
+            raise AppError("PROVIDER_DISABLED", f"Provider disabled: {provider.key}", 409)
         family = model.split(".", 1)[0]
         needed = set()
         if direction in ("pull", "bidirectional"):
@@ -167,6 +171,10 @@ class SyncProfileService:
         if conn is None or conn.status not in ("active", "degraded", "pending"):
             raise AppError("SYNC_CONNECTION_UNAVAILABLE", "Connection not schedulable", 409)
         await self._check_capability(conn, profile.model, profile.direction)  # run-time re-check
+        # Opportunistic reap (review defect #6): a crashed worker's stale
+        # 'running' row would otherwise block this profile forever — no cron
+        # needed, the next trigger clears it.
+        await reap_stale_runs(self.db)
         live = (
             await self.db.execute(
                 select(SyncRun).where(

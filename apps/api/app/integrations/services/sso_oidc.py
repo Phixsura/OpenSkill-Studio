@@ -89,6 +89,16 @@ class OidcService:
     ) -> str:
         conn = await self._connection(sso_connection_id)
         doc = await self._discovery(conn)
+        # Opportunistic purge (R7 defect #9): the unauthenticated authorize
+        # endpoint mints a state row per hit — expired rows must not
+        # accumulate forever. Cheap indexed delete, day-old grace.
+        from sqlalchemy import delete as _delete
+
+        await self.db.execute(
+            _delete(SsoLoginState).where(
+                SsoLoginState.expires_at < datetime.now(UTC) - timedelta(days=1)
+            )
+        )
         nonce = secrets.token_urlsafe(32)[:64]
         state = SsoLoginState(
             sso_connection_id=conn.id,

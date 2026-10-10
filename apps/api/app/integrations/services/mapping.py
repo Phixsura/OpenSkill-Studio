@@ -148,6 +148,10 @@ def validate_document(document: dict) -> list[str]:
     """Returns problems (empty = valid). Compiles every JMESPath expression
     so a bad one fails at save, never mid-run."""
     problems: list[str] = []
+    # Document size cap (review defect #1): defaults/enum_maps are arbitrary
+    # JSON — without a bound a tenant can park megabytes in JSONB per save.
+    if len(json.dumps(document, default=str)) > 65_536:
+        return ["document: exceeds 64KB"]
     fields = document.get("fields")
     if not isinstance(fields, list) or not fields:
         return ["document.fields: required non-empty list"]

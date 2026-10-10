@@ -161,6 +161,14 @@ class LtiService:
         reg = (await self.db.execute(q)).scalars().first()
         if reg is None:
             raise _invalid("unknown_issuer")
+        # Opportunistic purge of expired launch states (R7 defect #9).
+        from sqlalchemy import delete as _delete
+
+        await self.db.execute(
+            _delete(LtiLaunchState).where(
+                LtiLaunchState.expires_at < datetime.now(UTC) - timedelta(days=1)
+            )
+        )
         state = LtiLaunchState(
             registration_id=reg.id,
             nonce=secrets.token_urlsafe(32)[:64],

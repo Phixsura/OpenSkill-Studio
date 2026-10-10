@@ -415,3 +415,28 @@ async def test_event_data_size_cap(db):
     with pytest.raises(AppError) as e:
         await emit_event(db, org.id, "project.approved", data={"blob": "x" * 70_000})
     assert e.value.code == "EVENT_DATA_TOO_LARGE"
+
+
+# ── R7 defect #7 pin: mesh patterns subscribable through the real API ──
+
+
+@pytest.mark.asyncio
+async def test_subscription_accepts_mesh_patterns(db):
+    from app.exceptions import AppError
+    from app.services.webhook import WebhookService
+
+    org = await _org(db)
+    svc = WebhookService(db)
+    sub = await svc.create(
+        org.id,
+        "https://hooks.example.com/mesh",
+        ["com.openskill.project.*", "com.openskill.credential.issued.v1"],
+    )
+    assert sub.id
+    with pytest.raises(AppError) as e:
+        await svc.create(
+            org.id, "https://hooks.example.com/x", ["com.openskill.UPPER.*"]
+        )
+    assert e.value.code == "INVALID_EVENT"
+    with pytest.raises(AppError):
+        await svc.create(org.id, "https://hooks.example.com/x", ["totally.unknown"])

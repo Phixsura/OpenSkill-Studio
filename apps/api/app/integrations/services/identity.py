@@ -65,6 +65,19 @@ class IdentityService:
         allow_jit: bool = False,
         jit_role: str = "student",
     ) -> ResolutionResult:
+        # Defensive claim coercion (review defect #3): IdP/LMS claims are
+        # untrusted JSON — a non-string email/display_name must degrade to
+        # None (queueing), never reach a DB column as a dict/list (500).
+        if not isinstance(ident.email, str) or len(ident.email) > 255:
+            ident.email = None
+            ident.email_verified = False
+        if not isinstance(ident.display_name, str):
+            ident.display_name = None
+        else:
+            ident.display_name = ident.display_name[:100] or None
+        if not isinstance(ident.subject, str) or not ident.subject or len(ident.subject) > 500:
+            raise AppError("IDENTITY_AMBIGUOUS", "Invalid external subject", 403)
+
         # 1. Hot path: active link for (connection, subject).
         link = (
             await self.db.execute(

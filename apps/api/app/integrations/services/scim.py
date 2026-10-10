@@ -299,7 +299,12 @@ class ScimUserService:
         """Returns (resource, created). Reusing a soft-deleted userName
         REACTIVATES instead of 409 (draft-ansari rule)."""
         username = str(payload.get("userName", "")).strip().lower()
-        if not username or "@" not in username or len(username) > 255:
+        from app.integrations.services.bulk_import import _EMAIL_RE
+
+        # Same strict shape as bulk import (review defect #2): an IdP-sent
+        # formula-local or dotless-domain userName must fail validation, not
+        # become a platform account.
+        if not username or len(username) > 255 or not _EMAIL_RE.fullmatch(username):
             raise ScimError(400, "userName must be an email address", "invalidValue")
         display = str(
             payload.get("displayName")
@@ -608,7 +613,21 @@ class ScimGroupService:
                     target = set(ids)
                     add.extend(target - current)
                     remove.extend(current - target)
-        if rename:
+        if rename and rename != group.display_name:
+            # Unique (org, display_name): a rename collision must be a SCIM
+            # 409, not an IntegrityError 500 (R7 defect #8 — the DBAPIError
+            # backstop maps FK violations, not unique ones).
+            dup = (
+                await self.db.execute(
+                    select(ScimGroup.id).where(
+                        ScimGroup.org_id == self.org_id,
+                        ScimGroup.display_name == rename,
+                        ScimGroup.id != group.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dup is not None:
+                raise ScimError(409, "Group name already exists", "uniqueness")
             group.display_name = rename
         await self._apply_member_delta(group, add=add, remove=remove)
         return _group_resource(group, await self._member_ids(group.id))

@@ -538,3 +538,32 @@ async def test_sso_admin_rules(db):
     with pytest.raises(AppError) as e2:
         await svc.get(other.id, conn.id)
     assert e2.value.status_code == 404
+
+
+# ── R7 adversarial-review regression pins ──
+
+
+@pytest.mark.asyncio
+async def test_resolution_tolerates_junk_claim_types(db):
+    """A dict/list email or display_name from a hostile IdP must queue, not
+    500 at the DB column (review defect #3)."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "junk.example.edu")
+    svc = IdentityService(db)
+    with pytest.raises(AppError) as e:
+        await svc.resolve(
+            _ident(org, subject="junk-1", email={"evil": "dict"}, verified=True)
+        )
+    assert e.value.code in ("IDENTITY_AMBIGUOUS", "SSO_NO_ACCOUNT")
+    with pytest.raises(AppError):
+        await svc.resolve(
+            VerifiedExternalIdentity(
+                org_id=org.id,
+                source="sso",
+                connection_ref="01CONNJ",
+                subject=["not", "a", "string"],
+                email="a@junk.example.edu",
+                email_verified=True,
+            )
+        )
