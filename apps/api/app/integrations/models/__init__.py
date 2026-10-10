@@ -10,6 +10,16 @@ from app.integrations.models.connection import (  # noqa: F401
     IntegrationConnection,
     IntegrationConnectionCredential,
 )
+from app.integrations.models.events import (  # noqa: F401
+    DELIVERY_STATUSES,
+    EVENT_NAMESPACE,
+    INTERNAL_EVENT_PREFIX,
+    MAX_ATTEMPTS,
+    RETRY_OFFSETS_S,
+    DeliveryAttempt,
+    EventDelivery,
+    IntegrationEvent,
+)
 from app.integrations.models.provider import (  # noqa: F401
     AUTH_MODES,
     PROVIDER_CATEGORIES,

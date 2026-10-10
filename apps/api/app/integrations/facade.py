@@ -14,3 +14,21 @@ async def sync_provider_catalog(db: AsyncSession) -> int:
     from app.integrations.services.connections import ConnectionService
 
     return await ConnectionService(db).sync_provider_catalog()
+
+
+async def emit_event(
+    db: AsyncSession,
+    org_id: str,
+    event_type: str,
+    *,
+    subject: str | None = None,
+    data: dict | None = None,
+    version: int = 1,
+):
+    """Append a canonical mesh event (CloudEvents) + its outbox message in
+    the CALLER's transaction (ADR-018 §12.1). ``event_type`` is the bare
+    catalog name, e.g. "project.approved" → com.openskill.project.approved.v1.
+    Delivery fan-out happens asynchronously in the outbox worker."""
+    from app.integrations.services.events import emit_event as _emit
+
+    return await _emit(db, org_id, event_type, subject=subject, data=data, version=version)

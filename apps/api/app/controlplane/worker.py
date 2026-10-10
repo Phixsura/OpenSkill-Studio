@@ -63,6 +63,7 @@ def load_handlers() -> None:
     import app.controlplane.services.settlement_handlers  # noqa: F401
     import app.ecosystem.worker  # noqa: F401 — eco.* topics (ADR-016)
     import app.experiments.worker  # noqa: F401 — exp.* topics (ADR-017)
+    import app.integrations.worker  # noqa: F401 — intg.* topics (ADR-018)
 
 
 def _worker_id() -> str:

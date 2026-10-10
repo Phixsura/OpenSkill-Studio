@@ -22,6 +22,12 @@ class WebhookSubscription(Base):
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     events: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Zero-downtime rotation (ADR-018 §12.2): after a rotation the previous
+    # secret co-signs deliveries for 7 days so receivers can roll keys.
+    secret_prev: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    secret_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
