@@ -848,6 +848,22 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R20-R33 (marathon hardening, continued)**: R20 reversible identity
+  unlink (list/DELETE, uniform 404) + webhook-subscription management UI;
+  R21 org-page nav entry + per-route rate limits on every protocol surface
+  (SCIM had none); R22 sync-conflict adjudication (accept_theirs/keep_ours/
+  dismiss drives resolved_by/resolved_action; both sides stored in detail);
+  R23 stale-adjudication 409 guard + identity-links UI; R24 expandable
+  CloudEvent payloads; R25 non-vacuous rate-limit route guard test;
+  R26-R33 mutation probes over every money/security core — mapping
+  evaluator (17 holes closed), SSRF guard (mixed-resolution refusal,
+  IPv4-mapped v6, classification matrix), event mesh (internal-wildcard
+  feedback-loop guard), identity resolution (7 takeover killers incl.
+  two-members-same-email and suspended-link hot path), OIDC (expired
+  state, require-exp, email_verified=false), SCIM (group_map admin/owner
+  escalation 422, PUT deactivation, reactivation), sync engine (backfill
+  cursor reset, claim/terminal guards, requeue resumes from own cursor).
+  Surviving mutants individually verified equivalent or defense-in-depth.
 - **R19**: SAML cert-expiry sweep (30-day window, daily-deduped mesh alert,
   06:18 cron); ADR deferred-items audit. **R18**: SCIM group-map editor UI.
 - **R17**: deep-linking response signing (tool-key JWT; opaque `data`
