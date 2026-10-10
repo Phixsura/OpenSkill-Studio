@@ -40,6 +40,15 @@ interface ScimToken {
   token?: string | null;
 }
 
+interface IdentityLink {
+  id: string;
+  user_id: string;
+  source: string;
+  subject: string;
+  email_at_link: string | null;
+  created_at: string;
+}
+
 interface QueueItem {
   id: string;
   source: string;
@@ -199,6 +208,20 @@ export default function IdentityIntegrationsPage() {
       queryClient.invalidateQueries({ queryKey: ["intg-scim-tokens", orgId] });
     },
     onError,
+  });
+
+  const linksQ = useQuery({
+    queryKey: ["intg-identity-links", orgId],
+    queryFn: () => apiWithAuth<{ data: IdentityLink[] }>(`${base}/identity-links`),
+  });
+
+  const unlink = useMutation({
+    mutationFn: (id: string) => apiWithAuth(`${base}/identity-links/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success("Identity unlinked — the subject can be re-linked later");
+      queryClient.invalidateQueries({ queryKey: ["intg-identity-links", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Unlink failed"),
   });
 
   const resolveQueue = useMutation({
@@ -524,6 +547,38 @@ export default function IdentityIntegrationsPage() {
           ))}
           {(queueQ.data?.data ?? []).length === 0 && (
             <li className="text-muted-foreground text-sm">Queue is empty.</li>
+          )}
+        </ul>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-medium">Identity links</h2>
+        <p className="text-muted-foreground text-sm">
+          Active external-identity links. Unlinking is reversible — the audit row survives and the
+          subject can re-link on its next verified login.
+        </p>
+        <ul className="space-y-2">
+          {(linksQ.data?.data ?? []).map((l) => (
+            <li
+              key={l.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3"
+            >
+              <div className="min-w-0 text-sm">
+                <span className="font-mono text-xs">{l.subject}</span>
+                <span className="text-muted-foreground ml-2 text-xs">
+                  {l.source} → user {l.user_id}
+                </span>
+                {l.email_at_link && (
+                  <span className="text-muted-foreground ml-2 text-xs">{l.email_at_link}</span>
+                )}
+              </div>
+              <Button size="sm" variant="outline" onClick={() => unlink.mutate(l.id)}>
+                Unlink
+              </Button>
+            </li>
+          ))}
+          {(linksQ.data?.data ?? []).length === 0 && (
+            <li className="text-muted-foreground text-sm">No active links.</li>
           )}
         </ul>
       </section>

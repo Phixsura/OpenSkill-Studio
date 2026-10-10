@@ -307,6 +307,14 @@ class SyncProfileService:
             ).scalar_one_or_none()
             if staged is None:
                 raise AppError("SYNC_CONFLICT_INVALID", "Staged record no longer exists", 422)
+            # Staleness guard: a later run may have already moved this field —
+            # applying the recorded "theirs" would overwrite NEWER data.
+            if staged.payload.get(result.detail["field"]) != result.detail.get("ours"):
+                raise AppError(
+                    "SYNC_CONFLICT_STALE",
+                    "Field changed since this conflict was recorded; re-run the sync",
+                    409,
+                )
             payload = dict(staged.payload)
             payload[result.detail["field"]] = result.detail.get("theirs")
             staged.payload = payload  # fresh dict — JSONB identity gotcha

@@ -606,6 +606,55 @@ async def test_conflict_resolution_accept_theirs_keep_ours(db):
 
 
 @pytest.mark.asyncio
+async def test_conflict_accept_theirs_refuses_stale(db):
+    """R23: a later run moved the field -> accept_theirs is 409, data kept."""
+    org, owner = await _org(db)
+    policy = {"timed": "most_recent", "_default": "theirs"}
+    fake = FakeRosterConnector([[{"external_id": "s1", "timed": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake, field_policy=policy)
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "s1"
+            )
+        )
+    ).scalar_one()
+    staged.payload = {"timed": "LOCAL"}
+    staged.raw_hash = "seeded"
+    await db.commit()
+    from app.integrations import registry
+
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "s1", "timed": "REMOTE"}]], respect_state=False
+    )
+    run2 = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)
+    svc = SyncProfileService(db)
+    row = next(
+        r
+        for r in await svc.run_records(org.id, run2.id, outcome="conflict")
+        if r.conflict_class == "clock_unresolvable"
+    )
+    # Simulate a later run having moved the field.
+    staged.payload = {"timed": "NEWER", "_updated_at": "2026-10-12T00:00:00+00:00"}
+    staged.raw_hash = "moved"
+    await db.commit()
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_conflict(
+            org.id, run2.id, row.id, action="accept_theirs", actor_id=owner.id
+        )
+    assert exc.value.status_code == 409
+    await db.refresh(staged)
+    assert staged.payload["timed"] == "NEWER"  # untouched
+    # keep_ours still allowed on the stale row (mark-only is always safe).
+    await svc.resolve_conflict(org.id, run2.id, row.id, action="keep_ours", actor_id=owner.id)
+
+
+@pytest.mark.asyncio
 async def test_echo_suppression(db):
     org, owner = await _org(db)
     fake = FakeRosterConnector([[{"external_id": "e1", "v": "ours"}]])
