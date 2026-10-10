@@ -286,3 +286,78 @@ def test_every_protocol_route_is_rate_limited():
         )
     ]
     assert missing == [], f"protocol routes without rate_limit: {missing}"
+
+
+def test_forbidden_ip_classification_matrix():
+    """R27 mutation probe: every reserved-range clause must be load-bearing."""
+    from app.integrations.security import _is_forbidden_ip
+
+    forbidden = [
+        "10.1.2.3",            # private
+        "127.0.0.1",           # loopback
+        "169.254.169.254",     # link-local (cloud metadata)
+        "224.0.0.1",           # multicast
+        "240.0.0.1",           # reserved
+        "0.0.0.0",             # unspecified
+        "100.64.0.1",          # carrier-grade NAT
+        "::1",                 # v6 loopback
+        "::",                  # v6 unspecified
+        "fe80::1",             # v6 link-local
+        "ff02::1",             # v6 multicast
+        "fc00::1",             # v6 ULA (private)
+        "::ffff:10.0.0.1",     # IPv4-mapped v6 smuggling a private v4
+        "::ffff:127.0.0.1",    # IPv4-mapped loopback
+        "not-an-ip",           # unparseable is forbidden, not ignored
+    ]
+    for ip in forbidden:
+        assert _is_forbidden_ip(ip), ip
+    for ip in ("8.8.8.8", "1.1.1.1", "2607:f8b0::1", "::ffff:8.8.8.8"):
+        assert not _is_forbidden_ip(ip), ip
+
+
+def test_mixed_resolution_set_is_refused_and_first_addr_returned(monkeypatch):
+    """A hostname resolving to {public, private} is an attack (DNS pinning
+    games) — refused outright, never 'skip to the public one'. An all-public
+    set returns the FIRST address (the one that gets dialed)."""
+    from app.config import settings
+    import socket as _socket
+
+    from app.integrations.security import EgressBlockedError, _resolve_and_validate
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+
+    def fake(host, port, proto=0):
+        return [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.0.0.5", 443)),
+        ]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", fake)
+    with pytest.raises(EgressBlockedError):
+        _resolve_and_validate("evil.example.com", 443)
+
+    def fake_pub(host, port, proto=0):
+        return [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("93.184.216.35", 443)),
+        ]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", fake_pub)
+    assert _resolve_and_validate("ok.example.com", 443) == "93.184.216.34"
+
+
+def test_egress_trailing_dot_and_mapped_literal(monkeypatch):
+    """FQDN trailing dot must not dodge the TLD screen; a literal
+    IPv4-mapped IPv6 URL is screened without a DNS step."""
+    from app.config import settings
+    from app.integrations.security import EgressBlockedError, validate_egress_url
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    for url in (
+        "https://db.corp./x",
+        "https://localhost./x",
+        "https://[::ffff:10.0.0.1]/x",
+        "https://[::1]/x",
+    ):
+        with pytest.raises(EgressBlockedError):
+            validate_egress_url(url)
