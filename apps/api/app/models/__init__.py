@@ -7,6 +7,9 @@ import app.ecosystem.models as _eco_models  # noqa: F401, E402
 
 # ── Experimentation layer (Issue #42, ADR-017) ──
 import app.experiments.models as _exp_models  # noqa: F401, E402
+
+# ── Integration fabric (Issue #43, ADR-018) ──
+import app.integrations.models as _intg_models  # noqa: F401, E402
 import app.talent.models as _talent_models  # noqa: F401
 from app.models.base import Base  # noqa: F401
 from app.models.capability import CapabilityTag  # noqa: F401

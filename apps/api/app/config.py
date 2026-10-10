@@ -196,6 +196,20 @@ class Settings(BaseSettings):
                     ) from exc
         return v
 
+    # ── Integration fabric (ADR-018) ──
+    # Allow egress to private/reserved ranges — TEST ONLY (E2E suites hit
+    # localhost; R79 pattern). The validator refuses it anywhere else, so a
+    # copied .env can never open the SSRF guard in production.
+    egress_allow_private: bool = False
+
+    @field_validator("egress_allow_private")
+    @classmethod
+    def validate_egress_allow_private(cls, v: bool, info: Any) -> bool:
+        app_env = (info.data.get("app_env") or "development") if info.data else "development"
+        if v and app_env not in ("development", "test"):
+            raise ValueError("EGRESS_ALLOW_PRIVATE must not be enabled outside development/test")
+        return v
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
