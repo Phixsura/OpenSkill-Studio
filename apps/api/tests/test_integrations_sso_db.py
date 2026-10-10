@@ -780,9 +780,9 @@ async def test_linked_but_suspended_user_refused_on_hot_path(db):
 async def test_oidc_expired_state_missing_exp_and_unverified_email(db):
     """Kills: expired-state acceptance, optional-exp acceptance, and
     trusting an email_verified=false claim."""
-    import app.integrations.services.sso_oidc as mod
     from datetime import timedelta as _td
 
+    import app.integrations.services.sso_oidc as mod
     from app.integrations.models import SsoLoginState
 
     org, conn = await _oidc_setup(db)
