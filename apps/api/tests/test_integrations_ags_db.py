@@ -307,3 +307,97 @@ async def test_deep_linking_response_signed_and_verifiable(db):
     items = claims[f"{dl}content_items"]
     assert items[0]["type"] == "ltiResourceLink"
     assert items[0]["custom"]["resource_id"].startswith("skill:")
+
+
+# ── R39: AGS probe killers ──
+
+
+class _RefusingPlatform(FakeAgsPlatform):
+    """Token or score endpoint refusals, switchable per instance."""
+
+    def __init__(self, jwks, *, token_status=200, score_status=200):
+        super().__init__(jwks)
+        self.token_status = token_status
+        self.score_status = score_status
+
+    async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+        path = urlsplit(url).path
+        if path.endswith("/token") and self.token_status != 200:
+            return httpx.Response(self.token_status, request=httpx.Request(method, url))
+        if path.endswith("/scores") and self.score_status != 200:
+            self.scores.append(json.loads(content))
+            return httpx.Response(self.score_status, request=httpx.Request(method, url))
+        return await super().request(
+            method, url, headers=headers, content=content, read_timeout=read_timeout
+        )
+
+
+@pytest.mark.asyncio
+async def test_push_score_failure_and_guard_matrix(db):
+    """Kills: token-refused -> False, non-2xx score -> False, disabled
+    registration -> False, revoked link -> False, trailing-slash lineitem
+    URL normalized."""
+    from datetime import UTC, datetime
+
+    from app.integrations.models import ExternalIdentityLink
+
+    org, user = await _org(db)
+    reg, link = await _setup(db, org, user)
+    jwks = await tool_jwks(db)
+
+    # Token endpoint refuses -> push reports failure.
+    assert (
+        await push_score(
+            db, link, user_id=user.id, score_given=1,
+            egress=_RefusingPlatform(jwks, token_status=401),
+        )
+        is False
+    )
+    # Score endpoint 403 -> failure, never success.
+    assert (
+        await push_score(
+            db, link, user_id=user.id, score_given=1,
+            egress=_RefusingPlatform(jwks, score_status=403),
+        )
+        is False
+    )
+    # Trailing slash on the lineitem URL must not produce '//scores'.
+    link.ags_lineitem_url = link.ags_lineitem_url.rstrip("/") + "/"
+    await db.flush()
+    recorder = FakeAgsPlatform(jwks)
+    urls = []
+    orig_request = recorder.request
+
+    async def spy(method, url, **kw):
+        urls.append(url)
+        return await orig_request(method, url, **kw)
+
+    recorder.request = spy
+    assert await push_score(db, link, user_id=user.id, score_given=2, egress=recorder) is True
+    assert all("//scores" not in u for u in urls)
+
+    # Disabled registration -> False.
+    reg.status = "disabled"
+    await db.flush()
+    assert (
+        await push_score(db, link, user_id=user.id, score_given=3, egress=FakeAgsPlatform(jwks))
+        is False
+    )
+    reg.status = "active"
+    await db.flush()
+
+    # Revoked link -> False (identity no longer authoritative for grading).
+    row = (
+        await db.execute(
+            select(ExternalIdentityLink).where(
+                ExternalIdentityLink.connection_ref == reg.id,
+                ExternalIdentityLink.user_id == user.id,
+            )
+        )
+    ).scalar_one()
+    row.revoked_at = datetime.now(UTC)
+    await db.flush()
+    assert (
+        await push_score(db, link, user_id=user.id, score_given=4, egress=FakeAgsPlatform(jwks))
+        is False
+    )
