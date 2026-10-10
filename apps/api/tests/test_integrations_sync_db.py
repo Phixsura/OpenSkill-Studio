@@ -885,3 +885,78 @@ async def test_sweep_scheduled_profiles_triggers_due_only(db):
         await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
     ).scalars().all()
     assert len(runs_after) == 1
+
+
+# ── R33: sync-engine execution-core killers ──
+
+
+@pytest.mark.asyncio
+async def test_backfill_resets_cursor_and_terminal_guards(db):
+    """Kills: backfill-keeps-cursor, re-executing a terminal run, and
+    executing a run someone else already claimed."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "b1", "v": "1"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "succeeded" and run.cursor_out == {"batch": 1}
+
+    # Terminal guard: re-executing a succeeded run is a hard no-op.
+    calls_before = len(fake.read_calls)
+    await execute_run(db, run.id)
+    assert len(fake.read_calls) == calls_before
+
+    # Backfill: cursor_in must RESET to {} (full re-read), not resume.
+    run_b = await svc.trigger(org.id, profile.id, trigger="backfill")
+    await db.commit()
+    assert run_b.cursor_in == {}
+    await execute_run(db, run_b.id)
+    assert fake.read_calls[-1] == {}  # connector saw a fresh state
+
+    # Claim guard: a run already in 'running' (claimed elsewhere) is not
+    # re-entered by a second executor.
+    run_c = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    run_c.status = "running"
+    run_c.started_at = datetime.now(UTC)
+    await db.commit()
+    calls_before = len(fake.read_calls)
+    await execute_run(db, run_c.id)
+    assert len(fake.read_calls) == calls_before
+    run_c.status = "cancelled"  # tidy
+    await db.commit()
+
+    # Cancel guard: a finished run can never be cancelled (409).
+    with pytest.raises(AppError) as exc:
+        await svc.cancel(org.id, run.id)
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_requeued_run_resumes_from_own_cursor_out(db):
+    """A redelivered/requeued run with committed progress resumes from its
+    OWN cursor_out, not from cursor_in."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector(
+        [[{"external_id": "q1", "v": "1"}], [{"external_id": "q2", "v": "2"}]],
+        crash_after=1,
+    )
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "failed" and run.cursor_out == {"batch": 1}
+    # Simulate outbox redelivery of the same run object.
+    run.status = "queued"
+    run.error = None
+    await db.commit()
+    await execute_run(db, run.id)
+    # The resumed read started from the committed checkpoint...
+    assert fake.read_calls[-1] == {"batch": 1}
+    await db.refresh(run)
+    assert run.status == "succeeded" and run.cursor_out == {"batch": 2}
