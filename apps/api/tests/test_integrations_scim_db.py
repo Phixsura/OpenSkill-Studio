@@ -485,6 +485,9 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
              "data": {"displayName": f"BG-{uuid.uuid4().hex[:6]}"}},
         ],
     })
+    import json as _json
+
+    _json.dumps(out)  # R53 e2e-caught: exc.body (unbound method) crashed render
     assert out["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:BulkResponse"]
     st = [op["status"] for op in out["Operations"]]
     assert st == ["201", "201", "409", "201"]

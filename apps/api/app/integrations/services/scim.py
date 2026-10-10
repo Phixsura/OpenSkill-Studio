@@ -112,7 +112,7 @@ async def apply_bulk(db, token, payload: dict) -> dict:
         except ScimError as exc:
             failures += 1
             entry["status"] = str(exc.status)
-            entry["response"] = exc.body
+            entry["response"] = exc.body()
         results.append(entry)
         if fail_on and failures >= fail_on:
             break
