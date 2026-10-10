@@ -771,3 +771,76 @@ async def test_linked_but_suspended_user_refused_on_hot_path(db):
     with pytest.raises(AppError) as exc:
         await svc.resolve(_ident(org, subject="hot-sub", email="hot@hot-r29.io"))
     assert exc.value.code == "SSO_NO_ACCOUNT"
+
+
+# ── R31: OIDC mutation-probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_oidc_expired_state_missing_exp_and_unverified_email(db):
+    """Kills: expired-state acceptance, optional-exp acceptance, and
+    trusting an email_verified=false claim."""
+    import app.integrations.services.sso_oidc as mod
+    from datetime import timedelta as _td
+
+    from app.integrations.models import SsoLoginState
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    email = f"r31-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    def factory(form):
+        return _mint_id_token(
+            sub="r31-sub", email=email, nonce=factory.nonce, aud="client-1", **factory.over
+        )
+
+    factory.over = {}
+    svc.egress = FakeIdp(factory)
+
+    async def start():
+        url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+        qs = parse_qs(urlsplit(url).query)
+        factory.nonce = qs["nonce"][0]
+        return qs["state"][0]
+
+    # 1. Expired state row refused even though the token itself is valid.
+    state_val = await start()
+    row = await db.get(SsoLoginState, state_val)
+    row.expires_at = datetime.now(UTC) - _td(minutes=1)
+    await db.flush()
+    with pytest.raises(AppError):
+        await svc.handle_callback(
+            state_value=state_val, code="c", redirect_uri="https://app.test/cb"
+        )
+
+    # 2. Token WITHOUT exp refused (require list, not just validity-if-present).
+    state_val = await start()
+
+    def no_exp_factory(form):
+        claims = {
+            "iss": ISSUER,
+            "aud": "client-1",
+            "sub": "r31-sub",
+            "email": email,
+            "email_verified": True,
+            "nonce": no_exp_factory.nonce,
+            "iat": int(time.time()),
+        }
+        return pyjwt.encode(claims, _PRIV, algorithm="RS256", headers={"kid": "k1"})
+
+    no_exp_factory.nonce = factory.nonce
+    svc.egress = FakeIdp(no_exp_factory)
+    with pytest.raises(AppError):
+        await svc.handle_callback(
+            state_value=state_val, code="c", redirect_uri="https://app.test/cb"
+        )
+    svc.egress = FakeIdp(factory)
+
+    # 3. email_verified=false claim: must QUEUE, never match/JIT.
+    factory.over = {"email_verified": False}
+    state_val = await start()
+    with pytest.raises(AppError) as exc2:
+        await svc.handle_callback(
+            state_value=state_val, code="c", redirect_uri="https://app.test/cb"
+        )
+    assert exc2.value.code in ("IDENTITY_AMBIGUOUS", "SSO_NO_ACCOUNT")
