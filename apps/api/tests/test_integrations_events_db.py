@@ -562,3 +562,53 @@ async def test_subscription_stats_grouped_and_org_scoped(db, egress):
     assert sub.id in stats and stats[sub.id].get("succeeded", 0) >= 1
     assert foreign_sub.id not in stats
     assert ev.id != ev2.id
+
+
+@pytest.mark.asyncio
+async def test_events_api_org_scoping_and_filters(db, egress):
+    """R47 API-layer killers: list_events org filter + type_prefix, deliveries
+    org filter, delivery-detail uniform 404 cross-org."""
+    from app.exceptions import AppError
+    from app.integrations.api.events import get_delivery, list_deliveries, list_events
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    other = await _org(db)
+    sub = await _sub(db, org)
+    await _sub(db, other)  # foreign deliveries must exist to prove the filter
+    ev = await emit_event(db, org.id, "project.approved", subject="api-1", data={})
+    await emit_event(db, org.id, "skill.completed", subject="api-2", data={})
+    foreign = await emit_event(db, other.id, "project.approved", subject="FOREIGN", data={})
+    await db.commit()
+    await _drain(db)
+
+    owner_row = (
+        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
+    ).scalars().first()
+    user = await db.get(_User, owner_row.user_id)
+
+    out = await list_events(org.id, type_prefix=None, limit=50, db=db, user=user)
+    subjects = {e.subject for e in out["data"]}
+    assert "api-1" in subjects and "FOREIGN" not in subjects
+
+    out2 = await list_events(
+        org.id, type_prefix="com.openskill.skill.", limit=50, db=db, user=user
+    )
+    assert {e.subject for e in out2["data"]} == {"api-2"}
+
+    dels = await list_deliveries(
+        org.id, status=None, subscription_id=None, limit=50, db=db, user=user
+    )
+    assert all(d.event_id != foreign.id for d in dels["data"])
+    assert any(d.event_id == ev.id for d in dels["data"])
+
+    # Cross-org delivery detail: uniform 404.
+    mine = next(d for d in dels["data"] if d.event_id == ev.id)
+    other_owner_row = (
+        await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))
+    ).scalars().first()
+    other_user = await db.get(_User, other_owner_row.user_id)
+    with pytest.raises(AppError) as exc:
+        await get_delivery(other.id, mine.id, db=db, user=other_user)
+    assert exc.value.status_code == 404
+    assert sub is not None
