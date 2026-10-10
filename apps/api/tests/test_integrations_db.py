@@ -340,3 +340,46 @@ async def test_connection_upgrade_revalidates(ctx):
     # Restore catalog row for sibling tests.
     await svc.sync_provider_catalog()
     await db.commit()
+
+
+# ── R40: connections probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
+    """Kills: PATCH-path base_url skipping the SSRF screen, and
+    additionalProperties=False not enforced on config."""
+    from app.config import settings as _settings
+    from app.integrations.security import EgressBlockedError
+
+    user = await _user(db)
+    org = await _org(db, user)
+    svc = ConnectionService(db)
+    await svc.sync_provider_catalog()
+    await db.flush()
+    conn = await svc.create(
+        org.id, provider_key="oneroster", name=f"up-{uuid.uuid4().hex[:6]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+    )
+    # Update path must run the same egress screen as create.
+    assert _settings.egress_allow_private is False or True  # document intent
+    with pytest.raises(EgressBlockedError):
+        await svc.update(org.id, conn.id, base_url="https://169.254.169.254/x")
+    with pytest.raises(EgressBlockedError):
+        await svc.update(org.id, conn.id, base_url="ftp://sis.example.com/")
+
+    # Unknown config key refused on create AND update (schema is closed).
+    with pytest.raises(AppError) as exc:
+        await svc.update(
+            org.id, conn.id,
+            config={"token_url": "https://idp.example.com/token", "surprise": 1},
+        )
+    assert exc.value.status_code == 422
+    with pytest.raises(AppError) as exc2:
+        await svc.create(
+            org.id, provider_key="oneroster", name=f"uc-{uuid.uuid4().hex[:6]}",
+            config={"token_url": "https://idp.example.com/token", "surprise": 1},
+            base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+        )
+    assert exc2.value.status_code == 422

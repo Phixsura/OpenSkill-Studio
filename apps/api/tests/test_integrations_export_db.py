@@ -229,3 +229,81 @@ async def test_sweep_scheduled_exports_runs_due_daily_streams(db):
     assert await svc.list_runs(org.id, manual.id) == []
     # Within the day: not due again.
     assert await sweep_scheduled_exports(db, writer) == 0
+
+
+# ── R40: warehouse probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_narrowed_allowlist_disabled_gate_salt_pagination_failure(db, monkeypatch):
+    import app.integrations.services.warehouse as wh
+
+    org, owner = await _org(db)
+    org2, _ = await _org(db)
+    await emit_event(db, org.id, "project.approved", subject="same-subj", data={"x": 1})
+    await emit_event(db, org2.id, "project.approved", subject="same-subj", data={"x": 1})
+    await db.flush()
+
+    # 1. NARROWED allowlist: the projection is built FROM the allowlist —
+    # extractor fields outside it must never appear (row.keys() mutant).
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    s = await svc.create_stream(
+        org.id, name=f"nr-{ULID()}", dataset="events", field_allowlist=["id", "type"]
+    )
+    run = await svc.run_export(org.id, s.id)
+    rows = [json.loads(x) for x in writer.files[run.parts[0]].decode().strip().split("\n")]
+    assert all(set(r) == {"id", "type"} for r in rows)
+
+    # 2. Org-salted hashing: the same value hashes DIFFERENTLY per org
+    # (cross-org joinability guard).
+    w1, w2 = MemWriter(), MemWriter()
+    sa = await WarehouseExportService(db, writer=w1).create_stream(
+        org.id, name=f"ha-{ULID()}", dataset="events",
+        field_allowlist=["id", "subject"], anonymize={"subject": "hash"},
+    )
+    sb = await WarehouseExportService(db, writer=w2).create_stream(
+        org2.id, name=f"hb-{ULID()}", dataset="events",
+        field_allowlist=["id", "subject"], anonymize={"subject": "hash"},
+    )
+    ra = await WarehouseExportService(db, writer=w1).run_export(org.id, sa.id)
+    rb = await WarehouseExportService(db, writer=w2).run_export(org2.id, sb.id)
+    ha = json.loads(w1.files[ra.parts[0]].decode().strip().split("\n")[0])["subject"]
+    hb = json.loads(w2.files[rb.parts[0]].decode().strip().split("\n")[0])["subject"]
+    assert ha != hb  # same raw subject, different org salt
+
+    # 3. Disabled stream refuses to run.
+    s.enabled = False
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.run_export(org.id, s.id)
+    assert exc.value.code == "EXPORT_STREAM_DISABLED"
+    s.enabled = True
+    await db.flush()
+
+    # 4. Pagination: with page size 1, three events -> 3 parts, all rows.
+    await emit_event(db, org.id, "project.approved", subject="pg-2", data={})
+    await emit_event(db, org.id, "project.approved", subject="pg-3", data={})
+    await db.flush()
+    monkeypatch.setattr(wh, "EXPORT_PAGE_ROWS", 1)
+    wpg = MemWriter()
+    spg = await WarehouseExportService(db, writer=wpg).create_stream(
+        org.id, name=f"pg-{ULID()}", dataset="events"
+    )
+    rpg = await WarehouseExportService(db, writer=wpg).run_export(org.id, spg.id)
+    assert rpg.row_count == 3 and len(rpg.parts) == 3
+    monkeypatch.setattr(wh, "EXPORT_PAGE_ROWS", 1000)
+
+    # 5. Writer failure -> run FAILED and the stream cursor does NOT move.
+    class _BoomWriter:
+        async def write(self, key, content):
+            raise RuntimeError("disk full")
+
+    sfail = await WarehouseExportService(db, writer=_BoomWriter()).create_stream(
+        org.id, name=f"fl-{ULID()}", dataset="events"
+    )
+    before = dict(sfail.cursor or {})
+    rf = await WarehouseExportService(db, writer=_BoomWriter()).run_export(org.id, sfail.id)
+    assert rf.status == "failed" and rf.error == "RuntimeError"
+    await db.refresh(sfail)
+    assert dict(sfail.cursor or {}) == before
