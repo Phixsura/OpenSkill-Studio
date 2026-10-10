@@ -95,6 +95,10 @@ class DeliveryAttempt(Base):
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(String(200), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # R60 (Svix parity): first 500 sanitized chars of a FAILED response body
+    # so receiver bugs are debuggable from our side. Success bodies are not
+    # retained (they are the receiver's data, not ours).
+    response_snippet: Mapped[str | None] = mapped_column(String(500), nullable=True)
     attempted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

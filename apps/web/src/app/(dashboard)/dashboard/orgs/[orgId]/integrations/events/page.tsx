@@ -25,6 +25,7 @@ interface Attempt {
   status_code: number | null;
   error: string | null;
   latency_ms: number | null;
+  response_snippet: string | null;
   attempted_at: string;
 }
 
@@ -338,6 +339,11 @@ export default function IntegrationEventsPage() {
                       {a.attempted_at} — {a.status_code ?? "—"}{" "}
                       {a.error && <span className="text-red-700">{a.error}</span>}
                       {a.latency_ms != null && <span> ({a.latency_ms}ms)</span>}
+                      {a.response_snippet && (
+                        <div className="text-muted-foreground mt-0.5 truncate">
+                          ↳ {a.response_snippet}
+                        </div>
+                      )}
                     </li>
                   ))}
                   {detailData?.data.attempts?.length === 0 && <li>No attempts yet.</li>}

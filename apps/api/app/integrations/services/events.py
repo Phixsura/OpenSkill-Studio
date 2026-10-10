@@ -238,10 +238,15 @@ async def handle_delivery_attempt(db: AsyncSession, payload: dict) -> None:
 
     started = _time.monotonic()
     status_code: int | None = None
+    snippet: str | None = None
     error: str | None = None
     try:
         resp = await EgressClient().request("POST", sub.url, headers=headers, content=body)
         status_code = resp.status_code
+        if not 200 <= resp.status_code < 300:
+            # Sanitized failure snippet: control chars stripped, 500-char cap.
+            text = resp.text[:2000]
+            snippet = "".join(ch for ch in text if ch >= " " or ch in "\t")[:500] or None
         if 200 <= resp.status_code < 300:
             delivery.status = "succeeded"
             delivery.next_attempt_at = None
@@ -257,6 +262,7 @@ async def handle_delivery_attempt(db: AsyncSession, payload: dict) -> None:
             delivery_id=delivery.id,
             status_code=status_code,
             error=error,
+            response_snippet=snippet,
             latency_ms=int((_time.monotonic() - started) * 1000),
         )
     )

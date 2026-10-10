@@ -109,7 +109,11 @@ class _FakeEgress:
         code = self.codes.pop(0) if self.codes else 200
         if code == -1:
             raise httpx.ConnectTimeout("boom")
-        return httpx.Response(code, request=httpx.Request(method, url))
+        return httpx.Response(
+            code,
+            content=(b"" if code < 400 else b"upstream error \x01detail\x02 " + b"x" * 600),
+            request=httpx.Request(method, url),
+        )
 
 
 @pytest.fixture
@@ -633,3 +637,48 @@ async def test_events_api_org_scoping_and_filters(db, egress):
         await get_delivery(other.id, mine.id, db=db, user=other_user)
     assert exc.value.status_code == 404
     assert sub is not None
+
+
+@pytest.mark.asyncio
+async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress):
+    """R60: failed attempts keep a sanitized 500-char response snippet;
+    successful attempts never retain the body."""
+    from app.integrations.models import DeliveryAttempt
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    egress.codes = [500, 200]
+    ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
+    await db.commit()
+    await _drain(db)
+    # drive the retry (scheduled later) — force due now
+    from app.controlplane.models.outbox import OutboxMessage
+
+    rows = (
+        await db.execute(select(OutboxMessage).where(OutboxMessage.status == "pending"))
+    ).scalars().all()
+    for r in rows:
+        r.available_at = datetime.now(UTC)
+    await db.commit()
+    await _drain(db)
+
+    attempts = (
+        (
+            await db.execute(
+                select(DeliveryAttempt)
+                .join(EventDelivery, EventDelivery.id == DeliveryAttempt.delivery_id)
+                .where(EventDelivery.event_id == ev.id)
+                .order_by(DeliveryAttempt.attempted_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(attempts) == 2
+    failed, ok = attempts[0], attempts[-1]
+    assert failed.status_code == 500
+    assert failed.response_snippet is not None
+    assert len(failed.response_snippet) <= 500
+    assert "\x01" not in failed.response_snippet  # control chars stripped
+    assert failed.response_snippet.startswith("upstream error")
+    assert ok.status_code == 200 and ok.response_snippet is None

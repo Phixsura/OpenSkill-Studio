@@ -32,6 +32,7 @@ class AttemptResponse(BaseModel):
     status_code: int | None
     error: str | None
     latency_ms: int | None
+    response_snippet: str | None = None
     attempted_at: datetime
 
 
