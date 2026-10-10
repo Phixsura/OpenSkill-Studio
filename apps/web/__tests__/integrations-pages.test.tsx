@@ -370,6 +370,123 @@ describe("sync page", () => {
     fireEvent.click(screen.getByText("Conflicts"));
     await waitFor(() => expect(screen.getByText(/ambiguous_identity/)).toBeTruthy());
   });
+
+  it("adjudicates conflicts: accept_theirs only on clock ties, resolved badge", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/sync-runs/r1/records/rr1/resolve": {
+        data: {},
+      },
+      "/orgs/ORG1234567890123456789012/integrations/sync-profiles": { data: [] },
+      "/orgs/ORG1234567890123456789012/integrations/sync-runs/r1/records": {
+        data: [
+          {
+            id: "rr1",
+            external_id: "e-1",
+            model: "roster.class",
+            outcome: "conflict",
+            conflict_class: "clock_unresolvable",
+            detail: { field: "t", ours: "L", theirs: "R" },
+            resolved_action: null,
+          },
+          {
+            id: "rr2",
+            external_id: "e-2",
+            model: "roster.class",
+            outcome: "conflict",
+            conflict_class: "duplicate_external_id",
+            detail: {},
+            resolved_action: "dismiss",
+          },
+        ],
+      },
+      "/orgs/ORG1234567890123456789012/integrations/sync-runs": {
+        data: [
+          {
+            id: "r1",
+            profile_id: "sp1",
+            status: "partial",
+            trigger: "manual",
+            stats: { read: 2, conflicts: 2 },
+            error: null,
+            started_at: null,
+            finished_at: null,
+          },
+        ],
+      },
+    });
+    render(<SyncPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("Conflicts")).toBeTruthy());
+    fireEvent.click(screen.getByText("Conflicts"));
+    await waitFor(() => expect(screen.getByText(/clock_unresolvable/)).toBeTruthy());
+    // The already-resolved row shows its badge, no buttons.
+    expect(screen.getByText("dismiss")).toBeTruthy();
+    // Accept theirs only offered on the clock-tie row.
+    expect(screen.getAllByText("Accept theirs").length).toBe(1);
+    fireEvent.click(screen.getByText("Accept theirs"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/sync-runs/r1/records/rr1/resolve",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ action: "accept_theirs" }),
+        }),
+      ),
+    );
+  });
+});
+
+describe("identity links", () => {
+  it("lists active links and unlinks reversibly", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/identity-links/il1": { data: {} },
+      "/orgs/ORG1234567890123456789012/integrations/identity-links": {
+        data: [
+          {
+            id: "il1",
+            user_id: "U1",
+            source: "sso",
+            subject: "subj-9",
+            email_at_link: "a@b.io",
+            created_at: "2026-10-11T00:00:00Z",
+          },
+        ],
+      },
+    });
+    render(<IdentityPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("subj-9")).toBeTruthy());
+    fireEvent.click(screen.getByText("Unlink"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/identity-links/il1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+  });
+});
+
+describe("event payloads", () => {
+  it("expands the CloudEvent data on click", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/events": {
+        data: [
+          {
+            id: "e9",
+            type: "com.openskill.brief.created.v1",
+            subject: "b-1",
+            time: "2026-10-11T01:00:00Z",
+            data: { brief_id: "b-1", marker: "PAYLOAD_MARKER" },
+          },
+        ],
+      },
+      "/orgs/ORG1234567890123456789012/integrations/deliveries": { data: [] },
+      "/orgs/ORG1234567890123456789012/webhooks": { data: [] },
+    });
+    render(<EventsPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText(/brief.created/)).toBeTruthy());
+    expect(screen.queryByText(/PAYLOAD_MARKER/)).toBeFalsy();
+    fireEvent.click(screen.getByText(/brief.created/));
+    await waitFor(() => expect(screen.getByText(/PAYLOAD_MARKER/)).toBeTruthy());
+  });
 });
 
 describe("data page", () => {
