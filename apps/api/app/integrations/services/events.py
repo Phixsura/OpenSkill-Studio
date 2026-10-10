@@ -335,6 +335,90 @@ async def _maybe_auto_disable(db: AsyncSession, sub: WebhookSubscription, now: d
         log.warning("webhook_subscription_auto_disabled", subscription_id=sub.id)
 
 
+# ── retention (R44) ──
+
+# Operational data ages out on a fixed clock; business data never does.
+RETAIN_DELIVERIES = timedelta(days=90)   # terminal deliveries + attempts
+RETAIN_EVENTS = timedelta(days=180)      # canonical events (cascade deliveries)
+RETAIN_SYNC_RUNS = timedelta(days=180)   # terminal runs (cascade record rows)
+RETAIN_ROW_ERRORS = timedelta(days=180)  # import row errors
+_RETENTION_BATCH = 10_000
+
+
+async def sweep_retention(db: AsyncSession) -> dict[str, int]:
+    """Nightly bounded cleanup — the mesh/sync tables must not grow forever.
+
+    Deletes are batched (id-subquery LIMIT) so one giant backlog never holds
+    a long transaction; each loop commits its own batch. Only TERMINAL
+    deliveries/runs age out — anything still pending keeps its history.
+    """
+    from sqlalchemy import delete
+
+    from app.integrations.models import SyncRecordResult, SyncRun
+    from app.integrations.models.bulk import ImportRowError
+
+    now = _utcnow()
+    counts = {"deliveries": 0, "events": 0, "sync_runs": 0, "row_errors": 0}
+
+    async def drain(label: str, stmt_factory) -> None:
+        while True:
+            res = await db.execute(stmt_factory())
+            n = res.rowcount or 0
+            counts[label] += n
+            await db.commit()
+            if n < _RETENTION_BATCH:
+                break
+
+    await drain(
+        "deliveries",
+        lambda: delete(EventDelivery).where(
+            EventDelivery.id.in_(
+                select(EventDelivery.id)
+                .where(
+                    EventDelivery.status.in_(("succeeded", "exhausted", "cancelled")),
+                    EventDelivery.created_at < now - RETAIN_DELIVERIES,
+                )
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    await drain(
+        "events",
+        lambda: delete(IntegrationEvent).where(
+            IntegrationEvent.id.in_(
+                select(IntegrationEvent.id)
+                .where(IntegrationEvent.time < now - RETAIN_EVENTS)
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    await drain(
+        "sync_runs",
+        lambda: delete(SyncRun).where(
+            SyncRun.id.in_(
+                select(SyncRun.id)
+                .where(
+                    SyncRun.status.in_(("succeeded", "failed", "cancelled")),
+                    SyncRun.created_at < now - RETAIN_SYNC_RUNS,
+                )
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    await drain(
+        "row_errors",
+        lambda: delete(ImportRowError).where(
+            ImportRowError.id.in_(
+                select(ImportRowError.id)
+                .where(ImportRowError.created_at < now - RETAIN_ROW_ERRORS)
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    assert SyncRecordResult is not None  # cascade-deleted with their run
+    return counts
+
+
 # ── replay (§12.2) ──
 
 

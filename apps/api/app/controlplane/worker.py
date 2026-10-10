@@ -634,6 +634,17 @@ async def _intg_cert_expiry_sweep(ctx: dict) -> None:
             log.warning("intg_certs_expiring", count=n)
 
 
+async def _intg_retention_sweep(ctx: dict) -> None:
+    """ADR-018 R44: age out terminal deliveries/events/runs/row errors."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.events import sweep_retention
+
+    async with AsyncSessionLocal() as db:
+        counts = await sweep_retention(db)  # commits per batch itself
+        if any(counts.values()):
+            log.info("intg_retention_swept", **counts)
+
+
 async def _intg_connection_health_sweep(ctx: dict) -> None:
     """ADR-018 §4 (R41): ping active/degraded connections so health decays
     without a manual Ping; first unhealthy transition emits a mesh alert."""
@@ -684,6 +695,7 @@ def _cron_jobs() -> list:
         cron(_intg_scheduled_exports, hour=2, minute=47, timeout=1800, name="intg_exports"),
         cron(_intg_cert_expiry_sweep, hour=6, minute=18, name="intg_cert_expiry"),
         cron(_intg_connection_health_sweep, minute={14, 44}, name="intg_conn_health"),
+        cron(_intg_retention_sweep, hour=3, minute=52, timeout=3600, name="intg_retention"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single

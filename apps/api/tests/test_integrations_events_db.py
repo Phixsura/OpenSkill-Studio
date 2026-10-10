@@ -487,3 +487,49 @@ def test_event_matches_internal_wildcard_protection():
     assert not event_matches(["com.openskill.proj.*"], t.replace("project", "proj2"))
     # Junk patterns never match, never crash.
     assert not event_matches([None, 42, {}, ""], t)
+
+
+# ── R44: retention sweep ──
+
+
+@pytest.mark.asyncio
+async def test_retention_sweep_ages_out_terminal_data_only(db):
+    from datetime import timedelta as _td
+
+    from app.integrations.services.events import sweep_retention
+    from app.models.webhook import WebhookSubscription
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    old_time = datetime.now(UTC) - _td(days=200)
+    mid_time = datetime.now(UTC) - _td(days=100)
+
+    ev_old = IntegrationEvent(org_id=org.id, type="com.openskill.project.approved.v1",
+                              source="/t", subject="old", time=old_time)
+    ev_new = IntegrationEvent(org_id=org.id, type="com.openskill.project.approved.v1",
+                              source="/t", subject="new")
+    db.add_all([ev_old, ev_new])
+    await db.flush()
+    d_term = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
+                           status="succeeded", attempt_count=1, created_at=mid_time)
+    d_pend = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
+                           status="pending", attempt_count=0, created_at=mid_time,
+                           replay_of="X")  # dodge the partial-unique original index
+    db.add_all([d_term, d_pend])
+    await db.flush()
+    ids = {"ev_old": ev_old.id, "ev_new": ev_new.id,
+           "d_term": d_term.id, "d_pend": d_pend.id}
+    await db.commit()
+
+    counts = await sweep_retention(db)
+    assert counts["deliveries"] >= 1 and counts["events"] >= 1
+
+    assert await db.get(IntegrationEvent, ids["ev_old"]) is None
+    assert await db.get(IntegrationEvent, ids["ev_new"]) is not None
+    assert await db.get(EventDelivery, ids["d_term"]) is None
+    # A delivery still pending NEVER ages out, whatever its age.
+    assert await db.get(EventDelivery, ids["d_pend"]) is not None
+    # tidy: cancel the pending row so later sweeps may reclaim it.
+    (await db.get(EventDelivery, ids["d_pend"])).status = "cancelled"
+    await db.commit()
+    assert sub is not None and WebhookSubscription is not None

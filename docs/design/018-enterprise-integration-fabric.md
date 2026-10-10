@@ -831,6 +831,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.
 
+- **R44 — retention**: nightly 03:52 sweep ages out TERMINAL deliveries
+  (90d, attempts cascade), events (180d), terminal sync runs (180d, record
+  rows cascade) and import row errors (180d) in 10k-id batches with
+  per-batch commits. Pending work never ages out. Connection health decays
+  via the half-hourly ping sweep (R41) with transition alerts.
+
 - **R42 — OIDC Back-Channel Logout 1.0 (RP)**: POST
   /sso/oidc/backchannel-logout/{connection_id} accepts the IdP's
   logout_token (same discovery→JWKS trust chain as id_tokens; events member

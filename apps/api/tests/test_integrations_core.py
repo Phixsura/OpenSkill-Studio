@@ -377,6 +377,7 @@ def test_every_fabric_sweep_has_a_registered_cron():
         "intg_exports",          # ExportStream.schedule driver
         "intg_cert_expiry",      # SAML cert expiry alerts
         "intg_conn_health",      # connection health decay + alerts
+        "intg_retention",        # terminal-data age-out (R44)
     }
     missing = required - names
     assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"
