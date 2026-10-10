@@ -9,12 +9,14 @@ from app.integrations.api.scim import scim_router
 from app.integrations.api.scim import token_admin_router as scim_token_admin_router
 from app.integrations.api.sso import admin_router as sso_admin_router
 from app.integrations.api.sso import protocol_router as sso_protocol_router
+from app.integrations.api.sync import router as sync_router
 
 integrations_router = APIRouter(dependencies=[Depends(rate_limit(120, 60))])
 integrations_router.include_router(connections_router)
 integrations_router.include_router(events_router)
 integrations_router.include_router(sso_admin_router)
 integrations_router.include_router(scim_token_admin_router)
+integrations_router.include_router(sync_router)
 # Protocol endpoints are tighter-limited: they are unauthenticated.
 integrations_router.include_router(
     sso_protocol_router, dependencies=[Depends(rate_limit(30, 60))]

@@ -49,3 +49,21 @@ from app.integrations.models.sso import (  # noqa: F401
     SsoConnection,
     SsoLoginState,
 )
+from app.integrations.models.sync import (  # noqa: F401
+    BATCH_SIZE,
+    CANONICAL_MODELS,
+    CONFLICT_CLASSES,
+    FIELD_POLICIES,
+    MAPPING_DIRECTIONS,
+    RECORD_OUTCOMES,
+    RUN_STATUSES,
+    RUN_TRIGGERS,
+    STALE_RUN_REAP_MINUTES,
+    SYNC_DIRECTIONS,
+    SYNC_SCHEDULES,
+    MappingProfile,
+    StagedRecord,
+    SyncProfile,
+    SyncRecordResult,
+    SyncRun,
+)
