@@ -138,14 +138,19 @@ async def list_webhooks(
 async def rotate_webhook_secret(
     org_id: str,
     webhook_id: str,
+    immediate: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Defect #103: rotate the signing secret in place — the new secret is
-    returned once, in the same created-response shape."""
+    returned once. Default rotation keeps the old secret co-signing mesh
+    deliveries for 7 days (ADR-018 §12.2); ?immediate=true is the
+    leaked-secret path (old key stops signing now)."""
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WebhookService(db)
-    sub = await svc.rotate_secret(webhook_id, org_id, actor_user_id=user.id)
+    sub = await svc.rotate_secret(
+        webhook_id, org_id, actor_user_id=user.id, immediate=immediate
+    )
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 

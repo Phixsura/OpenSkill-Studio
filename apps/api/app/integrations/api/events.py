@@ -13,7 +13,6 @@ from app.integrations.models import DeliveryAttempt, EventDelivery, IntegrationE
 from app.integrations.services.events import replay_delivery
 from app.models.organization import OrgRole
 from app.models.user import User
-from app.models.webhook import WebhookSubscription
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/orgs/{org_id}/integrations", tags=["Integrations"])
@@ -161,30 +160,3 @@ async def replay(
     resp = _delivery_response(clone, event.type if event else "?")
     await db.commit()
     return {"data": resp}
-
-
-@router.post(
-    "/subscriptions/{subscription_id}/rotate-secret",
-    response_model=DataResponse[dict],
-)
-async def rotate_subscription_secret(
-    org_id: str,
-    subscription_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Zero-downtime secret rotation (§12.2): the previous secret co-signs
-    for 7 days. Returns the NEW secret once — it is not retrievable later."""
-    import secrets as _secrets
-    from datetime import UTC
-    from datetime import datetime as _dt
-
-    await _admin(org_id, user, db)
-    sub = await db.get(WebhookSubscription, subscription_id)
-    if sub is None or sub.org_id != org_id:
-        raise AppError("WEBHOOK_NOT_FOUND", "Subscription not found", 404)
-    sub.secret_prev = sub.secret
-    sub.secret = _secrets.token_hex(32)
-    sub.secret_rotated_at = _dt.now(UTC)
-    await db.commit()
-    return {"data": {"secret": sub.secret, "rotated_at": sub.secret_rotated_at.isoformat()}}

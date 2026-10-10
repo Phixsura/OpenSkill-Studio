@@ -440,3 +440,27 @@ async def test_subscription_accepts_mesh_patterns(db):
     assert e.value.code == "INVALID_EVENT"
     with pytest.raises(AppError):
         await svc.create(org.id, "https://hooks.example.com/x", ["totally.unknown"])
+
+
+# ── R14: rotation keeps the old secret co-signing (one behavior everywhere) ──
+
+
+@pytest.mark.asyncio
+async def test_legacy_rotate_cosigns_then_immediate_stops(db):
+    from app.integrations.services.events import build_delivery_headers
+    from app.services.webhook import WebhookService
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    old_secret = sub.secret
+    svc = WebhookService(db)
+    await svc.rotate_secret(sub.id, org.id)
+    assert sub.secret != old_secret
+    assert sub.secret_prev == old_secret  # zero-downtime co-sign window
+    h = build_delivery_headers(sub, "evt", b"{}", datetime.now(UTC))
+    assert len(h["webhook-signature"].split(" ")) == 2
+    # Leaked-secret path: immediate rotation drops the old key NOW.
+    await svc.rotate_secret(sub.id, org.id, immediate=True)
+    assert sub.secret_prev is None
+    h2 = build_delivery_headers(sub, "evt", b"{}", datetime.now(UTC))
+    assert len(h2["webhook-signature"].split(" ")) == 1

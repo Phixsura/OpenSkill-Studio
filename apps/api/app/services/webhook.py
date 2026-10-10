@@ -274,15 +274,29 @@ class WebhookService:
         return list(result.scalars().all())
 
     async def rotate_secret(
-        self, webhook_id: str, org_id: str, *, actor_user_id: str | None = None
+        self,
+        webhook_id: str,
+        org_id: str,
+        *,
+        actor_user_id: str | None = None,
+        immediate: bool = False,
     ) -> WebhookSubscription:
-        """Defect #103 (industry staple): retire a leaked signing secret in
-        place — same id/url/events, fresh token_hex(32). Org-scoped with the
-        uniform 404; the new secret is returned ONCE (the created-response
-        shape), never listed afterwards."""
+        """Defect #103 (industry staple): retire a signing secret in place —
+        same id/url/events, fresh token_hex(32). Org-scoped uniform 404; the
+        new secret is returned ONCE, never listed afterwards.
+
+        ADR-018 §12.2 (marathon R14): by default the PREVIOUS secret co-signs
+        mesh deliveries for 7 days so receivers can roll keys without a hard
+        break. ``immediate=True`` is the leaked-secret path — the old key
+        stops signing right now."""
         sub = await self.db.get(WebhookSubscription, webhook_id)
         if sub is None or sub.org_id != org_id:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        sub.secret_prev = None if immediate else sub.secret
+        sub.secret_rotated_at = _dt.now(_UTC)
         sub.secret = secrets.token_hex(32)
         await self.db.flush()
         await self._record_webhook_audit(

@@ -11,6 +11,15 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
+interface MappingProfile {
+  id: string;
+  name: string;
+  direction: string;
+  model: string;
+  document: { fields?: unknown[] };
+  version: number;
+}
+
 interface SyncProfile {
   id: string;
   connection_id: string;
@@ -56,6 +65,14 @@ export default function SyncIntegrationsPage() {
   const base = `/orgs/${orgId}/integrations`;
 
   const [openRun, setOpenRun] = useState<string | null>(null);
+  const [mapName, setMapName] = useState("");
+  const [mapModel, setMapModel] = useState("roster.class");
+  const [mapDoc, setMapDoc] = useState(
+    JSON.stringify({ fields: [{ target: "title", path: "title" }] }, null, 2),
+  );
+  const [previewFor, setPreviewFor] = useState<string | null>(null);
+  const [sampleJson, setSampleJson] = useState('{"title": "Example"}');
+  const [previewOut, setPreviewOut] = useState<string | null>(null);
 
   const profilesQ = useQuery({
     queryKey: ["intg-sync-profiles", orgId],
@@ -64,6 +81,10 @@ export default function SyncIntegrationsPage() {
   const runsQ = useQuery({
     queryKey: ["intg-sync-runs", orgId],
     queryFn: () => apiWithAuth<{ data: SyncRun[] }>(`${base}/sync-runs`),
+  });
+  const mappingsQ = useQuery({
+    queryKey: ["intg-mappings", orgId],
+    queryFn: () => apiWithAuth<{ data: MappingProfile[] }>(`${base}/mapping-profiles`),
   });
   const conflictsQ = useQuery({
     queryKey: ["intg-run-records", orgId, openRun],
@@ -86,6 +107,49 @@ export default function SyncIntegrationsPage() {
       toast.success("Run queued");
       queryClient.invalidateQueries({ queryKey: ["intg-sync-runs", orgId] });
     },
+    onError,
+  });
+
+  const createMapping = useMutation({
+    mutationFn: () => {
+      let document: unknown;
+      try {
+        document = JSON.parse(mapDoc);
+      } catch {
+        throw new ApiError(0, "BAD_JSON", "Mapping document is not valid JSON");
+      }
+      return apiWithAuth(`${base}/mapping-profiles`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: mapName,
+          direction: "inbound",
+          model: mapModel,
+          document,
+        }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Mapping created");
+      setMapName("");
+      queryClient.invalidateQueries({ queryKey: ["intg-mappings", orgId] });
+    },
+    onError,
+  });
+
+  const previewMapping = useMutation({
+    mutationFn: (id: string) => {
+      let sample: unknown;
+      try {
+        sample = JSON.parse(sampleJson);
+      } catch {
+        throw new ApiError(0, "BAD_JSON", "Sample is not valid JSON");
+      }
+      return apiWithAuth<{ data: unknown[] }>(`${base}/mapping-profiles/${id}/preview`, {
+        method: "POST",
+        body: JSON.stringify({ samples: [sample] }),
+      });
+    },
+    onSuccess: (res) => setPreviewOut(JSON.stringify(res.data[0], null, 2)),
     onError,
   });
 
@@ -164,6 +228,93 @@ export default function SyncIntegrationsPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-medium">Mapping profiles</h2>
+        <ul className="space-y-2">
+          {(mappingsQ.data?.data ?? []).map((m) => (
+            <li key={m.id} className="rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="font-medium">{m.name}</span>
+                  <span className="ml-2 font-mono text-xs">{m.model}</span>
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    v{m.version} · {m.direction} · {(m.document.fields ?? []).length} fields
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPreviewFor(previewFor === m.id ? null : m.id)}
+                >
+                  Preview
+                </Button>
+              </div>
+              {previewFor === m.id && (
+                <div className="mt-2 space-y-2 border-t pt-2">
+                  <textarea
+                    aria-label={`Sample record for ${m.name}`}
+                    className="h-20 w-full rounded-md border p-2 font-mono text-xs"
+                    value={sampleJson}
+                    onChange={(e) => setSampleJson(e.target.value)}
+                  />
+                  <Button size="sm" onClick={() => previewMapping.mutate(m.id)}>
+                    Run preview
+                  </Button>
+                  {previewOut && (
+                    <pre className="bg-muted overflow-auto rounded-md border p-2 text-xs">
+                      {previewOut}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <input
+              aria-label="Mapping name"
+              className="rounded-md border px-2 py-1 text-sm"
+              placeholder="oneroster-classes"
+              value={mapName}
+              onChange={(e) => setMapName(e.target.value)}
+            />
+            <select
+              aria-label="Canonical model"
+              className="rounded-md border px-2 py-1 text-sm"
+              value={mapModel}
+              onChange={(e) => setMapModel(e.target.value)}
+            >
+              {[
+                "roster.class",
+                "roster.enrollment",
+                "roster.user",
+                "roster.term",
+                "talent.application",
+                "crm.deal",
+              ].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              disabled={!mapName || createMapping.isPending}
+              onClick={() => createMapping.mutate()}
+            >
+              Create mapping
+            </Button>
+          </div>
+          <textarea
+            aria-label="Mapping document JSON"
+            className="h-32 w-full rounded-md border p-2 font-mono text-xs"
+            value={mapDoc}
+            onChange={(e) => setMapDoc(e.target.value)}
+          />
+        </div>
       </section>
 
       <section className="space-y-3">
