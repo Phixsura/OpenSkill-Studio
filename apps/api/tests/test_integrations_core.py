@@ -381,9 +381,9 @@ def test_every_fabric_sweep_has_a_registered_cron():
     missing = required - names
     assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"
 
-    import app.controlplane.worker as cp_worker
-
     from pathlib import Path
+
+    import app.controlplane.worker as cp_worker
 
     src = Path(cp_worker.__file__).read_text()
     assert "app.integrations.worker" in src  # outbox handlers registered
