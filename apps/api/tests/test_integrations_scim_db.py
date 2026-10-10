@@ -405,3 +405,53 @@ async def test_scim_formula_username_rejected(ctx):
     assert e.value.status == 400 and e.value.scim_type == "invalidValue"
     with pytest.raises(ScimError):
         await _usvc(ctx).create({"userName": "x@nodot"})
+
+
+# ── R32: SCIM mutation-probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_group_map_role_ceiling_rejects_admin_and_owner(ctx):
+    """Mint ceiling: a group_map must never map to admin/owner — adding
+    'admin' to ROLE_MAP_ALLOWED would be privilege escalation via IdP."""
+    from app.exceptions import AppError
+
+    svc = ScimTokenService(ctx["db"])
+    for role in ("admin", "owner"):
+        with pytest.raises(AppError) as e:
+            await svc.create(
+                ctx["org"].id,
+                name=f"bad-{role}",
+                group_map={"Ops": {"kind": "role", "role": role}},
+                created_by=ctx["owner"].id,
+            )
+        assert e.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_deactivation_and_patch_reactivation(ctx):
+    """PUT active=false deprovisions exactly like PATCH; PATCH active=true
+    restores an archived membership. Display names are trimmed."""
+    email = f"put-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    res, _ = await _usvc(ctx).create({"userName": email, "displayName": "P"})
+    uid = res["id"]
+    out = await _usvc(ctx).replace(uid, {"userName": email, "active": "False"})
+    assert out["active"] is False
+    # PATCH reactivation.
+    out2 = await _usvc(ctx).patch(
+        uid, {"Operations": [{"op": "replace", "path": "active", "value": True}]}
+    )
+    assert out2["active"] is True
+    # displayName whitespace trimmed on PATCH.
+    out3 = await _usvc(ctx).patch(
+        uid, {"Operations": [{"op": "replace", "path": "displayName", "value": "  Neat  "}]}
+    )
+    assert out3["displayName"] == "Neat"
+
+
+@pytest.mark.asyncio
+async def test_group_patch_invalid_op_rejected(ctx):
+    g = await _gsvc(ctx).create({"displayName": f"G-{uuid.uuid4().hex[:6]}"})
+    with pytest.raises(ScimError) as e:
+        await _gsvc(ctx).patch(g["id"], {"Operations": [{"op": "upsert", "value": {}}]})
+    assert e.value.status == 400
