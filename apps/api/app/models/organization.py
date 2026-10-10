@@ -115,6 +115,11 @@ class OrgMember(Base):
         Enum(OrgRole, name="org_role", create_constraint=True),
         default=OrgRole.STUDENT,
     )
+    # ADR-018 §5.2: break-glass members bypass enforced SSO (owner-granted,
+    # max 2 per org, audited on every use). Never settable via JIT/SCIM.
+    is_break_glass: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     status: Mapped[MemberStatus] = mapped_column(
         Enum(MemberStatus, name="member_status", create_constraint=True),
         default=MemberStatus.ACTIVE,

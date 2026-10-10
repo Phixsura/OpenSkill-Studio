@@ -182,6 +182,12 @@ class AuthService:
         if user.status == UserStatus.DELETED:
             raise InvalidCredentialsError()
 
+        # ADR-018 §5.2 enforced SSO: a member of an org that enforces SSO and
+        # has verified this email's domain must authenticate via the IdP —
+        # password login is refused unless the member is break-glass (owner-
+        # granted escape hatch; every use is audited to the event mesh).
+        await self._enforce_sso_gate(user)
+
         user.last_login_at = datetime.now(UTC)
         await self.db.flush()
 
@@ -496,6 +502,50 @@ class AuthService:
         return token
 
     # ── Helpers ───────────────────────────────────────────────
+
+    async def _enforce_sso_gate(self, user: User) -> None:
+        """Raise SSO_REQUIRED for password logins covered by enforced SSO
+        (fail-safe OPEN only for mesh audit, never for the gate itself)."""
+        from app.integrations.models import OrgDomain, SsoConnection
+        from app.models.organization import MemberStatus, OrgMember
+
+        domain = user.email.rsplit("@", 1)[-1].lower()
+        rows = (
+            await self.db.execute(
+                select(OrgMember.is_break_glass, OrgMember.org_id)
+                .join(SsoConnection, SsoConnection.org_id == OrgMember.org_id)
+                .join(
+                    OrgDomain,
+                    (OrgDomain.org_id == OrgMember.org_id)
+                    & (OrgDomain.domain == domain)
+                    & (OrgDomain.status == "verified"),
+                )
+                .where(
+                    OrgMember.user_id == user.id,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                    SsoConnection.enforce_sso.is_(True),
+                    SsoConnection.status == "active",
+                )
+            )
+        ).all()
+        if not rows:
+            return
+        if not any(bg for bg, _ in rows):
+            raise AppError("SSO_REQUIRED", "This organization requires SSO sign-in", 403)
+        # Break-glass use is a first-class audited fact.
+        org_id = next(org for bg, org in rows if bg)
+        try:
+            from app.integrations.facade import emit_event
+
+            await emit_event(
+                self.db,
+                org_id,
+                "org.breakglass.login",
+                subject=user.id,
+                data={"user_id": user.id},
+            )
+        except Exception:
+            log.warning("mesh_emit_failed", event="org.breakglass.login", user_id=user.id)
 
     async def _create_token_pair(
         self,

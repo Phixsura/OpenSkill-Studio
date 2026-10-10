@@ -20,8 +20,24 @@ from app.integrations.models.events import (  # noqa: F401
     EventDelivery,
     IntegrationEvent,
 )
+from app.integrations.models.identity import (  # noqa: F401
+    LINK_SOURCES,
+    MATCH_QUEUE_STATUSES,
+    ExternalIdentityLink,
+    IdentityMatchQueue,
+)
 from app.integrations.models.provider import (  # noqa: F401
     AUTH_MODES,
     PROVIDER_CATEGORIES,
     IntegrationProvider,
+)
+from app.integrations.models.sso import (  # noqa: F401
+    DOMAIN_STATUSES,
+    JIT_ALLOWED_ROLES,
+    PUBLIC_EMAIL_DOMAINS,
+    SSO_PROTOCOLS,
+    SSO_STATUSES,
+    OrgDomain,
+    SsoConnection,
+    SsoLoginState,
 )
