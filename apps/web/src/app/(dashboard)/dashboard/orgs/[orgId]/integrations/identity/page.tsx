@@ -49,6 +49,23 @@ interface IdentityLink {
   created_at: string;
 }
 
+interface LtiRegistration {
+  id: string;
+  issuer: string;
+  client_id: string;
+  status: string;
+  deployment_ids: string[];
+}
+
+interface LtiLink {
+  id: string;
+  deployment_id: string;
+  resource_link_id: string;
+  kind: string;
+  target_id: string;
+  has_nrps: boolean;
+}
+
 interface QueueItem {
   id: string;
   source: string;
@@ -208,6 +225,60 @@ export default function IdentityIntegrationsPage() {
       queryClient.invalidateQueries({ queryKey: ["intg-scim-tokens", orgId] });
     },
     onError,
+  });
+
+  const [ltiForm, setLtiForm] = useState({
+    issuer: "",
+    client_id: "",
+    auth_login_url: "",
+    auth_token_url: "",
+    jwks_url: "",
+    deployment_ids: "",
+  });
+  const [openReg, setOpenReg] = useState<string | null>(null);
+
+  const ltiRegsQ = useQuery({
+    queryKey: ["intg-lti-regs", orgId],
+    queryFn: () => apiWithAuth<{ data: LtiRegistration[] }>(`${base}/lti/registrations`),
+  });
+
+  const ltiLinksQ = useQuery({
+    queryKey: ["intg-lti-links", orgId, openReg],
+    queryFn: () =>
+      apiWithAuth<{ data: LtiLink[] }>(`${base}/lti/registrations/${openReg}/resource-links`),
+    enabled: openReg !== null,
+  });
+
+  const createLtiReg = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`${base}/lti/registrations`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...ltiForm,
+          deployment_ids: ltiForm.deployment_ids
+            .split(",")
+            .map((d) => d.trim())
+            .filter(Boolean),
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("LMS registration created");
+      queryClient.invalidateQueries({ queryKey: ["intg-lti-regs", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Create failed"),
+  });
+
+  const nrpsSync = useMutation({
+    mutationFn: (linkId: string) =>
+      apiWithAuth<{ data: Record<string, number> }>(
+        `${base}/lti/resource-links/${linkId}/nrps-sync`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) =>
+      toast.success(
+        `Roster synced: ${res.data.resolved} resolved, ${res.data.jit_created} created, ${res.data.queued} queued`,
+      ),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "NRPS sync failed"),
   });
 
   const linksQ = useQuery({
@@ -547,6 +618,86 @@ export default function IdentityIntegrationsPage() {
           ))}
           {(queueQ.data?.data ?? []).length === 0 && (
             <li className="text-muted-foreground text-sm">Queue is empty.</li>
+          )}
+        </ul>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-medium">LTI platforms</h2>
+        <p className="text-muted-foreground text-sm">
+          LMS registrations (LTI 1.3). Launches validate against the pinned issuer, client and
+          deployment allowlist; NRPS pre-provisions course members.
+        </p>
+        <form
+          className="grid gap-2 sm:grid-cols-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            createLtiReg.mutate();
+          }}
+        >
+          {(
+            [
+              ["issuer", "https://lms.example.com"],
+              ["client_id", "client id"],
+              ["auth_login_url", "auth login URL"],
+              ["auth_token_url", "token URL"],
+              ["jwks_url", "JWKS URL"],
+              ["deployment_ids", "deployment ids (comma)"],
+            ] as const
+          ).map(([key, ph]) => (
+            <Input
+              key={key}
+              aria-label={`LTI ${key}`}
+              placeholder={ph}
+              value={ltiForm[key]}
+              onChange={(e) => setLtiForm((f) => ({ ...f, [key]: e.target.value }))}
+              required
+            />
+          ))}
+          <Button type="submit" size="sm" className="sm:col-span-3 sm:justify-self-start">
+            Register LMS
+          </Button>
+        </form>
+        <ul className="space-y-2">
+          {(ltiRegsQ.data?.data ?? []).map((reg) => (
+            <li key={reg.id} className="rounded-md border p-3">
+              <button
+                type="button"
+                className="w-full text-left text-sm"
+                onClick={() => setOpenReg(openReg === reg.id ? null : reg.id)}
+              >
+                <span className="font-mono text-xs">{reg.issuer}</span>
+                <span className="text-muted-foreground ml-2 text-xs">
+                  {reg.client_id} · {reg.status} · deployments: {reg.deployment_ids.join(", ")}
+                </span>
+              </button>
+              {openReg === reg.id && (
+                <ul className="mt-2 space-y-1 border-t pt-2 text-xs">
+                  {(ltiLinksQ.data?.data ?? []).map((l) => (
+                    <li key={l.id} className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono">
+                        {l.resource_link_id} → {l.kind}:{l.target_id}
+                      </span>
+                      {l.has_nrps ? (
+                        <Button size="sm" variant="outline" onClick={() => nrpsSync.mutate(l.id)}>
+                          Sync roster
+                        </Button>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          launch once to enable roster sync
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                  {(ltiLinksQ.data?.data ?? []).length === 0 && (
+                    <li className="text-muted-foreground">No resource links mapped.</li>
+                  )}
+                </ul>
+              )}
+            </li>
+          ))}
+          {(ltiRegsQ.data?.data ?? []).length === 0 && (
+            <li className="text-muted-foreground text-sm">No LMS registrations.</li>
           )}
         </ul>
       </section>

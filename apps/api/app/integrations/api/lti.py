@@ -170,6 +170,45 @@ class DeepLinkSelectRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+@admin_router.get(
+    "/registrations/{reg_id}/resource-links", response_model=DataResponse[list[dict]]
+)
+async def list_resource_links(
+    org_id: str,
+    reg_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    svc = LtiService(db)
+    await svc.get_registration(org_id, reg_id)  # uniform 404 wall
+    from app.integrations.models import LtiResourceLink
+
+    rows = (
+        await db.execute(
+            select(LtiResourceLink)
+            .where(LtiResourceLink.registration_id == reg_id)
+            .order_by(LtiResourceLink.created_at.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+    return {
+        "data": [
+            {
+                "id": r.id,
+                "deployment_id": r.deployment_id,
+                "resource_link_id": r.resource_link_id,
+                "kind": r.kind,
+                "target_id": r.target_id,
+                "grade_sync_enabled": r.grade_sync_enabled,
+                "has_nrps": bool(r.nrps_url),
+                "has_ags": bool(r.ags_lineitem_url),
+            }
+            for r in rows
+        ]
+    }
+
+
 @admin_router.post(
     "/resource-links/{link_id}/nrps-sync", response_model=DataResponse[dict]
 )

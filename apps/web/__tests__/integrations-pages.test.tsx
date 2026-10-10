@@ -464,6 +464,59 @@ describe("fabric health strip", () => {
   });
 });
 
+describe("lti platforms", () => {
+  it("lists registrations, expands links and syncs roster via NRPS", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/lti/resource-links/L1/nrps-sync": {
+        data: { read: 4, resolved: 2, jit_created: 2, queued: 1, skipped: 1 },
+      },
+      "/orgs/ORG1234567890123456789012/integrations/lti/registrations/R1/resource-links": {
+        data: [
+          {
+            id: "L1",
+            deployment_id: "dep-1",
+            resource_link_id: "rl-1",
+            kind: "skill",
+            target_id: "SK1",
+            has_nrps: true,
+          },
+          {
+            id: "L2",
+            deployment_id: "dep-1",
+            resource_link_id: "rl-2",
+            kind: "skill",
+            target_id: "SK2",
+            has_nrps: false,
+          },
+        ],
+      },
+      "/orgs/ORG1234567890123456789012/integrations/lti/registrations": {
+        data: [
+          {
+            id: "R1",
+            issuer: "https://lms.example.com",
+            client_id: "tool-1",
+            status: "active",
+            deployment_ids: ["dep-1"],
+          },
+        ],
+      },
+    });
+    render(<IdentityPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("https://lms.example.com")).toBeTruthy());
+    fireEvent.click(screen.getByText("https://lms.example.com"));
+    await waitFor(() => expect(screen.getByText(/rl-1/)).toBeTruthy());
+    expect(screen.getByText(/launch once to enable roster sync/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Sync roster"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/lti/resource-links/L1/nrps-sync",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+});
+
 describe("identity links", () => {
   it("lists active links and unlinks reversibly", async () => {
     route({
