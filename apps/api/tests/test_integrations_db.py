@@ -349,7 +349,6 @@ async def test_connection_upgrade_revalidates(ctx):
 async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
     """Kills: PATCH-path base_url skipping the SSRF screen, and
     additionalProperties=False not enforced on config."""
-    from app.config import settings as _settings
     from app.integrations.security import EgressBlockedError
 
     user = await _user(db)
@@ -362,8 +361,8 @@ async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
         config={"token_url": "https://idp.example.com/token"},
         base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
     )
-    # Update path must run the same egress screen as create.
-    assert _settings.egress_allow_private is False or True  # document intent
+    # Update path must run the same egress screen as create (the test env
+    # keeps egress_allow_private unset, so literal private IPs are refused).
     with pytest.raises(EgressBlockedError):
         await svc.update(org.id, conn.id, base_url="https://169.254.169.254/x")
     with pytest.raises(EgressBlockedError):
