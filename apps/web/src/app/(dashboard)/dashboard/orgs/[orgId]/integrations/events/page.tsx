@@ -1,0 +1,204 @@
+"use client";
+
+// Event mesh console (ADR-018 §12): browse canonical events, inspect
+// webhook deliveries with per-attempt history, replay failed deliveries.
+
+import { useState } from "react";
+import { useParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { apiWithAuth, ApiError } from "@/lib/api";
+
+interface MeshEvent {
+  id: string;
+  type: string;
+  subject: string | null;
+  time: string | null;
+}
+
+interface Attempt {
+  id: string;
+  status_code: number | null;
+  error: string | null;
+  latency_ms: number | null;
+  attempted_at: string;
+}
+
+interface Delivery {
+  id: string;
+  event_id: string;
+  event_type: string;
+  subscription_id: string;
+  status: string;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  replay_of: string | null;
+  attempts?: Attempt[] | null;
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  succeeded: "bg-green-100 text-green-800",
+  exhausted: "bg-red-100 text-red-800",
+  pending: "bg-amber-100 text-amber-800",
+  delivering: "bg-blue-100 text-blue-800",
+  cancelled: "bg-gray-100 text-gray-800",
+};
+
+export default function IntegrationEventsPage() {
+  const { orgId } = useParams<{ orgId: string }>();
+  const queryClient = useQueryClient();
+  const base = `/orgs/${orgId}/integrations`;
+
+  const [typePrefix, setTypePrefix] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [openDelivery, setOpenDelivery] = useState<string | null>(null);
+
+  const { data: eventsData, isLoading: eventsLoading } = useQuery({
+    queryKey: ["intg-events", orgId, typePrefix],
+    queryFn: () =>
+      apiWithAuth<{ data: MeshEvent[] }>(
+        `${base}/events${typePrefix ? `?type_prefix=${encodeURIComponent(typePrefix)}` : ""}`,
+      ),
+  });
+  const events = eventsData?.data ?? [];
+
+  const {
+    data: deliveriesData,
+    isLoading: deliveriesLoading,
+    isError: deliveriesError,
+  } = useQuery({
+    queryKey: ["intg-deliveries", orgId, statusFilter],
+    queryFn: () =>
+      apiWithAuth<{ data: Delivery[] }>(
+        `${base}/deliveries${statusFilter ? `?status=${statusFilter}` : ""}`,
+      ),
+  });
+  const deliveries = deliveriesData?.data ?? [];
+
+  const { data: detailData } = useQuery({
+    queryKey: ["intg-delivery", orgId, openDelivery],
+    queryFn: () => apiWithAuth<{ data: Delivery }>(`${base}/deliveries/${openDelivery}`),
+    enabled: openDelivery !== null,
+  });
+
+  const replay = useMutation({
+    mutationFn: (id: string) => apiWithAuth(`${base}/deliveries/${id}/replay`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Replay queued");
+      queryClient.invalidateQueries({ queryKey: ["intg-deliveries", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Replay failed"),
+  });
+
+  return (
+    <div className="space-y-8 p-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Event mesh</h1>
+        <p className="text-muted-foreground text-sm">
+          Canonical events with signed webhook delivery — at-least-once, retried on the Svix ladder,
+          replayable after exhaustion.
+        </p>
+      </div>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-medium">Deliveries</h2>
+          <select
+            aria-label="Delivery status filter"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="">All statuses</option>
+            <option value="pending">pending</option>
+            <option value="succeeded">succeeded</option>
+            <option value="exhausted">exhausted</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </div>
+        {deliveriesLoading && <p>Loading deliveries…</p>}
+        {deliveriesError && <p className="text-destructive">Failed to load deliveries.</p>}
+        {!deliveriesLoading && deliveries.length === 0 && (
+          <p className="text-muted-foreground text-sm">No deliveries yet.</p>
+        )}
+        <ul className="space-y-2">
+          {deliveries.map((d) => (
+            <li key={d.id} className="rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="font-mono text-xs">{d.event_type}</span>
+                  <span
+                    className={`ml-2 rounded px-2 py-0.5 text-xs ${STATUS_COLORS[d.status] ?? ""}`}
+                  >
+                    {d.status}
+                  </span>
+                  <span className="text-muted-foreground ml-2 text-xs">
+                    attempts: {d.attempt_count}
+                  </span>
+                  {d.replay_of && <span className="ml-2 text-xs text-blue-700">replay</span>}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setOpenDelivery(openDelivery === d.id ? null : d.id)}
+                  >
+                    Attempts
+                  </Button>
+                  {(d.status === "exhausted" ||
+                    d.status === "cancelled" ||
+                    d.status === "succeeded") && (
+                    <Button size="sm" variant="outline" onClick={() => replay.mutate(d.id)}>
+                      Replay
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {openDelivery === d.id && (
+                <ul className="mt-2 space-y-1 border-t pt-2 text-xs">
+                  {(detailData?.data.attempts ?? []).map((a) => (
+                    <li key={a.id} className="font-mono">
+                      {a.attempted_at} — {a.status_code ?? "—"}{" "}
+                      {a.error && <span className="text-red-700">{a.error}</span>}
+                      {a.latency_ms != null && <span> ({a.latency_ms}ms)</span>}
+                    </li>
+                  ))}
+                  {detailData?.data.attempts?.length === 0 && <li>No attempts yet.</li>}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-medium">Events</h2>
+          <Input
+            aria-label="Type prefix filter"
+            className="max-w-xs"
+            placeholder="Filter by type prefix…"
+            value={typePrefix}
+            onChange={(e) => setTypePrefix(e.target.value)}
+          />
+        </div>
+        {eventsLoading && <p>Loading events…</p>}
+        <ul className="space-y-1">
+          {events.map((e) => (
+            <li key={e.id} className="rounded border px-3 py-2 text-sm">
+              <span className="font-mono text-xs">{e.type}</span>
+              {e.subject && <span className="text-muted-foreground ml-2 text-xs">{e.subject}</span>}
+              {e.time && <span className="text-muted-foreground ml-2 text-xs">{e.time}</span>}
+            </li>
+          ))}
+          {!eventsLoading && events.length === 0 && (
+            <li className="text-muted-foreground text-sm">No events recorded.</li>
+          )}
+        </ul>
+      </section>
+    </div>
+  );
+}
