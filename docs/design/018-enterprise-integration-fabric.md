@@ -864,6 +864,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R55-R62**: e2e-caught /Bulk serialization crash (exc.body unbound
+  method — unit test never serialized; now json.dumps the envelope);
+  probe campaign over every NEW module (apply_bulk incl. SAVEPOINT
+  isolation proof, NRPS incl. malicious rel=next egress refusal + page
+  cap, metadata refresh, back-channel logout, retention batching,
+  connection-health sweep, gradeable hook org-scoping, generic REST/ATS
+  connectors — which had ZERO direct tests), outbox-handler sync path
+  driven end-to-end; failed-attempt response snippets (intg10, Svix
+  parity). Live E2E now 39 checks.
+
 - **R49-R54 (second window, continued)**: LTI NRPS v2 membership
   pre-provisioning (launch captures namesroleservice; paginated fetch via
   generalized service_token; identity-resolution ladder, instructor/student
