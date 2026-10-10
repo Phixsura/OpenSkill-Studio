@@ -932,6 +932,27 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
                                exp=int(time.time()) + 3600),
             service=svc,
         )
+    # A REVOKED link is not authoritative: logout for its subject sweeps 0.
+    from app.integrations.models import ExternalIdentityLink as _Link
+
+    link_row = (
+        await db.execute(
+            select(_Link).where(
+                _Link.connection_ref == conn.id, _Link.subject == "bcl-sub"
+            )
+        )
+    ).scalar_one()
+    link_row.revoked_at = datetime.now(UTC)
+    await db.flush()
+    assert (
+        await handle_backchannel_logout(
+            db, conn.id, _mint_logout_token(sub="bcl-sub"), service=svc
+        )
+        == 0
+    )
+    link_row.revoked_at = None
+    await db.flush()
+
     # unknown subject: clean 200-equivalent (0 swept), no error oracle.
     assert (
         await handle_backchannel_logout(

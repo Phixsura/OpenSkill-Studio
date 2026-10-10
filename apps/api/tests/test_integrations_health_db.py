@@ -220,6 +220,35 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
         ).scalars().all()
         assert len(events) == 1
         assert events[0].data["error_class"] == "CONNECTION_AUTH_REJECTED"
+        # Error connections are NOT pinged again (load guard) — count calls.
+        calls = {"n": 0}
+
+        class _CountingDead(_DeadConnector):
+            async def ping(self, ctx):
+                calls["n"] += 1
+                raise AppError("CONNECTION_AUTH_REJECTED", "401", 502)
+
+        registry.CONNECTORS["oneroster"] = _CountingDead()
+        await svc.sweep_connection_health()
+        assert calls["n"] == 0  # the parked connection stays untouched
+
+        # A connector CRASH (non-AppError) still records failure health.
+        conn.status = "active"
+        conn.health = {}
+        await db.flush()
+
+        class _Crashing:
+            key = "oneroster"
+            capabilities = frozenset({"roster.read"})
+
+            async def ping(self, ctx):
+                raise RuntimeError("segfault-ish")
+
+        registry.CONNECTORS["oneroster"] = _Crashing()
+        await svc.sweep_connection_health()
+        await db.refresh(conn)
+        assert conn.health.get("last_error_class") == "CONNECTOR_CRASH"
+
         # Error connections are NOT re-swept (not in active/degraded).
         await svc.sweep_connection_health()
         events2 = (

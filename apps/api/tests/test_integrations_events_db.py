@@ -521,8 +521,29 @@ async def test_retention_sweep_ages_out_terminal_data_only(db):
            "d_term": d_term.id, "d_pend": d_pend.id}
     await db.commit()
 
-    counts = await sweep_retention(db)
+    # A RECENT terminal delivery must survive (age cutoff, not status alone).
+    d_recent = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
+                             status="succeeded", attempt_count=1, replay_of="Y")
+    db.add(d_recent)
+    await db.flush()
+    ids["d_recent"] = d_recent.id
+    await db.commit()
+
+    # Batch loop drains PAST one batch (kill the one-batch-only mutant).
+    import app.integrations.services.events as _ev_mod
+
+    monkeypatch = None
+    try:
+        from _pytest.monkeypatch import MonkeyPatch
+
+        monkeypatch = MonkeyPatch()
+        monkeypatch.setattr(_ev_mod, "_RETENTION_BATCH", 1)
+        counts = await sweep_retention(db)
+    finally:
+        if monkeypatch:
+            monkeypatch.undo()
     assert counts["deliveries"] >= 1 and counts["events"] >= 1
+    assert await db.get(EventDelivery, ids["d_recent"]) is not None
 
     assert await db.get(IntegrationEvent, ids["ev_old"]) is None
     assert await db.get(IntegrationEvent, ids["ev_new"]) is not None
