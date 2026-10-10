@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
 from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse, reject_ctrl_str
@@ -160,6 +161,74 @@ async def rotate_webhook_secret(
     )
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
+
+
+@router.post(
+    "/orgs/{org_id}/webhooks/{webhook_id}/test",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def test_webhook(
+    org_id: str,
+    webhook_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R37 (Svix 'send example' parity): synchronously dispatch a sample
+    SIGNED CloudEvent to the endpoint and report status/latency — verifies
+    connectivity and lets the receiver check its signature code without
+    waiting for a real event. Never touches the delivery log."""
+    import json as _json
+    import time as _time
+    from datetime import UTC, datetime
+
+    from ulid import ULID
+
+    from app.integrations.security import EgressBlockedError, EgressClient
+    from app.integrations.services.events import build_delivery_headers
+
+    await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    svc = WebhookService(db)
+    subs = {s.id: s for s in await svc.list_subscriptions(org_id)}
+    sub = subs.get(webhook_id)
+    if sub is None:
+        raise AppError("WEBHOOK_NOT_FOUND", "Webhook not found", 404)
+    now = datetime.now(UTC)
+    event_id = str(ULID())
+    body = _json.dumps(
+        {
+            "specversion": "1.0",
+            "id": event_id,
+            "source": f"/orgs/{org_id}",
+            "type": "com.openskill.integration.subscription.test.v1",
+            "subject": sub.id,
+            "time": now.isoformat(),
+            "datacontenttype": "application/json",
+            "data": {"test": True, "subscription_id": sub.id},
+        },
+        separators=(",", ":"),
+    ).encode()
+    headers = build_delivery_headers(sub, event_id, body, now)
+    started = _time.monotonic()
+    try:
+        resp = await EgressClient().request("POST", sub.url, headers=headers, content=body)
+        result = {
+            "delivered": 200 <= resp.status_code < 300,
+            "status_code": resp.status_code,
+            "latency_ms": int((_time.monotonic() - started) * 1000),
+            "error": None,
+        }
+    except EgressBlockedError as exc:
+        result = {"delivered": False, "status_code": None, "latency_ms": None,
+                  "error": exc.message}
+    except Exception as exc:  # connection refused / timeout — a result, not a 500
+        result = {
+            "delivered": False,
+            "status_code": None,
+            "latency_ms": int((_time.monotonic() - started) * 1000),
+            "error": type(exc).__name__,
+        }
+    return DataResponse(data=result)
 
 
 @router.delete(

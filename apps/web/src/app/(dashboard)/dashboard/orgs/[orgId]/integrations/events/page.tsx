@@ -139,6 +139,18 @@ export default function IntegrationEventsPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Rotate failed"),
   });
 
+  const testSub = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth<{
+        data: { delivered: boolean; status_code: number | null; error: string | null };
+      }>(`/orgs/${orgId}/webhooks/${id}/test`, { method: "POST" }),
+    onSuccess: (res) =>
+      res.data.delivered
+        ? toast.success(`Test delivered (${res.data.status_code})`)
+        : toast.error(`Test failed: ${res.data.error ?? res.data.status_code}`),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Test failed"),
+  });
+
   const deleteSub = useMutation({
     mutationFn: (id: string) => apiWithAuth(`/orgs/${orgId}/webhooks/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -217,6 +229,9 @@ export default function IntegrationEventsPage() {
                 {!sub.active && <span className="ml-2 text-xs text-red-700">disabled</span>}
               </div>
               <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => testSub.mutate(sub.id)}>
+                  Test
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"

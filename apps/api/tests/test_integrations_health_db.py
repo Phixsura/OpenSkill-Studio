@@ -104,3 +104,64 @@ async def test_health_counts_are_org_scoped(db):
 
     with pytest.raises(HTTPException):
         await fabric_health(org.id, db=db, user=other_owner)
+
+
+@pytest.mark.asyncio
+async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
+    """R37: /webhooks/{id}/test dispatches a sample SIGNED CloudEvent
+    synchronously, reports delivered/status/latency, 404s cross-org, and
+    maps connection failures to a result (never a 500)."""
+    import json
+
+    import httpx
+
+    import app.api.v1.endpoints.webhooks as ep
+    from app.models.webhook import WebhookSubscription
+    from app.services import webhook as legacy
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    sub = WebhookSubscription(
+        org_id=org.id, url="https://sink.example.com/h",
+        events=["project.approved"], secret="b" * 64, active=True,
+    )
+    db.add(sub)
+    await db.flush()
+
+    calls = []
+
+    class _Fake:
+        def __init__(self, code):
+            self.code = code
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            calls.append({"url": url, "headers": headers, "body": content})
+            if self.code == -1:
+                raise httpx.ConnectTimeout("boom")
+            return httpx.Response(self.code, request=httpx.Request(method, url))
+
+    from app.integrations import security as sec
+
+    monkeypatch.setattr(sec, "EgressClient", lambda: _Fake(200))
+    out = await ep.test_webhook(org.id, sub.id, user=owner, db=db)
+    data = out.data
+    assert data["delivered"] is True and data["status_code"] == 200
+    body = json.loads(calls[0]["body"])
+    assert body["type"] == "com.openskill.integration.subscription.test.v1"
+    assert body["data"]["test"] is True
+    assert "webhook-signature" in calls[0]["headers"]
+
+    # Receiver down -> structured failure, not a 500.
+    monkeypatch.setattr(sec, "EgressClient", lambda: _Fake(-1))
+    out2 = await ep.test_webhook(org.id, sub.id, user=owner, db=db)
+    assert out2.data["delivered"] is False and out2.data["error"] == "ConnectTimeout"
+
+    # Cross-org: uniform 404.
+    from app.exceptions import AppError
+
+    mallory = await _user(db)
+    other = await _org(db, mallory)
+    with pytest.raises(AppError) as exc:
+        await ep.test_webhook(other.id, sub.id, user=mallory, db=db)
+    assert exc.value.status_code == 404
+    assert legacy is not None  # module import sanity
