@@ -244,6 +244,42 @@ async def test_gradeable_event_hook_pushes_clamped_score(db, monkeypatch):
     pushed = await handle_gradeable_event(db, event)
     assert pushed == 1
     assert platform.scores[0]["scoreGiven"] == 100.0  # clamped
+    # Missing user_id -> 0 pushes (guard, not crash).
+    ev_nouser = IntegrationEvent(
+        org_id=org.id, type="com.openskill.project.approved.v1",
+        source=f"/orgs/{org.id}", data={"project_id": "01PROJXXXXXXXXXXXXXXXXXXXX"},
+    )
+    db.add(ev_nouser)
+    await db.flush()
+    assert await handle_gradeable_event(db, ev_nouser) == 0
+
+    # A FOREIGN org's link for the same target never receives this org's
+    # grade (org-scoping on the link join).
+    org2, user2 = await _org(db)
+    svc2 = LtiService(db)
+    reg2 = await svc2.create_registration(
+        org2.id, issuer=f"{ISS}-{uuid.uuid4().hex[:6]}", client_id="tool-2",
+        auth_login_url=f"{ISS}/auth", auth_token_url=f"{ISS}/token",
+        jwks_url=f"{ISS}/jwks", deployment_ids=["dep-1"],
+    )
+    link2 = await svc2.map_resource_link(
+        org2.id, reg2.id, deployment_id="dep-1", resource_link_id="rl-1",
+        kind="project", target_id="01PROJXXXXXXXXXXXXXXXXXXXX",
+        grade_sync_enabled=True,
+    )
+    link2.ags_lineitem_url = f"{ISS}/ags/lineitems/other"
+    await db.flush()
+    before = len(platform.scores)
+    assert await handle_gradeable_event(db, event) == 1  # only OUR link
+    assert len(platform.scores) == before + 1
+
+    # grade_sync disabled -> not pushed.
+    link.grade_sync_enabled = False
+    await db.flush()
+    assert await handle_gradeable_event(db, event) == 0
+    link.grade_sync_enabled = True
+    await db.flush()
+
     # Non-gradeable types no-op.
     event2 = IntegrationEvent(
         org_id=org.id,

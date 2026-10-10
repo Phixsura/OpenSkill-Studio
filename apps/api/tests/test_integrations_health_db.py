@@ -151,6 +151,11 @@ async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
     assert body["data"]["test"] is True
     assert "webhook-signature" in calls[0]["headers"]
 
+    # Non-2xx receiver -> delivered False with the status surfaced.
+    monkeypatch.setattr(sec, "EgressClient", lambda: _Fake(500))
+    out15 = await ep.test_webhook(org.id, sub.id, user=owner, db=db)
+    assert out15.data["delivered"] is False and out15.data["status_code"] == 500
+
     # Receiver down -> structured failure, not a 500.
     monkeypatch.setattr(sec, "EgressClient", lambda: _Fake(-1))
     out2 = await ep.test_webhook(org.id, sub.id, user=owner, db=db)
