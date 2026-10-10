@@ -9,7 +9,7 @@ the org prefix (IdPs and browsers hit them unauthenticated):
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -483,6 +483,27 @@ async def oidc_authorize(
     )
     await db.commit()
     return RedirectResponse(url, status_code=302)
+
+
+@protocol_router.post(
+    "/oidc/backchannel-logout/{connection_id}",
+    dependencies=[Depends(rate_limit(30, 60))],
+    status_code=200,
+)
+async def oidc_backchannel_logout(
+    connection_id: str,
+    logout_token: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """OIDC Back-Channel Logout 1.0 (R42): IdP-initiated session revocation.
+    Register this URL per client at the IdP. 200 with an empty body on
+    success (including unknown subject — no oracle); 401 envelope on an
+    invalid token."""
+    from app.integrations.services.sso_oidc import handle_backchannel_logout
+
+    await handle_backchannel_logout(db, connection_id, logout_token)
+    await db.commit()
+    return {}
 
 
 @protocol_router.get("/oidc/callback", dependencies=[Depends(rate_limit(10, 60))])

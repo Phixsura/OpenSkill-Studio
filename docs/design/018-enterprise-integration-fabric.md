@@ -831,6 +831,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.
 
+- **R42 — OIDC Back-Channel Logout 1.0 (RP)**: POST
+  /sso/oidc/backchannel-logout/{connection_id} accepts the IdP's
+  logout_token (same discovery→JWKS trust chain as id_tokens; events member
+  required; nonce prohibited; jti single-use via the login-state replay
+  cache; iat freshness 2×skew) and revokes every refresh token of the
+  linked user. Unknown subject returns clean 200 — no oracle. SAML SLO
+  remains deferred (front-channel only; rarely deployed).
+
 - **R20/R23 decision — unlink does NOT revoke sessions**: unlinking an
   external identity only severs the mapping (reversible; audit row kept).
   The platform account and its sessions stand — offboarding is SCIM

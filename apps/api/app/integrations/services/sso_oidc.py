@@ -240,6 +240,105 @@ class OidcService:
         return conn, result
 
 
+BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
+
+
+async def handle_backchannel_logout(
+    db: AsyncSession, sso_connection_id: str, logout_token: str, *, service: OidcService | None = None
+) -> int:
+    """OIDC Back-Channel Logout 1.0 (R42): the IdP POSTs a logout_token when
+    a user signs out / is disabled upstream. Validate it with the SAME trust
+    chain as id_tokens (issuer discovery -> JWKS, aud, iat), then revoke
+    every session of the linked user. Returns the number of users swept.
+
+    Spec constraints enforced: events claim must carry the backchannel-logout
+    member; nonce is PROHIBITED (prevents id_token replay as logout_token);
+    jti is single-use (replay cache on the login-state table); sub required
+    (sid-only tokens unsupported in v1 — we do not track IdP session ids).
+    """
+    import hashlib
+
+    from app.integrations.models import ExternalIdentityLink, SsoLoginState
+
+    svc = service or OidcService(db)
+    conn = await svc._connection(sso_connection_id)  # noqa: SLF001
+    doc = await svc._discovery(conn)  # noqa: SLF001
+    try:
+        header = pyjwt.get_unverified_header(logout_token)
+    except pyjwt.PyJWTError as exc:
+        raise _invalid("jwt_header_invalid") from exc
+    if header.get("alg") != "RS256":
+        raise _invalid("alg_not_rs256")
+    keys = await svc._jwks_keys(conn, doc["jwks_uri"], kid=header.get("kid", ""))  # noqa: SLF001
+    key = keys.get(header.get("kid", ""))
+    if key is None:
+        raise _invalid("kid_unknown")
+    try:
+        claims = pyjwt.decode(
+            logout_token,
+            key=key,
+            algorithms=["RS256"],
+            audience=conn.oidc_client_id,
+            issuer=doc["issuer"],
+            leeway=CLOCK_SKEW_S,
+            options={"require": ["iat", "iss", "aud", "jti"], "verify_exp": True},
+        )
+    except pyjwt.PyJWTError as exc:
+        raise _invalid(f"jwt_invalid:{type(exc).__name__}") from exc
+    if "nonce" in claims:
+        raise _invalid("logout_token_has_nonce")
+    events = claims.get("events")
+    if not isinstance(events, dict) or BACKCHANNEL_LOGOUT_EVENT not in events:
+        raise _invalid("logout_event_missing")
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise _invalid("logout_sub_missing")
+    # iat freshness beyond library leeway: logout tokens are one-shot signals.
+    iat = int(claims.get("iat", 0))
+    if abs(datetime.now(UTC).timestamp() - iat) > CLOCK_SKEW_S * 2:
+        raise _invalid("logout_token_stale")
+    # jti single-use (same deterministic-key replay cache as SAML assertions).
+    jti_key = hashlib.sha256(f"bcl:{conn.id}:{claims['jti']}".encode()).hexdigest()[:26].upper()
+    if await db.get(SsoLoginState, jti_key) is not None:
+        raise _invalid("logout_token_replayed")
+    db.add(
+        SsoLoginState(
+            id=jti_key,
+            sso_connection_id=conn.id,
+            nonce="backchannel-logout-jti",
+            expires_at=datetime.now(UTC) + timedelta(seconds=CLOCK_SKEW_S * 4),
+            used_at=datetime.now(UTC),
+        )
+    )
+    link = (
+        await db.execute(
+            select(ExternalIdentityLink).where(
+                ExternalIdentityLink.connection_ref == conn.id,
+                ExternalIdentityLink.subject == sub,
+                ExternalIdentityLink.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        return 0  # nothing to do — still 200 (no subject-existence oracle)
+    from app.services.auth import AuthService
+
+    await AuthService(db)._revoke_all_user_tokens(link.user_id)  # noqa: SLF001
+    try:
+        from app.integrations.facade import emit_event
+
+        await emit_event(
+            db,
+            conn.org_id,
+            "integration.sso.backchannel_logout",
+            subject=link.user_id,
+            data={"sso_connection_id": conn.id},
+        )
+    except Exception:
+        log.warning("bcl_event_emit_failed", connection_id=conn.id)
+    return 1
+
+
 async def set_client_secret(conn: SsoConnection, secret: str) -> None:
     """Write-only client secret (same envelope as connection credentials)."""
     conn.oidc_client_secret_ct = encrypt_credentials({"client_secret": secret})

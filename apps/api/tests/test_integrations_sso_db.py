@@ -844,3 +844,99 @@ async def test_oidc_expired_state_missing_exp_and_unverified_email(db):
             state_value=state_val, code="c", redirect_uri="https://app.test/cb"
         )
     assert exc2.value.code in ("IDENTITY_AMBIGUOUS", "SSO_NO_ACCOUNT")
+
+
+# ── R42: OIDC back-channel logout ──
+
+
+def _mint_logout_token(*, sub, aud="client-1", jti=None, **over):
+    claims = {
+        "iss": ISSUER,
+        "aud": aud,
+        "sub": sub,
+        "jti": jti or uuid.uuid4().hex,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 120,
+        "events": {"http://schemas.openid.net/event/backchannel-logout": {}},
+    }
+    claims.update(over)
+    claims = {k: v for k, v in claims.items() if v is not None}
+    return pyjwt.encode(claims, _PRIV, algorithm="RS256", headers={"kid": "k1"})
+
+
+@pytest.mark.asyncio
+async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
+    import app.integrations.services.sso_oidc as mod
+    from app.integrations.services.sso_oidc import handle_backchannel_logout
+    from app.models.user import RefreshToken
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    email = f"bcl-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    def factory(form):
+        return _mint_id_token(sub="bcl-sub", email=email, nonce=factory.nonce, aud="client-1")
+
+    svc.egress = FakeIdp(factory)
+    url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+    qs = parse_qs(urlsplit(url).query)
+    factory.nonce = qs["nonce"][0]
+    _, result = await svc.handle_callback(
+        state_value=qs["state"][0], code="c", redirect_uri="https://app.test/cb"
+    )
+    user_id = result.user.id
+    # Give the user a live refresh token to sweep.
+    from datetime import timedelta as _td
+
+    from app.services.auth import AuthService
+
+    db.add(RefreshToken(user_id=user_id, token_hash="h" * 64,
+                        expires_at=datetime.now(UTC) + _td(days=7)))
+    await db.flush()
+
+    tok = _mint_logout_token(sub="bcl-sub")
+    swept = await handle_backchannel_logout(db, conn.id, tok, service=svc)
+    assert swept == 1
+    live = (
+        await db.execute(
+            select(RefreshToken).where(
+                RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None)
+            )
+        )
+    ).scalars().all()
+    assert live == []
+
+    # jti replay refused.
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(db, conn.id, tok, service=svc)
+    # nonce prohibited (id_token must not pass as logout_token).
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(
+            db, conn.id, _mint_logout_token(sub="bcl-sub", nonce="n"), service=svc
+        )
+    # events member required.
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(
+            db, conn.id, _mint_logout_token(sub="bcl-sub", events={"other": {}}), service=svc
+        )
+    # missing sub refused.
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(
+            db, conn.id, _mint_logout_token(sub=None), service=svc
+        )
+    # stale iat refused.
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(
+            db, conn.id,
+            _mint_logout_token(sub="bcl-sub", iat=int(time.time()) - 3600,
+                               exp=int(time.time()) + 3600),
+            service=svc,
+        )
+    # unknown subject: clean 200-equivalent (0 swept), no error oracle.
+    assert (
+        await handle_backchannel_logout(
+            db, conn.id, _mint_logout_token(sub="never-seen"), service=svc
+        )
+        == 0
+    )
+    assert AuthService is not None
