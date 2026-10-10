@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
+from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.integrations.services.domains import OrgDomainService
 from app.integrations.services.identity import IdentityService
@@ -366,7 +367,7 @@ def _callback_uri(request: Request) -> str:
     return f"{base}/api/v1/sso/oidc/callback"
 
 
-@protocol_router.get("/login")
+@protocol_router.get("/login", dependencies=[Depends(rate_limit(30, 60))])
 async def sso_discovery(
     email: str = Query(min_length=3, max_length=255),
     db: AsyncSession = Depends(get_db),
@@ -400,7 +401,7 @@ async def sso_discovery(
 # ── SAML protocol endpoints (P3b) ──
 
 
-@protocol_router.get("/saml/metadata")
+@protocol_router.get("/saml/metadata", dependencies=[Depends(rate_limit(30, 60))])
 async def saml_sp_metadata():
     from fastapi.responses import Response as _Response
 
@@ -409,7 +410,7 @@ async def saml_sp_metadata():
     return _Response(sp_metadata_xml(), media_type="application/samlmetadata+xml")
 
 
-@protocol_router.get("/saml/authorize")
+@protocol_router.get("/saml/authorize", dependencies=[Depends(rate_limit(10, 60))])
 async def saml_authorize(
     connection: str = Query(min_length=1, max_length=26),
     db: AsyncSession = Depends(get_db),
@@ -421,7 +422,7 @@ async def saml_authorize(
     return RedirectResponse(url, status_code=302)
 
 
-@protocol_router.post("/saml/acs/{connection_id}")
+@protocol_router.post("/saml/acs/{connection_id}", dependencies=[Depends(rate_limit(10, 60))])
 async def saml_acs(
     connection_id: str,
     request: Request,
@@ -471,7 +472,7 @@ async def saml_acs(
     )
 
 
-@protocol_router.get("/oidc/authorize")
+@protocol_router.get("/oidc/authorize", dependencies=[Depends(rate_limit(10, 60))])
 async def oidc_authorize(
     request: Request,
     connection: str = Query(min_length=1, max_length=26),
@@ -484,7 +485,7 @@ async def oidc_authorize(
     return RedirectResponse(url, status_code=302)
 
 
-@protocol_router.get("/oidc/callback")
+@protocol_router.get("/oidc/callback", dependencies=[Depends(rate_limit(10, 60))])
 async def oidc_callback(
     request: Request,
     state: str = Query(min_length=1, max_length=64),

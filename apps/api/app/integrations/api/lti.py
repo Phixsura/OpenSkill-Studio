@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
+from app.core.rate_limit import rate_limit
 from app.integrations.models import LtiDeployment, LtiRegistration
 from app.integrations.services.lti import LtiService
 from app.models.organization import OrgRole
@@ -213,7 +214,7 @@ async def deep_link_select(
 # ── protocol ──
 
 
-@protocol_router.get("/jwks")
+@protocol_router.get("/jwks", dependencies=[Depends(rate_limit(30, 60))])
 async def lti_tool_jwks(db: AsyncSession = Depends(get_db)):
     """The tool's public keys (platforms verify our AGS client assertions
     and deep-link JWTs against this)."""
@@ -228,8 +229,8 @@ def _launch_redirect_uri(request: Request) -> str:
     return f"{str(request.base_url).rstrip('/')}/api/v1/lti/launch"
 
 
-@protocol_router.get("/login")
-@protocol_router.post("/login")
+@protocol_router.get("/login", dependencies=[Depends(rate_limit(60, 60))])
+@protocol_router.post("/login", dependencies=[Depends(rate_limit(60, 60))])
 async def lti_login(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -259,7 +260,7 @@ async def lti_login(
     return RedirectResponse(url, status_code=302)
 
 
-@protocol_router.post("/launch")
+@protocol_router.post("/launch", dependencies=[Depends(rate_limit(60, 60))])
 async def lti_launch(
     request: Request,
     state: str = Form(min_length=1, max_length=64),

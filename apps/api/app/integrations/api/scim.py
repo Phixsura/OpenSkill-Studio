@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.integrations.services.scim import (
     ScimError,
     ScimGroupService,
@@ -57,7 +58,7 @@ async def _run(db: AsyncSession, authorization: str | None, fn):
 # ── discovery ──
 
 
-@scim_router.get("/ServiceProviderConfig")
+@scim_router.get("/ServiceProviderConfig", dependencies=[Depends(rate_limit(240, 60))])
 async def service_provider_config():
     return _scim_json(
         {
@@ -79,7 +80,7 @@ async def service_provider_config():
     )
 
 
-@scim_router.get("/ResourceTypes")
+@scim_router.get("/ResourceTypes", dependencies=[Depends(rate_limit(240, 60))])
 async def resource_types():
     return _scim_json(
         {
@@ -105,7 +106,7 @@ async def resource_types():
     )
 
 
-@scim_router.get("/Schemas")
+@scim_router.get("/Schemas", dependencies=[Depends(rate_limit(240, 60))])
 async def schemas():
     return _scim_json(
         {
@@ -122,7 +123,7 @@ async def schemas():
 # ── Users ──
 
 
-@scim_router.get("/Users")
+@scim_router.get("/Users", dependencies=[Depends(rate_limit(240, 60))])
 async def list_users(
     filter: str | None = Query(default=None, max_length=300),  # noqa: A002
     startIndex: int = Query(default=1, ge=1),  # noqa: N803
@@ -139,7 +140,7 @@ async def list_users(
     return await _run(db, authorization, fn)
 
 
-@scim_router.post("/Users")
+@scim_router.post("/Users", dependencies=[Depends(rate_limit(240, 60))])
 async def create_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -153,7 +154,7 @@ async def create_user(
     return await _run(db, authorization, fn)
 
 
-@scim_router.get("/Users/{user_id}")
+@scim_router.get("/Users/{user_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def get_user(
     user_id: str,
     db: AsyncSession = Depends(get_db),
@@ -165,7 +166,7 @@ async def get_user(
     return await _run(db, authorization, fn)
 
 
-@scim_router.put("/Users/{user_id}")
+@scim_router.put("/Users/{user_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def replace_user(
     user_id: str,
     request: Request,
@@ -179,7 +180,7 @@ async def replace_user(
     return await _run(db, authorization, fn)
 
 
-@scim_router.patch("/Users/{user_id}")
+@scim_router.patch("/Users/{user_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def patch_user(
     user_id: str,
     request: Request,
@@ -193,7 +194,7 @@ async def patch_user(
     return await _run(db, authorization, fn)
 
 
-@scim_router.delete("/Users/{user_id}")
+@scim_router.delete("/Users/{user_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def delete_user(
     user_id: str,
     db: AsyncSession = Depends(get_db),
@@ -209,7 +210,7 @@ async def delete_user(
 # ── Groups ──
 
 
-@scim_router.get("/Groups")
+@scim_router.get("/Groups", dependencies=[Depends(rate_limit(240, 60))])
 async def list_groups(
     startIndex: int = Query(default=1, ge=1),  # noqa: N803
     count: int = Query(default=100, ge=0, le=200),
@@ -224,7 +225,7 @@ async def list_groups(
     return await _run(db, authorization, fn)
 
 
-@scim_router.post("/Groups")
+@scim_router.post("/Groups", dependencies=[Depends(rate_limit(240, 60))])
 async def create_group(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -237,7 +238,7 @@ async def create_group(
     return await _run(db, authorization, fn)
 
 
-@scim_router.get("/Groups/{group_id}")
+@scim_router.get("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def get_group(
     group_id: str,
     db: AsyncSession = Depends(get_db),
@@ -249,7 +250,7 @@ async def get_group(
     return await _run(db, authorization, fn)
 
 
-@scim_router.patch("/Groups/{group_id}")
+@scim_router.patch("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def patch_group(
     group_id: str,
     request: Request,
@@ -263,7 +264,7 @@ async def patch_group(
     return await _run(db, authorization, fn)
 
 
-@scim_router.delete("/Groups/{group_id}")
+@scim_router.delete("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def delete_group(
     group_id: str,
     db: AsyncSession = Depends(get_db),

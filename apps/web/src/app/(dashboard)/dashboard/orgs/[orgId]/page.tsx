@@ -70,9 +70,14 @@ export default function OrgOverviewPage() {
           <Button variant="secondary">Manage Members</Button>
         </Link>
         {(org.role === "owner" || org.role === "admin") && (
-          <Link href={`/dashboard/orgs/${orgId}/settings`}>
-            <Button variant="secondary">Settings</Button>
-          </Link>
+          <>
+            <Link href={`/dashboard/orgs/${orgId}/settings`}>
+              <Button variant="secondary">Settings</Button>
+            </Link>
+            <Link href={`/dashboard/orgs/${orgId}/integrations`}>
+              <Button variant="secondary">Integrations</Button>
+            </Link>
+          </>
         )}
       </div>
     </div>
