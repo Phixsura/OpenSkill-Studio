@@ -99,6 +99,84 @@ def test_validate_document_matrix():
     )
 
 
+def test_transforms_and_boundaries_matrix():
+    """R26: mutation probe killed only 3/20 — these pin every transform's
+    contract and every boundary constant in the evaluator."""
+    from app.integrations.services.mapping import (
+        MAX_INPUT_BYTES,
+        MAX_RESULT_DEPTH,
+        _t_coalesce_empty_null,
+        _t_date_iso,
+        _t_datetime_iso,
+        _t_first,
+        _t_split_csv,
+        _t_to_decimal,
+        _t_to_int,
+        _t_to_string,
+        _TransformError,
+    )
+
+    # to_string: booleans are JSON "true"/"false", never "True".
+    assert _t_to_string(True) == "true" and _t_to_string(False) == "false"
+    assert _t_to_string(None) is None and _t_to_string(5) == "5"
+    # to_int: bools are NOT integers; float-strings are NOT integers;
+    # the JS-safe bound is exactly 2**53 exclusive on both sides.
+    for bad in (True, False, "4.5", "x"):
+        with pytest.raises(_TransformError):
+            _t_to_int(bad)
+    assert _t_to_int(str(2**53 - 1)) == 2**53 - 1
+    for edge in (2**53, -(2**53), 2**60, -(2**60)):
+        with pytest.raises(_TransformError):
+            _t_to_int(str(edge))
+    assert _t_to_int("  7 ") == 7 and _t_to_int("") is None
+    # to_decimal: non-finite rejected, finite normalized to string.
+    for bad in ("NaN", "Infinity", "-Infinity"):
+        with pytest.raises(_TransformError):
+            _t_to_decimal(bad)
+    assert _t_to_decimal("1.50") == "1.50" and _t_to_decimal(None) is None
+    # date_iso: empty string -> None (not error); truncates to 10 chars so a
+    # datetime input is accepted as its date part.
+    assert _t_date_iso("") is None and _t_date_iso(None) is None
+    assert _t_date_iso("2026-10-11T23:59:59") == "2026-10-11"
+    with pytest.raises(_TransformError):
+        _t_date_iso("2026-13-99")
+    # datetime_iso: empty -> None; Z normalized.
+    assert _t_datetime_iso("") is None
+    assert _t_datetime_iso("2026-10-11T01:02:03Z") == "2026-10-11T01:02:03+00:00"
+    # split_csv: blanks dropped, empty -> [], lists pass through.
+    assert _t_split_csv("a, ,b,,c ") == ["a", "b", "c"]
+    assert _t_split_csv("") == [] and _t_split_csv(None) == []
+    assert _t_split_csv(["x"]) == ["x"]
+    # first: FIRST element, never last; empty list -> None.
+    assert _t_first(["a", "b"]) == "a" and _t_first([]) is None and _t_first("s") == "s"
+    # coalesce_empty_null: ALL empty shapes collapse.
+    assert _t_coalesce_empty_null("") is None
+    assert _t_coalesce_empty_null([]) is None
+    assert _t_coalesce_empty_null({}) is None
+    assert _t_coalesce_empty_null(0) == 0
+
+    doc = {"fields": [{"target": "x", "path": "a", "default": "D"}]}
+    # default applies ONLY when the path yields None — a present value wins.
+    assert apply_mapping(doc, {"a": "V"})[0] == {"x": "V"}
+    assert apply_mapping(doc, {})[0] == {"x": "D"}
+    # input cap is exclusive at MAX_INPUT_BYTES: a record AT the cap passes.
+    pad = {"a": "V", "p": "y" * (MAX_INPUT_BYTES - len('{"a": "V", "p": ""}'))}
+    assert len(__import__("json").dumps(pad)) == MAX_INPUT_BYTES
+    mapped, errors = apply_mapping(doc, pad)
+    assert errors == [] and mapped == {"x": "V"}
+    # depth cap: a value of depth MAX_RESULT_DEPTH is refused, depth-1 passes.
+    deep = ok_depth = "leaf"
+    for _ in range(MAX_RESULT_DEPTH):
+        deep = [deep]
+    for _ in range(MAX_RESULT_DEPTH - 1):
+        ok_depth = [ok_depth]
+    assert apply_mapping(doc, {"a": deep})[1][0]["code"] == "too_deep"
+    assert apply_mapping(doc, {"a": ok_depth})[1] == []
+    # validate_document: target length bound is exactly 100.
+    assert validate_document({"fields": [{"target": "t" * 100, "path": "a"}]}) == []
+    assert validate_document({"fields": [{"target": "t" * 101, "path": "a"}]}) != []
+
+
 def test_apply_mapping_matrix():
     doc = {
         "fields": [
