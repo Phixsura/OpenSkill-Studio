@@ -54,6 +54,33 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ssoChecking, setSsoChecking] = useState(false);
+
+  // R68 (ADR-018): enterprise SSO entry — discover the IdP by email domain
+  // and hand the browser to the org's authorize endpoint. The discovery
+  // endpoint only confirms existence + a URL (no org oracle).
+  const handleSso = async () => {
+    setError(null);
+    if (!email.includes("@")) {
+      setError("Enter your work email first, then use single sign-on.");
+      return;
+    }
+    setSsoChecking(true);
+    try {
+      const res = await api<{ data: { sso: boolean; authorize_url?: string } }>(
+        `/sso/login?email=${encodeURIComponent(email)}`,
+      );
+      if (res.data.sso && res.data.authorize_url) {
+        window.location.assign(res.data.authorize_url);
+        return;
+      }
+      setError("Single sign-on is not configured for this email domain.");
+    } catch {
+      setError("Could not check single sign-on for this email. Try a password login.");
+    } finally {
+      setSsoChecking(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,6 +169,16 @@ export default function LoginPage() {
 
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Logging in..." : "Log in"}
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          disabled={ssoChecking}
+          className="w-full"
+          onClick={handleSso}
+        >
+          {ssoChecking ? "Checking..." : "Continue with single sign-on (SSO)"}
         </Button>
       </form>
 
