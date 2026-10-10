@@ -478,6 +478,81 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
         await sync_memberships(db, org2.id, link.id, egress=platform)
     assert exc.value.status_code == 404
 
+    # Inactive registration refuses sync.
+    reg.status = "disabled"
+    await db.flush()
+    with pytest.raises(AppError) as exc_inactive:
+        await sync_memberships(db, org.id, link.id, egress=platform)
+    assert exc_inactive.value.code == "LTI_REGISTRATION_INACTIVE"
+    reg.status = "active"
+    await db.flush()
+
+    # Token refused -> 502, not a silent empty sync.
+    class NoTokenPlatform(NrpsPlatform):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(401, request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    with pytest.raises(AppError) as exc_tok:
+        await sync_memberships(db, org.id, link.id, egress=NoTokenPlatform())
+    assert exc_tok.value.code == "LTI_NRPS_TOKEN_REFUSED"
+
+    # Data endpoint 401 (expired token mid-walk) -> 502 class too.
+    class Auth401Platform(NrpsPlatform):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(
+                    200, json={"access_token": "t"}, request=httpx.Request(method, url)
+                )
+            return httpx.Response(401, request=httpx.Request(method, url))
+
+    with pytest.raises(AppError) as exc_401:
+        await sync_memberships(db, org.id, link.id, egress=Auth401Platform())
+    assert exc_401.value.code == "LTI_NRPS_TOKEN_REFUSED"
+
+    # Malicious next-link to a private address is refused (platform data is
+    # screened); and an endless next-link chain stops at the page cap.
+    class EvilNextPlatform(NrpsPlatform):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(
+                    200, json={"access_token": "t"}, request=httpx.Request(method, url)
+                )
+            return httpx.Response(
+                200, json={"members": []},
+                headers={"link": '<https://169.254.169.254/x>; rel="next"'},
+                request=httpx.Request(method, url),
+            )
+
+    from app.integrations.security import EgressBlockedError
+
+    with pytest.raises(EgressBlockedError):
+        await sync_memberships(db, org.id, link.id, egress=EvilNextPlatform())
+
+    class LoopPlatform(NrpsPlatform):
+        def __init__(self):
+            super().__init__()
+            self.data_calls = 0
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(
+                    200, json={"access_token": "t"}, request=httpx.Request(method, url)
+                )
+            self.data_calls += 1
+            return httpx.Response(
+                200, json={"members": []},
+                headers={"link": '<https://lms.example.com/api/nrps/ctx-1?loop=1>; rel="next"'},
+                request=httpx.Request(method, url),
+            )
+
+    loop = LoopPlatform()
+    await sync_memberships(db, org.id, link.id, egress=loop)
+    assert loop.data_calls == 25  # _MAX_PAGES cap, not unbounded
+
     # No NRPS URL -> explicit 422 with guidance.
     link2 = await svc.map_resource_link(
         org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-2",

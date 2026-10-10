@@ -572,6 +572,19 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
             org.id, conn.id, egress=_MetaEgress(b"", status=500)
         )
     assert exc.value.status_code == 502
+    # Wrong protocol (oidc) with a metadata URL set anyway -> 422 as well.
+    from app.integrations.services.sso_admin import SsoAdminService as _Svc
+
+    oidc_conn = await _Svc(db).create(
+        org.id, protocol="oidc", oidc_issuer="https://idp9.example.com",
+        oidc_client_id="c9", oidc_client_secret="s",
+    )
+    oidc_conn.idp_metadata_url = "https://idp9.example.com/metadata.xml"
+    await db.flush()
+    with pytest.raises(AppError) as exc_proto:
+        await svc.refresh_from_metadata(org.id, oidc_conn.id)
+    assert exc_proto.value.status_code == 422
+
     # No metadata URL configured -> 422.
     conn2 = await _saml_conn(db, (await _org(db))[0])
     with pytest.raises(AppError) as exc2:
