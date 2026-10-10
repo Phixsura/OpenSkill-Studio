@@ -383,5 +383,7 @@ def test_every_fabric_sweep_has_a_registered_cron():
 
     import app.controlplane.worker as cp_worker
 
-    src = open(cp_worker.__file__).read()
+    from pathlib import Path
+
+    src = Path(cp_worker.__file__).read_text()
     assert "app.integrations.worker" in src  # outbox handlers registered
