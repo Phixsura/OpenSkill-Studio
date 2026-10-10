@@ -175,8 +175,10 @@ async def test_emit_fanout_deliver_success(db, egress):
     assert d.attempt_count == 1
     assert other.id not in {x.subscription_id for x in deliveries}
 
-    # Wire check: CloudEvents body + Standard Webhooks headers.
-    call = egress.calls[0]
+    # Wire check: CloudEvents body + Standard Webhooks headers. Pick OUR
+    # call by webhook-id — stray pending outbox rows from an earlier aborted
+    # run can drain first and occupy calls[0].
+    call = next(c for c in egress.calls if c["headers"].get("webhook-id") == event.id)
     body = json.loads(call["body"])
     assert body["specversion"] == "1.0"
     assert body["id"] == event.id
@@ -464,3 +466,24 @@ async def test_legacy_rotate_cosigns_then_immediate_stops(db):
     assert sub.secret_prev is None
     h2 = build_delivery_headers(sub, "evt", b"{}", datetime.now(UTC))
     assert len(h2["webhook-signature"].split(" ")) == 1
+
+
+def test_event_matches_internal_wildcard_protection():
+    """R28 mutation probe: fabric-internal events (integration.*) must match
+    on EXACT name only — a '.*' wildcard subscription must never route
+    delivery.exhausted notices back into the failing endpoint (feedback
+    loop). Also: matching is case-SENSITIVE."""
+    from app.integrations.services.events import event_matches
+
+    exhausted = "com.openskill.integration.delivery.exhausted"
+    assert not event_matches(["com.openskill.integration.*"], exhausted)
+    assert not event_matches(["com.openskill.*"], exhausted)
+    assert event_matches([exhausted], exhausted)  # exact still works
+    # Normal events: wildcard and exact both match; case matters.
+    t = "com.openskill.project.approved.v1"
+    assert event_matches(["com.openskill.project.*"], t)
+    assert event_matches([t], t)
+    assert not event_matches([t.upper()], t)
+    assert not event_matches(["com.openskill.proj.*"], t.replace("project", "proj2"))
+    # Junk patterns never match, never crash.
+    assert not event_matches([None, 42, {}, ""], t)
