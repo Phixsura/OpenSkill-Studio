@@ -248,6 +248,24 @@ class ConnectionService:
         await self.db.flush()
         return conn
 
+    async def upgrade(self, org_id: str, connection_id: str) -> IntegrationConnection:
+        """Explicit provider-version upgrade (ADR §19): re-validates config
+        against the NEW schema and re-checks connector presence — surfaces
+        CONNECTION_CONFIG_INVALID / CAPABILITY_MISSING, never silent."""
+        conn = await self.get(org_id, connection_id)
+        provider = await self.db.get(IntegrationProvider, conn.provider_id)
+        assert provider is not None
+        if conn.provider_version == provider.version:
+            return conn  # already current — idempotent
+        if not provider.enabled:
+            raise AppError("PROVIDER_DISABLED", f"Provider disabled: {provider.key}", 409)
+        self._screen_config(conn.config or {}, provider)
+        if CONNECTORS.get(provider.key) is None:
+            raise AppError("CAPABILITY_MISSING", "No connector registered", 409)
+        conn.provider_version = provider.version
+        await self.db.flush()
+        return conn
+
     async def delete(self, org_id: str, connection_id: str) -> None:
         conn = await self.get(org_id, connection_id)
         await self.db.delete(conn)

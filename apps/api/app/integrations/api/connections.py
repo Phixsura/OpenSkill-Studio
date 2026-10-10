@@ -172,6 +172,22 @@ async def set_credential(
     return {"data": resp}
 
 
+@router.post(
+    "/connections/{connection_id}/upgrade", response_model=DataResponse[ConnectionResponse]
+)
+async def upgrade_connection(
+    org_id: str,
+    connection_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _admin(org_id, user, db)
+    conn = await ConnectionService(db).upgrade(org_id, connection_id)
+    resp = await _to_response(db, conn)
+    await db.commit()
+    return {"data": resp}
+
+
 @router.post("/connections/{connection_id}/ping", response_model=DataResponse[PingResponse])
 async def ping_connection(
     org_id: str,

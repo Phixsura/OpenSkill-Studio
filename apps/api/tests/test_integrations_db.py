@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from ulid import ULID
 
 from app.core.security import hash_password
@@ -288,3 +289,54 @@ async def test_ping_success_activates_and_failure_degrades(ctx, monkeypatch):
         with pytest.raises(AppError):
             await svc.ping(org.id, conn.id)
     assert conn.status == "error"
+
+
+# ── R13: explicit provider-version upgrade (ADR §19) ──
+
+
+@pytest.mark.asyncio
+async def test_connection_upgrade_revalidates(ctx):
+    from app.integrations.models import IntegrationProvider
+
+    svc, org, db = ctx["svc"], ctx["org"], ctx["db"]
+    conn = await _mk_conn(
+        ctx,
+        provider_key="oneroster",
+        config={"token_url": "https://idp.example.com/token", "page_size": 50},
+    )
+    assert conn.provider_version == 1
+    # Idempotent when already current.
+    same = await svc.upgrade(org.id, conn.id)
+    assert same.provider_version == 1
+
+    provider = (
+        await db.execute(
+            select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+        )
+    ).scalars().first()
+    # Catalog publishes v2 with a TIGHTER schema the stored config violates.
+    provider.version = 2
+    provider.config_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["token_url"],
+        "properties": {
+            "token_url": {"type": "string", "maxLength": 500},
+            "page_size": {"type": "integer", "minimum": 10, "maximum": 20},
+        },
+    }
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.upgrade(org.id, conn.id)  # page_size 50 > new max 20
+    assert e.value.code == "CONNECTION_CONFIG_INVALID"
+    assert conn.provider_version == 1  # never silently bumped
+    # Fix the config -> upgrade succeeds.
+    await svc.update(
+        org.id, conn.id,
+        config={"token_url": "https://idp.example.com/token", "page_size": 15},
+    )
+    upgraded = await svc.upgrade(org.id, conn.id)
+    assert upgraded.provider_version == 2
+    # Restore catalog row for sibling tests.
+    await svc.sync_provider_catalog()
+    await db.commit()

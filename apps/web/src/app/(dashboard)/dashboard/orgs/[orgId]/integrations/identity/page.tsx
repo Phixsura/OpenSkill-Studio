@@ -58,6 +58,10 @@ export default function IdentityIntegrationsPage() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [allowJit, setAllowJit] = useState(false);
+  const [protocol, setProtocol] = useState<"oidc" | "saml">("oidc");
+  const [samlEntityId, setSamlEntityId] = useState("");
+  const [samlSsoUrl, setSamlSsoUrl] = useState("");
+  const [samlCertPem, setSamlCertPem] = useState("");
   const [tokenName, setTokenName] = useState("");
   const [mintedToken, setMintedToken] = useState<string | null>(null);
   const [linkUserId, setLinkUserId] = useState("");
@@ -109,13 +113,23 @@ export default function IdentityIntegrationsPage() {
     mutationFn: () =>
       apiWithAuth(`${base}/sso-connections`, {
         method: "POST",
-        body: JSON.stringify({
-          protocol: "oidc",
-          oidc_issuer: issuer,
-          oidc_client_id: clientId,
-          oidc_client_secret: clientSecret || null,
-          allow_jit: allowJit,
-        }),
+        body: JSON.stringify(
+          protocol === "oidc"
+            ? {
+                protocol: "oidc",
+                oidc_issuer: issuer,
+                oidc_client_id: clientId,
+                oidc_client_secret: clientSecret || null,
+                allow_jit: allowJit,
+              }
+            : {
+                protocol: "saml",
+                idp_entity_id: samlEntityId,
+                idp_sso_url: samlSsoUrl,
+                idp_certificates: samlCertPem ? [{ pem: samlCertPem }] : [],
+                allow_jit: allowJit,
+              },
+        ),
       }),
     onSuccess: () => {
       toast.success("SSO connection created (testing)");
@@ -283,28 +297,66 @@ export default function IdentityIntegrationsPage() {
           ))}
         </ul>
         <div className="flex flex-wrap items-end gap-2">
-          <Input
-            aria-label="OIDC issuer"
-            className="max-w-xs"
-            placeholder="https://login.idp.example.com"
-            value={issuer}
-            onChange={(e) => setIssuer(e.target.value)}
-          />
-          <Input
-            aria-label="Client ID"
-            className="max-w-[10rem]"
-            placeholder="client id"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-          />
-          <Input
-            aria-label="Client secret"
-            className="max-w-[10rem]"
-            type="password"
-            placeholder="client secret"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-          />
+          <select
+            aria-label="SSO protocol"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={protocol}
+            onChange={(e) => setProtocol(e.target.value as "oidc" | "saml")}
+          >
+            <option value="oidc">OIDC</option>
+            <option value="saml">SAML 2.0</option>
+          </select>
+          {protocol === "saml" && (
+            <>
+              <Input
+                aria-label="IdP entity ID"
+                className="max-w-xs"
+                placeholder="https://idp.example.com/metadata"
+                value={samlEntityId}
+                onChange={(e) => setSamlEntityId(e.target.value)}
+              />
+              <Input
+                aria-label="IdP SSO URL"
+                className="max-w-xs"
+                placeholder="https://idp.example.com/sso"
+                value={samlSsoUrl}
+                onChange={(e) => setSamlSsoUrl(e.target.value)}
+              />
+              <textarea
+                aria-label="IdP signing certificate (PEM)"
+                className="h-20 w-full max-w-md rounded-md border p-2 font-mono text-xs"
+                placeholder="-----BEGIN CERTIFICATE-----"
+                value={samlCertPem}
+                onChange={(e) => setSamlCertPem(e.target.value)}
+              />
+            </>
+          )}
+          {protocol === "oidc" && (
+            <>
+              <Input
+                aria-label="OIDC issuer"
+                className="max-w-xs"
+                placeholder="https://login.idp.example.com"
+                value={issuer}
+                onChange={(e) => setIssuer(e.target.value)}
+              />
+              <Input
+                aria-label="Client ID"
+                className="max-w-[10rem]"
+                placeholder="client id"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+              />
+              <Input
+                aria-label="Client secret"
+                className="max-w-[10rem]"
+                type="password"
+                placeholder="client secret"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+              />
+            </>
+          )}
           <label className="flex items-center gap-1 text-sm">
             <input
               aria-label="Allow JIT"
@@ -315,10 +367,15 @@ export default function IdentityIntegrationsPage() {
             JIT provisioning
           </label>
           <Button
-            disabled={!issuer || !clientId || createSso.isPending}
+            disabled={
+              createSso.isPending ||
+              (protocol === "oidc"
+                ? !issuer || !clientId
+                : !samlEntityId || !samlSsoUrl || !samlCertPem)
+            }
             onClick={() => createSso.mutate()}
           >
-            Add OIDC
+            Add {protocol === "oidc" ? "OIDC" : "SAML"}
           </Button>
         </div>
       </section>
