@@ -862,6 +862,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R35-R47 (second marathon window)**: fabric health summary endpoint +
+  hub status strip (R36); webhook test-send, Svix parity (R37); connection
+  health sweep cron with unhealthy-transition alerts (R41); OIDC
+  Back-Channel Logout 1.0 (R42); nightly retention sweep (R44); per-
+  subscription delivery stats (R46). Probe campaign extended to the LTI
+  launch validator, bulk import, roster provisioning, AGS score push,
+  warehouse projection (narrowed-allowlist leak + org-salt joinability
+  killers), connections PATCH-path SSRF screen, OneRoster connector
+  pagination (<= mutant silently dropped page 2+), sso_admin screens, the
+  events API layer org filters, and cron registration (guard test pins all
+  7 sweeps). Live E2E extended to 37 checks — all passing.
+
 - **R20-R33 (marathon hardening, continued)**: R20 reversible identity
   unlink (list/DELETE, uniform 404) + webhook-subscription management UI;
   R21 org-page nav entry + per-route rate limits on every protocol surface
