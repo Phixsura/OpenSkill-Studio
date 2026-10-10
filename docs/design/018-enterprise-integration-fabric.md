@@ -830,3 +830,44 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **Provider version upgrades**: explicit `POST /connections/{id}/upgrade` re-validates
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.
+
+## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
+
+- **R16**: scheduled EXPORTS were never driven (same gap class as R11's
+  scheduled syncs) — sweep + nightly cron (02:47).
+- **R15**: live-API E2E lifecycle (tests/e2e_integration_lifecycle.py, 32
+  checks incl. a local signed-webhook sink). E2E-caught: (1) the webhook
+  REQUEST SCHEMA duplicated the event-type check and missed R7's mesh arm —
+  the live API rejected com.openskill.* subscriptions service tests
+  accepted; (2) the legacy subscription URL screen ignored the boot-guarded
+  EGRESS_ALLOW_PRIVATE flag. Lesson re-learned: layer-duplicated validation
+  drifts — share the predicate.
+- **R14**: legacy rotate-secret swapped keys in place and hard-broke
+  receivers mid-window — now co-signs for 7 days (?immediate=true for the
+  leaked-key path); duplicate P2 rotate endpoint removed. Mapping editor +
+  preview UI.
+- **R13**: explicit provider-version upgrade endpoint (re-validate config
+  against the new schema; pin never bumps silently). SAML create UI.
+- **R12 (P3b)**: SAML SP via signxml. XSW-safe by construction (only the
+  signed subtree is consumed); exclusive-c14n requirement pinned by test;
+  per-connection cert pinning; assertion-id replay cache; unsolicited
+  responses rejected.
+- **R11**: pending-domain DNS cron, scheduled-sync sweep (the `schedule`
+  column was never driven), stale-run reaper cron; authed error-report
+  download in the UI (bare <a href> 401'd).
+- **R10 (P11)**: five admin pages (hub/identity/sync/events/data) + tests.
+- **R9**: §18 acceptance chain as one inline test (SCIM → SSO → roster →
+  cohort → event → signed delivery → AGS → export → deprovision sweep).
+- **R8 (P10)**: consent-gated ATS push (ids+pipeline only; consent_missing
+  conflicts; last_outbound change detection); invoice.finalized routed to
+  tenant orgs as a privacy-safe id-only notification.
+- **R7**: adversarial sweep, 9 defects — mapping-doc size cap; SCIM strict
+  email; junk claim types; disabled-provider runs; concurrent import
+  commits; unscheduled reaper; mesh events unsubscribable via API; SCIM
+  group-rename 500; login-state rows never purged.
+- **P1–P6/P7 (earlier same branch)**: fabric core, event mesh + wiring,
+  OIDC SSO + identity resolution + enforce-SSO/break-glass, SCIM server,
+  mapping + sync engine (destination-confirmed cursors; the JSONB
+  identity-assignment bug — re-assigning a mutated dict skips the UPDATE —
+  cost one debugging round), roster provisioning, OneRoster connector,
+  LTI launch + AGS, bulk import, warehouse export.

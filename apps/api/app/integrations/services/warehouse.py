@@ -301,6 +301,46 @@ class WarehouseExportService:
         return run
 
 
+async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
+    """Worker cron (R16 — same gap class as scheduled syncs): daily export
+    streams run when their last run is older than a day."""
+    from datetime import timedelta
+
+    from app.integrations.models.export import ExportRun
+
+    streams = (
+        await db.execute(
+            select(ExportStream).where(
+                ExportStream.enabled.is_(True), ExportStream.schedule == "daily"
+            )
+        )
+    ).scalars().all()
+    ran = 0
+    now = datetime.now(UTC)
+    for stream in streams:
+        last = (
+            await db.execute(
+                select(ExportRun.created_at)
+                .where(ExportRun.stream_id == stream.id)
+                .order_by(ExportRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if last is not None:
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+            if now - last < timedelta(days=1):
+                continue
+        try:
+            await WarehouseExportService(db, writer=writer).run_export(
+                stream.org_id, stream.id
+            )
+            ran += 1
+        except AppError as exc:
+            log.warning("scheduled_export_skipped", stream_id=stream.id, code=exc.code)
+    return ran
+
+
 class S3PartWriter:
     """Production writer (API/worker)."""
 

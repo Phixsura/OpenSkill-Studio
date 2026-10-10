@@ -622,6 +622,18 @@ async def _intg_stale_run_reaper(ctx: dict) -> None:
             log.warning("intg_stale_runs_reaped", count=n)
 
 
+async def _intg_scheduled_exports(ctx: dict) -> None:
+    """ADR-018 §16.2: drive daily export streams (R16)."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.warehouse import S3PartWriter, sweep_scheduled_exports
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_scheduled_exports(db, S3PartWriter())
+        if n:
+            await db.commit()
+            log.info("intg_scheduled_exports_ran", count=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -644,6 +656,7 @@ def _cron_jobs() -> list:
         cron(_intg_domain_sweep, minute={7, 22, 37, 52}, name="intg_domain_sweep"),
         cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
         cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
+        cron(_intg_scheduled_exports, hour=2, minute=47, timeout=1800, name="intg_exports"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single

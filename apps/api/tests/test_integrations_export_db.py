@@ -204,3 +204,28 @@ async def test_export_enrollments_hash_and_drop(db):
     # per-org salt: same user exported by another org hashes DIFFERENTLY
     salted = hashlib.sha256(f"x:{learner.id}".encode()).hexdigest()[:32]
     assert rows[0]["user_id"] != salted  # not an unsalted/global hash
+
+
+# ── R16: scheduled export sweep (same gap class as scheduled syncs) ──
+
+
+@pytest.mark.asyncio
+async def test_sweep_scheduled_exports_runs_due_daily_streams(db):
+    from app.integrations.services.warehouse import sweep_scheduled_exports
+
+    org, owner = await _org(db)
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    daily = await svc.create_stream(
+        org.id, name=f"d-{ULID()}", dataset="events", schedule="daily"
+    )
+    manual = await svc.create_stream(org.id, name=f"m-{ULID()}", dataset="events")
+    await emit_event(db, org.id, "project.approved", subject="s", data={})
+    await db.flush()
+    # First sweep: the daily stream runs, the manual one never does.
+    assert await sweep_scheduled_exports(db, writer) == 1
+    runs = await svc.list_runs(org.id, daily.id)
+    assert len(runs) == 1 and runs[0].status == "succeeded"
+    assert await svc.list_runs(org.id, manual.id) == []
+    # Within the day: not due again.
+    assert await sweep_scheduled_exports(db, writer) == 0
