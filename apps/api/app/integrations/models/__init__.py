@@ -31,6 +31,14 @@ from app.integrations.models.provider import (  # noqa: F401
     PROVIDER_CATEGORIES,
     IntegrationProvider,
 )
+from app.integrations.models.scim import (  # noqa: F401
+    GROUP_MAP_KINDS,
+    MAX_SCIM_TOKENS_PER_ORG,
+    SCIM_TOKEN_PREFIX,
+    ScimGroup,
+    ScimGroupMember,
+    ScimToken,
+)
 from app.integrations.models.sso import (  # noqa: F401
     DOMAIN_STATUSES,
     JIT_ALLOWED_ROLES,

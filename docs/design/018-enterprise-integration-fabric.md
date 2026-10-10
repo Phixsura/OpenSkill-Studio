@@ -782,6 +782,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 ## 19. Known edges & explicit decisions
 
 - **No /Bulk SCIM in v1** (advertised unsupported); Entra works without it.
+- **SCIM payload layer is hand-rolled** (P4 decision, supersedes the §5.3
+  scim2-models recommendation): the production rules that matter — lenient Entra
+  PATCH parsing, deactivate≡DELETE with session sweep, delta membership,
+  reactivation-not-409 — fight strict model libraries, and the resource subset is
+  tiny. Every rule is pinned by a test; scim2-tester conformance runs are deferred
+  until the dependency earns its keep.
 - **No FIFO delivery guarantee** (Svix lesson): consumers get `time` + replay; we
   document at-least-once unordered.
 - **OneRoster push (gradebook) deferred** to the LTI AGS path — one grade-return

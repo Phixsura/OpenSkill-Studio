@@ -213,3 +213,28 @@ def test_connection_response_has_no_secret_fields():
 
     forbidden = {"ciphertext", "secret", "values", "token", "credential"}
     assert not (set(ConnectionResponse.model_fields) & forbidden)
+
+
+# ── SCIM protocol surface (no DB for discovery; 401 shape) ──
+
+
+@pytest.mark.asyncio
+async def test_scim_discovery_endpoints(client):
+    resp = await client.get("/api/v1/scim/v2/ServiceProviderConfig")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bulk"]["supported"] is False  # advertised unsupported (ADR §19)
+    assert body["patch"]["supported"] is True
+    rt = await client.get("/api/v1/scim/v2/ResourceTypes")
+    assert {r["id"] for r in rt.json()["Resources"]} == {"User", "Group"}
+
+
+@pytest.mark.asyncio
+async def test_scim_requires_bearer_with_scim_error_shape(client):
+    resp = await client.get("/api/v1/scim/v2/Users")
+    assert resp.status_code == 401
+    body = resp.json()
+    assert body["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+    assert body["status"] == "401"
+    # never the app envelope
+    assert "error" not in body
