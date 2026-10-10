@@ -406,10 +406,13 @@ async def sso_discovery(
     ).scalars().first()
     if conn is None:
         return {"data": {"sso": False}}
+    # R67: route by the connection's PROTOCOL — a SAML org was being sent to
+    # the OIDC authorize endpoint (dead login for SAML-only orgs).
+    path = "saml" if conn.protocol == "saml" else "oidc"
     return {
         "data": {
             "sso": True,
-            "authorize_url": f"/api/v1/sso/oidc/authorize?connection={conn.id}",
+            "authorize_url": f"/api/v1/sso/{path}/authorize?connection={conn.id}",
         }
     }
 

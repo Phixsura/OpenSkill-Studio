@@ -590,3 +590,27 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
     with pytest.raises(AppError) as exc2:
         await svc.refresh_from_metadata(conn2.org_id, conn2.id)
     assert exc2.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_login_discovery_routes_by_protocol(db):
+    """R67: /sso/login discovery must route a SAML org to the SAML authorize
+    endpoint — a SAML-only org was handed the OIDC URL (dead login)."""
+    import inspect
+
+    import app.integrations.api.sso as sso_api
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.status = "active"
+    await db.flush()
+    # find the discovery endpoint (protocol /sso/login)
+    fn = None
+    for name, obj in vars(sso_api).items():
+        if inspect.iscoroutinefunction(obj) and "org_for_email_domain" in inspect.getsource(obj):
+            fn = obj
+            break
+    assert fn is not None, "discovery endpoint not found"
+    out = await fn(email=f"who@{domain}", db=db)
+    assert out["data"]["sso"] is True
+    assert out["data"]["authorize_url"].startswith("/api/v1/sso/saml/authorize?")
