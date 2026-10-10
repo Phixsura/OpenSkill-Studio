@@ -252,3 +252,37 @@ async def test_scim_requires_bearer_with_scim_error_shape(client):
     assert body["status"] == "401"
     # never the app envelope
     assert "error" not in body
+
+
+def test_every_protocol_route_is_rate_limited():
+    """R25 guard: unauthenticated protocol surfaces (SSO/SAML/OIDC, SCIM,
+    LTI) must each carry a rate_limit dependency — a new route added without
+    one is a state-mint flood / token brute-force vector (R21)."""
+    from starlette.routing import Mount
+
+    from app.main import app as fastapi_app
+
+    def walk(routes, prefix=""):
+        for r in routes:
+            if isinstance(r, Mount):
+                yield from walk(r.routes, prefix + r.path)
+            elif hasattr(r, "original_router"):  # fastapi _IncludedRouter wrapper
+                yield from walk(r.original_router.routes, prefix)
+            else:
+                yield prefix + getattr(r, "path", ""), r
+
+    protocol = [
+        (p, r)
+        for p, r in walk(fastapi_app.routes)
+        if p.startswith(("/sso", "/scim/v2", "/lti"))
+    ]
+    assert len(protocol) >= 20, "guard went vacuous — protocol prefixes moved?"
+    missing = [
+        p
+        for p, r in protocol
+        if not any(
+            getattr(d.dependency, "__qualname__", "").startswith("rate_limit.")
+            for d in (getattr(r, "dependencies", None) or [])
+        )
+    ]
+    assert missing == [], f"protocol routes without rate_limit: {missing}"
