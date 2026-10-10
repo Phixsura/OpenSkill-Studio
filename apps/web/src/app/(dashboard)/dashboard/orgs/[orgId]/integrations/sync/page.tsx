@@ -4,6 +4,7 @@
 // cursor/stats, record-level conflicts, roster provisioning trigger.
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -188,6 +189,12 @@ export default function SyncIntegrationsPage() {
 
   return (
     <div className="space-y-8 p-6">
+      <Link
+        href={`/dashboard/orgs/${orgId}/integrations`}
+        className="text-muted-foreground text-sm hover:underline"
+      >
+        ← Integrations
+      </Link>
       <div>
         <h1 className="text-2xl font-semibold">Sync</h1>
         <p className="text-muted-foreground text-sm">

@@ -4,6 +4,7 @@
 // webhook deliveries with per-attempt history, replay failed deliveries.
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -179,6 +180,12 @@ export default function IntegrationEventsPage() {
 
   return (
     <div className="space-y-8 p-6">
+      <Link
+        href={`/dashboard/orgs/${orgId}/integrations`}
+        className="text-muted-foreground text-sm hover:underline"
+      >
+        ← Integrations
+      </Link>
       <div>
         <h1 className="text-2xl font-semibold">Event mesh</h1>
         <p className="text-muted-foreground text-sm">
