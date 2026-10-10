@@ -153,6 +153,63 @@ async def map_resource_link(
     }
 
 
+class DeepLinkSelectRequest(BaseModel):
+    """Instructor picked a platform resource to place in the LMS. The launch
+    response (dev/test shape) carried the deep-linking claims the UI echoes
+    back here; the endpoint returns the signed JWT + return URL for a
+    browser form-post."""
+
+    model_config = ConfigDict(extra="forbid")
+    registration_id: str = Field(min_length=1, max_length=26)
+    deployment_id: str = Field(min_length=1, max_length=255)
+    return_url: str = Field(min_length=8, max_length=1000)
+    data: str | None = Field(default=None, max_length=4000)
+    kind: str
+    target_id: str = Field(min_length=1, max_length=26)
+    title: str = Field(min_length=1, max_length=200)
+
+
+@admin_router.post("/deep-link/select", response_model=DataResponse[dict])
+async def deep_link_select(
+    org_id: str,
+    body: DeepLinkSelectRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN, OrgRole.INSTRUCTOR)
+    from app.integrations.models import LTI_RESOURCE_KINDS
+    from app.integrations.security import validate_egress_url
+    from app.integrations.services.lti import LtiService
+    from app.integrations.services.lti_ags import (
+        build_resource_link_item,
+        sign_deep_linking_response,
+    )
+
+    if body.kind not in LTI_RESOURCE_KINDS:
+        from app.exceptions import AppError
+
+        raise AppError("LTI_RESOURCE_KIND_INVALID", "bad kind", 422)
+    # The return URL is platform-asserted via the launch claims — still
+    # egress-screened (a tampered claim must not point the browser at an
+    # internal origin we vouch for).
+    validate_egress_url(body.return_url)
+    reg = await LtiService(db).get_registration(org_id, body.registration_id)
+    launch_url = f"{str(request.base_url).rstrip('/')}/api/v1/lti/launch"
+    item = build_resource_link_item(
+        title=body.title, launch_url=launch_url, resource_id=f"{body.kind}:{body.target_id}"
+    )
+    jwt_value = await sign_deep_linking_response(
+        db,
+        reg,
+        deployment_id=body.deployment_id,
+        content_items=[item],
+        data=body.data,
+    )
+    await db.commit()
+    return {"data": {"return_url": body.return_url, "jwt": jwt_value}}
+
+
 # ── protocol ──
 
 

@@ -30,6 +30,18 @@ from app.models.user import User, UserRole, UserStatus
 ISS = "https://lms.example.edu"
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_engine_pool():
+    """test_jwks_endpoint drives the HTTP client fixture into the DB on its
+    own event loop — without a dispose the pooled connection poisons the
+    NEXT test's loop ("Event loop is closed" ordering flake class)."""
+    yield
+    from app.core.database import engine
+
+    await engine.dispose()
+
+
+
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import AsyncSessionLocal, engine
@@ -252,3 +264,46 @@ async def test_jwks_endpoint(client):
     # up, so the shape must be a JWKS document.
     body = resp.json()
     assert "keys" in body and body["keys"][0]["kty"] == "RSA"
+
+
+# ── R17: deep-linking response signing ──
+
+
+@pytest.mark.asyncio
+async def test_deep_linking_response_signed_and_verifiable(db):
+    from app.integrations.services.lti_ags import (
+        build_resource_link_item,
+        sign_deep_linking_response,
+        tool_jwks,
+    )
+
+    org, user = await _org(db)
+    reg, _link = await _setup(db, org, user)
+    item = build_resource_link_item(
+        title="AI Studio 101",
+        launch_url="https://tool.example.com/api/v1/lti/launch",
+        resource_id="skill:01SKILLXXXXXXXXXXXXXXXXXXX",
+    )
+    token = await sign_deep_linking_response(
+        db, reg, deployment_id="dep-1", content_items=[item], data="platform-opaque"
+    )
+    jwks = await tool_jwks(db)
+    header = pyjwt.get_unverified_header(token)
+    key = next(
+        pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(k))
+        for k in jwks["keys"]
+        if k["kid"] == header["kid"]
+    )
+    claims = pyjwt.decode(
+        token, key=key, algorithms=["RS256"], audience=ISS,
+        options={"require": ["exp", "iat", "iss", "aud", "nonce"]},
+    )
+    claim = "https://purl.imsglobal.org/spec/lti/claim/"
+    dl = "https://purl.imsglobal.org/spec/lti-dl/claim/"
+    assert claims["iss"] == reg.client_id  # tool speaks as its client id
+    assert claims[f"{claim}message_type"] == "LtiDeepLinkingResponse"
+    assert claims[f"{claim}deployment_id"] == "dep-1"
+    assert claims[f"{dl}data"] == "platform-opaque"  # round-trips verbatim
+    items = claims[f"{dl}content_items"]
+    assert items[0]["type"] == "ltiResourceLink"
+    assert items[0]["custom"]["resource_id"].startswith("skill:")

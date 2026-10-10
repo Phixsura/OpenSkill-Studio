@@ -180,6 +180,52 @@ async def push_score(
     return ok
 
 
+# ── deep linking (ADR §8 / LTI-DL 2.0) ──
+
+DL_CLAIM = "https://purl.imsglobal.org/spec/lti-dl/claim/"
+LTI_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/"
+
+
+async def sign_deep_linking_response(
+    db: AsyncSession,
+    reg: LtiRegistration,
+    *,
+    deployment_id: str,
+    content_items: list[dict],
+    data: str | None = None,
+) -> str:
+    """Mint the signed LtiDeepLinkingResponse JWT the browser posts back to
+    the platform's deep_link_return_url. Content items are tool-authored
+    (ltiResourceLink entries pointing at our launch URL)."""
+    key = await ensure_tool_key(db)
+    pem = decrypt_credentials(key.private_pem_ct)["pem"]
+    now = int(time.time())
+    claims: dict = {
+        "iss": reg.client_id,  # tool speaks as the client
+        "aud": reg.issuer,
+        "iat": now,
+        "exp": now + 300,
+        "nonce": secrets.token_hex(16),
+        f"{LTI_CLAIM}message_type": "LtiDeepLinkingResponse",
+        f"{LTI_CLAIM}version": "1.3.0",
+        f"{LTI_CLAIM}deployment_id": deployment_id,
+        f"{DL_CLAIM}content_items": content_items,
+    }
+    if data is not None:
+        # Opaque platform state from the request MUST round-trip verbatim.
+        claims[f"{DL_CLAIM}data"] = data
+    return pyjwt.encode(claims, pem, algorithm="RS256", headers={"kid": key.kid})
+
+
+def build_resource_link_item(*, title: str, launch_url: str, resource_id: str) -> dict:
+    return {
+        "type": "ltiResourceLink",
+        "title": title[:200],
+        "url": launch_url,
+        "custom": {"resource_id": resource_id},
+    }
+
+
 # ── mesh-event hook (called fail-safe from the event fan-out handler) ──
 
 GRADEABLE = {

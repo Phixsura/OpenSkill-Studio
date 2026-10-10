@@ -20,12 +20,14 @@ interface Provider {
   category: string;
   auth_mode: string;
   display_name: string;
+  version: number;
   config_schema: { properties?: Record<string, { description?: string }> };
 }
 
 interface Connection {
   id: string;
   provider_key: string;
+  provider_version: number;
   name: string;
   status: string;
   base_url: string | null;
@@ -121,6 +123,16 @@ export default function IntegrationsHubPage() {
       toast.error(err instanceof ApiError ? err.message : "Failed to store credential"),
   });
 
+  const upgradeConnection = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`${base}/connections/${id}/upgrade`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Connection upgraded to the current provider version");
+      invalidate();
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Upgrade failed"),
+  });
+
   const removeConnection = useMutation({
     mutationFn: (id: string) => apiWithAuth(`${base}/connections/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -186,6 +198,12 @@ export default function IntegrationsHubPage() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  {(providers.find((p) => p.key === c.provider_key)?.version ?? 0) >
+                    c.provider_version && (
+                    <Button size="sm" onClick={() => upgradeConnection.mutate(c.id)}>
+                      Upgrade
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" onClick={() => ping.mutate(c.id)}>
                     Ping
                   </Button>
