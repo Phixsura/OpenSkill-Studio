@@ -414,3 +414,86 @@ async def test_cert_expiry_sweep_alerts_once_per_day(db):
     # (still deduped this day for THIS conn; a fresh conn proves the window)
     await _saml_conn(db, (await _org(db))[0])  # healthy cert, no alert
     assert await svc.sweep_expiring_certificates() == 0
+
+
+# ── R30: verifier mutation-probe killers (signed-but-malicious variants) ──
+
+
+@pytest.mark.asyncio
+async def test_saml_condition_and_subject_vectors(db):
+    """Each variant is SIGNED by the pinned cert — only the semantic check
+    under test can reject it."""
+    import re as _re
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    email = f"k-{uuid.uuid4().hex[:6]}@{domain}"
+    svc = SamlService(db)
+
+    async def expect_reject(xml: str, relay=None):
+        signed = _sign_assertion(xml)
+        with pytest.raises(AppError) as e:
+            await svc.handle_acs(
+                connection_id=conn.id,
+                saml_response_b64=_wrap_response(signed),
+                relay_state=relay,
+            )
+        assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    # Missing <Conditions> entirely.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    await expect_reject(_re.sub(r"<saml:Conditions.*?</saml:Conditions>", "", xml, flags=_re.S))
+
+    # NotBefore in the future (beyond skew).
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    future = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+    await expect_reject(_re.sub(r'NotBefore="[^"]*"', f'NotBefore="{future}"', xml))
+
+    # Conditions without NotOnOrAfter.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    xml = _re.sub(r'(<saml:Conditions[^>]*?) NotOnOrAfter="[^"]*"', r"\1", xml, count=1)
+    await expect_reject(xml)
+
+    # Unsolicited: InResponseTo without the AuthnRequest prefix.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email).replace(
+        f'InResponseTo="_{state}"', f'InResponseTo="{state}"'
+    )
+    await expect_reject(xml)
+
+    # RelayState mismatch on an otherwise-valid assertion.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    await expect_reject(xml, relay="not-the-state")
+
+    # Whitespace NameID strips to empty.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email, name_id="  ")
+    await expect_reject(xml)
+
+
+@pytest.mark.asyncio
+async def test_saml_dtd_forbidden(db):
+    """A DOCTYPE anywhere in the response is refused outright (XXE surface),
+    even when the assertion inside is validly signed."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+    state = await _start(db, conn)
+    signed = _sign_assertion(
+        _assertion_xml(in_response_to=state, email=f"d@{domain}")
+    )
+    resp = etree.Element(f"{{{SAMLP_NS}}}Response", nsmap={"samlp": SAMLP_NS})
+    resp.set("ID", f"_R{uuid.uuid4().hex}")
+    resp.append(signed)
+    raw = b'<!DOCTYPE Response [<!ENTITY x "y">]>' + etree.tostring(resp)
+    with pytest.raises(AppError) as e:
+        await svc.handle_acs(
+            connection_id=conn.id,
+            saml_response_b64=base64.b64encode(raw).decode(),
+            relay_state=None,
+        )
+    assert e.value.code == "SSO_ASSERTION_INVALID"
