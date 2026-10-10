@@ -960,3 +960,28 @@ async def test_requeued_run_resumes_from_own_cursor_out(db):
     assert fake.read_calls[-1] == {"batch": 1}
     await db.refresh(run)
     assert run.status == "succeeded" and run.cursor_out == {"batch": 2}
+
+
+@pytest.mark.asyncio
+async def test_sync_run_drivable_through_outbox_handler(db):
+    """R62: the outbox handler must run the sync on a DEDICATED session —
+    the per-batch commits inside execute_run are incompatible with the
+    handler SAVEPOINT. Drives the real handler via process_outbox_once."""
+    import app.integrations.worker  # noqa: F401 — registers handlers
+
+    from app.controlplane.worker import process_outbox_once
+    from app.integrations.models import SyncRun
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "ob-1", "v": "1"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    run_id = run.id
+    for _ in range(6):
+        n = await process_outbox_once(db, topics=["intg.sync.run"])
+        if n == 0:
+            break
+    row = await db.get(SyncRun, run_id)
+    await db.refresh(row)
+    assert row.status == "succeeded" and row.stats.get("created") == 1
