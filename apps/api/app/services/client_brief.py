@@ -60,6 +60,26 @@ class ClientBriefService:
             await self.db.flush()
 
         log.info("brief_created", brief_id=brief.id, org_id=org_id)
+
+        # ADR-018 §12 catalog: brief.created. Fail-safe; CRM-safe payload —
+        # ids and status only, never learner data (§7 privacy rule).
+        try:
+            from app.integrations.facade import emit_event
+
+            await emit_event(
+                self.db,
+                org_id,
+                "brief.created",
+                subject=brief.id,
+                data={
+                    "brief_id": brief.id,
+                    "title": brief.title,
+                    "client_name": brief.client_name,
+                    "status": str(getattr(brief.status, "value", brief.status)),
+                },
+            )
+        except Exception:
+            log.warning("mesh_emit_failed", event="brief.created", brief_id=brief.id)
         return brief
 
     async def list_briefs(

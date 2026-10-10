@@ -73,6 +73,13 @@ _BLOCKED_NETWORKS = [
 MAX_WEBHOOKS_PER_ORG = 25
 MAX_EVENTS_PER_WEBHOOK = 20
 
+# Legacy event name -> canonical mesh catalog name where they differ
+# (ADR-018 §12.1). The eco change event only fires for verified changes, so
+# it maps onto the catalog's ecosystem.change_verified.
+_MESH_NAME_MAP = {
+    "ecosystem.change": "ecosystem.change_verified",
+}
+
 # Track background delivery tasks so they aren't garbage-collected
 # and can be drained on shutdown.
 _pending_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
@@ -302,6 +309,25 @@ class WebhookService:
         (the DB reads) but spawn them only on the session's after_commit; a
         rollback simply never fires them.
         """
+        # ADR-018 §12 (P2b): mirror every legacy event into the canonical
+        # integration event mesh (persistent, signed, retried delivery). The
+        # legacy fire-and-forget path below stays for existing subscribers;
+        # the mesh row+outbox message joins the caller's transaction so a
+        # rollback discards both. Fail-safe: mesh problems never break the
+        # business write (same posture as the legacy path).
+        try:
+            from app.integrations.facade import emit_event as _mesh_emit
+
+            async with self.db.begin_nested():
+                await _mesh_emit(
+                    self.db,
+                    org_id,
+                    _MESH_NAME_MAP.get(event_type, event_type),
+                    data=payload,
+                )
+        except Exception:
+            log.warning("mesh_event_mirror_failed", org_id=org_id, event_type=event_type)
+
         try:
             # Use a nested savepoint so any DB error (e.g. missing column
             # before migration runs) doesn't invalidate the caller's session.

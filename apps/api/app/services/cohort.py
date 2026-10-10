@@ -296,6 +296,23 @@ class CohortService:
             raise AlreadyCohortMemberError() from None
 
         log.info("cohort_member_added", cohort_id=cohort_id, user_id=user_id, role=role.value)
+
+        # ADR-018 §12 catalog: learner.enrolled (learner role only; staff
+        # additions are not an enrollment fact). Fail-safe — mesh problems
+        # never break the enrollment write.
+        if role == CohortRole.LEARNER:
+            try:
+                from app.integrations.facade import emit_event
+
+                await emit_event(
+                    self.db,
+                    org_id,
+                    "learner.enrolled",
+                    subject=member.id,
+                    data={"cohort_id": cohort_id, "user_id": user_id},
+                )
+            except Exception:
+                log.warning("mesh_emit_failed", event="learner.enrolled", cohort_id=cohort_id)
         return member
 
     async def remove_member(self, cohort_id: str, user_id: str, org_id: str) -> None:

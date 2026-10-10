@@ -447,6 +447,24 @@ async def final_accept(
         if brief_result.rowcount:
             record.completed_brief = True
     await _notify_org(db, principal, submission, "client_final_accepted")
+    # ADR-018 §12 catalog: client.accepted. Fail-safe; ids only — the CRM
+    # mapping layer must never receive learner content (§7 privacy rule).
+    try:
+        from app.integrations.facade import emit_event
+
+        await emit_event(
+            db,
+            submission.org_id,
+            "client.accepted",
+            subject=submission.id,
+            data={
+                "submission_id": submission.id,
+                "project_id": submission.project_id,
+                "brief_completed": bool(record.completed_brief),
+            },
+        )
+    except Exception:
+        log.warning("mesh_emit_failed", event="client.accepted", submission_id=submission.id)
     return record
 
 

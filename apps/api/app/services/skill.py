@@ -846,6 +846,20 @@ class SkillService:
 
         # Award points on first completion
         if not was_completed and progress.status == ProgressStatus.COMPLETED:
+            # ADR-018 §12 catalog: skill.completed (first completion only —
+            # recomputations that stay COMPLETED never re-fire). Fail-safe.
+            try:
+                from app.integrations.facade import emit_event
+
+                await emit_event(
+                    self.db,
+                    org_id,
+                    "skill.completed",
+                    subject=skill_id,
+                    data={"skill_id": skill_id, "user_id": user_id},
+                )
+            except Exception:
+                log.warning("mesh_emit_failed", event="skill.completed", skill_id=skill_id)
             try:
                 from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
 

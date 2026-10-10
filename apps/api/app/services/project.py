@@ -1122,6 +1122,25 @@ class ProjectService:
         if review_status == ReviewStatus.APPROVED:
             sub.status = SubmissionStatus.APPROVED
             sub.final_score = self._calculate_final_score(score or 0, sub.is_late, project)
+            # ADR-018 §12 catalog: project.approved. Fail-safe — the mesh
+            # row joins this transaction; a rollback discards both.
+            try:
+                from app.integrations.facade import emit_event
+
+                await emit_event(
+                    self.db,
+                    sub.org_id,
+                    "project.approved",
+                    subject=sub.id,
+                    data={
+                        "submission_id": sub.id,
+                        "project_id": sub.project_id,
+                        "user_id": sub.user_id,
+                        "final_score": sub.final_score,
+                    },
+                )
+            except Exception:
+                log.warning("mesh_emit_failed", event="project.approved", submission_id=sub.id)
         elif review_status == ReviewStatus.REVISION_REQUESTED:
             sub.status = SubmissionStatus.REVISION_REQUESTED
             # Clear any score from a prior approval — the work is being redone,
