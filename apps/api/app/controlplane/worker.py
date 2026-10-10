@@ -634,6 +634,41 @@ async def _intg_cert_expiry_sweep(ctx: dict) -> None:
             log.warning("intg_certs_expiring", count=n)
 
 
+async def _intg_metadata_refresh(ctx: dict) -> None:
+    """ADR-018 R51: daily refresh of SAML IdP metadata for connections that
+    configured a metadata URL (automatic cert rotation)."""
+    from sqlalchemy import select as _select
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import SsoConnection
+    from app.integrations.services.sso_admin import SsoAdminService
+
+    async with AsyncSessionLocal() as db:
+        conns = (
+            await db.execute(
+                _select(SsoConnection).where(
+                    SsoConnection.protocol == "saml",
+                    SsoConnection.status.in_(("testing", "active")),
+                    SsoConnection.idp_metadata_url.is_not(None),
+                )
+            )
+        ).scalars().all()
+        refreshed = 0
+        for conn in conns:
+            try:
+                out = await SsoAdminService(db).refresh_from_metadata(conn.org_id, conn.id)
+                refreshed += 1 if out.get("rotated") else 0
+            except Exception as exc:  # one bad IdP never stops the sweep
+                log.warning(
+                    "intg_metadata_refresh_failed",
+                    connection_id=conn.id,
+                    error=type(exc).__name__,
+                )
+        if conns:
+            await db.commit()
+            log.info("intg_metadata_refreshed", scanned=len(conns), rotated=refreshed)
+
+
 async def _intg_retention_sweep(ctx: dict) -> None:
     """ADR-018 R44: age out terminal deliveries/events/runs/row errors."""
     from app.core.database import AsyncSessionLocal
@@ -696,6 +731,7 @@ def _cron_jobs() -> list:
         cron(_intg_cert_expiry_sweep, hour=6, minute=18, name="intg_cert_expiry"),
         cron(_intg_connection_health_sweep, minute={14, 44}, name="intg_conn_health"),
         cron(_intg_retention_sweep, hour=3, minute=52, timeout=3600, name="intg_retention"),
+        cron(_intg_metadata_refresh, hour=5, minute=37, name="intg_metadata_refresh"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single

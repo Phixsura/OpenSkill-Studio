@@ -378,6 +378,7 @@ def test_every_fabric_sweep_has_a_registered_cron():
         "intg_cert_expiry",      # SAML cert expiry alerts
         "intg_conn_health",      # connection health decay + alerts
         "intg_retention",        # terminal-data age-out (R44)
+        "intg_metadata_refresh", # SAML metadata cert rotation (R51)
     }
     missing = required - names
     assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"

@@ -32,6 +32,7 @@ class SsoAdminService:
         oidc_client_secret: str | None = None,
         idp_entity_id: str | None = None,
         idp_sso_url: str | None = None,
+        idp_metadata_url: str | None = None,
         idp_certificates: list[dict] | None = None,
         attribute_map: dict | None = None,
         allow_jit: bool = False,
@@ -53,6 +54,8 @@ class SsoAdminService:
                     "SSO_CONFIG_INVALID", "idp_entity_id and idp_sso_url required", 422
                 )
             validate_egress_url(idp_sso_url)
+            if idp_metadata_url:
+                validate_egress_url(idp_metadata_url)
             certs = self._screen_certificates(idp_certificates)
             if not certs:
                 raise AppError(
@@ -75,6 +78,7 @@ class SsoAdminService:
             oidc_client_id=oidc_client_id,
             idp_entity_id=idp_entity_id,
             idp_sso_url=idp_sso_url,
+            idp_metadata_url=idp_metadata_url,
             idp_certificates=(
                 self._screen_certificates(idp_certificates) if protocol == "saml" else []
             ),
@@ -193,6 +197,83 @@ class SsoAdminService:
                 "Designate a break-glass member before enforcing SSO",
                 409,
             )
+
+    async def refresh_from_metadata(
+        self, org_id: str, conn_id: str, *, egress=None
+    ) -> dict:
+        """R51: drive the never-driven idp_metadata_url column — fetch the
+        IdP's SAML metadata and refresh the pinned signing certificates (and
+        SSO URL / entity id when present). Rotation overlap comes from the
+        metadata itself carrying old+new certs. Hardened parse: no DTD, no
+        entity resolution, 1MB cap; every extracted URL is egress-screened.
+        """
+        from lxml import etree
+
+        from app.integrations.security import (
+            MAX_RESPONSE_BYTES,
+            EgressClient,
+            validate_egress_url,
+        )
+
+        conn = await self.get(org_id, conn_id)
+        if conn.protocol != "saml" or not conn.idp_metadata_url:
+            raise AppError("SSO_CONFIG_INVALID", "No SAML metadata URL configured", 422)
+        validate_egress_url(conn.idp_metadata_url)
+        egress = egress or EgressClient()
+        resp = await egress.request("GET", conn.idp_metadata_url)
+        if resp.status_code != 200:
+            raise AppError("SSO_METADATA_FETCH_FAILED", f"metadata {resp.status_code}", 502)
+        body = resp.content
+        if len(body) > MAX_RESPONSE_BYTES:
+            raise AppError("SSO_METADATA_FETCH_FAILED", "metadata too large", 502)
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False)
+        try:
+            root = etree.fromstring(body, parser=parser)
+        except etree.XMLSyntaxError as exc:
+            raise AppError("SSO_METADATA_INVALID", "metadata XML invalid", 422) from exc
+        if root.getroottree().docinfo.doctype:
+            raise AppError("SSO_METADATA_INVALID", "DTD forbidden", 422)
+        md_ns = "urn:oasis:names:tc:SAML:2.0:metadata"
+        ds_ns = "http://www.w3.org/2000/09/xmldsig#"
+        entity_id = root.get("entityID")
+        idp = root.find(f"{{{md_ns}}}IDPSSODescriptor")
+        if idp is None:
+            raise AppError("SSO_METADATA_INVALID", "No IDPSSODescriptor", 422)
+        pems: list[dict] = []
+        for kd in idp.findall(f"{{{md_ns}}}KeyDescriptor"):
+            use = kd.get("use")
+            if use not in (None, "signing"):
+                continue  # encryption keys never verify assertions
+            for cert_el in kd.findall(f".//{{{ds_ns}}}X509Certificate"):
+                b64 = "".join((cert_el.text or "").split())
+                if not b64:
+                    continue
+                lines = [b64[i : i + 64] for i in range(0, len(b64), 64)]
+                pems.append(
+                    {
+                        "pem": "-----BEGIN CERTIFICATE-----\n"
+                        + "\n".join(lines)
+                        + "\n-----END CERTIFICATE-----\n"
+                    }
+                )
+        if not pems:
+            raise AppError("SSO_METADATA_INVALID", "No signing certificates", 422)
+        screened = self._screen_certificates(pems)  # parses + stamps not_after
+        sso_url = None
+        for svc in idp.findall(f"{{{md_ns}}}SingleSignOnService"):
+            if svc.get("Binding", "").endswith("HTTP-Redirect") and svc.get("Location"):
+                sso_url = svc.get("Location")
+                break
+        before = {(c.get("pem") or "").strip() for c in (conn.idp_certificates or [])}
+        after = {(c.get("pem") or "").strip() for c in screened}
+        conn.idp_certificates = screened
+        if entity_id:
+            conn.idp_entity_id = str(entity_id)[:500]
+        if sso_url:
+            validate_egress_url(sso_url)
+            conn.idp_sso_url = str(sso_url)[:500]
+        await self.db.flush()
+        return {"certificates": len(screened), "rotated": before != after}
 
     async def sweep_expiring_certificates(self, *, days: int = 30) -> int:
         """Worker cron (ADR §5.2 R19): emit a daily-deduped mesh event for

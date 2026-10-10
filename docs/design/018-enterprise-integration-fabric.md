@@ -857,8 +857,7 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   (SHIPPED in R49 as membership pre-provisioning — launch captures the
   namesroleservice claim, admin-triggered sync pages the roster through
   identity resolution with the instructor/student role map; no cohort
-  writes, placement stays a launch concern); SAML idp_metadata_url auto-polling
-  (certs are pinned manually; the R19 expiry sweep alerts 30 days out); per-key
+  writes, placement stays a launch concern); SAML idp_metadata_url auto-polling (SHIPPED R51: daily 05:37 sweep + manual refresh endpoint — hardened parse, signing-keys only, pem-diff rotation detection; the R19 expiry sweep still alerts 30 days out as the backstop); per-key
   selection of the events `data` payload in warehouse exports; CRM outbound
   extractors (models + engine support exist; vendor connectors are issue #44
   marketplace territory).

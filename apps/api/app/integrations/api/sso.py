@@ -275,6 +275,22 @@ async def set_break_glass(
     await db.commit()
 
 
+@admin_router.post(
+    "/sso-connections/{conn_id}/refresh-metadata", response_model=DataResponse[dict]
+)
+async def refresh_sso_metadata(
+    org_id: str,
+    conn_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R51: pull the IdP's SAML metadata now and refresh pinned certs."""
+    await _admin(org_id, user, db)
+    out = await SsoAdminService(db).refresh_from_metadata(org_id, conn_id)
+    await db.commit()
+    return {"data": out}
+
+
 # ── identity links (reversible; ADR §2.5) ──
 
 

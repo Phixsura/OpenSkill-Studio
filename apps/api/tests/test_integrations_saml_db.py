@@ -497,3 +497,83 @@ async def test_saml_dtd_forbidden(db):
             relay_state=None,
         )
     assert e.value.code == "SSO_ASSERTION_INVALID"
+
+
+# ── R51: SAML metadata auto-refresh ──
+
+
+def _metadata_xml(cert_pem: str, *, entity="https://idp.example.com/meta",
+                  sso="https://idp.example.com/sso2", use="signing") -> bytes:
+    b64 = "".join(
+        line for line in cert_pem.strip().splitlines() if "CERTIFICATE" not in line
+    )
+    return f"""<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
+  xmlns:ds="http://www.w3.org/2000/09/xmldsig#" entityID="{entity}">
+  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="{use}">
+      <ds:KeyInfo><ds:X509Data><ds:X509Certificate>{b64}</ds:X509Certificate></ds:X509Data></ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:SingleSignOnService
+      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+      Location="{sso}"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>""".encode()
+
+
+class _MetaEgress:
+    def __init__(self, body, status=200):
+        self.body = body
+        self.status = status
+
+    async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+        import httpx
+
+        return httpx.Response(
+            self.status, content=self.body, request=httpx.Request(method, url)
+        )
+
+
+@pytest.mark.asyncio
+async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_metadata_url = "https://idp.example.com/metadata.xml"
+    await db.flush()
+    svc = SsoAdminService(db)
+
+    # Fresh cert from the ROGUE pair = a rotation (different from pinned).
+    out = await svc.refresh_from_metadata(
+        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT))
+    )
+    assert out == {"certificates": 1, "rotated": True}
+    await db.refresh(conn)
+    assert conn.idp_entity_id == "https://idp.example.com/meta"
+    assert conn.idp_sso_url == "https://idp.example.com/sso2"
+    assert len(conn.idp_certificates) == 1 and conn.idp_certificates[0]["not_after"]
+
+    # Same metadata again: no rotation.
+    out2 = await svc.refresh_from_metadata(
+        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT))
+    )
+    assert out2["rotated"] is False
+
+    # Encryption-only keys are ignored -> no signing certs -> 422.
+    with pytest.raises(AppError):
+        await svc.refresh_from_metadata(
+            org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, use="encryption"))
+        )
+    # DTD refused outright.
+    dtd = b'<!DOCTYPE md [<!ENTITY x "y">]>' + _metadata_xml(ROGUE_CERT)
+    with pytest.raises(AppError):
+        await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(dtd))
+    # Upstream failure is a 502-class error, not a crash.
+    with pytest.raises(AppError) as exc:
+        await svc.refresh_from_metadata(
+            org.id, conn.id, egress=_MetaEgress(b"", status=500)
+        )
+    assert exc.value.status_code == 502
+    # No metadata URL configured -> 422.
+    conn2 = await _saml_conn(db, (await _org(db))[0])
+    with pytest.raises(AppError) as exc2:
+        await svc.refresh_from_metadata(conn2.org_id, conn2.id)
+    assert exc2.value.status_code == 422
