@@ -538,3 +538,105 @@ async def test_revoked_link_never_drives_unenroll(db):
     await db.flush()
     r2 = await svc.provision(org.id, conn.id, actor_id=owner.id)
     assert r2["members_removed"] == 0
+
+
+# ── R45: connector probe killers ──
+
+
+def _ctx(egress, page_size=2):
+    from app.integrations.registry import ConnCtx
+
+    async def loader():
+        return {"client_id": "cid", "client_secret": "cs"}
+
+    ctx = ConnCtx(
+        connection_id="x",
+        config={"token_url": "https://sis.example.com/token", "page_size": page_size},
+        base_url="https://sis.example.com/ims/oneroster/rostering/v1p2",
+        _secret_loader=loader,
+    )
+    ctx.egress = egress
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_oneroster_multi_page_and_overfull_page(db):
+    """Kills: exact-full-page continuation (`<=` mutant stops early) and
+    offset advancing by page_size instead of the REAL item count when a
+    badly-behaved server over-returns."""
+    from app.integrations.registry import OneRosterConnector
+
+    def cls(i):
+        return {"sourcedId": f"c-{i}", "title": f"T{i}"}
+
+    # 4 items, page_size 2 -> two full pages + one empty probe; 4 records.
+    sis = FakeSis([[cls(1), cls(2), cls(3), cls(4)]])
+    connector = OneRosterConnector()
+    batches = [b async for b in connector.read(_ctx(sis), "roster.class", {})]
+    records = [r for b in batches for r in b["records"]]
+    assert [r["external_id"] for r in records] == ["c-1", "c-2", "c-3", "c-4"]
+    assert batches[-1]["state"] == {"endpoint_offset": 0}
+    # Mid-run checkpoints carried the LIVE offset for crash resume.
+    assert [b["state"]["endpoint_offset"] for b in batches[:-1]] == [2, 4]
+
+    class OverfullSis(FakeSis):
+        """Returns 3 items although limit=2 (server ignores the limit)."""
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            parsed = urlsplit(url)
+            if parsed.path.endswith("/token"):
+                return await super().request(
+                    method, url, headers=headers, content=content, read_timeout=read_timeout
+                )
+            self.calls.append(url)
+            offset = int(parse_qs(parsed.query).get("offset", ["0"])[0])
+            flat = [c for page in self.pages for c in page]
+            items = flat[offset : offset + 3]  # over-returns
+            return httpx.Response(
+                200, json={"classes": items}, request=httpx.Request(method, url)
+            )
+
+    over = OverfullSis([[cls(1), cls(2), cls(3)]])
+    batches2 = [b async for b in connector.read(_ctx(over), "roster.class", {})]
+    records2 = [r for b in batches2 for r in b["records"]]
+    assert [r["external_id"] for r in records2] == ["c-1", "c-2", "c-3"]  # no dupes
+    offsets = [parse_qs(urlsplit(u).query)["offset"][0] for u in over.calls if "offset" in u]
+    assert offsets == ["0", "3"]  # offset advanced by REAL count
+
+
+@pytest.mark.asyncio
+async def test_oneroster_error_classification(db):
+    """Kills: token 500 / missing access_token / data 401 vs 500 arms."""
+    from app.integrations.registry import OneRosterConnector
+
+    def scripted(token_status=200, token_json=None, data_status=200):
+        class S:
+            async def request(self, method, url, **kw):
+                if urlsplit(url).path.endswith("/token"):
+                    return httpx.Response(
+                        token_status,
+                        json=token_json if token_json is not None else {"access_token": "t"},
+                        request=httpx.Request(method, url),
+                    )
+                return httpx.Response(
+                    data_status, json={"classes": []}, request=httpx.Request(method, url)
+                )
+        return S()
+
+    connector = OneRosterConnector()
+
+    async def read_with(egress):
+        return [b async for b in connector.read(_ctx(egress), "roster.class", {})]
+
+    with pytest.raises(AppError) as e1:
+        await read_with(scripted(token_status=500))
+    assert e1.value.code == "CONNECTION_AUTH_REJECTED"
+    with pytest.raises(AppError) as e2:
+        await read_with(scripted(token_json={}))
+    assert e2.value.code == "CONNECTION_AUTH_REJECTED"
+    with pytest.raises(AppError) as e3:
+        await read_with(scripted(data_status=401))
+    assert e3.value.code == "CONNECTION_AUTH_REJECTED"
+    with pytest.raises(AppError) as e4:
+        await read_with(scripted(data_status=503))
+    assert e4.value.code == "CONNECTION_PING_FAILED"
