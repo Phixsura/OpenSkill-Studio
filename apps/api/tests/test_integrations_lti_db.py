@@ -447,8 +447,8 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
     # Instructor got the instructor role; learner got student.
     from sqlalchemy import func as _f
 
-    from app.models.organization import OrgMember as _OM
-    from app.models.user import User as _U
+    from app.models.organization import OrgMember as MemberModel
+    from app.models.user import User as UserModel
 
     teach = (
         await db.execute(
