@@ -1540,6 +1540,18 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 2022-2121 — the wrap-up. The seventh marathon ran 100 battery
+rounds fully green (two transient flakes — an ERR_ABORTED navigation at
+R2061 and a single wall test at R2072 — both re-ran clean) before the
+user called time at 2h51m: "差不多该收尾了". Final state of the
+campaign: 2,121 recorded rounds; defects #1-#108 all closed red-first;
+194 full-suite certifications (latest 7039/7039); migrations exp01-exp17;
+exp battery 655, live E2E wall 161, web 744 + 3 browser checks; 55
+mutation waves at 100% kill or ledgered equivalents; six completed
+five-hour single-conversation marathons plus this final partial; 32
+falsified adversarial hypotheses in the audit ledger. PR #47 moves from
+draft to ready for review; merging remains the maintainer's call.
+
 Rounds 1852-2019 — the sixth five-hour single-conversation marathon,
 completed, crossing the round-2000 milestone mid-stream. From 09:56:22
 to 14:57:14 (5h00m52s) one conversation turn chained 168 battery rounds
