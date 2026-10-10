@@ -306,3 +306,57 @@ async def test_registration_admin_rules(db):
         await svc.map_resource_link(
             org.id, reg.id, deployment_id="d1", resource_link_id="r", kind="exam", target_id="x"
         )
+
+
+# ── R37: launch-validation probe killers ──
+
+
+@pytest.mark.asyncio
+async def test_launch_expired_state_inactive_reg_and_missing_exp(db):
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.models import LtiLaunchState
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    svc.egress = FakePlatform()
+
+    # 1. Expired state: valid token, stale row -> refused.
+    state, nonce = await _start(svc, reg)
+    row = await db.get(LtiLaunchState, state)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db.flush()
+    with pytest.raises(AppError):
+        await svc.handle_launch(state_value=state, id_token=_mint(nonce))
+
+    # 2. Registration disabled AFTER the state was minted -> refused.
+    state, nonce = await _start(svc, reg)
+    reg.status = "disabled"
+    await db.flush()
+    with pytest.raises(AppError) as exc:
+        await svc.handle_launch(state_value=state, id_token=_mint(nonce))
+    assert "registration_inactive" in exc.value.message or exc.value.code == "LTI_LAUNCH_INVALID"
+    reg.status = "active"
+    await db.flush()
+
+    # 3. Token without exp -> refused (require list).
+    state, nonce = await _start(svc, reg)
+    # Fully launchable except for the missing exp — so ONLY the require
+    # list can reject it (otherwise identity resolution would mask the hole).
+    claims = {
+        "iss": ISS,
+        "aud": "tool-client-1",
+        "sub": "lms-user-7",
+        "email": f"noexp-{uuid.uuid4().hex[:6]}@{_mint.domain}",
+        "name": "No Exp",
+        "nonce": nonce,
+        "iat": int(time.time()),
+        f"{CLAIM}version": "1.3.0",
+        f"{CLAIM}message_type": "LtiResourceLinkRequest",
+        f"{CLAIM}deployment_id": "dep-1",
+        f"{CLAIM}resource_link": {"id": "rl-1"},
+        f"{CLAIM}roles": [],
+    }
+    token = pyjwt.encode(claims, _PRIV, algorithm="RS256", headers={"kid": "lms-k1"})
+    with pytest.raises(AppError):
+        await svc.handle_launch(state_value=state, id_token=token)
