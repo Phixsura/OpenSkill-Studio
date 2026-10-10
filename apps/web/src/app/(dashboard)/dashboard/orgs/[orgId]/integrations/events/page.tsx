@@ -17,6 +17,7 @@ interface MeshEvent {
   type: string;
   subject: string | null;
   time: string | null;
+  data: Record<string, unknown>;
 }
 
 interface Attempt {
@@ -66,6 +67,7 @@ export default function IntegrationEventsPage() {
   const [revealedSecret, setRevealedSecret] = useState<{ id: string; secret: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [openDelivery, setOpenDelivery] = useState<string | null>(null);
+  const [openEvent, setOpenEvent] = useState<string | null>(null);
 
   const { data: eventsData, isLoading: eventsLoading } = useQuery({
     queryKey: ["intg-events", orgId, typePrefix],
@@ -317,9 +319,22 @@ export default function IntegrationEventsPage() {
         <ul className="space-y-1">
           {events.map((e) => (
             <li key={e.id} className="rounded border px-3 py-2 text-sm">
-              <span className="font-mono text-xs">{e.type}</span>
-              {e.subject && <span className="text-muted-foreground ml-2 text-xs">{e.subject}</span>}
-              {e.time && <span className="text-muted-foreground ml-2 text-xs">{e.time}</span>}
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={() => setOpenEvent(openEvent === e.id ? null : e.id)}
+              >
+                <span className="font-mono text-xs">{e.type}</span>
+                {e.subject && (
+                  <span className="text-muted-foreground ml-2 text-xs">{e.subject}</span>
+                )}
+                {e.time && <span className="text-muted-foreground ml-2 text-xs">{e.time}</span>}
+              </button>
+              {openEvent === e.id && (
+                <pre className="bg-muted mt-2 overflow-x-auto rounded p-2 text-xs">
+                  {JSON.stringify(e.data, null, 2)}
+                </pre>
+              )}
             </li>
           ))}
           {!eventsLoading && events.length === 0 && (

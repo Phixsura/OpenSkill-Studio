@@ -831,6 +831,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   config against the new config_schema and re-checks capabilities — may surface
   CAPABILITY_MISSING, never silent.
 
+- **R20/R23 decision — unlink does NOT revoke sessions**: unlinking an
+  external identity only severs the mapping (reversible; audit row kept).
+  The platform account and its sessions stand — offboarding is SCIM
+  deactivation or member removal, both of which sweep refresh tokens.
+  accept_theirs adjudication carries a staleness guard (409 when the staged
+  field moved since the conflict was recorded).
+
 - **Deferred (explicit, as of R19)**: import template kinds `roster` and
   `opportunities` (users shipped; the pipeline is template-agnostic); LTI NRPS
   (roster arrives via OneRoster/SCIM instead); SAML idp_metadata_url auto-polling
