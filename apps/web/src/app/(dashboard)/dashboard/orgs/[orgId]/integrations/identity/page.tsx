@@ -34,6 +34,7 @@ interface SsoConnection {
 interface ScimToken {
   id: string;
   name: string;
+  group_map: Record<string, { kind: string; id?: string; role?: string }>;
   last_used_at: string | null;
   revoked_at: string | null;
   token?: string | null;
@@ -65,6 +66,8 @@ export default function IdentityIntegrationsPage() {
   const [tokenName, setTokenName] = useState("");
   const [mintedToken, setMintedToken] = useState<string | null>(null);
   const [linkUserId, setLinkUserId] = useState("");
+  const [mapFor, setMapFor] = useState<string | null>(null);
+  const [groupMapJson, setGroupMapJson] = useState("{}");
 
   const domainsQ = useQuery({
     queryKey: ["intg-domains", orgId],
@@ -172,6 +175,27 @@ export default function IdentityIntegrationsPage() {
     mutationFn: (id: string) => apiWithAuth(`${base}/scim-tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast.success("Token revoked");
+      queryClient.invalidateQueries({ queryKey: ["intg-scim-tokens", orgId] });
+    },
+    onError,
+  });
+
+  const saveGroupMap = useMutation({
+    mutationFn: (id: string) => {
+      let group_map: unknown;
+      try {
+        group_map = JSON.parse(groupMapJson);
+      } catch {
+        throw new ApiError(0, "BAD_JSON", "Group map is not valid JSON");
+      }
+      return apiWithAuth(`${base}/scim-tokens/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ group_map }),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Group map saved");
+      setMapFor(null);
       queryClient.invalidateQueries({ queryKey: ["intg-scim-tokens", orgId] });
     },
     onError,
@@ -390,7 +414,10 @@ export default function IdentityIntegrationsPage() {
         )}
         <ul className="space-y-2">
           {(tokensQ.data?.data ?? []).map((t) => (
-            <li key={t.id} className="flex items-center justify-between rounded-md border p-3">
+            <li
+              key={t.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3"
+            >
               <div>
                 <span className="font-medium">{t.name}</span>
                 {t.revoked_at ? (
@@ -402,9 +429,38 @@ export default function IdentityIntegrationsPage() {
                 )}
               </div>
               {!t.revoked_at && (
-                <Button size="sm" variant="destructive" onClick={() => revokeToken.mutate(t.id)}>
-                  Revoke
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setMapFor(mapFor === t.id ? null : t.id);
+                      setGroupMapJson(JSON.stringify(t.group_map ?? {}, null, 2));
+                    }}
+                  >
+                    Group map
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => revokeToken.mutate(t.id)}>
+                    Revoke
+                  </Button>
+                </div>
+              )}
+              {mapFor === t.id && (
+                <div className="mt-2 w-full space-y-2 border-t pt-2">
+                  <p className="text-muted-foreground text-xs">
+                    Map IdP group names to cohorts or roles, e.g.{" "}
+                    {'{"Instructors": {"kind": "role", "role": "instructor"}}'}
+                  </p>
+                  <textarea
+                    aria-label={`Group map for ${t.name}`}
+                    className="h-24 w-full rounded-md border p-2 font-mono text-xs"
+                    value={groupMapJson}
+                    onChange={(e) => setGroupMapJson(e.target.value)}
+                  />
+                  <Button size="sm" onClick={() => saveGroupMap.mutate(t.id)}>
+                    Save group map
+                  </Button>
+                </div>
               )}
             </li>
           ))}
