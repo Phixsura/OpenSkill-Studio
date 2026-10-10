@@ -606,7 +606,7 @@ async def test_login_discovery_routes_by_protocol(db):
     await db.flush()
     # find the discovery endpoint (protocol /sso/login)
     fn = None
-    for name, obj in vars(sso_api).items():
+    for obj in vars(sso_api).values():
         if inspect.iscoroutinefunction(obj) and "org_for_email_domain" in inspect.getsource(obj):
             fn = obj
             break
