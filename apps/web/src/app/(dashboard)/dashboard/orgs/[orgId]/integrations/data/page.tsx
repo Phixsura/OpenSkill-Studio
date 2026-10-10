@@ -123,6 +123,23 @@ export default function DataIntegrationsPage() {
     onError,
   });
 
+  // A bare <a href> to the authenticated errors.csv endpoint 401s (no
+  // bearer in browser navigation) — fetch with auth and hand over a blob.
+  const downloadErrors = async (jobId: string) => {
+    try {
+      const { apiTextWithAuth } = await import("@/lib/api");
+      const csv = await apiTextWithAuth(`${base}/imports/${jobId}/errors.csv`);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `import-${jobId}-errors.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      onError(err);
+    }
+  };
+
   const runStream = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth<{ data: ExportRun }>(`${base}/export-streams/${id}/run`, {
@@ -182,14 +199,9 @@ export default function DataIntegrationsPage() {
                 </Button>
               )}
               {(job.dry_stats?.errors ?? 0) > 0 && (
-                <a
-                  className="text-sm underline"
-                  href={`${API_BASE}/api/v1${base}/imports/${job.id}/errors.csv`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <Button size="sm" variant="outline" onClick={() => downloadErrors(job.id)}>
                   Download error report
-                </a>
+                </Button>
               )}
             </div>
           </div>

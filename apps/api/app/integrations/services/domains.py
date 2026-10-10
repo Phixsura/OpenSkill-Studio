@@ -133,6 +133,42 @@ class OrgDomainService:
         )
         return {d for (d,) in rows.all()}
 
+    async def sweep_pending(self, *, expire_days: int = 7) -> int:
+        """Worker cron (ADR §5.1): poll pending domains against DNS; verify
+        on success, fail after the expiry window. Returns changed count."""
+
+        now = datetime.now(UTC)
+        pending = (
+            await self.db.execute(
+                select(OrgDomain).where(OrgDomain.status == "pending").limit(200)
+            )
+        ).scalars().all()
+        changed = 0
+        verifier = get_verifier()
+        for row in pending:
+            row.last_checked_at = now
+            if (now - (row.created_at or now)).days >= expire_days:
+                row.status = "failed"
+                changed += 1
+                continue
+            try:
+                ok = await verifier.verify(row.domain, row.verification_token)
+            except Exception:  # DNS hiccup — try again next sweep
+                continue
+            if not ok:
+                continue
+            row.status = "verified"
+            row.verified_at = now
+            try:
+                async with self.db.begin_nested():
+                    await self.db.flush()
+                changed += 1
+            except Exception:
+                # Another org won the partial-unique race — mark failed.
+                row.status = "failed"
+        await self.db.flush()
+        return changed
+
     async def org_for_email_domain(self, email: str) -> str | None:
         """IdP discovery: the single org holding the VERIFIED domain of this
         email, or None. Freemail domains never route."""

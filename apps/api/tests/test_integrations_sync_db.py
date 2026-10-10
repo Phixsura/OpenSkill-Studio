@@ -643,3 +643,35 @@ async def test_trigger_reaps_stale_run_and_starts_fresh(db):
     assert fresh.id != stuck.id
     await db.refresh(stuck)
     assert stuck.status == "failed" and stuck.error["class"] == "stale_heartbeat"
+
+
+# ── R11: scheduled-profile sweep (nothing else drives `schedule`) ──
+
+
+@pytest.mark.asyncio
+async def test_sweep_scheduled_profiles_triggers_due_only(db):
+    from app.integrations.models import SyncRun
+    from app.integrations.services.sync_engine import sweep_scheduled_profiles
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    profile.schedule = "hourly"
+    await db.commit()
+    # No prior run -> due now.
+    assert await sweep_scheduled_profiles(db) == 1
+    run = (
+        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
+    ).scalars().first()
+    assert run is not None and run.trigger == "schedule"
+    # A live run exists -> idempotent trigger returns it; sweep counts it but
+    # creates no second run.
+    await sweep_scheduled_profiles(db)
+    runs = (
+        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
+    ).scalars().all()
+    assert len(runs) == 1
+    # Finish the run recently -> NOT due within the hour.
+    runs[0].status = "succeeded"
+    await db.commit()
+    assert await sweep_scheduled_profiles(db) == 0

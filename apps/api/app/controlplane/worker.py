@@ -586,6 +586,42 @@ async def _exp_closure_sweep(ctx: dict) -> None:
             log.info("exp_experiments_auto_completed", count=n)
 
 
+async def _intg_domain_sweep(ctx: dict) -> None:
+    """ADR-018 §5.1: poll pending org domains against DNS TXT."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.domains import OrgDomainService
+
+    async with AsyncSessionLocal() as db:
+        n = await OrgDomainService(db).sweep_pending()
+        if n:
+            await db.commit()
+            log.info("intg_domains_swept", changed=n)
+
+
+async def _intg_scheduled_syncs(ctx: dict) -> None:
+    """ADR-018 §11: drive hourly/daily sync profiles."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.sync_engine import sweep_scheduled_profiles
+
+    async with AsyncSessionLocal() as db:
+        n = await sweep_scheduled_profiles(db)
+        if n:
+            await db.commit()
+            log.info("intg_scheduled_syncs_triggered", count=n)
+
+
+async def _intg_stale_run_reaper(ctx: dict) -> None:
+    """ADR-018 §11.2: fail runs whose worker died mid-flight."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.sync_engine import reap_stale_runs
+
+    async with AsyncSessionLocal() as db:
+        n = await reap_stale_runs(db)
+        if n:
+            await db.commit()
+            log.warning("intg_stale_runs_reaped", count=n)
+
+
 def _cron_jobs() -> list:
     """Cron registry — later phases append their sweeps here."""
     from arq.cron import cron
@@ -604,6 +640,10 @@ def _cron_jobs() -> list:
         cron(_eco_availability_sweep, minute={14, 44}, name="eco_availability_sweep"),
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
+        # ADR-018 integration fabric sweeps (off-minute by convention)
+        cron(_intg_domain_sweep, minute={7, 22, 37, 52}, name="intg_domain_sweep"),
+        cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
+        cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single

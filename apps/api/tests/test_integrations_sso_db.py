@@ -567,3 +567,40 @@ async def test_resolution_tolerates_junk_claim_types(db):
                 email_verified=True,
             )
         )
+
+
+# ── R11: pending-domain DNS sweep ──
+
+
+@pytest.mark.asyncio
+async def test_domain_sweep_verifies_and_expires(db, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    import app.integrations.services.domains as mod
+    from app.integrations.models import OrgDomain
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = OrgDomainService(db)
+    fresh = await svc.claim(org.id, f"sweep-{uuid.uuid4().hex[:6]}.example.edu")
+    stale = await svc.claim(org.id, f"old-{uuid.uuid4().hex[:6]}.example.edu")
+    # Backdate the stale claim beyond the 7-day window.
+    await db.execute(
+        OrgDomain.__table__.update()
+        .where(OrgDomain.id == stale.id)
+        .values(created_at=datetime.now(UTC) - timedelta(days=8))
+    )
+
+    db.expire_all()  # the core UPDATE above bypassed the identity map
+
+    class Yep:
+        async def verify(self, h, t):
+            return True
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
+    changed = await svc.sweep_pending()
+    assert changed == 2
+    await db.refresh(fresh)
+    await db.refresh(stale)
+    assert fresh.status == "verified"
+    assert stale.status == "failed"  # expired before DNS was consulted

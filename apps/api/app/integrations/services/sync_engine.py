@@ -761,6 +761,46 @@ async def _finish(db: AsyncSession, run: SyncRun, status: str, *, error: dict | 
             log.warning("mesh_emit_failed", event="integration.sync.completed", run_id=run.id)
 
 
+async def sweep_scheduled_profiles(db: AsyncSession) -> int:
+    """Worker cron: trigger enabled hourly/daily profiles whose last run is
+    older than their period (nothing else drives `schedule` — R11 gap)."""
+    profiles = (
+        await db.execute(
+            select(SyncProfile).where(
+                SyncProfile.enabled.is_(True),
+                SyncProfile.schedule.in_(("hourly", "daily")),
+            )
+        )
+    ).scalars().all()
+    triggered = 0
+    now = datetime.now(UTC)
+    for profile in profiles:
+        period = timedelta(hours=1) if profile.schedule == "hourly" else timedelta(days=1)
+        last = (
+            await db.execute(
+                select(SyncRun.created_at)
+                .where(SyncRun.profile_id == profile.id)
+                .order_by(SyncRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if last is not None:
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+            if now - last < period:
+                continue
+        try:
+            await SyncProfileService(db).trigger(
+                profile.org_id, profile.id, trigger="schedule"
+            )
+            triggered += 1
+        except AppError as exc:
+            log.warning(
+                "scheduled_sync_skipped", profile_id=profile.id, code=exc.code
+            )
+    return triggered
+
+
 async def reap_stale_runs(db: AsyncSession) -> int:
     """Crash-retry pin (R85): a running run with a stale heartbeat is failed
     so the next trigger can start cleanly from the committed cursor."""
