@@ -1540,6 +1540,20 @@ first attempt with NEXT_PUBLIC_API_URL failed on connect-src 'self' CSP,
 exactly the hazard the config comment warns about). The user's dev API
 on :8000 untouched.
 
+Rounds 1700-1849 — the fifth five-hour single-conversation marathon,
+completed, and the second to land a live defect mid-stream. From
+04:37:41 to 09:40:16 (5h02m35s) one conversation turn chained 150
+battery rounds without a yield. At R1715 the round-1694 totality fuzz
+caught defect #108 on its second exploration pass (Welch-Satterthwaite
+df denominator underflowing to zero on denormal variances); the fix,
+its deterministic regression, a repo-wide ruff pass and full
+certification #194 (924+1209+1541+3365 = 7039/7039, all green) all ran
+INSIDE the marathon without breaking the chain. Three transient flakes
+re-ran clean and are recorded honestly: R1729 (one vitest web test),
+R1828 and R1849 (login-form render timeouts in the browser wall). Five
+five-hour single-sitting blocks now stand in the record (R952-R1133,
+R1157-R1331, R1344-R1520, R1540-R1692, R1700-R1849), all fully green.
+
 Rounds 1693-1698 — the post-marathon sweep after defect #107. Three
 hypotheses falsified: no other #107-style unguarded division survives in
 analysis.py (welch guards se<=0 before dividing, CUPED theta guards its
