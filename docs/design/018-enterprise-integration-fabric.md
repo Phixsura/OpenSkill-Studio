@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R249 (seventh window, final foreground tally)**: four complete
+  foreground passes of the full API suite on successive HEADs
+  (7348 → 7356 → 7357 → 7361, zero failures), fabric suite to 322, web
+  764+tsc+lint ×4, E2E 62 ×4, adversarial 178 ×4 with zero API tracebacks.
+  Window-7 totals: ~60 mutants killed, 13 new survivor-pin tests
+  (R239–R241, R243–R245, R247–R248), 6 documented equivalents, 3 registry
+  drift guards, 1 harness-hygiene fix. All executed as sequential foreground
+  commands per operator instruction.
 - **R248 (seventh window, survivor pins ×4)**: four more unpinned
   properties: bulk-replay per-call cap (monkeypatched cap=2, 3 exhausted →
   exactly 2 clones), single-replay 409 on a DISABLED subscription (replay
