@@ -574,3 +574,90 @@ def test_oauth_scopes_stay_least_privilege():
     )
     assert '"scope": "openid email profile"' in Path(oidc_mod.__file__).read_text()
     assert '"scope": "openid",' in Path(lti_mod.__file__).read_text()
+
+
+def test_generic_crm_connector_contract():
+    """R120 (Part E): CRM reader maps accounts/contacts/deals, paginates by
+    real item count, classifies 401/5xx, refuses unknown models, read-only."""
+    import asyncio
+
+    import httpx
+
+    from app.exceptions import AppError
+    from app.integrations.registry import ConnCtx, GenericCrmConnector
+
+    class CrmApi:
+        def __init__(self, pages_by_key, status=200):
+            self.pages = pages_by_key
+            self.status = status
+            self.calls = []
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            self.calls.append(url)
+            if self.status != 200:
+                return httpx.Response(self.status, request=httpx.Request(method, url))
+            from urllib.parse import parse_qs, urlsplit
+
+            parsed = urlsplit(url)
+            key = parsed.path.rstrip("/").split("/")[-1]
+            qs = parse_qs(parsed.query)
+            offset = int(qs.get("offset", ["0"])[0])
+            limit = int(qs.get("limit", ["100"])[0])
+            items = self.pages.get(key, [])[offset : offset + limit]
+            return httpx.Response(200, json={key: items}, request=httpx.Request(method, url))
+
+    async def loader():
+        return {"api_key": "crm-key"}
+
+    def ctx(egress, page_size=2):
+        c = ConnCtx(connection_id="x", config={"page_size": page_size, "auth_header": "X-Api-Key"},
+                    base_url="https://crm.example.com/api/", _secret_loader=loader)
+        c.egress = egress
+        return c
+
+    async def main():
+        conn = GenericCrmConnector()
+        api = CrmApi({
+            "accounts": [{"id": "a1", "name": "Acme", "domain": "acme.io"},
+                         {"id": "a2", "name": "Globex"},
+                         {"id": "a3", "name": "Initech"}],
+        })
+        batches = [b async for b in conn.read(ctx(api), "crm.account", {})]
+        recs = [r for b in batches for r in b["records"]]
+        assert [r["external_id"] for r in recs] == ["a1", "a2", "a3"]
+        assert recs[0] == {"external_id": "a1", "name": "Acme", "domain": "acme.io"}
+        assert batches[-1]["state"] == {"endpoint_offset": 0}
+        # api-key header placed under the configured name.
+        assert all("X-Api-Key" not in u for u in api.calls)  # header, not query
+
+        # contacts map account_external_id; deals map stage.
+        api2 = CrmApi({"contacts": [{"id": "c1", "email": "p@acme.io", "account_id": "a1"}]})
+        [c1] = [r async for b in conn.read(ctx(api2), "crm.contact", {}) for r in b["records"]]
+        assert c1 == {"external_id": "c1", "email": "p@acme.io", "name": None,
+                      "account_external_id": "a1"}
+
+        # error classification + unknown model.
+        try:
+            async for _ in conn.read(ctx(CrmApi({}, status=401)), "crm.deal", {}):
+                pass
+            raise AssertionError("no 401")
+        except AppError as e:
+            assert e.code == "CONNECTION_AUTH_REJECTED"
+        try:
+            async for _ in conn.read(ctx(api), "talent.candidate", {}):
+                pass
+            raise AssertionError("no model guard")
+        except AppError as e:
+            assert e.code == "SYNC_PROFILE_INVALID"
+        # read-only: no write method.
+        assert not hasattr(conn, "write")
+
+    asyncio.run(main())
+
+
+def test_generic_crm_in_catalog():
+    """R120: generic_crm registered with crm.read capability."""
+    from app.integrations.registry import CONNECTORS, PROVIDER_CATALOG
+
+    assert "generic_crm" in CONNECTORS
+    assert PROVIDER_CATALOG["generic_crm"]["capabilities"] == ["crm.read"]

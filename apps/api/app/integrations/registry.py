@@ -89,6 +89,21 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         },
         "version": 1,
     },
+    "generic_crm": {
+        "category": "crm",
+        "auth_mode": "api_key",
+        "display_name": "Generic CRM (REST)",
+        "capabilities": ["crm.read"],
+        "config_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "auth_header": {"type": "string", "maxLength": 100, "default": "Authorization"},
+                "page_size": {"type": "integer", "minimum": 10, "maximum": 500, "default": 100},
+            },
+        },
+        "version": 1,
+    },
 }
 
 
@@ -371,6 +386,81 @@ class OneRosterConnector:
                 break
 
 
+class GenericCrmConnector:
+    """Inbound CRM reader (Part E): pulls accounts/contacts/deals from a REST
+    CRM with an API-key header and offset pagination. Maps common fields to
+    the canonical crm.* models; a MappingProfile refines per-vendor. Read-only
+    by design — internal learner data never flows OUT through this connector
+    (CRM push is a separate consented path)."""
+
+    key = "generic_crm"
+    capabilities = frozenset({"crm.read"})
+
+    MODEL_PATHS = {
+        "crm.account": ("accounts", "accounts"),
+        "crm.contact": ("contacts", "contacts"),
+        "crm.deal": ("deals", "deals"),
+    }
+
+    async def ping(self, ctx: ConnCtx) -> None:
+        from app.exceptions import AppError
+
+        if not ctx.base_url:
+            raise AppError("CONNECTION_CONFIG_INVALID", "base_url is required", 422)
+        validate_egress_url(ctx.base_url)
+
+    @staticmethod
+    def _map_record(model: str, item: dict) -> dict:
+        ext = str(item.get("id") or item.get("external_id") or "")
+        out: dict = {"external_id": ext}
+        if model == "crm.account":
+            out.update({"name": item.get("name"), "domain": item.get("domain")})
+        elif model == "crm.contact":
+            out.update({
+                "email": item.get("email"),
+                "name": item.get("name") or item.get("full_name"),
+                "account_external_id": str(item.get("account_id") or "") or None,
+            })
+        else:  # crm.deal
+            out.update({
+                "name": item.get("name") or item.get("title"),
+                "stage": item.get("stage"),
+                "account_external_id": str(item.get("account_id") or "") or None,
+            })
+        return out
+
+    async def read(self, ctx: ConnCtx, model: str, state: dict):
+        from app.exceptions import AppError
+
+        endpoint = self.MODEL_PATHS.get(model)
+        if endpoint is None:
+            raise AppError("SYNC_PROFILE_INVALID", f"generic_crm cannot read {model}", 422)
+        path, collection_key = endpoint
+        page_size = int(ctx.config.get("page_size", 100))
+        secret = await ctx.get_secret()
+        header = ctx.config.get("auth_header", "Authorization")
+        headers = {header: secret["api_key"]} if secret.get("api_key") else {}
+        base = (ctx.base_url or "").rstrip("/")
+        offset = int(state.get("endpoint_offset", 0))
+        while True:
+            url = f"{base}/{path}?limit={page_size}&offset={offset}"
+            resp = await request_with_retry(ctx.egress, "GET", url, headers=headers)
+            if resp.status_code in (401, 403):
+                raise AppError("CONNECTION_AUTH_REJECTED", f"CRM {resp.status_code}", 422)
+            if resp.status_code != 200:
+                raise AppError("CONNECTION_PING_FAILED", f"CRM {resp.status_code}", 422)
+            items = resp.json().get(collection_key, []) or []
+            records = [self._map_record(model, i) for i in items if isinstance(i, dict)]
+            offset += len(items)
+            last_page = len(items) < page_size
+            yield {
+                "records": records,
+                "state": {"endpoint_offset": 0 if last_page else offset},
+            }
+            if last_page:
+                break
+
+
 CONNECTORS: dict[str, Connector] = {
     c.key: c  # type: ignore[misc]
     for c in (
@@ -378,5 +468,6 @@ CONNECTORS: dict[str, Connector] = {
         GenericRestConnector(),
         GenericAtsConnector(),
         OneRosterConnector(),
+        GenericCrmConnector(),
     )
 }
