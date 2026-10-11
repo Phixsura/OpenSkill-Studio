@@ -858,3 +858,52 @@ async def test_response_size_cap_aborts_before_buffering(monkeypatch):
     state["mode"] = "ok"
     resp = await EgressClient().request("GET", "https://api.example.com/small")
     assert resp.status_code == 200 and resp.json() == {"ok": True}
+
+
+def test_event_catalog_covers_every_emitted_name():
+    """R231 catalog-drift guard: every bare mesh-event name emitted anywhere
+    in the backend (emit_event literals, SCIM _audit literals, and
+    INTERNAL_EVENT_PREFIX f-strings) must appear in the subscription
+    catalog — legacy set, DIRECT_EMISSIONS, or the internal-alertable map.
+    And DIRECT_EMISSIONS must contain no phantom entries nothing emits."""
+    import pathlib
+    import re
+
+    from app.integrations.api.events import _INTERNAL_ALERTABLE, DIRECT_EMISSIONS
+    from app.services.webhook import _MESH_NAME_MAP, VALID_EVENT_TYPES
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    emitted: set[str] = set()
+    name_re = re.compile(r'"([a-z][a-z_]*(?:\.[a-z_]+)+)"')
+    for py in root.rglob("*.py"):
+        text = py.read_text()
+        for m in re.finditer(r"emit_event\(", text):
+            window = text[m.end() : m.end() + 300]
+            found = name_re.search(window)
+            if found:
+                emitted.add(found.group(1))
+        for m in re.finditer(r'_audit\(\s*"([a-z][a-z_.]+)"', text):
+            emitted.add(m.group(1))
+        for m in re.finditer(
+            r'f"\{INTERNAL_EVENT_PREFIX\}([a-z][a-z_.]+)"', text
+        ):
+            emitted.add("integration." + m.group(1))
+
+    assert emitted, "source scan found nothing — the regex broke, fix the test"
+    catalog_bare = (
+        set(VALID_EVENT_TYPES)
+        | {_MESH_NAME_MAP.get(n, n) for n in VALID_EVENT_TYPES}
+        | set(DIRECT_EMISSIONS)
+        | {
+            t.removeprefix("com.openskill.").removesuffix(".v1")
+            for t in _INTERNAL_ALERTABLE
+        }
+    )
+    uncatalogued = {
+        n for n in emitted
+        if n not in catalog_bare
+        and _MESH_NAME_MAP.get(n, n) not in catalog_bare
+    }
+    assert not uncatalogued, f"emitted but not in the catalog: {sorted(uncatalogued)}"
+    phantom = set(DIRECT_EMISSIONS) - emitted
+    assert not phantom, f"catalogued but nothing emits them: {sorted(phantom)}"

@@ -110,6 +110,27 @@ _INTERNAL_ALERTABLE = {
 }
 
 
+# Direct facade emissions (ADR-018 §12/P2b) — not in the legacy set. R231:
+# module-level so the catalog-drift guard test can assert that every bare
+# event name emitted anywhere in the codebase appears here (or in the legacy
+# set / the internal-alertable map) — a new emit without a catalog entry
+# fails CI instead of silently being undiscoverable in the subscription UI.
+DIRECT_EMISSIONS = (
+    "learner.enrolled",
+    "skill.completed",
+    "project.approved",
+    "brief.created",
+    "client.accepted",
+    "invoice.finalized",
+    "org.sso.login",
+    "org.breakglass.login",
+    "org.import.committed",
+    "org.scim.provisioned",
+    "org.scim.deprovisioned",
+    "org.scim.reactivated",
+)
+
+
 @router.get("/event-catalog", response_model=DataResponse[dict])
 async def event_catalog(
     org_id: str,
@@ -123,21 +144,7 @@ async def event_catalog(
 
     await _admin(org_id, user, db)
     legacy = sorted(VALID_EVENT_TYPES)
-    # Direct facade emissions (ADR-018 §12/P2b) — not in the legacy set.
-    direct = [
-        "learner.enrolled",
-        "skill.completed",
-        "project.approved",
-        "brief.created",
-        "client.accepted",
-        "invoice.finalized",
-        "org.sso.login",
-        "org.breakglass.login",
-        "org.import.committed",
-        "org.scim.provisioned",
-        "org.scim.deprovisioned",
-        "org.scim.reactivated",
-    ]
+    direct = list(DIRECT_EMISSIONS)
     canonical = sorted(
         {f"com.openskill.{_MESH_NAME_MAP.get(name, name)}.v1" for name in legacy}
         | {f"com.openskill.{name}.v1" for name in direct}

@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R231 (seventh window, drift guard — probe-killed)**: the event catalog's
+  `direct` list was hand-maintained inside the endpoint — a new facade
+  emission without a catalog entry would be silently undiscoverable in the
+  subscription UI. Hoisted to module-level `DIRECT_EMISSIONS` plus a
+  source-scan guard test: every bare mesh-event name emitted anywhere
+  (emit_event literals, SCIM `_audit` literals, INTERNAL_EVENT_PREFIX
+  f-strings) must appear in legacy ∪ DIRECT_EMISSIONS ∪ internal-alertable,
+  and DIRECT_EMISSIONS may contain no phantom entries. Injecting an
+  uncatalogued emit fails the test.
 - **R230 (sixth window, R229 class)**: upload and commit on the data page
   never invalidated the `intg-imports` history list rendered alongside —
   stale until manual refresh. Both mutations invalidate it now. (Staleness
