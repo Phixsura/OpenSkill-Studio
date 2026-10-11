@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R153 (third window)**: the error report's last column is now a
+  kind-appropriate `identifier` (email for users/roster, title for
+  opportunities) instead of a users-only email column — still
+  formula-injection-sanitized. Known limitation (documented, accepted):
+  opportunities idempotency is best-effort — no unique index on
+  (org, lower(title)) exists because the interactive API legitimately
+  allows same-title postings, so two CONCURRENT imports of the same new
+  title can land two drafts (a human reviews drafts before publish).
+
 - **R151-R152 (third window, UI polish with teeth)**: job list rows show
   the template kind; uploads carry a mount-salted deterministic
   idempotency key (double-click lands on the SAME job instead of a
