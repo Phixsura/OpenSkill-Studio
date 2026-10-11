@@ -637,6 +637,39 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     ).scalars().all()
     assert sorted(deps) == ["dep-A", "dep-B"]
 
+    # Missing required key (token_endpoint) -> CONFIG_INVALID.
+    broken = dict(config)
+    broken.pop("token_endpoint")
+    broken["issuer"] = f"{iss}-broken"
+    with pytest.raises(AppError) as e_missing:
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+            registration_token=None,
+            egress=FakePlatform(broken),
+        )
+    assert e_missing.value.code == "LTI_DYNREG_CONFIG_INVALID"
+
+    # 201 with an empty JSON body (no client_id) -> REFUSED, not a DB error.
+    class EmptyBody(FakePlatform):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/register"):
+                return httpx.Response(201, json={}, request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    eb_cfg = dict(config)
+    eb_cfg["issuer"] = f"{iss}-eb"
+    with pytest.raises(AppError) as e_empty:
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+            registration_token=None,
+            egress=EmptyBody(eb_cfg),
+        )
+    assert e_empty.value.code == "LTI_DYNREG_REFUSED"
+
     # Plain OIDC server (no platform claim) refused.
     bare = dict(config)
     bare.pop(PLATFORM_CONFIG_CLAIM)

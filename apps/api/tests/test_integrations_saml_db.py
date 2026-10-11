@@ -714,6 +714,30 @@ async def test_slo_signed_request_revokes_sessions(db):
     assert redirect.startswith("https://idp.example.com/slo?SAMLResponse=")
     assert "RelayState=r-1" in redirect
 
+    # A REVOKED link never sweeps (not authoritative).
+    from app.integrations.models import ExternalIdentityLink as _L
+
+    row = (
+        await db.execute(
+            select(_L).where(_L.connection_ref == conn.id, _L.subject == subject)
+        )
+    ).scalar_one()
+    row.revoked_at = datetime.now(UTC)
+    await db.flush()
+    _, swept_rev, _ = await svc.handle_slo_request(
+        connection_id=conn.id, raw_query=_signed_slo_query(subject)
+    )
+    assert swept_rev == 0
+    row.revoked_at = None
+    await db.flush()
+
+    # Without an SLO URL the response redirect is None (plain confirmation).
+    conn2.idp_slo_url = None
+    await db.flush()
+    assert svc.build_slo_response_redirect(conn2, in_response_to=None, relay_state=None) is None
+    conn2.idp_slo_url = "https://idp.example.com/slo"
+    await db.flush()
+
     # Unknown subject: clean success, 0 swept (no oracle).
     _, swept0, _ = await svc.handle_slo_request(
         connection_id=conn.id, raw_query=_signed_slo_query("never-seen")
@@ -735,3 +759,62 @@ async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
     await expect_reject(_signed_slo_query("s", sign=False))          # logout-CSRF
     await expect_reject(_signed_slo_query("s", key_pem=ROGUE_KEY))    # rogue key
     await expect_reject(_signed_slo_query("s", issuer="https://rogue.example.com"))
+    # BOTH SigAlg and Signature absent -> clean 401 AppError, never a
+    # KeyError/500 (kills the skip-presence-check mutant).
+    bare = "&".join(
+        seg for seg in _signed_slo_query("s").split("&")
+        if not seg.startswith(("SigAlg=", "Signature="))
+    )
+    await expect_reject(bare)
+
+    # Signature present but SigAlg stripped -> refused (both params required).
+    q = _signed_slo_query("s")
+    no_alg = "&".join(seg for seg in q.split("&") if not seg.startswith("SigAlg="))
+    await expect_reject(no_alg)
+    # Unsupported SigAlg (rsa-sha1) refused even with a valid-shape signature.
+    sha1 = q.replace("xmldsig-more%23rsa-sha256", "xmldsig%23rsa-sha1")
+    await expect_reject(sha1)
+
+    # A signed LogoutRESPONSE (wrong root element) is not a LogoutRequest.
+    import zlib
+    from urllib.parse import quote
+
+    from cryptography.hazmat.primitives import hashes as _h
+    from cryptography.hazmat.primitives import serialization as _ser
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad
+
+    resp_xml = (
+        f'<samlp:LogoutResponse xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_X{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).isoformat()}">'
+        f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer></samlp:LogoutResponse>"
+    )
+    deflated = zlib.compress(resp_xml.encode())[2:-4]
+    base_q = (
+        f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"
+        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    )
+    key = _ser.load_pem_private_key(
+        IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
+    )
+    sig = key.sign(base_q.encode(), _pad.PKCS1v15(), _h.SHA256())
+    await expect_reject(base_q + "&Signature=" + quote(base64.b64encode(sig).decode(), safe=""))
+
+    # A signed LogoutResponse CONTAINING a NameID must still be refused by
+    # the root-tag check — otherwise it acts as a logout request.
+    resp_with_nameid = (
+        f'<samlp:LogoutResponse xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_Y{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).isoformat()}">'
+        f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer>"
+        "<saml:NameID>victim-subject</saml:NameID></samlp:LogoutResponse>"
+    )
+    deflated2 = zlib.compress(resp_with_nameid.encode())[2:-4]
+    base_q2 = (
+        f"SAMLRequest={quote(base64.b64encode(deflated2).decode(), safe='')}"
+        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    )
+    sig2 = key.sign(base_q2.encode(), _pad.PKCS1v15(), _h.SHA256())
+    await expect_reject(
+        base_q2 + "&Signature=" + quote(base64.b64encode(sig2).decode(), safe="")
+    )

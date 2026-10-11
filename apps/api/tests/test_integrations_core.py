@@ -515,6 +515,11 @@ def test_request_with_retry_honors_retry_after_and_caps():
         resp = await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
         assert resp.status_code == 429 and s.calls == 3
 
+        # All-503 is BOUNDED too (3 attempts, final 503 surfaced).
+        s = Scripted([(503, {})] * 5)
+        resp = await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
+        assert resp.status_code == 503 and s.calls == 3
+
         # Unparseable (HTTP-date) Retry-After falls back to a short beat.
         s = Scripted([(429, {"retry-after": "Sat, 11 Oct 2026 10:00:00 GMT"}), (200, {})])
         t0 = _time.monotonic()
