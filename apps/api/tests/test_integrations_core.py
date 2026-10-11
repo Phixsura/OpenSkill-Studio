@@ -661,3 +661,38 @@ def test_generic_crm_in_catalog():
 
     assert "generic_crm" in CONNECTORS
     assert PROVIDER_CATALOG["generic_crm"]["capabilities"] == ["crm.read"]
+
+
+def test_connector_sdk_boundary_contract():
+    """R125 (Part M): every registered connector declares key + capabilities
+    + ping; its declared capabilities MATCH the methods it implements; and
+    the CONNECTORS registry is consistent with PROVIDER_CATALOG."""
+    import inspect
+
+    from app.integrations.registry import CONNECTORS, PROVIDER_CATALOG
+
+    cap_method = {
+        "roster.read": "read",
+        "crm.read": "read",
+        "talent.write": "write",
+        "events.deliver": None,
+    }
+    for key, conn in CONNECTORS.items():
+        assert conn.key == key, f"{key}: key mismatch"
+        assert isinstance(conn.capabilities, frozenset), key
+        assert inspect.iscoroutinefunction(conn.ping), f"{key}: ping must be async"
+        for cap in conn.capabilities:
+            method = cap_method.get(cap)
+            if method:
+                assert hasattr(conn, method), f"{key} claims {cap} but has no {method}()"
+                fn = getattr(conn, method)
+                assert inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn), (
+                    f"{key}.{method} must be async"
+                )
+        if hasattr(conn, "write"):
+            assert any(c.endswith(".write") for c in conn.capabilities), f"{key}: undeclared write"
+
+    assert set(CONNECTORS) == set(PROVIDER_CATALOG)
+    for key, conn in CONNECTORS.items():
+        assert set(conn.capabilities) == set(PROVIDER_CATALOG[key]["capabilities"]), key
+        assert PROVIDER_CATALOG[key]["version"] >= 1
