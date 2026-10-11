@@ -41,6 +41,19 @@ describe("sso-complete", () => {
     expect(replace).toHaveBeenCalledWith("/dashboard");
   });
 
+  it("honors a relative return_to and rejects absolute/protocol-relative ones", async () => {
+    window.location.hash = "#access_token=AT2&return_to=%2Forgs%2FX%2Fprojects";
+    mockApi.mockResolvedValueOnce({ data: { id: "u1" } });
+    render(<SsoCompletePage />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/orgs/X/projects"));
+
+    vi.clearAllMocks();
+    window.location.hash = "#access_token=AT3&return_to=//evil.com";
+    mockApi.mockResolvedValueOnce({ data: { id: "u1" } });
+    render(<SsoCompletePage />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
+  });
+
   it("shows an error when the fragment is missing", async () => {
     window.location.hash = "";
     render(<SsoCompletePage />);

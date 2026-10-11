@@ -161,7 +161,7 @@ class OidcService:
 
     async def handle_callback(
         self, *, state_value: str, code: str, redirect_uri: str
-    ) -> tuple[SsoConnection, ResolutionResult]:
+    ) -> tuple[SsoConnection, ResolutionResult, str | None]:
         state = await self._consume_state(state_value)
         conn = await self._connection(state.sso_connection_id)
         doc = await self._discovery(conn)
@@ -237,7 +237,7 @@ class OidcService:
         result = await IdentityService(self.db).resolve(
             ident, allow_jit=conn.allow_jit, jit_role=conn.default_role
         )
-        return conn, result
+        return conn, result, state.redirect_to
 
 
 BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"

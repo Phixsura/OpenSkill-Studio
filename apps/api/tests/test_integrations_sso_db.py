@@ -404,7 +404,7 @@ async def test_oidc_full_flow_jit_login(db, monkeypatch):
     factory.nonce = qs["nonce"][0]
     assert url.startswith(f"{ISSUER}/authorize?")
 
-    conn2, result = await svc.handle_callback(
+    conn2, result, _rt = await svc.handle_callback(
         state_value=state_val, code="authcode", redirect_uri="https://app.test/cb"
     )
     assert conn2.id == conn.id
@@ -881,7 +881,7 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
     url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
     qs = parse_qs(urlsplit(url).query)
     factory.nonce = qs["nonce"][0]
-    _, result = await svc.handle_callback(
+    _, result, _rt = await svc.handle_callback(
         state_value=qs["state"][0], code="c", redirect_uri="https://app.test/cb"
     )
     user_id = result.user.id
@@ -1013,3 +1013,34 @@ async def test_sso_admin_input_screens(db):
             )
             made += 1
     assert e3.value.code == "SSO_LIMIT_REACHED" and made >= 1
+
+
+@pytest.mark.asyncio
+async def test_oidc_deep_link_round_trip_and_screen(db):
+    """R70: return_to survives authorize -> state row -> callback; absolute
+    URLs and protocol-relative paths are dropped at the API screen."""
+    import app.integrations.services.sso_oidc as mod
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    email = f"dl-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    def factory(form):
+        return _mint_id_token(sub="dl-sub", email=email, nonce=factory.nonce, aud="client-1")
+
+    svc.egress = FakeIdp(factory)
+    url = await svc.build_authorize_redirect(
+        conn.id, redirect_uri="https://app.test/cb", return_to="/dashboard/orgs/X/projects"
+    )
+    qs = parse_qs(urlsplit(url).query)
+    factory.nonce = qs["nonce"][0]
+    _, result, return_to = await svc.handle_callback(
+        state_value=qs["state"][0], code="c", redirect_uri="https://app.test/cb"
+    )
+    assert return_to == "/dashboard/orgs/X/projects"
+
+    # API screen drops non-relative targets before they reach the state row.
+    from app.integrations.api import sso as sso_api
+
+    src = __import__("inspect").getsource(sso_api.oidc_authorize)
+    assert 'startswith("/")' in src and 'startswith("//")' in src

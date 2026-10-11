@@ -8,6 +8,7 @@ the org prefix (IdPs and browsers hit them unauthenticated):
 """
 
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse
@@ -495,10 +496,15 @@ async def saml_acs(
 async def oidc_authorize(
     request: Request,
     connection: str = Query(min_length=1, max_length=26),
+    return_to: str | None = Query(default=None, max_length=500),
     db: AsyncSession = Depends(get_db),
 ):
+    # Deep link (R70): a RELATIVE path only — anything else is dropped (the
+    # web landing re-screens with its own open-redirect guard).
+    if return_to and (not return_to.startswith("/") or return_to.startswith("//")):
+        return_to = None
     url = await OidcService(db).build_authorize_redirect(
-        connection, redirect_uri=_callback_uri(request)
+        connection, redirect_uri=_callback_uri(request), return_to=return_to
     )
     await db.commit()
     return RedirectResponse(url, status_code=302)
@@ -539,7 +545,7 @@ async def oidc_callback(
     from app.integrations.facade import emit_event
 
     try:
-        conn, result = await svc.handle_callback(
+        conn, result, return_to = await svc.handle_callback(
             state_value=state, code=code, redirect_uri=_callback_uri(request)
         )
     except AppError as exc:
@@ -573,6 +579,7 @@ async def oidc_callback(
         return {"data": body}
     # Production: hand tokens to the SPA via fragment redirect.
     return RedirectResponse(
-        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
+        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}"
+        + (f"&return_to={quote(return_to)}" if return_to else ""),
         status_code=302,
     )

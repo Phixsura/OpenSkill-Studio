@@ -22,6 +22,12 @@ export default function SsoCompletePage() {
     ran.current = true;
     const params = new URLSearchParams(window.location.hash.slice(1));
     const accessToken = params.get("access_token");
+    // R70 deep link — same open-redirect guard as the login page.
+    const rawReturn = (params.get("return_to") ?? "").replace(/[\t\n\r]/g, "");
+    const returnTo =
+      rawReturn.startsWith("/") && !rawReturn.startsWith("//") && !rawReturn.includes("\\")
+        ? rawReturn
+        : "/dashboard";
     if (!accessToken) {
       setError("Sign-in response was incomplete. Please try again.");
       return;
@@ -34,7 +40,7 @@ export default function SsoCompletePage() {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         setAuth(accessToken, me.data);
-        router.replace("/dashboard");
+        router.replace(returnTo);
       } catch {
         setError("Could not complete sign-in. Please try again.");
       }
