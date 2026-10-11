@@ -97,6 +97,59 @@ def _delivery_response(
     )
 
 
+# R93: the alertable fabric-internal events (exact-match only — §12).
+_INTERNAL_ALERTABLE = {
+    "com.openskill.integration.delivery.exhausted.v1": "A delivery exhausted its retry ladder (dead-letter)",
+    "com.openskill.integration.subscription.auto_disabled.v1": "An endpoint was disabled after 5 days of consistent failure",
+    "com.openskill.integration.connection.unhealthy.v1": "A connection transitioned into degraded/error",
+    "com.openskill.integration.sso.cert_expiring.v1": "A pinned SAML certificate expires within 30 days",
+    "com.openskill.integration.sso.backchannel_logout.v1": "An IdP revoked a user session (OIDC back-channel)",
+    "com.openskill.integration.sso.single_logout.v1": "An IdP revoked a user session (SAML SLO)",
+}
+
+
+@router.get("/event-catalog", response_model=DataResponse[dict])
+async def event_catalog(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R93: everything a subscription can match — legacy names, their
+    canonical mesh types, wildcard examples and the alertable internals —
+    so the UI offers discovery instead of a blank pattern box."""
+    from app.services.webhook import _MESH_NAME_MAP, VALID_EVENT_TYPES
+
+    await _admin(org_id, user, db)
+    legacy = sorted(VALID_EVENT_TYPES)
+    # Direct facade emissions (ADR-018 §12/P2b) — not in the legacy set.
+    direct = [
+        "learner.enrolled",
+        "skill.completed",
+        "project.approved",
+        "brief.created",
+        "client.accepted",
+        "invoice.finalized",
+        "org.sso.login",
+        "org.breakglass.login",
+        "org.scim.provisioned",
+        "org.scim.deprovisioned",
+        "org.scim.reactivated",
+    ]
+    canonical = sorted(
+        {f"com.openskill.{_MESH_NAME_MAP.get(name, name)}.v1" for name in legacy}
+        | {f"com.openskill.{name}.v1" for name in direct}
+    )
+    prefixes = sorted({t.rsplit(".", 2)[0] + ".*" for t in canonical})
+    return {
+        "data": {
+            "legacy": legacy,
+            "canonical": canonical,
+            "wildcards": prefixes,
+            "internal": _INTERNAL_ALERTABLE,
+        }
+    }
+
+
 @router.get("/subscription-stats", response_model=DataResponse[dict])
 async def subscription_stats(
     org_id: str,

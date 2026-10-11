@@ -723,3 +723,28 @@ async def test_webhook_update_in_place(db):
     with pytest.raises(AppError) as e3:
         await svc.update(sub.id, other.id, active=False)
     assert e3.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_event_catalog_lists_legacy_canonical_and_internals(db):
+    from app.integrations.api.events import event_catalog
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    owner_row = (
+        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
+    ).scalars().first()
+    user = await db.get(_User, owner_row.user_id)
+    out = await event_catalog(org.id, db=db, user=user)
+    data = out["data"]
+    assert "credential.issued" in data["legacy"]
+    assert "com.openskill.project.approved.v1" in data["canonical"]
+    # Legacy->canonical rename honored (ecosystem.change -> change_verified).
+    assert "com.openskill.ecosystem.change_verified.v1" in data["canonical"]
+    assert "com.openskill.project.*" in data["wildcards"]
+    assert "com.openskill.integration.delivery.exhausted.v1" in data["internal"]
+    # Every advertised pattern is actually accepted by the create validator.
+    from app.services.webhook import _MESH_PATTERN_RE, VALID_EVENT_TYPES
+
+    for t in data["canonical"] + data["wildcards"] + list(data["internal"]):
+        assert _MESH_PATTERN_RE.fullmatch(t) or t in VALID_EVENT_TYPES, t

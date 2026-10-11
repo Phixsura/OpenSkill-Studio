@@ -99,6 +99,19 @@ export default function IntegrationEventsPage() {
     enabled: openDelivery !== null,
   });
 
+  const catalogQ = useQuery({
+    queryKey: ["intg-event-catalog", orgId],
+    queryFn: () =>
+      apiWithAuth<{
+        data: { canonical: string[]; wildcards: string[]; internal: Record<string, string> };
+      }>(`${base}/event-catalog`),
+  });
+  const catalogOptions = [
+    ...(catalogQ.data?.data.wildcards ?? []),
+    ...(catalogQ.data?.data.canonical ?? []),
+    ...Object.keys(catalogQ.data?.data.internal ?? {}),
+  ];
+
   const { data: subsData, isLoading: subsLoading } = useQuery({
     queryKey: ["intg-subs", orgId],
     queryFn: () => apiWithAuth<{ data: Subscription[] }>(`/orgs/${orgId}/webhooks`),
@@ -228,10 +241,16 @@ export default function IntegrationEventsPage() {
             aria-label="Event patterns"
             className="max-w-sm"
             placeholder="com.openskill.integration.*, project.approved"
+            list="event-catalog-options"
             value={subEvents}
             onChange={(e) => setSubEvents(e.target.value)}
             required
           />
+          <datalist id="event-catalog-options">
+            {catalogOptions.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
           <Button type="submit" size="sm" disabled={createSub.isPending}>
             Subscribe
           </Button>
