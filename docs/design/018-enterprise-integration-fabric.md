@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R233 (seventh window, R231 class)**: registry-coherence guards — a
+  schedule added to SYNC_SCHEDULES/EXPORT_SCHEDULES without a sweep cadence
+  entry is accepted by the API but NEVER auto-runs (silent no-op schedule);
+  the three import-kind registries (IMPORT_KINDS, TEMPLATE_VERSIONS,
+  KIND_SPECS) must agree. Set-equality tests for all of them.
 - **R232 (seventh window, R231 class)**: `MODEL_REQUIRED_KEYS` guard — a
   canonical model missing from the dict makes strict_schema silently
   validate nothing (frozenset() fallback). Bidirectional set-equality test

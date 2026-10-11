@@ -202,3 +202,33 @@ def test_every_canonical_model_has_strict_schema_keys():
     stray = set(MODEL_REQUIRED_KEYS) - CANONICAL_MODELS
     assert not stray, f"required-keys entries for unknown models: {sorted(stray)}"
     assert all(MODEL_REQUIRED_KEYS[m] for m in MODEL_REQUIRED_KEYS), "empty key sets"
+
+
+def test_schedule_and_import_registries_are_coherent():
+    """R233 (R231 class): three registries that drift silently.
+    (1) Adding a schedule to SYNC_SCHEDULES / EXPORT_SCHEDULES without a
+        period in the sweep's cadence map means profiles/streams on that
+        schedule are accepted by the API but NEVER auto-run (silent no-op).
+    (2) IMPORT_KINDS, TEMPLATE_VERSIONS and KIND_SPECS must agree or a kind
+        parses with no validator / versions without a parser.
+    """
+    from datetime import timedelta
+
+    from app.integrations.models.bulk import IMPORT_KINDS
+    from app.integrations.models.export import EXPORT_SCHEDULES
+    from app.integrations.models.sync import SYNC_SCHEDULES
+    from app.integrations.services.bulk_import import KIND_SPECS, TEMPLATE_VERSIONS
+    from app.integrations.services.warehouse import _EXPORT_CADENCE
+
+    # Rebuild the sync sweep's inline period mapping here; keep in lockstep
+    # with sweep_scheduled_profiles (hourly/daily arms).
+    sync_cadence = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}
+    assert SYNC_SCHEDULES - {"manual"} == set(sync_cadence), (
+        "SYNC_SCHEDULES gained a schedule the sweep never runs"
+    )
+    assert EXPORT_SCHEDULES - {"manual"} == set(_EXPORT_CADENCE), (
+        "EXPORT_SCHEDULES gained a schedule the sweep never runs"
+    )
+    assert set(KIND_SPECS) == IMPORT_KINDS == set(TEMPLATE_VERSIONS), (
+        "import kind registries drifted"
+    )
