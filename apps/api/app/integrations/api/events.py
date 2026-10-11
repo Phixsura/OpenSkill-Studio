@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.integrations.models import DeliveryAttempt, EventDelivery, IntegrationEvent
 from app.integrations.services.events import replay_delivery
@@ -252,7 +253,12 @@ async def delivery_payload(
     return Response(delivery.request_body, media_type="application/json")
 
 
-@router.post("/webhooks/{subscription_id}/replay-exhausted", response_model=DataResponse[dict])
+@router.post(
+    "/webhooks/{subscription_id}/replay-exhausted",
+    response_model=DataResponse[dict],
+    # R159: write-amplifying (up to 500 enqueues/call) — bound it.
+    dependencies=[Depends(rate_limit(10, 60))],
+)
 async def replay_exhausted_bulk(
     org_id: str,
     subscription_id: str,

@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R159 (fourth window)**: the bulk replay-exhausted endpoint is write-
+  amplifying (up to 500 enqueues per call), so it now carries a 10/60s
+  rate limit like the other mutating fabric routes.
+
 - **R157 (fourth window, UI)**: each subscription card gets a "Replay
   exhausted" action wired to the R155 endpoint (toasts the requeued count)
   so operators can recover a backlog without the CLI.
