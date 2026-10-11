@@ -917,6 +917,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R177 (fourth window, production 500 — naive timestamp)**: a
+  non-compliant IdP sending a SAML assertion timestamp WITHOUT a Z/offset
+  parsed to a naive datetime; comparing it against the aware `now` raised
+  TypeError (not the ValueError the guard caught) → uncaught 500. `_parse_time`
+  now forces UTC on naive input, so a malformed timestamp becomes a clean
+  SSO_ASSERTION_INVALID 403. Test pins it (reverting the fix fails the test).
 - **R176 (fourth window, add-before-savepoint #8 — SCIM groups)**: the SCIM
   group create path gets the same savepoint + clean 409 guard as create-user
   (R167); concurrent same-displayName creates now return SCIM 409 uniqueness,

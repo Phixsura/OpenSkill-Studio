@@ -81,7 +81,13 @@ def sp_metadata_xml(connection_id: str | None = None) -> str:
 
 
 def _parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    # R177: a non-compliant IdP may send a naive timestamp (no Z / offset).
+    # fromisoformat would then return a naive datetime, which raises
+    # TypeError (not ValueError) when compared with the aware `now` — an
+    # uncaught 500. Force UTC so every path stays aware and the caller's
+    # ValueError guard turns genuinely malformed strings into a clean 403.
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 class SamlService:

@@ -451,6 +451,16 @@ async def test_saml_condition_and_subject_vectors(db):
     future = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
     await expect_reject(_re.sub(r'NotBefore="[^"]*"', f'NotBefore="{future}"', xml))
 
+    # R177: a non-compliant IdP sending a NAIVE timestamp (no Z/offset) must
+    # yield a clean 403, not a 500 from comparing naive vs aware datetimes.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    naive = "2099-01-01T00:00:00"  # no tz — would be naive, but still future-expiry
+    await expect_reject(
+        _re.sub(r'NotBefore="[^"]*"', 'NotBefore="2099-01-01T00:00:00"', xml)
+    )
+    assert naive  # referenced
+
     # Conditions without NotOnOrAfter.
     state = await _start(db, conn)
     xml = _assertion_xml(in_response_to=state, email=email)
