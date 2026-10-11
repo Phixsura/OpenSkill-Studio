@@ -878,6 +878,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R77-R85 (admin-surface CRUD completion)**: webhook subscription PATCH
+  (edit without secret churn + re-enable), SCIM filter operator case-
+  insensitivity (RFC 7644), SCIM Group PUT (Okta group-push dialect,
+  full member-set replace through the shared delta engine; also /Bulk-
+  dispatchable), pagination edge pins, export-stream PATCH (edit/disable)
+  - sync-profile PATCH (schedule/policy; mapping stays pinned until an
+    explicit repin — §10.1), import-job history endpoint + UI, and DELETE
+    endpoints with guard semantics (live-run 409, mapping-in-use 409,
+    cascade semantics documented per resource). Live E2E grown to 44 checks
+    incl. the SSO browser journey and expanded IDOR walls.
+
 - **R63-R71 (login-journey closure)**: sub-page breadcrumbs; operations
   guide (docs/ops/integration-fabric-operations.md); acceptance-criteria
   mapping (§20a); and a manual end-to-end walk of the BROWSER login
