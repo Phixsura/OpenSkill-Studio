@@ -141,6 +141,12 @@ Every admin resource is full CRUD:
   auto-disabled endpoint WITHOUT rotating the secret; DELETE removes.
 - Export streams: PATCH edits allowlist/anonymize/schedule or disables;
   DELETE removes the stream + run history (bucket objects stay).
+- Sync dry-run: `POST .../sync-profiles/{id}/preview?limit=N` (pull profiles,
+  the UI "Dry-run" button) reads the first few live records from the connector
+  and shows how the mapping transforms them — nothing is staged or committed.
+  Use it to validate a connection's read + mapping before enabling a schedule.
+  (Sync RUNS load the connection's decrypted credentials just like ping — a
+  healthy ping now implies a sync will authenticate the same way.)
 - Sync profiles: PATCH edits schedule/enabled/field_policy; the mapping
   version stays pinned until `repin_mapping: true` (an explicit act).
   DELETE refuses while a run is live (409 SYNC_PROFILE_BUSY — cancel it).
