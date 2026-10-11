@@ -21,6 +21,7 @@ Usage: make infra-up, then (dedicated port avoids stale-server 404s):
 """
 
 import asyncio
+import json
 import os
 import uuid
 
@@ -453,6 +454,51 @@ async def main() -> int:
                 r.status_code == 200 and r.json()["data"]["secret"].count("*") == 0,
                 r.text[:200],
             )
+
+        # ── bulk import over HTTP: JSON template, sniffed format (R128) ──
+        import_email = f"e2e-imp-{uuid.uuid4().hex[:8]}@imports.example.edu"
+        payload = json.dumps({"users": [{"email": import_email, "role": "student"}]})
+        r = await c.post(
+            f"{base}/imports",
+            headers=h,
+            data={"kind": "users", "mode": "partial",
+                  "idempotency_key": f"e2e-{uuid.uuid4().hex[:10]}"},
+            files={"file": ("users.json", payload.encode(), "application/json")},
+        )
+        check(
+            "JSON import previews over multipart HTTP",
+            r.status_code in (200, 201) and r.json()["data"]["dry_stats"]["valid"] == 1,
+            r.text[:300],
+        )
+        if r.status_code in (200, 201):
+            import_job_id = r.json()["data"]["id"]
+            r = await c.post(f"{base}/imports/{import_job_id}/commit", headers=h)
+            check(
+                "JSON import commits a user",
+                r.status_code == 200 and r.json()["data"]["stats"]["created"] == 1,
+                r.text[:200],
+            )
+            # idempotent re-upload returns the same job
+            r = await c.post(
+                f"{base}/imports",
+                headers=h,
+                data={"kind": "users", "mode": "partial",
+                      "idempotency_key": f"e2e2-{uuid.uuid4().hex[:10]}"},
+                files={"file": ("users.json", payload.encode(), "application/json")},
+            )
+            check(
+                "re-upload previews as skip (idempotent)",
+                r.status_code in (200, 201) and r.json()["data"]["dry_stats"]["skips"] == 1,
+                r.text[:200],
+            )
+        # unknown kind refused at create
+        r = await c.post(
+            f"{base}/imports",
+            headers=h,
+            data={"kind": "nonsense", "mode": "partial"},
+            files={"file": ("x.csv", b"email\n", "text/csv")},
+        )
+        check("unknown import kind refused", r.status_code == 422, str(r.status_code))
 
         # ── IDOR spot wall (second real user, not a member) ──
         for path in (

@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R141-R142 (third window, UI + live walk)**: data-page vitest coverage
+  for the kind selector / per-kind header-map fields / JSON accept; live
+  E2E extended with a REAL multipart JSON import walk (upload previews,
+  commit creates, idempotent re-upload skips, unknown kind 422) — E2E now
+  53/53 (was 49).
+
 - **R140 (third window, probe over R134-R138)**: 7 targeted mutants —
   retention status set, cutoff direction, blanked-job rescan, delete-failure
   blanking, PKCE challenge derivation, verifier persistence, unregistered
