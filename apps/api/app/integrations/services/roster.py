@@ -76,11 +76,12 @@ class RosterProvisioningService:
             "conflicts": 0,
         }
 
-        cohort_by_class = await self._provision_classes(
+        cohort_by_class, linked_cohorts = await self._provision_classes(
             org_id, connection_id, actor_id, auto_create, run_id, report
         )
         await self._provision_enrollments(
-            org_id, connection_id, cohort_by_class, jit_users, on_unenroll, run_id, report
+            org_id, connection_id, cohort_by_class, linked_cohorts,
+            jit_users, on_unenroll, run_id, report,
         )
         await self.db.flush()
         return report
@@ -133,7 +134,7 @@ class RosterProvisioningService:
         auto_create: bool,
         run_id: str | None,
         report: dict,
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         staged = (
             await self.db.execute(
                 select(StagedRecord).where(
@@ -188,7 +189,14 @@ class RosterProvisioningService:
             else:
                 report["unchanged"] += 1
             out[rec.external_id] = cohort.id
-        return out
+        # R209: the full backlink map (every cohort this connection ever
+        # provisioned, staged-active or not) — the unenroll path needs it,
+        # because a class removed from the SIS tombstones BOTH the class and
+        # its enrollments, and the staged-active map above no longer carries
+        # that class: membership removal would silently stop working exactly
+        # when the SIS offboards a whole class.
+        linked = {ext: c.id for ext, c in by_external.items()}
+        return out, linked
 
     # ── enrollments -> cohort members ──
 
@@ -197,6 +205,7 @@ class RosterProvisioningService:
         org_id: str,
         connection_id: str,
         cohort_by_class: dict[str, str],
+        linked_cohorts: dict[str, str],
         jit_users: bool,
         on_unenroll: str,
         run_id: str | None,
@@ -266,6 +275,11 @@ class RosterProvisioningService:
                         {"code": exc.code}, report,
                     )
             elif rec.status == "tombstoned" and on_unenroll == "remove_membership":
+                # R209: fall back to the backlink map — the class may itself
+                # be tombstoned (whole-class SIS removal), in which case it is
+                # absent from the staged-active map but its cohort still
+                # exists and its members must still be removable.
+                cohort_id = cohort_id or linked_cohorts.get(class_ext)
                 if cohort_id is None:
                     continue
                 link_user = await self._linked_user(connection_id, user_ext)

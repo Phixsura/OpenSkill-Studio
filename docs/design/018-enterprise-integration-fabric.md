@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R209 (fifth window, governance fix — mutation-killed)**: whole-class SIS
+  offboarding silently stopped removing members. The backfill tombstones the
+  class AND its enrollments together, but the unenroll pass looked the cohort
+  up only in the staged-ACTIVE class map — tombstoned-class enrollments hit
+  `cohort_id is None → continue` and memberships lingered forever. Fix: the
+  unenroll branch falls back to the connection's backlink map (every cohort
+  this connection ever provisioned); the ACTIVE path intentionally keeps
+  requiring a staged-active class (an active enrollment into a tombstoned
+  class stays a missing_reference conflict, never a silent write).
 - **R208 (fifth window, concurrency fix — mutation-killed)**: `run_export`
   had no per-stream serialization: a manual trigger racing the hourly sweep
   (or a double-trigger) read the SAME cursor — both re-export the span, and

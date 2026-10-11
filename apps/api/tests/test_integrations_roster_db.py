@@ -640,3 +640,50 @@ async def test_oneroster_error_classification(db):
     with pytest.raises(AppError) as e4:
         await read_with(scripted(data_status=503))
     assert e4.value.code == "CONNECTION_PING_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_whole_class_tombstone_still_removes_members(db):
+    """R209: when the SIS removes an ENTIRE class, the backfill tombstones the
+    class AND its enrollments. The unenroll pass used to look the cohort up
+    only in the staged-ACTIVE class map — whole-class offboarding silently
+    stopped removing members. The backlink fallback must remove them."""
+    org, owner = await _org(db)
+    await _domain(db, org, "sch9.example.edu")
+    conn = await _conn(db, org, owner)
+    await _user_member(db, org, "gone@sch9.example.edu")
+    _stage(db, conn, "roster.class", "c-gone", {"title": "Closing"})
+    _stage(db, conn, "roster.user", "u-gone", {"email": "gone@sch9.example.edu"})
+    _stage(
+        db, conn, "roster.enrollment", "e-gone",
+        {"class_external_id": "c-gone", "user_external_id": "u-gone", "role": "student"},
+    )
+    await db.flush()
+    svc = RosterProvisioningService(db)
+    r0 = await svc.provision(org.id, conn.id, actor_id=owner.id)
+    assert r0["members_added"] == 1
+
+    # SIS deletes the whole class: class AND enrollment tombstone together.
+    rows = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id,
+                StagedRecord.external_id.in_(("c-gone", "e-gone")),
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 2
+    for r in rows:
+        r.status = "tombstoned"
+    await db.flush()
+
+    r1 = await svc.provision(org.id, conn.id, actor_id=owner.id)
+    assert r1["members_removed"] == 1
+    members = (
+        await db.execute(
+            select(CohortMember)
+            .join(Cohort, Cohort.id == CohortMember.cohort_id)
+            .where(Cohort.org_id == org.id)
+        )
+    ).scalars().all()
+    assert members == []
