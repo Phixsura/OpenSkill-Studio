@@ -878,6 +878,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R63-R71 (login-journey closure)**: sub-page breadcrumbs; operations
+  guide (docs/ops/integration-fabric-operations.md); acceptance-criteria
+  mapping (§20a); and a manual end-to-end walk of the BROWSER login
+  journey that found three production-dead paths no API test could see —
+  R67 discovery handed SAML orgs the OIDC authorize URL, R69 the ACS/
+  callback redirect targeted /auth/sso-complete which never existed
+  ((auth) is a route group: no URL segment — every prod SSO login 404'd
+  with tokens stranded in the fragment; new /sso-complete page consumes
+  the fragment, scrubs the hash, hydrates via /auth/me), R70 the state
+  row's redirect_to was written but never read (deep links lost; now
+  round-trips behind open-redirect guards on both sides), R71 enforced-
+  SSO password logins now hand off into the SSO flow instead of a dead
+  error, R68 the login page gained the missing SSO entry entirely.
+
 - **R55-R62**: e2e-caught /Bulk serialization crash (exc.body unbound
   method — unit test never serialized; now json.dumps the envelope);
   probe campaign over every NEW module (apply_bulk incl. SAVEPOINT
