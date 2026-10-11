@@ -911,6 +911,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R120-R126 (third window, breadth+SDK)**: generic CRM read connector
+  (Part E), full canonical-model list in the sync UI, mapping preview/run
+  parity (Part H), bidirectional-profile rejection (was silent pull-only),
+  connector-SDK boundary contract test (Part M). Fabric suite 246; E2E 49;
+  web 762.
+
 - **R97-R114 (third window, hardening)**: opt-in typed-model staging gate
   (R99); Part O completion — audit trail for 16 admin mutations (R100,
   record_audit has a registered-action allowlist the best-effort wrapper
