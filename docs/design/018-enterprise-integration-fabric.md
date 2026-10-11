@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R147 (third window, audit inverse check)**: same pattern for the audit
+  trail — every `record_fabric_audit` call site is scanned and its action
+  literal must be in AUDIT_ACTIONS (record_audit swallows unregistered
+  actions silently, the R100 trap), so a typo'd audit can never ship as a
+  silent no-op.
+
 - **R146 (third window, catalog inverse check)**: the catalog test now
   scans every `emit_event` call site in app code and asserts its type is
   advertised (canonical or internal) — a new emission can no longer ship

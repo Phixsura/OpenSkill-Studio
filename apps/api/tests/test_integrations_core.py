@@ -717,3 +717,24 @@ def test_connector_sdk_boundary_contract():
     for key, conn in connectors.items():
         assert set(conn.capabilities) == set(PROVIDER_CATALOG[key]["capabilities"]), key
         assert PROVIDER_CATALOG[key]["version"] >= 1
+
+
+def test_every_fabric_audit_action_is_registered():
+    """R147 (inverse of the R100 lesson): record_audit SWALLOWS unregistered
+    actions silently — scan every record_fabric_audit call site and assert
+    its action literal is in AUDIT_ACTIONS, so a typo'd or unregistered
+    action can never ship as a silent no-op."""
+    import pathlib
+    import re
+
+    from app.controlplane.services.audit import AUDIT_ACTIONS
+
+    call_re = re.compile(
+        r"""record_fabric_audit\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*["']([a-z0-9_.]+)["']"""
+    )
+    found: set[str] = set()
+    for f in pathlib.Path("app").rglob("*.py"):
+        found |= set(call_re.findall(f.read_text()))
+    assert found, "record_fabric_audit scan found nothing - regex drifted"
+    unregistered = sorted(found - set(AUDIT_ACTIONS))
+    assert not unregistered, f"audited actions never land: {unregistered}"
