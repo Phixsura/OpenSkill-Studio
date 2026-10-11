@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R219 (sixth window, R218 class — push side)**: `_execute_push` did the
+  same per-record staged point SELECT; now prefetched in bounded IN(500)
+  batches before the loop. Push + sync files 40/40.
 - **R218 (sixth window, scale fix — mutation-killed)**: the pull engine
   looked up each record's staged row with a point SELECT — an N+1 of 500
   round-trips per batch (minutes of pure latency on a 1M-record enterprise

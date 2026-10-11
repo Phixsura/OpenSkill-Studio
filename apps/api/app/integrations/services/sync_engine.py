@@ -877,6 +877,22 @@ async def _execute_push(
     stats["read"] = len(records)
     to_send: list[dict] = []
     staged_by_id: dict[str, StagedRecord] = {}
+    # R219 (R218 class, push side): prefetch ALL staged rows for this
+    # connection+model in bounded IN(...) queries instead of one point
+    # SELECT per application.
+    prefetched: dict[str, StagedRecord] = {}
+    all_ids = [r["external_id"] for r in records]
+    for j in range(0, len(all_ids), 500):
+        rows_pref = (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.connection_id == conn.id,
+                    StagedRecord.model == profile.model,
+                    StagedRecord.external_id.in_(all_ids[j : j + 500]),
+                )
+            )
+        ).scalars()
+        prefetched.update({r.external_id: r for r in rows_pref})
     for raw in records:
         external_id = raw["external_id"]
         if not raw.pop("_consented"):
@@ -911,15 +927,7 @@ async def _execute_push(
         else:
             mapped = raw
         new_hash = _payload_hash(mapped)
-        staged = (
-            await db.execute(
-                select(StagedRecord).where(
-                    StagedRecord.connection_id == conn.id,
-                    StagedRecord.model == profile.model,
-                    StagedRecord.external_id == external_id,
-                )
-            )
-        ).scalar_one_or_none()
+        staged = prefetched.get(external_id)  # R219
         if staged is not None and (staged.last_outbound or {}).get("fields_hash") == new_hash:
             stats["unchanged"] += 1
             continue
