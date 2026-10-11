@@ -83,6 +83,22 @@ each break-glass login emits `org.breakglass.login`).
   (`replay_of`) and exempt from the one-original-per-(event,subscription)
   uniqueness.
 
+## 4b. Editing and removing resources (R77-R84)
+
+Every admin resource is full CRUD:
+
+- Webhook subscriptions: PATCH edits url/events or re-enables an
+  auto-disabled endpoint WITHOUT rotating the secret; DELETE removes.
+- Export streams: PATCH edits allowlist/anonymize/schedule or disables;
+  DELETE removes the stream + run history (bucket objects stay).
+- Sync profiles: PATCH edits schedule/enabled/field_policy; the mapping
+  version stays pinned until `repin_mapping: true` (an explicit act).
+  DELETE refuses while a run is live (409 SYNC_PROFILE_BUSY — cancel it).
+- Mapping profiles: DELETE refuses while any sync profile pins it
+  (409 MAPPING_IN_USE).
+- LTI registrations: DELETE cascades deployments/links/states; launches
+  from that platform stop validating immediately.
+
 ## 5. Sync engine conflicts
 
 Record-level rows carry `conflict_class`:
