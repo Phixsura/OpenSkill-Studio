@@ -313,7 +313,11 @@ export default function SyncIntegrationsPage() {
                 "roster.enrollment",
                 "roster.user",
                 "roster.term",
+                "talent.candidate",
                 "talent.application",
+                "talent.job",
+                "crm.account",
+                "crm.contact",
                 "crm.deal",
               ].map((m) => (
                 <option key={m} value={m}>
