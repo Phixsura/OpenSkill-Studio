@@ -1392,6 +1392,20 @@ async def test_sync_preview_pull_dry_run(db):
     out = await SyncProfileService(db).preview(org.id, profile.id, limit=5)
     assert out["model"] == "roster.class"
     assert out["count"] == 2
+
+    # limit is enforced ACROSS batches: with two batches of 3 and limit 3,
+    # the preview must stop after the first batch — not spill into batch 2.
+    big = FakeRosterConnector(
+        [
+            [{"external_id": f"a{i}", "title": "T"} for i in range(3)],
+            [{"external_id": f"b{i}", "title": "T"} for i in range(3)],
+        ]
+    )
+    from app.integrations import registry as _reg
+
+    _reg.CONNECTORS["oneroster"] = big
+    capped = await SyncProfileService(db).preview(org.id, profile.id, limit=3)
+    assert capped["count"] == 3  # not 4+ (outer per-batch break enforces it)
     assert out["records"][0]["raw"]["external_id"] == "pv1"
     assert out["records"][0]["mapped"]["title"] == "ALGEBRA"  # transform applied
     assert out["records"][0]["errors"] == []

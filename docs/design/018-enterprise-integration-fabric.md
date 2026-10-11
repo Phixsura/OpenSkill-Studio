@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R201 (fifth window, probe over R196/R198)**: mutation probe killed the
+  preview-direction and atomic-status mutants; the surviving "preview limit
+  not enforced across batches" mutant was a REAL coverage gap (the test used
+  one batch, so the per-batch outer break was never exercised) — closed with
+  a two-batch limit test (limit=3, two batches of 3 → exactly 3, no spill).
 - **R199 (fifth window, replay-cache concurrency defense)**: the SAML
   assertion and OIDC back-channel-logout replay caches used check-then-add on
   a deterministic key; under TRUE parallelism (two workers, same assertion/
