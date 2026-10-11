@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R232 (seventh window, R231 class)**: `MODEL_REQUIRED_KEYS` guard — a
+  canonical model missing from the dict makes strict_schema silently
+  validate nothing (frozenset() fallback). Bidirectional set-equality test
+  (no missing models, no stray entries, no empty key sets).
 - **R231 (seventh window, drift guard — probe-killed)**: the event catalog's
   `direct` list was hand-maintained inside the endpoint — a new facade
   emission without a catalog entry would be silently undiscoverable in the

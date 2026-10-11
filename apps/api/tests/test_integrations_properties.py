@@ -188,3 +188,17 @@ def test_nested_non_finite_rejected_not_staged():
     # finite nested floats still pass untouched
     mapped2, errors2 = apply_mapping(doc, {"m": {"score": 1.5}, "t": [2.0]})
     assert errors2 == [] and mapped2 == {"meta": {"score": 1.5}, "tags": [2.0]}
+
+
+def test_every_canonical_model_has_strict_schema_keys():
+    """R232 (R231 class): strict_schema silently no-ops for a model missing
+    from MODEL_REQUIRED_KEYS (frozenset() fallback). Adding an 11th canonical
+    model without declaring its required keys must fail here, not ship a
+    validation gate that validates nothing."""
+    from app.integrations.models.sync import CANONICAL_MODELS, MODEL_REQUIRED_KEYS
+
+    missing = CANONICAL_MODELS - set(MODEL_REQUIRED_KEYS)
+    assert not missing, f"models without strict_schema keys: {sorted(missing)}"
+    stray = set(MODEL_REQUIRED_KEYS) - CANONICAL_MODELS
+    assert not stray, f"required-keys entries for unknown models: {sorted(stray)}"
+    assert all(MODEL_REQUIRED_KEYS[m] for m in MODEL_REQUIRED_KEYS), "empty key sets"
