@@ -387,4 +387,10 @@ async def test_domain_verify_exclusivity_under_race(db, monkeypatch):
         )
     ).scalars().all()
     assert verified.count("verified") == 1
+    # Clean up the COMMITTED rows so the global sweep_pending (no org filter)
+    # in sibling tests never trips over a leftover same-domain pending pair.
+    async with AsyncSessionLocal() as cleanup:
+        from sqlalchemy import delete as _del
+        await cleanup.execute(_del(OrgDomain).where(OrgDomain.domain == domain))
+        await cleanup.commit()
 
