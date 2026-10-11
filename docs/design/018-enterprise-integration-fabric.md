@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R222 (sixth window, R218 class — import preview)**: `_preview_user_rows`
+  runs INLINE in the upload request and paid 2 point SELECTs per row — 20k
+  round-trips on a 10k-row file, all inside one HTTP request. Batched into
+  IN(500) user-by-email + membership queries; per-row logic unchanged.
+  Import file 26/26.
 - **R221 (sixth window, R218 class — SCIM side)**: the SCIM user list built
   each row's resource with a per-row `_link_for` point SELECT (up to 200 per
   page; IdPs page the whole directory nightly → 10k extra round-trips per

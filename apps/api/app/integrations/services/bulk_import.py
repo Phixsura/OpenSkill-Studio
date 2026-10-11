@@ -532,23 +532,36 @@ class BulkImportService:
 
     async def _preview_user_rows(self, org_id: str, rows: list[dict]):
         creates = updates = skips = 0
-        for row in rows:
-            user = (
+        # R222 (R218 class): the preview runs INLINE in the upload request and
+        # paid 2 point SELECTs per row — 2N round-trips on a 10k-row file.
+        # Batch: users by email, memberships by user id, both IN(500)-bounded.
+        emails = sorted({row["email"] for row in rows})
+        users_by_email: dict[str, User] = {}
+        for j in range(0, len(emails), 500):
+            found = (
                 await self.db.execute(
-                    select(User).where(func.lower(User.email) == row["email"])
+                    select(User).where(func.lower(User.email).in_(emails[j : j + 500]))
                 )
-            ).scalar_one_or_none()
+            ).scalars()
+            users_by_email.update({u.email.lower(): u for u in found})
+        member_ids: set[str] = set()
+        uids = [u.id for u in users_by_email.values()]
+        for j in range(0, len(uids), 500):
+            found_m = (
+                await self.db.execute(
+                    select(OrgMember.user_id).where(
+                        OrgMember.org_id == org_id,
+                        OrgMember.user_id.in_(uids[j : j + 500]),
+                    )
+                )
+            ).scalars()
+            member_ids.update(found_m)
+        for row in rows:
+            user = users_by_email.get(row["email"])
             if user is None:
                 creates += 1
                 continue
-            member = (
-                await self.db.execute(
-                    select(OrgMember).where(
-                        OrgMember.org_id == org_id, OrgMember.user_id == user.id
-                    )
-                )
-            ).scalar_one_or_none()
-            if member is None or (
+            if user.id not in member_ids or (
                 row["display_name"] and row["display_name"] != user.display_name
             ):
                 updates += 1
