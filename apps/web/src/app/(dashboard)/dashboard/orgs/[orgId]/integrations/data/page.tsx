@@ -49,6 +49,7 @@ export default function DataIntegrationsPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState("partial");
+  const [aliases, setAliases] = useState({ email: "", display_name: "", role: "" });
   const [job, setJob] = useState<ImportJob | null>(null);
   const [streamName, setStreamName] = useState("");
   const [dataset, setDataset] = useState("events");
@@ -79,6 +80,12 @@ export default function DataIntegrationsPage() {
       const form = new FormData();
       form.append("kind", "users");
       form.append("mode", mode);
+      // R92: optional vendor-header aliases.
+      const map: Record<string, string> = {};
+      for (const [k, v] of Object.entries(aliases)) {
+        if (v.trim()) map[k] = v.trim();
+      }
+      if (Object.keys(map).length) form.append("header_map", JSON.stringify(map));
       form.append("file", file);
       // multipart upload: bypass the JSON helper but reuse the live token
       // (sharedRefresh would force a rotation per upload — wrong tool).
@@ -191,6 +198,23 @@ export default function DataIntegrationsPage() {
         <h2 className="text-lg font-medium">Bulk import (users CSV)</h2>
         <div className="flex flex-wrap items-center gap-3">
           <input aria-label="CSV file" ref={fileRef} type="file" accept=".csv,text/csv" />
+          <details className="w-full text-xs">
+            <summary className="text-muted-foreground cursor-pointer">
+              Vendor CSV headers (optional column mapping)
+            </summary>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {(["email", "display_name", "role"] as const).map((k) => (
+                <Input
+                  key={k}
+                  aria-label={`CSV header for ${k}`}
+                  className="max-w-[11rem]"
+                  placeholder={`header for ${k}`}
+                  value={aliases[k]}
+                  onChange={(e) => setAliases((a) => ({ ...a, [k]: e.target.value }))}
+                />
+              ))}
+            </div>
+          </details>
           <select
             aria-label="Import mode"
             className="rounded-md border px-2 py-1 text-sm"
