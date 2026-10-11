@@ -185,16 +185,36 @@ class IdentityService:
                 raise AppError("IDENTITY_AMBIGUOUS", "Identity requires admin confirmation", 403)
             user = existing
         else:
-            user = User(
-                email=email,
-                password_hash=None,
-                display_name=ident.display_name or email.split("@", 1)[0],
-                role=UserRole.STUDENT,
-                status=UserStatus.ACTIVE,
-                email_verified=True,  # verified domain + verified IdP email
-            )
-            self.db.add(user)
-            await self.db.flush()
+            # R166: two concurrent first-time logins for the same new email
+            # both reach here with existing=None and race to INSERT. The
+            # INSERT goes INSIDE a savepoint so a unique-violation loser can
+            # roll back just that statement (not poison the session) and
+            # re-select the winner's row — the add-before-savepoint class.
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                async with self.db.begin_nested():
+                    user = User(
+                        email=email,
+                        password_hash=None,
+                        display_name=ident.display_name or email.split("@", 1)[0],
+                        role=UserRole.STUDENT,
+                        status=UserStatus.ACTIVE,
+                        email_verified=True,  # verified domain + verified IdP email
+                    )
+                    self.db.add(user)
+                    await self.db.flush()
+            except IntegrityError:
+                user = (
+                    await self.db.execute(
+                        select(User).where(func.lower(User.email) == email)
+                    )
+                ).scalar_one()
+                if user.status != UserStatus.ACTIVE:
+                    await self._queue(ident, reason="existing_account_inactive")
+                    raise AppError(
+                        "IDENTITY_AMBIGUOUS", "Identity requires admin confirmation", 403
+                    ) from None
         member = (
             await self.db.execute(
                 select(OrgMember).where(

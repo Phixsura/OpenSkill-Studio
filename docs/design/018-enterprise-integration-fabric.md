@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R166 (fourth window, production 500 — add-before-savepoint #4)**: a
+  TRUE-concurrency race test over JIT provisioning exposed a fourth
+  instance of the marathon-2 bug class — two concurrent first-time SSO
+  logins for the same brand-new verified email both took the JIT branch and
+  raced to INSERT `users.email`; the unique-violation loser's session was
+  poisoned → 500. Fixed: the user INSERT now runs inside `begin_nested()`,
+  and on IntegrityError the loser rolls back just that statement and
+  re-selects the winner's row (inactive → the same admin-confirmation 403).
+  3x stable.
+
 - **R165 (fourth window, unbounded-growth fix)**: the SAML assertion replay
   cache reuses the login-state table; only the OIDC authorize endpoint
   purged expired rows, so a SAML-ONLY tenant's replay cache grew forever.

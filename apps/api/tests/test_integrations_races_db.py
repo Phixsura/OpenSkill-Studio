@@ -460,3 +460,59 @@ async def test_roster_import_race_single_membership(db):
     ).scalar_one()
     assert n == 1, f"expected exactly one membership, got {n} ({results})"
     assert created_total == 1, results
+
+
+@pytest.mark.asyncio
+async def test_concurrent_jit_provision_single_user(db):
+    """R166: two concurrent FIRST-TIME SSO logins for the same brand-new
+    verified email must JIT exactly one User (and one membership), with
+    neither session poisoned by a unique-violation 500 — the add-before-
+    savepoint class the marathon-2 race tests found elsewhere."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import OrgDomain
+    from app.integrations.services.identity import (
+        IdentityService,
+        VerifiedExternalIdentity,
+    )
+    from app.models.organization import OrgMember as OrgMemberModel
+    from app.models.user import User as _User
+
+    org, owner = await _org(db)
+    domain = f"jit-{uuid.uuid4().hex[:6]}.edu"
+    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
+                     verification_token="t", verified_at=datetime.now(UTC)))
+    await db.commit()
+    email = f"newbie-{uuid.uuid4().hex[:8]}@{domain}"
+    conn_ref = f"01JIT{uuid.uuid4().hex[:21].upper()}"
+
+    async def login(sub_suffix):
+        async with AsyncSessionLocal() as own:
+            ident = VerifiedExternalIdentity(
+                org_id=org.id, source="sso", connection_ref=conn_ref,
+                subject=f"jit-sub-{sub_suffix}", email=email, email_verified=True,
+            )
+            res = await IdentityService(own).resolve(ident, allow_jit=True, jit_role="student")
+            await own.commit()
+            return res.user.id
+
+    # DIFFERENT subjects, SAME new email: both take the JIT branch and race
+    # to INSERT the same User.email.
+    results = await asyncio.gather(login("a"), login("b"), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"a login session blew up: {r!r}"
+    assert results[0] == results[1], "both logins must resolve to the same user"
+
+    users = (
+        await db.execute(select(_User).where(func.lower(_User.email) == email))
+    ).scalars().all()
+    assert len(users) == 1, f"JIT created {len(users)} users for one email"
+    members = (
+        await db.execute(
+            select(OrgMemberModel).where(OrgMemberModel.org_id == org.id, OrgMemberModel.user_id == users[0].id)
+        )
+    ).scalars().all()
+    assert len(members) == 1
