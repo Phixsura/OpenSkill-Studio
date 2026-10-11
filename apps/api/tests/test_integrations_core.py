@@ -121,17 +121,19 @@ async def test_request_pins_resolved_ip(monkeypatch):
 
     captured = {}
 
-    async def fake_request(self, method, url, headers=None, content=None, extensions=None):
-        captured["url"] = str(url)
-        captured["headers"] = dict(headers or {})
-        captured["extensions"] = dict(extensions or {})
-        return httpx.Response(200, request=httpx.Request(method, url))
+    async def fake_send(self, request, *, stream=False, **kw):
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["extensions"] = dict(request.extensions or {})
+        return httpx.Response(200, request=request)
 
-    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+    # R217 made EgressClient stream via build_request+send, so patch send.
+    monkeypatch.setattr(httpx.AsyncClient, "send", fake_send)
     resp = await EgressClient().request("POST", "https://hooks.example.com/deliver?a=1")
     assert resp.status_code == 200
-    assert captured["url"] == "https://93.184.216.34:443/deliver?a=1"
-    assert captured["headers"]["Host"] == "hooks.example.com"
+    # httpx normalizes the default :443 away on the Request object.
+    assert captured["url"] == "https://93.184.216.34/deliver?a=1"
+    assert captured["headers"]["host"] == "hooks.example.com"
     assert captured["extensions"]["sni_hostname"] == "hooks.example.com"
 
 
@@ -796,3 +798,63 @@ def test_sync_connctx_always_builds_with_secret_loader():
             "a sync-engine ConnCtx is built without _secret_loader "
             f"(connectors would get empty secrets): {body[:120]!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_response_size_cap_aborts_before_buffering(monkeypatch):
+    """R217: the egress response cap must reject OVERSIZED bodies without
+    buffering them whole — the old `len(resp.content) > cap` ran only AFTER
+    httpx had already read the entire body into memory (a hostile server
+    returning gigabytes OOM'd the worker before the cap ever fired).
+    Three cases: declared Content-Length too big (rejected before any body
+    read), undeclared/chunked body that exceeds the cap mid-stream (aborted
+    at the cap, not at the end), and a normal small response (unchanged)."""
+    import httpx as _httpx
+
+    from app.config import settings
+    from app.integrations import security as sec
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34"))
+    monkeypatch.setattr(sec, "MAX_RESPONSE_BYTES", 1024)
+
+    state = {"mode": "declared", "body_reads": 0}
+
+    class CountingStream(_httpx.AsyncByteStream):
+        """64 chunks of 64B = 4KB total (> 1KB cap); counts chunks served."""
+
+        async def __aiter__(self):
+            for _ in range(64):
+                state["body_reads"] += 1
+                yield b"x" * 64
+
+        async def aclose(self):
+            return None
+
+    async def fake_send(self, request, *, stream=False, **kw):
+        if state["mode"] == "declared":
+            # Content-Length says 4096 — must be rejected with ZERO chunk reads.
+            return _httpx.Response(
+                200, headers={"content-length": "4096"},
+                stream=CountingStream(), request=request,
+            )
+        if state["mode"] == "chunked":
+            # No usable length — must abort mid-stream at the cap.
+            return _httpx.Response(200, stream=CountingStream(), request=request)
+        return _httpx.Response(200, json={"ok": True}, request=request)
+
+    monkeypatch.setattr(_httpx.AsyncClient, "send", fake_send)
+
+    with pytest.raises(sec.EgressBlockedError):
+        await EgressClient().request("GET", "https://api.example.com/huge")
+    assert state["body_reads"] == 0  # declared-length reject: nothing buffered
+
+    state["mode"] = "chunked"
+    with pytest.raises(sec.EgressBlockedError):
+        await EgressClient().request("GET", "https://api.example.com/huge2")
+    # Aborted at the cap (1KB = 16 chunks + 1 overflow), far short of all 64.
+    assert state["body_reads"] <= 20
+
+    state["mode"] = "ok"
+    resp = await EgressClient().request("GET", "https://api.example.com/small")
+    assert resp.status_code == 200 and resp.json() == {"ok": True}

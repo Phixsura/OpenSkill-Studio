@@ -163,14 +163,33 @@ class EgressClient:
         async with httpx.AsyncClient(
             follow_redirects=False, timeout=timeout, trust_env=False
         ) as client:
-            resp = await client.request(
-                method,
-                pinned_url,
-                headers=send_headers,
-                content=content,
+            # R217: STREAM the response and abort past the cap. The old
+            # `len(resp.content) > cap` check buffered the ENTIRE body first —
+            # a hostile/misconfigured server returning gigabytes OOM'd the
+            # worker before the "cap" ever ran. Reject early on a declared
+            # Content-Length, else count chunks and cut the connection.
+            req = client.build_request(
+                method, pinned_url, headers=send_headers, content=content,
                 extensions=extensions,
             )
-            # Cap what we hold in memory; callers never stream.
-            if len(resp.content) > MAX_RESPONSE_BYTES:
-                raise EgressBlockedError("Response exceeds size cap")
+            resp = await client.send(req, stream=True)
+            try:
+                declared = resp.headers.get("content-length")
+                if declared is not None:
+                    try:
+                        if int(declared) > MAX_RESPONSE_BYTES:
+                            raise EgressBlockedError("Response exceeds size cap")
+                    except ValueError:
+                        pass  # garbage header — fall through to counted read
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_RESPONSE_BYTES:
+                        raise EgressBlockedError("Response exceeds size cap")
+                    chunks.append(chunk)
+            finally:
+                await resp.aclose()
+            # Hand back a normal buffered Response (callers use .content/.json()).
+            resp._content = b"".join(chunks)  # noqa: SLF001 — httpx's own cache slot
             return resp

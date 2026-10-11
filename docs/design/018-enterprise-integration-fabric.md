@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R217 (sixth window, OOM fix — mutation-killed)**: the EgressClient
+  response-size cap ran AFTER httpx buffered the entire body
+  (`len(resp.content) > cap`) — a hostile or misconfigured upstream returning
+  gigabytes OOM'd the worker before the "cap" ever fired. Fix: stream via
+  `build_request`+`send(stream=True)`; reject a declared oversized
+  Content-Length before reading any body, count chunks and abort the
+  connection at the cap otherwise, then hand back a normal buffered Response.
+  Test proves zero body reads on declared reject, mid-stream abort (≤20 of 64
+  chunks) on chunked overflow, and an unchanged small-response path; the
+  buffered-check mutant fails it.
 - **R216 (sixth window, availability fix)**: the OneRoster and CRM readers'
   offset-pagination loops had NO page bound (NRPS already capped at 25) — a
   misbehaving server that ignores `offset` (always returns a full page) made
