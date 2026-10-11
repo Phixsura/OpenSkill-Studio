@@ -682,3 +682,44 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     assert "\x01" not in failed.response_snippet  # control chars stripped
     assert failed.response_snippet.startswith("upstream error")
     assert ok.status_code == 200 and ok.response_snippet is None
+
+
+@pytest.mark.asyncio
+async def test_webhook_update_in_place(db):
+    """R77: url/events edit + re-enable without secret rotation; blocked
+    URLs and junk events refused; cross-org uniform 404."""
+    from app.services.webhook import WebhookService
+
+    org = await _org(db)
+    other = await _org(db)
+    svc = WebhookService(db)
+    sub = await _sub(db, org)
+    old_secret = sub.secret
+
+    out = await svc.update(
+        sub.id, org.id,
+        url="https://new-receiver.example.com/hook",
+        events=["com.openskill.skill.*"],
+        actor_user_id=None,
+    )
+    assert out.url == "https://new-receiver.example.com/hook"
+    assert out.events == ["com.openskill.skill.*"]
+    assert out.secret == old_secret  # edit never rotates
+
+    # Re-enable after auto-disable.
+    sub.active = False
+    await db.flush()
+    out2 = await svc.update(sub.id, org.id, active=True)
+    assert out2.active is True
+
+    from app.exceptions import AppError
+
+    with pytest.raises(AppError) as e1:
+        await svc.update(sub.id, org.id, url="http://169.254.169.254/x")
+    assert e1.value.code == "WEBHOOK_URL_BLOCKED"
+    with pytest.raises(AppError) as e2:
+        await svc.update(sub.id, org.id, events=["totally.unknown"])
+    assert e2.value.code == "INVALID_EVENT"
+    with pytest.raises(AppError) as e3:
+        await svc.update(sub.id, other.id, active=False)
+    assert e3.value.status_code == 404

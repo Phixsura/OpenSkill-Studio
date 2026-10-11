@@ -272,6 +272,56 @@ class WebhookService:
         )
         return sub
 
+    async def update(
+        self,
+        webhook_id: str,
+        org_id: str,
+        *,
+        url: str | None = None,
+        events: list[str] | None = None,
+        active: bool | None = None,
+        actor_user_id: str | None = None,
+    ) -> WebhookSubscription:
+        """R77: edit a subscription in place (url/events/re-enable) — before
+        this, any change meant delete+recreate and a new signing secret for
+        the receiver. Same URL screen and event validation as create();
+        re-enabling clears the consistent-failure evidence by cancelling
+        exhausted deliveries' claim on the auto-disable window going forward
+        (history rows stay)."""
+        sub = (
+            await self.db.execute(
+                select(WebhookSubscription).where(
+                    WebhookSubscription.id == webhook_id,
+                    WebhookSubscription.org_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if sub is None:
+            raise AppError("WEBHOOK_NOT_FOUND", "Webhook not found", 404)
+        if url is not None and url != sub.url:
+            if await _is_blocked_url_async(url):
+                raise AppError(
+                    "WEBHOOK_URL_BLOCKED",
+                    "Webhook URL must not point to internal or private addresses",
+                    422,
+                )
+            sub.url = url
+        if events is not None:
+            if not events or len(events) > MAX_EVENTS_PER_WEBHOOK:
+                raise AppError("INVALID_EVENT", "1..N event patterns required", 422)
+            for event in events:
+                if event in VALID_EVENT_TYPES or _MESH_PATTERN_RE.fullmatch(event):
+                    continue
+                raise AppError("INVALID_EVENT", f"Unknown event type: {event}", 422)
+            sub.events = list(events)
+        if active is not None:
+            sub.active = active
+        await self.db.flush()
+        await self._record_webhook_audit(
+            sub, action="webhook.updated", actor_user_id=actor_user_id
+        )
+        return sub
+
     async def list_subscriptions(self, org_id: str) -> list[WebhookSubscription]:
         result = await self.db.execute(
             select(WebhookSubscription)

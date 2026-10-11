@@ -138,6 +138,40 @@ async def list_webhooks(
     return DataResponse(data=[WebhookResponse.model_validate(s) for s in subs])
 
 
+class UpdateWebhookRequest(BaseModel):
+    url: str | None = None
+    events: list[str] | None = None
+    active: bool | None = None
+
+    _nc = field_validator("url")(reject_ctrl_str)
+
+
+@router.patch(
+    "/orgs/{org_id}/webhooks/{webhook_id}",
+    response_model=DataResponse[WebhookResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def update_webhook(
+    org_id: str,
+    webhook_id: str,
+    body: UpdateWebhookRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """R77: edit url/events or re-enable without rotating the secret."""
+    await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    sub = await WebhookService(db).update(
+        webhook_id,
+        org_id,
+        url=body.url,
+        events=body.events,
+        active=body.active,
+        actor_user_id=user.id,
+    )
+    await db.commit()
+    return DataResponse(data=WebhookResponse.model_validate(sub))
+
+
 @router.post(
     "/orgs/{org_id}/webhooks/{webhook_id}/rotate-secret",
     response_model=DataResponse[WebhookCreatedResponse],

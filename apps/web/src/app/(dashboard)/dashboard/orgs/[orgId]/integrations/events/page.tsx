@@ -160,6 +160,19 @@ export default function IntegrationEventsPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Test failed"),
   });
 
+  const toggleSub = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      apiWithAuth(`/orgs/${orgId}/webhooks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active }),
+      }),
+    onSuccess: (_d, v) => {
+      toast.success(v.active ? "Subscription re-enabled" : "Subscription disabled");
+      queryClient.invalidateQueries({ queryKey: ["intg-subs", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Update failed"),
+  });
+
   const deleteSub = useMutation({
     mutationFn: (id: string) => apiWithAuth(`/orgs/${orgId}/webhooks/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -257,6 +270,13 @@ export default function IntegrationEventsPage() {
                 })()}
               </div>
               <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => toggleSub.mutate({ id: sub.id, active: !sub.active })}
+                >
+                  {sub.active ? "Disable" : "Re-enable"}
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => testSub.mutate(sub.id)}>
                   Test
                 </Button>
