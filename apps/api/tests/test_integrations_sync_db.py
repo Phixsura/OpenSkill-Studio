@@ -1058,3 +1058,51 @@ async def test_delete_guards_profile_busy_and_mapping_in_use(db):
 
     assert await db.get(SyncProfile, profile.id) is None
     assert await db.get(MappingProfile, mapping_id) is None
+
+
+@pytest.mark.asyncio
+async def test_strict_schema_gate_blocks_broken_mappings(db):
+    """R99: with options.strict_schema, a mapped payload missing a required
+    key becomes a schema_invalid conflict (never staged); compliant records
+    stage normally; the gate stays off by default."""
+    from app.integrations import registry
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector(
+        [[{"external_id": "ok-1", "title": "Has Title"},
+          {"external_id": "bad-1", "v": "no-title"}]]
+    )
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    profile.options = {"strict_schema": True}
+    await db.commit()
+    svc = SyncProfileService(db)
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    await db.refresh(run)
+    assert run.stats["created"] == 1 and run.stats["conflicts"] == 1
+    rows = await svc.run_records(org.id, run.id, outcome="conflict")
+    assert rows[0].external_id == "bad-1"
+    assert rows[0].conflict_class == "schema_invalid"
+    assert rows[0].detail == {"missing": ["title"]}
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id,
+                StagedRecord.external_id == "bad-1",
+            )
+        )
+    ).scalar_one_or_none()
+    assert staged is None  # junk never staged
+
+    # Default (no flag): the same record stages fine.
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "bad-1", "v": "no-title"}]], respect_state=False
+    )
+    profile.options = {}
+    await db.commit()
+    run2 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.stats["conflicts"] == 0 and run2.stats["created"] == 1

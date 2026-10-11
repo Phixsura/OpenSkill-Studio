@@ -18,6 +18,23 @@ MAPPING_DIRECTIONS = frozenset({"inbound", "outbound"})
 
 # Canonical models the fabric understands (payload schemas enforced at the
 # mapping boundary — R86 import-validate rule). Extended by later phases.
+# R99 "typed per-model schemas": the required keys a mapped payload must
+# carry when the profile opts into strict_schema — a wrong mapping fails
+# fast as a schema_invalid conflict instead of staging junk. Extra fields
+# always pass through (provisioning ignores them).
+MODEL_REQUIRED_KEYS: dict[str, frozenset[str]] = {
+    "roster.term": frozenset({"name"}),
+    "roster.class": frozenset({"title"}),
+    "roster.enrollment": frozenset({"class_external_id", "user_external_id"}),
+    "roster.user": frozenset({"email"}),
+    "talent.candidate": frozenset({"email"}),
+    "talent.application": frozenset({"candidate_external_id"}),
+    "talent.job": frozenset({"title"}),
+    "crm.account": frozenset({"name"}),
+    "crm.contact": frozenset({"email"}),
+    "crm.deal": frozenset({"name"}),
+}
+
 CANONICAL_MODELS = frozenset(
     {
         "roster.term",

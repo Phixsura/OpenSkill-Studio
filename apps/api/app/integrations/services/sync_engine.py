@@ -538,6 +538,27 @@ async def _apply_record(
     else:
         mapped = raw
 
+    # R99 typed-model gate (opt-in via profile.options.strict_schema):
+    # required keys must be present and non-empty — a broken mapping becomes
+    # a schema_invalid conflict, never staged junk.
+    if (profile.options or {}).get("strict_schema"):
+        from app.integrations.models.sync import MODEL_REQUIRED_KEYS
+
+        required = MODEL_REQUIRED_KEYS.get(profile.model, frozenset())
+        missing_req = [k for k in required if mapped.get(k) in (None, "")]
+        if missing_req:
+            db.add(
+                SyncRecordResult(
+                    run_id=run.id,
+                    external_id=external_id,
+                    model=profile.model,
+                    outcome="conflict",
+                    conflict_class="schema_invalid",
+                    detail={"missing": sorted(missing_req)},
+                )
+            )
+            return "conflicts", {}
+
     new_hash = _payload_hash(mapped)
     staged = (
         await db.execute(
