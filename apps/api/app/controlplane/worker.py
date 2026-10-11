@@ -679,6 +679,22 @@ async def _intg_retention_sweep(ctx: dict) -> None:
         if any(counts.values()):
             log.info("intg_retention_swept", **counts)
 
+    # R134: the uploaded import FILES are full PII rosters — purge the
+    # stored objects for terminal jobs past the window.
+    from app.config import settings
+    from app.core.storage import get_s3_client
+    from app.integrations.services.bulk_import import sweep_import_files
+
+    async def _delete_object(key: str) -> None:
+        async for client in get_s3_client():
+            await client.delete_object(Bucket=settings.s3_bucket, Key=key)
+
+    async with AsyncSessionLocal() as db:
+        purged = await sweep_import_files(db, deleter=_delete_object)
+        if purged:
+            await db.commit()
+            log.info("intg_import_files_purged", count=purged)
+
 
 async def _intg_connection_health_sweep(ctx: dict) -> None:
     """ADR-018 §4 (R41): ping active/degraded connections so health decays

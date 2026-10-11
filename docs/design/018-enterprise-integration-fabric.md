@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R134 (third window, PII governance)**: uploaded import FILES (full
+  rosters — emails, names) no longer sit in object storage forever:
+  `sweep_import_files` deletes the stored object for terminal jobs older
+  than 90 days and blanks `file_key` (idempotent; non-terminal jobs keep
+  their file until committed/failed; a failing delete skips that job and
+  retries next night). Wired into the nightly `_intg_retention_sweep`
+  with an injected S3 deleter.
+
 - **R133 (third window, mutation probe over R128-R131)**: 12 targeted
   mutants over the new parse/apply/export code — 10 killed outright; the 2
   survivors (roster default-role flip, in-file dup check disabled) were

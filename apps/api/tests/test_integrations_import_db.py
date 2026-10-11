@@ -771,3 +771,60 @@ async def test_roster_default_role_and_infile_dup(db):
         )
     ).scalar_one()
     assert member.role == CohortRole.LEARNER  # omitted role -> learner
+
+
+@pytest.mark.asyncio
+async def test_import_file_retention_sweep(db):
+    """R134 (PII governance): terminal jobs past 90d get their stored file
+    deleted and file_key blanked; fresh/non-terminal jobs keep theirs; a
+    failing delete skips that job without stopping the sweep; blanked jobs
+    are never re-scanned."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.services.bulk_import import sweep_import_files
+
+    org, owner = await _org(db)
+    svc = BulkImportService(db)
+
+    async def mk(status: str, age_days: int, file_key: str):
+        data = f"email\nsw-{uuid.uuid4().hex[:6]}@x.edu\n".encode()
+        job = await svc.create_job(
+            org.id, kind="users", mode="partial", file_bytes=data,
+            file_key=file_key, created_by=owner.id,
+            idempotency_key=f"sw-{uuid.uuid4().hex[:10]}",
+        )
+        job.status = status
+        job.created_at = datetime.now(UTC) - timedelta(days=age_days)
+        await db.flush()
+        return job
+
+    old_done = await mk("succeeded", 120, "k-old-done")
+    old_failed = await mk("failed", 120, "k-old-failed")
+    old_previewed = await mk("previewed", 120, "k-old-previewed")
+    fresh_done = await mk("succeeded", 5, "k-fresh")
+    old_poison = await mk("partial", 120, "k-poison")
+
+    deleted: list[str] = []
+
+    async def deleter(key: str) -> None:
+        if key == "k-poison":
+            raise RuntimeError("s3 down for this key")
+        deleted.append(key)
+
+    purged = await sweep_import_files(db, deleter=deleter)
+    assert purged == 2
+    assert sorted(deleted) == ["k-old-done", "k-old-failed"]
+    await db.refresh(old_done)
+    await db.refresh(old_previewed)
+    await db.refresh(fresh_done)
+    await db.refresh(old_poison)
+    assert old_done.file_key == ""           # purged + blanked
+    assert old_previewed.file_key == "k-old-previewed"  # non-terminal kept
+    assert fresh_done.file_key == "k-fresh"  # inside the window
+    assert old_poison.file_key == "k-poison"  # delete failed -> retried later
+
+    # second sweep: only the poison job remains scannable
+    deleted.clear()
+    purged2 = await sweep_import_files(db, deleter=deleter)
+    assert purged2 == 0 and deleted == []
+    assert old_failed is not None

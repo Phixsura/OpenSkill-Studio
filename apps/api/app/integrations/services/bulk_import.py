@@ -18,6 +18,7 @@ import csv
 import hashlib
 import io
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -333,6 +334,47 @@ def parse_users_csv(
         raw_rows.append((i, {_canon(k or ""): (v or "").strip() for k, v in raw.items()
                              if k is not None}))
     return KIND_SPECS[kind].validator(raw_rows)
+
+
+RETAIN_IMPORT_FILES = timedelta(days=90)
+
+
+async def sweep_import_files(db: AsyncSession, deleter=None) -> int:
+    """R134 (PII governance): the uploaded import FILE is the full roster —
+    emails, names — and must not sit in object storage forever. Terminal
+    jobs older than the window get their stored object deleted and
+    file_key blanked (idempotent: blanked jobs are never re-scanned).
+    Non-terminal (validating/previewed/committing) jobs keep their file —
+    an admin may still commit them; they turn terminal or age into this
+    sweep on a later night once committed/failed.
+
+    ``deleter`` is injected for tests; production passes an S3-backed
+    callable from the worker."""
+    cutoff = datetime.now(UTC) - RETAIN_IMPORT_FILES
+    jobs = (
+        await db.execute(
+            select(ImportJob)
+            .where(
+                ImportJob.status.in_(("succeeded", "partial", "failed")),
+                ImportJob.created_at < cutoff,
+                ImportJob.file_key != "",
+            )
+            .limit(1000)
+        )
+    ).scalars().all()
+    purged = 0
+    for job in jobs:
+        try:
+            if deleter is not None:
+                await deleter(job.file_key)
+        except Exception as exc:  # one bad object never stops the sweep
+            log.warning("import_file_purge_failed", job_id=job.id, error=type(exc).__name__)
+            continue
+        job.file_key = ""
+        purged += 1
+    if purged:
+        await db.flush()
+    return purged
 
 
 class BulkImportService:
