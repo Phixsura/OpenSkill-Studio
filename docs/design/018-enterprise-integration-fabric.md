@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R230 (sixth window, R229 class)**: upload and commit on the data page
+  never invalidated the `intg-imports` history list rendered alongside —
+  stale until manual refresh. Both mutations invalidate it now. (Staleness
+  sweep across all five fabric pages: every create/mutate now invalidates
+  every co-rendered list it affects.)
 - **R229 (sixth window, UI staleness fix)**: resolving an identity-queue item
   with action `link` CREATES an identity link, but the page only invalidated
   the queue query — the links table alongside it showed stale data until a

@@ -139,6 +139,8 @@ export default function DataIntegrationsPage() {
     onSuccess: (res) => {
       setJob(res.data);
       toast.success("Previewed — review the dry-run stats, then commit");
+      // R230 (R229 class): the import-history list on this page must refresh.
+      queryClient.invalidateQueries({ queryKey: ["intg-imports", orgId] });
     },
     onError,
   });
@@ -149,6 +151,7 @@ export default function DataIntegrationsPage() {
     onSuccess: (res) => {
       setJob(res.data);
       toast.success(`Import ${res.data.status}`);
+      queryClient.invalidateQueries({ queryKey: ["intg-imports", orgId] }); // R230
     },
     onError,
   });
