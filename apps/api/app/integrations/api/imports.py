@@ -87,6 +87,29 @@ async def upload_import(
     return {"data": resp}
 
 
+@router.get("/imports", response_model=DataResponse[list[ImportJobResponse]])
+async def list_imports(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R83: recent import jobs for the org (newest first)."""
+    from sqlalchemy import select
+
+    from app.integrations.models import ImportJob
+
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    rows = (
+        await db.execute(
+            select(ImportJob)
+            .where(ImportJob.org_id == org_id)
+            .order_by(ImportJob.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return {"data": [ImportJobResponse.model_validate(r, from_attributes=True) for r in rows]}
+
+
 @router.get("/imports/{job_id}", response_model=DataResponse[ImportJobResponse])
 async def get_import(
     org_id: str,

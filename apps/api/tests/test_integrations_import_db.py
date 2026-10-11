@@ -339,3 +339,28 @@ async def test_display_truncation_error_cap_and_committing_claim(db):
     with pytest.raises(AppError) as exc:
         await svc.commit(org.id, job3.id, file_bytes=data3)
     assert exc.value.code == "IMPORT_NOT_COMMITTABLE"
+
+
+@pytest.mark.asyncio
+async def test_list_imports_org_scoped(db):
+    """R83: GET /imports lists only this org's jobs, newest first."""
+    from app.integrations.api.imports import list_imports
+    from app.models.user import User as _User
+
+    org, owner = await _org(db)
+    other, other_owner = await _org(db)
+    svc = BulkImportService(db)
+    data = _csv([f"li-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
+    job = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="l1", created_by=owner.id, idempotency_key=f"r83-{uuid.uuid4().hex[:8]}",
+    )
+    foreign = await svc.create_job(
+        other.id, kind="users", mode="partial", file_bytes=data,
+        file_key="l2", created_by=other_owner.id,
+        idempotency_key=f"r83b-{uuid.uuid4().hex[:8]}",
+    )
+    owner_user = await db.get(_User, owner.id)
+    out = await list_imports(org.id, db=db, user=owner_user)
+    ids = [j.id for j in out["data"]]
+    assert job.id in ids and foreign.id not in ids

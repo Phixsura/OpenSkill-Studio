@@ -67,6 +67,11 @@ export default function DataIntegrationsPage() {
   const onError = (err: unknown) =>
     toast.error(err instanceof ApiError ? err.message : "Request failed");
 
+  const importsQ = useQuery({
+    queryKey: ["intg-imports", orgId],
+    queryFn: () => apiWithAuth<{ data: ImportJob[] }>(`${base}/imports`),
+  });
+
   const upload = useMutation({
     mutationFn: async () => {
       const file = fileRef.current?.files?.[0];
@@ -227,6 +232,29 @@ export default function DataIntegrationsPage() {
             </div>
           </div>
         )}
+        <details className="text-sm">
+          <summary className="text-muted-foreground cursor-pointer">Recent imports</summary>
+          <ul className="mt-2 space-y-1 text-xs">
+            {(importsQ.data?.data ?? []).map((j) => (
+              <li key={j.id} className="font-mono">
+                {j.id} — {j.status}
+                {j.stats?.applied != null && <span>, applied {j.stats.applied}</span>}
+                {(j.dry_stats?.errors ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    className="ml-2 underline"
+                    onClick={() => downloadErrors(j.id)}
+                  >
+                    errors.csv
+                  </button>
+                )}
+              </li>
+            ))}
+            {(importsQ.data?.data ?? []).length === 0 && (
+              <li className="text-muted-foreground">No imports yet.</li>
+            )}
+          </ul>
+        </details>
       </section>
 
       <section className="space-y-3">
