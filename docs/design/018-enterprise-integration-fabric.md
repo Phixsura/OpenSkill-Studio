@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R197 (fifth window, UI)**: a "Dry-run" button on each pull sync profile
+  wires to the R196 preview endpoint and toasts the pulled count (nothing
+  staged) — an admin validates a connection's live read before scheduling.
 - **R196 (fifth window, world-class feature)**: sync dry-run preview —
   `POST /sync-profiles/{id}/preview` reads the first few records from the
   connector (with REAL credentials, now that R194 wired them) and shows the

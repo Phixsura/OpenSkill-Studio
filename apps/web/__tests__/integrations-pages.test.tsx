@@ -389,6 +389,16 @@ describe("sync page", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    // R196: dry-run preview button on the pull profile.
+    api.mockImplementationOnce(() => Promise.resolve({ data: { count: 3, records: [] } }));
+    fireEvent.click(screen.getByText("Dry-run"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/preview?limit=5",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
     fireEvent.click(screen.getByText("Conflicts"));
     await waitFor(() => expect(screen.getByText(/ambiguous_identity/)).toBeTruthy());
   });

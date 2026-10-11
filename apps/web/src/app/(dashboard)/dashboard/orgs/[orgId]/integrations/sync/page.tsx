@@ -125,6 +125,23 @@ export default function SyncIntegrationsPage() {
     onError,
   });
 
+  const dryRun = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth<{ data: { count: number; records: unknown[] } }>(
+        `${base}/sync-profiles/${id}/preview?limit=5`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) => {
+      const n = res.data.count;
+      toast.success(
+        n === 0
+          ? "Dry-run read 0 records (connector reachable, source empty)"
+          : `Dry-run pulled ${n} record(s) — mapping applied, nothing staged`,
+      );
+    },
+    onError,
+  });
+
   const createMapping = useMutation({
     mutationFn: () => {
       let document: unknown;
@@ -236,6 +253,17 @@ export default function SyncIntegrationsPage() {
                 >
                   Backfill
                 </Button>
+                {p.direction === "pull" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={dryRun.isPending}
+                    onClick={() => dryRun.mutate(p.id)}
+                    title="Read a few records from the source and show the mapping — nothing is staged"
+                  >
+                    Dry-run
+                  </Button>
+                )}
                 {p.model.startsWith("roster.") && (
                   <Button
                     size="sm"
