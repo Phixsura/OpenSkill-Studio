@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R136 (third window, race)**: TRUE-concurrency test over the new
+  roster apply path — two different jobs, same (user, cohort) pair,
+  committed via two real sessions: exactly one membership lands, the
+  loser's row fails inside its savepoint (no poisoned session, no 500),
+  both jobs reach a terminal status. Confirms the add-inside-savepoint
+  discipline held for R129 code. 3x stable.
+
 - **R135 (third window, RFC 9700)**: OIDC login now sends PKCE S256 —
   per-state `code_verifier` (intg14 column, nullable for legacy rows)
   minted at authorize, `code_challenge`+method on the redirect, verifier

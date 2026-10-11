@@ -394,3 +394,69 @@ async def test_domain_verify_exclusivity_under_race(db, monkeypatch):
         await cleanup.execute(_del(OrgDomain).where(OrgDomain.domain == domain))
         await cleanup.commit()
 
+
+
+@pytest.mark.asyncio
+async def test_roster_import_race_single_membership(db):
+    """R136: TWO different roster jobs for the same (user, cohort) pair
+    committed concurrently — the unique index decides; the loser's row
+    fails cleanly inside its savepoint (partial job, apply_failed or skip),
+    neither session 500s, and exactly ONE membership lands."""
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.bulk_import import BulkImportService
+    from app.models.cohort import Cohort, CohortMember
+
+    org, owner = await _org(db)
+    cohort = Cohort(
+        org_id=org.id, name="Race Cohort", slug=f"race-{uuid.uuid4().hex[:8]}",
+        created_by=owner.id,
+    )
+    db.add(cohort)
+    await db.flush()
+    email = f"rr-{uuid.uuid4().hex[:8]}@x.edu"
+    useed = f"email\n{email}\n".encode()
+    svc = BulkImportService(db)
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"rru-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    data = f"email,cohort_slug\n{email},{cohort.slug}\n".encode()
+    job_ids = []
+    for i in range(2):
+        j = await svc.create_job(
+            org.id, kind="roster", mode="partial", file_bytes=data,
+            file_key=f"r{i}", created_by=owner.id,
+            idempotency_key=f"rrj{i}-{uuid.uuid4().hex[:8]}",
+        )
+        job_ids.append(j.id)
+    await db.commit()
+    cohort_id, org_id = cohort.id, org.id
+
+    async def committer(job_id):
+        async with AsyncSessionLocal() as own:
+            job = await BulkImportService(own).commit(org_id, job_id, file_bytes=data)
+            status, stats = job.status, dict(job.stats or {})
+            await own.commit()
+            return status, stats
+
+    results = await asyncio.gather(
+        committer(job_ids[0]), committer(job_ids[1]), return_exceptions=True
+    )
+    for r in results:
+        assert not isinstance(r, BaseException), f"a session blew up: {r!r}"
+        status, stats = r
+        assert status in ("succeeded", "partial"), (status, stats)
+    created_total = sum(r[1].get("created", 0) for r in results)
+    n = (
+        await db.execute(
+            select(func.count()).select_from(CohortMember).where(
+                CohortMember.cohort_id == cohort_id
+            )
+        )
+    ).scalar_one()
+    assert n == 1, f"expected exactly one membership, got {n} ({results})"
+    assert created_total == 1, results
