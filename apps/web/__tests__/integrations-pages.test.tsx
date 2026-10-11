@@ -608,6 +608,33 @@ describe("data page", () => {
     );
   });
 
+  it("R149: stream create sends an explicit field allowlist incl. data.<key>", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/export-streams": { data: [] },
+    });
+    render(<DataPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Stream name"), {
+      target: { value: "scored" },
+    });
+    fireEvent.change(screen.getByLabelText("Stream fields"), {
+      target: { value: " id, type ,data.score " },
+    });
+    fireEvent.click(screen.getByText("Create stream"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/export-streams",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            name: "scored",
+            dataset: "events",
+            field_allowlist: ["id", "type", "data.score"],
+          }),
+        }),
+      ),
+    );
+  });
+
   it("R132: kind selector drives header-map fields and accepts JSON files", async () => {
     route({
       "/orgs/ORG1234567890123456789012/integrations/export-streams": { data: [] },

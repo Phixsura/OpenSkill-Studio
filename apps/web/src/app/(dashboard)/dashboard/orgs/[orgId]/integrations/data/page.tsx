@@ -69,6 +69,7 @@ export default function DataIntegrationsPage() {
   const [job, setJob] = useState<ImportJob | null>(null);
   const [streamName, setStreamName] = useState("");
   const [dataset, setDataset] = useState("events");
+  const [streamFields, setStreamFields] = useState("");
   const [openStream, setOpenStream] = useState<string | null>(null);
 
   const streamsQ = useQuery({
@@ -140,14 +141,26 @@ export default function DataIntegrationsPage() {
   });
 
   const createStream = useMutation({
-    mutationFn: () =>
-      apiWithAuth(`${base}/export-streams`, {
+    mutationFn: () => {
+      // R149: optional explicit field allowlist — supports data.<key>
+      // per-key payload selection (events dataset); empty = safe default.
+      const fields = streamFields
+        .split(",")
+        .map((f) => f.trim())
+        .filter(Boolean);
+      return apiWithAuth(`${base}/export-streams`, {
         method: "POST",
-        body: JSON.stringify({ name: streamName, dataset }),
-      }),
+        body: JSON.stringify({
+          name: streamName,
+          dataset,
+          ...(fields.length ? { field_allowlist: fields } : {}),
+        }),
+      });
+    },
     onSuccess: () => {
       toast.success("Export stream created");
       setStreamName("");
+      setStreamFields("");
       queryClient.invalidateQueries({ queryKey: ["intg-export-streams", orgId] });
     },
     onError,
@@ -382,6 +395,13 @@ export default function DataIntegrationsPage() {
             <option value="events">events</option>
             <option value="enrollments">enrollments</option>
           </select>
+          <Input
+            aria-label="Stream fields"
+            className="max-w-xs"
+            placeholder="fields (optional), e.g. id,type,data.score"
+            value={streamFields}
+            onChange={(e) => setStreamFields(e.target.value)}
+          />
           <Button
             disabled={!streamName || createStream.isPending}
             onClick={() => createStream.mutate()}

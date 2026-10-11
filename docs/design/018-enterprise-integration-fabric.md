@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R148-R149 (third window)**: import kind registry consistency invariant
+  (IMPORT_KINDS == TEMPLATE_VERSIONS == KIND_SPECS, required ⊆ known);
+  export-stream UI gains an optional explicit fields input so the R130
+  `data.<key>` per-key selection is reachable from the admin surface
+  (comma-separated, trimmed, empty = safe default allowlist).
+
 - **R147 (third window, audit inverse check)**: same pattern for the audit
   trail — every `record_fabric_audit` call site is scanned and its action
   literal must be in AUDIT_ACTIONS (record_audit swallows unregistered
