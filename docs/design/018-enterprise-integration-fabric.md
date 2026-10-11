@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R164 (fourth window, input bounds)**: mapping field `transform` lists
+  are now length-capped (MAX_TRANSFORMS=10) and type-guarded (a non-list
+  value is a validation error, not a char-by-char iteration) — closing the
+  last unbounded dimension in an otherwise fully-bounded mapping validator.
+
 - **R163 (fourth window, index)**: the nightly retention sweep deletes
   terminal deliveries by (status, created_at) across all subscriptions; the
   existing (subscription_id, …) index can't serve that, so it full-scanned.

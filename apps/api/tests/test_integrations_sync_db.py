@@ -97,6 +97,19 @@ def test_validate_document_matrix():
         "unknown keys" in p
         for p in validate_document({"fields": [{"target": "x", "path": "a", "python": "1"}]})
     )
+    # R164: transform list is length-capped and type-guarded.
+    assert any(
+        "more than" in p
+        for p in validate_document(
+            {"fields": [{"target": "x", "path": "a", "transform": ["trim"] * 50}]}
+        )
+    )
+    assert any(
+        "must be a list" in p
+        for p in validate_document(
+            {"fields": [{"target": "x", "path": "a", "transform": "trim"}]}
+        )
+    )
 
 
 def test_transforms_and_boundaries_matrix():

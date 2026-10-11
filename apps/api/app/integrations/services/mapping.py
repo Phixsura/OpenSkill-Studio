@@ -34,6 +34,7 @@ MAX_INPUT_BYTES = 262_144  # 256 KB per record
 MAX_RESULT_DEPTH = 10
 MAX_STRING_LEN = 10_000
 MAX_PREVIEW_SAMPLES = 20
+MAX_TRANSFORMS = 10  # per field; the closed set has far fewer useful chains
 
 
 # ── transform registry (closed set; §10.2) ──
@@ -181,7 +182,13 @@ def validate_document(document: dict) -> list[str]:
                 jmespath.compile(path)
             except JMESPathError as exc:
                 problems.append(f"{where}.path: invalid JMESPath ({exc})")
-        for name in f.get("transform", []) or []:
+        transforms = f.get("transform", []) or []
+        if not isinstance(transforms, list):
+            problems.append(f"{where}.transform: must be a list")
+            transforms = []
+        if len(transforms) > MAX_TRANSFORMS:
+            problems.append(f"{where}.transform: more than {MAX_TRANSFORMS} transforms")
+        for name in transforms:
             if name not in TRANSFORMS:
                 problems.append(f"{where}.transform: unknown transform {name!r}")
         enum_map = f.get("enum_map")
