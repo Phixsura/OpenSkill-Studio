@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R239/R240 (seventh window, survivor pins — foreground sweep)**: two more
+  survivors pinned. R239: no test bounded a single JMESPath expression
+  (MAX_EXPR_LEN) — the 64KB document cap only partially shadows it; a direct
+  validate_document test now kills the widened-cap mutant. R240: an
+  assertion with NO InResponseTo (IdP-initiated SSO) relied on the
+  downstream consume gate; an outcome-level test (validly signed, real
+  outstanding request, attribute stripped pre-signing) pins the 401.
+  Foreground batch results: mapping (4 killed + R239), connections state
+  machine (3 killed — the two-strike rule pinned by the health file),
+  domains (freemail/claim + verified-holder killed; freemail DISCOVERY
+  short-circuit is equivalent via the claim gate), SCIM bulk (3 killed),
+  AGS gating (3 killed incl. score clamp), SAML relay-state binding killed.
 - **R238 (seventh window, test-infra hardening)**: the health-sweep
   transition test swept the WHOLE shared dev DB (limit=100_000) with the real
   connector registry — garbage connections from prior runs did real outbound

@@ -1518,3 +1518,14 @@ async def test_staged_lookup_batched_not_per_record(db, monkeypatch):
     ).scalar_one()
     assert refetched.status == "succeeded" and refetched.stats["created"] == 12
     assert counts["staged_selects"] <= 6, counts
+
+
+def test_mapping_rejects_overlong_path_expression():
+    """R239 (mutation survivor pin): a single JMESPath longer than
+    MAX_EXPR_LEN must be rejected at save — the 64KB document cap only
+    partially shadows this (a many-KB single expression still compiles,
+    and compile cost must stay bounded per field)."""
+    doc = {"fields": [{"target": "x", "path": "a" + ("." + "b" * 60) * 20}]}
+    assert len(doc["fields"][0]["path"]) > 500
+    problems = validate_document(doc)
+    assert any("path: required string <= 500" in p for p in problems), problems

@@ -887,3 +887,28 @@ async def test_connection_without_pinned_certs_rejects_even_valid_signatures(db)
     # _invalid() is deliberately generic (401, reason only logged) — the
     # outcome that matters: the login is REJECTED, never resolved.
     assert e.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unsolicited_assertion_without_inresponseto_rejected(db):
+    """R240 (survivor pin): an assertion carrying NO InResponseTo —
+    IdP-initiated SSO — must be rejected in v1 even when validly signed and
+    a real outstanding request exists (the attacker may know a state id via
+    RelayState, but only a response bound to the request is acceptable)."""
+    import re as _re
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    email = f"un-{uuid.uuid4().hex[:6]}@{domain}"
+    state = await _start(db, conn)  # a real outstanding request exists
+    xml = _assertion_xml(in_response_to=state, email=email)
+    # Strip the InResponseTo attribute BEFORE signing (it is inside the
+    # signed subtree, so post-signature tampering would fail earlier).
+    xml = _re.sub(r'InResponseTo="[^"]*" ', "", xml, count=1)
+    assert "InResponseTo" not in xml
+    b64 = _wrap_response(_sign_assertion(xml))
+    with pytest.raises(AppError) as e:
+        await SamlService(db).handle_acs(
+            connection_id=conn.id, saml_response_b64=b64, relay_state=state
+        )
+    assert e.value.status_code == 401
