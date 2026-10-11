@@ -229,6 +229,22 @@ SIS removes its memberships on the next provision pass.
   refresh and the domain-DNS sweep commit per row; all three crons carry
   explicit 1800s timeouts. A mid-sweep kill never rolls back completed work.
 
+### Guard rails & verification (window 7)
+
+- Drift guards fail CI when hand-maintained registries fall out of sync:
+  every emitted mesh-event name must appear in the subscription catalog
+  (source-scan test), every canonical model declares strict-schema keys, and
+  every non-manual schedule has a sweep cadence (plus the import-kind triple).
+- Clean-harness mutation re-verification: 39 mutants killed across the
+  security cores this window (projection, signing, deprovision, SAML
+  window/XSW/cert-pinning, retry-ladder boundaries, identity takeover
+  ladder, LTI launch, OIDC state/PKCE, import fingerprint, outbox worker,
+  roster governance, push consent, export data-key gate); the two survivors
+  are documented equivalents with outcome-level tests pinning the property.
+- Mutation harness hygiene: probes clear **pycache** after writing AND after
+  restoring a mutant — a restored source can otherwise keep executing the
+  mutant's bytecode (mtime-granularity collision).
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned
