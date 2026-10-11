@@ -310,6 +310,9 @@ export default function IdentityIntegrationsPage() {
     onSuccess: () => {
       toast.success("Resolved");
       queryClient.invalidateQueries({ queryKey: ["intg-id-queue", orgId] });
+      // R229: a "link" resolution CREATES an identity link — the links table
+      // on this same page must refresh too, not show stale data.
+      queryClient.invalidateQueries({ queryKey: ["intg-identity-links", orgId] });
     },
     onError,
   });

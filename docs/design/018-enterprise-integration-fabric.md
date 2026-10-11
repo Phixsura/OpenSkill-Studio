@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R229 (sixth window, UI staleness fix)**: resolving an identity-queue item
+  with action `link` CREATES an identity link, but the page only invalidated
+  the queue query — the links table alongside it showed stale data until a
+  manual refresh. Both queries invalidate now.
 - **R228 (sixth window, R226 class — domain sweep)**: the quarter-hourly
   pending-domain sweep does up to 200 slow DNS lookups per tick with no cron
   timeout margin; a kill rolled back every verification already made. Commit
