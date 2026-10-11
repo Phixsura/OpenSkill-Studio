@@ -248,6 +248,16 @@ describe("events page", () => {
       ),
     );
 
+    // R157: bulk replay of exhausted deliveries for this subscription.
+    api.mockImplementationOnce(() => Promise.resolve({ data: { requeued: 2 } }));
+    fireEvent.click(screen.getByText("Replay exhausted"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/webhooks/w1/replay-exhausted",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
     // Create path: POST then the once-only secret banner swaps to the new one.
     api.mockImplementationOnce(() =>
       Promise.resolve({

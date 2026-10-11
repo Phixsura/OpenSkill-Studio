@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R157 (fourth window, UI)**: each subscription card gets a "Replay
+  exhausted" action wired to the R155 endpoint (toasts the requeued count)
+  so operators can recover a backlog without the CLI.
+
 - **R156 (fourth window, e2e hygiene)**: live E2E exercises the bulk-replay
   endpoint and now DELETEs the webhook subscription it created (same
   cleanup discipline as the R150 domain fix) — repeated e2e runs no longer

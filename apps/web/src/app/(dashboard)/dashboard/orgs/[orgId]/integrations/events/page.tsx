@@ -204,6 +204,19 @@ export default function IntegrationEventsPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Replay failed"),
   });
 
+  // R157: operator bulk recovery after an endpoint outage.
+  const replayExhausted = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth<{ data: { requeued: number } }>(`${base}/webhooks/${id}/replay-exhausted`, {
+        method: "POST",
+      }),
+    onSuccess: (res) => {
+      toast.success(`Requeued ${res.data.requeued} exhausted deliveries`);
+      queryClient.invalidateQueries({ queryKey: ["intg-deliveries", orgId] });
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : "Bulk replay failed"),
+  });
+
   return (
     <div className="space-y-8 p-6">
       <Link
@@ -314,6 +327,15 @@ export default function IntegrationEventsPage() {
                   title="Leaked-secret path: the old key stops signing immediately"
                 >
                   Rotate now
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={replayExhausted.isPending}
+                  onClick={() => replayExhausted.mutate(sub.id)}
+                  title="Requeue every exhausted delivery for this endpoint (after an outage)"
+                >
+                  Replay exhausted
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => deleteSub.mutate(sub.id)}>
                   Delete
