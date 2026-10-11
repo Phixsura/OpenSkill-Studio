@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R205 (fifth window, silent-data-drop fix)**: a CSV with two columns
+  mapping to the same canonical field (duplicate header, or a header_map that
+  aliases two source columns onto one canonical) made csv.DictReader silently
+  keep only the LAST value — a silent data drop. parse_users_csv now detects
+  duplicate KNOWN-canonical columns and rejects the file with a clear
+  `duplicate_column` error.
 - **R203 (fifth window, observability coverage)**: test pins that an export
   over an empty source still writes a manifest (row_count=0, parts=[]) and
   succeeds — the run stays observable in the warehouse, never a silent no-op.

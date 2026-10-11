@@ -358,6 +358,29 @@ def parse_users_csv(
         return alias_to_canonical.get(h, h)
 
     headers = [_canon(h) for h in (reader.fieldnames or [])]
+    # R205: two source columns mapping to the SAME canonical field (duplicate
+    # headers, or a header_map that aliases "Email" and "E-mail" both to
+    # "email") would make csv.DictReader silently keep only the LAST — a
+    # silent data drop. Reject the file with a clear error instead. Only
+    # KNOWN canonical columns matter (extra columns are ignored anyway).
+    known = KIND_SPECS[kind].known_headers
+    seen_canon: dict[str, int] = {}
+    dup_errors = []
+    for h in headers:
+        if h in known:
+            seen_canon[h] = seen_canon.get(h, 0) + 1
+    for canon, cnt in seen_canon.items():
+        if cnt > 1:
+            dup_errors.append(
+                {
+                    "row_number": 1,
+                    "column": canon,
+                    "code": "duplicate_column",
+                    "message": f"Column {canon!r} appears {cnt} times — remove the duplicate",
+                }
+            )
+    if dup_errors:
+        return [], dup_errors
     missing = [c for c in KIND_SPECS[kind].required if c not in headers]
     if missing:
         return [], [

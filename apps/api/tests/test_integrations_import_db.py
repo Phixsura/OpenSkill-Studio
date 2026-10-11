@@ -1067,3 +1067,29 @@ async def test_atomic_apply_failure_persists_failed_status(db):
     ).scalar_one()
     assert n == 0
     assert Cohort is not None
+
+
+def test_duplicate_canonical_column_rejected():
+    """R205: two columns mapping to the same canonical field (a duplicate
+    header) must be a clear file-level error — not a silent csv.DictReader
+    last-wins data drop."""
+    data = b"email,email,role\r\na@x.edu,b@x.edu,student\r\n"
+    rows, errors = parse_users_csv(data)
+    assert rows == []
+    assert errors[0]["code"] == "duplicate_column" and errors[0]["column"] == "email"
+
+    # header_map aliasing a second source column onto an existing canonical
+    # also collides (both land on "email").
+    data2 = b"primary,secondary,role\r\na@x.edu,b@x.edu,student\r\n"
+    rows2, errors2 = parse_users_csv(
+        data2, header_map={"email": "primary", "display_name": "secondary"}
+    )
+    # primary->email, secondary->display_name: no collision, one of each.
+    assert errors2 == [] and len(rows2) == 1
+
+    data3 = b"primary,secondary,role\r\na@x.edu,b@x.edu,student\r\n"
+    rows3, errors3 = parse_users_csv(
+        data3, header_map={"email": "primary"}
+    )
+    # Only primary->email; secondary stays unknown (ignored). One email col.
+    assert errors3 == [] and len(rows3) == 1
