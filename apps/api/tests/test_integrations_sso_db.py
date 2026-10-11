@@ -599,7 +599,9 @@ async def test_domain_sweep_verifies_and_expires(db, monkeypatch):
 
     monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
     changed = await svc.sweep_pending()
-    assert changed == 2
+    # >= not ==: the sweep is global and other committed pending rows (e.g.
+    # a live-E2E leftover) may legitimately be swept in the same pass.
+    assert changed >= 2
     await db.refresh(fresh)
     await db.refresh(stale)
     assert fresh.status == "verified"

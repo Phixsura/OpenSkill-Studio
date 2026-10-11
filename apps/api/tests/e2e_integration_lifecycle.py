@@ -600,6 +600,7 @@ async def main() -> int:
 
         # ── cleanup (best effort) ──
         await c.delete(f"{base}/connections/{conn_id}", headers=h)
+        await c.delete(f"{base}/domains/{domain_id}", headers=h)
 
     await sink.stop()
     print(f"\nPASS={PASS} FAIL={FAIL}")
