@@ -531,6 +531,59 @@ async def main() -> int:
                     r.text[:300],
                 )
 
+        # ── opportunities kind over HTTP: drafts behind the profile gate ──
+        opp_json = json.dumps(
+            {"opportunities": [
+                {"title": f"E2E Role {uuid.uuid4().hex[:6]}",
+                 "opportunity_type": "internship", "location_mode": "remote"},
+            ]}
+        )
+        r = await c.post(
+            f"{base}/imports",
+            headers=h,
+            data={"kind": "opportunities", "mode": "partial",
+                  "idempotency_key": f"e2eo-{uuid.uuid4().hex[:10]}"},
+            files={"file": ("opps.json", opp_json.encode(), "application/json")},
+        )
+        check(
+            "opportunities import without profile -> row errors",
+            r.status_code in (200, 201)
+            and r.json()["data"]["dry_stats"]["valid"] == 0
+            and r.json()["data"]["dry_stats"]["errors"] == 1,
+            r.text[:300],
+        )
+        r = await c.post("/talent/employers/" + org_id, headers=h, json={})
+        check("employer profile registered", r.status_code == 201, r.text[:200])
+        r = await c.post(
+            f"{base}/imports",
+            headers=h,
+            data={"kind": "opportunities", "mode": "partial",
+                  "idempotency_key": f"e2eo2-{uuid.uuid4().hex[:10]}"},
+            files={"file": ("opps.json", opp_json.encode(), "application/json")},
+        )
+        check(
+            "opportunities import previews a draft",
+            r.status_code in (200, 201) and r.json()["data"]["dry_stats"]["creates"] == 1,
+            r.text[:300],
+        )
+        if r.status_code in (200, 201):
+            oid = r.json()["data"]["id"]
+            r = await c.post(f"{base}/imports/{oid}/commit", headers=h)
+            check(
+                "opportunities import lands a DRAFT",
+                r.status_code == 200 and r.json()["data"]["stats"]["created"] == 1,
+                r.text[:300],
+            )
+            r = await c.get(
+                "/talent/opportunities", headers=h,
+                params={"org_id": org_id, "status": "draft"},
+            )
+            check(
+                "imported posting is draft-only",
+                r.status_code == 200,
+                r.text[:200],
+            )
+
         # ── IDOR spot wall (second real user, not a member) ──
         for path in (
             f"{base}/connections/{conn_id}",
