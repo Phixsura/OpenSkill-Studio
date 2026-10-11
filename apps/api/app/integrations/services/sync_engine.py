@@ -162,6 +162,47 @@ class SyncProfileService:
             ).scalars()
         )
 
+    async def update(
+        self,
+        org_id: str,
+        profile_id: str,
+        *,
+        schedule: str | None = None,
+        enabled: bool | None = None,
+        field_policy: dict | None = None,
+        mapping_profile_id: str | None = None,
+        repin_mapping: bool = False,
+    ) -> SyncProfile:
+        """R82: edit a profile in place. model/direction/connection are
+        immutable (cursor + capability semantics); repin_mapping=True
+        re-pins to the mapping's CURRENT version (an explicit act — runs
+        otherwise keep the version pinned at create, §10.1)."""
+        profile = await self.db.get(SyncProfile, profile_id)
+        if profile is None or profile.org_id != org_id:
+            raise AppError("SYNC_PROFILE_NOT_FOUND", "Profile not found", 404)
+        if schedule is not None:
+            if schedule not in SYNC_SCHEDULES:
+                raise AppError("SYNC_PROFILE_INVALID", "bad schedule", 422)
+            profile.schedule = schedule
+        if field_policy is not None:
+            self._validate_field_policy(field_policy)
+            profile.field_policy = dict(field_policy)
+        if mapping_profile_id is not None or repin_mapping:
+            target_id = mapping_profile_id or profile.mapping_profile_id
+            if target_id is None:
+                raise AppError("SYNC_PROFILE_INVALID", "no mapping to pin", 422)
+            mp = await self.db.get(MappingProfile, target_id)
+            if mp is None or mp.org_id != org_id:
+                raise AppError("MAPPING_NOT_FOUND", "Mapping profile not found", 404)
+            if mp.model != profile.model:
+                raise AppError("SYNC_PROFILE_INVALID", "mapping model mismatch", 422)
+            profile.mapping_profile_id = mp.id
+            profile.mapping_version = mp.version
+        if enabled is not None:
+            profile.enabled = enabled
+        await self.db.flush()
+        return profile
+
     async def trigger(self, org_id: str, profile_id: str, *, trigger: str = "manual") -> SyncRun:
         """Idempotent: a live run is returned instead of a second one."""
         profile = await self.get(org_id, profile_id)

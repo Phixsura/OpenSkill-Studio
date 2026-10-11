@@ -223,6 +223,39 @@ async def create_sync_profile(
     return {"data": resp}
 
 
+class SyncProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schedule: str | None = Field(default=None, max_length=20)
+    enabled: bool | None = None
+    field_policy: dict | None = None
+    mapping_profile_id: str | None = Field(default=None, max_length=26)
+    repin_mapping: bool = False
+
+
+@router.patch("/sync-profiles/{profile_id}", response_model=DataResponse[SyncProfileResponse])
+async def update_sync_profile(
+    org_id: str,
+    profile_id: str,
+    body: SyncProfileUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R82: edit schedule/enabled/field_policy or (re)pin the mapping."""
+    await _admin(org_id, user, db)
+    profile = await SyncProfileService(db).update(
+        org_id,
+        profile_id,
+        schedule=body.schedule,
+        enabled=body.enabled,
+        field_policy=body.field_policy,
+        mapping_profile_id=body.mapping_profile_id,
+        repin_mapping=body.repin_mapping,
+    )
+    resp = SyncProfileResponse.model_validate(profile, from_attributes=True)
+    await db.commit()
+    return {"data": resp}
+
+
 @router.post(
     "/sync-profiles/{profile_id}/run", response_model=DataResponse[SyncRunResponse], status_code=202
 )

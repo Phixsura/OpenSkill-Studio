@@ -984,3 +984,41 @@ async def test_sync_run_drivable_through_outbox_handler(db):
     row = await db.get(SyncRun, run_id)
     await db.refresh(row)
     assert row.status == "succeeded" and row.stats.get("created") == 1
+
+
+@pytest.mark.asyncio
+async def test_profile_update_and_mapping_repin(db):
+    """R82: schedule/enabled/policy edits validated; repin_mapping is an
+    EXPLICIT act that moves the pinned version; cross-org uniform 404."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(
+        db, org, owner, fake,
+        mapping={"fields": [{"target": "title", "path": "title"}]},
+    )
+    svc = SyncProfileService(db)
+    assert profile.mapping_version == 1
+
+    out = await svc.update(
+        org.id, profile.id, schedule="hourly", enabled=False,
+        field_policy={"_default": "theirs"},
+    )
+    assert out.schedule == "hourly" and out.enabled is False
+    assert out.field_policy == {"_default": "theirs"}
+
+    # Mapping bumps to v2; the profile stays pinned at v1 until repin.
+    mp = await MappingService(db).get(org.id, profile.mapping_profile_id)
+    await MappingService(db).update_document(
+        org.id, mp.id, {"fields": [{"target": "title", "path": "title2"}]}
+    )
+    await db.refresh(profile)
+    assert profile.mapping_version == 1
+    out2 = await svc.update(org.id, profile.id, repin_mapping=True)
+    assert out2.mapping_version == 2
+
+    with pytest.raises(AppError):
+        await svc.update(org.id, profile.id, schedule="sometimes")
+    org2, _ = await _org(db)
+    with pytest.raises(AppError) as exc:
+        await svc.update(org2.id, profile.id, enabled=True)
+    assert exc.value.status_code == 404
