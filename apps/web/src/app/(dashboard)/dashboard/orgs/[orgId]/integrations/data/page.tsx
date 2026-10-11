@@ -97,6 +97,12 @@ export default function DataIntegrationsPage() {
       const form = new FormData();
       form.append("kind", kind);
       form.append("mode", mode);
+      // R152: deterministic per-file key — a double-click (or re-upload of
+      // the identical file) lands on the SAME job instead of a duplicate.
+      form.append(
+        "idempotency_key",
+        `web:${kind}:${file.name}:${file.size}:${file.lastModified}`.slice(0, 100),
+      );
       // R92: optional vendor-header aliases.
       const map: Record<string, string> = {};
       for (const [k, v] of Object.entries(aliases)) {
