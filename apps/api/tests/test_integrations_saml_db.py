@@ -199,7 +199,7 @@ async def test_saml_happy_path_jit(db):
     email = f"saml-{uuid.uuid4().hex[:6]}@{domain}"
     signed = _sign_assertion(_assertion_xml(in_response_to=state, email=email))
     b64 = _wrap_response(signed)
-    conn2, result = await SamlService(db).handle_acs(
+    conn2, result, _rt = await SamlService(db).handle_acs(
         connection_id=conn.id, saml_response_b64=b64, relay_state=state
     )
     assert conn2.id == conn.id
@@ -210,7 +210,7 @@ async def test_saml_happy_path_jit(db):
         _assertion_xml(in_response_to=state2, email=email, name_id="stable-1")
     )
     # (different subject -> matches by verified email to the same account)
-    _, result2 = await SamlService(db).handle_acs(
+    _, result2, _rt2 = await SamlService(db).handle_acs(
         connection_id=conn.id, saml_response_b64=_wrap_response(signed2), relay_state=state2
     )
     assert result2.user.id == result.user.id
@@ -335,7 +335,7 @@ async def test_saml_xsw_unsigned_sibling_ignored(db):
     b64 = _wrap_response(evil, signed)
     svc = SamlService(db)
     try:
-        _, result = await svc.handle_acs(
+        _, result, _rt3 = await svc.handle_acs(
             connection_id=conn.id, saml_response_b64=b64, relay_state=state
         )
         # If accepted at all, it MUST be the signed identity.
@@ -614,3 +614,24 @@ async def test_login_discovery_routes_by_protocol(db):
     out = await fn(email=f"who@{domain}", db=db)
     assert out["data"]["sso"] is True
     assert out["data"]["authorize_url"].startswith("/api/v1/sso/saml/authorize?")
+
+
+@pytest.mark.asyncio
+async def test_saml_deep_link_round_trip(db):
+    """R75: return_to survives authn-request state -> ACS (SAML symmetry
+    with the OIDC deep link)."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+    url = await svc.build_authn_redirect(conn.id, return_to="/dashboard/orgs/Z/skills")
+    from urllib.parse import parse_qs, urlsplit
+
+    state = parse_qs(urlsplit(url).query)["RelayState"][0]
+    signed = _sign_assertion(
+        _assertion_xml(in_response_to=state, email=f"dl-{uuid.uuid4().hex[:6]}@{domain}")
+    )
+    _, result, return_to = await svc.handle_acs(
+        connection_id=conn.id, saml_response_b64=_wrap_response(signed), relay_state=state
+    )
+    assert return_to == "/dashboard/orgs/Z/skills"
+    assert result.user is not None

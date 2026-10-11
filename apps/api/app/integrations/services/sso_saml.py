@@ -93,7 +93,9 @@ class SamlService:
 
     # ── AuthnRequest (SP-initiated; redirect binding) ──
 
-    async def build_authn_redirect(self, connection_id: str) -> str:
+    async def build_authn_redirect(
+        self, connection_id: str, *, return_to: str | None = None
+    ) -> str:
         import zlib
         from urllib.parse import urlencode
 
@@ -104,6 +106,7 @@ class SamlService:
             sso_connection_id=conn.id,
             nonce=secrets.token_urlsafe(24)[:64],
             expires_at=datetime.now(UTC) + STATE_TTL,
+            redirect_to=return_to,
         )
         self.db.add(state)
         await self.db.flush()
@@ -128,9 +131,10 @@ class SamlService:
 
     # ── ACS (the validation core) ──
 
-    async def _consume_request_id(self, state_value: str, conn_id: str) -> None:
+    async def _consume_request_id(self, state_value: str, conn_id: str) -> str | None:
         """InResponseTo must be an outstanding request of THIS connection —
-        single-use, TTL'd (same discipline as the OIDC state row)."""
+        single-use, TTL'd (same discipline as the OIDC state row). Returns
+        the stored deep-link target (R75)."""
         res = await self.db.execute(
             update(SsoLoginState)
             .where(
@@ -140,10 +144,12 @@ class SamlService:
                 SsoLoginState.expires_at > datetime.now(UTC),
             )
             .values(used_at=datetime.now(UTC))
-            .returning(SsoLoginState.id)
+            .returning(SsoLoginState.redirect_to)
         )
-        if res.scalar_one_or_none() is None:
+        row = res.one_or_none()
+        if row is None:
             raise _invalid("in_response_to_unknown_used_or_expired")
+        return row[0]
 
     async def _assert_id_unseen(
         self, conn_id: str, assertion_id: str, not_on_or_after: datetime
@@ -192,7 +198,7 @@ class SamlService:
 
     async def handle_acs(
         self, *, connection_id: str, saml_response_b64: str, relay_state: str | None
-    ) -> tuple[SsoConnection, ResolutionResult]:
+    ) -> tuple[SsoConnection, ResolutionResult, str | None]:
         conn = await self._connection(connection_id)
         if len(saml_response_b64) > MAX_RESPONSE_BYTES:
             raise _invalid("response_too_large")
@@ -246,7 +252,7 @@ class SamlService:
         in_response_to = (subject_conf.get("InResponseTo") if subject_conf is not None else None) or ""
         if not in_response_to.startswith("_"):
             raise _invalid("unsolicited_response")  # IdP-initiated not supported v1
-        await self._consume_request_id(in_response_to[1:], conn.id)
+        return_to = await self._consume_request_id(in_response_to[1:], conn.id)
 
         assertion_id = assertion.get("ID", "")
         if not assertion_id:
@@ -290,4 +296,4 @@ class SamlService:
         result = await IdentityService(self.db).resolve(
             ident, allow_jit=conn.allow_jit, jit_role=conn.default_role
         )
-        return conn, result
+        return conn, result, return_to

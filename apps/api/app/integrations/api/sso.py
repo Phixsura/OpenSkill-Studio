@@ -433,11 +433,14 @@ async def saml_sp_metadata():
 @protocol_router.get("/saml/authorize", dependencies=[Depends(rate_limit(10, 60))])
 async def saml_authorize(
     connection: str = Query(min_length=1, max_length=26),
+    return_to: str | None = Query(default=None, max_length=500),
     db: AsyncSession = Depends(get_db),
 ):
     from app.integrations.services.sso_saml import SamlService
 
-    url = await SamlService(db).build_authn_redirect(connection)
+    if return_to and (not return_to.startswith("/") or return_to.startswith("//")):
+        return_to = None
+    url = await SamlService(db).build_authn_redirect(connection, return_to=return_to)
     await db.commit()
     return RedirectResponse(url, status_code=302)
 
@@ -456,7 +459,7 @@ async def saml_acs(
     if not saml_response:
         raise AppError("SSO_ASSERTION_INVALID", "SAMLResponse missing", 401)
     svc = SamlService(db)
-    conn, result = await svc.handle_acs(
+    conn, result, return_to = await svc.handle_acs(
         connection_id=connection_id,
         saml_response_b64=saml_response,
         relay_state=str(relay_state) if relay_state is not None else None,
@@ -487,7 +490,8 @@ async def saml_acs(
     if settings.app_env in ("development", "test"):
         return {"data": body}
     return RedirectResponse(
-        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
+        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}"
+        + (f"&return_to={quote(return_to)}" if return_to else ""),
         status_code=302,
     )
 
