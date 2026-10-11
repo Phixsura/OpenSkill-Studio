@@ -917,6 +917,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R179 (fourth window, production 500 — external naive timestamp)**: the
+  clock-conflict resolver compared `theirs_ts > ours_ts` where `theirs`
+  comes from EXTERNAL provider data; a provider sending a naive `updated_at`
+  (no Z/offset) made that a naive-vs-aware comparison → TypeError → uncaught
+  500 mid-sync. `_ts` now forces UTC on naive input. Test pins it (revert
+  fails). This closes the fromisoformat-then-compare class across the fabric
+  (SAML R177, echo R178, sync clock R179; OIDC/LTI use int epochs; sso_admin
+  cert-expiry already guarded).
 - **R178 (fourth window, defense-in-depth)**: the echo-suppression read of
   `last_outbound.written_at` (always written aware by us) now also catches
   TypeError and normalizes a naive value to UTC — a legacy/tampered naive

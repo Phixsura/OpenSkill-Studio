@@ -873,9 +873,14 @@ def _ts(value) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+    # R179: `theirs` comes from EXTERNAL provider data and may be naive (no
+    # Z/offset). The caller does `theirs_ts > ours_ts`; a naive-vs-aware
+    # comparison raises TypeError (not ValueError) → an uncaught 500 in the
+    # sync run. Force UTC so every timestamp is comparable.
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 async def _finish(db: AsyncSession, run: SyncRun, status: str, *, error: dict | None = None) -> None:

@@ -1275,3 +1275,45 @@ async def test_connection_delete_refuses_while_run_live(db):
         )
     ).scalar_one()
     assert n == 0  # cascade cleaned the run
+
+
+@pytest.mark.asyncio
+async def test_clock_conflict_tolerates_naive_provider_timestamp(db):
+    """R179: a provider sending a NAIVE updated_at (no Z/offset) while our
+    stored _updated_at is aware must NOT 500 the sync run via a naive-vs-
+    aware comparison — most_recent still resolves (naive treated as UTC)."""
+    org, owner = await _org(db)
+    policy = {"timed": "most_recent", "_default": "theirs"}
+    fake = FakeRosterConnector([[{"external_id": "n1", "timed": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake, field_policy=policy)
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "n1"
+            )
+        )
+    ).scalar_one()
+    staged.payload = {"timed": "LOCAL", "_updated_at": "2026-10-10T00:00:00+00:00"}
+    staged.raw_hash = "seeded"
+    await db.commit()
+
+    from app.integrations import registry
+
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        respect_state=False,
+        batches=[[
+            {
+                "external_id": "n1", "timed": "REMOTE",
+                "updated_at": "2026-10-11T00:00:00",  # NAIVE, newer than ours
+            }
+        ]],
+    )
+    run2 = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)  # must not raise
+    await db.refresh(staged)
+    assert staged.payload["timed"] == "REMOTE"  # naive treated as UTC, theirs newer
