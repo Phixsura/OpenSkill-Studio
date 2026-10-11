@@ -1198,3 +1198,22 @@ async def test_mapping_preview_parity_with_run_and_guards(db):
         await svc.preview(org.id, profile.mapping_profile_id, [sample] * 21)
     assert exc.value.code == "MAPPING_PREVIEW_TOO_LARGE"
     assert registry is not None
+
+
+@pytest.mark.asyncio
+async def test_bidirectional_profile_rejected(db):
+    """R124: bidirectional has no coherent single-profile execution (pull and
+    push are different models) — creation must refuse it, not silently
+    pull-only."""
+    from app.exceptions import AppError
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, _p = await _setup_profile(db, org, owner, fake)
+    with pytest.raises(AppError) as exc:
+        await SyncProfileService(db).create(
+            org.id, connection_id=conn.id, name=f"bi-{uuid.uuid4().hex[:6]}",
+            model="roster.class", direction="bidirectional", mapping_profile_id=None,
+        )
+    assert exc.value.code == "SYNC_PROFILE_INVALID"
+    assert "bidirectional" in exc.value.message

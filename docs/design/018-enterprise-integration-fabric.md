@@ -852,6 +852,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   accept_theirs adjudication carries a staleness guard (409 when the staged
   field moved since the conflict was recorded).
 
+- **R124 — bidirectional direction**: the enum accepted "bidirectional" but
+  execute_run routed it to pull-only (push is talent.application-specific and
+  a profile carries ONE model) — a silent half-implementation. Now rejected
+  at creation with guidance to pair a pull + a push profile; Part G
+  bidirectional is achieved by that pairing, not a single mixed profile.
+
 - **R120/R121 — CRM (Part E)**: generic CRM READ connector ships
   (accounts/contacts/deals → canonical crm.* models, API-key + pagination,
   read-only). CRM→ClientBrief AUTO-provisioning is DELIBERATELY NOT built:

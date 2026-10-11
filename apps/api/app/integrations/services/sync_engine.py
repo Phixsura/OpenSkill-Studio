@@ -72,6 +72,16 @@ class SyncProfileService:
             raise AppError("SYNC_PROFILE_INVALID", f"unknown model: {model}", 422)
         if direction not in SYNC_DIRECTIONS:
             raise AppError("SYNC_PROFILE_INVALID", "bad direction", 422)
+        if direction == "bidirectional":
+            # R124: a profile has ONE model, and pull (connector.read) vs push
+            # (talent.application only) are different models — a single
+            # bidirectional profile has no coherent execution. Reject rather
+            # than silently pull-only. Pair a pull profile with a push profile.
+            raise AppError(
+                "SYNC_PROFILE_INVALID",
+                "bidirectional not supported per-profile; create paired pull + push profiles",
+                422,
+            )
         if schedule not in SYNC_SCHEDULES:
             raise AppError("SYNC_PROFILE_INVALID", "bad schedule", 422)
         self._validate_field_policy(field_policy or {})
