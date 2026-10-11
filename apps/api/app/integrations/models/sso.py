@@ -121,6 +121,9 @@ class SsoLoginState(Base):
         String(26), ForeignKey("intg_sso_connections.id", ondelete="CASCADE"), nullable=False
     )
     nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    # R135: PKCE S256 verifier — minted at authorize, replayed at token
+    # exchange; nullable for rows minted before the upgrade.
+    code_verifier: Mapped[str | None] = mapped_column(String(128), nullable=True)
     redirect_to: Mapped[str | None] = mapped_column(String(500), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

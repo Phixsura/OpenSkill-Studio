@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R135 (third window, RFC 9700)**: OIDC login now sends PKCE S256 —
+  per-state `code_verifier` (intg14 column, nullable for legacy rows)
+  minted at authorize, `code_challenge`+method on the redirect, verifier
+  replayed at token exchange — so an intercepted authorization code alone
+  is useless even for this confidential client. IdPs without PKCE support
+  ignore the extra params (RFC 6749 requires ignoring unknowns).
+
 - **R134 (third window, PII governance)**: uploaded import FILES (full
   rosters — emails, names) no longer sit in object storage forever:
   `sweep_import_files` deletes the stored object for terminal jobs older

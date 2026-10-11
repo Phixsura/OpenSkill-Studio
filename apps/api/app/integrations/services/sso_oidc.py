@@ -13,6 +13,8 @@ Validation set per launch (tests mirror this list):
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import secrets
 import time
@@ -100,9 +102,19 @@ class OidcService:
             )
         )
         nonce = secrets.token_urlsafe(32)[:64]
+        # R135 PKCE (RFC 7636 S256; RFC 9700 requires it for ALL clients,
+        # confidential included): the verifier binds the token exchange to
+        # THIS authorize hit, so an intercepted code alone is useless.
+        code_verifier = secrets.token_urlsafe(64)[:128]
+        code_challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        )
         state = SsoLoginState(
             sso_connection_id=conn.id,
             nonce=nonce,
+            code_verifier=code_verifier,
             redirect_to=return_to,
             expires_at=datetime.now(UTC) + STATE_TTL,
         )
@@ -115,6 +127,8 @@ class OidcService:
             "scope": "openid email profile",
             "state": state.id,
             "nonce": nonce,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
         }
         return f"{doc['authorization_endpoint']}?{urlencode(params)}"
 
@@ -181,6 +195,8 @@ class OidcService:
                     "redirect_uri": redirect_uri,
                     "client_id": conn.oidc_client_id or "",
                     "client_secret": secret,
+                    # R135: legacy pre-PKCE state rows omit the verifier.
+                    **({"code_verifier": state.code_verifier} if state.code_verifier else {}),
                 }
             ).encode(),
         )

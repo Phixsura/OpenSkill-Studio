@@ -1044,3 +1044,49 @@ async def test_oidc_deep_link_round_trip_and_screen(db):
 
     src = __import__("inspect").getsource(sso_api.oidc_authorize)
     assert 'startswith("/")' in src and 'startswith("//")' in src
+
+
+@pytest.mark.asyncio
+async def test_oidc_pkce_s256(db):
+    """R135 (RFC 9700): the authorize redirect carries a S256 code_challenge
+    derived from a per-state verifier, and the token exchange replays that
+    exact verifier — an intercepted code alone is useless."""
+    import base64
+    import hashlib
+
+    import app.integrations.services.sso_oidc as mod
+    from app.integrations.models.sso import SsoLoginState
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    email = f"pkce-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    captured_forms: list[dict] = []
+
+    def factory(form):
+        captured_forms.append(form)
+        return _mint_id_token(
+            sub="pkce-sub", email=email, nonce=factory.nonce, aud="client-1"
+        )
+
+    fake = FakeIdp(factory)
+    svc.egress = fake
+
+    url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+    q = parse_qs(urlsplit(url).query)
+    assert q["code_challenge_method"] == ["S256"]
+    challenge = q["code_challenge"][0]
+    state_id = q["state"][0]
+    row = await db.get(SsoLoginState, state_id)
+    assert row.code_verifier and 43 <= len(row.code_verifier) <= 128
+    expect = (
+        base64.urlsafe_b64encode(hashlib.sha256(row.code_verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
+    assert challenge == expect
+    factory.nonce = row.nonce
+
+    await svc.handle_callback(code="c0de", state_value=state_id, redirect_uri="https://app.test/cb")
+    assert captured_forms, "token endpoint never called"
+    assert captured_forms[0]["code_verifier"] == [row.code_verifier]
