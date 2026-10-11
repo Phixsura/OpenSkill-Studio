@@ -208,6 +208,23 @@ Whole-class SIS removals now unenroll members: the tombstone pass resolves
 cohorts through the connection backlink map, so offboarding a class in the
 SIS removes its memberships on the next provision pass.
 
+### Scale & protocol guarantees (window 6)
+
+- A connector page of ANY size is staged completely; the cursor only advances
+  after the whole page commits (crash replays are idempotent upserts).
+- Offset pagination is bounded (10k pages/read) — a server that ignores
+  `offset` fails the run cleanly instead of looping forever.
+- Egress responses stream and abort at the 1MB cap — an oversized body can
+  no longer buffer unbounded memory before the cap fires.
+- The N+1 sweep batched every per-record lookup: pull engine, push, roster
+  provisioning, SCIM directory listing, and both import previews now issue
+  bounded IN(500) queries instead of a round-trip per row.
+- A webhook endpoint answering 410 Gone is disabled immediately (Svix
+  convention) and alerts via `integration.subscription.auto_disabled`
+  (reason `endpoint_gone`).
+- Fixing an errored connection's config or base_url re-opens it for a fresh
+  ping, same as rotating credentials.
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned
