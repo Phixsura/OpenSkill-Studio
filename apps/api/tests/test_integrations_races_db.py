@@ -156,3 +156,71 @@ async def test_import_commit_applies_exactly_once_under_race(db):
         )
     ).scalar_one()
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_dispatch_race_is_at_least_once_consistent(db, monkeypatch):
+    """Two dispatchers race ONE pending delivery. The mesh is at-least-once
+    (receivers dedupe by webhook-id): duplicates are permitted, but the final
+    state must be consistent — succeeded, every POST recorded as an attempt,
+    identical bytes on the wire (the archive), and no retry scheduled."""
+    import httpx
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.facade import emit_event
+    from app.integrations.models import DeliveryAttempt, EventDelivery
+    from app.integrations.services import events as ev_mod
+    from app.models.webhook import WebhookSubscription
+
+    org, owner = await _org(db)
+    db.add(WebhookSubscription(
+        org_id=org.id, url="https://sink.example.com/h",
+        events=["com.openskill.project.*"], secret="r" * 64, active=True,
+    ))
+    event = await emit_event(db, org.id, "project.approved", subject="race", data={})
+    await db.commit()
+    # Fan out once (serial) to mint the delivery row.
+    async with AsyncSessionLocal() as s0:
+        await ev_mod.handle_event_created(s0, {"event_id": event.id})
+        await s0.commit()
+    async with AsyncSessionLocal() as s0:
+        from sqlalchemy import select as _sel
+
+        delivery_id = (
+            await s0.execute(
+                _sel(EventDelivery.id).where(EventDelivery.event_id == event.id)
+            )
+        ).scalar_one()
+
+    posts = []
+
+    class SlowSink:
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            posts.append(content)
+            await asyncio.sleep(0.05)  # hold both dispatchers in flight
+            return httpx.Response(200, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(ev_mod, "EgressClient", lambda: SlowSink())
+
+    async def dispatcher():
+        async with AsyncSessionLocal() as own:
+            await ev_mod.handle_delivery_attempt(own, {"delivery_id": delivery_id})
+            await own.commit()
+
+    await asyncio.gather(dispatcher(), dispatcher())
+
+    async with AsyncSessionLocal() as s1:
+        from sqlalchemy import func as _f
+        from sqlalchemy import select as _sel
+
+        row = await s1.get(EventDelivery, delivery_id)
+        attempts = (
+            await s1.execute(
+                _sel(_f.count()).select_from(DeliveryAttempt).where(
+                    DeliveryAttempt.delivery_id == delivery_id
+                )
+            )
+        ).scalar_one()
+    assert row.status == "succeeded" and row.next_attempt_at is None
+    assert 1 <= len(posts) <= 2 and attempts == len(posts)
+    assert len({bytes(p) for p in posts}) == 1  # byte-identical wire bodies
