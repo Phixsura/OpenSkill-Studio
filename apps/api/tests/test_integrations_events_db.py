@@ -863,3 +863,56 @@ async def test_terminal_delivery_redelivery_is_noop(db, egress, terminal):
         )
     ).scalars().all()
     assert len(attempts_after) == len(attempts_before)
+
+
+@pytest.mark.asyncio
+async def test_bulk_replay_exhausted(db):
+    """R155: bulk replay requeues every exhausted delivery of a subscription,
+    skips originals whose prior replay is in flight or already succeeded,
+    refuses inactive subscriptions, and is cross-org invisible."""
+    from app.exceptions import AppError
+    from app.integrations.services.events import replay_exhausted
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    evs = [
+        await emit_event(db, org.id, "project.approved", subject=f"bulk-{i}", data={})
+        for i in range(3)
+    ]
+    await db.flush()
+
+    def mk(ev_id, status, replay_of=None):
+        d = EventDelivery(
+            event_id=ev_id, subscription_id=sub.id, status=status,
+            attempt_count=5 if status == "exhausted" else 0,
+            next_attempt_at=None, replay_of=replay_of, request_body="{}",
+        )
+        db.add(d)
+        return d
+
+    d1 = mk(evs[0].id, "exhausted")
+    d2 = mk(evs[1].id, "exhausted")
+    d3 = mk(evs[2].id, "exhausted")
+    await db.flush()
+    mk(evs[1].id, "succeeded", replay_of=d2.id)   # d2 already recovered
+    mk(evs[2].id, "pending", replay_of=d3.id)     # d3 replay in flight
+    await db.flush()
+
+    clones = await replay_exhausted(db, org.id, sub.id)
+    assert [c.replay_of for c in clones] == [d1.id]
+    assert clones[0].status == "pending" and clones[0].attempt_count == 0
+    assert clones[0].request_body == "{}"
+
+    # second call: nothing left to requeue (d1 now covered by its clone)
+    assert await replay_exhausted(db, org.id, sub.id) == []
+
+    # inactive subscription refuses; cross-org is uniform 404
+    sub.active = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await replay_exhausted(db, org.id, sub.id)
+    assert e.value.code == "DELIVERY_NOT_REPLAYABLE"
+    other = await _org(db)
+    with pytest.raises(AppError) as e2:
+        await replay_exhausted(db, other.id, sub.id)
+    assert e2.value.status_code == 404

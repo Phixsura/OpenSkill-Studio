@@ -432,6 +432,70 @@ async def sweep_retention(db: AsyncSession) -> dict[str, int]:
 # ── replay (§12.2) ──
 
 
+MAX_BULK_REPLAY = 500
+
+
+async def replay_exhausted(
+    db: AsyncSession, org_id: str, subscription_id: str, *, since: datetime | None = None
+) -> list[EventDelivery]:
+    """R155: operator bulk recovery after an endpoint outage — clone every
+    EXHAUSTED delivery of one subscription back to pending (newest first,
+    capped at MAX_BULK_REPLAY per call; repeat to drain a larger backlog).
+    Deliveries that already have a replay in flight OR a succeeded replay
+    are skipped — bulk replay never duplicates what a prior replay landed."""
+    sub = await db.get(WebhookSubscription, subscription_id)
+    if sub is None or sub.org_id != org_id:
+        raise AppError("SUBSCRIPTION_NOT_FOUND", "Subscription not found", 404)
+    if not sub.active:
+        raise AppError("DELIVERY_NOT_REPLAYABLE", "Subscription inactive", 409)
+    q = (
+        select(EventDelivery)
+        .where(
+            EventDelivery.subscription_id == sub.id,
+            EventDelivery.status == "exhausted",
+        )
+        .order_by(EventDelivery.created_at.desc())
+        .limit(MAX_BULK_REPLAY)
+    )
+    if since is not None:
+        q = q.where(EventDelivery.created_at >= since)
+    originals = (await db.execute(q)).scalars().all()
+    if not originals:
+        return []
+    # One query for every delivery that already has a non-failed replay.
+    covered = set(
+        (
+            await db.execute(
+                select(EventDelivery.replay_of).where(
+                    EventDelivery.replay_of.in_([d.id for d in originals]),
+                    EventDelivery.status.in_(("pending", "delivering", "succeeded")),
+                )
+            )
+        ).scalars()
+    )
+    from app.controlplane.models.outbox import enqueue
+
+    clones: list[EventDelivery] = []
+    for d in originals:
+        if d.id in covered:
+            continue
+        clone = EventDelivery(
+            event_id=d.event_id,
+            subscription_id=d.subscription_id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=_utcnow(),
+            replay_of=d.id,
+            request_body=d.request_body,
+        )
+        db.add(clone)
+        clones.append(clone)
+    await db.flush()
+    for clone in clones:
+        enqueue(db, TOPIC_DELIVERY_ATTEMPT, {"delivery_id": clone.id})
+    return clones
+
+
 async def replay_delivery(db: AsyncSession, org_id: str, delivery_id: str) -> EventDelivery:
     delivery = await db.get(EventDelivery, delivery_id)
     event = await db.get(IntegrationEvent, delivery.event_id) if delivery else None

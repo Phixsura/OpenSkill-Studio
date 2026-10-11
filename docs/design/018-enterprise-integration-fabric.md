@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R155 (fourth window, DLQ bulk recovery)**: `replay_exhausted` requeues
+  every exhausted delivery of one subscription (newest first, capped 500/
+  call; repeat to drain a backlog) for operator recovery after an endpoint
+  outage — skips originals whose prior replay is in flight OR already
+  succeeded (one query, never duplicates), refuses inactive subs, uniform
+  404 cross-org. `POST /webhooks/{id}/replay-exhausted`, audited
+  (`intg.delivery.bulk_replayed`). Diagnosed+cleared accumulated real-
+  Postgres debt from repeated e2e runs (2554 pending outbox, 2589 subs)
+  that had been breaking the global-`_drain` events suite.
+
 - **R154 (third window)**: SCIM ServiceProviderConfig's advertised
   `bulk.maxOperations` now reads the same constant `apply_bulk` enforces —
   the two can no longer drift.

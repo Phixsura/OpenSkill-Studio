@@ -18,6 +18,7 @@ AUDIT_ACTIONS = frozenset(
     {
         # webhooks (defect #105: credential lifecycle must be audited)
         # ADR-018 integration fabric admin mutations (R100, Part O).
+        "intg.delivery.bulk_replayed",
         "intg.import.created",
         "intg.import.committed",
         "intg.mapping.created",

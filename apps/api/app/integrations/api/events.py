@@ -252,6 +252,29 @@ async def delivery_payload(
     return Response(delivery.request_body, media_type="application/json")
 
 
+@router.post("/webhooks/{subscription_id}/replay-exhausted", response_model=DataResponse[dict])
+async def replay_exhausted_bulk(
+    org_id: str,
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R155: bulk recovery after an endpoint outage — requeue every
+    exhausted delivery of this subscription (capped per call; repeat to
+    drain a larger backlog). Audited."""
+    from app.integrations.facade import record_fabric_audit
+    from app.integrations.services.events import replay_exhausted
+
+    await _admin(org_id, user, db)
+    clones = await replay_exhausted(db, org_id, subscription_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.delivery.bulk_replayed", "webhook_subscription",
+        subscription_id, after={"requeued": len(clones)},
+    )
+    await db.commit()
+    return {"data": {"requeued": len(clones)}}
+
+
 @router.post("/deliveries/{delivery_id}/replay", response_model=DataResponse[DeliveryResponse])
 async def replay(
     org_id: str,
