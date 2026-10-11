@@ -194,6 +194,20 @@ Alertable mesh events to subscribe to:
 `integration.connection.unhealthy`, `integration.sso.cert_expiring`,
 `integration.sso.backchannel_logout`.
 
+### Concurrency guarantees (window 5)
+
+Every admin write that races itself is serialized or savepoint-guarded: org
+domain claims (org row lock, exact 20-domain cap), export runs (stream row
+lock — a manual trigger racing the hourly sweep can neither double-export
+nor regress the cursor), first-time credential sets, and same-idempotency-key
+import uploads all absorb concurrent duplicates with a clean idempotent
+response instead of a 500. The expensive triggers (`.../run` on export
+streams, `.../provision-roster`) are rate-limited 10/min per route.
+
+Whole-class SIS removals now unenroll members: the tombstone pass resolves
+cohorts through the connection backlink map, so offboarding a class in the
+SIS removes its memberships on the next provision pass.
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned
