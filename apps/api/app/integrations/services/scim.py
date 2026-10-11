@@ -368,9 +368,26 @@ class ScimUserService:
         page = (
             await self.db.execute(q.offset(start_index - 1).limit(count))
         ).all()
+        # R221 (R218 class): ONE link query for the page instead of a point
+        # SELECT per row — IdPs page the whole directory nightly, so a
+        # 10k-user org was paying 10k extra round-trips per sweep.
+        page_ids = [user.id for user, _m in page]
+        links_by_user: dict[str, ExternalIdentityLink] = {}
+        if page_ids:
+            link_rows = (
+                await self.db.execute(
+                    select(ExternalIdentityLink).where(
+                        ExternalIdentityLink.org_id == self.org_id,
+                        ExternalIdentityLink.user_id.in_(page_ids),
+                        ExternalIdentityLink.source == "scim",
+                        ExternalIdentityLink.revoked_at.is_(None),
+                    )
+                )
+            ).scalars()
+            links_by_user = {ln.user_id: ln for ln in link_rows}
         resources = []
         for user, member in page:
-            resources.append(_user_resource(user, member, await self._link_for(user.id)))
+            resources.append(_user_resource(user, member, links_by_user.get(user.id)))
         return {
             "schemas": [SCIM_LIST_SCHEMA],
             "totalResults": total,

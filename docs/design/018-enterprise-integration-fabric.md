@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R221 (sixth window, R218 class — SCIM side)**: the SCIM user list built
+  each row's resource with a per-row `_link_for` point SELECT (up to 200 per
+  page; IdPs page the whole directory nightly → 10k extra round-trips per
+  sweep on a 10k-user org). One IN(...) link query per page now. SCIM file
+  28/28.
 - **R220 (sixth window, R218 class — roster side)**: `_provision_enrollments`
   paid ~3 point SELECTs per enrollment (identity link, staged roster.user,
   plus the tombstone-path link lookup) — 15k round-trips for a 5k-enrollment
