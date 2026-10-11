@@ -135,6 +135,21 @@ async def run_stream(
     return {"data": resp}
 
 
+@router.delete("/export-streams/{stream_id}", status_code=204)
+async def delete_stream(
+    org_id: str,
+    stream_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R84: delete a stream and its run history (objects in storage stay —
+    retention there is the bucket's policy). Disable is the soft path."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    stream = await WarehouseExportService(db).get_stream(org_id, stream_id)
+    await db.delete(stream)
+    await db.commit()
+
+
 @router.get(
     "/export-streams/{stream_id}/runs", response_model=DataResponse[list[ExportRunResponse]]
 )

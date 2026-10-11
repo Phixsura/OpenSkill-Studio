@@ -1022,3 +1022,39 @@ async def test_profile_update_and_mapping_repin(db):
     with pytest.raises(AppError) as exc:
         await svc.update(org2.id, profile.id, enabled=True)
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_guards_profile_busy_and_mapping_in_use(db):
+    """R84: live run refuses profile delete; pinned mapping refuses mapping
+    delete; both deletable once clear."""
+    from app.integrations.api.sync import delete_mapping_profile, delete_sync_profile
+    from app.models.user import User as _User
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(
+        db, org, owner, fake,
+        mapping={"fields": [{"target": "title", "path": "title"}]},
+    )
+    mapping_id = profile.mapping_profile_id
+    owner_user = await db.get(_User, owner.id)
+    svc = SyncProfileService(db)
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+
+    with pytest.raises(AppError) as e1:
+        await delete_sync_profile(org.id, profile.id, db=db, user=owner_user)
+    assert e1.value.code == "SYNC_PROFILE_BUSY"
+    with pytest.raises(AppError) as e2:
+        await delete_mapping_profile(org.id, mapping_id, db=db, user=owner_user)
+    assert e2.value.code == "MAPPING_IN_USE"
+
+    await svc.cancel(org.id, run.id)
+    await db.commit()
+    await delete_sync_profile(org.id, profile.id, db=db, user=owner_user)
+    await delete_mapping_profile(org.id, mapping_id, db=db, user=owner_user)
+    from app.integrations.models import MappingProfile, SyncProfile
+
+    assert await db.get(SyncProfile, profile.id) is None
+    assert await db.get(MappingProfile, mapping_id) is None

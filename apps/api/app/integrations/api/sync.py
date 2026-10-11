@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.exceptions import AppError
 from app.integrations.services.mapping import MappingService
 from app.integrations.services.sync_engine import SyncProfileService
 from app.models.organization import OrgRole
@@ -273,6 +274,63 @@ async def trigger_sync(
     resp = SyncRunResponse.model_validate(run, from_attributes=True)
     await db.commit()
     return {"data": resp}
+
+
+@router.delete("/sync-profiles/{profile_id}", status_code=204)
+async def delete_sync_profile(
+    org_id: str,
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R84: delete a profile (runs cascade). A LIVE run refuses (cancel it
+    first) — deleting under an executor invites orphaned work."""
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import SyncProfile, SyncRun
+
+    await _admin(org_id, user, db)
+    profile = await db.get(SyncProfile, profile_id)
+    if profile is None or profile.org_id != org_id:
+        raise AppError("SYNC_PROFILE_NOT_FOUND", "Profile not found", 404)
+    live = (
+        await db.execute(
+            _select(SyncRun.id).where(
+                SyncRun.profile_id == profile.id,
+                SyncRun.status.in_(("queued", "running")),
+            )
+        )
+    ).scalars().first()
+    if live is not None:
+        raise AppError("SYNC_PROFILE_BUSY", "Cancel the live run first", 409)
+    await db.delete(profile)
+    await db.commit()
+
+
+@router.delete("/mapping-profiles/{profile_id}", status_code=204)
+async def delete_mapping_profile(
+    org_id: str,
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R84: delete a mapping unless a sync profile still pins it (409 —
+    nicer than the DB RESTRICT error)."""
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import SyncProfile
+
+    await _admin(org_id, user, db)
+    mp = await MappingService(db).get(org_id, profile_id)
+    ref = (
+        await db.execute(
+            _select(SyncProfile.id).where(SyncProfile.mapping_profile_id == mp.id)
+        )
+    ).scalars().first()
+    if ref is not None:
+        raise AppError("MAPPING_IN_USE", "A sync profile still uses this mapping", 409)
+    await db.delete(mp)
+    await db.commit()
 
 
 @router.get("/sync-runs", response_model=DataResponse[list[SyncRunResponse]])

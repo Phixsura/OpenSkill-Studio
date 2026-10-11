@@ -170,6 +170,22 @@ class DeepLinkSelectRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+@admin_router.delete("/registrations/{reg_id}", status_code=204)
+async def delete_registration(
+    org_id: str,
+    reg_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R84: delete an LMS registration (deployments/links/states cascade).
+    Launches from that platform stop validating immediately."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    svc = LtiService(db)
+    reg = await svc.get_registration(org_id, reg_id)
+    await db.delete(reg)
+    await db.commit()
+
+
 @admin_router.get(
     "/registrations/{reg_id}/resource-links", response_model=DataResponse[list[dict]]
 )
