@@ -828,3 +828,61 @@ async def test_import_file_retention_sweep(db):
     purged2 = await sweep_import_files(db, deleter=deleter)
     assert purged2 == 0 and deleted == []
     assert old_failed is not None
+
+
+@pytest.mark.asyncio
+async def test_import_create_and_commit_write_audit_rows(db, monkeypatch):
+    """R138 (Part O): bulk provisioning is audited — upload writes
+    intg.import.created, commit writes intg.import.committed, rows LAND
+    (registered actions, not silently swallowed) with the acting user."""
+    import io as _io
+
+    from starlette.datastructures import UploadFile as _Upload
+
+    import app.integrations.api.imports as imports_api
+    from app.controlplane.models.audit import CommercialAuditEvent as AuditEvent
+
+    org, owner = await _org(db)
+    owner_user = owner
+    data = f"email\nau-{uuid.uuid4().hex[:6]}@x.edu\n".encode()
+    stored: dict[str, bytes] = {}
+
+    async def fake_store(org_id, hint, content):
+        stored["k"] = content
+        return "fake-key"
+
+    async def fake_load(file_key):
+        return stored["k"]
+
+    monkeypatch.setattr(imports_api, "_store_file", fake_store)
+    monkeypatch.setattr(imports_api, "_load_file", fake_load)
+
+    out = await imports_api.upload_import(
+        org.id,
+        kind="users",
+        mode="partial",
+        idempotency_key=f"au-{uuid.uuid4().hex[:8]}",
+        header_map=None,
+        file=_Upload(_io.BytesIO(data), filename="u.csv"),
+        db=db,
+        user=owner_user,
+    )
+    job_id = out["data"].id
+    out2 = await imports_api.commit_import(org.id, job_id, db=db, user=owner_user)
+    assert out2["data"].status == "succeeded"
+
+    rows = (
+        await db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.target_type == "import_job",
+                AuditEvent.target_id == job_id,
+            )
+            .order_by(AuditEvent.created_at)
+        )
+    ).scalars().all()
+    actions = [r.action for r in rows]
+    assert actions == ["intg.import.created", "intg.import.committed"]
+    assert all(r.actor_user_id == owner.id for r in rows)
+    assert rows[0].after["kind"] == "users"
+    assert rows[1].after["stats"]["created"] == 1

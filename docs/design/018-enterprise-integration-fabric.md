@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R138 (third window, Part O gap)**: bulk imports — mass account
+  provisioning, exactly what auditors ask about — were the one admin
+  mutation WITHOUT an audit trail. `intg.import.created` (kind/mode/
+  dry_stats) and `intg.import.committed` (status/stats) now land in the
+  append-only trail with the acting user; actions registered in
+  AUDIT_ACTIONS (the R100 silent-swallow lesson), test asserts rows LAND.
+
 - **R137 (third window, properties)**: hypothesis coverage over the new
   parse surface — detect_format and both parsers total over arbitrary
   bytes for all three kinds; CSV/JSON format PARITY (same logical rows

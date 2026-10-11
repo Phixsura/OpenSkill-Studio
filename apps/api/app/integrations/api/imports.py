@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
 from app.exceptions import AppError
+from app.integrations.facade import record_fabric_audit
 from app.integrations.models.bulk import MAX_IMPORT_BYTES
 from app.integrations.services.bulk_import import BulkImportService
 from app.models.organization import OrgRole
@@ -106,6 +107,11 @@ async def upload_import(
         header_map=_parse_header_map(header_map),
     )
     resp = _resp(job)
+    # R138 (Part O): bulk provisioning is exactly what auditors ask about.
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.import.created", "import_job", job.id,
+        after={"kind": job.kind, "mode": job.mode, "dry_stats": job.dry_stats},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -157,6 +163,10 @@ async def commit_import(
     content = await _load_file(job.file_key)
     job = await svc.commit(org_id, job_id, file_bytes=content)
     resp = _resp(job)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.import.committed", "import_job", job.id,
+        after={"kind": job.kind, "status": job.status, "stats": job.stats},
+    )
     await db.commit()
     return {"data": resp}
 
