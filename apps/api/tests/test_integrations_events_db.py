@@ -1106,3 +1106,62 @@ def test_delivery_timestamp_header_is_fresh():
     headers = build_delivery_headers(sub, "evt_1", b"{}", now)
     ts = int(headers["webhook-timestamp"])
     assert abs(ts - int(_time.time())) < 60, headers
+
+
+@pytest.mark.asyncio
+async def test_bulk_replay_respects_cap(db, egress, monkeypatch):
+    """R248 (survivor pin): bulk replay clones at most MAX_BULK_REPLAY per
+    call — the cap existed only in code, never in a test."""
+    from app.integrations.services import events as svc
+    from app.integrations.services.events import handle_event_created, replay_exhausted
+
+    monkeypatch.setattr(svc, "MAX_BULK_REPLAY", 2)
+    org = await _org(db)
+    sub = await _sub(db, org)
+    deliveries = []
+    for i in range(3):
+        ev = await emit_event(db, org.id, "project.approved", subject=f"br-{i}", data={})
+        await db.flush()
+        await handle_event_created(db, {"event_id": ev.id})
+        d = (
+            await db.execute(
+                select(EventDelivery).where(
+                    EventDelivery.event_id == ev.id,
+                    EventDelivery.subscription_id == sub.id,
+                )
+            )
+        ).scalar_one()
+        d.status = "exhausted"
+        d.next_attempt_at = None
+        deliveries.append(d)
+    await db.flush()
+    clones = await replay_exhausted(db, org.id, sub.id)
+    assert len(clones) == 2  # capped
+
+
+@pytest.mark.asyncio
+async def test_single_replay_rejected_on_inactive_subscription(db, egress):
+    """R248 (survivor pin): replaying a delivery whose subscription is
+    DISABLED must 409 — otherwise replay resurrects traffic to an endpoint
+    that auto-disable (or an admin) just silenced."""
+    from app.integrations.services.events import handle_event_created, replay_delivery
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="ri-1", data={})
+    await db.flush()
+    await handle_event_created(db, {"event_id": ev.id})
+    d = (
+        await db.execute(
+            select(EventDelivery).where(
+                EventDelivery.event_id == ev.id,
+                EventDelivery.subscription_id == sub.id,
+            )
+        )
+    ).scalar_one()
+    d.status = "exhausted"
+    sub.active = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await replay_delivery(db, org.id, d.id)
+    assert e.value.status_code == 409

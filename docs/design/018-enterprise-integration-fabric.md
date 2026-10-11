@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R248 (seventh window, survivor pins ×4)**: four more unpinned
+  properties: bulk-replay per-call cap (monkeypatched cap=2, 3 exhausted →
+  exactly 2 clones), single-replay 409 on a DISABLED subscription (replay
+  must not resurrect silenced endpoints), to_int bool rejection
+  (outcome-pinned; the explicit isinstance guard is equivalent via
+  int(str(bool)) ValueError), and LTI deep-link `data` verbatim round-trip
+  (present when sent, absent when not). Batches 13–15 killed 10 more:
+  all five report/stat counters, replay-clone byte fidelity, first-dispatch
+  archive gate, bulk-replay covered-skip, signature v1 prefix, to_int range.
 - **R247 (seventh window, survivor pin)**: a frozen webhook-timestamp (ts=0)
   survived — the signature stays internally consistent, but receiver-side
   Standard-Webhooks replay protection depends on a FRESH timestamp. New

@@ -1547,3 +1547,13 @@ async def test_scheduled_sweep_never_triggers_manual_profiles(db):
         await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
     ).scalars().all()
     assert runs == []
+
+
+def test_to_int_rejects_bool():
+    """R248 (survivor pin): bool is an int subclass — to_int(True) silently
+    becoming 1 corrupts typed fields. Must raise."""
+    from app.integrations.services.mapping import apply_mapping
+
+    doc = {"fields": [{"target": "n", "path": "v", "transform": ["to_int"]}]}
+    mapped, errors = apply_mapping(doc, {"v": True})
+    assert mapped == {} and errors and errors[0]["code"] == "transform_to_int"

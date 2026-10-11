@@ -728,3 +728,26 @@ async def test_dynamic_registration_full_flow_and_screens(db):
             egress=Refusing(ref_cfg),
         )
     assert e2.value.code == "LTI_DYNREG_REFUSED"
+
+
+@pytest.mark.asyncio
+async def test_deep_link_data_round_trips_verbatim(db):
+    """R248 (survivor pin): the platform's opaque `data` from the deep-link
+    request MUST round-trip into the response JWT verbatim (LTI-DL 2.0);
+    omitted when the request carried none."""
+    import jwt as _pyjwt
+
+    from app.integrations.services.lti_ags import DL_CLAIM, sign_deep_linking_response
+
+    org, owner = await _org(db)
+    _svc, reg = await _registration(db, org)
+    token = await sign_deep_linking_response(
+        db, reg, deployment_id="dep-1", content_items=[], data="opaque-state-123"
+    )
+    claims = _pyjwt.decode(token, options={"verify_signature": False})
+    assert claims[f"{DL_CLAIM}data"] == "opaque-state-123"
+    token2 = await sign_deep_linking_response(
+        db, reg, deployment_id="dep-1", content_items=[], data=None
+    )
+    claims2 = _pyjwt.decode(token2, options={"verify_signature": False})
+    assert f"{DL_CLAIM}data" not in claims2
