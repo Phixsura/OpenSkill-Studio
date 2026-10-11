@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R151-R152 (third window, UI polish with teeth)**: job list rows show
+  the template kind; uploads carry a mount-salted deterministic
+  idempotency key (double-click lands on the SAME job instead of a
+  duplicate, while a fresh page visit can legitimately re-import the
+  identical file after fixing the environment).
+
 - **R148-R149 (third window)**: import kind registry consistency invariant
   (IMPORT_KINDS == TEMPLATE_VERSIONS == KIND_SPECS, required ⊆ known);
   export-stream UI gains an optional explicit fields input so the R130
