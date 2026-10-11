@@ -748,3 +748,49 @@ async def test_event_catalog_lists_legacy_canonical_and_internals(db):
 
     for t in data["canonical"] + data["wildcards"] + list(data["internal"]):
         assert _MESH_PATTERN_RE.fullmatch(t) or t in VALID_EVENT_TYPES, t
+
+
+@pytest.mark.asyncio
+async def test_payload_archive_byte_stable_and_replay_inherits(db, egress):
+    """R94: first dispatch archives the exact signed bytes; the wire body
+    equals the archive; a replay clone inherits it; the payload endpoint
+    serves it (uniform 404 cross-org)."""
+    from app.integrations.api.events import delivery_payload
+    from app.integrations.services.events import replay_delivery
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="ar-1", data={"k": 1})
+    await db.commit()
+    await _drain(db)
+    d = (
+        await db.execute(
+            select(EventDelivery).where(EventDelivery.event_id == ev.id)
+        )
+    ).scalars().first()
+    assert d.request_body is not None
+    wire = next(c for c in egress.calls if c["headers"].get("webhook-id") == ev.id)
+    assert wire["body"] == d.request_body.encode()  # byte-exact
+
+    clone = await replay_delivery(db, org.id, d.id)
+    assert clone.request_body == d.request_body
+    await db.commit()
+
+    owner_row = (
+        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
+    ).scalars().first()
+    user = await db.get(_User, owner_row.user_id)
+    resp = await delivery_payload(org.id, d.id, db=db, user=user)
+    assert resp.body.decode() == d.request_body
+
+    other = await _org(db)
+    other_owner_row = (
+        await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))
+    ).scalars().first()
+    other_user = await db.get(_User, other_owner_row.user_id)
+    from app.exceptions import AppError
+
+    with pytest.raises(AppError) as exc:
+        await delivery_payload(other.id, d.id, db=db, user=other_user)
+    assert exc.value.status_code == 404

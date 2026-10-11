@@ -230,6 +230,26 @@ async def get_delivery(
     return {"data": _delivery_response(delivery, event.type, list(attempts))}
 
 
+@router.get("/deliveries/{delivery_id}/payload")
+async def delivery_payload(
+    org_id: str,
+    delivery_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R94: the archived wire bytes (exactly what was signed and sent)."""
+    from fastapi.responses import Response
+
+    await _admin(org_id, user, db)
+    delivery = await db.get(EventDelivery, delivery_id)
+    event = await db.get(IntegrationEvent, delivery.event_id) if delivery else None
+    if delivery is None or event is None or event.org_id != org_id:
+        raise AppError("DELIVERY_NOT_FOUND", "Delivery not found", 404)
+    if delivery.request_body is None:
+        raise AppError("DELIVERY_PAYLOAD_EMPTY", "No dispatch has run yet", 404)
+    return Response(delivery.request_body, media_type="application/json")
+
+
 @router.post("/deliveries/{delivery_id}/replay", response_model=DataResponse[DeliveryResponse])
 async def replay(
     org_id: str,

@@ -8,7 +8,7 @@ per matching webhook subscription; attempts are the per-try audit trail.
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -77,6 +77,10 @@ class EventDelivery(Base):
         DateTime(timezone=True), nullable=True
     )
     # Replay lineage: a replayed delivery points at the one it clones.
+    # R94: the EXACT body bytes signed on first dispatch — retries and
+    # replays resend these bytes, so receiver-side signature checks are
+    # byte-stable across code changes.
+    request_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     replay_of: Mapped[str | None] = mapped_column(String(26), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -232,7 +232,11 @@ async def handle_delivery_attempt(db: AsyncSession, payload: dict) -> None:
     delivery.status = "delivering"
     delivery.attempt_count += 1
     attempt_no = delivery.attempt_count
-    body = _cloudevent_body(event)
+    # R94: archive the exact signed bytes on FIRST dispatch; every retry
+    # (and any replay clone) reuses them byte-for-byte.
+    if delivery.request_body is None:
+        delivery.request_body = _cloudevent_body(event).decode()
+    body = delivery.request_body.encode()
     now = _utcnow()
     headers = build_delivery_headers(sub, event.id, body, now)
 
@@ -458,6 +462,7 @@ async def replay_delivery(db: AsyncSession, org_id: str, delivery_id: str) -> Ev
         attempt_count=0,
         next_attempt_at=_utcnow(),
         replay_of=delivery.id,
+        request_body=delivery.request_body,
     )
     db.add(clone)
     await db.flush()
