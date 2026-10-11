@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R246 (seventh window, single-chat foreground ledger)**: entire 5-hour
+  verification executed as sequential FOREGROUND commands (no background
+  tasks/monitors). Round 1: full suite 7348 green in 11 chunked runs, E2E
+  62, adversarial 178. Probe batches 7–11 killed 19 more mutants and pinned
+  5 survivors as new tests (R239 expr-cap, R240 unsolicited-SAML, R241
+  auto-disable negative, R243 scheduler negatives ×3, R244 NRPS privilege
+  ceiling + cert-parse 422, R245 fingerprint version binding); equivalents
+  documented (export-sweep filters double-gated). Round 2 on the final HEAD:
+  full suite 7356 green, fabric 317, web 764+tsc+lint, E2E 62, adversarial
+  178 — zero failures, zero tracebacks.
 - **R245 (seventh window, upgrade-safety pin)**: the dry-run fingerprint's
   template-version binding had no pin — dropping the version from the hash
   only manifests ACROSS a template upgrade (stale pre-upgrade previews would
