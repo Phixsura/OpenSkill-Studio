@@ -607,4 +607,30 @@ describe("data page", () => {
       ),
     );
   });
+
+  it("R132: kind selector drives header-map fields and accepts JSON files", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/export-streams": { data: [] },
+    });
+    render(<DataPage />, { wrapper: wrapper() });
+    const select = (await screen.findByLabelText("Import kind")) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual([
+      "users",
+      "roster",
+      "opportunities",
+    ]);
+    const file = screen.getByLabelText("Import file") as HTMLInputElement;
+    expect(file.accept).toContain(".json");
+
+    // users fields by default
+    expect(screen.getByLabelText("CSV header for display_name")).toBeTruthy();
+    // switching kind swaps the mappable columns
+    fireEvent.change(select, { target: { value: "roster" } });
+    await waitFor(() => expect(screen.getByLabelText("CSV header for cohort_slug")).toBeTruthy());
+    expect(screen.queryByLabelText("CSV header for display_name")).toBeNull();
+    fireEvent.change(select, { target: { value: "opportunities" } });
+    await waitFor(() =>
+      expect(screen.getByLabelText("CSV header for opportunity_type")).toBeTruthy(),
+    );
+  });
 });
