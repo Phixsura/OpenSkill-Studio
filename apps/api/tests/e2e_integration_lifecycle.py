@@ -419,6 +419,23 @@ async def main() -> int:
             r.text[:300],
         )
 
+        # ── R93/R94: event catalog + payload archive over HTTP ──
+        r = await c.get(f"{base}/event-catalog", headers=h)
+        check(
+            "event catalog served",
+            r.status_code == 200 and "canonical" in r.json()["data"],
+            r.text[:200],
+        )
+        if ok_rows:
+            r = await c.get(
+                f"{base}/deliveries/{ok_rows[0]['id']}/payload", headers=h
+            )
+            check(
+                "payload archive byte view",
+                r.status_code == 200 and r.json().get("id") == event_id,
+                r.text[:200],
+            )
+
         # ── R20/R22: identity links + webhook rotation over HTTP ──
         r = await c.get(f"{base}/identity-links", headers=h)
         check("identity links list (R20)", r.status_code == 200, r.text[:200])
