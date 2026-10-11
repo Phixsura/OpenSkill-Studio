@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
+from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.integrations.facade import record_fabric_audit
 from app.integrations.models.bulk import MAX_IMPORT_BYTES
@@ -80,7 +81,12 @@ def _parse_header_map(raw: str | None) -> dict:
     return out
 
 
-@router.post("/imports", response_model=DataResponse[ImportJobResponse], status_code=201)
+@router.post(
+    "/imports",
+    response_model=DataResponse[ImportJobResponse],
+    status_code=201,
+    dependencies=[Depends(rate_limit(30, 60))],  # R160: bounded bulk provisioning
+)
 async def upload_import(
     org_id: str,
     kind: str = Form(max_length=30),
@@ -150,7 +156,11 @@ async def get_import(
     return {"data": _resp(await BulkImportService(db).get(org_id, job_id))}
 
 
-@router.post("/imports/{job_id}/commit", response_model=DataResponse[ImportJobResponse])
+@router.post(
+    "/imports/{job_id}/commit",
+    response_model=DataResponse[ImportJobResponse],
+    dependencies=[Depends(rate_limit(30, 60))],  # R160
+)
 async def commit_import(
     org_id: str,
     job_id: str,

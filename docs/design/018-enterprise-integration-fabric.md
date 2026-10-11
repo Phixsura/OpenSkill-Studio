@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R160 (fourth window, rate-limit sweep)**: the other write-amplifying /
+  provisioning fabric routes — import upload, import commit, sync run — gain
+  30/60s rate limits (there is no global limiter middleware; each router
+  self-limits). A contract test asserts every one of these routes carries a
+  rate_limit dependency so a regression can't silently drop it.
+
 - **R159 (fourth window)**: the bulk replay-exhausted endpoint is write-
   amplifying (up to 500 enqueues per call), so it now carries a 10/60s
   rate limit like the other mutating fabric routes.

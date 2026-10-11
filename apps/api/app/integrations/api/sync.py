@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.integrations.facade import record_fabric_audit
 from app.integrations.services.mapping import MappingService
@@ -272,7 +273,10 @@ async def update_sync_profile(
 
 
 @router.post(
-    "/sync-profiles/{profile_id}/run", response_model=DataResponse[SyncRunResponse], status_code=202
+    "/sync-profiles/{profile_id}/run",
+    response_model=DataResponse[SyncRunResponse],
+    status_code=202,
+    dependencies=[Depends(rate_limit(30, 60))],  # R160: bound run-spawning
 )
 async def trigger_sync(
     org_id: str,

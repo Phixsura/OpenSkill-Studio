@@ -738,3 +738,31 @@ def test_every_fabric_audit_action_is_registered():
     assert found, "record_fabric_audit scan found nothing - regex drifted"
     unregistered = sorted(found - set(AUDIT_ACTIONS))
     assert not unregistered, f"audited actions never land: {unregistered}"
+
+
+def test_write_amplifying_routes_are_rate_limited():
+    """R159-R160: the write-amplifying / provisioning fabric routes carry a
+    rate_limit dependency (bulk replay, import upload+commit, sync run) —
+    a regression that drops the limit is caught here."""
+    from app.integrations.api import events as ev_api
+    from app.integrations.api import imports as im_api
+    from app.integrations.api import sync as sync_api
+
+    def _paths_with_ratelimit(router):
+        out = {}
+        for r in router.routes:
+            deps = getattr(r, "dependencies", []) or []
+            has = any(
+                "rate_limit" in getattr(getattr(d, "dependency", None), "__qualname__", "")
+                for d in deps
+            )
+            out[(tuple(sorted(r.methods or [])), r.path)] = has
+        return out
+
+    ev = _paths_with_ratelimit(ev_api.router)
+    assert ev[(("POST",), "/orgs/{org_id}/integrations/webhooks/{subscription_id}/replay-exhausted")]
+    im = _paths_with_ratelimit(im_api.router)
+    assert im[(("POST",), "/orgs/{org_id}/integrations/imports")]
+    assert im[(("POST",), "/orgs/{org_id}/integrations/imports/{job_id}/commit")]
+    sy = _paths_with_ratelimit(sync_api.router)
+    assert sy[(("POST",), "/orgs/{org_id}/integrations/sync-profiles/{profile_id}/run")]
