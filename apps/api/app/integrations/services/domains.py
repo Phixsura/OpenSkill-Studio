@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controlplane.services.domains import check_reserved, get_verifier, normalize_hostname
@@ -37,6 +38,15 @@ class OrgDomainService:
                 "Public mailbox domains cannot anchor an organization",
                 422,
             )
+        # R207 (same class as webhook defect #102): the cap COUNT and the
+        # duplicate-claim SELECT below are both TOCTOU under concurrency —
+        # lock the Org row first so same-org claimers serialize, making the
+        # cap exact and the dup check race-free against uq_intg_domain_org
+        # (whose unique-violation loser would otherwise 500 and poison the
+        # session at the bare flush).
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         count = len(
             (
                 await self.db.execute(select(OrgDomain.id).where(OrgDomain.org_id == org_id))
@@ -74,8 +84,23 @@ class OrgDomainService:
             status="pending",
             verification_token=f"osks-verify-{secrets.token_hex(16)}",
         )
-        self.db.add(row)
-        await self.db.flush()
+        try:
+            async with self.db.begin_nested():
+                # add INSIDE the savepoint (R111): added-before-nested would
+                # survive the rollback and poison the session.
+                self.db.add(row)
+                await self.db.flush()
+        except IntegrityError:
+            # uq_intg_domain_org loser (belt to the org-lock braces above):
+            # someone claimed it concurrently — idempotent return of theirs.
+            dup = (
+                await self.db.execute(
+                    select(OrgDomain).where(
+                        OrgDomain.org_id == org_id, OrgDomain.domain == domain
+                    )
+                )
+            ).scalar_one()
+            return dup
         await self.db.refresh(row)
         return row
 

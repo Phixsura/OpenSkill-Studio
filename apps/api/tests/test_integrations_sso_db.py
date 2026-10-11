@@ -1092,3 +1092,37 @@ async def test_oidc_pkce_s256(db):
     await svc.handle_callback(code="c0de", state_value=state_id, redirect_uri="https://app.test/cb")
     assert captured_forms, "token endpoint never called"
     assert captured_forms[0]["code_verifier"] == [row.code_verifier]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_domain_claim_same_org_no_500(db):
+    """R207: two sessions claiming the same (org, domain) concurrently must
+    end with ONE row and no IntegrityError 500 (loser used to hit
+    uq_intg_domain_org at a bare flush -> 500 + poisoned session).
+
+    Honest scope (same as the R199 SAML replay test): a single event loop
+    does not force the dup-SELECT/INSERT interleave, so this asserts the
+    serialized+idempotent OUTCOME; the org FOR UPDATE lock and the
+    savepoint-wrapped INSERT are the guards for true parallelism."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+
+    user = await _user(db)
+    org = await _org(db, user)
+    await db.commit()
+    domain = f"race-{uuid.uuid4().hex[:10]}.example.edu"
+
+    async def _claim():
+        async with AsyncSessionLocal() as s:
+            row = await OrgDomainService(s).claim(org.id, domain)
+            rid = row.id
+            await s.commit()
+            return rid
+
+    r1, r2 = await asyncio.gather(_claim(), _claim())
+    assert r1 == r2  # serialized + idempotent: one row, no IntegrityError 500
+    rows = (
+        await db.execute(select(OrgDomain).where(OrgDomain.domain == domain))
+    ).scalars().all()
+    assert len(rows) == 1
