@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import structlog
@@ -365,23 +365,29 @@ class WarehouseExportService:
         return run
 
 
-async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
-    """Worker cron (R16 — same gap class as scheduled syncs): daily export
-    streams run when their last run is older than a day."""
-    from datetime import timedelta
+# R183: export cadence parity with sync (manual never auto-runs).
+_EXPORT_CADENCE = {"hourly": timedelta(hours=1), "daily": timedelta(days=1)}
 
+
+async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
+    """Worker cron (R16): scheduled export streams run when their last run is
+    older than their cadence (hourly/daily; manual never auto-runs)."""
     from app.integrations.models.export import ExportRun
 
     streams = (
         await db.execute(
             select(ExportStream).where(
-                ExportStream.enabled.is_(True), ExportStream.schedule == "daily"
+                ExportStream.enabled.is_(True),
+                ExportStream.schedule.in_(tuple(_EXPORT_CADENCE)),
             )
         )
     ).scalars().all()
     ran = 0
     now = datetime.now(UTC)
     for stream in streams:
+        cadence = _EXPORT_CADENCE.get(stream.schedule)
+        if cadence is None:
+            continue
         last = (
             await db.execute(
                 select(ExportRun.created_at)
@@ -393,7 +399,7 @@ async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
         if last is not None:
             if last.tzinfo is None:
                 last = last.replace(tzinfo=UTC)
-            if now - last < timedelta(days=1):
+            if now - last < cadence:
                 continue
         try:
             await WarehouseExportService(db, writer=writer).run_export(

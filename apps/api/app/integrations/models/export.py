@@ -10,7 +10,7 @@ from app.models.base import Base, ulid_pk
 
 EXPORT_RUN_STATUSES = frozenset({"running", "succeeded", "failed"})
 ANONYMIZE_MODES = frozenset({"hash", "drop"})
-EXPORT_SCHEDULES = frozenset({"manual", "daily"})
+EXPORT_SCHEDULES = frozenset({"manual", "hourly", "daily"})
 EXPORT_PAGE_ROWS = 1000
 
 

@@ -478,3 +478,35 @@ async def test_per_key_data_selection(db):
         org.id, stream.id, field_allowlist=["id", "data.score"]
     )
     assert updated.field_allowlist == ["id", "data.score"]
+
+
+@pytest.mark.asyncio
+async def test_sweep_scheduled_exports_hourly_cadence(db):
+    """R183: hourly export streams run on an hourly cadence (not the daily
+    one); within the hour they are not due, past the hour they run again."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.models.export import ExportRun
+    from app.integrations.services.warehouse import sweep_scheduled_exports
+
+    org, owner = await _org(db)
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    hourly = await svc.create_stream(
+        org.id, name=f"h-{ULID()}", dataset="events", schedule="hourly"
+    )
+    await emit_event(db, org.id, "project.approved", subject="s", data={})
+    await db.flush()
+
+    assert await sweep_scheduled_exports(db, writer) == 1
+    runs = await svc.list_runs(org.id, hourly.id)
+    assert len(runs) == 1
+    # Within the hour: not due.
+    assert await sweep_scheduled_exports(db, writer) == 0
+
+    # Backdate the last run beyond an hour -> due again (but NOT a full day,
+    # proving the cadence is hourly, not daily).
+    run = await db.get(ExportRun, runs[0].id)
+    run.created_at = datetime.now(UTC) - timedelta(hours=2)
+    await db.flush()
+    assert await sweep_scheduled_exports(db, writer) == 1

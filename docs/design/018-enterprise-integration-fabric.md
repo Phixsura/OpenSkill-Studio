@@ -917,6 +917,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R183 (fourth window, feature parity)**: warehouse export streams gain an
+  `hourly` schedule (sync already had it); `sweep_scheduled_exports` is now
+  cadence-aware (per-schedule timedelta: hourly 1h, daily 1d, manual never)
+  instead of a hardcoded 1-day check. Test proves hourly re-runs past the
+  hour but not within it, and not on the daily cadence.
 - **R182 (fourth window, rename-collision symmetry)**: connection UPDATE
   rename now wraps its flush in a savepoint too — renaming onto an existing
   name returns the clean CONNECTION_NAME_TAKEN 409 and leaves the session
