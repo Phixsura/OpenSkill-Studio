@@ -614,3 +614,23 @@ async def test_group_put_full_replace_okta_dialect(ctx):
     with pytest.raises(ScimError) as exc2:
         await _gsvc(ctx).replace("01NOPENOPENOPENOPENOPENOPE", {"displayName": "X"})
     assert exc2.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_list_pagination_edges(ctx):
+    """R80: RFC 7644 §3.4.2.4 — count=0 returns totals with no resources;
+    out-of-range startIndex returns an empty page, never an error."""
+    email = f"pg-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    await _usvc(ctx).create({"userName": email})
+    out = await _usvc(ctx).list(
+        filter_expr=f'userName eq "{email}"', start_index=1, count=0
+    )
+    assert out["totalResults"] == 1 and out["Resources"] == []
+    out2 = await _usvc(ctx).list(
+        filter_expr=f'userName eq "{email}"', start_index=99, count=10
+    )
+    assert out2["totalResults"] == 1 and out2["Resources"] == []
+    g = await _gsvc(ctx).create({"displayName": f"PG-{uuid.uuid4().hex[:6]}"})
+    out3 = await _gsvc(ctx).list(start_index=1, count=0)
+    assert out3["Resources"] == [] and out3["totalResults"] >= 1
+    assert g["id"]
