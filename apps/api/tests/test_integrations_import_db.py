@@ -725,3 +725,49 @@ async def test_opportunities_import_kind(db):
         file_key="o3", created_by=owner2.id, idempotency_key=f"op3-{uuid.uuid4().hex[:8]}",
     )
     assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] == 1
+
+
+@pytest.mark.asyncio
+async def test_roster_default_role_and_infile_dup(db):
+    """R133 mutation-probe kills: omitted role defaults to LEARNER, and the
+    same (email, cohort_slug) pair twice in one file is a duplicate_in_file
+    row error — exactly one membership lands."""
+    from app.integrations.models import ImportRowError
+    from app.models.cohort import CohortMember, CohortRole
+
+    org, owner = await _org(db)
+    cohort = await _cohort(db, org, owner, f"c-{uuid.uuid4().hex[:8]}")
+    svc = BulkImportService(db)
+    email = f"rd-{uuid.uuid4().hex[:6]}@x.edu"
+    useed = f"email\n{email}\n".encode()
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"rd-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    # no role column at all + the same pair twice
+    data = (
+        "email,cohort_slug\n"
+        f"{email},{cohort.slug}\n"
+        f"{email},{cohort.slug}\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="roster", mode="partial", file_bytes=data,
+        file_key="r", created_by=owner.id, idempotency_key=f"rd2-{uuid.uuid4().hex[:8]}",
+    )
+    assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 1
+    err = (
+        await db.execute(
+            select(ImportRowError).where(ImportRowError.job_id == job.id)
+        )
+    ).scalar_one()
+    assert err.code == "duplicate_in_file"
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+    member = (
+        await db.execute(
+            select(CohortMember).where(CohortMember.cohort_id == cohort.id)
+        )
+    ).scalar_one()
+    assert member.role == CohortRole.LEARNER  # omitted role -> learner

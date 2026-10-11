@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R133 (third window, mutation probe over R128-R131)**: 12 targeted
+  mutants over the new parse/apply/export code — 10 killed outright; the 2
+  survivors (roster default-role flip, in-file dup check disabled) were
+  REAL coverage gaps, closed with a killer test (omitted role -> LEARNER,
+  duplicate pair -> one membership + duplicate_in_file row error). 12/12
+  killed on re-probe.
+
 - **R131 (third window, Part K deferred kind)**: `opportunities` import
   template — employer migrations land postings as DRAFTS only (a human
   publishes; import can never reach candidates), gated on an existing
