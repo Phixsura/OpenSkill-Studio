@@ -59,9 +59,12 @@ async def ensure_tool_key(db: AsyncSession) -> LtiToolKey:
         public_jwk=jwk,
         active=True,
     )
-    db.add(key)
     try:
         async with db.begin_nested():
+            # add INSIDE the savepoint (R111 — same class as the R110 race
+            # finding): added-before-nested survives the rollback and poisons
+            # the session at the next flush.
+            db.add(key)
             await db.flush()
     except Exception:
         # Concurrent first-use race: someone else created it — use theirs.

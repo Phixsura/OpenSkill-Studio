@@ -278,3 +278,20 @@ async def test_sso_first_login_race_single_link(db):
         )
     ).scalars().all()
     assert len(links) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_key_concurrent_first_use_single_key(db):
+    """R111: two concurrent ensure_tool_key calls — the singleton index
+    arbitrates, the loser gets the winner's key, neither session poisons."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.lti_ags import ensure_tool_key
+
+    async def miner():
+        async with AsyncSessionLocal() as own:
+            key = await ensure_tool_key(own)
+            await own.commit()
+            return key.kid
+
+    kids = await asyncio.gather(miner(), miner())
+    assert kids[0] == kids[1]
