@@ -3,7 +3,7 @@ commit re-reads the stored file and refuses if it drifted (fingerprint)."""
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,6 +120,31 @@ async def upload_import(
     )
     await db.commit()
     return {"data": resp}
+
+
+@router.get("/imports/template")
+async def import_template(
+    org_id: str,
+    kind: str = "users",
+    fmt: str = Query(default="csv", alias="format"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R169: download a blank, versioned template (header + one example row)
+    for a given kind/format so admins know the exact columns."""
+    from fastapi import Response
+
+    from app.integrations.services.bulk_import import template_for
+
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    fmt = "json" if str(fmt).lower() == "json" else "csv"
+    body, ctype = template_for(kind, fmt)
+    ext = "json" if fmt == "json" else "csv"
+    return Response(
+        body,
+        media_type=ctype,
+        headers={"content-disposition": f'attachment; filename="{kind}-template.{ext}"'},
+    )
 
 
 @router.get("/imports", response_model=DataResponse[list[ImportJobResponse]])

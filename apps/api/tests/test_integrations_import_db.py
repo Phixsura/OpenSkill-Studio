@@ -918,3 +918,46 @@ def test_kind_registries_consistent():
     for kind, spec in KIND_SPECS.items():
         assert set(spec.required) <= set(spec.known_headers), kind
         assert TEMPLATE_VERSIONS[kind] >= 1
+
+
+def test_import_template_generator():
+    """R169: template_for emits ordered columns (required first) + one example
+    row, for CSV and JSON, for every kind; unknown kind is refused; the
+    example row round-trips back through the parser with zero errors."""
+    import csv as _csv
+    import io as _io
+    import json as _json
+
+    from app.exceptions import AppError
+    from app.integrations.services.bulk_import import (
+        KIND_SPECS,
+        detect_format,
+        parse_users,
+        template_for,
+    )
+
+    for kind, spec in KIND_SPECS.items():
+        body, ctype = template_for(kind, "csv")
+        assert ctype == "text/csv"
+        reader = list(_csv.reader(_io.StringIO(body.decode())))
+        header = reader[0]
+        assert header == list(spec.columns)  # ordered, required first
+        for req in spec.required:
+            assert req in header
+        # the example row parses cleanly (template is a valid starting point)
+        rows, errors = parse_users(body, detect_format(body), kind=kind)
+        assert errors == [], f"{kind} template example did not parse: {errors}"
+        assert len(rows) == 1
+
+        jbody, jctype = template_for(kind, "json")
+        assert jctype == "application/json"
+        doc = _json.loads(jbody)
+        assert kind in doc and len(doc[kind]) == 1
+        jrows, jerrors = parse_users(jbody, "json", kind=kind)
+        assert jerrors == [] and len(jrows) == 1
+
+    try:
+        template_for("nonsense", "csv")
+        raise AssertionError("unknown kind must raise")
+    except AppError as e:
+        assert e.code == "IMPORT_KIND_INVALID"

@@ -275,24 +275,63 @@ def detect_format(file_bytes: bytes) -> str:
 
 
 class _KindSpec:
-    __slots__ = ("required", "known_headers", "validator")
+    __slots__ = ("required", "columns", "validator", "sample")
 
-    def __init__(self, required, known_headers, validator):
+    def __init__(self, required, columns, validator, sample):
         self.required = required
-        self.known_headers = known_headers
+        self.columns = columns  # ordered, required first (R169 template order)
         self.validator = validator
+        self.sample = sample  # one example row, column->value
+
+    @property
+    def known_headers(self):  # back-compat: header_map validation wants a set
+        return set(self.columns)
 
 
 KIND_SPECS = {
-    "users": _KindSpec(USERS_REQUIRED, {"email", "display_name", "role"}, _validate_user_rows),
-    "roster": _KindSpec(ROSTER_REQUIRED, {"email", "cohort_slug", "role"}, _validate_roster_rows),
+    "users": _KindSpec(
+        USERS_REQUIRED,
+        ("email", "display_name", "role"),
+        _validate_user_rows,
+        {"email": "learner@school.edu", "display_name": "Ada Lovelace", "role": "student"},
+    ),
+    "roster": _KindSpec(
+        ROSTER_REQUIRED,
+        ("email", "cohort_slug", "role"),
+        _validate_roster_rows,
+        {"email": "learner@school.edu", "cohort_slug": "fall-2026", "role": "learner"},
+    ),
     "opportunities": _KindSpec(
         OPPS_REQUIRED,
-        {"title", "opportunity_type", "description", "location_mode",
-         "location_text", "compensation_display", "openings"},
+        ("title", "opportunity_type", "description", "location_mode",
+         "location_text", "compensation_display", "openings"),
         _validate_opportunity_rows,
+        {
+            "title": "ML Engineering Intern", "opportunity_type": "internship",
+            "description": "Build models with our team.", "location_mode": "remote",
+            "location_text": "Anywhere", "compensation_display": "$30/hr", "openings": "2",
+        },
     ),
 }
+
+
+def template_for(kind: str, fmt: str = "csv") -> tuple[bytes, str]:
+    """R169: a blank, versioned import template (header row + one example)
+    so admins know the exact columns. Returns (bytes, content_type)."""
+    if kind not in KIND_SPECS:
+        raise AppError("IMPORT_KIND_INVALID", f"kind must be one of {sorted(KIND_SPECS)}", 422)
+    spec = KIND_SPECS[kind]
+    cols = list(spec.columns)
+    if fmt == "json":
+        import json as _json
+
+        doc = {kind: [{c: spec.sample.get(c, "") for c in cols}]}
+        return _json.dumps(doc, indent=2).encode(), "application/json"
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(cols)
+    writer.writerow([_sanitize_cell(str(spec.sample.get(c, ""))) for c in cols])
+    return buf.getvalue().encode(), "text/csv"
 
 
 def parse_users_csv(
