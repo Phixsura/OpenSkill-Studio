@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R247 (seventh window, survivor pin)**: a frozen webhook-timestamp (ts=0)
+  survived — the signature stays internally consistent, but receiver-side
+  Standard-Webhooks replay protection depends on a FRESH timestamp. New
+  freshness assertion on build_delivery_headers. Batch also killed:
+  signature-header swap, org-salt unbinding, revoked-link resolution.
 - **R246 (seventh window, single-chat foreground ledger)**: entire 5-hour
   verification executed as sequential FOREGROUND commands (no background
   tasks/monitors). Round 1: full suite 7348 green in 11 chunked runs, E2E

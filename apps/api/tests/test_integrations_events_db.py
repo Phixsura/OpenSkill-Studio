@@ -1085,3 +1085,24 @@ async def test_fresh_failures_do_not_auto_disable_early(db, egress):
     await _maybe_auto_disable(db, sub, datetime.now(UTC))
     await db.flush()
     assert sub.active is True  # fresh failures never disable early
+
+
+def test_delivery_timestamp_header_is_fresh():
+    """R247 (survivor pin): the webhook-timestamp header must be the CURRENT
+    time — Standard Webhooks replay protection on the receiver side depends
+    on it. A frozen ts (e.g. 0) still signs consistently, so only a freshness
+    assertion catches it."""
+    import secrets as _secrets
+    import time as _time
+
+    from app.integrations.services.events import build_delivery_headers
+    from app.models.webhook import WebhookSubscription
+
+    sub = WebhookSubscription(
+        org_id="o", url="https://hooks.example.com/x",
+        events=["project.approved"], secret=_secrets.token_hex(32), active=True,
+    )
+    now = datetime.now(UTC)
+    headers = build_delivery_headers(sub, "evt_1", b"{}", now)
+    ts = int(headers["webhook-timestamp"])
+    assert abs(ts - int(_time.time())) < 60, headers
