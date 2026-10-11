@@ -95,6 +95,9 @@ class SsoConnection(Base):
     idp_entity_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
     idp_metadata_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     idp_sso_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # R88: IdP Single Logout endpoint (Redirect binding), captured from
+    # metadata or set manually.
+    idp_slo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     idp_certificates: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     # {email: "...", display_name: "...", external_id: "..."} claim names
     attribute_map: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")

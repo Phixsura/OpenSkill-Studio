@@ -445,6 +445,45 @@ async def saml_authorize(
     return RedirectResponse(url, status_code=302)
 
 
+@protocol_router.get(
+    "/saml/slo/{connection_id}", dependencies=[Depends(rate_limit(10, 60))]
+)
+async def saml_slo(
+    connection_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """R88 — IdP-initiated Single Logout (Redirect binding). The request
+    MUST be signed (verified against the pinned certs); the linked user's
+    sessions are revoked and a LogoutResponse is returned to the IdP."""
+    from app.integrations.services.sso_saml import SamlService
+
+    svc = SamlService(db)
+    conn, swept, relay_state = await svc.handle_slo_request(
+        connection_id=connection_id, raw_query=request.url.query
+    )
+    if swept:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            from app.integrations.facade import emit_event
+
+            await emit_event(
+                db,
+                conn.org_id,
+                "integration.sso.single_logout",
+                subject=conn.id,
+                data={"sso_connection_id": conn.id},
+            )
+    await db.commit()
+    redirect = svc.build_slo_response_redirect(
+        conn, in_response_to=None, relay_state=relay_state
+    )
+    if redirect:
+        return RedirectResponse(redirect, status_code=302)
+    return {"data": {"logged_out": True}}
+
+
 @protocol_router.post("/saml/acs/{connection_id}", dependencies=[Depends(rate_limit(10, 60))])
 async def saml_acs(
     connection_id: str,

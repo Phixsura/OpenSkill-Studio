@@ -635,3 +635,103 @@ async def test_saml_deep_link_round_trip(db):
     )
     assert return_to == "/dashboard/orgs/Z/skills"
     assert result.user is not None
+
+
+# ── R88: Single Logout ──
+
+
+def _signed_slo_query(subject: str, *, key_pem=IDP_KEY, issuer=IDP_ENTITY,
+                      relay: str | None = None, sign: bool = True) -> str:
+    import zlib
+    from urllib.parse import quote
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    req = (
+        f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_LO{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).isoformat()}">'
+        f"<saml:Issuer>{issuer}</saml:Issuer>"
+        f"<saml:NameID>{subject}</saml:NameID>"
+        "</samlp:LogoutRequest>"
+    )
+    deflated = zlib.compress(req.encode())[2:-4]
+    parts = [f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"]
+    if relay is not None:
+        parts.append(f"RelayState={quote(relay, safe='')}")
+    parts.append(
+        "SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    )
+    query = "&".join(parts)
+    if not sign:
+        return query
+    key = serialization.load_pem_private_key(
+        key_pem if isinstance(key_pem, bytes) else key_pem.encode(), password=None
+    )
+    sig = key.sign(query.encode(), padding.PKCS1v15(), hashes.SHA256())
+    return query + "&Signature=" + quote(base64.b64encode(sig).decode(), safe="")
+
+
+@pytest.mark.asyncio
+async def test_slo_signed_request_revokes_sessions(db):
+    from datetime import timedelta as _td
+
+    from app.models.user import RefreshToken
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_slo_url = "https://idp.example.com/slo"
+    await db.flush()
+    svc = SamlService(db)
+    # Establish a linked user via a normal ACS login.
+    state = await _start(db, conn)
+    email = f"slo-{uuid.uuid4().hex[:6]}@{domain}"
+    signed = _sign_assertion(_assertion_xml(in_response_to=state, email=email))
+    _, result, _rt = await svc.handle_acs(
+        connection_id=conn.id, saml_response_b64=_wrap_response(signed), relay_state=state
+    )
+    subject = result.link.subject
+    db.add(RefreshToken(user_id=result.user.id, token_hash="s" * 64,
+                        expires_at=datetime.now(UTC) + _td(days=7)))
+    await db.flush()
+
+    conn2, swept, relay = await svc.handle_slo_request(
+        connection_id=conn.id,
+        raw_query=_signed_slo_query(subject, relay="r-1"),
+    )
+    assert swept == 1 and relay == "r-1"
+    live = (
+        await db.execute(
+            select(RefreshToken).where(
+                RefreshToken.user_id == result.user.id,
+                RefreshToken.revoked_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    assert live == []
+    redirect = svc.build_slo_response_redirect(conn2, in_response_to=None, relay_state=relay)
+    assert redirect.startswith("https://idp.example.com/slo?SAMLResponse=")
+    assert "RelayState=r-1" in redirect
+
+    # Unknown subject: clean success, 0 swept (no oracle).
+    _, swept0, _ = await svc.handle_slo_request(
+        connection_id=conn.id, raw_query=_signed_slo_query("never-seen")
+    )
+    assert swept0 == 0
+
+
+@pytest.mark.asyncio
+async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+
+    async def expect_reject(query):
+        with pytest.raises(AppError) as e:
+            await svc.handle_slo_request(connection_id=conn.id, raw_query=query)
+        assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    await expect_reject(_signed_slo_query("s", sign=False))          # logout-CSRF
+    await expect_reject(_signed_slo_query("s", key_pem=ROGUE_KEY))    # rogue key
+    await expect_reject(_signed_slo_query("s", issuer="https://rogue.example.com"))

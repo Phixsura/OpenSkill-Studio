@@ -264,6 +264,11 @@ class SsoAdminService:
             if svc.get("Binding", "").endswith("HTTP-Redirect") and svc.get("Location"):
                 sso_url = svc.get("Location")
                 break
+        slo_url = None
+        for svc in idp.findall(f"{{{md_ns}}}SingleLogoutService"):
+            if svc.get("Binding", "").endswith("HTTP-Redirect") and svc.get("Location"):
+                slo_url = svc.get("Location")
+                break
         before = {(c.get("pem") or "").strip() for c in (conn.idp_certificates or [])}
         after = {(c.get("pem") or "").strip() for c in screened}
         conn.idp_certificates = screened
@@ -272,6 +277,9 @@ class SsoAdminService:
         if sso_url:
             validate_egress_url(sso_url)
             conn.idp_sso_url = str(sso_url)[:500]
+        if slo_url:
+            validate_egress_url(slo_url)
+            conn.idp_slo_url = str(slo_url)[:500]
         await self.db.flush()
         return {"certificates": len(screened), "rotated": before != after}
 

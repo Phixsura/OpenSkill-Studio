@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from lxml import etree
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -70,6 +70,9 @@ def sp_metadata_xml(connection_id: str | None = None) -> str:
         '<md:SPSSODescriptor AuthnRequestsSigned="false" '
         'WantAssertionsSigned="true" '
         'protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">'
+        f'<md:SingleLogoutService '
+        'Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" '
+        f'Location="{acs.replace("/acs/", "/slo/")}"/>'
         f'<md:AssertionConsumerService '
         'Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" '
         f'Location="{acs}" index="0"/>'
@@ -128,6 +131,153 @@ class SamlService:
             }
         )
         return f"{conn.idp_sso_url}?{q}"
+
+    # ── Single Logout (R88 — IdP-initiated, Redirect binding) ──
+
+    async def handle_slo_request(
+        self, *, connection_id: str, raw_query: str
+    ) -> tuple[SsoConnection, int, str | None]:
+        """Consume an IdP-initiated LogoutRequest (HTTP-Redirect binding).
+
+        The redirect binding signs the RAW query substrings
+        `SAMLRequest[&RelayState]&SigAlg` with the IdP key — we verify
+        against the PINNED certs (an unsigned logout is refused outright:
+        logout-CSRF). On success every refresh token of the linked user is
+        revoked. Returns (conn, users_swept, relay_state). Unknown subjects
+        sweep 0 but still succeed (no oracle).
+        """
+        import zlib
+        from urllib.parse import parse_qs, unquote
+
+        from cryptography.exceptions import InvalidSignature as _BadSig
+        from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.asymmetric import padding as _padding
+        from cryptography.x509 import load_pem_x509_certificate
+
+        conn = await self._connection(connection_id)
+        params = parse_qs(raw_query, keep_blank_values=True)
+
+        def _one(name: str) -> str | None:
+            vals = params.get(name)
+            return vals[0] if vals else None
+
+        saml_request = _one("SAMLRequest")
+        sig_alg = _one("SigAlg")
+        signature_b64 = _one("Signature")
+        if not saml_request:
+            raise _invalid("slo_request_missing")
+        if not sig_alg or not signature_b64:
+            raise _invalid("slo_unsigned")  # logout-CSRF guard
+        if sig_alg != "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256":
+            raise _invalid("slo_sigalg_unsupported")
+
+        # Rebuild the EXACT signed string from the raw query (spec order:
+        # SAMLRequest[&RelayState]&SigAlg, original percent-encoding kept).
+        raw_parts = {
+            seg.split("=", 1)[0]: seg
+            for seg in raw_query.split("&")
+            if "=" in seg
+        }
+        ordered = [raw_parts["SAMLRequest"]]
+        if "RelayState" in raw_parts:
+            ordered.append(raw_parts["RelayState"])
+        ordered.append(raw_parts["SigAlg"])
+        signed_data = "&".join(ordered).encode()
+        # Signature must be decoded ONCE from its raw segment — parse_qs has
+        # already plus-decoded signature_b64, which corrupts base64 '+'.
+        sig_seg = raw_parts.get("Signature", "")
+        try:
+            signature = base64.b64decode(
+                unquote(sig_seg.split("=", 1)[1]), validate=True
+            )
+        except Exception as exc:
+            raise _invalid("slo_signature_invalid") from exc
+        verified = False
+        for entry in conn.idp_certificates or []:
+            pem = entry.get("pem", "")
+            if not pem:
+                continue
+            try:
+                cert = load_pem_x509_certificate(pem.encode())
+                cert.public_key().verify(
+                    signature, signed_data, _padding.PKCS1v15(), _hashes.SHA256()
+                )
+                verified = True
+                break
+            except (_BadSig, ValueError):
+                continue
+        if not verified:
+            raise _invalid("slo_signature_invalid")
+
+        try:
+            xml_bytes = zlib.decompress(
+                base64.b64decode(saml_request, validate=True), -15
+            )
+        except Exception as exc:
+            raise _invalid("slo_request_invalid") from exc
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False)
+        try:
+            root = etree.fromstring(xml_bytes, parser=parser)
+        except etree.XMLSyntaxError as exc:
+            raise _invalid("slo_request_invalid") from exc
+        if root.getroottree().docinfo.doctype:
+            raise _invalid("dtd_forbidden")
+        if root.tag != f"{{{NS['samlp']}}}LogoutRequest":
+            raise _invalid("slo_request_invalid")
+        issuer = (root.findtext(f"{{{NS['saml']}}}Issuer") or "").strip()
+        if conn.idp_entity_id and issuer != conn.idp_entity_id:
+            raise _invalid("issuer_mismatch")
+        name_id = (root.findtext(f"{{{NS['saml']}}}NameID") or "").strip()
+        if not name_id:
+            raise _invalid("slo_no_name_id")
+
+        from app.integrations.models import ExternalIdentityLink
+
+        link = (
+            await self.db.execute(
+                select(ExternalIdentityLink).where(
+                    ExternalIdentityLink.connection_ref == conn.id,
+                    ExternalIdentityLink.subject == name_id,
+                    ExternalIdentityLink.revoked_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        swept = 0
+        if link is not None:
+            from app.services.auth import AuthService
+
+            await AuthService(self.db)._revoke_all_user_tokens(link.user_id)  # noqa: SLF001
+            swept = 1
+        return conn, swept, _one("RelayState")
+
+    def build_slo_response_redirect(
+        self, conn: SsoConnection, *, in_response_to: str | None, relay_state: str | None
+    ) -> str | None:
+        """Deflated (unsigned) LogoutResponse back to the IdP's SLO URL —
+        most IdPs accept unsigned responses; absent an SLO URL return None
+        and the caller renders a plain confirmation."""
+        import zlib
+        from urllib.parse import urlencode
+
+        if not conn.idp_slo_url:
+            return None
+        now = datetime.now(UTC).isoformat()
+        resp = (
+            f'<samlp:LogoutResponse xmlns:samlp="{NS["samlp"]}" '
+            f'xmlns:saml="{NS["saml"]}" ID="_LR{secrets.token_hex(12)}" '
+            f'Version="2.0" IssueInstant="{now}" '
+            + (f'InResponseTo="{in_response_to}" ' if in_response_to else "")
+            + f'Destination="{conn.idp_slo_url}">'
+            f"<saml:Issuer>{sp_entity_id()}</saml:Issuer>"
+            '<samlp:Status><samlp:StatusCode '
+            'Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>'
+            "</samlp:LogoutResponse>"
+        )
+        deflated = zlib.compress(resp.encode())[2:-4]
+        q = {"SAMLResponse": base64.b64encode(deflated).decode()}
+        if relay_state:
+            q["RelayState"] = relay_state
+        return f"{conn.idp_slo_url}?{urlencode(q)}"
 
     # ── ACS (the validation core) ──
 
