@@ -917,6 +917,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R185 (fourth window, scheduling bug)**: the export sweep cron was
+  `hour=2` (once a day), so R183's `hourly` streams would have silently run
+  only daily. Changed to run every hour (minute 47); the per-stream cadence
+  check still bounds daily streams to one run/day. A cron-registry test now
+  asserts the export sweep is not hour-pinned (revert fails it).
 - **R184 (fourth window, UI)**: export-stream create form gains a schedule
   selector (manual/hourly/daily) so the R183 cadences are reachable from the
   admin surface.

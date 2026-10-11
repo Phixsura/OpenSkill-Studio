@@ -743,7 +743,11 @@ def _cron_jobs() -> list:
         cron(_intg_domain_sweep, minute={7, 22, 37, 52}, name="intg_domain_sweep"),
         cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
         cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
-        cron(_intg_scheduled_exports, hour=2, minute=47, timeout=1800, name="intg_exports"),
+        # R185: run EVERY hour (minute 47) so an `hourly` export stream (R183)
+        # actually fires hourly — a once-a-day cron would silently make every
+        # schedule daily. The per-stream cadence check gates daily streams to
+        # one run/day regardless.
+        cron(_intg_scheduled_exports, minute=47, timeout=1800, name="intg_exports"),
         cron(_intg_cert_expiry_sweep, hour=6, minute=18, name="intg_cert_expiry"),
         cron(_intg_connection_health_sweep, minute={14, 44}, name="intg_conn_health"),
         cron(_intg_retention_sweep, hour=3, minute=52, timeout=3600, name="intg_retention"),

@@ -406,6 +406,14 @@ def test_every_fabric_sweep_has_a_registered_cron():
     missing = required - names
     assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"
 
+    # R185: the export sweep must run at least hourly (not hour-pinned), else
+    # an `hourly` ExportStream silently degrades to daily.
+    exports = next(j for j in _cron_jobs() if j.name == "intg_exports")
+    hour_spec = getattr(exports, "hour", None)
+    assert hour_spec in (None, set(), "*"), (
+        f"intg_exports is hour-pinned ({hour_spec!r}) — hourly streams would run daily"
+    )
+
     from pathlib import Path
 
     import app.controlplane.worker as cp_worker
