@@ -571,3 +571,48 @@ async def test_concurrent_membership_jit_single_member(db):
         )
     ).scalars().all()
     assert len(members) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_connection_create_same_name(db):
+    """R172: two concurrent connection creates with the same (org, name) —
+    exactly one lands; the loser gets a clean CONNECTION_NAME_TAKEN 409,
+    never a raw unique-violation 500."""
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.models import IntegrationConnection
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+    await db.commit()
+    name = f"conn-race-{uuid.uuid4().hex[:8]}"
+
+    async def create():
+        async with AsyncSessionLocal() as own:
+            try:
+                await ConnectionService(own).create(
+                    org.id, provider_key="generic_crm", name=name,
+                    config={}, base_url="https://crm.example.edu", created_by=owner.id,
+                )
+                await own.commit()
+                return "created"
+            except AppError as e:
+                return e.code
+
+    results = await asyncio.gather(create(), create(), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"raw crash (not a clean 409): {r!r}"
+    assert "created" in results
+    assert "CONNECTION_NAME_TAKEN" in results, f"expected one 409, got {results}"
+
+    n = (
+        await db.execute(
+            select(func.count()).select_from(IntegrationConnection).where(
+                IntegrationConnection.org_id == org.id,
+                IntegrationConnection.name == name,
+            )
+        )
+    ).scalar_one()
+    assert n == 1

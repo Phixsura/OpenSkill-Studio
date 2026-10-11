@@ -917,6 +917,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R172 (fourth window, add-before-savepoint #6 — connections)**: the
+  connection create path had the same shape (dup-SELECT then add+flush); two
+  concurrent same-name creates raced to INSERT (uq_intg_conn_org_name). The
+  INSERT now runs in a savepoint and the loser returns the same clean
+  CONNECTION_NAME_TAKEN 409, not a 500. Race-tested 3x. (update-rename's
+  pre-check covers the far rarer simultaneous-rename collision.)
 - **R169 (fourth window, Part K template download)**: `GET /imports/template
 ?kind=&format=` serves a blank, versioned template (ordered header, required
   columns first, + one worked example) per kind in CSV or JSON — the piece

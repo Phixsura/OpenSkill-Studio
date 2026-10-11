@@ -181,8 +181,20 @@ class ConnectionService:
             health={},
             created_by=created_by,
         )
-        self.db.add(conn)
-        await self.db.flush()
+        # R172: the dup-SELECT above handles the common case, but two
+        # concurrent creates with the same name both pass it and race to
+        # INSERT (uq_intg_conn_org_name). The INSERT runs in a savepoint so
+        # the unique-violation loser returns the SAME clean 409, not a 500.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                self.db.add(conn)
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                "CONNECTION_NAME_TAKEN", "A connection with this name exists", 409
+            ) from exc
         # server_default timestamps must be loaded eagerly — an async lazy
         # load at response-serialization time raises MissingGreenlet.
         await self.db.refresh(conn)
