@@ -173,7 +173,7 @@ Record-level rows carry `conflict_class`:
 | intg_retention        | 03:52           | age out terminal deliveries (90d), events/runs/row-errors (180d); purge stored import FILES for terminal jobs >90d (R134 — they are full PII rosters) |
 | intg_metadata_refresh | 05:37           | re-poll SAML IdP metadata (cert rotation)                                                                                                             |
 | intg_cert_expiry      | 06:18           | 30-day cert expiry alerts                                                                                                                             |
-| intg_exports          | 02:47           | run due daily export streams                                                                                                                          |
+| intg_exports          | :47 hourly      | run due export streams (per-stream cadence: hourly/daily)                                                                                             |
 
 All registered names are pinned by `test_every_fabric_sweep_has_a_registered_cron`.
 
