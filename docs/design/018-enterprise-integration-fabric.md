@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R216 (sixth window, availability fix)**: the OneRoster and CRM readers'
+  offset-pagination loops had NO page bound (NRPS already capped at 25) — a
+  misbehaving server that ignores `offset` (always returns a full page) made
+  the sync run INFINITE: the heartbeat kept refreshing so the stale-run
+  reaper never fired, and staged writes churned forever. Fix: MAX_READ_PAGES
+  = 10,000 (1M records at the default page size); past it the run fails
+  cleanly with CONNECTION_PING_FAILED. Test: an offset-ignoring fake server
+  with the cap monkeypatched to 4 — exactly 4 pages yielded, then AppError.
 - **R215 (sixth window, DATA-LOSS fix — mutation-killed)**: the pull engine
   processed only `records[: BATCH_SIZE * 2]` of each connector page but
   counted ALL of them in `stats.read` and advanced the cursor past the whole

@@ -687,3 +687,53 @@ async def test_whole_class_tombstone_still_removes_members(db):
         )
     ).scalars().all()
     assert members == []
+
+
+@pytest.mark.asyncio
+async def test_offset_ignoring_server_bounded_not_infinite(db, monkeypatch):
+    """R216: a misbehaving SIS/CRM that ignores `offset` (always returns a
+    full page) must fail the read with a clean error at MAX_READ_PAGES —
+    previously the loop was unbounded: the run churned forever while its
+    heartbeat kept the stale-run reaper away."""
+    from app.integrations import registry as reg
+
+    monkeypatch.setattr(reg, "MAX_READ_PAGES", 4)
+
+    calls = {"n": 0}
+
+    class EvilSis:
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            calls["n"] += 1
+            if "token" in url:
+                return httpx.Response(
+                    200, json={"access_token": "t"}, request=httpx.Request(method, url)
+                )
+            # Ignores offset: ALWAYS a full page of page_size=2 items.
+            return httpx.Response(
+                200,
+                json={"classes": [
+                    {"sourcedId": "a", "title": "A"},
+                    {"sourcedId": "b", "title": "B"},
+                ]},
+                request=httpx.Request(method, url),
+            )
+
+    async def loader():
+        return {"client_id": "cid", "client_secret": "cs"}
+
+    from app.integrations.registry import ConnCtx
+
+    ctx = ConnCtx(
+        connection_id="c1",
+        config={"token_url": "https://idp.example.com/token", "page_size": 2},
+        base_url="https://sis.example.com/ims/oneroster",
+        _secret_loader=loader,
+    )
+    ctx.egress = EvilSis()
+    connector = reg.OneRosterConnector()
+    pages = 0
+    with pytest.raises(AppError) as e:
+        async for _batch in connector.read(ctx, "roster.class", {}):
+            pages += 1
+    assert e.value.code == "CONNECTION_PING_FAILED"
+    assert pages == 4  # yielded up to the cap, then failed cleanly

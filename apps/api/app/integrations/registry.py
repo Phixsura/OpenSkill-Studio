@@ -171,6 +171,16 @@ async def request_with_retry(
         return resp
 
 
+# R216: hard ceiling on pages per read() call. NRPS already caps at 25;
+# the offset-paginated readers had NO bound — a misbehaving server that
+# ignores `offset` (or always returns a full page) made the sync run
+# infinite: heartbeat kept refreshing so the stale-run reaper never fired,
+# and staged writes churned forever. 10k pages x 100 default page_size =
+# 1M records, far beyond any legitimate roster/CRM; past it we fail the
+# run cleanly instead of looping.
+MAX_READ_PAGES = 10_000
+
+
 class GenericWebhookConnector:
     """Delivery target for the event mesh (P2). Ping validates reachability
     of nothing — subscriptions carry their own URLs — so it only re-screens
@@ -361,7 +371,13 @@ class OneRosterConnector:
         token = await self._token(ctx)
         offset = int(state.get("endpoint_offset", 0))
         base = (ctx.base_url or "").rstrip("/")
+        pages = 0
         while True:
+            if pages >= MAX_READ_PAGES:  # R216: misbehaving-server bound
+                raise AppError(
+                    "CONNECTION_PING_FAILED", "OneRoster pagination never terminated", 422
+                )
+            pages += 1
             url = f"{base}/{path}?limit={page_size}&offset={offset}"
             resp = await request_with_retry(
                 ctx.egress, "GET", url, headers={"authorization": f"Bearer {token}"}
@@ -442,7 +458,13 @@ class GenericCrmConnector:
         headers = {header: secret["api_key"]} if secret.get("api_key") else {}
         base = (ctx.base_url or "").rstrip("/")
         offset = int(state.get("endpoint_offset", 0))
+        pages = 0
         while True:
+            if pages >= MAX_READ_PAGES:  # R216: misbehaving-server bound
+                raise AppError(
+                    "CONNECTION_PING_FAILED", "CRM pagination never terminated", 422
+                )
+            pages += 1
             url = f"{base}/{path}?limit={page_size}&offset={offset}"
             resp = await request_with_retry(ctx.egress, "GET", url, headers=headers)
             if resp.status_code in (401, 403):
