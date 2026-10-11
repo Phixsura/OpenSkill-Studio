@@ -443,6 +443,10 @@ async def main() -> int:
             f"{base}/sync-runs/{run_id}",
             f"{base}/scim-tokens",
             f"{base}/identity-links",
+            f"{base}/sync-profiles",
+            f"{base}/export-streams",
+            f"{base}/mapping-profiles",
+            f"{base}/imports",
         ):
             r = await c.get(path, headers=mallory)
             check(f"wall {path.split('/')[-1]}", r.status_code in (403, 404), str(r.status_code))

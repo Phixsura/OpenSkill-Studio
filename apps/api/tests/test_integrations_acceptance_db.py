@@ -233,7 +233,7 @@ async def test_full_acceptance_chain(db, monkeypatch):
         algorithm="RS256",
         headers={"kid": "acc-k1"},
     )
-    _conn, resolution = await oidc.handle_callback(
+    _conn, resolution, _rt = await oidc.handle_callback(
         state_value=qs["state"][0], code="c", redirect_uri="https://app.test/cb"
     )
     assert resolution.user.id == learner_id  # SCIM account, SSO login, ONE user
