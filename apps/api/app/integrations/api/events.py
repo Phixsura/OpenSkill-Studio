@@ -102,6 +102,7 @@ _INTERNAL_ALERTABLE = {
     "com.openskill.integration.delivery.exhausted.v1": "A delivery exhausted its retry ladder (dead-letter)",
     "com.openskill.integration.subscription.auto_disabled.v1": "An endpoint was disabled after 5 days of consistent failure",
     "com.openskill.integration.connection.unhealthy.v1": "A connection transitioned into degraded/error",
+    "com.openskill.integration.sync.completed.v1": "A sync run reached a terminal state (staged/applied/error counts in data)",
     "com.openskill.integration.sso.cert_expiring.v1": "A pinned SAML certificate expires within 30 days",
     "com.openskill.integration.sso.backchannel_logout.v1": "An IdP revoked a user session (OIDC back-channel)",
     "com.openskill.integration.sso.single_logout.v1": "An IdP revoked a user session (SAML SLO)",

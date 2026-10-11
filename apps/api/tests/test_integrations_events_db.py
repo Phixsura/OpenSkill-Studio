@@ -761,6 +761,22 @@ async def test_event_catalog_lists_legacy_canonical_and_internals(db):
 
     for t in data["canonical"] + data["wildcards"] + list(data["internal"]):
         assert _MESH_PATTERN_RE.fullmatch(t) or t in VALID_EVENT_TYPES, t
+    assert "com.openskill.org.import.committed.v1" in data["canonical"]  # R143
+
+    # R146 inverse self-consistency: every emit_event CALL SITE in app code
+    # uses a type the catalog advertises — a new emission cannot silently
+    # ship undiscoverable.
+    import pathlib
+    import re as _re
+
+    emit_re = _re.compile(r"""emit_event\(\s*[^,]+,\s*[^,]+,\s*["']([a-z0-9_.]+)["']""")
+    emitted: set[str] = set()
+    for f in pathlib.Path("app").rglob("*.py"):
+        emitted |= set(emit_re.findall(f.read_text()))
+    assert emitted, "emit_event scan found nothing — regex drifted"
+    advertised = set(data["canonical"]) | set(data["internal"])
+    for name in emitted:
+        assert f"com.openskill.{name}.v1" in advertised, f"{name} emitted but not cataloged"
 
 
 @pytest.mark.asyncio

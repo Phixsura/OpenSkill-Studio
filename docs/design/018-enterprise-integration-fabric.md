@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R146 (third window, catalog inverse check)**: the catalog test now
+  scans every `emit_event` call site in app code and asserts its type is
+  advertised (canonical or internal) — a new emission can no longer ship
+  undiscoverable. The check immediately caught a REAL gap:
+  `integration.sync.completed` was emitted but absent from the catalog —
+  added to the alertable internals.
+
 - **R143 (third window, mesh completeness)**: commit of a bulk import now
   emits `com.openskill.org.import.committed.v1` (counts only — never the
   roster) so SIS/HRIS webhook subscribers can react to bulk provisioning;
