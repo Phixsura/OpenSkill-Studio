@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R169 (fourth window, Part K template download)**: `GET /imports/template
+?kind=&format=` serves a blank, versioned template (ordered header, required
+  columns first, + one worked example) per kind in CSV or JSON — the piece
+  Part K's "versioned CSV/JSON templates" implied but never exposed. The
+  example row round-trips back through the parser with zero errors.
+- **R167 (fourth window, add-before-savepoint #5 — SCIM)**: SCIM create-user
+  INSERT now runs in a savepoint; a concurrent same-userName loser returns a
+  proper SCIM 409 uniqueness error, not a raw 500. Repo-wide add-site sweep
+  confirmed the rest already guarded.
+- **R168 (fourth window, test isolation)**: the response-snippet test clears
+  pending outbox first so its exact [500,200] egress sequence isn't consumed
+  by foreign backlog in the global drain.
 - **R166 (fourth window, production 500 — add-before-savepoint #4)**: a
   TRUE-concurrency race test over JIT provisioning exposed a fourth
   instance of the marathon-2 bug class — two concurrent first-time SSO
