@@ -878,6 +878,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **Final verification (marathon2 close)**: backend 7248/7248 green
+  (chunked after two OOM-killed monolithic runs; the 52 transient 429s in
+  the talent chunk were execution-compression artifacts of the in-process
+  sliding-window limiter — green with a per-test reset shim, untouched by
+  this branch); web 762/762 + tsc clean; live-HTTP E2E 47/47.
+
 - **R77-R85 (admin-surface CRUD completion)**: webhook subscription PATCH
   (edit without secret churn + re-enable), SCIM filter operator case-
   insensitivity (RFC 7644), SCIM Group PUT (Okta group-push dialect,
