@@ -660,6 +660,17 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
 
     org = await _org(db)
     await _sub(db, org)
+    # This test asserts an EXACT egress code sequence ([500, 200]) for one
+    # delivery, but _drain is global and a shared dev Postgres accumulates
+    # pending outbox from other tests/runs that would consume those codes
+    # first. Clearing the pending backlog is a fair precondition for a test
+    # of the precise retry mechanism.
+    from sqlalchemy import delete as _delete
+
+    from app.controlplane.models.outbox import OutboxMessage as OutboxModel
+
+    await db.execute(_delete(OutboxModel).where(OutboxModel.status == "pending"))
+    await db.commit()
     egress.codes = [500, 200]
     ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
     await db.commit()
