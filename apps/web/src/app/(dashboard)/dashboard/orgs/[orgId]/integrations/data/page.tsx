@@ -70,6 +70,7 @@ export default function DataIntegrationsPage() {
   const [streamName, setStreamName] = useState("");
   const [dataset, setDataset] = useState("events");
   const [streamFields, setStreamFields] = useState("");
+  const mountKey = useRef(Math.random().toString(36).slice(2, 10));
   const [openStream, setOpenStream] = useState<string | null>(null);
 
   const streamsQ = useQuery({
@@ -97,11 +98,16 @@ export default function DataIntegrationsPage() {
       const form = new FormData();
       form.append("kind", kind);
       form.append("mode", mode);
-      // R152: deterministic per-file key — a double-click (or re-upload of
-      // the identical file) lands on the SAME job instead of a duplicate.
+      // R152: per-mount salt + file fingerprint — a double-click lands on
+      // the SAME job instead of a duplicate, while a fresh page visit can
+      // legitimately re-import the identical file (e.g. after fixing the
+      // environment that made rows fail).
       form.append(
         "idempotency_key",
-        `web:${kind}:${file.name}:${file.size}:${file.lastModified}`.slice(0, 100),
+        `web:${mountKey.current}:${kind}:${file.name}:${file.size}:${file.lastModified}`.slice(
+          0,
+          100,
+        ),
       );
       // R92: optional vendor-header aliases.
       const map: Record<string, string> = {};
