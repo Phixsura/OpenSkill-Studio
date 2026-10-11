@@ -224,3 +224,57 @@ async def test_delivery_dispatch_race_is_at_least_once_consistent(db, monkeypatc
     assert row.status == "succeeded" and row.next_attempt_at is None
     assert 1 <= len(posts) <= 2 and attempts == len(posts)
     assert len({bytes(p) for p in posts}) == 1  # byte-identical wire bodies
+
+
+@pytest.mark.asyncio
+async def test_sso_first_login_race_single_link(db):
+    """Two concurrent FIRST logins for the same subject: the partial-unique
+    index arbitrates; both resolve to the SAME user, exactly one active
+    link row exists."""
+    from datetime import UTC, datetime
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import ExternalIdentityLink, OrgDomain
+    from app.integrations.services.identity import (
+        IdentityService,
+        VerifiedExternalIdentity,
+    )
+
+    org, owner = await _org(db)
+    domain = f"race-{uuid.uuid4().hex[:6]}.io"
+    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
+                     verification_token="t", verified_at=datetime.now(UTC)))
+    member = User(
+        email=f"kid@{domain}", password_hash=hash_password("Test123!"),
+        display_name="Kid", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(member)
+    await db.flush()
+    db.add(OrgMember(org_id=org.id, user_id=member.id, role=OrgRole.STUDENT,
+                     status=MemberStatus.ACTIVE))
+    await db.commit()
+    subject = f"race-sub-{uuid.uuid4().hex[:6]}"
+    conn_ref = f"01RACE{uuid.uuid4().hex[:20].upper()}"
+
+    async def login():
+        async with AsyncSessionLocal() as own:
+            ident = VerifiedExternalIdentity(
+                org_id=org.id, source="sso", connection_ref=conn_ref,
+                subject=subject, email=f"kid@{domain}", email_verified=True,
+            )
+            res = await IdentityService(own).resolve(ident)
+            await own.commit()
+            return res.user.id
+
+    u1, u2 = await asyncio.gather(login(), login())
+    assert u1 == u2 == member.id
+    links = (
+        await db.execute(
+            select(ExternalIdentityLink).where(
+                ExternalIdentityLink.connection_ref == conn_ref,
+                ExternalIdentityLink.subject == subject,
+                ExternalIdentityLink.revoked_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    assert len(links) == 1
