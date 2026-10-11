@@ -910,13 +910,22 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 | Mappings declarative, non-executable     | JMESPath + fixed transform table, compile-at-save, caps; no user code paths                                                                                                                                                               |
 | Warehouse exports incremental + governed | cursor advances only on success; allowlist-BUILT projection; manifest freshness; schedules + retention                                                                                                                                    |
 | Connector health/conflicts observable    | health summary endpoint + hub strip, half-hourly ping sweep + unhealthy transitions, per-subscription stats, record-level conflict rows + UI adjudication                                                                                 |
-| Full E2E chain                           | tests/e2e_integration_lifecycle.py: 39 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→export→IDOR walls) + acceptance-chain DB test                                                                  |
+| Full E2E chain                           | tests/e2e_integration_lifecycle.py: 62 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→bulk-replay→export→CSV/JSON+roster+opportunities imports→IDOR walls) + acceptance-chain DB test                |
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **Marathon4 verification (mid-window checkpoint R155-R179)**: fabric suite
+  277/277, web 764/764, live E2E 62/62, each changed area mutation- or
+  revert-probed. Two production-500 classes closed fabric-wide this window —
+  add-before-savepoint (JIT user/member, SCIM user/group, connection,
+  mapping: R166/166b/167/172/173/176) and naive-datetime compare (SAML,
+  echo, sync clock: R177/178/179) — plus DLQ bulk replay, SCIM SQL paging,
+  retention index, rate-limit sweep, SAML replay-cache purge, connection
+  cascade-delete guard, and Part K template download.
+
 - **R179 (fourth window, production 500 — external naive timestamp)**: the
   clock-conflict resolver compared `theirs_ts > ours_ts` where `theirs`
   comes from EXTERNAL provider data; a provider sending a naive `updated_at`
