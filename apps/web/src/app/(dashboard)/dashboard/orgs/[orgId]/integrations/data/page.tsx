@@ -308,7 +308,7 @@ export default function DataIntegrationsPage() {
           <ul className="mt-2 space-y-1 text-xs">
             {(importsQ.data?.data ?? []).map((j) => (
               <li key={j.id} className="font-mono">
-                {j.id} — {j.status}
+                {j.id} — {j.kind} — {j.status}
                 {j.stats?.applied != null && <span>, applied {j.stats.applied}</span>}
                 {(j.dry_stats?.errors ?? 0) > 0 && (
                   <button
