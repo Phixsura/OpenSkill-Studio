@@ -1230,3 +1230,37 @@ async def test_bidirectional_profile_rejected(db):
         )
     assert exc.value.code == "SYNC_PROFILE_INVALID"
     assert "bidirectional" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_connection_delete_refuses_while_run_live(db):
+    """R174: deleting a connection cascade-deletes its sync profiles + runs;
+    a live run must block the delete (CONNECTION_BUSY 409) so the worker is
+    never left operating on a row ripped out from under it. Once the run
+    reaches a terminal state the delete proceeds."""
+    from app.exceptions import AppError
+    from app.integrations.models import SyncRun
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+    conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector([[]]))
+
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual", cursor_in={})
+    db.add(run)
+    await db.flush()
+
+    with pytest.raises(AppError) as e:
+        await ConnectionService(db).delete(org.id, conn.id)
+    assert e.value.code == "CONNECTION_BUSY" and e.value.status_code == 409
+
+    run.status = "succeeded"
+    await db.flush()
+    run_id = run.id
+    await ConnectionService(db).delete(org.id, conn.id)  # now allowed
+    from sqlalchemy import func as _func
+    n = (
+        await db.execute(
+            select(_func.count()).select_from(SyncRun).where(SyncRun.id == run_id)
+        )
+    ).scalar_one()
+    assert n == 0  # cascade cleaned the run

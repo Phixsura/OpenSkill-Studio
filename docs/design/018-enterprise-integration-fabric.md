@@ -917,6 +917,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R174 (fourth window, cascade-delete integrity)**: deleting a connection
+  cascade-deletes its sync profiles AND their runs (FK CASCADE). A LIVE run
+  would be ripped out from under the worker mid-pass, so connection delete
+  now refuses with CONNECTION_BUSY (409) while any of its profiles has a
+  queued/running run — the same discipline profile-delete already had. Test
+  covers refuse-while-live then delete-after-terminal (+ cascade cleanup).
 - **R173 (fourth window, add-before-savepoint #7 — mappings)**: the last
   check-then-add create path (mapping profiles, uq_intg_mapping_org_name)
   got the same savepoint + clean 409 guard; race-tested 3x. A full sweep of

@@ -280,6 +280,28 @@ class ConnectionService:
 
     async def delete(self, org_id: str, connection_id: str) -> None:
         conn = await self.get(org_id, connection_id)
+        # R174: deleting a connection cascade-deletes its sync profiles AND
+        # their runs (FK ON DELETE CASCADE). If a run is live, that would rip
+        # the row out from under the worker mid-pass. Refuse — same discipline
+        # as profile delete (cancel the live run first).
+        from app.integrations.models import SyncProfile, SyncRun
+
+        live = (
+            await self.db.execute(
+                select(SyncRun.id)
+                .join(SyncProfile, SyncProfile.id == SyncRun.profile_id)
+                .where(
+                    SyncProfile.connection_id == connection_id,
+                    SyncRun.status.in_(("queued", "running")),
+                )
+            )
+        ).scalars().first()
+        if live is not None:
+            raise AppError(
+                "CONNECTION_BUSY",
+                "A sync run on this connection is live — cancel it first",
+                409,
+            )
         await self.db.delete(conn)
         await self.db.flush()
 
