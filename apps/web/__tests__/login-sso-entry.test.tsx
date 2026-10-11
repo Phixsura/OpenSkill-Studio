@@ -14,14 +14,22 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   api: vi.fn(),
-  ApiError: class extends Error {},
+  ApiError: class extends Error {
+    constructor(
+      public status = 0,
+      public code = "",
+      message = "",
+    ) {
+      super(message);
+    }
+  },
 }));
 vi.mock("@/lib/useAnonExperiment", () => ({
   claimAnonymousId: vi.fn().mockResolvedValue(true),
 }));
 
 import LoginPage from "@/app/(auth)/login/page";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 const mockApi = vi.mocked(api);
 
@@ -62,5 +70,30 @@ describe("login SSO entry", () => {
     });
     fireEvent.click(screen.getByText(/Continue with single sign-on/));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/not configured/));
+  });
+
+  it("hands an SSO_REQUIRED password login straight into the SSO flow", async () => {
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, assign },
+      writable: true,
+    });
+    mockApi
+      .mockRejectedValueOnce(new ApiError(403, "SSO_REQUIRED", "Use SSO"))
+      .mockResolvedValueOnce({
+        data: { sso: true, authorize_url: "/api/v1/sso/oidc/authorize?connection=C2" },
+      });
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "emp@corp.io" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "pw" },
+    });
+    fireEvent.click(screen.getByText("Log in"));
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith("/api/v1/sso/oidc/authorize?connection=C2"),
+    );
+    expect(screen.queryByRole("alert")).toBeFalsy();
   });
 });

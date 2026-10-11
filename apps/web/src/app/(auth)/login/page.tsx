@@ -100,6 +100,13 @@ export default function LoginPage() {
       void claimAnonymousId();
       router.push(safeRedirect(searchParams.get("redirect")));
     } catch (err) {
+      // R71: an enforced-SSO org refuses password logins — hand the user
+      // straight into the SSO flow instead of a dead-end error.
+      if (err instanceof ApiError && err.code === "SSO_REQUIRED") {
+        setLoading(false);
+        await handleSso();
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "Login failed. Please try again.");
     } finally {
       setLoading(false);
