@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R227 (sixth window, R226 class — metadata sweep)**: the daily SAML
+  metadata refresh made one slow outbound fetch per connection with a single
+  trailing commit — a job-timeout kill rolled back every cert rotation
+  already applied. Now commits per connection (failures roll back only their
+  own partial state) and the cron got timeout=1800.
 - **R226 (sixth window, fleet-scale availability fix)**: the half-hourly
   health sweep pinged EVERY active/degraded connection serially (up to ~20s
   each) with ONE trailing commit — at fleet scale it outlived the cron job

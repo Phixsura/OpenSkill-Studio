@@ -658,14 +658,18 @@ async def _intg_metadata_refresh(ctx: dict) -> None:
             try:
                 out = await SsoAdminService(db).refresh_from_metadata(conn.org_id, conn.id)
                 refreshed += 1 if out.get("rotated") else 0
+                # R227 (R226 class): each fetch is a slow outbound call —
+                # commit per connection so a job-timeout kill keeps the
+                # rotations already applied instead of rolling them all back.
+                await db.commit()
             except Exception as exc:  # one bad IdP never stops the sweep
+                await db.rollback()  # discard any partial state from the failure
                 log.warning(
                     "intg_metadata_refresh_failed",
                     connection_id=conn.id,
                     error=type(exc).__name__,
                 )
         if conns:
-            await db.commit()
             log.info("intg_metadata_refreshed", scanned=len(conns), rotated=refreshed)
 
 
@@ -752,7 +756,8 @@ def _cron_jobs() -> list:
         cron(_intg_connection_health_sweep, minute={14, 44}, timeout=1800,
              name="intg_conn_health"),  # R226: 100 pings x ~20s worst case
         cron(_intg_retention_sweep, hour=3, minute=52, timeout=3600, name="intg_retention"),
-        cron(_intg_metadata_refresh, hour=5, minute=37, name="intg_metadata_refresh"),
+        cron(_intg_metadata_refresh, hour=5, minute=37, timeout=1800,
+             name="intg_metadata_refresh"),  # R227: slow serial fetches
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single
