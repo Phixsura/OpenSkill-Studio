@@ -634,3 +634,38 @@ async def test_list_pagination_edges(ctx):
     out3 = await _gsvc(ctx).list(start_index=1, count=0)
     assert out3["Resources"] == [] and out3["totalResults"] >= 1
     assert g["id"]
+
+
+@pytest.mark.asyncio
+async def test_scim_event_feed_mirrors_lifecycle(ctx):
+    """R91: provision/deprovision/reactivate all mirror into the mesh with
+    ids only — no email/display PII in event data."""
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import IntegrationEvent
+
+    db = ctx["db"]
+    email = f"feed-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    res, _ = await _usvc(ctx).create({"userName": email, "displayName": "Feed User"})
+    uid = res["id"]
+    await _usvc(ctx).patch(
+        uid, {"Operations": [{"op": "replace", "path": "active", "value": False}]}
+    )
+    await _usvc(ctx).patch(
+        uid, {"Operations": [{"op": "replace", "path": "active", "value": True}]}
+    )
+    events = (
+        await db.execute(
+            _select(IntegrationEvent).where(IntegrationEvent.subject == uid)
+        )
+    ).scalars().all()
+    types = [e.type for e in events]
+    for expected in (
+        "com.openskill.org.scim.provisioned.v1",
+        "com.openskill.org.scim.deprovisioned.v1",
+        "com.openskill.org.scim.reactivated.v1",
+    ):
+        assert expected in types, types
+    for e in events:
+        assert set(e.data) == {"user_id", "token_id"}  # ids only, no PII
+        assert email not in str(e.data)

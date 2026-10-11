@@ -485,6 +485,7 @@ class ScimUserService:
             await self._deprovision(user, member)
         elif active is True and member.status != MemberStatus.ACTIVE:
             member.status = MemberStatus.ACTIVE
+            await self._audit("org.scim.reactivated", user.id)
         await self.db.flush()
         return _user_resource(user, member, await self._link_for(user_id))
 
@@ -528,6 +529,7 @@ class ScimUserService:
             await self._deprovision(user, member)
         elif pending_active is True and member.status != MemberStatus.ACTIVE:
             member.status = MemberStatus.ACTIVE
+            await self._audit("org.scim.reactivated", user.id)
         await self.db.flush()
         return _user_resource(user, member, await self._link_for(user_id))
 
