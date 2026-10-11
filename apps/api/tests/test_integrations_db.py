@@ -382,3 +382,44 @@ async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
             base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
         )
     assert exc2.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_credential_set_no_500(ctx):
+    """R212 (R110 class): the credential envelope is 1:1 per connection
+    (UNIQUE connection_id) and set_credential was check-then-add — a
+    concurrent FIRST-TIME set's loser hit IntegrityError at a bare flush.
+    Both racers must succeed (last writer wins), ending with ONE envelope.
+
+    Honest scope (R199/R207 precedent): a single event loop may not force
+    the SELECT/INSERT interleave; this asserts the one-row outcome, and the
+    savepoint+fallback is the guard for true parallelism."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import IntegrationConnectionCredential
+
+    org = ctx["org"]
+    conn = await _mk_conn(ctx)
+    await ctx["db"].commit()
+
+    async def _set(tag):
+        async with AsyncSessionLocal() as s:
+            cred = await ConnectionService(s).set_credential(
+                org.id, conn.id, kind="api_key",
+                values={"api_key": f"k-{tag}"}, expires_at=None,
+            )
+            cid = cred.id
+            await s.commit()
+            return cid
+
+    r1, r2 = await asyncio.gather(_set("a"), _set("b"))
+    rows = (
+        await ctx["db"].execute(
+            select(IntegrationConnectionCredential).where(
+                IntegrationConnectionCredential.connection_id == conn.id
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].id in (r1, r2)

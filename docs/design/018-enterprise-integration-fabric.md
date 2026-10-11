@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R212 (fifth window, R110-class fix)**: `set_credential` was
+  check-then-add against the UNIQUE 1:1 credential envelope
+  (connection_id unique) — a concurrent FIRST-TIME credential set's loser hit
+  IntegrityError at a bare flush (500 + poisoned session). Fix:
+  savepoint-wrapped INSERT; on collision fall through to rotate-in-place on
+  the winner's row (last writer wins, identical to the update branch).
+  Outcome-scoped two-session test (single-loop interleave limit stated, per
+  R199/R207 precedent).
 - **R211 (fifth window, R87/R210-class fix — mutation-killed)**: `emit_event`
   size-checked data with bare `json.dumps` (allow_nan=True, no default): a
   NaN/Infinity passed the check and failed at the JSONB flush — INSIDE the

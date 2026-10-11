@@ -348,7 +348,28 @@ class ConnectionService:
                 ciphertext=ciphertext,
                 expires_at=expires_at,
             )
-            self.db.add(cred)
+            # R212 (R110 class): connection_id is UNIQUE (1:1 envelope) and
+            # this is a check-then-add — a concurrent first-time set's loser
+            # would 500 at a bare flush and poison the session. Savepoint the
+            # INSERT; on collision fall through to rotate-in-place on the
+            # winner's row (last writer wins, matching the update branch).
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(cred)
+                    await self.db.flush()
+            except IntegrityError:
+                cred = (
+                    await self.db.execute(
+                        select(IntegrationConnectionCredential).where(
+                            IntegrationConnectionCredential.connection_id == connection_id
+                        )
+                    )
+                ).scalar_one()
+                cred.kind = kind
+                cred.ciphertext = ciphertext
+                cred.expires_at = expires_at
         else:
             cred.kind = kind
             cred.ciphertext = ciphertext
