@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.integrations.facade import record_fabric_audit
 from app.integrations.models import IntegrationConnection, IntegrationProvider
 from app.integrations.schemas import (
@@ -299,7 +300,12 @@ async def upgrade_connection(
     return {"data": resp}
 
 
-@router.post("/connections/{connection_id}/ping", response_model=DataResponse[PingResponse])
+@router.post(
+    "/connections/{connection_id}/ping",
+    response_model=DataResponse[PingResponse],
+    # R161: ping triggers an outbound call — bound it (SSRF-probe throttle).
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 async def ping_connection(
     org_id: str,
     connection_id: str,

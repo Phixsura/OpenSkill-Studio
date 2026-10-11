@@ -766,3 +766,7 @@ def test_write_amplifying_routes_are_rate_limited():
     assert im[(("POST",), "/orgs/{org_id}/integrations/imports/{job_id}/commit")]
     sy = _paths_with_ratelimit(sync_api.router)
     assert sy[(("POST",), "/orgs/{org_id}/integrations/sync-profiles/{profile_id}/run")]
+    from app.integrations.api import connections as conn_api
+
+    cn = _paths_with_ratelimit(conn_api.router)
+    assert cn[(("POST",), "/orgs/{org_id}/integrations/connections/{connection_id}/ping")]

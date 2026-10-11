@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R161 (fourth window)**: connection ping triggers an outbound call, so
+  it gains a 20/60s limit too (throttles SSRF-probe attempts); folded into
+  the rate-limit coverage contract test.
+
 - **R160 (fourth window, rate-limit sweep)**: the other write-amplifying /
   provisioning fabric routes — import upload, import commit, sync run — gain
   30/60s rate limits (there is no global limiter middleware; each router
