@@ -124,7 +124,10 @@ canonical keys are refused. Re-imports are idempotent: users match by
 email, roster by (user, cohort), opportunities by lower(title) — and an
 existing member/posting's role/status is never changed by an import.
 
-Every upload/commit is audited (`intg.import.created` /
+Admins can fetch a blank starter file at
+`GET .../integrations/imports/template?kind=<users|roster|opportunities>&format=<csv|json>`
+(header row + one worked example; the UI's "Download template" button does
+this). Every upload/commit is audited (`intg.import.created` /
 `intg.import.committed`, counts only), and a successful commit emits
 `com.openskill.org.import.committed.v1` on the mesh so downstream
 SIS/HRIS webhooks can react to bulk provisioning — the payload carries
