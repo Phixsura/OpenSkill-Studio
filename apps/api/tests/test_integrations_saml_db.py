@@ -863,3 +863,27 @@ async def test_authn_redirect_purges_expired_replay_cache(db):
 
     assert await db.get(SsoLoginState, "STALEROWREPLAYCACHE0000001") is None
     assert await db.get(SsoLoginState, "FRESHROWREPLAYCACHE0000001") is not None
+
+
+@pytest.mark.asyncio
+async def test_connection_without_pinned_certs_rejects_even_valid_signatures(db):
+    """R237 (unreached-branch pin): a connection whose pinned-cert list is
+    empty must reject EVERY assertion with no_pinned_certificates — even one
+    validly signed by a real IdP key. The danger this pins out: an empty
+    x509_cert handed to signxml could fall back to the EMBEDDED KeyInfo cert
+    (trust-whoever-signed-it). No prior test exercised the empty-cert branch."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_certificates = []  # cert list emptied (e.g. bad admin edit)
+    await db.flush()
+    email = f"np-{uuid.uuid4().hex[:6]}@{domain}"
+    state = await _start(db, conn)
+    signed = _sign_assertion(_assertion_xml(in_response_to=state, email=email))
+    b64 = _wrap_response(signed)
+    with pytest.raises(AppError) as e:
+        await SamlService(db).handle_acs(
+            connection_id=conn.id, saml_response_b64=b64, relay_state=state
+        )
+    # _invalid() is deliberately generic (401, reason only logged) — the
+    # outcome that matters: the login is REJECTED, never resolved.
+    assert e.value.status_code == 401

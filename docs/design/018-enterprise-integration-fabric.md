@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R237 (seventh window, unreached-branch pin)**: no test exercised a SAML
+  connection whose pinned-cert list is EMPTY — the branch guarding against
+  "verify with no pinned certs" (where a bad fallback could trust the
+  embedded KeyInfo cert) was dead in the suite. New outcome-level test: a
+  validly IdP-signed assertion against an empty cert list is rejected 401.
+  Probing `certs=[""]` proved signxml rejects an empty cert rather than
+  falling back (equivalent mutant) — the property now stays pinned even if
+  the library's semantics ever change. Outbox worker probes (handler
+  savepoint, dead-letter threshold — 2) and XSW signed-subtree (1) also
+  KILLED. Window-7 harness totals: 29 killed, 2 equivalent.
 - **R236 (seventh window, clean-harness sweep continued)**: identity takeover
   guards (unverified-email, foreign-domain, multi-match, JIT ceiling — 4),
   LTI launch guards (nonce, deployment allowlist, azp — 3), OIDC login-state
