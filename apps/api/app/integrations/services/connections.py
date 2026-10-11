@@ -428,17 +428,25 @@ class ConnectionService:
         await self.db.flush()
         return conn
 
-    async def sweep_connection_health(self) -> int:
-        """R41 worker cron: ping every ACTIVE/DEGRADED connection so health
-        decays without an admin clicking Ping. Each failure feeds the same
+    async def sweep_connection_health(self, *, limit: int = 100) -> int:
+        """R41 worker cron: ping ACTIVE/DEGRADED connections so health decays
+        without an admin clicking Ping. Each failure feeds the same
         _record_failure state machine (degraded after repeats, error on auth
         rejection); the first transition INTO degraded/error emits a
-        daily-deduped integration.connection.unhealthy mesh event."""
+        daily-deduped integration.connection.unhealthy mesh event.
+
+        R226 (scale bound): pings are serial and can take up to ~20s each
+        (connect+read timeouts) — an UNBOUNDED sweep at fleet scale outlived
+        the cron job timeout and the single trailing commit rolled the whole
+        sweep back. Each tick now takes a stalest-first slice (updated_at
+        ascending — a ping bumps it, so rotation is fair) and COMMITS PER
+        CONNECTION: a mid-sweep kill keeps all completed work."""
         rows = (
             await self.db.execute(
-                select(IntegrationConnection).where(
-                    IntegrationConnection.status.in_(("active", "degraded"))
-                )
+                select(IntegrationConnection)
+                .where(IntegrationConnection.status.in_(("active", "degraded")))
+                .order_by(IntegrationConnection.updated_at.asc().nulls_first())
+                .limit(limit)
             )
         ).scalars().all()
         swept = 0
@@ -468,7 +476,9 @@ class ConnectionService:
                     )
                 except Exception:
                     pass  # alerting must never break the sweep
-            await self.db.flush()
+            # R226: per-connection durability — a job-timeout kill mid-sweep
+            # must not roll back the connections already pinged.
+            await self.db.commit()
         return swept
 
     def _record_success(self, conn: IntegrationConnection) -> None:

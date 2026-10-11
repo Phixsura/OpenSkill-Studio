@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R226 (sixth window, fleet-scale availability fix)**: the half-hourly
+  health sweep pinged EVERY active/degraded connection serially (up to ~20s
+  each) with ONE trailing commit — at fleet scale it outlived the cron job
+  timeout and the kill rolled the entire sweep back, so health never decayed.
+  Now each tick takes a stalest-first slice (updated_at ascending; a ping
+  bumps the row to the back, so rotation is fair), commits PER CONNECTION
+  (a mid-sweep kill keeps completed work), and the cron got timeout=1800.
+  Deterministic slice test: two epoch-dated connections, limit=1 pings
+  exactly the stalest, the next tick pings the other.
 - **R225 (sixth window, admin-UX parity fix)**: rotating credentials reset an
   ERRORED connection to pending (fresh ping), but editing the other two
   fixable inputs — config or base_url — did not: the connection stayed parked

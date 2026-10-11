@@ -207,11 +207,11 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
     old = registry.CONNECTORS.get("oneroster")
     registry.CONNECTORS["oneroster"] = _DeadConnector()
     try:
-        swept = await svc.sweep_connection_health()
+        swept = await svc.sweep_connection_health(limit=100_000)
         assert swept >= 1
         await db.refresh(conn)
         assert conn.status == "active"  # first rejection only records
-        await svc.sweep_connection_health()  # second consecutive -> parks
+        await svc.sweep_connection_health(limit=100_000)  # second consecutive -> parks
         await db.refresh(conn)
         assert conn.status == "error"
         events = (
@@ -234,7 +234,7 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
                 raise AppError("CONNECTION_AUTH_REJECTED", "401", 502)
 
         registry.CONNECTORS["oneroster"] = _CountingDead()
-        await svc.sweep_connection_health()
+        await svc.sweep_connection_health(limit=100_000)
         assert calls["n"] == 0  # the parked connection stays untouched
 
         # A connector CRASH (non-AppError) still records failure health.
@@ -250,12 +250,12 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
                 raise RuntimeError("segfault-ish")
 
         registry.CONNECTORS["oneroster"] = _Crashing()
-        await svc.sweep_connection_health()
+        await svc.sweep_connection_health(limit=100_000)
         await db.refresh(conn)
         assert conn.health.get("last_error_class") == "CONNECTOR_CRASH"
 
         # Error connections are NOT re-swept (not in active/degraded).
-        await svc.sweep_connection_health()
+        await svc.sweep_connection_health(limit=100_000)
         events2 = (
             await db.execute(
                 _select(IntegrationEvent).where(IntegrationEvent.subject == conn.id)
@@ -265,3 +265,72 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
     finally:
         if old is not None:
             registry.CONNECTORS["oneroster"] = old
+
+
+@pytest.mark.asyncio
+async def test_health_sweep_slice_is_stalest_first_and_rotates(db):
+    """R226: the sweep takes a bounded stalest-first slice (pings are serial
+    and slow at fleet scale; the unbounded sweep outlived the cron timeout
+    and rolled everything back). limit=1 must ping only the stalest
+    connection, and pinging bumps it to the back of the rotation."""
+    import asyncio
+
+    from app.integrations import registry
+    from app.integrations.services.connections import ConnectionService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = ConnectionService(db)
+    await svc.sync_provider_catalog()
+    await db.flush()
+    conns = []
+    for _i in range(2):
+        c = await svc.create(
+            org.id, provider_key="generic_rest", name=f"hs-{uuid.uuid4().hex[:8]}",
+            config={}, base_url="https://api.example.com/v1", created_by=owner.id,
+        )
+        c.status = "active"
+        conns.append(c)
+        await db.flush()
+        await asyncio.sleep(0.02)  # distinct updated_at ordering
+    await db.commit()
+
+    pinged: list[str] = []
+
+    class RecordingConnector:
+        key = "generic_rest"
+        capabilities = frozenset({"crm.read"})
+
+        async def ping(self, ctx):
+            pinged.append(ctx.connection_id)
+
+    old = registry.CONNECTORS.get("generic_rest")
+    registry.CONNECTORS["generic_rest"] = RecordingConnector()
+    try:
+        # Make OUR two conns the globally stalest (direct core UPDATE skips
+        # the onupdate), so the limit=1 slice is deterministic on the shared
+        # dev DB regardless of leftover rows.
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+
+        from sqlalchemy import update as _update
+
+        from app.integrations.models import IntegrationConnection as IntgConn
+
+        for idx, c in enumerate(conns):
+            await db.execute(
+                _update(IntgConn).where(IntgConn.id == c.id).values(
+                    updated_at=_dt(2000, 1, 1 + idx, tzinfo=_UTC)
+                )
+            )
+        await db.commit()
+        await svc.sweep_connection_health(limit=1)
+        # exactly the stalest one of OURS was pinged; the other untouched.
+        assert pinged == [conns[0].id]
+        pinged.clear()
+        # the ping bumped conns[0] to the back; conns[1] is now stalest.
+        await svc.sweep_connection_health(limit=1)
+        assert pinged == [conns[1].id]
+    finally:
+        if old is not None:
+            registry.CONNECTORS["generic_rest"] = old
