@@ -4,6 +4,8 @@ partial commit, idempotent re-upload, CSV-injection-safe error report)."""
 import uuid
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 import pytest_asyncio
 from sqlalchemy import func, select
 from ulid import ULID
@@ -416,3 +418,68 @@ async def test_header_map_aliases_and_validation(db):
             idempotency_key=f"r92d-{uuid.uuid4().hex[:8]}",
             header_map={"email": 7},
         )
+
+
+def test_csv_parser_robustness_matrix():
+    """R127 (Part K): real migration CSVs are messy. parse_users_csv must be
+    total — BOM, CRLF, quoted commas/newlines, extra columns, blank rows —
+    without crashing, and reject what it can't trust."""
+    from app.integrations.services.bulk_import import parse_users_csv
+
+    # BOM + CRLF + a quoted display_name containing a comma.
+    data = ('\ufeffemail,display_name,role\r\n'
+            'a@x.edu,"Doe, Jane",student\r\n').encode("utf-8")
+    rows, errors = parse_users_csv(data)
+    assert errors == [] and rows[0]["display_name"] == "Doe, Jane"
+
+    # Quoted embedded newline in a field.
+    data2 = ('email,display_name,role\n'
+            'b@x.edu,"Line1\nLine2",student\n').encode()
+    rows2, errors2 = parse_users_csv(data2)
+    assert errors2 == [] and "Line1" in rows2[0]["display_name"]
+
+    # Extra/unknown columns are ignored, not fatal.
+    data3 = ('email,display_name,role,department,notes\n'
+            'c@x.edu,C,student,eng,hi\n').encode()
+    rows3, errors3 = parse_users_csv(data3)
+    assert errors3 == [] and rows3[0]["email"] == "c@x.edu"
+
+    # Missing the required email column -> file-level error, zero rows.
+    rows4, errors4 = parse_users_csv(b"display_name,role\nDee,student\n")
+    assert rows4 == [] and errors4[0]["code"] == "missing_column"
+
+    # Non-UTF8 -> clean encoding error, no crash.
+    rows5, errors5 = parse_users_csv(b"\xff\xfe\x00garbage")
+    assert rows5 == [] and errors5[0]["code"] == "encoding"
+
+    # Whitespace-only email -> invalid_email row error.
+    rows6, errors6 = parse_users_csv(b"email,display_name,role\n   ,X,student\n")
+    assert rows6 == [] and any(e["code"] == "invalid_email" for e in errors6)
+
+
+@settings(max_examples=120, deadline=None)
+@given(
+    rows=st.lists(
+        st.tuples(st.text(max_size=40), st.text(max_size=40), st.text(max_size=20)),
+        max_size=8,
+    )
+)
+def test_parse_users_csv_total_over_arbitrary_cells(rows):
+    """Arbitrary cell contents (incl. commas/quotes/controls) never crash the
+    parser; every output row has a valid-shaped email + lowercased role."""
+    import csv
+    import io
+
+    from app.integrations.services.bulk_import import IMPORT_ROLE_MAP, parse_users_csv
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["email", "display_name", "role"])
+    for e, d, r in rows:
+        w.writerow([e, d, r])
+    parsed, errors = parse_users_csv(buf.getvalue().encode())
+    assert isinstance(parsed, list) and isinstance(errors, list)
+    for row in parsed:
+        assert "@" in row["email"] and row["email"] == row["email"].lower()
+        assert row["role"] in IMPORT_ROLE_MAP
+        assert len(row["display_name"]) <= 100
