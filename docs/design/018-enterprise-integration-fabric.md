@@ -917,6 +917,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R176 (fourth window, add-before-savepoint #8 — SCIM groups)**: the SCIM
+  group create path gets the same savepoint + clean 409 guard as create-user
+  (R167); concurrent same-displayName creates now return SCIM 409 uniqueness,
+  not a 500. The whole SCIM write surface is now uniformly race-safe.
 - **R175 (fourth window, probe over R172-R174)**: 4 mutants — the lone
   survivor was a coverage gap (connection delete tested `running` but not a
   `queued` run, which a worker could claim right after the check), closed

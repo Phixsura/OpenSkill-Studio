@@ -740,3 +740,43 @@ async def test_concurrent_scim_create_same_username(ctx):
         )
     ).scalar_one()
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_scim_group_create_same_name(ctx):
+    """R176: two concurrent SCIM group creates with the same displayName —
+    one lands, the loser gets a clean SCIM 409 uniqueness, never a 500."""
+    import asyncio
+
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models.scim import ScimGroup
+    from app.integrations.services.scim import ScimError, ScimGroupService
+
+    await ctx["db"].commit()
+    token = ctx["token"]
+    name = f"grp-race-{uuid.uuid4().hex[:8]}"
+
+    async def create():
+        async with AsyncSessionLocal() as own:
+            try:
+                await ScimGroupService(own, token).create({"displayName": name})
+                await own.commit()
+                return "created"
+            except ScimError as e:
+                return e.status
+
+    results = await asyncio.gather(create(), create(), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"raw crash (not a clean 409): {r!r}"
+    assert "created" in results and 409 in results, f"got {results}"
+
+    n = (
+        await ctx["db"].execute(
+            select(func.count()).select_from(ScimGroup).where(
+                ScimGroup.org_id == ctx["org"].id, ScimGroup.display_name == name
+            )
+        )
+    ).scalar_one()
+    assert n == 1

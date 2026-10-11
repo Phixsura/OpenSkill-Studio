@@ -660,8 +660,17 @@ class ScimGroupService:
                 str(payload["externalId"]) if payload.get("externalId") is not None else None
             ),
         )
-        self.db.add(group)
-        await self.db.flush()
+        # R176: dup-SELECT handles the sequential case; a concurrent same-name
+        # create races to INSERT (uq_intg_scim_group_org_name). Savepoint the
+        # INSERT so the loser returns the proper SCIM 409, not a raw 500.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                self.db.add(group)
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise ScimError(409, "Group already exists", "uniqueness") from exc
         initial = payload.get("members") or []
         added = []
         for m in initial:
