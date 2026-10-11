@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R213 (fifth window, R110-class fix — the ironic one)**: `create_job`'s
+  idempotency key is FOR absorbing concurrent duplicate submissions, yet the
+  check-then-add against `uq_intg_import_idem` meant exactly that race 500'd
+  the loser at a bare flush. Fix: savepoint INSERT; on collision re-select
+  and return the winner's job (identical to the sequential idempotent path).
+  Systematic sweep of every `unique=True` table in the integrations models
+  confirms the remaining insert sites are guarded (connections R-early,
+  mapping R173, export streams, LTI tool key R111, identity links, SCIM
+  users/groups/members, EventDelivery on_conflict, domains R207, credentials
+  R212).
 - **R212 (fifth window, R110-class fix)**: `set_credential` was
   check-then-add against the UNIQUE 1:1 credential envelope
   (connection_id unique) — a concurrent FIRST-TIME credential set's loser hit

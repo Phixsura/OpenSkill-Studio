@@ -502,8 +502,30 @@ class BulkImportService:
             idempotency_key=idempotency_key,
             header_map=header_map,
         )
-        self.db.add(job)
-        await self.db.flush()
+        # R213 (R110 class — and the exact race the idempotency key EXISTS
+        # for): two concurrent uploads with the same key both pass the
+        # check-then-add SELECT above; the loser used to hit
+        # uq_intg_import_idem at a bare flush (500 + poisoned session).
+        # Savepoint the INSERT; on collision return the winner's job (it
+        # validates its own file) — idempotent, like the sequential path.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                self.db.add(job)
+                await self.db.flush()
+        except IntegrityError:
+            existing = (
+                await self.db.execute(
+                    select(ImportJob).where(
+                        ImportJob.org_id == org_id,
+                        ImportJob.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return existing
+            raise
         await self._validate(job, file_bytes)
         await self.db.refresh(job)
         return job

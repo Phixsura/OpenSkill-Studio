@@ -1093,3 +1093,46 @@ def test_duplicate_canonical_column_rejected():
     )
     # Only primary->email; secondary stays unknown (ignored). One email col.
     assert errors3 == [] and len(rows3) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_idempotency_key_upload_no_500(db):
+    """R213 (R110 class): two concurrent uploads with the SAME idempotency
+    key are the exact race the key exists to absorb — the loser used to hit
+    uq_intg_import_idem at a bare flush (500 + poisoned session). Both must
+    get a job back and only ONE job row may exist.
+
+    Honest scope (R199/R207 precedent): a single loop may not force the
+    SELECT/INSERT interleave; this asserts the one-row outcome, and the
+    savepoint+re-select is the guard for true parallelism."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import ImportJob
+
+    org, owner = await _org(db)
+    await db.commit()
+    key = f"idem-{uuid.uuid4().hex[:10]}"
+    content = b"email,display_name,role\r\na@x.edu,A,student\r\n"
+
+    async def _upload():
+        async with AsyncSessionLocal() as s:
+            job = await BulkImportService(s).create_job(
+                org.id, kind="users", mode="partial", file_bytes=content,
+                file_key=f"imports/{org.id}/x.csv", created_by=owner.id,
+                idempotency_key=key,
+            )
+            jid = job.id
+            await s.commit()
+            return jid
+
+    j1, j2 = await asyncio.gather(_upload(), _upload())
+    assert j1 == j2  # idempotent: same job either way
+    rows = (
+        await db.execute(
+            select(ImportJob).where(
+                ImportJob.org_id == org.id, ImportJob.idempotency_key == key
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
