@@ -61,7 +61,9 @@ def _sanitize_cell(value: str) -> str:
     return value
 
 
-def parse_users_csv(file_bytes: bytes) -> tuple[list[dict], list[dict]]:
+def parse_users_csv(
+    file_bytes: bytes, header_map: dict | None = None
+) -> tuple[list[dict], list[dict]]:
     """Streamed, header-based parse. Returns (rows, errors). Row numbers are
     1-indexed INCLUDING the header (user's spreadsheet view). BOM + CRLF
     tolerated; extra columns ignored; missing required column fails the file
@@ -71,7 +73,18 @@ def parse_users_csv(file_bytes: bytes) -> tuple[list[dict], list[dict]]:
     except UnicodeDecodeError:
         return [], [{"row_number": 1, "code": "encoding", "message": "File is not UTF-8"}]
     reader = csv.DictReader(io.StringIO(text, newline=""))
-    headers = [h.strip().lower() for h in (reader.fieldnames or [])]
+    # R92 column mapping: {canonical: csv-header-alias}, case-insensitive on
+    # the alias side. Unknown canonical keys are refused at create_job.
+    alias_to_canonical = {
+        str(v).strip().lower(): str(k).strip().lower()
+        for k, v in (header_map or {}).items()
+    }
+
+    def _canon(header: str) -> str:
+        h = header.strip().lower()
+        return alias_to_canonical.get(h, h)
+
+    headers = [_canon(h) for h in (reader.fieldnames or [])]
     missing = [c for c in USERS_REQUIRED if c not in headers]
     if missing:
         return [], [
@@ -88,7 +101,7 @@ def parse_users_csv(file_bytes: bytes) -> tuple[list[dict], list[dict]]:
     seen_emails: dict[str, int] = {}
     for i, raw in enumerate(reader, start=2):  # header is row 1
         row = {
-            (k or "").strip().lower(): (v or "").strip()
+            _canon(k or ""): (v or "").strip()
             for k, v in raw.items()
             if k is not None
         }
@@ -153,6 +166,7 @@ class BulkImportService:
         file_key: str,
         created_by: str,
         idempotency_key: str | None = None,
+        header_map: dict | None = None,
     ) -> ImportJob:
         if kind not in IMPORT_KINDS:
             raise AppError("IMPORT_KIND_INVALID", f"kind must be one of {sorted(IMPORT_KINDS)}", 422)
@@ -160,6 +174,17 @@ class BulkImportService:
             raise AppError("IMPORT_MODE_INVALID", "mode must be atomic|partial", 422)
         if len(file_bytes) > MAX_IMPORT_BYTES:
             raise AppError("IMPORT_TOO_LARGE", "file exceeds 50MB", 422)
+        header_map = header_map or {}
+        if len(header_map) > 20:
+            raise AppError("IMPORT_HEADER_MAP_INVALID", "too many mappings", 422)
+        known = {"email", "display_name", "role"}
+        for k, v in header_map.items():
+            if str(k).strip().lower() not in known or not isinstance(v, str) or not v.strip():
+                raise AppError(
+                    "IMPORT_HEADER_MAP_INVALID",
+                    f"header_map keys must be in {sorted(known)} with string aliases",
+                    422,
+                )
         if idempotency_key:
             existing = (
                 await self.db.execute(
@@ -181,6 +206,7 @@ class BulkImportService:
             fingerprint=fingerprint(file_bytes, version),
             created_by=created_by,
             idempotency_key=idempotency_key,
+            header_map=header_map,
         )
         self.db.add(job)
         await self.db.flush()
@@ -189,7 +215,7 @@ class BulkImportService:
         return job
 
     async def _validate(self, job: ImportJob, file_bytes: bytes) -> None:
-        rows, errors = parse_users_csv(file_bytes)
+        rows, errors = parse_users_csv(file_bytes, job.header_map or {})
         creates = updates = skips = 0
         for row in rows:
             user = (
@@ -263,7 +289,7 @@ class BulkImportService:
         if claimed is None:
             raise AppError("IMPORT_NOT_COMMITTABLE", f"job is {job.status}", 409)
         await self.db.refresh(job)
-        rows, errors = parse_users_csv(file_bytes)
+        rows, errors = parse_users_csv(file_bytes, job.header_map or {})
         if job.mode == "atomic" and errors:
             job.status = "failed"
             job.stats = {"applied": 0, "errors": len(errors), "reason": "atomic_reject"}

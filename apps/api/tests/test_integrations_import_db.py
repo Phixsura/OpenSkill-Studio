@@ -364,3 +364,55 @@ async def test_list_imports_org_scoped(db):
     out = await list_imports(org.id, db=db, user=owner_user)
     ids = [j.id for j in out["data"]]
     assert job.id in ids and foreign.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_header_map_aliases_and_validation(db):
+    """R92 column mapping: a school CSV with 'E-mail Address'/'Full Name'
+    headers imports via header_map; commit re-parses with the SAME map;
+    junk maps refused."""
+    org, owner = await _org(db)
+    svc = BulkImportService(db)
+    email = f"hm-{uuid.uuid4().hex[:6]}@x.edu"
+    data = (
+        "E-mail Address,Full Name,Role\n"
+        f"{email},Mapped Person,student\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="hm1", created_by=owner.id,
+        idempotency_key=f"r92-{uuid.uuid4().hex[:8]}",
+        header_map={"email": "E-mail Address", "display_name": "Full Name", "role": "Role"},
+    )
+    assert job.dry_stats == {"valid": 1, "errors": 0, "creates": 1, "updates": 0, "skips": 0}
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+    u = (
+        await db.execute(select(User).where(func.lower(User.email) == email))
+    ).scalar_one()
+    assert u.display_name == "Mapped Person"
+
+    # Without the map the same file fails on missing columns.
+    job2 = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="hm2", created_by=owner.id,
+        idempotency_key=f"r92b-{uuid.uuid4().hex[:8]}",
+    )
+    assert job2.dry_stats["errors"] >= 1 and job2.dry_stats["valid"] == 0
+
+    # Unknown canonical key / junk alias refused.
+    with pytest.raises(AppError) as e1:
+        await svc.create_job(
+            org.id, kind="users", mode="partial", file_bytes=data,
+            file_key="hm3", created_by=owner.id,
+            idempotency_key=f"r92c-{uuid.uuid4().hex[:8]}",
+            header_map={"password": "Secret"},
+        )
+    assert e1.value.code == "IMPORT_HEADER_MAP_INVALID"
+    with pytest.raises(AppError):
+        await svc.create_job(
+            org.id, kind="users", mode="partial", file_bytes=data,
+            file_key="hm4", created_by=owner.id,
+            idempotency_key=f"r92d-{uuid.uuid4().hex[:8]}",
+            header_map={"email": 7},
+        )

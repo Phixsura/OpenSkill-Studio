@@ -38,6 +38,8 @@ class ImportJob(Base):
     file_key: Mapped[str] = mapped_column(String(500), nullable=False)
     # SHA-256(file bytes + template_version) — commit refuses a stale preview.
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # R92: {canonical: csv-header-alias} — commit re-parses with the SAME map.
+    header_map: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     dry_stats: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     stats: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)

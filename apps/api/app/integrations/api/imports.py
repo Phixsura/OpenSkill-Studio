@@ -58,12 +58,28 @@ async def _load_file(file_key: str) -> bytes:
     raise AppError("STORAGE_ERROR", "Could not load import file", 500)
 
 
+def _parse_header_map(raw: str | None) -> dict:
+    """R92: header_map arrives as a JSON string form field."""
+    if not raw:
+        return {}
+    import json
+
+    try:
+        out = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise AppError("IMPORT_HEADER_MAP_INVALID", "header_map is not JSON", 422) from exc
+    if not isinstance(out, dict):
+        raise AppError("IMPORT_HEADER_MAP_INVALID", "header_map must be an object", 422)
+    return out
+
+
 @router.post("/imports", response_model=DataResponse[ImportJobResponse], status_code=201)
 async def upload_import(
     org_id: str,
     kind: str = Form(max_length=30),
     mode: str = Form(default="partial", max_length=10),
     idempotency_key: str | None = Form(default=None, max_length=100),
+    header_map: str | None = Form(default=None, max_length=2000),
     file: UploadFile = File(...),  # noqa: B008
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -81,6 +97,7 @@ async def upload_import(
         file_key=file_key,
         created_by=user.id,
         idempotency_key=idempotency_key,
+        header_map=_parse_header_map(header_map),
     )
     resp = _resp(job)
     await db.commit()
