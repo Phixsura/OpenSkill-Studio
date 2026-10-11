@@ -516,3 +516,58 @@ async def test_concurrent_jit_provision_single_user(db):
         )
     ).scalars().all()
     assert len(members) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_membership_jit_single_member(db):
+    """R166: two concurrent logins of the SAME existing platform user into
+    the SAME org (membership-only JIT) must create exactly one OrgMember,
+    neither session poisoned by the uq_org_member violation."""
+    from datetime import UTC, datetime
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import OrgDomain
+    from app.integrations.services.identity import (
+        IdentityService,
+        VerifiedExternalIdentity,
+    )
+    from app.models.organization import OrgMember as OrgMemberModel
+
+    org, owner = await _org(db)
+    domain = f"mjit-{uuid.uuid4().hex[:6]}.edu"
+    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
+                     verification_token="t", verified_at=datetime.now(UTC)))
+    email = f"exist-{uuid.uuid4().hex[:8]}@{domain}"
+    # An ACTIVE platform user that is NOT yet a member of this org.
+    platform_user = User(
+        email=email, password_hash=hash_password("Test123!"),
+        display_name="Exist", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+    )
+    db.add(platform_user)
+    await db.commit()
+    conn_ref = f"01MJIT{uuid.uuid4().hex[:20].upper()}"
+
+    async def login(sub_suffix):
+        async with AsyncSessionLocal() as own:
+            ident = VerifiedExternalIdentity(
+                org_id=org.id, source="sso", connection_ref=conn_ref,
+                subject=f"mjit-sub-{sub_suffix}", email=email, email_verified=True,
+            )
+            res = await IdentityService(own).resolve(ident, allow_jit=True, jit_role="student")
+            await own.commit()
+            return res.user.id
+
+    results = await asyncio.gather(login("a"), login("b"), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"a login session blew up: {r!r}"
+    assert results[0] == results[1] == platform_user.id
+
+    members = (
+        await db.execute(
+            select(OrgMemberModel).where(
+                OrgMemberModel.org_id == org.id,
+                OrgMemberModel.user_id == platform_user.id,
+            )
+        )
+    ).scalars().all()
+    assert len(members) == 1

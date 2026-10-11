@@ -223,15 +223,25 @@ class IdentityService:
             )
         ).scalar_one_or_none()
         if member is None:
-            self.db.add(
-                OrgMember(
-                    org_id=ident.org_id,
-                    user_id=user.id,
-                    role=OrgRole(jit_role),
-                    status=MemberStatus.ACTIVE,
-                )
-            )
-            await self.db.flush()
+            # R166: same add-before-savepoint guard — two concurrent logins
+            # of the SAME existing user into the SAME org both see member=None
+            # and race to INSERT (uq_org_member). The loser rolls back its
+            # savepoint; the membership exists either way.
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(
+                        OrgMember(
+                            org_id=ident.org_id,
+                            user_id=user.id,
+                            role=OrgRole(jit_role),
+                            status=MemberStatus.ACTIVE,
+                        )
+                    )
+                    await self.db.flush()
+            except IntegrityError:
+                pass  # a concurrent login already created the membership
         return user
 
     async def _queue(self, ident: VerifiedExternalIdentity, *, reason: str) -> None:

@@ -923,6 +923,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   and on IntegrityError the loser rolls back just that statement and
   re-selects the winner's row (inactive → the same admin-confirmation 403).
   3x stable.
+  The membership INSERT in the same method had the identical hazard
+  (uq_org_member on a concurrent login of an existing user into one org) and
+  got the same savepoint guard; both paths race-tested 3x stable.
 
 - **R165 (fourth window, unbounded-growth fix)**: the SAML assertion replay
   cache reuses the login-state table; only the OIDC authorize endpoint
