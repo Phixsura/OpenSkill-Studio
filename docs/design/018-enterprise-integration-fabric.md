@@ -893,6 +893,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R97-R114 (third window, hardening)**: opt-in typed-model staging gate
+  (R99); Part O completion — audit trail for 16 admin mutations (R100,
+  record_audit has a registered-action allowlist the best-effort wrapper
+  was silently swallowing), redirect URIs pinned to public_base_url not the
+  Host header (R101/R102), least-privilege scope guard (R104), Part O
+  checklist §20b; property-based tests over the pure cores (R107); and
+  TRUE-concurrency race tests (R108-R113, two real sessions via gather)
+  that found THREE production 500s the single-threaded probes had marked
+  'unreachable': `db.add(x)` before `begin_nested()` leaves a pending
+  INSERT that replays at the next flush and poisons the session on a
+  unique-violation loser — fixed in identity._link, lti.ensure_tool_key,
+  and domains.verify()/sweep_pending. Fabric suite now 232 tests incl.
+  races + properties.
+
 - **R86-R96 (third window)**: connector rate-limit handling (capped
   Retry-After + bounded transient-5xx retry — Part G); LTI Dynamic
   Registration 1.0 (paste the platform config URL, everything negotiated;
