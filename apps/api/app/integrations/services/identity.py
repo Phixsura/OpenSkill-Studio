@@ -145,9 +145,12 @@ class IdentityService:
             external_id=ident.external_id,
             email_at_link=ident.email,
         )
-        self.db.add(link)
         try:
             async with self.db.begin_nested():
+                # add INSIDE the savepoint (R110 race finding): added-before-
+                # nested survives the rollback as a pending INSERT and
+                # poisons the session at the next flush.
+                self.db.add(link)
                 await self.db.flush()
         except Exception:
             # Concurrent first-login race: the partial unique index arbitrates;
