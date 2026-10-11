@@ -901,3 +901,16 @@ async def test_import_create_and_commit_write_audit_rows(db, monkeypatch):
     assert ev.subject == job_id
     assert ev.data["stats"]["created"] == 1
     assert "email" not in str(ev.data)
+
+
+def test_kind_registries_consistent():
+    """R148: IMPORT_KINDS, TEMPLATE_VERSIONS and KIND_SPECS must agree —
+    a kind present in one but not the others KeyErrors at runtime (create
+    reads TEMPLATE_VERSIONS[kind], parse reads KIND_SPECS[kind])."""
+    from app.integrations.models.bulk import IMPORT_KINDS
+    from app.integrations.services.bulk_import import KIND_SPECS, TEMPLATE_VERSIONS
+
+    assert set(IMPORT_KINDS) == set(TEMPLATE_VERSIONS) == set(KIND_SPECS)
+    for kind, spec in KIND_SPECS.items():
+        assert set(spec.required) <= set(spec.known_headers), kind
+        assert TEMPLATE_VERSIONS[kind] >= 1
