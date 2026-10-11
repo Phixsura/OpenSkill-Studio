@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R223 (sixth window, R218 class — roster preview)**: the roster import
+  preview paid ~3 point SELECTs per row (cohort by slug, user by email,
+  membership). Batched into IN(500) maps (`_roster_preview_maps`) consumed by
+  a pure per-row function; `_preview_roster_row` kept for the commit path's
+  per-row savepoint semantics. N+1 sweep of the fabric now complete: pull
+  engine (R218), push (R219), roster provisioning (R220), SCIM list (R221),
+  user-import preview (R222), roster-import preview (R223).
 - **R222 (sixth window, R218 class — import preview)**: `_preview_user_rows`
   runs INLINE in the upload request and paid 2 point SELECTs per row — 20k
   round-trips on a 10k-row file, all inside one HTTP request. Batched into

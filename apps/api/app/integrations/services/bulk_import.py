@@ -605,6 +605,71 @@ class BulkImportService:
             }
         return cohort, user, None
 
+    async def _roster_preview_maps(self, org_id: str, rows: list[dict]):
+        """R223 (R218 class): batch the roster preview's per-row lookups —
+        cohorts by slug, active org users by email, and existing memberships —
+        into bounded IN(...) queries. The preview runs inline in the upload
+        request; a 10k-row roster paid ~3 point SELECTs per row."""
+        slugs = sorted({r["cohort_slug"] for r in rows})
+        cohorts: dict[str, Cohort] = {}
+        for j in range(0, len(slugs), 500):
+            found = (
+                await self.db.execute(
+                    select(Cohort).where(
+                        Cohort.org_id == org_id, Cohort.slug.in_(slugs[j : j + 500])
+                    )
+                )
+            ).scalars()
+            cohorts.update({c.slug: c for c in found})
+        emails = sorted({r["email"] for r in rows})
+        users: dict[str, User] = {}
+        for j in range(0, len(emails), 500):
+            found_u = (
+                await self.db.execute(
+                    select(User)
+                    .join(OrgMember, OrgMember.user_id == User.id)
+                    .where(
+                        func.lower(User.email).in_(emails[j : j + 500]),
+                        OrgMember.org_id == org_id,
+                        OrgMember.status == MemberStatus.ACTIVE,
+                    )
+                )
+            ).scalars()
+            users.update({u.email.lower(): u for u in found_u})
+        member_pairs: set[tuple[str, str]] = set()
+        cohort_ids = [c.id for c in cohorts.values()]
+        for j in range(0, len(cohort_ids), 500):
+            found_m = (
+                await self.db.execute(
+                    select(CohortMember.cohort_id, CohortMember.user_id).where(
+                        CohortMember.cohort_id.in_(cohort_ids[j : j + 500])
+                    )
+                )
+            ).all()
+            member_pairs.update((cid, uid) for cid, uid in found_m)
+        return cohorts, users, member_pairs
+
+    @staticmethod
+    def _preview_roster_row_mapped(row: dict, cohorts, users, member_pairs):
+        cohort = cohorts.get(row["cohort_slug"])
+        if cohort is None:
+            return None, {
+                "row_number": row["row_number"], "column": "cohort_slug",
+                "code": "cohort_not_found",
+                "message": f"no cohort with slug {row['cohort_slug']!r}",
+                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+            }
+        user = users.get(row["email"])
+        if user is None:
+            return None, {
+                "row_number": row["row_number"], "column": "email",
+                "code": "user_not_in_org",
+                "message": "no active org member with this email (import users first)",
+                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+            }
+        existing = (cohort.id, user.id) in member_pairs
+        return ("skipped" if existing else "created"), None
+
     async def _preview_roster_row(self, org_id: str, row: dict):
         cohort, user, err = await self._resolve_roster_refs(org_id, row)
         if err is not None:
@@ -636,8 +701,9 @@ class BulkImportService:
             rows = kept2
         elif job.kind == "roster":
             kept: list[dict] = []
+            maps = await self._roster_preview_maps(job.org_id, rows)
             for row in rows:
-                outcome, err = await self._preview_roster_row(job.org_id, row)
+                outcome, err = self._preview_roster_row_mapped(row, *maps)
                 if err is not None:
                     errors.append(err)
                     continue
