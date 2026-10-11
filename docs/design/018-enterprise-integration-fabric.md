@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R238 (seventh window, test-infra hardening)**: the health-sweep
+  transition test swept the WHOLE shared dev DB (limit=100_000) with the real
+  connector registry — garbage connections from prior runs did real outbound
+  pings (5s connect timeouts), and under DB contention the test blew its 300s
+  timeout. Hermetic fix: swap the ENTIRE connector registry for instant fakes
+  during the test (full save/restore), and scope the parked-not-pinged
+  counter to the test's own connection id (prior-run oneroster leftovers hit
+  the counting fake too). Health file: 108s → 9s; roster/consent probes this
+  sweep (role-overwrite, guess-on-ambiguity, consent gate, revoked-counts — 4) all KILLED. Fabric 309/309.
 - **R237 (seventh window, unreached-branch pin)**: no test exercised a SAML
   connection whose pinned-cert list is EMPTY — the branch guarding against
   "verify with no pinned certs" (where a bad fallback could trust the

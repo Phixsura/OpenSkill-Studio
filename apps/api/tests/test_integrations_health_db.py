@@ -204,7 +204,20 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
         async def ping(self, ctx):
             raise AppError("CONNECTION_AUTH_REJECTED", "401 from source", 502)
 
-    old = registry.CONNECTORS.get("oneroster")
+    class _InstantOk:
+        capabilities = frozenset()
+
+        async def ping(self, ctx):
+            return None
+
+    # Hermetic world: the sweep walks EVERY active/degraded connection in the
+    # shared dev DB (accumulated across runs). Replace the WHOLE registry with
+    # instant fakes so garbage connections cost nothing (some real pings do
+    # outbound HTTP with 5s connect timeouts — thousands of leftovers under
+    # DB contention blew the 300s test timeout).
+    saved_registry = dict(registry.CONNECTORS)
+    for key in list(registry.CONNECTORS):
+        registry.CONNECTORS[key] = _InstantOk()
     registry.CONNECTORS["oneroster"] = _DeadConnector()
     try:
         swept = await svc.sweep_connection_health(limit=100_000)
@@ -230,7 +243,8 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
 
         class _CountingDead(_DeadConnector):
             async def ping(self, ctx):
-                calls["n"] += 1
+                if ctx.connection_id == conn.id:  # scope to OUR parked conn
+                    calls["n"] += 1
                 raise AppError("CONNECTION_AUTH_REJECTED", "401", 502)
 
         registry.CONNECTORS["oneroster"] = _CountingDead()
@@ -263,8 +277,8 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
         ).scalars().all()
         assert len(events2) == 1
     finally:
-        if old is not None:
-            registry.CONNECTORS["oneroster"] = old
+        registry.CONNECTORS.clear()
+        registry.CONNECTORS.update(saved_registry)
 
 
 @pytest.mark.asyncio
