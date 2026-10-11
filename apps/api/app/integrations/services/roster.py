@@ -220,6 +220,43 @@ class RosterProvisioningService:
             )
         ).scalars().all()
         svc = CohortService(self.db)
+        # R220 (R218 class): prefetch the per-record point SELECTs — identity
+        # links and staged roster.user rows for every user referenced by an
+        # enrollment — in bounded IN(...) queries. A 5k-enrollment school was
+        # paying ~3 round-trips per record. The single-row helpers stay as
+        # fallbacks for subjects not in the maps.
+        user_exts = sorted(
+            {
+                str((r.payload or {}).get("user_external_id") or "")
+                for r in staged
+                if (r.payload or {}).get("user_external_id")
+            }
+        )
+        links_map: dict[str, str] = {}
+        users_map: dict[str, StagedRecord] = {}
+        for j in range(0, len(user_exts), 500):
+            batch_ids = user_exts[j : j + 500]
+            link_rows = (
+                await self.db.execute(
+                    select(ExternalIdentityLink.subject, ExternalIdentityLink.user_id).where(
+                        ExternalIdentityLink.connection_ref == connection_id,
+                        ExternalIdentityLink.subject.in_(batch_ids),
+                        ExternalIdentityLink.revoked_at.is_(None),
+                    )
+                )
+            ).all()
+            links_map.update(dict(link_rows))
+            user_rows = (
+                await self.db.execute(
+                    select(StagedRecord).where(
+                        StagedRecord.connection_id == connection_id,
+                        StagedRecord.model == "roster.user",
+                        StagedRecord.external_id.in_(batch_ids),
+                        StagedRecord.status == "active",
+                    )
+                )
+            ).scalars()
+            users_map.update({r.external_id: r for r in user_rows})
         for rec in staged:
             p = rec.payload or {}
             class_ext = str(p.get("class_external_id") or "")
@@ -241,7 +278,8 @@ class RosterProvisioningService:
                     )
                     continue
                 user_id = await self._resolve_user(
-                    org_id, connection_id, user_ext, jit_users, run_id, rec, report
+                    org_id, connection_id, user_ext, jit_users, run_id, rec, report,
+                    links_map=links_map, users_map=users_map,
                 )
                 if user_id is None:
                     continue
@@ -282,7 +320,7 @@ class RosterProvisioningService:
                 cohort_id = cohort_id or linked_cohorts.get(class_ext)
                 if cohort_id is None:
                     continue
-                link_user = await self._linked_user(connection_id, user_ext)
+                link_user = links_map.get(user_ext)  # R220 prefetch
                 if link_user is None:
                     continue
                 existing = (
@@ -317,6 +355,9 @@ class RosterProvisioningService:
         run_id: str | None,
         rec: StagedRecord,
         report: dict,
+        *,
+        links_map: dict[str, str] | None = None,
+        users_map: dict[str, StagedRecord] | None = None,
     ) -> str | None:
         if not user_ext:
             self._conflict(
@@ -324,20 +365,27 @@ class RosterProvisioningService:
                 {"missing": "user_external_id"}, report,
             )
             return None
-        linked = await self._linked_user(connection_id, user_ext)
+        # R220: prefetch maps when the caller built them; point SELECTs stay
+        # as the fallback for direct callers.
+        if links_map is not None:
+            linked = links_map.get(user_ext)
+        else:
+            linked = await self._linked_user(connection_id, user_ext)
         if linked is not None:
             return linked
-        # Try the staged roster.user record for an email to resolve with.
-        user_rec = (
-            await self.db.execute(
-                select(StagedRecord).where(
-                    StagedRecord.connection_id == connection_id,
-                    StagedRecord.model == "roster.user",
-                    StagedRecord.external_id == user_ext,
-                    StagedRecord.status == "active",
+        if users_map is not None:
+            user_rec = users_map.get(user_ext)
+        else:
+            user_rec = (
+                await self.db.execute(
+                    select(StagedRecord).where(
+                        StagedRecord.connection_id == connection_id,
+                        StagedRecord.model == "roster.user",
+                        StagedRecord.external_id == user_ext,
+                        StagedRecord.status == "active",
+                    )
                 )
-            )
-        ).scalar_one_or_none()
+            ).scalar_one_or_none()
         email = str(((user_rec.payload if user_rec else {}) or {}).get("email") or "").lower()
         if not email:
             self._conflict(
@@ -367,4 +415,8 @@ class RosterProvisioningService:
                 {"user_external_id": user_ext}, report,
             )
             return None
+        if links_map is not None:
+            # Keep the prefetch map fresh: later enrollments of the SAME user
+            # (other classes) short-circuit instead of re-resolving.
+            links_map[user_ext] = result.user.id
         return result.user.id

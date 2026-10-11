@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R220 (sixth window, R218 class — roster side)**: `_provision_enrollments`
+  paid ~3 point SELECTs per enrollment (identity link, staged roster.user,
+  plus the tombstone-path link lookup) — 15k round-trips for a 5k-enrollment
+  school. Prefetched into bounded IN(500) maps handed to `_resolve_user`
+  (fallback point SELECTs kept for direct callers); successful resolutions
+  backfill the link map so repeat users short-circuit.
 - **R219 (sixth window, R218 class — push side)**: `_execute_push` did the
   same per-record staged point SELECT; now prefetched in bounded IN(500)
   batches before the loop. Push + sync files 40/40.
