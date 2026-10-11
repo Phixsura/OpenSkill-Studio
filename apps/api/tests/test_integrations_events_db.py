@@ -963,3 +963,49 @@ async def test_emit_event_rejects_non_finite_and_unserializable_data(db):
     # the session stays usable and a valid emit still works
     ev = await emit_event(db, org.id, "project.approved", subject="ok", data={"score": 1.0})
     assert ev.data == {"score": 1.0}
+
+
+@pytest.mark.asyncio
+async def test_410_gone_disables_subscription_immediately(db, egress):
+    """R224 (Svix convention): a 410 Gone is the receiver unsubscribing —
+    the delivery must be cancelled and the subscription disabled on the
+    FIRST attempt, not retried through the 8-step ladder and 5-day window."""
+    from app.integrations.services.events import handle_delivery_attempt, handle_event_created
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="gone-1", data={})
+    await db.flush()
+    await handle_event_created(db, {"event_id": ev.id})
+    delivery = (
+        await db.execute(
+            select(EventDelivery).where(
+                EventDelivery.event_id == ev.id, EventDelivery.subscription_id == sub.id
+            )
+        )
+    ).scalar_one()
+
+    async def _gone(method, url, *, headers=None, content=None, read_timeout=None):
+        return httpx.Response(410, request=httpx.Request(method, url))
+
+    egress.request = _gone
+    await handle_delivery_attempt(db, {"delivery_id": delivery.id})
+    await db.flush()
+
+    assert delivery.status == "cancelled" and delivery.next_attempt_at is None
+    assert sub.active is False
+    disabled_ev = (
+        await db.execute(
+            select(IntegrationEvent).where(
+                IntegrationEvent.org_id == org.id,
+                IntegrationEvent.type
+                == "com.openskill.integration.subscription.auto_disabled.v1",
+                IntegrationEvent.subject == sub.id,
+            )
+        )
+    ).scalars().all()
+    assert len(disabled_ev) == 1
+    assert disabled_ev[0].data["reason"] == "endpoint_gone"
+    # a second replayed attempt is a no-op (delivery no longer pending)
+    await handle_delivery_attempt(db, {"delivery_id": delivery.id})
+    assert delivery.status == "cancelled"

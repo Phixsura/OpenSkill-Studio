@@ -285,6 +285,24 @@ async def handle_delivery_attempt(db: AsyncSession, payload: dict) -> None:
     if delivery.status == "succeeded":
         return
 
+    # R224 (Svix convention): 410 Gone is the RECEIVER saying "stop sending".
+    # Retrying it through the full 8-attempt ladder spams an endpoint that
+    # explicitly unsubscribed. Disable the subscription immediately, cancel
+    # this delivery, and alert — same channel as the 5-day auto-disable.
+    if status_code == 410:
+        delivery.status = "cancelled"
+        delivery.next_attempt_at = None
+        sub.active = False
+        await emit_event(
+            db,
+            event.org_id,
+            f"{INTERNAL_EVENT_PREFIX}subscription.auto_disabled",
+            subject=sub.id,
+            data={"subscription_id": sub.id, "reason": "endpoint_gone"},
+        )
+        log.warning("webhook_subscription_gone_disabled", subscription_id=sub.id)
+        return
+
     if attempt_no >= MAX_ATTEMPTS:
         delivery.status = "exhausted"
         delivery.next_attempt_at = None

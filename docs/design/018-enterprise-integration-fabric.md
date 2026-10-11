@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R224 (sixth window, protocol-correctness fix — mutation-killed)**: a
+  410 Gone from a webhook endpoint was retried through the full 8-attempt
+  ladder and only counted toward the 5-day auto-disable window — but 410 is
+  the RECEIVER unsubscribing (Svix convention: disable immediately). Now the
+  first 410 cancels the delivery, deactivates the subscription, and emits
+  `integration.subscription.auto_disabled` with reason `endpoint_gone`
+  (same alert channel as the 5-day rule). Replayed attempts no-op.
 - **R223 (sixth window, R218 class — roster preview)**: the roster import
   preview paid ~3 point SELECTs per row (cohort by slug, user by email,
   membership). Batched into IN(500) maps (`_roster_preview_maps`) consumed by
