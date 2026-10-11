@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R245 (seventh window, upgrade-safety pin)**: the dry-run fingerprint's
+  template-version binding had no pin — dropping the version from the hash
+  only manifests ACROSS a template upgrade (stale pre-upgrade previews would
+  commit under new semantics). Direct hash-input test added. Batch 10 also
+  killed: event-size cap widening, webhook signing secret swap, SCIM string
+  "False" deactivation.
 - **R244 (seventh window, privilege-escalation pin)**: the NRPS ceiling test
   asserted only the POSITIVE direction (instructor member → instructor) — a
   mutant minting instructor for EVERY member (privilege escalation) survived.

@@ -1136,3 +1136,16 @@ async def test_concurrent_same_idempotency_key_upload_no_500(db):
         )
     ).scalars().all()
     assert len(rows) == 1
+
+
+def test_fingerprint_binds_template_version():
+    """R245 (survivor pin): the dry-run fingerprint must bind the TEMPLATE
+    version — after a template upgrade, a preview made under the old version
+    must go IMPORT_DRY_RUN_STALE rather than commit under new semantics.
+    Dropping the version from the hash only manifests across upgrades, so a
+    behavior test can't catch it; pin the hash input directly."""
+    from app.integrations.services.bulk_import import fingerprint
+
+    data = b"email,role\r\na@x.edu,student\r\n"
+    assert fingerprint(data, 1) != fingerprint(data, 2)
+    assert fingerprint(data, 1) == fingerprint(data, 1)
