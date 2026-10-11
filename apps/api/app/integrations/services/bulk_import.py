@@ -729,6 +729,18 @@ class BulkImportService:
                 )
             )
         ).scalar_one_or_none()
+        # NOTE (R189, known gap — deliberately NOT enforced here): adding/
+        # reactivating a member consumes a billable seat, and the interactive
+        # OrgMemberService.add_member funnels through a §2.5 seat-quota check
+        # (issue #27). Bulk import reimplements member creation and so does
+        # NOT gate on seats — a large import can over-provision a tenant past
+        # its entitlement. Enforcing it here breaks the established import test
+        # contract (imports currently always succeed regardless of plan) and
+        # is a billing-policy decision (hard-block vs over-provision-then-
+        # reconcile) owned by issue #27, so it is documented in ADR §20 rather
+        # than changed unilaterally. Recommendation: funnel import member
+        # creation through add_member (or call _check_seat_quota) once the
+        # desired billing behavior for bulk provisioning is decided.
         if member is None:
             self.db.add(
                 OrgMember(

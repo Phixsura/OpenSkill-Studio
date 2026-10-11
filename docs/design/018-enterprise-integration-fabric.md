@@ -919,6 +919,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   admin can grab the exact columns before preparing a file.
 - **R186-R187 (fourth window, probes)**: export cadence 3/3 and mapping
   validation 4/4 mutants killed — R183 and R164 fully pinned.
+- **R189 (fourth window, KNOWN GAP documented, not changed)**: bulk user
+  import reimplements OrgMember creation and so does NOT pass through the
+  §2.5 seat-quota funnel (issue #27) that the interactive add_member enforces
+  — a large import can over-provision a tenant past its seat entitlement.
+  This was INVESTIGATED and left as a documented gap rather than changed:
+  enforcing it (verified locally) breaks the established import test contract
+  (imports currently always succeed regardless of plan) and the correct
+  behavior — hard-block at cap vs over-provision-then-reconcile-at-billing —
+  is a policy decision owned by issue #27, not safe to decide unilaterally
+  in a hardening pass. Recommendation + code pointer left in
+  bulk_import._apply_row; cohort capacity (R188, a §43-local invariant) WAS
+  enforced because it is unambiguous and self-contained.
 - **R188 (fourth window, capacity bypass)**: the roster import applied
   CohortMember directly, BYPASSING CohortService's max_learners check — a
   bulk import could overfill a capped cohort past what interactive enroll
