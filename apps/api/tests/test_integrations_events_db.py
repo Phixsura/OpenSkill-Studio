@@ -898,6 +898,13 @@ async def test_bulk_replay_exhausted(db):
     mk(evs[2].id, "pending", replay_of=d3.id)     # d3 replay in flight
     await db.flush()
 
+    # A non-exhausted (e.g. succeeded) original must NEVER be bulk-replayed.
+    mk(
+        (await emit_event(db, org.id, "project.approved", subject="succ", data={})).id,
+        "succeeded",
+    )
+    await db.flush()
+
     clones = await replay_exhausted(db, org.id, sub.id)
     assert [c.replay_of for c in clones] == [d1.id]
     assert clones[0].status == "pending" and clones[0].attempt_count == 0
