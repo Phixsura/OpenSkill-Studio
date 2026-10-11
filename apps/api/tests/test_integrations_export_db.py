@@ -530,3 +530,43 @@ async def test_export_empty_source_still_writes_manifest(db):
     assert manifest["row_count"] == 0
     assert manifest["parts"] == []
     assert manifest["generated_at"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_export_serializes_on_stream_lock(db):
+    """R208: a manual trigger racing the hourly sweep must not double-export
+    the span or regress the cursor. The stream row lock serializes runs: the
+    second run waits, re-reads the ADVANCED cursor under the lock, and
+    exports 0 rows. Without the lock both read the same cursor and the total
+    row count doubles (the slow writer yields the loop mid-run to force the
+    interleave, so this test genuinely kills the no-lock mutant)."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+
+    org, _ = await _org(db)
+    for i in range(3):
+        await emit_event(db, org.id, "project.approved", subject=f"ce-{i}", data={})
+    svc = WarehouseExportService(db, writer=MemWriter())
+    stream = await svc.create_stream(org.id, name=f"race-{ULID()}", dataset="events")
+    await db.commit()
+
+    class SlowWriter(MemWriter):
+        async def write(self, key, content):
+            await asyncio.sleep(0.05)  # yield so the other run interleaves
+            await super().write(key, content)
+
+    async def _run():
+        async with AsyncSessionLocal() as s:
+            run = await WarehouseExportService(s, writer=SlowWriter()).run_export(
+                org.id, stream.id
+            )
+            counts = (run.status, run.row_count or 0)
+            await s.commit()
+            return counts
+
+    (s1, c1), (s2, c2) = await asyncio.gather(_run(), _run())
+    assert s1 == s2 == "succeeded"
+    # exactly one of them exported the 3 events; the other saw the advanced
+    # cursor under the lock and exported nothing.
+    assert sorted([c1, c2]) == [0, 3]

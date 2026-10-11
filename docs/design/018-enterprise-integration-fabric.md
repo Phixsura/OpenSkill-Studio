@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R208 (fifth window, concurrency fix — mutation-killed)**: `run_export`
+  had no per-stream serialization: a manual trigger racing the hourly sweep
+  (or a double-trigger) read the SAME cursor — both re-export the span, and
+  the last committer can REGRESS `stream.cursor` (its last_cursor may be
+  older), so the next run re-exports the whole span again. Fix: `SELECT ...
+FOR UPDATE` on the stream row + refresh, making read-cursor → export →
+  advance-cursor atomic per stream. The race test uses a slow writer to force
+  the interleave and asserts [0, 3] row counts — removing the lock makes it
+  fail (genuinely killed, unlike the single-loop-limited R207/R199 tests).
 - **R207 (fifth window, concurrency fix)**: `OrgDomainService.claim` capped
   domains with a bare COUNT (TOCTOU — concurrent claims could exceed the
   20-domain cap) and inserted after a check-then-add dup SELECT against

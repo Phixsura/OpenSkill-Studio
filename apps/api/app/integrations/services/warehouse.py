@@ -289,6 +289,18 @@ class WarehouseExportService:
 
     async def run_export(self, org_id: str, stream_id: str) -> ExportRun:
         stream = await self.get_stream(org_id, stream_id)
+        # R208: serialize runs per stream. A manual trigger racing the hourly
+        # sweep (or a double-click) would otherwise read the SAME cursor —
+        # both re-export the span, and whichever transaction commits LAST can
+        # regress stream.cursor (its last_cursor may be older), making the
+        # NEXT run re-export the whole span again. The row lock makes the
+        # read-cursor → export → advance-cursor sequence atomic per stream.
+        await self.db.execute(
+            select(ExportStream.id)
+            .where(ExportStream.id == stream.id)
+            .with_for_update()
+        )
+        await self.db.refresh(stream)  # re-read cursor under the lock
         if not stream.enabled:
             raise AppError("EXPORT_STREAM_DISABLED", "Stream is disabled", 409)
         if self.writer is None:
