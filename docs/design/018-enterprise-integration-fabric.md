@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R163 (fourth window, index)**: the nightly retention sweep deletes
+  terminal deliveries by (status, created_at) across all subscriptions; the
+  existing (subscription_id, …) index can't serve that, so it full-scanned.
+  Added `ix_intg_delivery_status_created` (intg15, reversible).
+
 - **R162 (fourth window, scalability)**: SCIM User/Group list now pages at
   the SQL level (offset/limit + a separate count) instead of materializing
   every row and slicing in Python — a large tenant's IdP paging through the

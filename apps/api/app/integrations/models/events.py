@@ -62,6 +62,9 @@ class EventDelivery(Base):
             postgresql_where="replay_of IS NULL",
         ),
         Index("ix_intg_delivery_sub_status", "subscription_id", "status", "created_at"),
+        # R163: the nightly retention sweep deletes by (status, created_at)
+        # across all subscriptions — needs its own leading-status index.
+        Index("ix_intg_delivery_status_created", "status", "created_at"),
     )
 
     id: Mapped[str] = ulid_pk()
