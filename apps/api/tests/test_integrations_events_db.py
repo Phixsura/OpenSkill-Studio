@@ -946,3 +946,20 @@ async def test_bulk_replay_exhausted(db):
     with pytest.raises(AppError) as e2:
         await replay_exhausted(db, other.id, sub.id)
     assert e2.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_emit_event_rejects_non_finite_and_unserializable_data(db):
+    """R211 (R87/R210 class): NaN/Infinity or a non-JSON type in event data
+    must be a clean 422 from emit_event — not a JSONB failure at flush that
+    poisons the CALLER's domain transaction."""
+    from datetime import datetime as _dt
+
+    org = await _org(db)
+    for bad in ({"score": float("nan")}, {"ts": _dt(2026, 1, 1)}, {"inf": float("inf")}):
+        with pytest.raises(AppError) as e:
+            await emit_event(db, org.id, "project.approved", subject="x", data=bad)
+        assert e.value.code == "EVENT_DATA_INVALID"
+    # the session stays usable and a valid emit still works
+    ev = await emit_event(db, org.id, "project.approved", subject="ok", data={"score": 1.0})
+    assert ev.data == {"score": 1.0}

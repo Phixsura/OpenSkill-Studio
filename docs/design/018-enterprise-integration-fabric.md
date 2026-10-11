@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R211 (fifth window, R87/R210-class fix — mutation-killed)**: `emit_event`
+  size-checked data with bare `json.dumps` (allow_nan=True, no default): a
+  NaN/Infinity passed the check and failed at the JSONB flush — INSIDE the
+  caller's domain transaction (poisoned session, domain write 500); a
+  datetime/Decimal in data raised TypeError from the size check itself. Fix:
+  `json.dumps(payload, allow_nan=False)` + catch → clean 422
+  EVENT_DATA_INVALID before anything is added to the session.
 - **R210 (fifth window, R87-class fix — mutation-killed)**: `apply_mapping`'s
   non-finite gate only checked a TOP-LEVEL float. `json.loads` — and therefore
   every connector's `resp.json()` — accepts `NaN`/`Infinity`, so a provider

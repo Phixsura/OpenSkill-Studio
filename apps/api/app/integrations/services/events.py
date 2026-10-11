@@ -83,7 +83,18 @@ async def emit_event(
     under the same reverse-DNS root.
     """
     payload = data or {}
-    if len(json.dumps(payload)) > _MAX_DATA_BYTES:
+    # R211 (R87/R210 class): gate serializability HERE, in the caller's txn,
+    # with a clean error. allow_nan=False raises on NaN/Infinity (json.dumps
+    # otherwise emits them and the JSONB INSERT fails at flush — poisoning
+    # the caller's domain transaction); a datetime/Decimal/set in data would
+    # TypeError the same way.
+    try:
+        blob = json.dumps(payload, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            "EVENT_DATA_INVALID", "event data must be finite, JSON-serializable", 422
+        ) from exc
+    if len(blob) > _MAX_DATA_BYTES:
         raise AppError("EVENT_DATA_TOO_LARGE", "event data exceeds 64KB", 422)
     full_type = f"{EVENT_NAMESPACE}{event_type}.v{version}"
     event = IntegrationEvent(
