@@ -360,9 +360,14 @@ class ScimUserService:
                 ).where(ExternalIdentityLink.external_id == value)
             else:
                 raise ScimError(400, f"Unsupported filter attribute: {attr}", "invalidFilter")
-        rows = (await self.db.execute(q)).all()
-        total = len(rows)
-        page = rows[start_index - 1 : start_index - 1 + count]
+        # R162: push paging into SQL so a large tenant does not materialize
+        # every row on each page (IdPs page through the whole directory).
+        total = (
+            await self.db.execute(select(func.count()).select_from(q.subquery()))
+        ).scalar_one()
+        page = (
+            await self.db.execute(q.offset(start_index - 1).limit(count))
+        ).all()
         resources = []
         for user, member in page:
             resources.append(_user_resource(user, member, await self._link_for(user.id)))
@@ -603,17 +608,17 @@ class ScimGroupService:
         return _group_resource(group, await self._member_ids(group.id))
 
     async def list(self, *, start_index: int, count: int) -> dict:
-        groups = list(
+        base = select(ScimGroup).where(ScimGroup.org_id == self.org_id)
+        total = (
+            await self.db.execute(select(func.count()).select_from(base.subquery()))
+        ).scalar_one()
+        page = list(
             (
                 await self.db.execute(
-                    select(ScimGroup)
-                    .where(ScimGroup.org_id == self.org_id)
-                    .order_by(ScimGroup.id)
+                    base.order_by(ScimGroup.id).offset(start_index - 1).limit(count)
                 )
             ).scalars()
         )
-        total = len(groups)
-        page = groups[start_index - 1 : start_index - 1 + count]
         resources = [_group_resource(g, await self._member_ids(g.id)) for g in page]
         return {
             "schemas": [SCIM_LIST_SCHEMA],

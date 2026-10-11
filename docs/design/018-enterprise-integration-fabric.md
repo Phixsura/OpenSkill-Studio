@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R162 (fourth window, scalability)**: SCIM User/Group list now pages at
+  the SQL level (offset/limit + a separate count) instead of materializing
+  every row and slicing in Python — a large tenant's IdP paging through the
+  whole directory was O(n) rows loaded per page (O(n²) total). Test asserts
+  stable totals, non-overlapping pages, and the count=0 total-probe.
+
 - **R161 (fourth window)**: connection ping triggers an outbound call, so
   it gains a 20/60s limit too (throttles SSRF-probe attempts); folded into
   the rate-limit coverage contract test.

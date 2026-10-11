@@ -673,3 +673,28 @@ async def test_scim_event_feed_mirrors_lifecycle(ctx):
     for e in events:
         assert set(e.data) == {"user_id", "token_id"}  # ids only, no PII
         assert email not in str(e.data)
+
+
+@pytest.mark.asyncio
+async def test_user_list_paginates_at_sql_level(ctx):
+    """R162: list pages via SQL offset/limit — total is stable across pages,
+    pages do not overlap, and successive pages advance."""
+    svc = _usvc(ctx)
+    for _ in range(5):
+        await svc.create(
+            {"userName": f"pg-{uuid.uuid4().hex[:8]}@scim.example.edu", "active": True}
+        )
+
+    p1 = await svc.list(filter_expr=None, start_index=1, count=2)
+    p2 = await svc.list(filter_expr=None, start_index=3, count=2)
+    p3 = await svc.list(filter_expr=None, start_index=5, count=2)
+    assert p1["totalResults"] == p2["totalResults"] == p3["totalResults"]
+    assert p1["totalResults"] >= 5
+    ids1 = {r["id"] for r in p1["Resources"]}
+    ids2 = {r["id"] for r in p2["Resources"]}
+    ids3 = {r["id"] for r in p3["Resources"]}
+    assert len(ids1) == 2 and len(ids2) == 2
+    assert not (ids1 & ids2) and not (ids2 & ids3) and not (ids1 & ids3)
+    # count=0 is a legitimate "just tell me the total" probe
+    p0 = await svc.list(filter_expr=None, start_index=1, count=0)
+    assert p0["Resources"] == [] and p0["totalResults"] >= 5
