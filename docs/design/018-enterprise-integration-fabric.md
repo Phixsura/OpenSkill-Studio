@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R154 (third window)**: SCIM ServiceProviderConfig's advertised
+  `bulk.maxOperations` now reads the same constant `apply_bulk` enforces —
+  the two can no longer drift.
+
 - **R153 (third window)**: the error report's last column is now a
   kind-appropriate `identifier` (email for users/roster, title for
   opportunities) instead of a users-only email column — still
