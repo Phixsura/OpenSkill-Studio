@@ -638,6 +638,7 @@ describe("data page", () => {
           body: JSON.stringify({
             name: "scored",
             dataset: "events",
+            schedule: "manual",
             field_allowlist: ["id", "type", "data.score"],
           }),
         }),

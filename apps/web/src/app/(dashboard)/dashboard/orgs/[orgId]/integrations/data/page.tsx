@@ -70,6 +70,7 @@ export default function DataIntegrationsPage() {
   const [streamName, setStreamName] = useState("");
   const [dataset, setDataset] = useState("events");
   const [streamFields, setStreamFields] = useState("");
+  const [streamSchedule, setStreamSchedule] = useState("manual");
   const mountKey = useRef(Math.random().toString(36).slice(2, 10));
   const [openStream, setOpenStream] = useState<string | null>(null);
 
@@ -165,6 +166,7 @@ export default function DataIntegrationsPage() {
         body: JSON.stringify({
           name: streamName,
           dataset,
+          schedule: streamSchedule,
           ...(fields.length ? { field_allowlist: fields } : {}),
         }),
       });
@@ -173,6 +175,7 @@ export default function DataIntegrationsPage() {
       toast.success("Export stream created");
       setStreamName("");
       setStreamFields("");
+      setStreamSchedule("manual");
       queryClient.invalidateQueries({ queryKey: ["intg-export-streams", orgId] });
     },
     onError,
@@ -429,6 +432,16 @@ export default function DataIntegrationsPage() {
           >
             <option value="events">events</option>
             <option value="enrollments">enrollments</option>
+          </select>
+          <select
+            aria-label="Stream schedule"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={streamSchedule}
+            onChange={(e) => setStreamSchedule(e.target.value)}
+          >
+            <option value="manual">manual</option>
+            <option value="hourly">hourly</option>
+            <option value="daily">daily</option>
           </select>
           <Input
             aria-label="Stream fields"

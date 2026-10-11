@@ -917,6 +917,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R184 (fourth window, UI)**: export-stream create form gains a schedule
+  selector (manual/hourly/daily) so the R183 cadences are reachable from the
+  admin surface.
 - **R183 (fourth window, feature parity)**: warehouse export streams gain an
   `hourly` schedule (sync already had it); `sweep_scheduled_exports` is now
   cadence-aware (per-schedule timedelta: hourly 1h, daily 1d, manual never)
