@@ -100,3 +100,70 @@ def test_sanitize_cell_idempotent_and_neutralizing(cell):
     assert _sanitize_cell(once) == once or once.startswith("'")
     if once:
         assert once[0] not in ("=", "+", "-", "@", "\t")
+
+
+# ── R137: import parser properties (R128-R131 surface) ──
+
+
+@given(st.binary(max_size=2000))
+@settings(max_examples=200, deadline=None)
+def test_detect_format_total(blob):
+    """detect_format is total over arbitrary bytes and returns a known kind."""
+    from app.integrations.services.bulk_import import detect_format
+
+    assert detect_format(blob) in ("csv", "json")
+
+
+@given(st.binary(max_size=2000))
+@settings(max_examples=200, deadline=None)
+def test_parse_users_any_bytes_never_raises(blob):
+    """Both parsers are total over arbitrary bytes for every kind: garbage
+    becomes (rows=[], errors=[...]) or valid rows — never an exception."""
+    from app.integrations.services.bulk_import import detect_format, parse_users
+
+    for kind in ("users", "roster", "opportunities"):
+        rows, errors = parse_users(blob, detect_format(blob), {}, kind=kind)
+        assert isinstance(rows, list) and isinstance(errors, list)
+
+
+_EMAILS = st.from_regex(r"[a-z0-9]{1,10}@[a-z0-9]{1,8}\.[a-z]{2,4}", fullmatch=True)
+_NAMES = st.text(
+    alphabet=string.ascii_letters + string.digits + " -_",
+    min_size=0, max_size=30,
+)
+
+
+@given(
+    st.lists(
+        st.tuples(_EMAILS, _NAMES, st.sampled_from(["student", "instructor", ""])),
+        min_size=0, max_size=8,
+    )
+)
+@settings(max_examples=400, deadline=None)
+def test_csv_json_parity_for_users(rows):
+    """Format parity: the same logical rows as CSV and as JSON validate to
+    the same (email, display, role) multiset — JSON is a first-class
+    template, not a lookalike."""
+    import csv as _csv
+    import io as _io
+    import json as _json
+
+    from app.integrations.services.bulk_import import parse_users
+
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["email", "display_name", "role"])
+    for e, d, r in rows:
+        w.writerow([e, d, r])
+    csv_rows, csv_errors = parse_users(buf.getvalue().encode(), "csv")
+
+    payload = _json.dumps(
+        [{"email": e, "display_name": d, "role": r} for e, d, r in rows]
+    ).encode()
+    json_rows, json_errors = parse_users(payload, "json")
+
+    def key(row):
+        return (row["email"], row["display_name"], row["role"])
+
+    assert sorted(map(key, csv_rows)) == sorted(map(key, json_rows))
+    assert len(csv_errors) == len(json_errors)

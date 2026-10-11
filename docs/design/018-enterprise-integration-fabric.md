@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R137 (third window, properties)**: hypothesis coverage over the new
+  parse surface — detect_format and both parsers total over arbitrary
+  bytes for all three kinds; CSV/JSON format PARITY (same logical rows
+  validate to the same multiset, 400 examples). Writing the parity
+  property exposed a real asymmetry — the CSV path strips every cell but
+  JSON values kept whitespace — fixed by stripping in `_canon_obj`.
+
 - **R136 (third window, race)**: TRUE-concurrency test over the new
   roster apply path — two different jobs, same (user, cohort) pair,
   committed via two real sessions: exactly one membership lands, the

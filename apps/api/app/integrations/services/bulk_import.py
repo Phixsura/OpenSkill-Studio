@@ -249,7 +249,8 @@ def parse_users_json(
                 if src == key:
                     key = canon
                     break
-            out[key] = v
+            # Parity with the CSV path, which strips every cell (R137).
+            out[key] = v.strip() if isinstance(v, str) else v
         return out
 
     raw_rows = []
