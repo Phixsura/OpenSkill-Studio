@@ -1053,3 +1053,35 @@ async def test_3xx_is_a_delivery_failure_not_success(db, egress):
     assert attempt.error == "http_302"
     assert delivery.status == "pending"  # scheduled for retry, NOT succeeded
     assert delivery.next_attempt_at is not None
+
+
+@pytest.mark.asyncio
+async def test_fresh_failures_do_not_auto_disable_early(db, egress):
+    """R241 (survivor pin — the NEGATIVE direction of the 5-day rule): an
+    endpoint that just started failing must NOT be auto-disabled. Shrinking
+    AUTO_DISABLE_AFTER to 0 made every first exhaustion disable the sub and
+    nothing caught it; the 5-day test only pins the positive direction."""
+    from app.integrations.services.events import (
+        _maybe_auto_disable,
+        handle_event_created,
+    )
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="fr-1", data={})
+    await db.flush()
+    await handle_event_created(db, {"event_id": ev.id})
+    delivery = (
+        await db.execute(
+            select(EventDelivery).where(
+                EventDelivery.event_id == ev.id, EventDelivery.subscription_id == sub.id
+            )
+        )
+    ).scalar_one()
+    # Exhaust it NOW (fresh failure evidence, minutes old at most).
+    delivery.status = "exhausted"
+    delivery.next_attempt_at = None
+    await db.flush()
+    await _maybe_auto_disable(db, sub, datetime.now(UTC))
+    await db.flush()
+    assert sub.active is True  # fresh failures never disable early

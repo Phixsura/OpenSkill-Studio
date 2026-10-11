@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R241 (seventh window, survivor pin)**: the 5-day auto-disable rule was
+  pinned only in the POSITIVE direction — shrinking the window to 0 days
+  (every first exhaustion disables the endpoint) survived the suite. New
+  negative-direction test: a freshly-exhausted delivery must leave the
+  subscription ACTIVE. Batch also killed: retention-deletes-pending,
+  internal-events-wildcard-routable, dynreg platform-claim + egress-screen
+  (4).
 - **R239/R240 (seventh window, survivor pins — foreground sweep)**: two more
   survivors pinned. R239: no test bounded a single JMESPath expression
   (MAX_EXPR_LEN) — the 64KB document cap only partially shadows it; a direct
