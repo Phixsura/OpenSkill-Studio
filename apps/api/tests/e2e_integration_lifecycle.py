@@ -532,9 +532,10 @@ async def main() -> int:
                 )
 
         # ── opportunities kind over HTTP: drafts behind the profile gate ──
+        opp_title = f"E2E Role {uuid.uuid4().hex[:6]}"
         opp_json = json.dumps(
             {"opportunities": [
-                {"title": f"E2E Role {uuid.uuid4().hex[:6]}",
+                {"title": opp_title,
                  "opportunity_type": "internship", "location_mode": "remote"},
             ]}
         )
@@ -580,7 +581,7 @@ async def main() -> int:
             )
             check(
                 "imported posting is draft-only",
-                r.status_code == 200,
+                r.status_code == 200 and opp_title in r.text,
                 r.text[:200],
             )
 
