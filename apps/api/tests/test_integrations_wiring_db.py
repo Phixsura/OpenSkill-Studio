@@ -186,3 +186,48 @@ async def test_create_brief_emits_catalog_event(db):
     assert rows[0].subject == brief.id
     # CRM-safe payload: ids/title/client/status only — no learner data.
     assert set(rows[0].data) == {"brief_id", "title", "client_name", "status"}
+
+
+@pytest.mark.asyncio
+async def test_invoice_finalized_routes_to_every_tenant_org_ids_only(db):
+    """P10/R76: invoice.finalized mirrors into the mesh for EVERY org under
+    the tenant, carrying ids only — never amounts (privacy boundary)."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.billing import Invoice
+    from app.controlplane.services.billing import finalize_invoice
+    from app.controlplane.services.tenants import Actor
+    from app.integrations.models import IntegrationEvent
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    tenant_id = org.tenant_id
+    # Second org under the SAME tenant.
+    org2 = Organization(
+        name=f"Org2 {ULID()}", slug=f"o2-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE, tenant_id=tenant_id, created_by=owner.id,
+    )
+    db.add(org2)
+    await db.flush()
+
+    inv = Invoice(
+        tenant_id=tenant_id, status="draft", currency="USD",
+        subtotal_minor=12345, total_minor=12345, amount_due_minor=12345,
+    )
+    db.add(inv)
+    await db.flush()
+    await finalize_invoice(db, inv, actor=Actor(user_id=owner.id, type="platform"))
+    await db.flush()
+
+    events = (
+        await db.execute(
+            _select(IntegrationEvent).where(
+                IntegrationEvent.subject == inv.id,
+                IntegrationEvent.type == "com.openskill.invoice.finalized.v1",
+            )
+        )
+    ).scalars().all()
+    assert {e.org_id for e in events} == {org.id, org2.id}
+    for e in events:
+        assert e.data == {"invoice_id": inv.id, "tenant_id": tenant_id}
+        assert "12345" not in str(e.data)  # amounts never leak into the mesh
