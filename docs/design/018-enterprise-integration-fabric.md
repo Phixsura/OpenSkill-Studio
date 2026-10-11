@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R203 (fifth window, observability coverage)**: test pins that an export
+  over an empty source still writes a manifest (row_count=0, parts=[]) and
+  succeeds — the run stays observable in the warehouse, never a silent no-op.
 - **R202 (fifth window, push credential coverage)**: R194 fixed both the
   read AND push ctx; added a push-path test (secret-capturing ATS connector)
   proving the decrypted api_key reaches the connector during write — the read

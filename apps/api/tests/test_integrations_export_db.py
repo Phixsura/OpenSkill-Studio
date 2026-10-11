@@ -510,3 +510,23 @@ async def test_sweep_scheduled_exports_hourly_cadence(db):
     run.created_at = datetime.now(UTC) - timedelta(hours=2)
     await db.flush()
     assert await sweep_scheduled_exports(db, writer) == 1
+
+
+@pytest.mark.asyncio
+async def test_export_empty_source_still_writes_manifest(db):
+    """R203: an export over an empty source still produces a manifest
+    (row_count=0, parts=[]) and succeeds — the run is observable in the
+    warehouse, never a silent no-op."""
+    org, owner = await _org(db)
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    stream = await svc.create_stream(org.id, name=f"empty-{ULID()}", dataset="events")
+    # No events emitted for this org → zero rows.
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded"
+    assert run.row_count == 0
+    assert run.manifest_key in writer.files
+    manifest = json.loads(writer.files[run.manifest_key])
+    assert manifest["row_count"] == 0
+    assert manifest["parts"] == []
+    assert manifest["generated_at"]
