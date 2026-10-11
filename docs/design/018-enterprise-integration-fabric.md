@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R235 (seventh window, clean-harness verification record)**: after the
+  R234 pycache fix, re-probed the security cores with the hygienic harness:
+  export projection (drop/hash/salt/allowlist-bypass — 4), webhook signature
+  composition (1), SCIM deprovision (session revoke, membership archive — 2),
+  SAML condition window (expiry, no-expiry, audience — 3), delivery ladder
+  boundaries (3). 13/13 KILLED, zero survivors; the sole historical survivor
+  (3xx success window) is now pinned by R234's test.
 - **R234 (seventh window, survivor pin + methodology fix)**: no test pinned
   "a 3xx is a delivery FAILURE" (Standard Webhooks requires 2xx; EgressClient
   never follows redirects, so a 302 is not acceptance). New test: a 302
