@@ -106,12 +106,23 @@ sessions are revoked, `integration.sso.single_logout` fires, and a
 LogoutResponse is redirected to the IdP's SLO URL (captured automatically
 from metadata). OIDC orgs get the same via back-channel logout.
 
-## 4a. Imports with vendor CSV headers (R92)
+## 4a. Imports: kinds, formats and vendor headers (R92/R128-R131)
+
+Three template kinds (`kind` form field): `users` (email, display_name,
+role student|instructor), `roster` (email, cohort_slug, role
+learner|instructor — enrolls EXISTING active org members; import users
+first), and `opportunities` (title, opportunity_type, description,
+location_mode, location_text, compensation_display, openings — lands as
+DRAFTS only; a human publishes). Files may be CSV or JSON (a top-level
+array, or `{"<kind>": [...]}`); the format is sniffed from content, no
+extra field needed.
 
 Pass `header_map` (JSON form field) at upload:
 `{"email": "E-mail Address", "display_name": "Full Name", "role": "Role"}`.
 The map is persisted on the job, so commit re-parses identically; unknown
-canonical keys are refused.
+canonical keys are refused. Re-imports are idempotent: users match by
+email, roster by (user, cohort), opportunities by lower(title) — and an
+existing member/posting's role/status is never changed by an import.
 
 ## 4b. Editing and removing resources (R77-R84)
 
@@ -144,16 +155,16 @@ Record-level rows carry `conflict_class`:
 
 ## 6. Scheduled jobs (worker crons)
 
-| job                   | schedule        | does                                                             |
-| --------------------- | --------------- | ---------------------------------------------------------------- |
-| intg_domain_sweep     | :07/:22/:37/:52 | DNS-poll pending domains, expire after 7d                        |
-| intg_scheduled_syncs  | :03/:33         | trigger due hourly/daily sync profiles                           |
-| intg_stale_run_reaper | :09/:39         | fail runs stuck in running                                       |
-| intg_conn_health      | :14/:44         | ping active/degraded connections; alert on unhealthy transition  |
-| intg_retention        | 03:52           | age out terminal deliveries (90d), events/runs/row-errors (180d) |
-| intg_metadata_refresh | 05:37           | re-poll SAML IdP metadata (cert rotation)                        |
-| intg_cert_expiry      | 06:18           | 30-day cert expiry alerts                                        |
-| intg_exports          | 02:47           | run due daily export streams                                     |
+| job                   | schedule        | does                                                                                                                                                  |
+| --------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| intg_domain_sweep     | :07/:22/:37/:52 | DNS-poll pending domains, expire after 7d                                                                                                             |
+| intg_scheduled_syncs  | :03/:33         | trigger due hourly/daily sync profiles                                                                                                                |
+| intg_stale_run_reaper | :09/:39         | fail runs stuck in running                                                                                                                            |
+| intg_conn_health      | :14/:44         | ping active/degraded connections; alert on unhealthy transition                                                                                       |
+| intg_retention        | 03:52           | age out terminal deliveries (90d), events/runs/row-errors (180d); purge stored import FILES for terminal jobs >90d (R134 — they are full PII rosters) |
+| intg_metadata_refresh | 05:37           | re-poll SAML IdP metadata (cert rotation)                                                                                                             |
+| intg_cert_expiry      | 06:18           | 30-day cert expiry alerts                                                                                                                             |
+| intg_exports          | 02:47           | run due daily export streams                                                                                                                          |
 
 All registered names are pinned by `test_every_fabric_sweep_has_a_registered_cron`.
 
