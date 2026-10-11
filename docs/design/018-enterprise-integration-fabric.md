@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R156 (fourth window, e2e hygiene)**: live E2E exercises the bulk-replay
+  endpoint and now DELETEs the webhook subscription it created (same
+  cleanup discipline as the R150 domain fix) — repeated e2e runs no longer
+  accumulate active subscriptions that pollute the shared dev Postgres.
+  E2E 62/62.
+
 - **R155 (fourth window, DLQ bulk recovery)**: `replay_exhausted` requeues
   every exhausted delivery of one subscription (newest first, capped 500/
   call; repeat to drain a backlog) for operator recovery after an endpoint

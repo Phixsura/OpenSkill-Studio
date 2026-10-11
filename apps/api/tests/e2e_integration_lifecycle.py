@@ -327,6 +327,7 @@ async def main() -> int:
             headers=h,
         )
         check("mesh-pattern subscription accepted", r.status_code == 201, r.text[:300])
+        sub_id = r.json()["data"]["id"] if r.status_code == 201 else None
         event_id = await emit_mesh_event(org_id, {"project_id": "p-e2e", "user_id": "u"})
         await drive_outbox()
         await asyncio.sleep(0.2)
@@ -599,9 +600,20 @@ async def main() -> int:
             r = await c.get(path, headers=mallory)
             check(f"wall {path.split('/')[-1]}", r.status_code in (403, 404), str(r.status_code))
 
+        # ── bulk replay of exhausted deliveries (R155) ──
+        if sub_id:
+            r = await c.post(f"{base}/webhooks/{sub_id}/replay-exhausted", headers=h)
+            check(
+                "bulk replay endpoint responds with a count",
+                r.status_code == 200 and "requeued" in r.json().get("data", {}),
+                r.text[:200],
+            )
+
         # ── cleanup (best effort) ──
         await c.delete(f"{base}/connections/{conn_id}", headers=h)
         await c.delete(f"{base}/domains/{domain_id}", headers=h)
+        if sub_id:
+            await c.delete(f"/orgs/{org_id}/webhooks/{sub_id}", headers=h)
 
     await sink.stop()
     print(f"\nPASS={PASS} FAIL={FAIL}")
