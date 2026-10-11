@@ -667,6 +667,15 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     # bound to our delivery regardless of concurrent/leftover state.
     sink_url = f"https://hooks.example.com/sn-{uuid.uuid4().hex[:8]}"
     await _sub(db, org, url=sink_url)
+    # Clear leftover pending outbox so the bounded _drain (rounds=10) is
+    # guaranteed to reach THIS test's event — a large backlog would otherwise
+    # starve it and break the 2-attempt sequence. URL-scoped codes above keep
+    # the sequence correct; this keeps the drain timely.
+    from sqlalchemy import delete as _delete
+
+    from app.controlplane.models.outbox import OutboxMessage as OutboxModel2
+
+    await db.execute(_delete(OutboxModel2).where(OutboxModel2.status == "pending"))
     await db.commit()
     mine = {"n": 0}
 
