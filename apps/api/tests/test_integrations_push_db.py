@@ -301,3 +301,40 @@ async def test_consent_revoke_then_regrant_last_write_wins(db):
     await db.refresh(run3)
     assert run3.stats["conflicts"] == 0
     assert app_row.id  # anchor
+
+
+@pytest.mark.asyncio
+async def test_push_loads_connection_credentials(db):
+    """R194 (push path): a push/write sync must hand the connector the
+    decrypted connection secret too — not just the read path. A secret-
+    capturing ATS connector must see the api_key during write."""
+    from app.integrations import registry
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+    seen = {}
+
+    class SecretCapturingAts:
+        key = "generic_ats"
+        capabilities = frozenset({"talent.write"})
+
+        async def ping(self, ctx):
+            return None
+
+        async def write(self, ctx, model, records):
+            seen.update(await ctx.get_secret())
+            return [{"external_id": r["external_id"], "ok": True, "error": None} for r in records]
+
+    conn, profile = await _setup(db, org, owner, SecretCapturingAts())
+    await ConnectionService(db).set_credential(
+        org.id, conn.id, kind="api_key", values={"api_key": "ats-secret-xyz"},
+        expires_at=None,
+    )
+    registry.CONNECTORS["generic_ats"] = SecretCapturingAts()
+    app_row, _cand = await _application(db, org, consent="granted")
+    await db.commit()
+
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    assert seen.get("api_key") == "ats-secret-xyz"

@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R202 (fifth window, push credential coverage)**: R194 fixed both the
+  read AND push ctx; added a push-path test (secret-capturing ATS connector)
+  proving the decrypted api_key reaches the connector during write — the read
+  path had R194's test, the push path now has its own.
 - **R201 (fifth window, probe over R196/R198)**: mutation probe killed the
   preview-direction and atomic-status mutants; the surviving "preview limit
   not enforced across batches" mutant was a REAL coverage gap (the test used
