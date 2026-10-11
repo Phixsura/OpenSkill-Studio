@@ -552,3 +552,25 @@ def test_redirect_uris_derive_from_config_not_host_header():
     assert "evil.attacker.example" not in _launch_redirect_uri(req)
     assert _callback_uri(req).endswith("/api/v1/sso/oidc/callback")
     assert _launch_redirect_uri(req).endswith("/api/v1/lti/launch")
+
+
+def test_oauth_scopes_stay_least_privilege():
+    """R104 (Part O): every outbound token request pins its MINIMAL scope —
+    widening any of these is privilege creep and must be a conscious edit."""
+    from pathlib import Path
+
+    import app.integrations.registry as reg_mod
+    import app.integrations.services.lti as lti_mod
+    import app.integrations.services.lti_ags as ags_mod
+    import app.integrations.services.lti_nrps as nrps_mod
+    import app.integrations.services.sso_oidc as oidc_mod
+
+    assert ags_mod.AGS_SCORE_SCOPE == "https://purl.imsglobal.org/spec/lti-ags/scope/score"
+    assert nrps_mod.NRPS_SCOPE == (
+        "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
+    )
+    assert '"scope": "https://purl.imsglobal.org/spec/or/v1p2/scope/roster.readonly"' in (
+        Path(reg_mod.__file__).read_text()
+    )
+    assert '"scope": "openid email profile"' in Path(oidc_mod.__file__).read_text()
+    assert '"scope": "openid",' in Path(lti_mod.__file__).read_text()
