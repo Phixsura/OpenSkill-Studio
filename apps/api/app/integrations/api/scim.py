@@ -45,8 +45,11 @@ async def _auth(
 
 
 async def _run(db: AsyncSession, authorization: str | None, fn):
-    """Authenticate, run, commit; render ScimError as its RFC body. The
-    error path still commits — last_used_at and audit rows must survive."""
+    """Authenticate, run, commit; render ScimError as its RFC body. On a
+    ScimError the whole operation is ROLLED BACK (atomicity — a partially
+    applied op must not persist); the best-effort last_used_at bump and any
+    audit row written before the error roll back with it, which is correct
+    because the action they describe did not take effect."""
     try:
         token = await _auth(db, authorization)
         result = await fn(token)
