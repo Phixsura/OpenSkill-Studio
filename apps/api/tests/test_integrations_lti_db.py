@@ -561,3 +561,125 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
     with pytest.raises(AppError) as exc2:
         await sync_memberships(db, org.id, link2.id, egress=platform)
     assert exc2.value.code == "LTI_NRPS_UNAVAILABLE"
+
+
+# ── R87: Dynamic Registration ──
+
+
+@pytest.mark.asyncio
+async def test_dynamic_registration_full_flow_and_screens(db):
+    import json as _json
+
+    from app.integrations.services.lti_dynreg import (
+        PLATFORM_CONFIG_CLAIM,
+        TOOL_CONFIG_CLAIM,
+        dynamic_register,
+    )
+
+    org, owner = await _org(db)
+    iss = f"https://lms-{uuid.uuid4().hex[:6]}.example.com"
+    config = {
+        "issuer": iss,
+        "authorization_endpoint": f"{iss}/auth",
+        "token_endpoint": f"{iss}/token",
+        "jwks_uri": f"{iss}/jwks",
+        "registration_endpoint": f"{iss}/register",
+        PLATFORM_CONFIG_CLAIM: {"product_family_code": "moodle"},
+    }
+
+    class FakePlatform:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.registration_body = None
+            self.auth_header = None
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            path = urlsplit(url).path
+            if path.endswith("/.well-known/openid-configuration"):
+                return httpx.Response(200, json=self.cfg, request=httpx.Request(method, url))
+            if path.endswith("/register"):
+                self.registration_body = _json.loads(content)
+                self.auth_header = (headers or {}).get("authorization")
+                return httpx.Response(
+                    201,
+                    json={
+                        "client_id": "dyn-client-9",
+                        TOOL_CONFIG_CLAIM: {"deployment_ids": ["dep-A", "dep-B"]},
+                    },
+                    request=httpx.Request(method, url),
+                )
+            return httpx.Response(404, request=httpx.Request(method, url))
+
+    platform = FakePlatform(config)
+    reg = await dynamic_register(
+        db, org.id,
+        openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+        registration_token="one-time-tok",
+        egress=platform,
+    )
+    assert reg.client_id == "dyn-client-9" and reg.issuer == iss
+    assert platform.auth_header == "Bearer one-time-tok"
+    sent = platform.registration_body
+    assert sent["token_endpoint_auth_method"] == "private_key_jwt"
+    assert sent["jwks_uri"].endswith("/api/v1/lti/jwks")
+    msg_types = {m["type"] for m in sent[TOOL_CONFIG_CLAIM]["messages"]}
+    assert msg_types == {"LtiResourceLinkRequest", "LtiDeepLinkingRequest"}
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import LtiDeployment
+
+    deps = (
+        await db.execute(
+            _select(LtiDeployment.deployment_id).where(
+                LtiDeployment.registration_id == reg.id
+            )
+        )
+    ).scalars().all()
+    assert sorted(deps) == ["dep-A", "dep-B"]
+
+    # Plain OIDC server (no platform claim) refused.
+    bare = dict(config)
+    bare.pop(PLATFORM_CONFIG_CLAIM)
+    bare["issuer"] = f"{iss}-bare"
+    with pytest.raises(AppError) as e1:
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+            registration_token=None,
+            egress=FakePlatform(bare),
+        )
+    assert e1.value.code == "LTI_DYNREG_CONFIG_INVALID"
+
+    # Private registration_endpoint refused by the egress screen.
+    evil = dict(config)
+    evil["issuer"] = f"{iss}-evil"
+    evil["registration_endpoint"] = "https://169.254.169.254/register"
+    from app.integrations.security import EgressBlockedError
+
+    with pytest.raises(EgressBlockedError):
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+            registration_token=None,
+            egress=FakePlatform(evil),
+        )
+
+    # Platform refusal (403) surfaces as 502-class, not a crash.
+    class Refusing(FakePlatform):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/register"):
+                return httpx.Response(403, request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    ref_cfg = dict(config)
+    ref_cfg["issuer"] = f"{iss}-ref"
+    with pytest.raises(AppError) as e2:
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{iss}/.well-known/openid-configuration",
+            registration_token="t",
+            egress=Refusing(ref_cfg),
+        )
+    assert e2.value.code == "LTI_DYNREG_REFUSED"

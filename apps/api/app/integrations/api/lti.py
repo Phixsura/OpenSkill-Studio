@@ -170,6 +170,39 @@ class DeepLinkSelectRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class DynamicRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    openid_configuration_url: str = Field(min_length=12, max_length=500)
+    registration_token: str | None = Field(default=None, max_length=2000)
+
+
+@admin_router.post(
+    "/registrations/dynamic", response_model=DataResponse[LtiRegistrationResponse],
+    status_code=201,
+)
+async def dynamic_registration(
+    org_id: str,
+    body: DynamicRegistrationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R87 — LTI Dynamic Registration 1.0: paste the platform's
+    openid-configuration URL (+ one-time token) and the whole registration
+    is negotiated automatically."""
+    from app.integrations.services.lti_dynreg import dynamic_register
+
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    reg = await dynamic_register(
+        db,
+        org_id,
+        openid_configuration_url=body.openid_configuration_url,
+        registration_token=body.registration_token,
+    )
+    resp = await _reg_response(db, reg)
+    await db.commit()
+    return {"data": resp}
+
+
 @admin_router.delete("/registrations/{reg_id}", status_code=204)
 async def delete_registration(
     org_id: str,
