@@ -392,8 +392,11 @@ async def resolve_identity_queue(
 
 
 def _callback_uri(request: Request) -> str:
-    # Single fixed redirect URI per environment (multi-tenant pattern).
-    base = str(request.base_url).rstrip("/")
+    """Single fixed redirect URI per environment (multi-tenant pattern).
+    R101 (Part O allowlisted redirect URIs): derived from the CONFIGURED
+    public base URL, never the Host header — a spoofed Host must not steer
+    the redirect_uri we register with the IdP."""
+    base = settings.public_base_url.rstrip("/")
     return f"{base}/api/v1/sso/oidc/callback"
 
 

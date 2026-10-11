@@ -532,3 +532,23 @@ def test_request_with_retry_honors_retry_after_and_caps():
         assert s.calls == 1
 
     asyncio.run(main())
+
+
+def test_redirect_uris_derive_from_config_not_host_header():
+    """R101 (Part O): a spoofed Host header must not steer the redirect_uri
+    we hand to IdPs/platforms."""
+    from starlette.requests import Request
+
+    from app.integrations.api.lti import _launch_redirect_uri
+    from app.integrations.api.sso import _callback_uri
+
+    scope = {
+        "type": "http", "method": "GET", "path": "/", "query_string": b"",
+        "headers": [(b"host", b"evil.attacker.example")],
+        "server": ("evil.attacker.example", 443), "scheme": "https",
+    }
+    req = Request(scope)
+    assert "evil.attacker.example" not in _callback_uri(req)
+    assert "evil.attacker.example" not in _launch_redirect_uri(req)
+    assert _callback_uri(req).endswith("/api/v1/sso/oidc/callback")
+    assert _launch_redirect_uri(req).endswith("/api/v1/lti/launch")

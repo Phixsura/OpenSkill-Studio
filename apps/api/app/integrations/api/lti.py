@@ -333,7 +333,8 @@ async def lti_tool_jwks(db: AsyncSession = Depends(get_db)):
 
 
 def _launch_redirect_uri(request: Request) -> str:
-    return f"{str(request.base_url).rstrip('/')}/api/v1/lti/launch"
+    # R101: configured base, never the Host header (spoofable).
+    return f"{settings.public_base_url.rstrip('/')}/api/v1/lti/launch"
 
 
 @protocol_router.get("/login", dependencies=[Depends(rate_limit(60, 60))])
