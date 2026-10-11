@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.exceptions import AppError
+from app.integrations.facade import record_fabric_audit
 from app.integrations.services.mapping import MappingService
 from app.integrations.services.sync_engine import SyncProfileService
 from app.models.organization import OrgRole
@@ -143,6 +144,9 @@ async def create_mapping(
         connection_id=body.connection_id,
     )
     resp = MappingResponse.model_validate(row, from_attributes=True)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.mapping.created", "mapping_profile", row.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -170,6 +174,9 @@ async def update_mapping(
     await _admin(org_id, user, db)
     row = await MappingService(db).update_document(org_id, profile_id, body.document)
     resp = MappingResponse.model_validate(row, from_attributes=True)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.mapping.updated", "mapping_profile", row.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -220,6 +227,9 @@ async def create_sync_profile(
         options=body.options,
     )
     resp = SyncProfileResponse.model_validate(row, from_attributes=True)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sync_profile.created", "sync_profile", row.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -253,6 +263,9 @@ async def update_sync_profile(
         repin_mapping=body.repin_mapping,
     )
     resp = SyncProfileResponse.model_validate(profile, from_attributes=True)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sync_profile.updated", "sync_profile", profile.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -304,6 +317,9 @@ async def delete_sync_profile(
     if live is not None:
         raise AppError("SYNC_PROFILE_BUSY", "Cancel the live run first", 409)
     await db.delete(profile)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sync_profile.deleted", "sync_profile", profile_id
+    )
     await db.commit()
 
 
@@ -330,6 +346,9 @@ async def delete_mapping_profile(
     if ref is not None:
         raise AppError("MAPPING_IN_USE", "A sync profile still uses this mapping", 409)
     await db.delete(mp)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.mapping.deleted", "mapping_profile", profile_id
+    )
     await db.commit()
 
 
@@ -403,5 +422,8 @@ async def resolve_sync_conflict(
         org_id, run_id, result_id, action=body.action, actor_id=user.id
     )
     resp = RecordResultResponse.model_validate(result, from_attributes=True)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.conflict.resolved", "sync_record", result.id, after={"action": body.action}
+    )
     await db.commit()
     return {"data": resp}

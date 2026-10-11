@@ -20,6 +20,7 @@ from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
+from app.integrations.facade import record_fabric_audit
 from app.integrations.services.domains import OrgDomainService
 from app.integrations.services.identity import IdentityService
 from app.integrations.services.sso_admin import SsoAdminService
@@ -216,6 +217,9 @@ async def create_sso_connection(
         default_role=body.default_role,
     )
     resp = _sso_response(conn)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sso.created", "sso_connection", conn.id, after={"protocol": conn.protocol}
+    )
     await db.commit()
     return {"data": resp}
 
@@ -246,6 +250,9 @@ async def update_sso_connection(
     await _admin(org_id, user, db)
     conn = await SsoAdminService(db).update(org_id, conn_id, **body.model_dump())
     resp = _sso_response(conn)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sso.updated", "sso_connection", conn.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -288,6 +295,9 @@ async def refresh_sso_metadata(
     """R51: pull the IdP's SAML metadata now and refresh pinned certs."""
     await _admin(org_id, user, db)
     out = await SsoAdminService(db).refresh_from_metadata(org_id, conn_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sso.metadata_refreshed", "sso_connection", conn_id, after=out
+    )
     await db.commit()
     return {"data": out}
 
@@ -329,6 +339,9 @@ async def unlink_identity(
 ):
     await _admin(org_id, user, db)
     await IdentityService(db).unlink(org_id, link_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.identity.unlinked", "identity_link", link_id
+    )
     await db.commit()
 
 

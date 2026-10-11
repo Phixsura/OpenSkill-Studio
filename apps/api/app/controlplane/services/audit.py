@@ -17,6 +17,23 @@ from app.controlplane.models.audit import CommercialAuditEvent
 AUDIT_ACTIONS = frozenset(
     {
         # webhooks (defect #105: credential lifecycle must be audited)
+        # ADR-018 integration fabric admin mutations (R100, Part O).
+        "intg.mapping.created",
+        "intg.mapping.updated",
+        "intg.mapping.deleted",
+        "intg.sync_profile.created",
+        "intg.sync_profile.updated",
+        "intg.sync_profile.deleted",
+        "intg.conflict.resolved",
+        "intg.sso.created",
+        "intg.sso.updated",
+        "intg.sso.metadata_refreshed",
+        "intg.identity.unlinked",
+        "intg.connection.created",
+        "intg.connection.deleted",
+        "intg.credential.set",
+        "intg.scim_token.minted",
+        "intg.scim_token.revoked",
         "webhook.created",
         "webhook.deleted",
         "webhook.secret_rotated",

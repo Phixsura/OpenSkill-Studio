@@ -32,3 +32,39 @@ async def emit_event(
     from app.integrations.services.events import emit_event as _emit
 
     return await _emit(db, org_id, event_type, subject=subject, data=data, version=version)
+
+
+async def record_fabric_audit(
+    db,
+    org_id: str,
+    actor_user_id: str | None,
+    action: str,
+    target_type: str,
+    target_id: str,
+    after: dict | None = None,
+) -> None:
+    """Issue #43 Part O: admin mutations on fabric config write the
+    append-only audit trail. Best-effort — an audit hiccup never fails the
+    operation; payloads carry config shape, NEVER secrets."""
+    if actor_user_id is None:
+        return
+    try:
+        from app.controlplane import facade as cp_facade
+        from app.controlplane.services.audit import Actor, record_audit
+
+        tenant = await cp_facade.get_tenant_for_org(db, org_id)
+        await record_audit(
+            db,
+            actor=Actor(user_id=actor_user_id, type="tenant"),
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            tenant_id=tenant.id,
+            after=after or {},
+        )
+    except Exception:  # noqa: BLE001
+        import structlog
+
+        structlog.get_logger().warning(
+            "fabric_audit_write_failed", action=action, target_id=target_id
+        )

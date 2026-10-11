@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.integrations.facade import record_fabric_audit
 from app.integrations.models import IntegrationConnection, IntegrationProvider
 from app.integrations.schemas import (
     ConnectionCreateRequest,
@@ -199,6 +200,9 @@ async def create_connection(
         created_by=user.id,
     )
     resp = await _to_response(db, conn)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.connection.created", "connection", conn.id, after={"provider": body.provider_key}
+    )
     await db.commit()
     return {"data": resp}
 
@@ -271,6 +275,9 @@ async def set_credential(
     )
     resp = CredentialResponse(
         id=cred.id, kind=cred.kind, expires_at=cred.expires_at, rotated_at=cred.rotated_at
+    )
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.credential.set", "connection", connection_id
     )
     await db.commit()
     return {"data": resp}

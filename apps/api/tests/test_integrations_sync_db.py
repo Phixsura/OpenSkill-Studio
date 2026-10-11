@@ -1106,3 +1106,41 @@ async def test_strict_schema_gate_blocks_broken_mappings(db):
     await execute_run(db, run2.id)
     await db.refresh(run2)
     assert run2.stats["conflicts"] == 0 and run2.stats["created"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_mutations_write_audit_rows(db):
+    """R100 (Part O): mapping create/update and sync-profile create write
+    the append-only audit trail with the acting user."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent as AuditEvent
+    from app.integrations.api.sync import create_mapping
+    from app.models.user import User as _User
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, _profile = await _setup_profile(db, org, owner, fake)
+    owner_user = await db.get(_User, owner.id)
+
+    import app.integrations.api.sync as sync_api
+
+    doc = {"fields": [{"target": "title", "path": "title"}]}
+    body = sync_api.MappingCreateRequest(
+        name=f"au-{uuid.uuid4().hex[:6]}", direction="inbound",
+        model="roster.class", document=doc,
+    )
+    out = await create_mapping(org.id, body, db=db, user=owner_user)
+    await db.commit()
+    mp_id = out["data"].id
+
+    rows = (
+        await db.execute(
+            _select(AuditEvent).where(
+                AuditEvent.target_type == "mapping_profile",
+                AuditEvent.target_id == mp_id,
+            )
+        )
+    ).scalars().all()
+    assert [r.action for r in rows] == ["intg.mapping.created"]
+    assert rows[0].actor_user_id == owner.id

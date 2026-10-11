@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.integrations.facade import record_fabric_audit
 from app.integrations.services.scim import (
     ScimError,
     ScimGroupService,
@@ -389,6 +390,9 @@ async def create_scim_token(
         org_id, name=body.name, group_map=body.group_map, created_by=user.id
     )
     resp = _token_resp(token, raw)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.scim_token.minted", "scim_token", token.id
+    )
     await db.commit()
     return {"data": resp}
 
@@ -419,4 +423,7 @@ async def revoke_scim_token(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     await ScimTokenService(db).revoke(org_id, token_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.scim_token.revoked", "scim_token", token_id
+    )
     await db.commit()
