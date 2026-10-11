@@ -124,6 +124,12 @@ canonical keys are refused. Re-imports are idempotent: users match by
 email, roster by (user, cohort), opportunities by lower(title) — and an
 existing member/posting's role/status is never changed by an import.
 
+Every upload/commit is audited (`intg.import.created` /
+`intg.import.committed`, counts only), and a successful commit emits
+`com.openskill.org.import.committed.v1` on the mesh so downstream
+SIS/HRIS webhooks can react to bulk provisioning — the payload carries
+counts, never the roster.
+
 ## 4b. Editing and removing resources (R77-R84)
 
 Every admin resource is full CRUD:
