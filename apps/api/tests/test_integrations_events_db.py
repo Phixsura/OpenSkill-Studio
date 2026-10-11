@@ -1009,3 +1009,47 @@ async def test_410_gone_disables_subscription_immediately(db, egress):
     # a second replayed attempt is a no-op (delivery no longer pending)
     await handle_delivery_attempt(db, {"delivery_id": delivery.id})
     assert delivery.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_3xx_is_a_delivery_failure_not_success(db, egress):
+    """R234 (mutation survivor pin): Standard Webhooks requires a 2xx — a
+    redirect is NOT acceptance (EgressClient never follows redirects, so a
+    302 means the receiver did not take the event). Widening the success
+    window to <400 must fail this test."""
+    from app.integrations.services.events import handle_delivery_attempt, handle_event_created
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="redir-1", data={})
+    await db.flush()
+    await handle_event_created(db, {"event_id": ev.id})
+    delivery = (
+        await db.execute(
+            select(EventDelivery).where(
+                EventDelivery.event_id == ev.id, EventDelivery.subscription_id == sub.id
+            )
+        )
+    ).scalar_one()
+
+    async def _redirect(method, url, *, headers=None, content=None, read_timeout=None):
+        return httpx.Response(
+            302, headers={"location": "https://elsewhere.example.com/"},
+            request=httpx.Request(method, url),
+        )
+
+    egress.request = _redirect
+    await handle_delivery_attempt(db, {"delivery_id": delivery.id})
+    await db.flush()
+
+    from app.integrations.models import DeliveryAttempt
+
+    attempt = (
+        await db.execute(
+            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == delivery.id)
+        )
+    ).scalars().one()
+    assert attempt.status_code == 302
+    assert attempt.error == "http_302"
+    assert delivery.status == "pending"  # scheduled for retry, NOT succeeded
+    assert delivery.next_attempt_at is not None

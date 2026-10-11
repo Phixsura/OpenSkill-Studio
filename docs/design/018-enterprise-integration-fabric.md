@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R234 (seventh window, survivor pin + methodology fix)**: no test pinned
+  "a 3xx is a delivery FAILURE" (Standard Webhooks requires 2xx; EgressClient
+  never follows redirects, so a 302 is not acceptance). New test: a 302
+  records http_302 and schedules a retry — the widened `<400` success-window
+  mutant now dies. The hunt also exposed a MUTATION-HARNESS trap: restoring a
+  mutated source via shutil.move can leave the MUTANT'S .pyc alive (mtime
+  second-granularity collision), silently poisoning subsequent runs — probes
+  must clear **pycache** after write AND after restore. (Timeline audit:
+  all recorded suite results predate the one polluted window.)
 - **R233 (seventh window, R231 class)**: registry-coherence guards — a
   schedule added to SYNC_SCHEDULES/EXPORT_SCHEDULES without a sweep cadence
   entry is accepted by the API but NEVER auto-runs (silent no-op schedule);
