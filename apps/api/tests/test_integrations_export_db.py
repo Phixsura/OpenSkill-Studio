@@ -419,3 +419,62 @@ async def test_export_enrollments_tenant_isolation(db):
                 cohort_ids.add(json.loads(line)["cohort_id"])
         assert own_cohort in cohort_ids
         assert cohort_ids.isdisjoint(others)  # no foreign cohort members
+
+
+@pytest.mark.asyncio
+async def test_per_key_data_selection(db):
+    """R130 (deferred item): explicit `data.<key>` allowlist entries export
+    just those payload keys; unselected keys never appear; the whole `data`
+    field stays unexportable; hash-anonymize works on a data key; caps and
+    dataset scoping enforced."""
+    org, _ = await _org(db)
+    await emit_event(
+        db, org.id, "project.approved", subject="p1",
+        data={"score": 97, "secret_note": "do not export", "learner": "u_1"},
+    )
+    await db.flush()
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+
+    stream = await svc.create_stream(
+        org.id, name=f"dk-{ULID()}", dataset="events",
+        field_allowlist=["id", "type", "data.score", "data.learner", "data.absent"],
+        anonymize={"data.learner": "hash"},
+    )
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded" and run.row_count == 1
+    part = next(v for k, v in writer.files.items() if k.endswith(".ndjson"))
+    row = json.loads(part.decode().strip())
+    assert row["data.score"] == 97
+    assert row["data.absent"] is None  # selected but missing -> null, no crash
+    assert "secret_note" not in json.dumps(row)  # unselected key never leaks
+    assert "data" not in row  # whole payload still not a field
+    assert row["data.learner"] != "u_1" and len(row["data.learner"]) == 32  # hashed
+
+    # whole `data`, bad shapes, wrong dataset, cap -> refused at config time
+    for bad in (["data"], ["data."], ["data..x"], ["data." + "k" * 65]):
+        with pytest.raises(AppError) as e:
+            await svc.create_stream(
+                org.id, name=f"bad-{ULID()}", dataset="events", field_allowlist=bad
+            )
+        assert e.value.code == "EXPORT_FIELD_NOT_ALLOWED", bad
+    with pytest.raises(AppError) as e2:
+        await svc.create_stream(
+            org.id, name=f"bad-{ULID()}", dataset="enrollments",
+            field_allowlist=["id", "data.score"],
+        )
+    assert e2.value.code == "EXPORT_FIELD_NOT_ALLOWED"
+    with pytest.raises(AppError) as e3:
+        await svc.create_stream(
+            org.id, name=f"bad-{ULID()}", dataset="events",
+            field_allowlist=[f"data.k{i}" for i in range(21)],
+        )
+    assert e3.value.code == "EXPORT_CONFIG_INVALID"
+
+    # update_stream enforces the same rules
+    with pytest.raises(AppError):
+        await svc.update_stream(org.id, stream.id, field_allowlist=["data"])
+    updated = await svc.update_stream(
+        org.id, stream.id, field_allowlist=["id", "data.score"]
+    )
+    assert updated.field_allowlist == ["id", "data.score"]

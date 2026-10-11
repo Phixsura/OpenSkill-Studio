@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -66,6 +67,9 @@ async def _extract_events(
             "type": e.type,
             "subject": e.subject,
             "time": e.time.isoformat() if e.time else None,
+            # R130: carried for data.<key> projection only — the projection
+            # is BUILT from the allowlist, so the raw payload cannot leak.
+            "data": e.data or {},
             "_cursor": e.id,
         }
         for e in rows
@@ -107,9 +111,9 @@ DATASETS: dict[str, dict] = {
         "fields": frozenset({"id", "type", "subject", "time"}),
         "extract": _extract_events,
         "default_allowlist": ["id", "type", "subject", "time"],
-        # The CloudEvents `data` payload is deliberately NOT exportable in
-        # v1: every key inside would need its own allowlist entry (the R82
-        # trap at warehouse scale) — a later phase adds per-key selection.
+        # The WHOLE CloudEvents `data` payload is deliberately not a field:
+        # R130 adds per-key selection via explicit `data.<key>` allowlist
+        # entries instead (the R82 trap at warehouse scale).
     },
     "enrollments": {
         "fields": frozenset({"id", "cohort_id", "cohort_name", "user_id", "role", "joined_at"}),
@@ -118,6 +122,31 @@ DATASETS: dict[str, dict] = {
         "default_anonymize": {"user_id": "hash"},
     },
 }
+
+
+_DATA_KEY_RE = re.compile(r"^data\.[a-zA-Z0-9_-]{1,64}$")
+MAX_DATA_KEYS = 20
+
+
+def _check_fields(dataset: str, spec: dict, fields, *, what: str) -> None:
+    """R130: per-key `data` selection. The whole CloudEvents payload is
+    still NOT exportable — only explicit `data.<key>` entries (events
+    dataset only, capped) join the plain field universe."""
+    dotted = [f for f in fields if isinstance(f, str) and f.startswith("data.")]
+    plain_bad = [
+        f for f in fields
+        if f not in spec["fields"] and not (dataset == "events" and _DATA_KEY_RE.fullmatch(str(f)))
+    ]
+    if plain_bad:
+        raise AppError(
+            "EXPORT_FIELD_NOT_ALLOWED",
+            f"{what} not in dataset universe: {plain_bad}",
+            422,
+        )
+    if len(dotted) > MAX_DATA_KEYS:
+        raise AppError(
+            "EXPORT_CONFIG_INVALID", f"at most {MAX_DATA_KEYS} data.<key> entries", 422
+        )
 
 
 def _org_salt(org_id: str) -> str:
@@ -149,17 +178,12 @@ class WarehouseExportService:
         if schedule not in EXPORT_SCHEDULES:
             raise AppError("EXPORT_CONFIG_INVALID", "bad schedule", 422)
         allowlist = field_allowlist or list(spec["default_allowlist"])
-        bad = [f for f in allowlist if f not in spec["fields"]]
-        if bad:
-            raise AppError(
-                "EXPORT_FIELD_NOT_ALLOWED",
-                f"fields not in dataset universe: {bad}",
-                422,
-            )
+        _check_fields(dataset, spec, allowlist, what="fields")
         anon = anonymize if anonymize is not None else dict(spec.get("default_anonymize", {}))
-        for field, mode in anon.items():
-            if field not in spec["fields"] or mode not in ANONYMIZE_MODES:
-                raise AppError("EXPORT_CONFIG_INVALID", f"bad anonymize entry {field!r}", 422)
+        _check_fields(dataset, spec, anon.keys(), what="anonymize fields")
+        for mode in anon.values():
+            if mode not in ANONYMIZE_MODES:
+                raise AppError("EXPORT_CONFIG_INVALID", "bad anonymize mode", 422)
         stream = ExportStream(
             org_id=org_id,
             name=name,
@@ -193,19 +217,16 @@ class WarehouseExportService:
         stream = await self.get_stream(org_id, stream_id)
         spec = DATASETS[stream.dataset]
         if field_allowlist is not None:
-            bad = [f for f in field_allowlist if f not in spec["fields"]]
-            if bad or not field_allowlist:
-                raise AppError(
-                    "EXPORT_FIELD_NOT_ALLOWED",
-                    f"fields not in dataset universe: {bad or 'empty'}",
-                    422,
-                )
+            if not field_allowlist:
+                raise AppError("EXPORT_FIELD_NOT_ALLOWED", "allowlist empty", 422)
+            _check_fields(stream.dataset, spec, field_allowlist, what="fields")
             stream.field_allowlist = list(field_allowlist)
         if anonymize is not None:
-            for field, mode in anonymize.items():
-                if field not in spec["fields"] or mode not in ANONYMIZE_MODES:
+            _check_fields(stream.dataset, spec, anonymize.keys(), what="anonymize fields")
+            for mode in anonymize.values():
+                if mode not in ANONYMIZE_MODES:
                     raise AppError(
-                        "EXPORT_CONFIG_INVALID", f"bad anonymize entry {field!r}", 422
+                        "EXPORT_CONFIG_INVALID", "bad anonymize mode", 422
                     )
             stream.anonymize = dict(anonymize)
         if schedule is not None:
@@ -257,7 +278,10 @@ class WarehouseExportService:
         for field in stream.field_allowlist:
             if anon.get(field) == "drop":
                 continue
-            value = row.get(field)
+            if field.startswith("data."):  # R130 per-key payload selection
+                value = (row.get("data") or {}).get(field[5:])
+            else:
+                value = row.get(field)
             if anon.get(field) == "hash" and value is not None:
                 value = hashlib.sha256(f"{salt}:{value}".encode()).hexdigest()[:32]
             out[field] = value

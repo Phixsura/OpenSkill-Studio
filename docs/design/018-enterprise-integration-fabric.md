@@ -876,7 +876,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   namesroleservice claim, admin-triggered sync pages the roster through
   identity resolution with the instructor/student role map; no cohort
   writes, placement stays a launch concern); SAML idp_metadata_url auto-polling (SHIPPED R51: daily 05:37 sweep + manual refresh endpoint — hardened parse, signing-keys only, pem-diff rotation detection; the R19 expiry sweep still alerts 30 days out as the backstop); per-key
-  selection of the events `data` payload in warehouse exports; CRM outbound
+  selection of the events `data` payload in warehouse exports (SHIPPED R130:
+  explicit `data.<key>` allowlist entries, events dataset only, capped at 20,
+  hash/drop anonymize supported; the whole payload remains unexportable); CRM outbound
   extractors (models + engine support exist; vendor connectors are issue #44
   marketplace territory).
 
@@ -910,6 +912,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 | Full E2E chain                           | tests/e2e_integration_lifecycle.py: 39 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→export→IDOR walls) + acceptance-chain DB test                                                                  |
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
+
+- **R130 (third window, deferred item)**: per-key warehouse export of the
+  events `data` payload via explicit `data.<key>` allowlist entries (events
+  dataset only, max 20, same hash/drop anonymize; create+update share one
+  `_check_fields` validator). The projection stays allowlist-BUILT, so
+  unselected payload keys structurally cannot leak and the whole `data`
+  field is still refused at config time.
 
 - **R129 (third window, Part K deferred kind)**: `roster` import template
   shipped (was explicitly deferred at R19): email + cohort_slug (+ role
