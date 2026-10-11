@@ -852,6 +852,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   accept_theirs adjudication carries a staleness guard (409 when the staged
   field moved since the conflict was recorded).
 
+- **R120/R121 — CRM (Part E)**: generic CRM READ connector ships
+  (accounts/contacts/deals → canonical crm.* models, API-key + pagination,
+  read-only). CRM→ClientBrief AUTO-provisioning is DELIBERATELY NOT built:
+  a ClientBrief requires human-authored objective, project_type and
+  evaluation_criteria that a CRM deal does not carry — auto-creating briefs
+  would fabricate those fields and pollute the production pipeline. The
+  staged crm.* records are available for reporting/warehouse export and a
+  MappingProfile can target them; linking a deal to an EXISTING brief is an
+  explicit admin action (no learner data crosses into the CRM either
+  direction). This is the privacy-safe reading of "map CRM deals/accounts
+  to Client Briefs ... without leaking internal learner data."
+
 - **Deferred (explicit, as of R19)**: import template kinds `roster` and
   `opportunities` (users shipped; the pipeline is template-agnostic); LTI NRPS
   (SHIPPED in R49 as membership pre-provisioning — launch captures the
