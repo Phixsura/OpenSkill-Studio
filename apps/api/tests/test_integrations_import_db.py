@@ -961,3 +961,51 @@ def test_import_template_generator():
         raise AssertionError("unknown kind must raise")
     except AppError as e:
         assert e.code == "IMPORT_KIND_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_roster_import_honors_cohort_capacity(db):
+    """R188: a bulk roster import must not overfill a capped cohort — with
+    max_learners=1, importing two learners enrolls one and records a
+    cohort_full row error for the other (partial mode)."""
+    from app.models.cohort import Cohort, CohortMember, CohortRole
+
+    org, owner = await _org(db)
+    cohort = Cohort(
+        org_id=org.id, name="Capped", slug=f"cap-{uuid.uuid4().hex[:8]}",
+        created_by=owner.id, max_learners=1,
+    )
+    db.add(cohort)
+    await db.flush()
+    svc = BulkImportService(db)
+
+    e1 = f"cap1-{uuid.uuid4().hex[:6]}@x.edu"
+    e2 = f"cap2-{uuid.uuid4().hex[:6]}@x.edu"
+    useed = f"email\n{e1}\n{e2}\n".encode()
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"cap-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    data = (
+        "email,cohort_slug,role\n"
+        f"{e1},{cohort.slug},learner\n"
+        f"{e2},{cohort.slug},learner\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="roster", mode="partial", file_bytes=data,
+        file_key="r", created_by=owner.id, idempotency_key=f"capr-{uuid.uuid4().hex[:8]}",
+    )
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1  # only one fit
+    assert committed.stats["errors"] == 1   # the other hit capacity
+    n = (
+        await db.execute(
+            select(func.count()).select_from(CohortMember).where(
+                CohortMember.cohort_id == cohort.id,
+                CohortMember.role == CohortRole.LEARNER,
+            )
+        )
+    ).scalar_one()
+    assert n == 1  # never overfilled

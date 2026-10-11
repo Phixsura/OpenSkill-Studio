@@ -917,6 +917,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R186-R187 (fourth window, probes)**: export cadence 3/3 and mapping
+  validation 4/4 mutants killed — R183 and R164 fully pinned.
+- **R188 (fourth window, capacity bypass)**: the roster import applied
+  CohortMember directly, BYPASSING CohortService's max_learners check — a
+  bulk import could overfill a capped cohort past what interactive enroll
+  allows. `_apply_roster_row` now counts learners and records a cohort_full
+  row error when at capacity (partial mode lands the rest). Test: max=1,
+  import 2 → one enrolled, one errored, never overfilled.
 - **R185 (fourth window, scheduling bug)**: the export sweep cron was
   `hour=2` (once a day), so R183's `hourly` streams would have silently run
   only daily. Changed to run every hour (minute 47); the per-stream cadence

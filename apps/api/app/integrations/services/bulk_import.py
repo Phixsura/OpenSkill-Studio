@@ -764,10 +764,28 @@ class BulkImportService:
         ).scalar_one_or_none()
         if existing is not None:
             return "skipped"
+        role = ROSTER_ROLE_MAP[row["role"]]
+        # R188: honor the cohort's max_learners — a bulk roster import must not
+        # overfill a capped cohort past what the interactive enroll enforces.
+        if role == CohortRole.LEARNER and cohort.max_learners is not None:
+            from sqlalchemy import func as _func
+
+            learners = (
+                await self.db.execute(
+                    select(_func.count(CohortMember.id)).where(
+                        CohortMember.cohort_id == cohort.id,
+                        CohortMember.role == CohortRole.LEARNER,
+                    )
+                )
+            ).scalar_one()
+            if learners >= cohort.max_learners:
+                raise AppError(
+                    "IMPORT_ROW_INVALID",
+                    f"cohort_full: cohort is at capacity ({cohort.max_learners} learners)",
+                    422,
+                )
         self.db.add(
-            CohortMember(
-                cohort_id=cohort.id, user_id=user.id, role=ROSTER_ROLE_MAP[row["role"]]
-            )
+            CohortMember(cohort_id=cohort.id, user_id=user.id, role=role)
         )
         await self.db.flush()
         return "created"
