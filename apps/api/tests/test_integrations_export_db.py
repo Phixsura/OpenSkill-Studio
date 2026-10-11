@@ -341,3 +341,81 @@ async def test_update_stream_edits_and_validates(db):
     with pytest.raises(AppError) as e2:
         await svc.update_stream(other.id, s.id, enabled=True)
     assert e2.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("n_orgs,events_each", [(2, 3), (3, 2), (4, 1), (2, 5)])
+async def test_export_tenant_isolation_matrix(db, n_orgs, events_each):
+    """R117 (Part L): with N orgs' events INTERLEAVED in emit order, each
+    org's export contains exactly its own rows and never another org's —
+    the extractor WHERE org_id clause is the only thing standing between
+    tenants in the warehouse."""
+    orgs = [await _org(db) for _ in range(n_orgs)]
+    marker = {}
+    # Interleave emits round-robin so ULID ordering mixes orgs.
+    for i in range(events_each):
+        for j, (org, _) in enumerate(orgs):
+            subj = f"o{j}-e{i}-{uuid.uuid4().hex[:4]}"
+            marker.setdefault(org.id, set()).add(subj)
+            await emit_event(db, org.id, "project.approved", subject=subj, data={})
+    await db.commit()
+
+    svc = WarehouseExportService(db, writer=MemWriter())
+    for org, _owner in orgs:
+        writer = MemWriter()
+        s = await WarehouseExportService(db, writer=writer).create_stream(
+            org.id, name=f"iso-{ULID()}", dataset="events"
+        )
+        run = await WarehouseExportService(db, writer=writer).run_export(org.id, s.id)
+        assert run.row_count == events_each
+        subjects = set()
+        for part in run.parts:
+            for line in writer.files[part].decode().strip().split("\n"):
+                subjects.add(json.loads(line)["subject"])
+        assert subjects == marker[org.id]  # exactly own rows, nothing foreign
+    assert svc is not None
+
+
+@pytest.mark.asyncio
+async def test_export_enrollments_tenant_isolation(db):
+    """R117: an enrollments export never contains another org's cohort
+    members (the Cohort.org_id join filter is the boundary)."""
+    from app.services.cohort import CohortService
+
+    orgs = []
+    for _ in range(2):
+        org, owner = await _org(db)
+        csvc = CohortService(db)
+        cohort = await csvc.create_cohort(
+            org_id=org.id, name=f"C {ULID()}", description=None, created_by=owner.id
+        )
+        learner = User(
+            email=f"iso-{uuid.uuid4().hex[:8]}@test.com",
+            password_hash=hash_password("Test123!"),
+            display_name="L", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        )
+        db.add(learner)
+        await db.flush()
+        db.add(OrgMember(org_id=org.id, user_id=learner.id, role=OrgRole.STUDENT,
+                         status=MemberStatus.ACTIVE))
+        await db.flush()
+        await csvc.add_member(cohort.id, learner.id, CohortRole.LEARNER, org.id)
+        orgs.append((org, cohort.id))
+    await db.commit()
+
+    # Use an allowlist WITHOUT the default user_id hash so the boundary is
+    # asserted on the raw cohort_id (user_id hash is salted per-org anyway).
+    for org, own_cohort in orgs:
+        others = {c for o, c in orgs if o.id != org.id}
+        writer = MemWriter()
+        s = await WarehouseExportService(db, writer=writer).create_stream(
+            org.id, name=f"en-{ULID()}", dataset="enrollments",
+            field_allowlist=["id", "cohort_id", "role"], anonymize={},
+        )
+        run = await WarehouseExportService(db, writer=writer).run_export(org.id, s.id)
+        cohort_ids = set()
+        for part in run.parts:
+            for line in writer.files[part].decode().strip().split("\n"):
+                cohort_ids.add(json.loads(line)["cohort_id"])
+        assert own_cohort in cohort_ids
+        assert cohort_ids.isdisjoint(others)  # no foreign cohort members
