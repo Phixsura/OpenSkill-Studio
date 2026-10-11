@@ -145,7 +145,8 @@ async def create_mapping(
     )
     resp = MappingResponse.model_validate(row, from_attributes=True)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.mapping.created", "mapping_profile", row.id
+        db, org_id, user.id, "intg.mapping.created", "mapping_profile", row.id,
+        after={"model": row.model, "version": row.version},
     )
     await db.commit()
     return {"data": resp}

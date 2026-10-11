@@ -1144,3 +1144,5 @@ async def test_admin_mutations_write_audit_rows(db):
     ).scalars().all()
     assert [r.action for r in rows] == ["intg.mapping.created"]
     assert rows[0].actor_user_id == owner.id
+    assert rows[0].tenant_id == org.tenant_id  # scoped to the tenant
+    assert rows[0].after == {"model": "roster.class", "version": 1}
