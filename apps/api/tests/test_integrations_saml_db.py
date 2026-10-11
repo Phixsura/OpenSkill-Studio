@@ -818,3 +818,38 @@ async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
     await expect_reject(
         base_q2 + "&Signature=" + quote(base64.b64encode(sig2).decode(), safe="")
     )
+
+
+@pytest.mark.asyncio
+async def test_authn_redirect_purges_expired_replay_cache(db):
+    """R165: a SAML-only tenant never hits the OIDC authorize purge, so
+    build_authn_redirect sweeps expired login-state/replay-cache rows itself
+    — old rows go, fresh rows (incl. the one it just minted) stay."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.models.sso import SsoLoginState
+
+    org, _u, _d = await _org(db)
+    conn = await _saml_conn(db, org)
+
+    stale = SsoLoginState(
+        id="STALEROWREPLAYCACHE0000001",
+        sso_connection_id=conn.id,
+        nonce="assertion-replay-cache",
+        expires_at=datetime.now(UTC) - timedelta(days=3),
+        used_at=datetime.now(UTC) - timedelta(days=3),
+    )
+    fresh = SsoLoginState(
+        id="FRESHROWREPLAYCACHE0000001",
+        sso_connection_id=conn.id,
+        nonce="assertion-replay-cache",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        used_at=datetime.now(UTC),
+    )
+    db.add_all([stale, fresh])
+    await db.flush()
+
+    await SamlService(db).build_authn_redirect(conn.id)
+
+    assert await db.get(SsoLoginState, "STALEROWREPLAYCACHE0000001") is None
+    assert await db.get(SsoLoginState, "FRESHROWREPLAYCACHE0000001") is not None

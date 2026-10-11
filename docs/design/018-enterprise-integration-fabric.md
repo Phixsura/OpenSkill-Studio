@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R165 (fourth window, unbounded-growth fix)**: the SAML assertion replay
+  cache reuses the login-state table; only the OIDC authorize endpoint
+  purged expired rows, so a SAML-ONLY tenant's replay cache grew forever.
+  `build_authn_redirect` now does the same opportunistic day-old purge.
+
 - **R164 (fourth window, input bounds)**: mapping field `transform` lists
   are now length-capped (MAX_TRANSFORMS=10) and type-guarded (a non-list
   value is a validation error, not a char-by-char iteration) — closing the

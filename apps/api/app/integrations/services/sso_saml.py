@@ -105,6 +105,17 @@ class SamlService:
         conn = await self._connection(connection_id)
         if not conn.idp_sso_url:
             raise AppError("SSO_CONFIG_INVALID", "idp_sso_url not configured", 422)
+        # R165: opportunistic purge of expired login-state + replay-cache rows.
+        # A SAML-only tenant never hits the OIDC authorize endpoint (which has
+        # the twin purge), so without this the assertion replay cache — stored
+        # in this same table — would grow unbounded. Day-old grace, indexed.
+        from sqlalchemy import delete as _delete
+
+        await self.db.execute(
+            _delete(SsoLoginState).where(
+                SsoLoginState.expires_at < datetime.now(UTC) - timedelta(days=1)
+            )
+        )
         state = SsoLoginState(
             sso_connection_id=conn.id,
             nonce=secrets.token_urlsafe(24)[:64],
