@@ -784,6 +784,17 @@ class ScimGroupService:
             if dup is not None:
                 raise ScimError(409, "Group name already exists", "uniqueness")
             group.display_name = rename
+            # R192: the dup-SELECT covers the common case; a concurrent rename
+            # onto the same name collides on the unique index at flush. Isolate
+            # the rename in a savepoint so the loser returns a clean SCIM 409
+            # (not a 500) and the session stays usable for the member delta.
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                async with self.db.begin_nested():
+                    await self.db.flush()
+            except IntegrityError as exc:
+                raise ScimError(409, "Group name already exists", "uniqueness") from exc
         await self._apply_member_delta(group, add=add, remove=remove)
         return _group_resource(group, await self._member_ids(group.id))
 

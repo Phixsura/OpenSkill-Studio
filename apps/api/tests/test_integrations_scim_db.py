@@ -780,3 +780,30 @@ async def test_concurrent_scim_group_create_same_name(ctx):
         )
     ).scalar_one()
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_scim_group_patch_rename_collision_clean_409(ctx):
+    """R192: PATCH-renaming a group onto an existing name returns a clean SCIM
+    409 (uniqueness), not a 500, and does not poison the session."""
+    from app.integrations.services.scim import ScimError, ScimGroupService
+
+    svc = ScimGroupService(ctx["db"], ctx["token"])
+    g1 = await svc.create({"displayName": f"grp-a-{uuid.uuid4().hex[:6]}"})
+    name_b = f"grp-b-{uuid.uuid4().hex[:6]}"
+    g2 = await svc.create({"displayName": name_b})
+    await ctx["db"].flush()
+
+    with pytest.raises(ScimError) as e:
+        await svc.patch(
+            g2["id"],
+            {"Operations": [{"op": "replace", "path": "displayName", "value": g1["displayName"]}]},
+        )
+    assert e.value.status == 409
+
+    # Session still usable: a legit rename of g2 works.
+    ok = await svc.patch(
+        g2["id"],
+        {"Operations": [{"op": "replace", "path": "displayName", "value": name_b + "-2"}]},
+    )
+    assert ok["displayName"] == name_b + "-2"

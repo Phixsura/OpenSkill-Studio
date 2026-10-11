@@ -919,6 +919,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   admin can grab the exact columns before preparing a file.
 - **R186-R187 (fourth window, probes)**: export cadence 3/3 and mapping
   validation 4/4 mutants killed — R183 and R164 fully pinned.
+- **R192 (fourth window, rename symmetry complete)**: SCIM group PATCH
+  rename now isolates its flush in a savepoint too — a concurrent rename
+  collision returns a clean SCIM 409, session stays usable for the member
+  delta. All rename/create unique paths across the fabric are now uniformly
+  409-not-500 under concurrency (connections R172/R182, mappings R173, SCIM
+  user R167 / group create R176 / group rename R192).
 - **R189 (fourth window, KNOWN GAP documented, not changed)**: bulk user
   import reimplements OrgMember creation and so does NOT pass through the
   §2.5 seat-quota funnel (issue #27) that the interactive add_member enforces
