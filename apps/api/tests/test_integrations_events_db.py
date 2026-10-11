@@ -807,3 +807,43 @@ async def test_payload_archive_byte_stable_and_replay_inherits(db, egress):
     with pytest.raises(AppError) as exc:
         await delivery_payload(other.id, d.id, db=db, user=other_user)
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["succeeded", "exhausted", "cancelled"])
+async def test_terminal_delivery_redelivery_is_noop(db, egress, terminal):
+    """Crash recovery can redeliver an outbox message after the delivery
+    already reached a terminal state — the handler must no-op (no extra POST,
+    no attempt-count bump, status unchanged)."""
+    from app.integrations.models import DeliveryAttempt
+    from app.integrations.services.events import handle_delivery_attempt
+
+    org = await _org(db)
+    await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="term", data={})
+    await db.commit()
+    await _drain(db)  # one real delivery to succeeded
+    d = (
+        await db.execute(select(EventDelivery).where(EventDelivery.event_id == ev.id))
+    ).scalars().first()
+    d.status = terminal
+    await db.flush()
+    calls_before = len(egress.calls)
+    attempts_before = (
+        await db.execute(
+            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)
+        )
+    ).scalars().all()
+    ac_before = d.attempt_count
+
+    await handle_delivery_attempt(db, {"delivery_id": d.id})
+
+    assert len(egress.calls) == calls_before  # no extra POST
+    await db.refresh(d)
+    assert d.status == terminal and d.attempt_count == ac_before
+    attempts_after = (
+        await db.execute(
+            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)
+        )
+    ).scalars().all()
+    assert len(attempts_after) == len(attempts_before)
