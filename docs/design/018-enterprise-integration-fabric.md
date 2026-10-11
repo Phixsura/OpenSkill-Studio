@@ -924,7 +924,8 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   for the kind selector / per-kind header-map fields / JSON accept; live
   E2E extended with a REAL multipart JSON import walk (upload previews,
   commit creates, idempotent re-upload skips, unknown kind 422) — E2E now
-  53/53 (was 49).
+  56/56 (was 49; R144 adds a live roster walk — cohort over HTTP, CSV
+  roster import previews the enrollment and commit lands the member).
 
 - **R140 (third window, probe over R134-R138)**: 7 targeted mutants —
   retention status set, cutoff direction, blanked-job rescan, delete-failure

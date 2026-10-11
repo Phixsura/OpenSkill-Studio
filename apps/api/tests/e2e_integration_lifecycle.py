@@ -500,6 +500,37 @@ async def main() -> int:
         )
         check("unknown import kind refused", r.status_code == 422, str(r.status_code))
 
+        # ── roster kind over HTTP: cohort by slug, member enrolled (R129) ──
+        r = await c.post(
+            f"/orgs/{org_id}/cohorts",
+            headers=h,
+            json={"name": f"E2E Cohort {uuid.uuid4().hex[:6]}"},
+        )
+        check("cohort created", r.status_code == 201, r.text[:200])
+        if r.status_code == 201:
+            cohort_slug = r.json()["data"]["slug"]
+            roster_csv = f"email,cohort_slug,role\n{import_email},{cohort_slug},learner\n"
+            r = await c.post(
+                f"{base}/imports",
+                headers=h,
+                data={"kind": "roster", "mode": "partial",
+                      "idempotency_key": f"e2er-{uuid.uuid4().hex[:10]}"},
+                files={"file": ("roster.csv", roster_csv.encode(), "text/csv")},
+            )
+            check(
+                "roster import previews an enrollment",
+                r.status_code in (200, 201) and r.json()["data"]["dry_stats"]["creates"] == 1,
+                r.text[:300],
+            )
+            if r.status_code in (200, 201):
+                rid = r.json()["data"]["id"]
+                r = await c.post(f"{base}/imports/{rid}/commit", headers=h)
+                check(
+                    "roster import enrolls the member",
+                    r.status_code == 200 and r.json()["data"]["stats"]["created"] == 1,
+                    r.text[:300],
+                )
+
         # ── IDOR spot wall (second real user, not a member) ──
         for path in (
             f"{base}/connections/{conn_id}",
