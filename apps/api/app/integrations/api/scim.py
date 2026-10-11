@@ -15,6 +15,7 @@ from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.integrations.facade import record_fabric_audit
 from app.integrations.services.scim import (
+    MAX_BULK_OPERATIONS,
     ScimError,
     ScimGroupService,
     ScimToken,
@@ -65,7 +66,12 @@ async def service_provider_config():
         {
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
             "patch": {"supported": True},
-            "bulk": {"supported": True, "maxOperations": 100, "maxPayloadSize": 1_048_576},
+            "bulk": {
+                "supported": True,
+                # advertised == enforced (apply_bulk reads the same constant)
+                "maxOperations": MAX_BULK_OPERATIONS,
+                "maxPayloadSize": 1_048_576,
+            },
             "filter": {"supported": True, "maxResults": 200},
             "changePassword": {"supported": False},
             "sort": {"supported": False},
