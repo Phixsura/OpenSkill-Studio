@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R140 (third window, probe over R134-R138)**: 7 targeted mutants —
+  retention status set, cutoff direction, blanked-job rescan, delete-failure
+  blanking, PKCE challenge derivation, verifier persistence, unregistered
+  audit action — all KILLED on first run; the new governance/PKCE/audit
+  code is fully pinned by its tests.
+
 - **R139 + final checkpoint (marathon3 close)**: connector contract tests
   rebuild fresh instances (the module-level CONNECTORS singleton is
   swapped by many tests — order pollution surfaced only in full-suite
