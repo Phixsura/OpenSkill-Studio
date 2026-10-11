@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R170 (fourth window, UI)**: a "Download template" button on the import
+  panel pulls the current kind's CSV template via the R169 endpoint, so an
+  admin can grab the exact columns before preparing a file.
 - **R169 (fourth window, Part K template download)**: `GET /imports/template
 ?kind=&format=` serves a blank, versioned template (ordered header, required
   columns first, + one worked example) per kind in CSV or JSON — the piece

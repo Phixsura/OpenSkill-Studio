@@ -180,6 +180,26 @@ export default function DataIntegrationsPage() {
 
   // A bare <a href> to the authenticated errors.csv endpoint 401s (no
   // bearer in browser navigation) — fetch with auth and hand over a blob.
+  const downloadTemplate = async () => {
+    try {
+      const { apiTextWithAuth } = await import("@/lib/api");
+      const isJson = false; // templates download as CSV by default
+      const text = await apiTextWithAuth(
+        `${base}/imports/template?kind=${encodeURIComponent(kind)}&format=csv`,
+      );
+      const url = URL.createObjectURL(
+        new Blob([text], { type: isJson ? "application/json" : "text/csv" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${kind}-template.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      onError(err);
+    }
+  };
+
   const downloadErrors = async (jobId: string) => {
     try {
       const { apiTextWithAuth } = await import("@/lib/api");
@@ -257,6 +277,9 @@ export default function DataIntegrationsPage() {
             type="file"
             accept=".csv,.json,text/csv,application/json"
           />
+          <Button size="sm" variant="outline" onClick={downloadTemplate}>
+            Download template
+          </Button>
           <details className="w-full text-xs">
             <summary className="text-muted-foreground cursor-pointer">
               Vendor headers (optional column mapping)
