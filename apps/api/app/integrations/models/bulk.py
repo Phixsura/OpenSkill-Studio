@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, ulid_pk
 
-IMPORT_KINDS = frozenset({"users", "roster"})
+IMPORT_KINDS = frozenset({"users", "roster", "opportunities"})
 IMPORT_MODES = frozenset({"atomic", "partial"})
 IMPORT_STATUSES = frozenset(
     {"validating", "previewed", "committing", "succeeded", "failed", "partial"}

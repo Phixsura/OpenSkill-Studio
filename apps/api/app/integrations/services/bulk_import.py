@@ -41,12 +41,14 @@ log = structlog.get_logger()
 
 _EMAIL_RE = re.compile(r"[a-z0-9!#$%&'*/?^_`{|}~.+=-]+@[a-z0-9.-]+\.[a-z]{2,}")
 
-TEMPLATE_VERSIONS = {"users": 1, "roster": 1}
+TEMPLATE_VERSIONS = {"users": 1, "roster": 1, "opportunities": 1}
 USERS_REQUIRED = ("email",)
 USERS_OPTIONAL = ("display_name", "role")
 IMPORT_ROLE_MAP = {"student": OrgRole.STUDENT, "instructor": OrgRole.INSTRUCTOR}
 ROSTER_REQUIRED = ("email", "cohort_slug")
 ROSTER_ROLE_MAP = {"learner": CohortRole.LEARNER, "instructor": CohortRole.INSTRUCTOR}
+OPPS_REQUIRED = ("title", "opportunity_type")
+OPPS_LOCATION_MODES = frozenset({"remote", "onsite", "hybrid"})
 # Per-kind parse spec: required columns, header_map-able keys, row validator.
 # (validators are bound after their definitions below)
 
@@ -150,6 +152,70 @@ def _validate_roster_rows(
     return rows, errors
 
 
+def _validate_opportunity_rows(
+    raw_rows: list[tuple[int, dict]]
+) -> tuple[list[dict], list[dict]]:
+    """Opportunities template rows (R131, Part K deferred kind): employer
+    migrations land postings as DRAFTS — a human publishes. Dup detection by
+    lower(title) within the file; idempotency against the DB is at apply."""
+    from app.talent.models.employer import OPPORTUNITY_TYPES
+
+    rows: list[dict] = []
+    errors: list[dict] = []
+    seen_titles: dict[str, int] = {}
+    for i, row in raw_rows:
+        title = str(row.get("title", "") or "").strip()
+        problems: list[tuple[str, str, str]] = []
+        if not title or len(title) > 200 or "\x00" in title:
+            problems.append(("title", "invalid_title", "title required (max 200)"))
+        otype = str(row.get("opportunity_type", "") or "").strip().lower()
+        if otype not in OPPORTUNITY_TYPES:
+            problems.append(
+                ("opportunity_type", "invalid_type",
+                 f"must be one of {sorted(OPPORTUNITY_TYPES)}")
+            )
+        description = str(row.get("description", "") or "")[:10000]
+        if "\x00" in description:
+            problems.append(("description", "control_chars", "NUL character"))
+        loc_mode = str(row.get("location_mode", "") or "").strip().lower() or None
+        if loc_mode is not None and loc_mode not in OPPS_LOCATION_MODES:
+            problems.append(
+                ("location_mode", "invalid_location_mode", "remote|onsite|hybrid")
+            )
+        loc_text = str(row.get("location_text", "") or "")[:200]
+        comp = str(row.get("compensation_display", "") or "")[:200]
+        if "\x00" in loc_text or "\x00" in comp:
+            problems.append(("location_text", "control_chars", "NUL character"))
+        openings_raw = str(row.get("openings", "") or "").strip() or "1"
+        try:
+            openings = int(openings_raw)
+            if not 1 <= openings <= 999:
+                raise ValueError
+        except (ValueError, TypeError):
+            problems.append(("openings", "invalid_openings", "integer 1-999"))
+            openings = 1
+        key = title.lower()
+        if title and key in seen_titles:
+            problems.append(
+                ("title", "duplicate_in_file", f"also on row {seen_titles[key]}")
+            )
+        if problems:
+            for col, code, message in problems:
+                errors.append({
+                    "row_number": i, "column": col, "code": code, "message": message,
+                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                })
+            continue
+        seen_titles[key] = i
+        rows.append({
+            "row_number": i, "title": title, "opportunity_type": otype,
+            "description": description or None, "location_mode": loc_mode,
+            "location_text": loc_text or None,
+            "compensation_display": comp or None, "openings": openings,
+        })
+    return rows, errors
+
+
 def parse_users_json(
     file_bytes: bytes, header_map: dict | None = None, kind: str = "users"
 ) -> tuple[list[dict], list[dict]]:
@@ -218,6 +284,12 @@ class _KindSpec:
 KIND_SPECS = {
     "users": _KindSpec(USERS_REQUIRED, {"email", "display_name", "role"}, _validate_user_rows),
     "roster": _KindSpec(ROSTER_REQUIRED, {"email", "cohort_slug", "role"}, _validate_roster_rows),
+    "opportunities": _KindSpec(
+        OPPS_REQUIRED,
+        {"title", "opportunity_type", "description", "location_mode",
+         "location_text", "compensation_display", "openings"},
+        _validate_opportunity_rows,
+    ),
 }
 
 
@@ -411,7 +483,18 @@ class BulkImportService:
             file_bytes, detect_format(file_bytes), job.header_map or {}, kind=job.kind
         )
         creates = updates = skips = 0
-        if job.kind == "roster":
+        if job.kind == "opportunities":
+            kept2: list[dict] = []
+            for row in rows:
+                outcome, err = await self._preview_opportunity_row(job.org_id, row)
+                if err is not None:
+                    errors.append(err)
+                    continue
+                kept2.append(row)
+                creates += outcome == "created"
+                skips += outcome == "skipped"
+            rows = kept2
+        elif job.kind == "roster":
             kept: list[dict] = []
             for row in rows:
                 outcome, err = await self._preview_roster_row(job.org_id, row)
@@ -490,6 +573,8 @@ class BulkImportService:
                 async with self.db.begin_nested():
                     if job.kind == "roster":
                         outcome = await self._apply_roster_row(job.org_id, row)
+                    elif job.kind == "opportunities":
+                        outcome = await self._apply_opportunity_row(job, row)
                     else:
                         outcome = await self._apply_row(job.org_id, row)
             except Exception as exc:  # row-level failure
@@ -512,7 +597,7 @@ class BulkImportService:
                         column=None,
                         code="apply_failed",
                         message=str(exc)[:300],
-                        raw_row={"email": row["email"]},
+                        raw_row={"email": row.get("email", ""), "title": row.get("title", "")},
                     )
                 )
                 continue
@@ -600,6 +685,62 @@ class BulkImportService:
         self.db.add(
             CohortMember(
                 cohort_id=cohort.id, user_id=user.id, role=ROSTER_ROLE_MAP[row["role"]]
+            )
+        )
+        await self.db.flush()
+        return "created"
+
+    async def _opportunity_refs(self, org_id: str, row: dict):
+        """(profile-exists, existing-opportunity?) — or an error dict."""
+        from app.talent.models.employer import EmployerProfile, Opportunity
+
+        profile = await self.db.get(EmployerProfile, org_id)
+        if profile is None:
+            return False, None, {
+                "row_number": row["row_number"], "column": None,
+                "code": "employer_profile_missing",
+                "message": "org has no employer profile — register first",
+                "raw_row": {"title": row["title"]},
+            }
+        existing = (
+            await self.db.execute(
+                select(Opportunity).where(
+                    Opportunity.employer_org_id == org_id,
+                    func.lower(Opportunity.title) == row["title"].lower(),
+                )
+            )
+        ).scalars().first()
+        return True, existing, None
+
+    async def _preview_opportunity_row(self, org_id: str, row: dict):
+        _ok, existing, err = await self._opportunity_refs(org_id, row)
+        if err is not None:
+            return None, err
+        return ("skipped" if existing is not None else "created"), None
+
+    async def _apply_opportunity_row(self, job: ImportJob, row: dict) -> str:
+        """Create one DRAFT posting (R131). Existing same-title postings skip
+        (idempotent re-upload); the import NEVER publishes — status stays
+        draft so a human reviews before anything reaches candidates."""
+        from app.talent.models.employer import Opportunity
+
+        _ok, existing, err = await self._opportunity_refs(job.org_id, row)
+        if err is not None:
+            raise AppError("IMPORT_ROW_INVALID", f"{err['code']}: {err['message']}", 422)
+        if existing is not None:
+            return "skipped"
+        self.db.add(
+            Opportunity(
+                employer_org_id=job.org_id,
+                title=row["title"],
+                description=row["description"],
+                opportunity_type=row["opportunity_type"],
+                location_mode=row["location_mode"],
+                location_text=row["location_text"],
+                compensation_display=row["compensation_display"],
+                openings=row["openings"],
+                status="draft",
+                created_by=job.created_by,
             )
         )
         await self.db.flush()

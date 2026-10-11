@@ -666,3 +666,62 @@ async def test_roster_import_json_and_atomic(db):
         )
     ).scalar_one()
     assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_opportunities_import_kind(db):
+    """R131 (Part K deferred kind): opportunity rows land as DRAFTS for an
+    org with an employer profile; bad type/openings are row errors; same
+    title skips on re-upload; without a profile every row errors."""
+    import json as _json
+
+    from app.talent.models.employer import EmployerProfile, Opportunity
+
+    org, owner = await _org(db)
+    db.add(EmployerProfile(org_id=org.id))
+    await db.flush()
+    svc = BulkImportService(db)
+
+    title = f"ML Intern {uuid.uuid4().hex[:6]}"
+    data = (
+        "title,opportunity_type,location_mode,openings\n"
+        f"{title},internship,remote,2\n"
+        f"Bad Type {uuid.uuid4().hex[:4]},astronaut,remote,1\n"
+        f"Bad Openings {uuid.uuid4().hex[:4]},internship,remote,0\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="opportunities", mode="partial", file_bytes=data,
+        file_key="o1", created_by=owner.id, idempotency_key=f"op-{uuid.uuid4().hex[:8]}",
+    )
+    assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 2
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+    opp = (
+        await db.execute(
+            select(Opportunity).where(Opportunity.employer_org_id == org.id)
+        )
+    ).scalar_one()
+    assert opp.status == "draft"  # import NEVER publishes
+    assert opp.openings == 2 and opp.location_mode == "remote"
+    assert opp.created_by == owner.id
+
+    # idempotent re-upload (JSON this time, case-insensitive title match)
+    data2 = _json.dumps(
+        {"opportunities": [{"title": title.upper(), "opportunity_type": "internship"}]}
+    ).encode()
+    job2 = await svc.create_job(
+        org.id, kind="opportunities", mode="partial", file_bytes=data2,
+        file_key="o2", created_by=owner.id, idempotency_key=f"op2-{uuid.uuid4().hex[:8]}",
+    )
+    assert job2.dry_stats["skips"] == 1
+    committed2 = await svc.commit(org.id, job2.id, file_bytes=data2)
+    assert committed2.stats["skipped"] == 1 and committed2.stats["created"] == 0
+
+    # no employer profile: every row is a resolution error at preview
+    org2, owner2 = await _org(db)
+    data3 = b"title,opportunity_type\nX,internship\n"
+    job3 = await svc.create_job(
+        org2.id, kind="opportunities", mode="partial", file_bytes=data3,
+        file_key="o3", created_by=owner2.id, idempotency_key=f"op3-{uuid.uuid4().hex[:8]}",
+    )
+    assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] == 1

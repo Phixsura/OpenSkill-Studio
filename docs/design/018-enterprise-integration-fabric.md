@@ -870,8 +870,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   direction). This is the privacy-safe reading of "map CRM deals/accounts
   to Client Briefs ... without leaking internal learner data."
 
-- **Deferred (explicit, as of R19)**: import template kinds `roster` and
-  `opportunities` (users shipped; the pipeline is template-agnostic); LTI NRPS
+- **Deferred (explicit, as of R19)**: import template kinds `roster`
+  (SHIPPED R129) and `opportunities` (SHIPPED R131 — draft-only postings,
+  employer-profile gate, idempotent by lower(title)); LTI NRPS
   (SHIPPED in R49 as membership pre-provisioning — launch captures the
   namesroleservice claim, admin-triggered sync pages the roster through
   identity resolution with the instructor/student role map; no cohort
@@ -912,6 +913,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 | Full E2E chain                           | tests/e2e_integration_lifecycle.py: 39 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→export→IDOR walls) + acceptance-chain DB test                                                                  |
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
+
+- **R131 (third window, Part K deferred kind)**: `opportunities` import
+  template — employer migrations land postings as DRAFTS only (a human
+  publishes; import can never reach candidates), gated on an existing
+  EmployerProfile (every row errors `employer_profile_missing` otherwise),
+  validated against OPPORTUNITY_TYPES / location modes / openings 1-999,
+  idempotent by lower(title) per org. Third KIND_SPECS entry — CSV and
+  JSON both serve it with header_map support.
 
 - **R130 (third window, deferred item)**: per-key warehouse export of the
   events `data` payload via explicit `data.<key>` allowlist entries (events
