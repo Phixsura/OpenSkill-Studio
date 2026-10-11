@@ -911,6 +911,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R127-R128 (third window, Part K closure)**: CSV parser robustness
+  suite (BOM/CRLF/quoted-newline/wide rows), then the JSON template Part K
+  promised: shared `_validate_user_rows` extracted from the CSV path,
+  `parse_users_json` (top-level array or `{"users": [...]}`, same email/
+  NUL/role/dup rules, header_map support), `detect_format` content sniffing
+  so create_job/commit dispatch with no API contract change; upload storage
+  key + ContentType follow the sniffed format.
+
 - **R120-R126 (third window, breadth+SDK)**: generic CRM read connector
   (Part E), full canonical-model list in the sync UI, mapping preview/run
   parity (Part H), bidirectional-profile rejection (was silent pull-only),
