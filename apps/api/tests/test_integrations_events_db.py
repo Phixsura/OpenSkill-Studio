@@ -659,25 +659,27 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     from app.integrations.models import DeliveryAttempt
 
     org = await _org(db)
-    await _sub(db, org)
-    # This test asserts an EXACT egress code sequence ([500, 200]) for one
-    # delivery, but _drain is global and a shared dev Postgres accumulates
-    # pending outbox from other tests/runs that would consume those codes
-    # first. Clearing the pending backlog is a fair precondition for a test
-    # of the precise retry mechanism.
-    from sqlalchemy import delete as _delete
-
-    from app.controlplane.models.outbox import OutboxMessage as OutboxModel
-
-    await db.execute(_delete(OutboxModel).where(OutboxModel.status == "pending"))
-    # Also drop any orphan in-flight deliveries left by other runs — the drain
-    # is global, and a stray pending/delivering row can perturb the scripted
-    # [500, 200] sequence this test asserts.
-    await db.execute(
-        _delete(EventDelivery).where(EventDelivery.status.in_(("pending", "delivering")))
-    )
+    # R193: _drain is global and the shared dev Postgres accumulates in-flight
+    # deliveries from other tests/runs. Rather than depend on scripted egress
+    # codes being consumed in order by THIS delivery alone, give the sub a
+    # unique URL and return 500-then-200 ONLY for that URL (200 for any other
+    # delivery that happens to drain in the same pass). The sequence is now
+    # bound to our delivery regardless of concurrent/leftover state.
+    sink_url = f"https://hooks.example.com/sn-{uuid.uuid4().hex[:8]}"
+    await _sub(db, org, url=sink_url)
     await db.commit()
-    egress.codes = [500, 200]
+    mine = {"n": 0}
+
+    async def _scripted(method, url, *, headers=None, content=None, read_timeout=None):
+        egress.calls.append({"method": method, "url": url, "headers": headers, "body": content})
+        if url == sink_url:
+            code = 500 if mine["n"] == 0 else 200
+            mine["n"] += 1
+            body = b"upstream error \x01detail\x02 " + b"x" * 600 if code >= 400 else b""
+            return httpx.Response(code, content=body, request=httpx.Request(method, url))
+        return httpx.Response(200, request=httpx.Request(method, url))
+
+    egress.request = _scripted
     ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
     await db.commit()
     await _drain(db)
