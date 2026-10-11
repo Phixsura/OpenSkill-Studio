@@ -878,6 +878,24 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R86-R96 (third window)**: connector rate-limit handling (capped
+  Retry-After + bounded transient-5xx retry — Part G); LTI Dynamic
+  Registration 1.0 (paste the platform config URL, everything negotiated;
+  plain-OIDC refusal + per-endpoint egress screens); SAML Single Logout
+  (IdP-initiated Redirect binding, SIGNED-only — logout-CSRF refused,
+  signed string rebuilt from RAW query segments because parse_qs plus-
+  decoding corrupts base64 signatures; a signed LogoutResponse carrying a
+  NameID is refused by the root-tag check) + SLO URL metadata capture
+  (intg11) + SP-metadata advertisement; attribute-map editor UI; SCIM
+  lifecycle event feed completed (reactivation arms); import header-alias
+  column mapping persisted on the job (intg12, commit re-parses with the
+  SAME map); event-type catalog endpoint + subscription datalist (self-
+  consistency test: every advertised pattern passes the create validator);
+  byte-exact delivery payload archive (intg13 — retries/replays resend the
+  archive even if the event row mutates) + inspection endpoint. Parquet
+  export deferred deliberately (pyarrow dependency decision). Live E2E
+  49/49; fabric suite 217 tests.
+
 - **Final verification (marathon2 close)**: backend 7248/7248 green
   (chunked after two OOM-killed monolithic runs; the 52 transient 429s in
   the talent chunk were execution-compression artifacts of the in-process
