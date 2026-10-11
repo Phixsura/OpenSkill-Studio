@@ -698,3 +698,45 @@ async def test_user_list_paginates_at_sql_level(ctx):
     # count=0 is a legitimate "just tell me the total" probe
     p0 = await svc.list(filter_expr=None, start_index=1, count=0)
     assert p0["Resources"] == [] and p0["totalResults"] >= 5
+
+
+@pytest.mark.asyncio
+async def test_concurrent_scim_create_same_username(ctx):
+    """R167: two concurrent SCIM creates of the same new userName — exactly
+    one User lands; the loser gets a clean SCIM 409 (uniqueness), never a
+    raw 500 / poisoned session."""
+    import asyncio
+
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.services.scim import ScimError, ScimUserService
+    from app.models.user import User as _User
+
+    await ctx["db"].commit()  # concurrent sessions must SEE the org + token
+    token = ctx["token"]
+    username = f"scim-race-{uuid.uuid4().hex[:8]}@scim.example.edu"
+
+    async def create():
+        async with AsyncSessionLocal() as own:
+            try:
+                await ScimUserService(own, token).create(
+                    {"userName": username, "active": True}
+                )
+                await own.commit()
+                return "created"
+            except ScimError as e:
+                return e.status
+
+    results = await asyncio.gather(create(), create(), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"raw crash (not a clean 409): {r!r}"
+    assert "created" in results
+    assert 409 in results, f"expected one 409, got {results}"
+
+    n = (
+        await ctx["db"].execute(
+            select(func.count()).select_from(_User).where(func.lower(_User.email) == username)
+        )
+    ).scalar_one()
+    assert n == 1

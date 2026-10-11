@@ -435,16 +435,28 @@ class ScimUserService:
                 )
                 self.db.add(member)
         else:
-            user = User(
-                email=username,
-                password_hash=None,
-                display_name=display,
-                role=UserRole.STUDENT,
-                status=UserStatus.ACTIVE,
-                email_verified=True,  # provisioned by the org's IdP
-            )
-            self.db.add(user)
-            await self.db.flush()
+            # R167: two concurrent POST /Users (or a retried /Bulk) for the
+            # same new userName race to INSERT users.email. The INSERT runs
+            # inside a savepoint; the unique-violation loser rolls back just
+            # that statement and returns the proper SCIM 409 — not a raw 500.
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                async with self.db.begin_nested():
+                    user = User(
+                        email=username,
+                        password_hash=None,
+                        display_name=display,
+                        role=UserRole.STUDENT,
+                        status=UserStatus.ACTIVE,
+                        email_verified=True,  # provisioned by the org's IdP
+                    )
+                    self.db.add(user)
+                    await self.db.flush()
+            except IntegrityError as exc:
+                raise ScimError(
+                    409, "userName already exists", "uniqueness"
+                ) from exc
             member = OrgMember(
                 org_id=self.org_id,
                 user_id=user.id,
