@@ -862,6 +862,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   extractors (models + engine support exist; vendor connectors are issue #44
   marketplace territory).
 
+## 20b. Part O security checklist (final audit, R100-R104)
+
+| Requirement                        | Evidence                                                                                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Encrypted secrets                  | Fernet envelopes, write-only (`has_client_secret`); SCIM tokens hashed; LTI tool keys encrypted                                                                 |
+| SSRF-safe outbound                 | single-egress lint test; resolve→validate-all-IPs→pin dial; mixed-set refusal; NRPS next-links + metadata endpoints re-screened                                 |
+| Allowlisted callback/redirect URIs | R101/R102: every redirect URI derived from `public_base_url`, never the Host header (hostile-Host guard test); SSO deep links relative-path screened both sides |
+| Webhook signature verification     | Standard Webhooks `v1,HMAC-SHA256(id.ts.body)`; 7-day co-sign rotation; byte-exact archive keeps receiver checks stable                                         |
+| Replay protection                  | OIDC state/nonce single-use; SAML assertion-id + InResponseTo caches; back-channel jti cache; SLO signed-only                                                   |
+| Least-privilege OAuth scopes       | R104 guard test pins roster.readonly / AGS score / NRPS membership.readonly / `openid email profile`                                                            |
+| Cross-tenant IDOR tests            | uniform-404 walls service- and API-level; live E2E walls 8 list surfaces with a second real user                                                                |
+| Field-level export allowlists      | allowlist-BUILT projection (narrowed-list leak killer), org-salted hashing                                                                                      |
+| Audit logs for admin mappings      | R100: 16 registered intg.* actions across mappings/profiles/SSO/credentials/SCIM tokens/conflict adjudication                                                   |
+| Safe deprovision                   | SCIM deactivate≡DELETE sweeps refresh tokens incl. rotation predecessors; back-channel + SLO sweep sessions; unenroll never deletes work product                |
+
 ## 20a. Issue #43 acceptance-criteria mapping (final audit)
 
 | Criterion                                | Evidence                                                                                                                                                                                                                                  |
