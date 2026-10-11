@@ -77,11 +77,41 @@ each break-glass login emits `org.breakglass.login`).
 - **Rotate secret** keeps the old key co-signing for 7 days; **Rotate now**
   is the leaked-secret path. **Test** sends a sample signed event
   synchronously and reports status/latency.
+- The exact signed bytes of every delivery are archived on first dispatch
+  (retries and replays resend them byte-for-byte even across deploys);
+  inspect via GET /deliveries/{id}/payload.
+- Connectors honor 429 Retry-After (capped at 30s) and retry transient
+  5xx twice — a rate-limited SIS no longer fails the run outright.
 - Failed attempts keep a sanitized 500-char response snippet in the
   attempts view — first stop when a receiver misbehaves.
 - Replay: any terminal delivery can be replayed; replays are flagged
   (`replay_of`) and exempt from the one-original-per-(event,subscription)
   uniqueness.
+
+## 3b. One-click LMS onboarding (R87)
+
+POST /integrations/lti/registrations/dynamic with the platform's
+openid-configuration URL (+ its one-time registration token): we fetch the
+config, refuse plain OIDC servers, register the tool (private_key_jwt,
+resource-link + deep-linking messages, AGS/NRPS scopes) and persist the
+returned client_id + deployment ids. Moodle: Site admin → Plugins →
+External tool → "register a tool" gives you exactly those two values.
+
+## 3c. Single Logout (R88)
+
+Our SP metadata advertises `/api/v1/sso/saml/slo/{connection_id}`
+(Redirect binding). IdP-initiated LogoutRequests MUST be signed — unsigned
+or rogue-signed requests are refused (logout-CSRF). On success the user's
+sessions are revoked, `integration.sso.single_logout` fires, and a
+LogoutResponse is redirected to the IdP's SLO URL (captured automatically
+from metadata). OIDC orgs get the same via back-channel logout.
+
+## 4a. Imports with vendor CSV headers (R92)
+
+Pass `header_map` (JSON form field) at upload:
+`{"email": "E-mail Address", "display_name": "Full Name", "role": "Role"}`.
+The map is persisted on the job, so commit re-parses identically; unknown
+canonical keys are refused.
 
 ## 4b. Editing and removing resources (R77-R84)
 
