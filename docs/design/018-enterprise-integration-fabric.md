@@ -917,6 +917,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R175 (fourth window, probe over R172-R174)**: 4 mutants — the lone
+  survivor was a coverage gap (connection delete tested `running` but not a
+  `queued` run, which a worker could claim right after the check), closed
+  with a queued-run assertion. 4/4 killed on re-probe.
 - **R174 (fourth window, cascade-delete integrity)**: deleting a connection
   cascade-deletes its sync profiles AND their runs (FK CASCADE). A LIVE run
   would be ripped out from under the worker mid-pass, so connection delete

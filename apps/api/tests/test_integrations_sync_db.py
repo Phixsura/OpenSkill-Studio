@@ -1245,6 +1245,17 @@ async def test_connection_delete_refuses_while_run_live(db):
     org, owner = await _org(db)
     conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector([[]]))
 
+    # A QUEUED run (not yet picked up) must also block — a worker could claim
+    # it the instant after the delete check.
+    queued = SyncRun(profile_id=profile.id, status="queued", trigger="manual", cursor_in={})
+    db.add(queued)
+    await db.flush()
+    with pytest.raises(AppError) as eq:
+        await ConnectionService(db).delete(org.id, conn.id)
+    assert eq.value.code == "CONNECTION_BUSY"
+    queued.status = "cancelled"
+    await db.flush()
+
     run = SyncRun(profile_id=profile.id, status="running", trigger="manual", cursor_in={})
     db.add(run)
     await db.flush()
