@@ -362,6 +362,35 @@ async def main() -> int:
             r.text[:300],
         )
 
+        # ── R67-R70: SSO browser journey over HTTP ──
+        r = await c.get(f"/sso/login?email=nobody@{domain}")
+        check("discovery: no sso yet", r.status_code == 200 and r.json()["data"]["sso"] is False)
+        r = await c.post(
+            f"{base}/sso-connections",
+            json={
+                "protocol": "oidc",
+                "oidc_issuer": "https://idp.example.com",
+                "oidc_client_id": "e2e-client",
+                "oidc_client_secret": "s3cret",
+            },
+            headers=h,
+        )
+        check("sso connection created", r.status_code == 201, r.text[:300])
+        sso_id = r.json()["data"]["id"]
+        r = await c.patch(
+            f"{base}/sso-connections/{sso_id}", json={"status": "active"}, headers=h
+        )
+        check("sso connection activated", r.status_code == 200, r.text[:300])
+        r = await c.get(f"/sso/login?email=nobody@{domain}")
+        disc = r.json()["data"]
+        check(
+            "discovery routes to oidc authorize",
+            r.status_code == 200
+            and disc["sso"] is True
+            and disc["authorize_url"].startswith("/api/v1/sso/oidc/authorize?"),
+            r.text[:200],
+        )
+
         # ── R36/R52: health summary + SCIM /Bulk over HTTP ──
         r = await c.get(f"{base}/health", headers=h)
         check(
