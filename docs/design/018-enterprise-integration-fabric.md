@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R195 (fifth window, regression guard)**: a source-level contract test
+  asserts every ConnCtx built in the sync engine passes `_secret_loader`, so
+  a future construction site that forgets it (reintroducing R194) is caught.
 - **R194 (fifth window, HIGH-SEVERITY production bug)**: sync runs built the
   connector ConnCtx WITHOUT a `_secret_loader`, so `ctx.get_secret()` returned
   `{}` — every real connector (OneRoster OAuth client-credentials, generic

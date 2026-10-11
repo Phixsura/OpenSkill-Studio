@@ -778,3 +778,21 @@ def test_write_amplifying_routes_are_rate_limited():
 
     cn = _paths_with_ratelimit(conn_api.router)
     assert cn[(("POST",), "/orgs/{org_id}/integrations/connections/{connection_id}/ping")]
+
+
+def test_sync_connctx_always_builds_with_secret_loader():
+    """R194 guard: every ConnCtx built in the sync engine must pass a
+    _secret_loader — a bare ConnCtx silently authenticates connectors with an
+    empty secret (ping-healthy-but-sync-401). Source-level check so a new
+    construction site that forgets the loader is caught."""
+    import pathlib
+    import re
+
+    src = pathlib.Path("app/integrations/services/sync_engine.py").read_text()
+    # Find each ConnCtx(...) call body and require _secret_loader in it.
+    for m in re.finditer(r"ConnCtx\((.*?)\)", src, re.DOTALL):
+        body = m.group(1)
+        assert "_secret_loader" in body, (
+            "a sync-engine ConnCtx is built without _secret_loader "
+            f"(connectors would get empty secrets): {body[:120]!r}"
+        )
