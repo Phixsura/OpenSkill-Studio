@@ -185,12 +185,31 @@ def test_no_direct_httpx_outside_security_module():
 
 # ── provider/connector registry parity (§13) ──
 
-def test_connector_registry_matches_catalog():
-    from app.integrations.registry import CONNECTORS, PROVIDER_CATALOG
+def _fresh_connectors():
+    """FRESH connector instances from the real classes: many tests swap
+    fakes into the module-level CONNECTORS singleton (order pollution) —
+    registry contracts are about the REAL classes, not whatever a prior
+    test left behind."""
+    from app.integrations import registry as _registry
+    from app.integrations.registry import PROVIDER_CATALOG
 
-    assert set(CONNECTORS) == set(PROVIDER_CATALOG)
+    return {
+        obj.key: obj()
+        for obj in vars(_registry).values()
+        if isinstance(obj, type)
+        and hasattr(obj, "key")
+        and hasattr(obj, "capabilities")
+        and getattr(obj, "key", None) in PROVIDER_CATALOG
+    }
+
+
+def test_connector_registry_matches_catalog():
+    from app.integrations.registry import PROVIDER_CATALOG
+
+    connectors = _fresh_connectors()
+    assert set(connectors) == set(PROVIDER_CATALOG)
     for key, spec in PROVIDER_CATALOG.items():
-        assert set(spec["capabilities"]) == set(CONNECTORS[key].capabilities), key
+        assert set(spec["capabilities"]) == set(connectors[key].capabilities), key
 
 
 # ── API auth surface (no DB: 401 before any query) ──
@@ -669,7 +688,9 @@ def test_connector_sdk_boundary_contract():
     the CONNECTORS registry is consistent with PROVIDER_CATALOG."""
     import inspect
 
-    from app.integrations.registry import CONNECTORS, PROVIDER_CATALOG
+    from app.integrations.registry import PROVIDER_CATALOG
+
+    connectors = _fresh_connectors()
 
     cap_method = {
         "roster.read": "read",
@@ -677,7 +698,7 @@ def test_connector_sdk_boundary_contract():
         "talent.write": "write",
         "events.deliver": None,
     }
-    for key, conn in CONNECTORS.items():
+    for key, conn in connectors.items():
         assert conn.key == key, f"{key}: key mismatch"
         assert isinstance(conn.capabilities, frozenset), key
         assert inspect.iscoroutinefunction(conn.ping), f"{key}: ping must be async"
@@ -692,7 +713,7 @@ def test_connector_sdk_boundary_contract():
         if hasattr(conn, "write"):
             assert any(c.endswith(".write") for c in conn.capabilities), f"{key}: undeclared write"
 
-    assert set(CONNECTORS) == set(PROVIDER_CATALOG)
-    for key, conn in CONNECTORS.items():
+    assert set(connectors) == set(PROVIDER_CATALOG)
+    for key, conn in connectors.items():
         assert set(conn.capabilities) == set(PROVIDER_CATALOG[key]["capabilities"]), key
         assert PROVIDER_CATALOG[key]["version"] >= 1
