@@ -802,16 +802,20 @@ class BulkImportService:
         ).scalars().all()
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["row_number", "column", "code", "message", "email"])
+        writer.writerow(["row_number", "column", "code", "message", "identifier"])
         for r in rows:
             raw: dict[str, Any] = r.raw_row or {}
+            # R153: kind-appropriate identifier — email for users/roster
+            # rows, title for opportunities — so the error report always
+            # names the offending row.
+            ident = str(raw.get("email") or raw.get("title") or raw.get("cohort_slug") or "")
             writer.writerow(
                 [
                     r.row_number,
                     _sanitize_cell(r.column or ""),
                     _sanitize_cell(r.code),
                     _sanitize_cell(r.message),
-                    _sanitize_cell(str(raw.get("email", ""))),
+                    _sanitize_cell(ident),
                 ]
             )
         return buf.getvalue()
