@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.integrations.services.warehouse import S3PartWriter, WarehouseExportService
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -121,6 +122,9 @@ async def update_stream(
     "/export-streams/{stream_id}/run",
     response_model=DataResponse[ExportRunResponse],
     status_code=202,
+    # R214: a full-stream export is the most expensive click in the fabric —
+    # bounded like the sync trigger (R160 family).
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def run_stream(
     org_id: str,

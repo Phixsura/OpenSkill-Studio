@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
 from app.integrations.services.roster import RosterProvisioningService
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -21,7 +22,11 @@ class ProvisionRequest(BaseModel):
 
 
 @router.post(
-    "/connections/{connection_id}/provision-roster", response_model=DataResponse[dict]
+    "/connections/{connection_id}/provision-roster",
+    response_model=DataResponse[dict],
+    # R214: provisioning walks every staged class/enrollment — bounded like
+    # the sync trigger (R160 family).
+    dependencies=[Depends(rate_limit(10, 60))],
 )
 async def provision_roster(
     org_id: str,

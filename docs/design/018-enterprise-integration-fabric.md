@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R214 (fifth window, parity hardening)**: the two most expensive trigger
+  endpoints had NO rate limit while the comparable sync trigger did (R160
+  family): `POST /export-streams/{id}/run` (full warehouse export) and
+  `POST /connections/{id}/provision-roster` (walks every staged
+  class/enrollment). Both now `rate_limit(10, 60)` — admin-gated already, but
+  a buggy client could hammer them.
 - **R213 (fifth window, R110-class fix — the ironic one)**: `create_job`'s
   idempotency key is FOR absorbing concurrent duplicate submissions, yet the
   check-then-add against `uq_intg_import_idem` meant exactly that race 500'd
