@@ -531,9 +531,26 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
             # WHOLE page is committed (§11.3: a crash re-runs from the
             # previous cursor and the upserts are idempotent).
             for i in range(0, len(records), BATCH_SIZE):
-                for raw in records[i : i + BATCH_SIZE]:
+                chunk = records[i : i + BATCH_SIZE]
+                # R218: ONE query for the chunk's staged rows instead of a
+                # point SELECT per record (N+1 at enterprise volume).
+                chunk_ids = [eid for eid in (_external_id_of(r) for r in chunk) if eid]
+                staged_map: dict[str, StagedRecord] = {}
+                if chunk_ids:
+                    rows_pref = (
+                        await db.execute(
+                            select(StagedRecord).where(
+                                StagedRecord.connection_id == conn.id,
+                                StagedRecord.model == profile.model,
+                                StagedRecord.external_id.in_(chunk_ids),
+                            )
+                        )
+                    ).scalars()
+                    staged_map = {r.external_id: r for r in rows_pref}
+                for raw in chunk:
                     outcome, detail = await _apply_record(
-                        db, run, profile, conn, mapping_doc, raw, seen_external_ids
+                        db, run, profile, conn, mapping_doc, raw, seen_external_ids,
+                        staged_map,
                     )
                     stats[outcome] = stats.get(outcome, 0) + 1
                 if i + BATCH_SIZE < len(records):
@@ -588,6 +605,10 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
     await _finish(db, run, status)
 
 
+def _external_id_of(raw: dict) -> str:
+    return str(raw.get("external_id") or raw.get("sourcedId") or raw.get("id") or "")
+
+
 async def _apply_record(
     db: AsyncSession,
     run: SyncRun,
@@ -596,8 +617,9 @@ async def _apply_record(
     mapping_doc: dict | None,
     raw: dict,
     seen: set[str],
+    staged_map: dict[str, StagedRecord] | None = None,
 ) -> tuple[str, dict]:
-    external_id = str(raw.get("external_id") or raw.get("sourcedId") or raw.get("id") or "")
+    external_id = _external_id_of(raw)
     if not external_id or len(external_id) > 255:
         db.add(
             SyncRecordResult(
@@ -665,15 +687,21 @@ async def _apply_record(
             return "conflicts", {}
 
     new_hash = _payload_hash(mapped)
-    staged = (
-        await db.execute(
-            select(StagedRecord).where(
-                StagedRecord.connection_id == conn.id,
-                StagedRecord.model == profile.model,
-                StagedRecord.external_id == external_id,
+    # R218: the engine prefetches the chunk's staged rows in ONE query and
+    # hands them down — the per-record point SELECT (500 round-trips per
+    # batch) remains only as the fallback for direct callers.
+    if staged_map is not None:
+        staged = staged_map.get(external_id)
+    else:
+        staged = (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.connection_id == conn.id,
+                    StagedRecord.model == profile.model,
+                    StagedRecord.external_id == external_id,
+                )
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
     if staged is None:
         db.add(
             StagedRecord(

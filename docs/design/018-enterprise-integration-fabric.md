@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R218 (sixth window, scale fix — mutation-killed)**: the pull engine
+  looked up each record's staged row with a point SELECT — an N+1 of 500
+  round-trips per batch (minutes of pure latency on a 1M-record enterprise
+  sync). Fix: prefetch the chunk's staged rows in ONE `IN (...)` query and
+  hand the map to `_apply_record` (the point SELECT stays as the fallback for
+  direct callers). Query-count test at the cursor level: 12 records in
+  chunks of 3 issue ≤6 staged-table SELECTs; the per-record version (13+)
+  fails it.
 - **R217 (sixth window, OOM fix — mutation-killed)**: the EgressClient
   response-size cap ran AFTER httpx buffered the entire body
   (`len(resp.content) > cap`) — a hostile or misconfigured upstream returning

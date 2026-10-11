@@ -1475,3 +1475,46 @@ async def test_overfull_connector_page_fully_staged_never_mistombstoned(db, monk
     refetched = await db.get(type(run), run.id)
     assert refetched.status == "succeeded"
     assert refetched.stats["created"] == 8 and refetched.stats["tombstoned"] == 0
+
+
+@pytest.mark.asyncio
+async def test_staged_lookup_batched_not_per_record(db, monkeypatch):
+    """R218: the engine must prefetch each chunk's staged rows in ONE query —
+    not a point SELECT per record (N+1: 500 round-trips per batch at
+    enterprise volume). Counted at the cursor: 12 records in chunks of 3 must
+    issue at most 6 staged-table SELECTs (4 chunk prefetches + tombstone pass
+    + slack); the per-record version issues 13+."""
+    from sqlalchemy import event
+
+    from app.core.database import engine
+    from app.integrations.services import sync_engine as se
+
+    monkeypatch.setattr(se, "BATCH_SIZE", 3)
+    org, owner = await _org(db)
+    pages = [
+        [{"sourcedId": f"nq-{p}-{i}", "title": f"C{p}{i}", "status": "active"}
+         for i in range(6)]
+        for p in range(2)
+    ]
+    conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector(pages))
+    run = await SyncProfileService(db).trigger(org.id, profile.id, trigger="backfill")
+    await db.commit()
+
+    counts = {"staged_selects": 0}
+
+    def _count(conn_, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "intg_staged_records" in statement:
+            counts["staged_selects"] += 1
+
+    sync_engine_ = engine.sync_engine
+    event.listen(sync_engine_, "before_cursor_execute", _count)
+    try:
+        await se.execute_run(db, run.id)
+    finally:
+        event.remove(sync_engine_, "before_cursor_execute", _count)
+
+    refetched = (
+        await db.execute(select(type(run)).where(type(run).id == run.id))
+    ).scalar_one()
+    assert refetched.status == "succeeded" and refetched.stats["created"] == 12
+    assert counts["staged_selects"] <= 6, counts
