@@ -255,3 +255,49 @@ async def test_push_requires_write_capability(db):
             mapping_profile_id=None,
         )
     assert e.value.code == "CAPABILITY_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_consent_revoke_then_regrant_last_write_wins(db):
+    """R116: consent is last-write-wins by timestamp — revoke blocks the
+    push, a later re-grant restores it. The §9 privacy boundary must track
+    the CURRENT decision, not the first or the most-permissive."""
+    from datetime import UTC, datetime, timedelta
+
+    org, owner = await _org(db)
+    sink = FakeAtsConnector()
+    conn, profile = await _setup(db, org, owner, sink)
+    app_row, cand = await _application(db, org, consent="granted")
+    await db.commit()
+    svc = SyncProfileService(db)
+
+    run1 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run1.id)
+    await db.refresh(run1)
+    assert run1.stats["pushed"] == 1 and run1.stats["conflicts"] == 0
+
+    # Revoke LATER than the grant -> next run is a consent conflict.
+    db.add(ConsentLog(
+        user_id=cand.id, consent_type="ats_share", action="revoked",
+        created_at=datetime.now(UTC) + timedelta(seconds=1),
+    ))
+    await db.commit()
+    run2 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.stats["conflicts"] == 1 and run2.stats["pushed"] == 0
+
+    # Re-grant LATER still -> push resumes (last write wins, not sticky-revoked).
+    db.add(ConsentLog(
+        user_id=cand.id, consent_type="ats_share", action="granted",
+        created_at=datetime.now(UTC) + timedelta(seconds=2),
+    ))
+    await db.commit()
+    run3 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run3.id)
+    await db.refresh(run3)
+    assert run3.stats["conflicts"] == 0
+    assert app_row.id  # anchor
