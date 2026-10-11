@@ -1317,3 +1317,56 @@ async def test_clock_conflict_tolerates_naive_provider_timestamp(db):
     await execute_run(db, run2.id)  # must not raise
     await db.refresh(staged)
     assert staged.payload["timed"] == "REMOTE"  # naive treated as UTC, theirs newer
+
+
+@pytest.mark.asyncio
+async def test_sync_run_loads_connection_credentials(db):
+    """R194: a sync run must decrypt the connection's stored credentials and
+    hand them to the connector via ctx.get_secret() — otherwise real
+    connectors (OneRoster OAuth, CRM api_key, ATS) authenticate with an empty
+    secret and silently 401 while ping looks healthy."""
+    from app.integrations import registry
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+
+    seen_secret = {}
+
+    class SecretCapturingConnector:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read"})
+
+        async def ping(self, ctx):
+            return None
+
+        async def read(self, ctx, model, state):
+            seen_secret.update(await ctx.get_secret())
+            yield {"records": [{"external_id": "s1", "title": "T"}], "state": {}}
+
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn = await csvc.create(
+        org.id, provider_key="oneroster", name=f"c-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+    )
+    conn.status = "active"
+    await csvc.set_credential(
+        org.id, conn.id, kind="client_secret",
+        values={"client_id": "cid-123", "client_secret": "shhh-secret"},
+        expires_at=None,
+    )
+    await db.flush()
+    registry.CONNECTORS["oneroster"] = SecretCapturingConnector()
+
+    profile = await SyncProfileService(db).create(
+        org.id, connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+
+    assert seen_secret.get("client_secret") == "shhh-secret"
+    assert seen_secret.get("client_id") == "cid-123"

@@ -37,6 +37,30 @@ from app.integrations.models import (
 from app.integrations.registry import CONNECTORS
 from app.integrations.services.mapping import apply_mapping
 
+
+def _secret_loader_for(db: AsyncSession, connection_id: str):
+    """R194: the same credential loader ConnectionService.ping uses. Sync
+    runs MUST decrypt connection credentials or every real connector
+    (OneRoster OAuth, CRM api_key, ATS) authenticates with an empty secret
+    and silently fails — ping looked healthy while syncs 401'd. Build the
+    ConnCtx with this loader, exactly like ping does."""
+    from app.core.crypto import decrypt_credentials
+    from app.integrations.models import IntegrationConnectionCredential
+
+    async def load() -> dict[str, str]:
+        cred = (
+            await db.execute(
+                select(IntegrationConnectionCredential).where(
+                    IntegrationConnectionCredential.connection_id == connection_id
+                )
+            )
+        ).scalar_one_or_none()
+        return decrypt_credentials(cred.ciphertext) if cred is not None else {}
+
+    return load
+
+
+
 log = structlog.get_logger()
 
 TOPIC_SYNC_RUN = "intg.sync.run"
@@ -436,7 +460,12 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
 
     from app.integrations.registry import ConnCtx
 
-    ctx = ConnCtx(connection_id=conn.id, config=conn.config or {}, base_url=conn.base_url)
+    ctx = ConnCtx(
+        connection_id=conn.id,
+        config=conn.config or {},
+        base_url=conn.base_url,
+        _secret_loader=_secret_loader_for(db, conn.id),  # R194
+    )
     try:
         async for batch in connector.read(ctx, profile.model, state):
             records = batch.get("records", [])
@@ -817,7 +846,12 @@ async def _execute_push(
     sent_ok = 0
     from app.integrations.registry import ConnCtx
 
-    ctx = ConnCtx(connection_id=conn.id, config=conn.config or {}, base_url=conn.base_url)
+    ctx = ConnCtx(
+        connection_id=conn.id,
+        config=conn.config or {},
+        base_url=conn.base_url,
+        _secret_loader=_secret_loader_for(db, conn.id),  # R194
+    )
     try:
         for i in range(0, len(to_send), 100):
             batch = to_send[i : i + 100]

@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R194 (fifth window, HIGH-SEVERITY production bug)**: sync runs built the
+  connector ConnCtx WITHOUT a `_secret_loader`, so `ctx.get_secret()` returned
+  `{}` — every real connector (OneRoster OAuth client-credentials, generic
+  CRM api_key, generic ATS) authenticated with an EMPTY secret and would
+  401/403 on every scheduled or triggered sync, while `ping` (which DID build
+  the loader) reported the connection healthy. Invisible to the suite because
+  all sync tests use a FakeConnector that never calls get_secret. Fixed: both
+  the read and push paths now build the ConnCtx with the same credential
+  loader ping uses (`_secret_loader_for`). Test with a secret-capturing
+  connector asserts the decrypted client_secret reaches the connector
+  (reverting the fix fails it).
+
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
