@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R225 (sixth window, admin-UX parity fix)**: rotating credentials reset an
+  ERRORED connection to pending (fresh ping), but editing the other two
+  fixable inputs — config or base_url — did not: the connection stayed parked
+  unless the admin also knew to flip status manually. `update()` now applies
+  the same error→pending reset on a config/base_url edit; a pure rename never
+  touches status.
 - **R224 (sixth window, protocol-correctness fix — mutation-killed)**: a
   410 Gone from a webhook endpoint was retried through the full 8-attempt
   ladder and only counted toward the 5-day auto-disable window — but 410 is

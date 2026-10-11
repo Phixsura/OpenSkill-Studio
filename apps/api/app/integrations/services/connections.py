@@ -245,6 +245,13 @@ class ConnectionService:
         if base_url is not None:
             validate_egress_url(base_url)
             conn.base_url = base_url
+        # R225 (parity with set_credential): fixing the thing that errored
+        # re-opens the connection for a fresh ping. Rotating credentials
+        # already reset error -> pending; editing config/base_url — the OTHER
+        # two things an admin fixes after an error — did not, leaving the
+        # connection parked unless they also knew to flip status manually.
+        if (config is not None or base_url is not None) and conn.status == "error":
+            conn.status = "pending"
         if status is not None:
             # Admin surface accepts only disable / re-enable (§4.2); the
             # machine-managed states are not settable from the API.

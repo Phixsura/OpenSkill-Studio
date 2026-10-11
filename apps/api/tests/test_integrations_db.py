@@ -423,3 +423,33 @@ async def test_concurrent_first_credential_set_no_500(ctx):
     ).scalars().all()
     assert len(rows) == 1
     assert rows[0].id in (r1, r2)
+
+
+@pytest.mark.asyncio
+async def test_config_fix_reopens_errored_connection(ctx):
+    """R225 (parity with set_credential): an admin who fixes the base_url or
+    config of an ERRORED connection re-opens it for a fresh ping — rotating
+    credentials already did this; editing the other two fixable inputs left
+    the connection parked unless they also flipped status by hand."""
+    svc, org = ctx["svc"], ctx["org"]
+    conn = await _mk_conn(ctx)
+    conn.status = "error"
+    await ctx["db"].flush()
+    updated = await svc.update(
+        org.id, conn.id, base_url="https://fixed.example.com/v2"
+    )
+    assert updated.status == "pending"
+
+    # same for a config edit
+    conn2 = await _mk_conn(ctx)
+    conn2.status = "error"
+    await ctx["db"].flush()
+    updated2 = await svc.update(org.id, conn2.id, config={})
+    assert updated2.status == "pending"
+
+    # a pure rename does NOT touch status
+    conn3 = await _mk_conn(ctx)
+    conn3.status = "error"
+    await ctx["db"].flush()
+    updated3 = await svc.update(org.id, conn3.id, name=f"n-{uuid.uuid4().hex[:8]}")
+    assert updated3.status == "error"
