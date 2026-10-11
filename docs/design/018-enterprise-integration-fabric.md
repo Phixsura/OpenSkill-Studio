@@ -917,6 +917,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R182 (fourth window, rename-collision symmetry)**: connection UPDATE
+  rename now wraps its flush in a savepoint too — renaming onto an existing
+  name returns the clean CONNECTION_NAME_TAKEN 409 and leaves the session
+  usable (follow-up write in the same session still commits), matching the
+  create-path guard. Completes uniform unique-violation handling on the
+  connection surface (create R172 + rename R182).
+
 - **Marathon4 verification (mid-window checkpoint R155-R179)**: fabric suite
   277/277, web 764/764, live E2E 62/62, each changed area mutation- or
   revert-probed. Two production-500 classes closed fabric-wide this window —

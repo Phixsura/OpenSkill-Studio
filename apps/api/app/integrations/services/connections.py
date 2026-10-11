@@ -257,7 +257,19 @@ class ConnectionService:
                     409,
                 )
             conn.status = status
-        await self.db.flush()
+        # R182: a rename collides on uq_intg_conn_org_name only under a rare
+        # simultaneous rename (the dup-SELECT covers the common case). Keep
+        # the whole surface uniform: a flush unique-violation returns the
+        # clean 409 rather than a 500.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                "CONNECTION_NAME_TAKEN", "A connection with this name exists", 409
+            ) from exc
         return conn
 
     async def upgrade(self, org_id: str, connection_id: str) -> IntegrationConnection:

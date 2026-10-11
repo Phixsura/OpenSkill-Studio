@@ -660,3 +660,35 @@ async def test_concurrent_mapping_create_same_name(db):
         )
     ).scalar_one()
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_connection_rename_collision_is_clean_409(db):
+    """R182: renaming a connection onto another's name returns a clean 409
+    (CONNECTION_NAME_TAKEN) and does NOT poison the session — a follow-up
+    write in the same session still commits."""
+    from app.exceptions import AppError
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+    svc = ConnectionService(db)
+    await svc.sync_provider_catalog()
+    a = await svc.create(
+        org.id, provider_key="generic_crm", name="conn-a",
+        config={}, base_url="https://a.example.edu", created_by=owner.id,
+    )
+    b = await svc.create(
+        org.id, provider_key="generic_crm", name="conn-b",
+        config={}, base_url="https://b.example.edu", created_by=owner.id,
+    )
+    await db.commit()
+
+    with pytest.raises(AppError) as e:
+        await svc.update(org.id, b.id, name="conn-a")  # collide with a
+    assert e.value.code == "CONNECTION_NAME_TAKEN" and e.value.status_code == 409
+
+    # Session not poisoned: a legitimate rename still works + commits.
+    updated = await svc.update(org.id, b.id, name="conn-b2")
+    await db.commit()
+    assert updated.name == "conn-b2"
+    assert a.name == "conn-a"
