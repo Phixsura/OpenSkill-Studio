@@ -919,6 +919,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   admin can grab the exact columns before preparing a file.
 - **R186-R187 (fourth window, probes)**: export cadence 3/3 and mapping
   validation 4/4 mutants killed — R183 and R164 fully pinned.
+- **Marathon4 verification (late-window, R180-R192)**: fabric 281/281, web
+  764/764, live E2E 62/62, consumers (controlplane/billing/webhooks) green;
+  every new fix mutation- or revert-probed (export cadence 3/3, mapping 4/4,
+  R188 capacity 2/2). Audited clean with no further defects: LTI DL/client-
+  assertion JWT (iat/exp 300s + nonce/jti), SAML+metadata XML parse (XXE/
+  entity-bomb safe), SCIM token sha256-hash compare (timing-safe), webhook
+  event-pattern validation, DNS verify timeout+exception-safe. All unique
+  create/rename paths uniformly 409-not-500 under concurrency.
 - **R192 (fourth window, rename symmetry complete)**: SCIM group PATCH
   rename now isolates its flush in a savepoint too — a concurrent rename
   collision returns a clean SCIM 409, session stays usable for the member
