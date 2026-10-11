@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R242 (seventh window, foreground sweep record)**: single-chat foreground
+  verification pass (no background tasks): full API suite 7348/7348 in 8+3
+  chunked foreground runs, E2E 62/62, adversarial 178/178 (zero tracebacks),
+  then continued clean-harness probes — LTI launch-state reuse, engine
+  backfill-cursor/dup-external-id/delta-tombstone, SCIM revoked-token +
+  group-map validation, CSV-injection guard, atomic-failure status, outbox
+  unknown-topic dead-letter: 10 more KILLED (one malformed probe on the
+  export update path discarded as invalid, create-path already pinned).
 - **R241 (seventh window, survivor pin)**: the 5-day auto-disable rule was
   pinned only in the POSITIVE direction — shrinking the window to 0 days
   (every first exhaustion disables the endpoint) survived the suite. New
