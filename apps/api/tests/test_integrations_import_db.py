@@ -886,3 +886,18 @@ async def test_import_create_and_commit_write_audit_rows(db, monkeypatch):
     assert all(r.actor_user_id == owner.id for r in rows)
     assert rows[0].after["kind"] == "users"
     assert rows[1].after["stats"]["created"] == 1
+
+    # R143: commit also lands a mesh event — counts only, never the roster.
+    from app.integrations.models.events import IntegrationEvent
+
+    ev = (
+        await db.execute(
+            select(IntegrationEvent).where(
+                IntegrationEvent.org_id == org.id,
+                IntegrationEvent.type == "com.openskill.org.import.committed.v1",
+            )
+        )
+    ).scalar_one()
+    assert ev.subject == job_id
+    assert ev.data["stats"]["created"] == 1
+    assert "email" not in str(ev.data)

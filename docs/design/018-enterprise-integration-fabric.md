@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R143 (third window, mesh completeness)**: commit of a bulk import now
+  emits `com.openskill.org.import.committed.v1` (counts only — never the
+  roster) so SIS/HRIS webhook subscribers can react to bulk provisioning;
+  catalog lists it among direct emissions; test asserts the event row,
+  its subject (job id) and the absence of any email in the payload.
+
 - **R141-R142 (third window, UI + live walk)**: data-page vitest coverage
   for the kind selector / per-kind header-map fields / JSON accept; live
   E2E extended with a REAL multipart JSON import walk (upload previews,

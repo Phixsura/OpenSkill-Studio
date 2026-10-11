@@ -131,6 +131,7 @@ async def event_catalog(
         "invoice.finalized",
         "org.sso.login",
         "org.breakglass.login",
+        "org.import.committed",
         "org.scim.provisioned",
         "org.scim.deprovisioned",
         "org.scim.reactivated",

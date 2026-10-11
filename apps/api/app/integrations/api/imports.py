@@ -167,6 +167,15 @@ async def commit_import(
         db, org_id, user.id, "intg.import.committed", "import_job", job.id,
         after={"kind": job.kind, "status": job.status, "stats": job.stats},
     )
+    # R143: downstream systems (SIS/HRIS webhooks) can react to bulk
+    # provisioning — counts only, never the roster itself.
+    from app.integrations.facade import emit_event
+
+    await emit_event(
+        db, org_id, "org.import.committed",
+        subject=job.id,
+        data={"kind": job.kind, "status": job.status, "stats": job.stats},
+    )
     await db.commit()
     return {"data": resp}
 
