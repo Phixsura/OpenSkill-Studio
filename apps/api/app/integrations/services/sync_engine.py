@@ -609,8 +609,13 @@ async def _apply_record(
         written_at = lo.get("written_at")
         try:
             dt = datetime.fromisoformat(written_at) if written_at else None
-        except ValueError:
+        except (ValueError, TypeError):
             dt = None
+        # R178 (defense-in-depth, same lesson as R177): we always write this
+        # aware, but a legacy/tampered naive value must not 500 the sync via a
+        # naive-vs-aware subtraction — normalize to UTC.
+        if dt is not None and dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
         if dt is not None and datetime.now(UTC) - dt <= timedelta(hours=24):
             staged.payload = mapped
             staged.raw_hash = new_hash

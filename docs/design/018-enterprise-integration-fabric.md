@@ -917,6 +917,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R178 (fourth window, defense-in-depth)**: the echo-suppression read of
+  `last_outbound.written_at` (always written aware by us) now also catches
+  TypeError and normalizes a naive value to UTC — a legacy/tampered naive
+  row can't 500 a sync run via naive-vs-aware subtraction. Same lesson as
+  R177, applied preventively to the one other fromisoformat-then-subtract.
 - **R177 (fourth window, production 500 — naive timestamp)**: a
   non-compliant IdP sending a SAML assertion timestamp WITHOUT a Z/offset
   parsed to a naive datetime; comparing it against the aware `now` raised
