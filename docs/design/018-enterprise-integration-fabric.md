@@ -914,6 +914,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R207 (fifth window, concurrency fix)**: `OrgDomainService.claim` capped
+  domains with a bare COUNT (TOCTOU — concurrent claims could exceed the
+  20-domain cap) and inserted after a check-then-add dup SELECT against
+  `uq_intg_domain_org` — a concurrent same-(org,domain) claim's loser raised
+  IntegrityError at a bare flush: 500 + poisoned session (R110 class). Fix:
+  `SELECT ... FOR UPDATE` on the Org row (mirrors webhook defect #102) so
+  same-org claimers serialize, plus savepoint-wrapped INSERT with
+  IntegrityError → idempotent re-select of the winner's row. Outcome-scoped
+  two-session test (docstring states the single-loop interleave limit, per
+  the R199 precedent).
+- **R206 (fifth window, flake root-cause fix)**: the recurring
+  `test_attempt_response_snippet_captured_sanitized_and_capped` full-suite
+  failure (survived both R193 URL-scoping and R204 purge) was structural: the
+  test asserted an exact [500, 200] attempt sequence but drove it through the
+  GLOBAL `_drain`, which shares the dev DB's leftover outbox/delivery state.
+  Rewritten self-contained: fan out its own event via `handle_event_created`,
+  then call `handle_delivery_attempt` directly on its own delivery (500 →
+  force due → 200). No dependence on global drain order; outbox mechanics
+  remain covered by the dedicated outbox tests. Fabric 290/290.
 - **R205 (fifth window, silent-data-drop fix)**: a CSV with two columns
   mapping to the same canonical field (duplicate header, or a header_map that
   aliases two source columns onto one canonical) made csv.DictReader silently
