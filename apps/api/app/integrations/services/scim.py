@@ -144,6 +144,9 @@ async def _apply_bulk_op(users, groups, method: str, path: str, data) -> dict:
         return {"status": "201", "location": f"/Groups/{res['id']}"}
     if path.startswith("/Groups/"):
         gid = path.removeprefix("/Groups/")
+        if method == "PUT":
+            res = await groups.replace(gid, _require_data())
+            return {"status": "200", "location": f"/Groups/{res['id']}"}
         if method == "PATCH":
             res = await groups.patch(gid, _require_data())
             return {"status": "200", "location": f"/Groups/{res['id']}"}

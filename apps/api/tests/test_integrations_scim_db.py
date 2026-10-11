@@ -501,10 +501,12 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
              "data": {"Operations": [
                  {"op": "replace", "path": "active", "value": False}]}},
             {"method": "DELETE", "path": f"/Users/{uid1}"},
+            {"method": "PUT", "path": "/Groups/01NOPENOPENOPENOPENOPENOPE",
+             "data": {"displayName": "nope"}},
             {"method": "TRACE", "path": "/Users"},
         ],
     })
-    assert [op["status"] for op in out2["Operations"]] == ["200", "204", "400"]
+    assert [op["status"] for op in out2["Operations"]] == ["200", "204", "404", "400"]
 
     # failOnErrors stops after the first failure.
     out3 = await apply_bulk(db, token, {
