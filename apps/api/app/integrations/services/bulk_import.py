@@ -33,6 +33,7 @@ from app.integrations.models.bulk import (
     ImportJob,
     ImportRowError,
 )
+from app.models.cohort import Cohort, CohortMember, CohortRole
 from app.models.organization import MemberStatus, OrgMember, OrgRole
 from app.models.user import User, UserRole, UserStatus
 
@@ -40,10 +41,14 @@ log = structlog.get_logger()
 
 _EMAIL_RE = re.compile(r"[a-z0-9!#$%&'*/?^_`{|}~.+=-]+@[a-z0-9.-]+\.[a-z]{2,}")
 
-TEMPLATE_VERSIONS = {"users": 1}
+TEMPLATE_VERSIONS = {"users": 1, "roster": 1}
 USERS_REQUIRED = ("email",)
 USERS_OPTIONAL = ("display_name", "role")
 IMPORT_ROLE_MAP = {"student": OrgRole.STUDENT, "instructor": OrgRole.INSTRUCTOR}
+ROSTER_REQUIRED = ("email", "cohort_slug")
+ROSTER_ROLE_MAP = {"learner": CohortRole.LEARNER, "instructor": CohortRole.INSTRUCTOR}
+# Per-kind parse spec: required columns, header_map-able keys, row validator.
+# (validators are bound after their definitions below)
 
 
 def fingerprint(file_bytes: bytes, template_version: int) -> str:
@@ -103,8 +108,50 @@ def _validate_user_rows(
     return rows, errors
 
 
+def _validate_roster_rows(
+    raw_rows: list[tuple[int, dict]]
+) -> tuple[list[dict], list[dict]]:
+    """Roster template rows (R129, Part K deferred kind): email + cohort_slug
+    (org-scoped stable key) + optional role (learner|instructor). Duplicate
+    detection is per (email, cohort_slug) pair — the same user may legally
+    appear once per cohort."""
+    rows: list[dict] = []
+    errors: list[dict] = []
+    seen: dict[tuple[str, str], int] = {}
+    for i, row in raw_rows:
+        email = str(row.get("email", "") or "").strip().lower()
+        problems: list[tuple[str, str, str]] = []
+        if (
+            not email
+            or len(email) > 255
+            or "\x00" in email
+            or not _EMAIL_RE.fullmatch(email)
+        ):
+            problems.append(("email", "invalid_email", "not a valid email address"))
+        slug = str(row.get("cohort_slug", "") or "").strip().lower()
+        if not slug or len(slug) > 200 or "\x00" in slug:
+            problems.append(("cohort_slug", "invalid_cohort_slug", "cohort_slug required (max 200)"))
+        role = str(row.get("role") or "learner").lower()
+        if role not in ROSTER_ROLE_MAP:
+            problems.append(("role", "invalid_role", "role must be learner|instructor"))
+        if email and slug and (email, slug) in seen:
+            problems.append(
+                ("email", "duplicate_in_file", f"also on row {seen[(email, slug)]}")
+            )
+        if problems:
+            for col, code, message in problems:
+                errors.append({
+                    "row_number": i, "column": col, "code": code, "message": message,
+                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                })
+            continue
+        seen[(email, slug)] = i
+        rows.append({"row_number": i, "email": email, "cohort_slug": slug, "role": role})
+    return rows, errors
+
+
 def parse_users_json(
-    file_bytes: bytes, header_map: dict | None = None
+    file_bytes: bytes, header_map: dict | None = None, kind: str = "users"
 ) -> tuple[list[dict], list[dict]]:
     """JSON users template (R128, Part K): a top-level list of objects, or
     {"users": [...]}. Same validation as CSV; header_map renames source keys
@@ -120,7 +167,7 @@ def parse_users_json(
     except _json.JSONDecodeError:
         return [], [{"row_number": 1, "code": "invalid_json", "message": "File is not valid JSON"}]
     if isinstance(doc, dict):
-        doc = doc.get("users")
+        doc = doc.get(kind, doc.get("rows"))
     if not isinstance(doc, list):
         return [], [{"row_number": 1, "code": "invalid_shape",
                      "message": "expected a list of users or {\"users\": [...]}"}]
@@ -141,16 +188,16 @@ def parse_users_json(
     raw_rows = []
     for idx, item in enumerate(doc, start=1):
         raw_rows.append((idx, _canon_obj(item) if isinstance(item, dict) else {}))
-    return _validate_user_rows(raw_rows)
+    return KIND_SPECS[kind].validator(raw_rows)
 
 
 def parse_users(
-    file_bytes: bytes, fmt: str, header_map: dict | None = None
+    file_bytes: bytes, fmt: str, header_map: dict | None = None, kind: str = "users"
 ) -> tuple[list[dict], list[dict]]:
-    """Format dispatcher (R128)."""
+    """Format dispatcher (R128); kind selects the template spec (R129)."""
     if fmt == "json":
-        return parse_users_json(file_bytes, header_map)
-    return parse_users_csv(file_bytes, header_map)
+        return parse_users_json(file_bytes, header_map, kind=kind)
+    return parse_users_csv(file_bytes, header_map, kind=kind)
 
 
 def detect_format(file_bytes: bytes) -> str:
@@ -159,8 +206,23 @@ def detect_format(file_bytes: bytes) -> str:
     return "json" if head in (b"[", b"{") else "csv"
 
 
+class _KindSpec:
+    __slots__ = ("required", "known_headers", "validator")
+
+    def __init__(self, required, known_headers, validator):
+        self.required = required
+        self.known_headers = known_headers
+        self.validator = validator
+
+
+KIND_SPECS = {
+    "users": _KindSpec(USERS_REQUIRED, {"email", "display_name", "role"}, _validate_user_rows),
+    "roster": _KindSpec(ROSTER_REQUIRED, {"email", "cohort_slug", "role"}, _validate_roster_rows),
+}
+
+
 def parse_users_csv(
-    file_bytes: bytes, header_map: dict | None = None
+    file_bytes: bytes, header_map: dict | None = None, kind: str = "users"
 ) -> tuple[list[dict], list[dict]]:
     """Streamed, header-based parse. Returns (rows, errors). Row numbers are
     1-indexed INCLUDING the header (user's spreadsheet view). BOM + CRLF
@@ -183,7 +245,7 @@ def parse_users_csv(
         return alias_to_canonical.get(h, h)
 
     headers = [_canon(h) for h in (reader.fieldnames or [])]
-    missing = [c for c in USERS_REQUIRED if c not in headers]
+    missing = [c for c in KIND_SPECS[kind].required if c not in headers]
     if missing:
         return [], [
             {
@@ -198,7 +260,7 @@ def parse_users_csv(
     for i, raw in enumerate(reader, start=2):  # header is row 1
         raw_rows.append((i, {_canon(k or ""): (v or "").strip() for k, v in raw.items()
                              if k is not None}))
-    return _validate_user_rows(raw_rows)
+    return KIND_SPECS[kind].validator(raw_rows)
 
 
 class BulkImportService:
@@ -232,7 +294,7 @@ class BulkImportService:
         header_map = header_map or {}
         if len(header_map) > 20:
             raise AppError("IMPORT_HEADER_MAP_INVALID", "too many mappings", 422)
-        known = {"email", "display_name", "role"}
+        known = KIND_SPECS[kind].known_headers
         for k, v in header_map.items():
             if str(k).strip().lower() not in known or not isinstance(v, str) or not v.strip():
                 raise AppError(
@@ -269,8 +331,7 @@ class BulkImportService:
         await self.db.refresh(job)
         return job
 
-    async def _validate(self, job: ImportJob, file_bytes: bytes) -> None:
-        rows, errors = parse_users(file_bytes, detect_format(file_bytes), job.header_map or {})
+    async def _preview_user_rows(self, org_id: str, rows: list[dict]):
         creates = updates = skips = 0
         for row in rows:
             user = (
@@ -284,7 +345,7 @@ class BulkImportService:
             member = (
                 await self.db.execute(
                     select(OrgMember).where(
-                        OrgMember.org_id == job.org_id, OrgMember.user_id == user.id
+                        OrgMember.org_id == org_id, OrgMember.user_id == user.id
                     )
                 )
             ).scalar_one_or_none()
@@ -294,6 +355,75 @@ class BulkImportService:
                 updates += 1
             else:
                 skips += 1
+        return rows, creates, updates, skips
+
+    async def _resolve_roster_refs(self, org_id: str, row: dict):
+        """(cohort, user, member?) for a roster row — or an error dict."""
+        cohort = (
+            await self.db.execute(
+                select(Cohort).where(
+                    Cohort.org_id == org_id, Cohort.slug == row["cohort_slug"]
+                )
+            )
+        ).scalar_one_or_none()
+        if cohort is None:
+            return None, None, {
+                "row_number": row["row_number"], "column": "cohort_slug",
+                "code": "cohort_not_found",
+                "message": f"no cohort with slug {row['cohort_slug']!r}",
+                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+            }
+        user = (
+            await self.db.execute(
+                select(User)
+                .join(OrgMember, OrgMember.user_id == User.id)
+                .where(
+                    func.lower(User.email) == row["email"],
+                    OrgMember.org_id == org_id,
+                    OrgMember.status == MemberStatus.ACTIVE,
+                )
+            )
+        ).scalar_one_or_none()
+        if user is None:
+            return None, None, {
+                "row_number": row["row_number"], "column": "email",
+                "code": "user_not_in_org",
+                "message": "no active org member with this email (import users first)",
+                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+            }
+        return cohort, user, None
+
+    async def _preview_roster_row(self, org_id: str, row: dict):
+        cohort, user, err = await self._resolve_roster_refs(org_id, row)
+        if err is not None:
+            return None, err
+        existing = (
+            await self.db.execute(
+                select(CohortMember).where(
+                    CohortMember.cohort_id == cohort.id, CohortMember.user_id == user.id
+                )
+            )
+        ).scalar_one_or_none()
+        return ("skipped" if existing is not None else "created"), None
+
+    async def _validate(self, job: ImportJob, file_bytes: bytes) -> None:
+        rows, errors = parse_users(
+            file_bytes, detect_format(file_bytes), job.header_map or {}, kind=job.kind
+        )
+        creates = updates = skips = 0
+        if job.kind == "roster":
+            kept: list[dict] = []
+            for row in rows:
+                outcome, err = await self._preview_roster_row(job.org_id, row)
+                if err is not None:
+                    errors.append(err)
+                    continue
+                kept.append(row)
+                creates += outcome == "created"
+                skips += outcome == "skipped"
+            rows = kept
+        else:
+            rows, creates, updates, skips = await self._preview_user_rows(job.org_id, rows)
         for e in errors[:MAX_ROW_ERRORS]:
             self.db.add(
                 ImportRowError(
@@ -344,7 +474,9 @@ class BulkImportService:
         if claimed is None:
             raise AppError("IMPORT_NOT_COMMITTABLE", f"job is {job.status}", 409)
         await self.db.refresh(job)
-        rows, errors = parse_users(file_bytes, detect_format(file_bytes), job.header_map or {})
+        rows, errors = parse_users(
+            file_bytes, detect_format(file_bytes), job.header_map or {}, kind=job.kind
+        )
         if job.mode == "atomic" and errors:
             job.status = "failed"
             job.stats = {"applied": 0, "errors": len(errors), "reason": "atomic_reject"}
@@ -356,7 +488,10 @@ class BulkImportService:
         for row in rows:
             try:
                 async with self.db.begin_nested():
-                    outcome = await self._apply_row(job.org_id, row)
+                    if job.kind == "roster":
+                        outcome = await self._apply_roster_row(job.org_id, row)
+                    else:
+                        outcome = await self._apply_row(job.org_id, row)
             except Exception as exc:  # row-level failure
                 row_failures += 1
                 if job.mode == "atomic":
@@ -444,6 +579,31 @@ class BulkImportService:
         # same rule as roster role_conflict; the import only sets initial role).
         await self.db.flush()
         return outcome
+
+    async def _apply_roster_row(self, org_id: str, row: dict) -> str:
+        """Enroll one (user, cohort) pair (R129). Missing cohort/user raise —
+        partial mode records the row error, atomic aborts. Existing members
+        skip; role is NEVER changed for existing members (human decisions
+        win, same rule as the users template)."""
+        cohort, user, err = await self._resolve_roster_refs(org_id, row)
+        if err is not None:
+            raise AppError("IMPORT_ROW_INVALID", f"{err['code']}: {err['message']}", 422)
+        existing = (
+            await self.db.execute(
+                select(CohortMember).where(
+                    CohortMember.cohort_id == cohort.id, CohortMember.user_id == user.id
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return "skipped"
+        self.db.add(
+            CohortMember(
+                cohort_id=cohort.id, user_id=user.id, role=ROSTER_ROLE_MAP[row["role"]]
+            )
+        )
+        await self.db.flush()
+        return "created"
 
     # ── error report ──
 

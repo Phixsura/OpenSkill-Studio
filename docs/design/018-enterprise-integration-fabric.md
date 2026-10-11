@@ -911,6 +911,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R129 (third window, Part K deferred kind)**: `roster` import template
+  shipped (was explicitly deferred at R19): email + cohort_slug (+ role
+  learner|instructor) enrolls existing active org members into cohorts;
+  per-kind `KIND_SPECS` (required columns, header_map keys, row validator)
+  so CSV/JSON parsers serve both kinds; preview resolves cohort/user and
+  reports cohort_not_found / user_not_in_org as row errors; commit skips
+  existing members and never changes their role (human decisions win);
+  atomic failures roll the whole transaction back at the request boundary.
+
 - **R127-R128 (third window, Part K closure)**: CSV parser robustness
   suite (BOM/CRLF/quoted-newline/wide rows), then the JSON template Part K
   promised: shared `_validate_user_rows` extracted from the CSV path,

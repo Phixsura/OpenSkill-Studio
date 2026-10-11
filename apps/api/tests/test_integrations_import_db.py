@@ -539,3 +539,130 @@ def test_detect_format_sniffing():
     assert detect_format(b'\xef\xbb\xbf\n  {"users": []}') == "json"
     assert detect_format(b"email,display_name\na@b.co,X") == "csv"
     assert detect_format(b"") == "csv"
+
+
+async def _cohort(db, org, owner, slug: str):
+    from app.models.cohort import Cohort
+
+    c = Cohort(org_id=org.id, name=slug.title(), slug=slug, created_by=owner.id)
+    db.add(c)
+    await db.flush()
+    return c
+
+
+@pytest.mark.asyncio
+async def test_roster_import_kind(db):
+    """R129 (Part K deferred kind): roster rows enroll existing org members
+    into cohorts by slug; unknown cohort/user are row errors; re-commit of
+    the same pair skips (idempotent); role never changed for existing."""
+    from app.models.cohort import CohortMember, CohortRole
+
+    org, owner = await _org(db)
+    cohort = await _cohort(db, org, owner, f"c-{uuid.uuid4().hex[:8]}")
+    svc = BulkImportService(db)
+
+    # Seed one org member via the users template (the documented order).
+    email = f"ro-{uuid.uuid4().hex[:6]}@x.edu"
+    useed = f"email\n{email}\n".encode()
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"ru-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    data = (
+        "email,cohort_slug,role\n"
+        f"{email},{cohort.slug},instructor\n"
+        f"ghost-{uuid.uuid4().hex[:6]}@x.edu,{cohort.slug},learner\n"
+        f"{email},no-such-cohort,learner\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="roster", mode="partial", file_bytes=data,
+        file_key="r1", created_by=owner.id, idempotency_key=f"rr-{uuid.uuid4().hex[:8]}",
+    )
+    # preview: 1 enrollable, 2 resolution errors
+    assert job.dry_stats["creates"] == 1 and job.dry_stats["errors"] == 2
+
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+    assert committed.status == "partial"
+    member = (
+        await db.execute(
+            select(CohortMember).where(CohortMember.cohort_id == cohort.id)
+        )
+    ).scalar_one()
+    assert member.role == CohortRole.INSTRUCTOR
+
+    # Idempotent re-import: same pair skips, role NOT downgraded to learner.
+    data2 = f"email,cohort_slug,role\n{email},{cohort.slug},learner\n".encode()
+    job2 = await svc.create_job(
+        org.id, kind="roster", mode="partial", file_bytes=data2,
+        file_key="r2", created_by=owner.id, idempotency_key=f"rr2-{uuid.uuid4().hex[:8]}",
+    )
+    committed2 = await svc.commit(org.id, job2.id, file_bytes=data2)
+    assert committed2.stats["skipped"] == 1 and committed2.stats["created"] == 0
+    await db.refresh(member)
+    assert member.role == CohortRole.INSTRUCTOR
+
+
+@pytest.mark.asyncio
+async def test_roster_import_json_and_atomic(db):
+    """R129: JSON roster template works; atomic mode rejects the whole file
+    when any row cannot resolve."""
+    import json as _json
+
+    from app.models.cohort import CohortMember
+
+    org, owner = await _org(db)
+    cohort = await _cohort(db, org, owner, f"c-{uuid.uuid4().hex[:8]}")
+    svc = BulkImportService(db)
+    email = f"rj-{uuid.uuid4().hex[:6]}@x.edu"
+    useed = f"email\n{email}\n".encode()
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"rj-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    data = _json.dumps(
+        {"roster": [{"email": email, "cohort_slug": cohort.slug}]}
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="roster", mode="partial", file_bytes=data,
+        file_key="r1", created_by=owner.id, idempotency_key=f"rj1-{uuid.uuid4().hex[:8]}",
+    )
+    assert job.dry_stats["creates"] == 1 and job.dry_stats["errors"] == 0
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+
+    # atomic: one bad row means nothing applied
+    org2, owner2 = await _org(db)
+    cohort2 = await _cohort(db, org2, owner2, f"c-{uuid.uuid4().hex[:8]}")
+    email2 = f"ra-{uuid.uuid4().hex[:6]}@x.edu"
+    useed2 = f"email\n{email2}\n".encode()
+    ujob2 = await svc.create_job(
+        org2.id, kind="users", mode="partial", file_bytes=useed2,
+        file_key="u2", created_by=owner2.id, idempotency_key=f"ra-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org2.id, ujob2.id, file_bytes=useed2)
+    # Bad row FIRST: the service aborts before applying anything in-session.
+    # (A failure AFTER a success relies on the request-boundary rollback in
+    # get_db — the whole transaction, claim included, returns to previewed.)
+    bad = (
+        f"email,cohort_slug\n{email2},missing-cohort\n"
+        f"{email2},{cohort2.slug}\n"
+    ).encode()
+    job2 = await svc.create_job(
+        org2.id, kind="roster", mode="atomic", file_bytes=bad,
+        file_key="r2", created_by=owner2.id, idempotency_key=f"ra2-{uuid.uuid4().hex[:8]}",
+    )
+    with pytest.raises(AppError):
+        await svc.commit(org2.id, job2.id, file_bytes=bad)
+    n = (
+        await db.execute(
+            select(func.count()).select_from(CohortMember).where(
+                CohortMember.cohort_id == cohort2.id
+            )
+        )
+    ).scalar_one()
+    assert n == 0
