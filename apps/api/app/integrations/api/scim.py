@@ -270,6 +270,21 @@ async def get_group(
     return await _run(db, authorization, fn)
 
 
+@scim_router.put("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
+async def replace_group(
+    group_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    payload = await _json_body(request)
+
+    async def run(token):
+        return _scim_json(await ScimGroupService(db, token).replace(group_id, payload))
+
+    return await _run(db, authorization, run)
+
+
 @scim_router.patch("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def patch_group(
     group_id: str,

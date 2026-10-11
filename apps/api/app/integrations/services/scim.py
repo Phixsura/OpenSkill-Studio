@@ -650,6 +650,41 @@ class ScimGroupService:
             await self._apply_member_delta(group, add=added, remove=[])
         return _group_resource(group, await self._member_ids(group.id))
 
+    async def replace(self, group_id: str, payload: dict) -> dict:
+        """PUT /Groups/{id} (R79 — Okta group push uses PUT, not PATCH):
+        full replace — displayName and the COMPLETE member set. Members
+        absent from the payload are removed (role/cohort effects reverted by
+        the same delta engine as PATCH)."""
+        group = await self._group(group_id)
+        name = str(payload.get("displayName", "")).strip()
+        if not name or len(name) > 255:
+            raise ScimError(400, "displayName required", "invalidValue")
+        dup = (
+            await self.db.execute(
+                select(ScimGroup.id).where(
+                    ScimGroup.org_id == self.org_id,
+                    ScimGroup.display_name == name,
+                    ScimGroup.id != group.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is not None:
+            raise ScimError(409, "Group name already exists", "uniqueness")
+        group.display_name = name
+        if payload.get("externalId") is not None:
+            group.external_id = str(payload["externalId"])
+        wanted = {
+            str(m["value"])
+            for m in (payload.get("members") or [])
+            if isinstance(m, dict) and isinstance(m.get("value"), str)
+        }
+        current = set(await self._member_ids(group.id))
+        await self._apply_member_delta(
+            group, add=sorted(wanted - current), remove=sorted(current - wanted)
+        )
+        await self.db.flush()
+        return _group_resource(group, await self._member_ids(group.id))
+
     async def delete(self, group_id: str) -> None:
         group = await self._group(group_id)
         # Membership effects are NOT cascaded on group delete — removing the

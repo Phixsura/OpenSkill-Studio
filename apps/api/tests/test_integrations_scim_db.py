@@ -582,3 +582,33 @@ async def test_filter_operator_case_insensitive(ctx):
             filter_expr=f'userName {op} "{email}"', start_index=1, count=10
         )
         assert lst["totalResults"] == 1, op
+
+
+@pytest.mark.asyncio
+async def test_group_put_full_replace_okta_dialect(ctx):
+    """R79: Okta group push uses PUT — full member-set replace (absent
+    members removed, role effects reverted by the shared delta engine),
+    rename with uniqueness, 404 on unknown group."""
+    e1 = f"gp1-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    e2 = f"gp2-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u1, _ = await _usvc(ctx).create({"userName": e1})
+    u2, _ = await _usvc(ctx).create({"userName": e2})
+    g = await _gsvc(ctx).create(
+        {"displayName": f"GP-{uuid.uuid4().hex[:6]}", "members": [{"value": u1["id"]}]}
+    )
+    out = await _gsvc(ctx).replace(
+        g["id"],
+        {"displayName": "Renamed Group", "members": [{"value": u2["id"]}]},
+    )
+    assert out["displayName"] == "Renamed Group"
+    assert [m["value"] for m in out["members"]] == [u2["id"]]  # u1 removed
+
+    # Rename collision -> 409.
+    g2 = await _gsvc(ctx).create({"displayName": f"GP2-{uuid.uuid4().hex[:6]}"})
+    with pytest.raises(ScimError) as exc:
+        await _gsvc(ctx).replace(g2["id"], {"displayName": "Renamed Group"})
+    assert exc.value.status == 409
+    # Unknown group -> 404.
+    with pytest.raises(ScimError) as exc2:
+        await _gsvc(ctx).replace("01NOPENOPENOPENOPENOPENOPE", {"displayName": "X"})
+    assert exc2.value.status == 404
