@@ -657,51 +657,46 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     """R60: failed attempts keep a sanitized 500-char response snippet;
     successful attempts never retain the body."""
     from app.integrations.models import DeliveryAttempt
+    from app.integrations.services.events import handle_delivery_attempt, handle_event_created
 
     org = await _org(db)
-    # R193: _drain is global and the shared dev Postgres accumulates in-flight
-    # deliveries from other tests/runs. Rather than depend on scripted egress
-    # codes being consumed in order by THIS delivery alone, give the sub a
-    # unique URL and return 500-then-200 ONLY for that URL (200 for any other
-    # delivery that happens to drain in the same pass). The sequence is now
-    # bound to our delivery regardless of concurrent/leftover state.
-    sink_url = f"https://hooks.example.com/sn-{uuid.uuid4().hex[:8]}"
-    await _sub(db, org, url=sink_url)
-    # Clear leftover pending outbox so the bounded _drain (rounds=10) is
-    # guaranteed to reach THIS test's event — a large backlog would otherwise
-    # starve it and break the 2-attempt sequence. URL-scoped codes above keep
-    # the sequence correct; this keeps the drain timely.
-    from sqlalchemy import delete as _delete
+    sub = await _sub(db, org)
+    ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
+    await db.flush()
+    # Self-contained: fan out THIS event to its own delivery, then drive that
+    # delivery directly (first attempt 500 → forced retry → 200). This avoids
+    # the GLOBAL _drain entirely, so leftover/foreign outbox on the shared dev
+    # DB can't perturb the exact [500, 200] sequence this test asserts (the
+    # recurring-flake root cause). The scripted codes return by call ORDER on
+    # this delivery's own URL.
+    await handle_event_created(db, {"event_id": ev.id})
+    delivery = (
+        await db.execute(
+            select(EventDelivery).where(
+                EventDelivery.event_id == ev.id, EventDelivery.subscription_id == sub.id
+            )
+        )
+    ).scalar_one()
 
-    from app.controlplane.models.outbox import OutboxMessage as OutboxModel2
-
-    await db.execute(_delete(OutboxModel2).where(OutboxModel2.status == "pending"))
-    await db.commit()
-    mine = {"n": 0}
+    codes = [500, 200]
 
     async def _scripted(method, url, *, headers=None, content=None, read_timeout=None):
         egress.calls.append({"method": method, "url": url, "headers": headers, "body": content})
-        if url == sink_url:
-            code = 500 if mine["n"] == 0 else 200
-            mine["n"] += 1
-            body = b"upstream error \x01detail\x02 " + b"x" * 600 if code >= 400 else b""
-            return httpx.Response(code, content=body, request=httpx.Request(method, url))
-        return httpx.Response(200, request=httpx.Request(method, url))
+        code = codes.pop(0) if codes else 200
+        body = b"upstream error \x01detail\x02 " + b"x" * 600 if code >= 400 else b""
+        return httpx.Response(code, content=body, request=httpx.Request(method, url))
 
     egress.request = _scripted
-    ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
-    await db.commit()
-    await _drain(db)
-    # drive the retry (scheduled later) — force due now
-    from app.controlplane.models.outbox import OutboxMessage
 
-    rows = (
-        await db.execute(select(OutboxMessage).where(OutboxMessage.status == "pending"))
-    ).scalars().all()
-    for r in rows:
-        r.available_at = datetime.now(UTC)
-    await db.commit()
-    await _drain(db)
+    # Attempt 1 → 500 (schedules a retry on the delivery).
+    await handle_delivery_attempt(db, {"delivery_id": delivery.id})
+    await db.flush()
+    # Force the retry due and drive attempt 2 → 200 directly on this delivery.
+    delivery.status = "pending"
+    delivery.next_attempt_at = datetime.now(UTC)
+    await db.flush()
+    await handle_delivery_attempt(db, {"delivery_id": delivery.id})
+    await db.flush()
 
     attempts = (
         (
