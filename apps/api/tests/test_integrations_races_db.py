@@ -616,3 +616,47 @@ async def test_concurrent_connection_create_same_name(db):
         )
     ).scalar_one()
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mapping_create_same_name(db):
+    """R173: two concurrent mapping creates with the same (org, name) — one
+    lands, the loser gets a clean MAPPING_NAME_TAKEN 409, not a 500."""
+    from sqlalchemy import func
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.models import MappingProfile
+    from app.integrations.services.mapping import MappingService
+
+    org, owner = await _org(db)
+    await db.commit()
+    name = f"map-race-{uuid.uuid4().hex[:8]}"
+    doc = {"fields": [{"target": "title", "path": "classTitle"}]}
+
+    async def create():
+        async with AsyncSessionLocal() as own:
+            try:
+                await MappingService(own).create(
+                    org.id, name=name, direction="inbound",
+                    model="roster.class", document=doc,
+                )
+                await own.commit()
+                return "created"
+            except AppError as e:
+                return e.code
+
+    results = await asyncio.gather(create(), create(), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"raw crash (not a clean 409): {r!r}"
+    assert "created" in results
+    assert "MAPPING_NAME_TAKEN" in results, f"expected one 409, got {results}"
+
+    n = (
+        await db.execute(
+            select(func.count()).select_from(MappingProfile).where(
+                MappingProfile.org_id == org.id, MappingProfile.name == name
+            )
+        )
+    ).scalar_one()
+    assert n == 1

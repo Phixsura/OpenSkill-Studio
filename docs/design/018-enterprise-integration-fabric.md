@@ -917,6 +917,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R170 (fourth window, UI)**: a "Download template" button on the import
   panel pulls the current kind's CSV template via the R169 endpoint, so an
   admin can grab the exact columns before preparing a file.
+- **R173 (fourth window, add-before-savepoint #7 — mappings)**: the last
+  check-then-add create path (mapping profiles, uq_intg_mapping_org_name)
+  got the same savepoint + clean 409 guard; race-tested 3x. A full sweep of
+  (org,name)-unique creates now shows all guarded — connections (R172),
+  mappings (R173), export streams + sync profiles (already begin_nested),
+  cohort members (CohortService), SCIM group members (on_conflict), domains
+  (R113). SCIM tokens have no name-uniqueness so no hazard.
 - **R172 (fourth window, add-before-savepoint #6 — connections)**: the
   connection create path had the same shape (dup-SELECT then add+flush); two
   concurrent same-name creates raced to INSERT (uq_intg_conn_org_name). The

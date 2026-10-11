@@ -309,8 +309,19 @@ class MappingService:
             model=model,
             document=document,
         )
-        self.db.add(profile)
-        await self.db.flush()
+        # R173: same add-before-savepoint guard as connections/export — two
+        # concurrent same-name creates both pass the dup-SELECT and race to
+        # INSERT (uq_intg_mapping_org_name); the loser returns a clean 409.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                self.db.add(profile)
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise AppError(
+                "MAPPING_NAME_TAKEN", "A mapping with this name exists", 409
+            ) from exc
         await self.db.refresh(profile)
         return profile
 
