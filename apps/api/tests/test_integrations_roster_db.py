@@ -737,3 +737,16 @@ async def test_offset_ignoring_server_bounded_not_infinite(db, monkeypatch):
             pages += 1
     assert e.value.code == "CONNECTION_PING_FAILED"
     assert pages == 4  # yielded up to the cap, then failed cleanly
+
+
+@pytest.mark.asyncio
+async def test_invalid_unenroll_policy_rejected(db):
+    """R243 (survivor pin): a typo'd on_unenroll policy must be a clean 422,
+    not silently behave like `ignore`."""
+    org, owner = await _org(db)
+    conn = await _conn(db, org, owner)
+    with pytest.raises(AppError) as e:
+        await RosterProvisioningService(db).provision(
+            org.id, conn.id, actor_id=owner.id, options={"on_unenroll": "archive"}
+        )
+    assert e.value.code == "ROSTER_OPTIONS_INVALID"

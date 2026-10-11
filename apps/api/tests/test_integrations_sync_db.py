@@ -1529,3 +1529,21 @@ def test_mapping_rejects_overlong_path_expression():
     assert len(doc["fields"][0]["path"]) > 500
     problems = validate_document(doc)
     assert any("path: required string <= 500" in p for p in problems), problems
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sweep_never_triggers_manual_profiles(db):
+    """R243 (survivor pin): a `manual` sync profile must never be triggered
+    by the scheduled sweep — the documented R11 rule had no negative test."""
+    from app.integrations.models import SyncRun
+    from app.integrations.services.sync_engine import sweep_scheduled_profiles
+
+    org, owner = await _org(db)
+    _conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector([[]]))
+    assert profile.schedule == "manual"
+    await db.commit()
+    await sweep_scheduled_profiles(db)
+    runs = (
+        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
+    ).scalars().all()
+    assert runs == []

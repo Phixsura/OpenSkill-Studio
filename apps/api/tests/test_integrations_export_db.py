@@ -570,3 +570,33 @@ async def test_concurrent_run_export_serializes_on_stream_lock(db):
     # exactly one of them exported the 3 events; the other saw the advanced
     # cursor under the lock and exported nothing.
     assert sorted([c1, c2]) == [0, 3]
+
+
+@pytest.mark.asyncio
+async def test_sweep_never_runs_manual_or_disabled_streams(db):
+    """R243 (survivor pins): the scheduler's NEGATIVE space — a `manual`
+    stream must never auto-run (R183's documented rule had no test), and a
+    disabled stream must be skipped even when its schedule is due."""
+    from sqlalchemy import select
+
+    from app.integrations.models.export import ExportRun
+    from app.integrations.services.warehouse import sweep_scheduled_exports
+
+    org, _ = await _org(db)
+    for _i in range(2):
+        await emit_event(db, org.id, "project.approved", subject="sw", data={})
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    manual = await svc.create_stream(org.id, name=f"man-{ULID()}", dataset="events")
+    assert manual.schedule == "manual"
+    hourly_off = await svc.create_stream(
+        org.id, name=f"off-{ULID()}", dataset="events", schedule="hourly"
+    )
+    hourly_off.enabled = False
+    await db.flush()
+    await sweep_scheduled_exports(db, writer)
+    for s in (manual, hourly_off):
+        runs = (
+            await db.execute(select(ExportRun).where(ExportRun.stream_id == s.id))
+        ).scalars().all()
+        assert runs == [], f"stream {s.schedule}/{s.enabled} must not auto-run"

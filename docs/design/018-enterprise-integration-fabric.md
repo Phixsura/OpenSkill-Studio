@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R243 (seventh window, scheduler-negative pins)**: the schedulers' NEGATIVE
+  space was untested — `manual` streams/profiles never auto-running and
+  disabled streams being skipped had no pins (only the positive "due daily
+  runs" direction). Three new outcome tests; probe dispositions: the two
+  export-filter mutants are double-gated equivalents (the loop's
+  cadence-lookup `continue` and run_export's own DISABLED 409 absorb them),
+  while the sync-profile filter mutant and the invalid-unenroll-policy 422
+  are genuinely killed by the new pins. Queue-dedup mutant also killed.
 - **R242 (seventh window, foreground sweep record)**: single-chat foreground
   verification pass (no background tasks): full API suite 7348/7348 in 8+3
   chunked foreground runs, E2E 62/62, adversarial 178/178 (zero tracebacks),
