@@ -303,7 +303,7 @@ async def deep_link_select(
     # internal origin we vouch for).
     validate_egress_url(body.return_url)
     reg = await LtiService(db).get_registration(org_id, body.registration_id)
-    launch_url = f"{str(request.base_url).rstrip('/')}/api/v1/lti/launch"
+    launch_url = f"{settings.public_base_url.rstrip('/')}/api/v1/lti/launch"  # R102
     item = build_resource_link_item(
         title=body.title, launch_url=launch_url, resource_id=f"{body.kind}:{body.target_id}"
     )
