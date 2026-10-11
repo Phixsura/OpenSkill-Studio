@@ -4,9 +4,9 @@ partial commit, idempotent re-upload, CSV-injection-safe error report)."""
 import uuid
 
 import pytest
+import pytest_asyncio
 from hypothesis import given, settings
 from hypothesis import strategies as st
-import pytest_asyncio
 from sqlalchemy import func, select
 from ulid import ULID
 
@@ -433,14 +433,14 @@ def test_csv_parser_robustness_matrix():
     assert errors == [] and rows[0]["display_name"] == "Doe, Jane"
 
     # Quoted embedded newline in a field.
-    data2 = ('email,display_name,role\n'
-            'b@x.edu,"Line1\nLine2",student\n').encode()
+    data2 = (b'email,display_name,role\n'
+            b'b@x.edu,"Line1\nLine2",student\n')
     rows2, errors2 = parse_users_csv(data2)
     assert errors2 == [] and "Line1" in rows2[0]["display_name"]
 
     # Extra/unknown columns are ignored, not fatal.
-    data3 = ('email,display_name,role,department,notes\n'
-            'c@x.edu,C,student,eng,hi\n').encode()
+    data3 = (b'email,display_name,role,department,notes\n'
+            b'c@x.edu,C,student,eng,hi\n')
     rows3, errors3 = parse_users_csv(data3)
     assert errors3 == [] and rows3[0]["email"] == "c@x.edu"
 
