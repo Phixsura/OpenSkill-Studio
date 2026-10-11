@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R215 (sixth window, DATA-LOSS fix — mutation-killed)**: the pull engine
+  processed only `records[: BATCH_SIZE * 2]` of each connector page but
+  counted ALL of them in `stats.read` and advanced the cursor past the whole
+  page — an overfull page (>1000 records in one yield) silently LOST its
+  tail forever, and a backfill then TOMBSTONED those very records (they never
+  reached the seen-set). Fix: process every record, chunked into BATCH_SIZE
+  sub-transactions (interim commits hold the cursor); the cursor advances
+  only once the WHOLE page is committed, preserving §11.3 crash-replay
+  idempotency. Test monkeypatches BATCH_SIZE=3 with an 8-record page:
+  8 staged, 0 tombstoned; restoring the old cap fails it.
 - **R214 (fifth window, parity hardening)**: the two most expensive trigger
   endpoints had NO rate limit while the comparable sync trigger did (R160
   family): `POST /export-streams/{id}/run` (full warehouse export) and

@@ -522,15 +522,30 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
             records = batch.get("records", [])
             next_state = batch.get("state", state)
             stats["read"] += len(records)
-            for raw in records[: BATCH_SIZE * 2]:
-                outcome, detail = await _apply_record(
-                    db, run, profile, conn, mapping_doc, raw, seen_external_ids
-                )
-                stats[outcome] = stats.get(outcome, 0) + 1
-            # ONE txn: staged writes + advanced cursor + stats (§11.3).
-            # Fresh dict copies every time: SQLAlchemy detects JSONB changes
-            # by object identity, so re-assigning the same mutated dict is
-            # silently a no-op UPDATE (the final batch's stats vanish).
+            # R215: process EVERY record. The old `[: BATCH_SIZE * 2]` cap
+            # silently dropped the tail of an overfull connector page while
+            # the cursor still advanced past it (permanent data loss) — and a
+            # backfill then TOMBSTONED the dropped records, since they never
+            # reached `seen_external_ids`. Chunk the writes to keep each
+            # transaction bounded, but advance the cursor only after the
+            # WHOLE page is committed (§11.3: a crash re-runs from the
+            # previous cursor and the upserts are idempotent).
+            for i in range(0, len(records), BATCH_SIZE):
+                for raw in records[i : i + BATCH_SIZE]:
+                    outcome, detail = await _apply_record(
+                        db, run, profile, conn, mapping_doc, raw, seen_external_ids
+                    )
+                    stats[outcome] = stats.get(outcome, 0) + 1
+                if i + BATCH_SIZE < len(records):
+                    # Interim checkpoint: staged writes + stats, cursor HELD.
+                    run.stats = dict(stats)
+                    run.heartbeat_at = datetime.now(UTC)
+                    await db.commit()
+            # ONE txn: the page's final staged writes + advanced cursor +
+            # stats (§11.3). Fresh dict copies every time: SQLAlchemy detects
+            # JSONB changes by object identity, so re-assigning the same
+            # mutated dict is silently a no-op UPDATE (the final batch's
+            # stats vanish).
             state = next_state
             run.cursor_out = dict(state)
             run.stats = dict(stats)

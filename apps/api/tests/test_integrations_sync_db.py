@@ -1441,3 +1441,37 @@ async def test_sync_preview_rejects_push_profile(db):
     with pytest.raises(AppError) as e:
         await SyncProfileService(db).preview(org.id, profile.id)
     assert e.value.code == "SYNC_PREVIEW_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_overfull_connector_page_fully_staged_never_mistombstoned(db, monkeypatch):
+    """R215: a connector page larger than the engine's per-txn chunk must be
+    staged COMPLETELY. The old `[: BATCH_SIZE * 2]` cap silently dropped the
+    tail while advancing the cursor past it (permanent loss) — and a backfill
+    then TOMBSTONED the dropped records (absent from the seen-set)."""
+    from app.integrations.services import sync_engine as se
+
+    monkeypatch.setattr(se, "BATCH_SIZE", 3)  # chunk=3; old cap would be 6
+    org, owner = await _org(db)
+    page = [
+        {"sourcedId": f"of-{i}", "title": f"Class {i}", "status": "active"}
+        for i in range(8)  # one page of 8 > old cap of 6
+    ]
+    conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector([page]))
+    run = await SyncProfileService(db).trigger(org.id, profile.id, trigger="backfill")
+    await db.commit()
+    await se.execute_run(db, run.id)
+
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id,
+                StagedRecord.model == "roster.class",
+            )
+        )
+    ).scalars().all()
+    assert len(staged) == 8
+    assert all(s.status == "active" for s in staged)  # none mis-tombstoned
+    refetched = await db.get(type(run), run.id)
+    assert refetched.status == "succeeded"
+    assert refetched.stats["created"] == 8 and refetched.stats["tombstoned"] == 0
