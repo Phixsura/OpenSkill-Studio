@@ -1126,3 +1126,21 @@ async def test_concurrent_domain_claim_same_org_no_500(db):
         await db.execute(select(OrgDomain).where(OrgDomain.domain == domain))
     ).scalars().all()
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_unparseable_certificate_rejected_at_create(db):
+    """R244 (survivor pin): a pinned cert that is not valid X.509 PEM must be
+    a clean 422 at create — silently accepting garbage leaves a SAML
+    connection that can never verify anything (or worse, skips pinning)."""
+    user = await _user(db)
+    org = await _org(db, user)
+    with pytest.raises(AppError) as e:
+        await SsoAdminService(db).create(
+            org.id,
+            protocol="saml",
+            idp_entity_id="https://idp.example.com",
+            idp_sso_url="https://idp.example.com/sso",
+            idp_certificates=[{"pem": "-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----"}],
+        )
+    assert e.value.code == "SSO_CONFIG_INVALID"

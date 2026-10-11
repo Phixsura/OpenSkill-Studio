@@ -458,6 +458,18 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
         )
     ).scalar_one()
     assert teach.value == "instructor"
+    # R244 (survivor pin): the NON-instructor member must get the
+    # registration's default role — a mutant minting instructor for everyone
+    # (privilege escalation) previously survived because only the positive
+    # instructor assertion existed.
+    stud = (
+        await db.execute(
+            select(MemberModel.role).join(UserModel, UserModel.id == MemberModel.user_id).where(
+                MemberModel.org_id == org.id, _f.lower(UserModel.email) == f"n1@{_mint.domain}".lower()
+            )
+        )
+    ).scalar_one()
+    assert stud.value == "student"
     q = (
         await db.execute(
             select(IdentityMatchQueue).where(

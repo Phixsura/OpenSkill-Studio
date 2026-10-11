@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R244 (seventh window, privilege-escalation pin)**: the NRPS ceiling test
+  asserted only the POSITIVE direction (instructor member → instructor) — a
+  mutant minting instructor for EVERY member (privilege escalation) survived.
+  Complementary assertion added: the non-instructor member gets the
+  registration's default role. Also pinned: an unparseable pinned certificate
+  is a clean 422 at create (previously unreached negative path). Batch 9
+  re-probe: NRPS role ceiling, inactive-member skip, cert parse, enforce-SSO
+  break-glass gate — 4/4 killed.
 - **R243 (seventh window, scheduler-negative pins)**: the schedulers' NEGATIVE
   space was untested — `manual` streams/profiles never auto-running and
   disabled streams being skipped had no pins (only the positive "due daily
