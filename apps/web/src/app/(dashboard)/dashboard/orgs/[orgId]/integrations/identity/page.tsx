@@ -30,6 +30,7 @@ interface SsoConnection {
   enforce_sso: boolean;
   allow_jit: boolean;
   default_role: string;
+  attribute_map: Record<string, string>;
 }
 
 interface ScimToken {
@@ -170,6 +171,10 @@ export default function IdentityIntegrationsPage() {
     },
     onError,
   });
+
+  const [attrEdit, setAttrEdit] = useState<{ id: string; email: string; name: string } | null>(
+    null,
+  );
 
   const patchSso = useMutation({
     mutationFn: (args: { id: string; body: Record<string, unknown> }) =>
@@ -417,7 +422,54 @@ export default function IdentityIntegrationsPage() {
                     {s.enforce_sso ? "Stop enforcing" : "Enforce SSO"}
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setAttrEdit(
+                      attrEdit?.id === s.id
+                        ? null
+                        : {
+                            id: s.id,
+                            email: s.attribute_map?.email ?? "",
+                            name: s.attribute_map?.display_name ?? "",
+                          },
+                    )
+                  }
+                >
+                  Attributes
+                </Button>
               </div>
+              {attrEdit?.id === s.id && (
+                <div className="mt-2 flex flex-wrap items-end gap-2 border-t pt-2">
+                  <Input
+                    aria-label="Email claim"
+                    className="max-w-[12rem]"
+                    placeholder="email claim (default: email)"
+                    value={attrEdit.email}
+                    onChange={(e) => setAttrEdit({ ...attrEdit, email: e.target.value })}
+                  />
+                  <Input
+                    aria-label="Display name claim"
+                    className="max-w-[12rem]"
+                    placeholder="name claim (default: name)"
+                    value={attrEdit.name}
+                    onChange={(e) => setAttrEdit({ ...attrEdit, name: e.target.value })}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const map: Record<string, string> = {};
+                      if (attrEdit.email.trim()) map.email = attrEdit.email.trim();
+                      if (attrEdit.name.trim()) map.display_name = attrEdit.name.trim();
+                      patchSso.mutate({ id: s.id, body: { attribute_map: map } });
+                      setAttrEdit(null);
+                    }}
+                  >
+                    Save map
+                  </Button>
+                </div>
+              )}
             </li>
           ))}
         </ul>
