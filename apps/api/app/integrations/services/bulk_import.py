@@ -650,28 +650,55 @@ class BulkImportService:
 
         applied = created = updated = skipped = 0
         row_failures = 0
+
+        async def _apply_one(row: dict) -> str:
+            if job.kind == "roster":
+                return await self._apply_roster_row(job.org_id, row)
+            if job.kind == "opportunities":
+                return await self._apply_opportunity_row(job, row)
+            return await self._apply_row(job.org_id, row)
+
+        if job.mode == "atomic":
+            # R198: all-or-nothing INCLUDING the terminal status. Apply every
+            # row inside ONE savepoint; a failure rolls back the whole
+            # savepoint (no partial data) but the outer transaction stays
+            # usable so status='failed' + the failing-row reason PERSIST (the
+            # API commits them) — the old flush-then-raise path had the status
+            # erased by the request-boundary rollback, leaving the job stuck
+            # at 'previewed' with no failure detail. Mirrors the validation-
+            # error early-return (also status='failed', no raise).
+            try:
+                async with self.db.begin_nested():
+                    a = c = u = sk = 0
+                    for row in rows:
+                        outcome = await _apply_one(row)
+                        a += 1
+                        c += outcome == "created"
+                        u += outcome == "updated"
+                        sk += outcome == "skipped"
+            except Exception as exc:
+                failing = locals().get("row", {})
+                job.status = "failed"
+                job.stats = {
+                    "applied": 0,
+                    "errors": 1,
+                    "reason": f"row_{failing.get('row_number', '?')}:{type(exc).__name__}",
+                }
+                await self.db.flush()
+                return job
+            job.stats = {
+                "applied": a, "created": c, "updated": u, "skipped": sk, "errors": 0,
+            }
+            job.status = "succeeded"
+            await self.db.flush()
+            return job
+
         for row in rows:
             try:
                 async with self.db.begin_nested():
-                    if job.kind == "roster":
-                        outcome = await self._apply_roster_row(job.org_id, row)
-                    elif job.kind == "opportunities":
-                        outcome = await self._apply_opportunity_row(job, row)
-                    else:
-                        outcome = await self._apply_row(job.org_id, row)
-            except Exception as exc:  # row-level failure
+                    outcome = await _apply_one(row)
+            except Exception as exc:  # row-level failure (partial mode)
                 row_failures += 1
-                if job.mode == "atomic":
-                    job.status = "failed"
-                    job.stats = {
-                        "applied": 0,
-                        "errors": row_failures,
-                        "reason": f"row_{row['row_number']}:{type(exc).__name__}",
-                    }
-                    await self.db.flush()
-                    raise AppError(
-                        "IMPORT_FAILED", "Atomic import failed; nothing was applied", 422
-                    ) from exc
                 self.db.add(
                     ImportRowError(
                         job_id=job.id,

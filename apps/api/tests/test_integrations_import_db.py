@@ -656,8 +656,11 @@ async def test_roster_import_json_and_atomic(db):
         org2.id, kind="roster", mode="atomic", file_bytes=bad,
         file_key="r2", created_by=owner2.id, idempotency_key=f"ra2-{uuid.uuid4().hex[:8]}",
     )
-    with pytest.raises(AppError):
-        await svc.commit(org2.id, job2.id, file_bytes=bad)
+    # R198: atomic apply-failure returns a terminal status='failed' (no raise,
+    # consistent with the validation-error path) — nothing is applied.
+    failed = await svc.commit(org2.id, job2.id, file_bytes=bad)
+    assert failed.status == "failed"
+    assert failed.stats["applied"] == 0 and failed.stats["errors"] == 1
     n = (
         await db.execute(
             select(func.count()).select_from(CohortMember).where(
@@ -1009,3 +1012,58 @@ async def test_roster_import_honors_cohort_capacity(db):
         )
     ).scalar_one()
     assert n == 1  # never overfilled
+
+
+@pytest.mark.asyncio
+async def test_atomic_apply_failure_persists_failed_status(db):
+    """R198: when an atomic import fails during APPLY (not validation), the
+    job's terminal status='failed' + reason must PERSIST (survive the commit),
+    not be erased by a raise/rollback leaving the job stuck at 'previewed'.
+    And no rows are applied."""
+    from app.models.cohort import Cohort, CohortMember
+
+    org, owner = await _org(db)
+    cohort = await _cohort(db, org, owner, f"c-{uuid.uuid4().hex[:8]}")
+    svc = BulkImportService(db)
+    email = f"ap-{uuid.uuid4().hex[:6]}@x.edu"
+    useed = f"email\n{email}\n".encode()
+    ujob = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=useed,
+        file_key="u", created_by=owner.id, idempotency_key=f"ap-{uuid.uuid4().hex[:8]}",
+    )
+    await svc.commit(org.id, ujob.id, file_bytes=useed)
+
+    # Atomic roster: first row valid, second references a missing cohort —
+    # validation passes (slug shape ok) but APPLY fails on resolution.
+    data = (
+        "email,cohort_slug\n"
+        f"{email},{cohort.slug}\n"
+        f"{email},missing-cohort-xyz\n"
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="roster", mode="atomic", file_bytes=data,
+        file_key="r", created_by=owner.id, idempotency_key=f"apr-{uuid.uuid4().hex[:8]}",
+    )
+    job_id = job.id
+    result = await svc.commit(org.id, job_id, file_bytes=data)
+    assert result.status == "failed"
+    assert "missing" not in result.stats.get("reason", "") or result.stats["applied"] == 0
+
+    # Persisted: re-fetch from a committed state (simulate the API commit).
+    await db.commit()
+    from app.integrations.models import ImportJob
+
+    refetched = await db.get(ImportJob, job_id)
+    await db.refresh(refetched)
+    assert refetched.status == "failed"  # NOT stuck at 'previewed'/'committing'
+
+    # Atomic = nothing applied: the valid first row did not enroll.
+    n = (
+        await db.execute(
+            select(func.count()).select_from(CohortMember).where(
+                CohortMember.cohort_id == cohort.id
+            )
+        )
+    ).scalar_one()
+    assert n == 0
+    assert Cohort is not None
