@@ -715,11 +715,11 @@ async def test_slo_signed_request_revokes_sessions(db):
     assert "RelayState=r-1" in redirect
 
     # A REVOKED link never sweeps (not authoritative).
-    from app.integrations.models import ExternalIdentityLink as _L
+    from app.integrations.models import ExternalIdentityLink as LinkModel
 
     row = (
         await db.execute(
-            select(_L).where(_L.connection_ref == conn.id, _L.subject == subject)
+            select(LinkModel).where(LinkModel.connection_ref == conn.id, LinkModel.subject == subject)
         )
     ).scalar_one()
     row.revoked_at = datetime.now(UTC)
