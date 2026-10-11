@@ -486,7 +486,7 @@ async def saml_acs(
     if settings.app_env in ("development", "test"):
         return {"data": body}
     return RedirectResponse(
-        f"/auth/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
+        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
         status_code=302,
     )
 
@@ -573,6 +573,6 @@ async def oidc_callback(
         return {"data": body}
     # Production: hand tokens to the SPA via fragment redirect.
     return RedirectResponse(
-        f"/auth/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
+        f"/sso-complete#access_token={pair.access_token}&refresh_token={pair.refresh_token}",
         status_code=302,
     )
