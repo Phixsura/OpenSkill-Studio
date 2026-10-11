@@ -957,11 +957,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R139 + final checkpoint (marathon3 close)**: connector contract tests
   rebuild fresh instances (the module-level CONNECTORS singleton is
   swapped by many tests — order pollution surfaced only in full-suite
-  order). Full verification: fabric suite 262/262, cross-cutting
-  consumers (controlplane/billing/webhooks) 618/618, web 762/762 +
-  type-check + lint, live E2E 49/49 (requires APP_ENV=test +
-  EGRESS_ALLOW_PRIVATE=true in BOTH the API and the e2e process — the
-  outbox is driven in-process).
+  order). Final verification after R140-R151: fabric suite 264/264,
+  cross-cutting consumers (controlplane/billing/webhooks) 618/618 plus
+  employer 54 and cohort 45, web 764/764 + type-check + lint, live E2E
+  61/61 (requires APP_ENV=test + EGRESS_ALLOW_PRIVATE=true in BOTH the
+  API and the e2e process — the outbox is driven in-process; a crashed
+  e2e run can leave a committed pending domain, hence the R150 tolerant
+  sweep assert + e2e domain cleanup).
 
 - **R138 (third window, Part O gap)**: bulk imports — mass account
   provisioning, exactly what auditors ask about — were the one admin
