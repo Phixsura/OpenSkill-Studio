@@ -121,6 +121,41 @@ class Connector(Protocol):
         """Health/credential check; raise AppError on failure."""
 
 
+async def request_with_retry(
+    egress,
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    content: bytes | None = None,
+    max_retries: int = 2,
+    retry_cap_s: float = 30.0,
+):
+    """Issue #43 Part G "rate limits": connectors honor 429 Retry-After
+    (capped — a hostile server must not park a worker for an hour) and
+    retry transient 5xx with small exponential backoff. The FINAL response
+    is returned either way; classification stays with the caller."""
+    import asyncio
+
+    attempt = 0
+    while True:
+        resp = await egress.request(method, url, headers=headers, content=content)
+        if resp.status_code == 429 and attempt < max_retries:
+            raw = resp.headers.get("retry-after", "1")
+            try:
+                delay = min(max(float(raw), 0.0), retry_cap_s)
+            except ValueError:  # HTTP-date form — just take a beat
+                delay = 1.0
+            await asyncio.sleep(delay)
+            attempt += 1
+            continue
+        if resp.status_code in (502, 503, 504) and attempt < max_retries:
+            await asyncio.sleep(min(2.0**attempt, retry_cap_s))
+            attempt += 1
+            continue
+        return resp
+
+
 class GenericWebhookConnector:
     """Delivery target for the event mesh (P2). Ping validates reachability
     of nothing — subscriptions carry their own URLs — so it only re-screens
@@ -184,7 +219,8 @@ class GenericAtsConnector:
         headers = {"content-type": "application/json"}
         if secret.get("api_key"):
             headers[header] = secret["api_key"]
-        resp = await ctx.egress.request(
+        resp = await request_with_retry(
+            ctx.egress,
             "POST",
             ctx.base_url.rstrip("/") + "/applications",
             headers=headers,
@@ -227,7 +263,8 @@ class OneRosterConnector:
         from app.exceptions import AppError
 
         secret = await ctx.get_secret()
-        resp = await ctx.egress.request(
+        resp = await request_with_retry(
+            ctx.egress,
             "POST",
             ctx.config["token_url"],
             headers={"content-type": "application/x-www-form-urlencoded"},
@@ -311,8 +348,8 @@ class OneRosterConnector:
         base = (ctx.base_url or "").rstrip("/")
         while True:
             url = f"{base}/{path}?limit={page_size}&offset={offset}"
-            resp = await ctx.egress.request(
-                "GET", url, headers={"authorization": f"Bearer {token}"}
+            resp = await request_with_retry(
+                ctx.egress, "GET", url, headers={"authorization": f"Bearer {token}"}
             )
             if resp.status_code == 401:
                 raise AppError("CONNECTION_AUTH_REJECTED", "OneRoster 401", 422)

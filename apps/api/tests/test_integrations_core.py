@@ -470,3 +470,60 @@ def test_generic_connector_contracts():
         assert out2 == [{"external_id": "b1", "ok": False, "error": "http_422"}]
 
     asyncio.run(main())
+
+
+def test_request_with_retry_honors_retry_after_and_caps():
+    """R86 (Part G rate limits): 429 Retry-After honored (capped), transient
+    5xx retried with backoff, retries bounded, final response surfaced."""
+    import asyncio
+    import time as _time
+
+    import httpx
+
+    from app.integrations.registry import request_with_retry
+
+    class Scripted:
+        def __init__(self, steps):
+            self.steps = list(steps)  # (status, headers)
+            self.calls = 0
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            self.calls += 1
+            status, hdrs = self.steps.pop(0)
+            return httpx.Response(status, headers=hdrs, request=httpx.Request(method, url))
+
+    async def main():
+        # 429 with Retry-After: waits then succeeds.
+        s = Scripted([(429, {"retry-after": "0"}), (200, {})])
+        resp = await request_with_retry(s, "GET", "https://x.example.com/")
+        assert resp.status_code == 200 and s.calls == 2
+
+        # Hostile Retry-After is CAPPED (3600 -> retry_cap_s), not slept raw.
+        s = Scripted([(429, {"retry-after": "3600"}), (200, {})])
+        t0 = _time.monotonic()
+        resp = await request_with_retry(
+            s, "GET", "https://x.example.com/", retry_cap_s=0.05
+        )
+        assert resp.status_code == 200
+        assert _time.monotonic() - t0 < 2.0  # never slept the hour
+
+        # Transient 503 retried; retries BOUNDED (3 attempts total), final
+        # response returned for the caller to classify.
+        s = Scripted([(503, {}), (200, {})])
+        assert (await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)).status_code == 200
+        s = Scripted([(429, {"retry-after": "0"})] * 5)
+        resp = await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
+        assert resp.status_code == 429 and s.calls == 3
+
+        # Unparseable (HTTP-date) Retry-After falls back to a short beat.
+        s = Scripted([(429, {"retry-after": "Sat, 11 Oct 2026 10:00:00 GMT"}), (200, {})])
+        t0 = _time.monotonic()
+        assert (await request_with_retry(s, "GET", "https://x/")).status_code == 200
+        assert _time.monotonic() - t0 < 3.0
+
+        # Hard 4xx never retried.
+        s = Scripted([(401, {})])
+        assert (await request_with_retry(s, "GET", "https://x/")).status_code == 401
+        assert s.calls == 1
+
+    asyncio.run(main())
