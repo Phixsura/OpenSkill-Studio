@@ -13,6 +13,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, apiWithAuth } from "@/lib/api";
 
+// R132: header-map-able columns per import template kind (mirrors KIND_SPECS).
+const KIND_FIELDS: Record<string, string[]> = {
+  users: ["email", "display_name", "role"],
+  roster: ["email", "cohort_slug", "role"],
+  opportunities: [
+    "title",
+    "opportunity_type",
+    "description",
+    "location_mode",
+    "location_text",
+    "compensation_display",
+    "openings",
+  ],
+};
+
 interface ImportJob {
   id: string;
   kind: string;
@@ -49,7 +64,8 @@ export default function DataIntegrationsPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState("partial");
-  const [aliases, setAliases] = useState({ email: "", display_name: "", role: "" });
+  const [kind, setKind] = useState("users");
+  const [aliases, setAliases] = useState<Record<string, string>>({});
   const [job, setJob] = useState<ImportJob | null>(null);
   const [streamName, setStreamName] = useState("");
   const [dataset, setDataset] = useState("events");
@@ -76,9 +92,9 @@ export default function DataIntegrationsPage() {
   const upload = useMutation({
     mutationFn: async () => {
       const file = fileRef.current?.files?.[0];
-      if (!file) throw new ApiError(0, "NO_FILE", "Choose a CSV file first");
+      if (!file) throw new ApiError(0, "NO_FILE", "Choose a CSV or JSON file first");
       const form = new FormData();
-      form.append("kind", "users");
+      form.append("kind", kind);
       form.append("mode", mode);
       // R92: optional vendor-header aliases.
       const map: Record<string, string> = {};
@@ -195,21 +211,39 @@ export default function DataIntegrationsPage() {
       </div>
 
       <section className="space-y-3 rounded-lg border p-4">
-        <h2 className="text-lg font-medium">Bulk import (users CSV)</h2>
+        <h2 className="text-lg font-medium">Bulk import (CSV / JSON)</h2>
         <div className="flex flex-wrap items-center gap-3">
-          <input aria-label="CSV file" ref={fileRef} type="file" accept=".csv,text/csv" />
+          <select
+            aria-label="Import kind"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={kind}
+            onChange={(e) => {
+              setKind(e.target.value);
+              setAliases({});
+            }}
+          >
+            <option value="users">Users</option>
+            <option value="roster">Roster (cohort enrollment)</option>
+            <option value="opportunities">Opportunities (drafts)</option>
+          </select>
+          <input
+            aria-label="Import file"
+            ref={fileRef}
+            type="file"
+            accept=".csv,.json,text/csv,application/json"
+          />
           <details className="w-full text-xs">
             <summary className="text-muted-foreground cursor-pointer">
-              Vendor CSV headers (optional column mapping)
+              Vendor headers (optional column mapping)
             </summary>
             <div className="mt-1 flex flex-wrap gap-2">
-              {(["email", "display_name", "role"] as const).map((k) => (
+              {(KIND_FIELDS[kind] ?? []).map((k) => (
                 <Input
                   key={k}
                   aria-label={`CSV header for ${k}`}
                   className="max-w-[11rem]"
                   placeholder={`header for ${k}`}
-                  value={aliases[k]}
+                  value={aliases[k] ?? ""}
                   onChange={(e) => setAliases((a) => ({ ...a, [k]: e.target.value }))}
                 />
               ))}
