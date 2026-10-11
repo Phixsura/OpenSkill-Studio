@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R196 (fifth window, world-class feature)**: sync dry-run preview —
+  `POST /sync-profiles/{id}/preview` reads the first few records from the
+  connector (with REAL credentials, now that R194 wired them) and shows the
+  raw records + how the profile's mapping transforms them, with no staging /
+  cursor / writes. This is the inbound analog of mapping-preview (which only
+  works on hand-pasted samples) and the Fivetran/Airbyte "test connection +
+  preview data" flow an admin needs before scheduling a sync. Pull-only
+  (422 on push), rate-limited (outbound read), 1-20 records.
 - **R195 (fifth window, regression guard)**: a source-level contract test
   asserts every ConnCtx built in the sync engine passes `_secret_loader`, so
   a future construction site that forgets it (reintroducing R194) is caught.

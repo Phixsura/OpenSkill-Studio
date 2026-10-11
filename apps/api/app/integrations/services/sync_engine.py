@@ -185,6 +185,57 @@ class SyncProfileService:
             raise AppError("SYNC_PROFILE_NOT_FOUND", "Sync profile not found", 404)
         return p
 
+    async def preview(self, org_id: str, profile_id: str, *, limit: int = 5) -> dict:
+        """R196: read-only sync dry-run — pull the FIRST small page from the
+        connector (with real credentials, via _secret_loader_for) and show the
+        raw records + how the profile's mapping would transform them. No
+        staging, no cursor advance, no writes — an admin validates a pull
+        connection before scheduling it (the inbound analog of mapping
+        preview, which only works on hand-pasted samples)."""
+        from app.integrations.models import IntegrationConnection, IntegrationProvider
+        from app.integrations.registry import CONNECTORS, ConnCtx
+
+        limit = max(1, min(int(limit), 20))
+        profile = await self.get(org_id, profile_id)
+        if profile.direction != "pull":
+            raise AppError("SYNC_PREVIEW_UNSUPPORTED", "preview is pull-only", 422)
+        conn = await self.db.get(IntegrationConnection, profile.connection_id)
+        provider = await self.db.get(IntegrationProvider, conn.provider_id) if conn else None
+        connector = CONNECTORS.get(provider.key) if provider else None
+        if connector is None or not hasattr(connector, "read"):
+            raise AppError("SYNC_PREVIEW_UNSUPPORTED", "connector cannot read", 422)
+        mapping_doc = None
+        if profile.mapping_profile_id:
+            mp = await self.db.get(MappingProfile, profile.mapping_profile_id)
+            mapping_doc = mp.document if mp else None
+        ctx = ConnCtx(
+            connection_id=conn.id,
+            config=conn.config or {},
+            base_url=conn.base_url,
+            _secret_loader=_secret_loader_for(self.db, conn.id),
+        )
+        records: list[dict] = []
+        try:
+            async for batch in connector.read(ctx, profile.model, {}):
+                for raw in batch.get("records", []):
+                    if not isinstance(raw, dict):
+                        continue
+                    row = {"raw": raw}
+                    if mapping_doc is not None:
+                        mapped, errors = apply_mapping(mapping_doc, raw)
+                        row["mapped"] = mapped
+                        row["errors"] = errors
+                    records.append(row)
+                    if len(records) >= limit:
+                        break
+                if len(records) >= limit:
+                    break
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError("SYNC_PREVIEW_FAILED", f"connector read failed: {type(exc).__name__}", 502) from exc
+        return {"model": profile.model, "count": len(records), "records": records}
+
     async def list(self, org_id: str) -> list[SyncProfile]:
         return list(
             (

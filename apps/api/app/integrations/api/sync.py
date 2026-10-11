@@ -294,6 +294,24 @@ async def trigger_sync(
     return {"data": resp}
 
 
+@router.post(
+    "/sync-profiles/{profile_id}/preview",
+    response_model=DataResponse[dict],
+    dependencies=[Depends(rate_limit(20, 60))],  # triggers an outbound read
+)
+async def preview_sync(
+    org_id: str,
+    profile_id: str,
+    limit: int = Query(default=5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R196: read-only dry-run — pull the first few records from the connector
+    and show how the profile's mapping transforms them. No staging/writes."""
+    await _admin(org_id, user, db)
+    return {"data": await SyncProfileService(db).preview(org_id, profile_id, limit=limit)}
+
+
 @router.delete("/sync-profiles/{profile_id}", status_code=204)
 async def delete_sync_profile(
     org_id: str,

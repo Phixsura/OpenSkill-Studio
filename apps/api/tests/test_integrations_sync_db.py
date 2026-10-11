@@ -1370,3 +1370,60 @@ async def test_sync_run_loads_connection_credentials(db):
 
     assert seen_secret.get("client_secret") == "shhh-secret"
     assert seen_secret.get("client_id") == "cid-123"
+
+
+@pytest.mark.asyncio
+async def test_sync_preview_pull_dry_run(db):
+    """R196: sync preview reads the first few records from the connector and
+    shows mapped output, with NO staging, cursor advance, or run row."""
+    from sqlalchemy import func as _func
+
+    from app.integrations.models import StagedRecord, SyncRun
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector(
+        [[{"external_id": "pv1", "title": "Algebra"}, {"external_id": "pv2", "title": "Calc"}]]
+    )
+    conn, profile = await _setup_profile(
+        db, org, owner, fake,
+        mapping={"fields": [{"target": "title", "path": "title", "transform": ["upper"]}]},
+    )
+
+    out = await SyncProfileService(db).preview(org.id, profile.id, limit=5)
+    assert out["model"] == "roster.class"
+    assert out["count"] == 2
+    assert out["records"][0]["raw"]["external_id"] == "pv1"
+    assert out["records"][0]["mapped"]["title"] == "ALGEBRA"  # transform applied
+    assert out["records"][0]["errors"] == []
+
+    # No side effects: no staged records, no run rows for this profile.
+    staged = (
+        await db.execute(
+            _func.count(StagedRecord.id).select().where(
+                StagedRecord.connection_id == conn.id
+            )
+        )
+    ).scalar()
+    assert staged in (0, None)
+    runs = (
+        await db.execute(
+            select(_func.count(SyncRun.id)).where(SyncRun.profile_id == profile.id)
+        )
+    ).scalar_one()
+    assert runs == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_preview_rejects_push_profile(db):
+    """R196: preview is pull-only — a push profile is a clean 422."""
+    from app.exceptions import AppError
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    # Flip to push direction directly (create rejects bidirectional, not push).
+    profile.direction = "push"
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await SyncProfileService(db).preview(org.id, profile.id)
+    assert e.value.code == "SYNC_PREVIEW_UNSUPPORTED"
