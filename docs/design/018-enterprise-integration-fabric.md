@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R210 (fifth window, R87-class fix — mutation-killed)**: `apply_mapping`'s
+  non-finite gate only checked a TOP-LEVEL float. `json.loads` — and therefore
+  every connector's `resp.json()` — accepts `NaN`/`Infinity`, so a provider
+  can hand us a non-finite float nested inside an object or list; it passed
+  validation into the mapped payload and the JSONB staging write rejected it
+  mid-run (500). Fix: `_has_non_finite` recursive scan; nested NaN/Inf now
+  yields a clean per-field `non_finite` conflict.
 - **R209 (fifth window, governance fix — mutation-killed)**: whole-class SIS
   offboarding silently stopped removing members. The backfill tombstones the
   class AND its enrollments together, but the unenroll pass looked the cohort

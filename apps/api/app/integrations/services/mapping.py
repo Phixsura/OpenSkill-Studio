@@ -206,6 +206,21 @@ def validate_document(document: dict) -> list[str]:
 # ── evaluation (engine + preview share this) ──
 
 
+def _has_non_finite(value: Any) -> bool:
+    """R210 (R87 class): json.loads — and therefore every connector's
+    resp.json() — ACCEPTS NaN/Infinity by default, so a provider can hand us
+    a non-finite float nested inside an object or list. The top-level float
+    check below misses it, and a nested NaN reaches the JSONB write where
+    Postgres rejects it mid-run (500). Scan recursively."""
+    if isinstance(value, float):
+        return value != value or value in (float("inf"), float("-inf"))
+    if isinstance(value, dict):
+        return any(_has_non_finite(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_non_finite(v) for v in value)
+    return False
+
+
 def _depth(value: Any, level: int = 0) -> int:
     if level > MAX_RESULT_DEPTH:
         return level
@@ -256,7 +271,7 @@ def apply_mapping(document: dict, record: dict) -> tuple[dict, list[dict]]:
             if isinstance(value, str) and len(value) > MAX_STRING_LEN:
                 errors.append({"field": target, "code": "too_long", "message": "string > 10k"})
                 continue
-            if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+            if _has_non_finite(value):
                 errors.append({"field": target, "code": "non_finite", "message": "NaN/Inf"})
                 continue
             if _depth(value) >= MAX_RESULT_DEPTH:

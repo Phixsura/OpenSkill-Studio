@@ -167,3 +167,24 @@ def test_csv_json_parity_for_users(rows):
 
     assert sorted(map(key, csv_rows)) == sorted(map(key, json_rows))
     assert len(csv_errors) == len(json_errors)
+
+
+def test_nested_non_finite_rejected_not_staged():
+    """R210 (R87 class): json.loads — and therefore connector resp.json() —
+    accepts NaN/Infinity, so a non-finite float can arrive NESTED inside an
+    object or list. It must become a non_finite error, never reach the mapped
+    payload (where the JSONB write would 500 mid-run)."""
+    import json as _json
+
+    from app.integrations.services.mapping import apply_mapping
+
+    doc = {"fields": [{"target": "meta", "path": "m"}, {"target": "tags", "path": "t"}]}
+    record = _json.loads('{"m": {"score": NaN, "ok": 1}, "t": [1.0, Infinity]}')
+    mapped, errors = apply_mapping(doc, record)
+    codes = {e["field"]: e["code"] for e in errors}
+    assert codes == {"meta": "non_finite", "tags": "non_finite"}
+    assert mapped == {}
+
+    # finite nested floats still pass untouched
+    mapped2, errors2 = apply_mapping(doc, {"m": {"score": 1.5}, "t": [2.0]})
+    assert errors2 == [] and mapped2 == {"meta": {"score": 1.5}, "tags": [2.0]}
