@@ -654,6 +654,9 @@ async def test_scim_event_feed_mirrors_lifecycle(ctx):
     await _usvc(ctx).patch(
         uid, {"Operations": [{"op": "replace", "path": "active", "value": True}]}
     )
+    # PUT-arm reactivation emits too (kills the PUT-site mutant).
+    await _usvc(ctx).replace(uid, {"userName": email, "active": False})
+    await _usvc(ctx).replace(uid, {"userName": email, "active": True})
     events = (
         await db.execute(
             _select(IntegrationEvent).where(IntegrationEvent.subject == uid)
@@ -666,6 +669,7 @@ async def test_scim_event_feed_mirrors_lifecycle(ctx):
         "com.openskill.org.scim.reactivated.v1",
     ):
         assert expected in types, types
+    assert types.count("com.openskill.org.scim.reactivated.v1") == 2  # PATCH + PUT arms
     for e in events:
         assert set(e.data) == {"user_id", "token_id"}  # ids only, no PII
         assert email not in str(e.data)

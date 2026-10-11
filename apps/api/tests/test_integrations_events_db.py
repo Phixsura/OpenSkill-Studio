@@ -352,6 +352,19 @@ async def test_replay_clones_and_dispatches(db, egress):
     ).scalar_one()
     assert d.status == "succeeded"
 
+    # Mutating the event row after first dispatch must NOT change the resent
+    # bytes — retries resend the ARCHIVE, not a re-render.
+    d.status = "pending"
+    ev.data = {"k": "MUTATED"}
+    await db.commit()
+    from app.integrations.services.events import handle_delivery_attempt
+
+    await handle_delivery_attempt(db, {"delivery_id": d.id})
+    await db.commit()
+    wire2 = [c for c in egress.calls if c["headers"].get("webhook-id") == ev.id][-1]
+    assert wire2["body"] == d.request_body.encode()
+    assert b"MUTATED" not in wire2["body"]
+
     clone = await replay_delivery(db, org.id, d.id)
     assert clone.replay_of == d.id
     await db.commit()
