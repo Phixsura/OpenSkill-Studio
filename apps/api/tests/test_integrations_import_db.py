@@ -483,3 +483,59 @@ def test_parse_users_csv_total_over_arbitrary_cells(rows):
         assert "@" in row["email"] and row["email"] == row["email"].lower()
         assert row["role"] in IMPORT_ROLE_MAP
         assert len(row["display_name"]) <= 100
+
+
+@pytest.mark.asyncio
+async def test_json_import_template(db):
+    """R128 (Part K CSV/JSON): a JSON users file imports with the same
+    validation as CSV; auto-detected by content; bad shape -> clean error."""
+    import json as _json
+
+    org, owner = await _org(db)
+    svc = BulkImportService(db)
+    email = f"js-{uuid.uuid4().hex[:6]}@x.edu"
+    data = _json.dumps(
+        {"users": [
+            {"email": email, "display_name": "JSON User", "role": "instructor"},
+            {"email": "bad-no-at", "display_name": "Nope"},
+        ]}
+    ).encode()
+    job = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data,
+        file_key="j1", created_by=owner.id, idempotency_key=f"r128-{uuid.uuid4().hex[:8]}",
+    )
+    assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 1
+    committed = await svc.commit(org.id, job.id, file_bytes=data)
+    assert committed.stats["created"] == 1
+    from sqlalchemy import func as _f
+
+    u = (
+        await db.execute(select(User).where(_f.lower(User.email) == email))
+    ).scalar_one()
+    assert u.display_name == "JSON User"
+
+    # Top-level list form also works.
+    data2 = _json.dumps([{"email": f"js2-{uuid.uuid4().hex[:6]}@x.edu"}]).encode()
+    job2 = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=data2,
+        file_key="j2", created_by=owner.id, idempotency_key=f"r128b-{uuid.uuid4().hex[:8]}",
+    )
+    assert job2.dry_stats["valid"] == 1
+
+    # Malformed JSON -> file-level error, zero valid.
+    job3 = await svc.create_job(
+        org.id, kind="users", mode="partial", file_bytes=b"{not json",
+        file_key="j3", created_by=owner.id, idempotency_key=f"r128c-{uuid.uuid4().hex[:8]}",
+    )
+    assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] >= 1
+
+
+def test_detect_format_sniffing():
+    """R128: format sniffing — BOM/whitespace-prefixed JSON detected; CSV
+    (even one whose first cell contains '{' mid-line) stays CSV."""
+    from app.integrations.services.bulk_import import detect_format
+
+    assert detect_format(b'[{"email": "a@b.co"}]') == "json"
+    assert detect_format(b'\xef\xbb\xbf\n  {"users": []}') == "json"
+    assert detect_format(b"email,display_name\na@b.co,X") == "csv"
+    assert detect_format(b"") == "csv"

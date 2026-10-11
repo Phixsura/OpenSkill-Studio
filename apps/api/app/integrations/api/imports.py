@@ -39,12 +39,18 @@ def _resp(job) -> ImportJobResponse:
 async def _store_file(org_id: str, job_hint: str, content: bytes) -> str:
     from ulid import ULID
 
-    file_key = f"orgs/{org_id}/imports/{ULID()}_{job_hint}.csv"
+    from app.integrations.services.bulk_import import detect_format
+
+    # R128: templates come as CSV or JSON — key extension and ContentType
+    # follow the sniffed format so downloads open correctly.
+    fmt = detect_format(content)
+    ctype = "application/json" if fmt == "json" else "text/csv"
+    file_key = f"orgs/{org_id}/imports/{ULID()}_{job_hint}.{fmt}"
     from app.core.storage import get_s3_client
 
     async for client in get_s3_client():
         await client.put_object(
-            Bucket=settings.s3_bucket, Key=file_key, Body=content, ContentType="text/csv"
+            Bucket=settings.s3_bucket, Key=file_key, Body=content, ContentType=ctype
         )
     return file_key
 

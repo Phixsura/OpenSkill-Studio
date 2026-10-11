@@ -61,6 +61,104 @@ def _sanitize_cell(value: str) -> str:
     return value
 
 
+def _validate_user_rows(
+    raw_rows: list[tuple[int, dict]]
+) -> tuple[list[dict], list[dict]]:
+    """Shared user-row validation for every import format (R128). Input is
+    (row_number, canonicalized-dict) pairs; output is (clean_rows, errors)
+    with identical rules to the CSV path: valid email shape, NUL guard,
+    role whitelist, in-file duplicate detection."""
+    rows: list[dict] = []
+    errors: list[dict] = []
+    seen_emails: dict[str, int] = {}
+    for i, row in raw_rows:
+        email = str(row.get("email", "") or "").strip().lower()
+        problems: list[tuple[str, str, str]] = []
+        if (
+            not email
+            or len(email) > 255
+            or "\x00" in email
+            or not _EMAIL_RE.fullmatch(email)
+        ):
+            problems.append(("email", "invalid_email", "not a valid email address"))
+        display = str(row.get("display_name", "") or "")[:100]
+        if "\x00" in display:
+            problems.append(("display_name", "control_chars", "NUL character"))
+        role = str(row.get("role") or "student").lower()
+        if role not in IMPORT_ROLE_MAP:
+            problems.append(("role", "invalid_role", "role must be student|instructor"))
+        if email and email in seen_emails:
+            problems.append(
+                ("email", "duplicate_in_file", f"also on row {seen_emails[email]}")
+            )
+        if problems:
+            for col, code, message in problems:
+                errors.append({
+                    "row_number": i, "column": col, "code": code, "message": message,
+                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                })
+            continue
+        seen_emails[email] = i
+        rows.append({"row_number": i, "email": email, "display_name": display, "role": role})
+    return rows, errors
+
+
+def parse_users_json(
+    file_bytes: bytes, header_map: dict | None = None
+) -> tuple[list[dict], list[dict]]:
+    """JSON users template (R128, Part K): a top-level list of objects, or
+    {"users": [...]}. Same validation as CSV; header_map renames source keys
+    to canonical. Row numbers are 1-indexed array positions."""
+    import json as _json
+
+    try:
+        text = file_bytes.decode("utf-8-sig", errors="strict")
+    except UnicodeDecodeError:
+        return [], [{"row_number": 1, "code": "encoding", "message": "File is not UTF-8"}]
+    try:
+        doc = _json.loads(text or "null")
+    except _json.JSONDecodeError:
+        return [], [{"row_number": 1, "code": "invalid_json", "message": "File is not valid JSON"}]
+    if isinstance(doc, dict):
+        doc = doc.get("users")
+    if not isinstance(doc, list):
+        return [], [{"row_number": 1, "code": "invalid_shape",
+                     "message": "expected a list of users or {\"users\": [...]}"}]
+    alias = {str(k).strip().lower(): str(v).strip().lower() for k, v in (header_map or {}).items()}
+
+    def _canon_obj(obj: dict) -> dict:
+        out = {}
+        for k, v in obj.items():
+            key = str(k).strip().lower()
+            # header_map for JSON maps canonical->source, so invert to find it.
+            for canon, src in alias.items():
+                if src == key:
+                    key = canon
+                    break
+            out[key] = v
+        return out
+
+    raw_rows = []
+    for idx, item in enumerate(doc, start=1):
+        raw_rows.append((idx, _canon_obj(item) if isinstance(item, dict) else {}))
+    return _validate_user_rows(raw_rows)
+
+
+def parse_users(
+    file_bytes: bytes, fmt: str, header_map: dict | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Format dispatcher (R128)."""
+    if fmt == "json":
+        return parse_users_json(file_bytes, header_map)
+    return parse_users_csv(file_bytes, header_map)
+
+
+def detect_format(file_bytes: bytes) -> str:
+    """R128: sniff JSON vs CSV by the first non-space byte (after BOM)."""
+    head = file_bytes.lstrip(b"\xef\xbb\xbf \t\r\n")[:1]
+    return "json" if head in (b"[", b"{") else "csv"
+
+
 def parse_users_csv(
     file_bytes: bytes, header_map: dict | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -96,54 +194,11 @@ def parse_users_csv(
             }
             for c in missing
         ]
-    rows: list[dict] = []
-    errors: list[dict] = []
-    seen_emails: dict[str, int] = {}
+    raw_rows = []
     for i, raw in enumerate(reader, start=2):  # header is row 1
-        row = {
-            _canon(k or ""): (v or "").strip()
-            for k, v in raw.items()
-            if k is not None
-        }
-        email = row.get("email", "").lower()
-        problems: list[tuple[str, str, str]] = []
-        # Real shape check, not just "has an @": formula-leading locals
-        # (=HYPERLINK(...)@x) and dotless domains must fail validation, not
-        # land as user rows.
-        if (
-            not email
-            or len(email) > 255
-            or "\x00" in email
-            or not _EMAIL_RE.fullmatch(email)
-        ):
-            problems.append(("email", "invalid_email", "not a valid email address"))
-        display = row.get("display_name", "")[:100]
-        if "\x00" in display:
-            problems.append(("display_name", "control_chars", "NUL character"))
-        role = (row.get("role") or "student").lower()
-        if role not in IMPORT_ROLE_MAP:
-            problems.append(("role", "invalid_role", "role must be student|instructor"))
-        if email and email in seen_emails:
-            problems.append(
-                ("email", "duplicate_in_file", f"also on row {seen_emails[email]}")
-            )
-        if problems:
-            for col, code, message in problems:
-                errors.append(
-                    {
-                        "row_number": i,
-                        "column": col,
-                        "code": code,
-                        "message": message,
-                        "raw_row": {k: v[:200] for k, v in row.items()},
-                    }
-                )
-            continue
-        seen_emails[email] = i
-        rows.append(
-            {"row_number": i, "email": email, "display_name": display, "role": role}
-        )
-    return rows, errors
+        raw_rows.append((i, {_canon(k or ""): (v or "").strip() for k, v in raw.items()
+                             if k is not None}))
+    return _validate_user_rows(raw_rows)
 
 
 class BulkImportService:
@@ -215,7 +270,7 @@ class BulkImportService:
         return job
 
     async def _validate(self, job: ImportJob, file_bytes: bytes) -> None:
-        rows, errors = parse_users_csv(file_bytes, job.header_map or {})
+        rows, errors = parse_users(file_bytes, detect_format(file_bytes), job.header_map or {})
         creates = updates = skips = 0
         for row in rows:
             user = (
@@ -289,7 +344,7 @@ class BulkImportService:
         if claimed is None:
             raise AppError("IMPORT_NOT_COMMITTABLE", f"job is {job.status}", 409)
         await self.db.refresh(job)
-        rows, errors = parse_users_csv(file_bytes, job.header_map or {})
+        rows, errors = parse_users(file_bytes, detect_format(file_bytes), job.header_map or {})
         if job.mode == "atomic" and errors:
             job.status = "failed"
             job.stats = {"applied": 0, "errors": len(errors), "reason": "atomic_reject"}
