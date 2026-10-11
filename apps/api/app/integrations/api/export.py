@@ -84,6 +84,39 @@ async def create_stream(
     return {"data": resp}
 
 
+class ExportStreamUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field_allowlist: list[str] | None = None
+    anonymize: dict | None = None
+    schedule: str | None = Field(default=None, max_length=20)
+    enabled: bool | None = None
+
+
+@router.patch(
+    "/export-streams/{stream_id}", response_model=DataResponse[ExportStreamResponse]
+)
+async def update_stream(
+    org_id: str,
+    stream_id: str,
+    body: ExportStreamUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """R81: edit allowlist/anonymize/schedule or disable a stream."""
+    await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
+    stream = await WarehouseExportService(db).update_stream(
+        org_id,
+        stream_id,
+        field_allowlist=body.field_allowlist,
+        anonymize=body.anonymize,
+        schedule=body.schedule,
+        enabled=body.enabled,
+    )
+    resp = ExportStreamResponse.model_validate(stream, from_attributes=True)
+    await db.commit()
+    return {"data": resp}
+
+
 @router.post(
     "/export-streams/{stream_id}/run",
     response_model=DataResponse[ExportRunResponse],

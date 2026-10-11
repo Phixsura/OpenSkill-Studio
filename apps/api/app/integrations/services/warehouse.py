@@ -177,6 +177,46 @@ class WarehouseExportService:
         await self.db.refresh(stream)
         return stream
 
+    async def update_stream(
+        self,
+        org_id: str,
+        stream_id: str,
+        *,
+        field_allowlist: list[str] | None = None,
+        anonymize: dict | None = None,
+        schedule: str | None = None,
+        enabled: bool | None = None,
+    ) -> ExportStream:
+        """R81: edit a stream in place — same universe/anonymize validation
+        as create. The dataset is immutable (cursor semantics differ per
+        dataset); narrowing the allowlist takes effect on the NEXT run."""
+        stream = await self.get_stream(org_id, stream_id)
+        spec = DATASETS[stream.dataset]
+        if field_allowlist is not None:
+            bad = [f for f in field_allowlist if f not in spec["fields"]]
+            if bad or not field_allowlist:
+                raise AppError(
+                    "EXPORT_FIELD_NOT_ALLOWED",
+                    f"fields not in dataset universe: {bad or 'empty'}",
+                    422,
+                )
+            stream.field_allowlist = list(field_allowlist)
+        if anonymize is not None:
+            for field, mode in anonymize.items():
+                if field not in spec["fields"] or mode not in ANONYMIZE_MODES:
+                    raise AppError(
+                        "EXPORT_CONFIG_INVALID", f"bad anonymize entry {field!r}", 422
+                    )
+            stream.anonymize = dict(anonymize)
+        if schedule is not None:
+            if schedule not in EXPORT_SCHEDULES:
+                raise AppError("EXPORT_CONFIG_INVALID", "bad schedule", 422)
+            stream.schedule = schedule
+        if enabled is not None:
+            stream.enabled = enabled
+        await self.db.flush()
+        return stream
+
     async def get_stream(self, org_id: str, stream_id: str) -> ExportStream:
         s = await self.db.get(ExportStream, stream_id)
         if s is None or s.org_id != org_id:

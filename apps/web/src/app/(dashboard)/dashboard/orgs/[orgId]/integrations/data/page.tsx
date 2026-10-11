@@ -28,6 +28,7 @@ interface ExportStream {
   dataset: string;
   field_allowlist: string[];
   schedule: string;
+  enabled: boolean;
   cursor: Record<string, unknown>;
 }
 
@@ -141,6 +142,19 @@ export default function DataIntegrationsPage() {
     }
   };
 
+  const toggleStream = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      apiWithAuth(`${base}/export-streams/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: (_d, v) => {
+      toast.success(v.enabled ? "Stream enabled" : "Stream disabled");
+      queryClient.invalidateQueries({ queryKey: ["intg-export-streams", orgId] });
+    },
+    onError,
+  });
+
   const runStream = useMutation({
     mutationFn: (id: string) =>
       apiWithAuth<{ data: ExportRun }>(`${base}/export-streams/${id}/run`, {
@@ -229,6 +243,13 @@ export default function DataIntegrationsPage() {
                   </span>
                 </div>
                 <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => toggleStream.mutate({ id: s.id, enabled: !s.enabled })}
+                  >
+                    {s.enabled ? "Disable" : "Enable"}
+                  </Button>
                   <Button size="sm" onClick={() => runStream.mutate(s.id)}>
                     Run export
                   </Button>

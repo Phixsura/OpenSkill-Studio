@@ -307,3 +307,37 @@ async def test_narrowed_allowlist_disabled_gate_salt_pagination_failure(db, monk
     assert rf.status == "failed" and rf.error == "RuntimeError"
     await db.refresh(sfail)
     assert dict(sfail.cursor or {}) == before
+
+
+@pytest.mark.asyncio
+async def test_update_stream_edits_and_validates(db):
+    """R81: allowlist narrows (universe-checked), anonymize validated,
+    schedule/enabled flips, cross-org uniform 404."""
+    org, owner = await _org(db)
+    other, _ = await _org(db)
+    svc = WarehouseExportService(db, writer=MemWriter())
+    s = await svc.create_stream(org.id, name=f"up-{ULID()}", dataset="events")
+
+    out = await svc.update_stream(
+        org.id, s.id,
+        field_allowlist=["id", "type"],
+        anonymize={"subject": "hash"},
+        schedule="daily",
+        enabled=False,
+    )
+    assert out.field_allowlist == ["id", "type"]
+    assert out.anonymize == {"subject": "hash"}
+    assert out.schedule == "daily" and out.enabled is False
+
+    with pytest.raises(AppError) as e1:
+        await svc.update_stream(org.id, s.id, field_allowlist=["id", "nope"])
+    assert e1.value.code == "EXPORT_FIELD_NOT_ALLOWED"
+    with pytest.raises(AppError):
+        await svc.update_stream(org.id, s.id, field_allowlist=[])
+    with pytest.raises(AppError):
+        await svc.update_stream(org.id, s.id, anonymize={"id": "scramble"})
+    with pytest.raises(AppError):
+        await svc.update_stream(org.id, s.id, schedule="hourly-ish")
+    with pytest.raises(AppError) as e2:
+        await svc.update_stream(other.id, s.id, enabled=True)
+    assert e2.value.status_code == 404
