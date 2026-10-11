@@ -224,6 +224,10 @@ SIS removes its memberships on the next provision pass.
   (reason `endpoint_gone`).
 - Fixing an errored connection's config or base_url re-opens it for a fresh
   ping, same as rotating credentials.
+- Every slow-IO sweep is kill-durable: health pings run a bounded
+  stalest-first slice per tick and commit per connection; the SAML metadata
+  refresh and the domain-DNS sweep commit per row; all three crons carry
+  explicit 1800s timeouts. A mid-sweep kill never rolls back completed work.
 
 ## 8. Security posture (what to tell the auditor)
 
