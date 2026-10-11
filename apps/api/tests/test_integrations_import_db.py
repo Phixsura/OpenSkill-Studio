@@ -725,6 +725,10 @@ async def test_opportunities_import_kind(db):
         file_key="o3", created_by=owner2.id, idempotency_key=f"op3-{uuid.uuid4().hex[:8]}",
     )
     assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] == 1
+    # R153: the error report names the offending row by TITLE for this kind.
+    report = await svc.errors_csv(org2.id, job3.id)
+    assert "identifier" in report.splitlines()[0]
+    assert "X" in report
 
 
 @pytest.mark.asyncio
