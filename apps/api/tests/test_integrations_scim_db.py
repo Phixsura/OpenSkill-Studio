@@ -570,3 +570,15 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
             "Operations": [{"method": "DELETE", "path": "/Users/x"}]
             * (MAX_BULK_OPERATIONS + 1),
         })
+
+
+@pytest.mark.asyncio
+async def test_filter_operator_case_insensitive(ctx):
+    """RFC 7644 §3.4.2.2 (R78): 'Eq'/'EQ' must parse like 'eq'."""
+    email = f"ci-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    await _usvc(ctx).create({"userName": email})
+    for op in ("Eq", "EQ"):
+        lst = await _usvc(ctx).list(
+            filter_expr=f'userName {op} "{email}"', start_index=1, count=10
+        )
+        assert lst["totalResults"] == 1, op

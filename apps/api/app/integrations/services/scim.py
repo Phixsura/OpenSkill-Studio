@@ -376,7 +376,8 @@ class ScimUserService:
         """Supports exactly: <attr> eq "<value>" (v1 scope)."""
         import re
 
-        m = re.fullmatch(r'\s*([A-Za-z.]+)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*', expr)
+        # RFC 7644 §3.4.2.2: operators are case-insensitive ("Eq" happens).
+        m = re.fullmatch(r'\s*([A-Za-z.]+)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*', expr, re.IGNORECASE)
         if not m:
             raise ScimError(400, "Only '<attr> eq \"value\"' filters are supported", "invalidFilter")
         return m.group(1).lower(), m.group(2)
