@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R236 (seventh window, clean-harness sweep continued)**: identity takeover
+  guards (unverified-email, foreign-domain, multi-match, JIT ceiling — 4),
+  LTI launch guards (nonce, deployment allowlist, azp — 3), OIDC login-state
+  (reuse, expiry, PKCE verifier — 3), import fingerprint gate (1): 11 more
+  KILLED. One documented EQUIVALENT survivor: removing LTI's alg pre-check
+  leaves pyjwt's `algorithms=["RS256"]` enforcing the same property (the
+  existing HS256 key-confusion test proves rejection at the outcome level);
+  the pre-check stays as defense-in-depth with a cleaner error code.
+  Window-7 totals: 24 killed, 1 equivalent.
 - **R235 (seventh window, clean-harness verification record)**: after the
   R234 pycache fix, re-probed the security cores with the hygienic harness:
   export projection (drop/hash/salt/allowlist-bypass — 4), webhook signature
