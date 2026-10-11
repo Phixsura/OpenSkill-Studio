@@ -113,11 +113,15 @@ class OrgDomainService:
                 "TXT record not found or does not match the verification token",
                 422,
             )
-        # Partial unique index is the authoritative race guard.
+        # Partial unique index is the authoritative race guard. The flush
+        # runs in a SAVEPOINT (R113): a unique-violation loser must not
+        # poison the caller's session (bare flush => PendingRollbackError on
+        # next use).
         row.status = "verified"
         row.verified_at = datetime.now(UTC)
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                await self.db.flush()
         except Exception as exc:
             raise AppError(
                 "DOMAIN_ALREADY_VERIFIED", "Domain is verified by another organization", 409

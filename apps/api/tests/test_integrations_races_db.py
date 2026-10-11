@@ -295,3 +295,96 @@ async def test_tool_key_concurrent_first_use_single_key(db):
 
     kids = await asyncio.gather(miner(), miner())
     assert kids[0] == kids[1]
+
+
+@pytest.mark.asyncio
+async def test_webhook_cap_holds_under_concurrent_creates(db):
+    """R113: the per-org webhook cap uses a FOR UPDATE org lock — two
+    concurrent creates at cap-1 must yield exactly one success."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.models.webhook import WebhookSubscription
+    from app.services.webhook import MAX_WEBHOOKS_PER_ORG, WebhookService
+
+    org, owner = await _org(db)
+    for i in range(MAX_WEBHOOKS_PER_ORG - 1):
+        db.add(WebhookSubscription(
+            org_id=org.id, url=f"https://sink{i}.example.com/h",
+            events=["project.approved"], secret="c" * 64, active=True,
+        ))
+    await db.commit()
+
+    async def creator(n):
+        async with AsyncSessionLocal() as own:
+            try:
+                await WebhookService(own).create(
+                    org.id, f"https://racer{n}.example.com/h", ["credential.issued"],
+                    actor_user_id=owner.id,
+                )
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(await asyncio.gather(creator(1), creator(2)))
+    assert results == ["WEBHOOK_LIMIT_REACHED", "won"]
+    from sqlalchemy import func as _f
+
+    n = (
+        await db.execute(
+            select(_f.count()).select_from(WebhookSubscription).where(
+                WebhookSubscription.org_id == org.id
+            )
+        )
+    ).scalar_one()
+    assert n == MAX_WEBHOOKS_PER_ORG
+
+
+@pytest.mark.asyncio
+async def test_domain_verify_exclusivity_under_race(db, monkeypatch):
+    """R113: two orgs' admins click Verify on the SAME domain at once — the
+    partial-unique index lets exactly one succeed, the loser gets a clean
+    409 (not a poisoned session)."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.models import OrgDomain
+    from app.integrations.services import domains as dom_mod
+    from app.integrations.services.domains import OrgDomainService
+
+    org1, _ = await _org(db)
+    org2, _ = await _org(db)
+    domain = f"race-dom-{uuid.uuid4().hex[:6]}.io"
+    ids = {}
+    for org in (org1, org2):
+        d = OrgDomain(org_id=org.id, domain=domain, status="pending",
+                      verification_token="t")
+        db.add(d)
+        await db.flush()
+        ids[org.id] = d.id
+    await db.commit()
+
+    class YesVerifier:
+        async def verify(self, host, token):
+            await asyncio.sleep(0.03)
+            return True
+
+    monkeypatch.setattr(dom_mod, "get_verifier", lambda: YesVerifier())
+
+    async def verifier(org_id):
+        async with AsyncSessionLocal() as own:
+            try:
+                await OrgDomainService(own).verify(org_id, ids[org_id])
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(await asyncio.gather(verifier(org1.id), verifier(org2.id)))
+    assert results == ["DOMAIN_ALREADY_VERIFIED", "won"]
+    verified = (
+        await db.execute(
+            select(OrgDomain.status).where(OrgDomain.domain == domain)
+        )
+    ).scalars().all()
+    assert verified.count("verified") == 1
+
