@@ -195,6 +195,9 @@ class OrgDomainService:
             except Exception:
                 # Another org won the partial-unique race — mark failed.
                 row.status = "failed"
+            # R228 (R226 class): each verify is a slow DNS lookup — commit
+            # per verified row so a job-timeout kill keeps progress.
+            await self.db.commit()
         # Trailing writes (failed statuses, last_checked_at) are constraint-
         # free, but guard anyway so one poisoned row can never abort the
         # whole sweep (R113 hardening).

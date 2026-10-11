@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R228 (sixth window, R226 class — domain sweep)**: the quarter-hourly
+  pending-domain sweep does up to 200 slow DNS lookups per tick with no cron
+  timeout margin; a kill rolled back every verification already made. Commit
+  per verified row + cron timeout=1800. Completes the sweep-durability class:
+  health (R226), metadata (R227), domains (R228); retention already
+  committed per batch, exports per run (R208 lock).
 - **R227 (sixth window, R226 class — metadata sweep)**: the daily SAML
   metadata refresh made one slow outbound fetch per connection with a single
   trailing commit — a job-timeout kill rolled back every cert rotation

@@ -744,7 +744,8 @@ def _cron_jobs() -> list:
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # ADR-018 integration fabric sweeps (off-minute by convention)
-        cron(_intg_domain_sweep, minute={7, 22, 37, 52}, name="intg_domain_sweep"),
+        cron(_intg_domain_sweep, minute={7, 22, 37, 52}, timeout=1800,
+             name="intg_domain_sweep"),  # R228: 200 DNS lookups x ~5s worst case
         cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
         cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
         # R185: run EVERY hour (minute 47) so an `hourly` export stream (R183)
