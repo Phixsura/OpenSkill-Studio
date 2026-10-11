@@ -670,6 +670,12 @@ async def test_attempt_response_snippet_captured_sanitized_and_capped(db, egress
     from app.controlplane.models.outbox import OutboxMessage as OutboxModel
 
     await db.execute(_delete(OutboxModel).where(OutboxModel.status == "pending"))
+    # Also drop any orphan in-flight deliveries left by other runs — the drain
+    # is global, and a stray pending/delivering row can perturb the scripted
+    # [500, 200] sequence this test asserts.
+    await db.execute(
+        _delete(EventDelivery).where(EventDelivery.status.in_(("pending", "delivering")))
+    )
     await db.commit()
     egress.codes = [500, 200]
     ev = await emit_event(db, org.id, "project.approved", subject="sn-1", data={})
