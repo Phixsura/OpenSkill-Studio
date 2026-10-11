@@ -1146,3 +1146,55 @@ async def test_admin_mutations_write_audit_rows(db):
     assert rows[0].actor_user_id == owner.id
     assert rows[0].tenant_id == org.tenant_id  # scoped to the tenant
     assert rows[0].after == {"model": "roster.class", "version": 1}
+
+
+@pytest.mark.asyncio
+async def test_mapping_preview_parity_with_run_and_guards(db):
+    """R123 (Part H): preview shares the exact evaluator with the engine —
+    the preview of a sample equals what a real run stages for that record.
+    Non-dict samples degrade safely; >20 samples is refused."""
+    from app.exceptions import AppError
+    from app.integrations import registry
+
+    org, owner = await _org(db)
+    doc = {
+        "fields": [
+            {"target": "title", "path": "title", "transform": ["trim"]},
+            {"target": "code", "path": "code", "transform": ["upper"]},
+            {"target": "term", "path": "termId", "default": "T0"},
+        ]
+    }
+    sample = {"title": "  Math 101  ", "code": "m1"}
+    fake = FakeRosterConnector([[dict(sample, external_id="p1")]])
+    conn, profile = await _setup_profile(db, org, owner, fake, mapping=doc)
+    svc = MappingService(db)
+
+    prev = await svc.preview(org.id, profile.mapping_profile_id, [sample])
+    assert prev[0]["mapped"] == {"title": "Math 101", "code": "M1", "term": "T0"}
+    assert prev[0]["errors"] == []
+
+    # Real run stages the SAME mapped payload (parity).
+    run = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "p1"
+            )
+        )
+    ).scalar_one()
+    for k, v in prev[0]["mapped"].items():
+        assert staged.payload[k] == v
+
+    # Non-dict sample -> empty mapped, no crash.
+    prev2 = await svc.preview(org.id, profile.mapping_profile_id, ["not-a-dict"])
+    # No crash; no real values leak from a non-dict (only the default fires).
+    assert prev2[0]["mapped"].get("term") == "T0"
+    assert prev2[0]["mapped"].get("code") is None
+
+    # >20 samples refused.
+    with pytest.raises(AppError) as exc:
+        await svc.preview(org.id, profile.mapping_profile_id, [sample] * 21)
+    assert exc.value.code == "MAPPING_PREVIEW_TOO_LARGE"
+    assert registry is not None
