@@ -329,15 +329,26 @@ class SamlService:
         existing = await self.db.get(SsoLoginState, key)
         if existing is not None:
             raise _invalid("assertion_replayed")
-        self.db.add(
-            SsoLoginState(
-                id=key,
-                sso_connection_id=conn_id,
-                nonce="assertion-replay-cache",
-                expires_at=not_on_or_after,
-                used_at=datetime.now(UTC),
-            )
-        )
+        # R199: two concurrent POSTs of the SAME assertion (replay attack or an
+        # IdP retry) both pass the SELECT and race to INSERT the deterministic
+        # key. The INSERT runs in a savepoint; the unique-violation loser is
+        # treated as a detected replay (clean 403), not a raw 500.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            async with self.db.begin_nested():
+                self.db.add(
+                    SsoLoginState(
+                        id=key,
+                        sso_connection_id=conn_id,
+                        nonce="assertion-replay-cache",
+                        expires_at=not_on_or_after,
+                        used_at=datetime.now(UTC),
+                    )
+                )
+                await self.db.flush()
+        except IntegrityError as exc:
+            raise _invalid("assertion_replayed") from exc
 
     def _verify_signature(self, conn: SsoConnection, xml_bytes: bytes) -> etree._Element:
         """Return the VERIFIED subtree only (signxml XMLVerifier). Certs are

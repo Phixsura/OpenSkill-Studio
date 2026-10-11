@@ -317,15 +317,25 @@ async def handle_backchannel_logout(
     jti_key = hashlib.sha256(f"bcl:{conn.id}:{claims['jti']}".encode()).hexdigest()[:26].upper()
     if await db.get(SsoLoginState, jti_key) is not None:
         raise _invalid("logout_token_replayed")
-    db.add(
-        SsoLoginState(
-            id=jti_key,
-            sso_connection_id=conn.id,
-            nonce="backchannel-logout-jti",
-            expires_at=datetime.now(UTC) + timedelta(seconds=CLOCK_SKEW_S * 4),
-            used_at=datetime.now(UTC),
-        )
-    )
+    # R199: concurrent identical logout tokens (IdP retry) race to INSERT the
+    # deterministic jti key — savepoint the INSERT so the loser is a clean
+    # "replayed" (one-shot signal already consumed), not a raw 500.
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with db.begin_nested():
+            db.add(
+                SsoLoginState(
+                    id=jti_key,
+                    sso_connection_id=conn.id,
+                    nonce="backchannel-logout-jti",
+                    expires_at=datetime.now(UTC) + timedelta(seconds=CLOCK_SKEW_S * 4),
+                    used_at=datetime.now(UTC),
+                )
+            )
+            await db.flush()
+    except IntegrityError as exc:
+        raise _invalid("logout_token_replayed") from exc
     link = (
         await db.execute(
             select(ExternalIdentityLink).where(

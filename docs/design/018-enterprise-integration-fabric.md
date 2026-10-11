@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R199 (fifth window, replay-cache concurrency defense)**: the SAML
+  assertion and OIDC back-channel-logout replay caches used check-then-add on
+  a deterministic key; under TRUE parallelism (two workers, same assertion/
+  logout token) the unique-violation loser would 500 instead of a clean
+  replay rejection. Both INSERTs now run in a savepoint → the loser is a
+  clean assertion_replayed / logout_token_replayed (same add-before-savepoint
+  discipline as R167/R172/R176). A concurrent test confirms the clean
+  outcome (the common asyncio-serialized path hits the SELECT guard; the
+  savepoint covers the true-parallel INSERT collision).
 - **R198 (fifth window, atomic-import status bug)**: an atomic import that
   failed during APPLY (not validation) set status='failed' then RAISED — the
   request-boundary rollback erased the status, leaving the job stuck at

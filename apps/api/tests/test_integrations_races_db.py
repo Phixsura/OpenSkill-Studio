@@ -692,3 +692,42 @@ async def test_connection_rename_collision_is_clean_409(db):
     await db.commit()
     assert updated.name == "conn-b2"
     assert a.name == "conn-a"
+
+
+@pytest.mark.asyncio
+async def test_saml_assertion_replay_cache_concurrent_clean_reject(db):
+    """R199: two concurrent inserts of the SAME assertion id (replay attack or
+    IdP retry) — one records it, the loser gets a clean assertion_replayed
+    (403), NOT a raw IntegrityError 500 / poisoned session."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.models.sso import SsoConnection
+    from app.integrations.services.sso_saml import SamlService
+
+    org, owner = await _org(db)
+    # A real connection row so the replay-cache FK is satisfied (insert
+    # directly — cert validation is irrelevant to this cache-race test).
+    conn = SsoConnection(org_id=org.id, protocol="saml", status="active")
+    db.add(conn)
+    await db.flush()
+    conn_id = conn.id
+    assertion_id = f"_A{uuid.uuid4().hex}"
+    noa = datetime.now(UTC) + timedelta(minutes=5)
+    await db.commit()
+
+    async def consume():
+        async with AsyncSessionLocal() as own:
+            try:
+                await SamlService(own)._assert_id_unseen(conn_id, assertion_id, noa)  # noqa: SLF001
+                await own.commit()
+                return "recorded"
+            except AppError as e:
+                return e.code
+
+    results = await asyncio.gather(consume(), consume(), return_exceptions=True)
+    for r in results:
+        assert not isinstance(r, BaseException), f"raw crash (not clean replay): {r!r}"
+    assert "recorded" in results
+    assert "SSO_ASSERTION_INVALID" in results, f"expected one clean replay, got {results}"
