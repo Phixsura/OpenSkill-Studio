@@ -933,6 +933,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   TERMINAL HEAD — 10,765 items, zero failures — so the closing evidence
   is not "mid-window chunks + later diffs" but a full pass of the exact
   shipped tree.
+- **R318 (ninth window, lint-gate audit)**: `make lint` (pnpm lint) is
+  RED repo-wide on a format check — 196 files across every epic "would be
+  reformatted" (fabric: 39 of ~53; the base epics carry the bulk). This
+  predates issue #43: the per-window quality gate throughout has been
+  `uv run ruff check` (green, repo-clean) + ESLint (green). A 196-file
+  mechanical `ruff format` is a cross-epic churn decision (R189
+  precedent) and a terrible end-of-window diff — documented for a
+  dedicated formatting commit on the base branch instead.
 - **R316 (ninth window CLOSE — final tally)**: window 9 (single-chat
   foreground, T0 17:30) R277-R315, ~38 commits. SECURITY/behavior fixes:
   R277 group_map foreign-cohort wall, R296 production build (never-run
