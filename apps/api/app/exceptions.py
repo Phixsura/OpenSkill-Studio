@@ -102,9 +102,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error_handler(request: Request, exc: StarletteHTTPException):
+        # Re-rendering into the error envelope must not DROP the exception's
+        # headers: a 429 loses Retry-After / X-RateLimit-*, a 401 loses
+        # WWW-Authenticate (R366 — found live by the rate-limiter drill).
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body("HTTP_ERROR", exc.detail or "Request error", request),
+            headers=getattr(exc, "headers", None) or None,
         )
 
     @app.exception_handler(RequestValidationError)

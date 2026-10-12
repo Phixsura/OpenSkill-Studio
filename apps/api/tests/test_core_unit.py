@@ -618,3 +618,45 @@ def test_max_json_depth_boundary_and_hostile_short_circuit():
     t0 = time.perf_counter()
     assert max_json_depth(hostile, limit=64) > 64
     assert time.perf_counter() - t0 < 0.5  # short-circuited
+
+
+# ── R366: stacked limiters + envelope headers ──────────────────────────────
+
+
+def test_rate_limit_key_includes_budget_declaration():
+    """R366: a route-level limiter stacked on a router-level one (10/60
+    inside 120/60) shares (method, route template, identity) — the redis key
+    must also carry (limit, window) or each request increments ONE bucket
+    twice and every stacked budget is silently halved (observed live: a
+    10/60 route tripped 429 at the 6th call)."""
+    import inspect
+
+    from app.core.rate_limit import rate_limit
+
+    src = inspect.getsource(rate_limit)
+    assert "{limit}:{window}" in src, "key must embed the (limit, window) declaration"
+
+
+def test_http_error_handler_preserves_exception_headers():
+    """R366: re-rendering an HTTPException into the error envelope must keep
+    the exception's headers — a 429 without Retry-After / a 401 without
+    WWW-Authenticate violates the RFCs and breaks well-behaved clients."""
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    from app.exceptions import register_exception_handlers
+
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/boom")
+    async def boom():
+        raise HTTPException(
+            status_code=429, detail="Too many requests", headers={"Retry-After": "60"}
+        )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/boom")
+    assert r.status_code == 429
+    assert r.headers.get("Retry-After") == "60"
+    assert r.json()["error"]["code"] == "HTTP_ERROR"

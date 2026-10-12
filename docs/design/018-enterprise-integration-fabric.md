@@ -931,6 +931,22 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R366 (eleventh window, rate-limiter engagement drill — two production
+  fixes)**: every live suite runs APP_ENV=test where rate limiting is
+  skipped, so the 429 path had never been exercised live. A dev-mode
+  drill (burst a 10/60 route) found: (1) **stacked-budget halving** — the
+  redis key was (method, route template, identity) only, so a route-level
+  limiter inside the router-level one incremented the SAME sorted set
+  twice per request; the 10/60 route tripped 429 at the 6th call. Key now
+  embeds (limit, window). (2) **envelope drops exception headers** — the
+  global HTTPException handler re-rendered into the error envelope
+  without `exc.headers`, so 429s lost Retry-After/X-RateLimit-* and 401s
+  lost WWW-Authenticate. Handler now passes them through. Drill after:
+  exactly 10 allowed (transparency headers present), 11th = 429 with
+  Retry-After: 60, sibling route unaffected (per-route bucket). Both
+  pinned in test_core_unit.py. Lesson: a test-mode skip means the guarded
+  path needs its own engagement drill — fail-open proofs are not
+  engagement proofs.
 - **R365 (eleventh window, storm latency SLO)**: the concurrency storm
   now records every request's wall time and asserts a latency SLO on top
   of zero-5xx: p50 < 1 s, p95 < 5 s under 20 workers of mixed CRUD on a

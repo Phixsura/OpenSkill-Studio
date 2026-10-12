@@ -121,7 +121,12 @@ def rate_limit(limit: int, window: int):
         # unresolved (defensive; every mounted route carries scope["route"]).
         route = request.scope.get("route")
         path_key = getattr(route, "path", None) or request.url.path
-        key = f"{request.method}:{path_key}:{identity}"
+        # The (limit, window) declaration is part of the key: a route-level
+        # limiter stacked on a router-level one (e.g. 10/60 inside 120/60)
+        # must keep an INDEPENDENT bucket. With a shared key each request
+        # incremented the same sorted set twice, silently halving every
+        # stacked budget (a 10/60 route tripped 429 at the 6th call — R366).
+        key = f"{request.method}:{path_key}:{limit}:{window}:{identity}"
 
         allowed, remaining = await check_rate_limit(key, limit, window)
 
