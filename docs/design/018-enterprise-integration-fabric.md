@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R294 (ninth window, UPDATE-path validation pins)**: the create path's
+  validations were all pinned, their UPDATE twins were not — three
+  survivors on SsoAdminService.update (bogus status, admin default_role
+  past the JIT mint ceiling, internal oidc_issuer past the egress screen)
+  pinned in `test_sso_update_validations` (all refused, row unchanged);
+  re-probed 4/4 KILLED (enforce-without-break-glass was already covered).
+  Heuristic recorded: for every validated CREATE field, check the UPDATE
+  path re-validates it — update twins rot unseen.
 - **R293 (ninth window, mid-window regression record)**: after R277-R292
   (1 security fix, retention, 2 UI staleness fixes + placeholder bug, the
   53-check browser walk, 2 contract guards, sweep source-scan, ops-doc

@@ -1270,3 +1270,35 @@ async def test_match_queue_cross_org_wall(db):
     assert e.value.code == "IDENTITY_QUEUE_NOT_FOUND" and e.value.status_code == 404
     await db.refresh(item)
     assert item.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_sso_update_validations(db):
+    """R294 (survivor pins): the UPDATE path re-validates what create
+    validates — bogus status, admin default_role (JIT mint ceiling), and
+    an internal oidc_issuer (egress screen) are all refused, and nothing
+    on the row changes."""
+    from app.integrations.security import EgressBlockedError
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+    conn = await svc.create(
+        org.id, protocol="oidc",
+        oidc_issuer="https://idp.example.com", oidc_client_id="c",
+    )
+
+    with pytest.raises(AppError) as e:
+        await svc.update(org.id, conn.id, status="banana")
+    assert e.value.code == "SSO_CONFIG_INVALID"
+
+    with pytest.raises(AppError) as e:
+        await svc.update(org.id, conn.id, default_role="admin")
+    assert e.value.code == "SSO_JIT_ROLE_INVALID"
+
+    with pytest.raises(EgressBlockedError):
+        await svc.update(org.id, conn.id, oidc_issuer="http://169.254.169.254/x")
+
+    await db.refresh(conn)
+    assert conn.oidc_issuer == "https://idp.example.com"
+    assert conn.default_role == "student"
