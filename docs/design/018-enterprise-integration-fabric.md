@@ -133,7 +133,13 @@ twice in a row). Only `active|degraded` connections are scheduled.
 
 Rules (from Nango, S4.2): refresh under a **per-connection advisory lock**
 (`pg_advisory_xact_lock(hashtext(connection_id))`) so concurrent runs never race a
-refresh; rotated refresh tokens overwrite previous ciphertext in the same txn; a
+refresh. _Implementation note (R314 audit)_: the shipped connectors hold NO
+stored OAuth refresh tokens — OneRoster mints a fresh `client_credentials`
+token per run and CRM/ATS use static api_keys — so there is no refresh flow
+to lock; the invariant the lock was for is held by construction (plus the
+one-live-run partial unique index and the queued→running claim). Revisit if
+a connector with genuine refresh-token rotation lands.
+Rotated refresh tokens would overwrite previous ciphertext in the same txn; a
 refresh failure with `invalid_grant` moves the connection to `error` and emits
 `integration.connection.errored`. API never returns credential material — the
 credential response model has exactly `{id, kind, expires_at, rotated_at}`.
@@ -922,6 +928,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R314 (ninth window, ADR-reality alignment)**: the §6 credential
+  advisory-lock clause described a refresh-token rotation flow that was
+  never built — shipped connectors mint fresh client_credentials per run
+  or use static api_keys, so there is no refresh race to lock; the
+  invariant is held by the one-live-run index + the queued->running
+  claim. Annotated the design text with the implementation reality
+  instead of adding a lock with nothing to protect. Commitment sweep
+  otherwise verified: tombstone-never-delete (R209), uniform-404 (R276),
+  JIT never-above-instructor (R88 gates + R294 update twin), secrets
+  never echoed (schema-level + walk R298), SCIM cross-org untouchable
+  (R277), iss/state session-stored (pinned).
 - **R313 (ninth window, fix — ADR commitment sweep continued)**: §5.2
   also promises the break-glass audit row carries "IP + UA" — the emit
   only carried user_id. login() already receives ip_address/device_info;
