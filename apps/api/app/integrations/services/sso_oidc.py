@@ -61,11 +61,7 @@ class OidcService:
 
     async def _connection(self, sso_connection_id: str) -> SsoConnection:
         conn = await self.db.get(SsoConnection, sso_connection_id)
-        if (
-            conn is None
-            or conn.protocol != "oidc"
-            or conn.status not in ("testing", "active")
-        ):
+        if conn is None or conn.protocol != "oidc" or conn.status not in ("testing", "active"):
             raise AppError("SSO_CONNECTION_NOT_FOUND", "SSO connection not found", 404)
         return conn
 
@@ -267,7 +263,11 @@ BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
 
 
 async def handle_backchannel_logout(
-    db: AsyncSession, sso_connection_id: str, logout_token: str, *, service: OidcService | None = None
+    db: AsyncSession,
+    sso_connection_id: str,
+    logout_token: str,
+    *,
+    service: OidcService | None = None,
 ) -> int:
     """OIDC Back-Channel Logout 1.0 (R42): the IdP POSTs a logout_token when
     a user signs out / is disabled upstream. Validate it with the SAME trust

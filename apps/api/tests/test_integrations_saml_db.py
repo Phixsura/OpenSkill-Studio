@@ -231,9 +231,7 @@ async def test_saml_rejection_vectors(db):
 
     async def expect_reject(b64, relay=None):
         with pytest.raises(AppError) as e:
-            await svc.handle_acs(
-                connection_id=conn.id, saml_response_b64=b64, relay_state=relay
-            )
+            await svc.handle_acs(connection_id=conn.id, saml_response_b64=b64, relay_state=relay)
         assert e.value.code == "SSO_ASSERTION_INVALID"
 
     # unsigned assertion
@@ -334,9 +332,7 @@ async def test_saml_xsw_unsigned_sibling_ignored(db):
     evil_email = f"evil-{uuid.uuid4().hex[:6]}@{domain}"
     state = await _start(db, conn)
     signed = _sign_assertion(_assertion_xml(in_response_to=state, email=good_email))
-    evil = etree.fromstring(
-        _assertion_xml(in_response_to=state, email=evil_email).encode()
-    )
+    evil = etree.fromstring(_assertion_xml(in_response_to=state, email=evil_email).encode())
     # Evil assertion FIRST (the classic naive-parser pick).
     b64 = _wrap_response(evil, signed)
     svc = SamlService(db)
@@ -374,10 +370,10 @@ async def test_saml_admin_config_rules(db):
     assert conn.idp_certificates[0]["not_after"]
     # pending request rows purge path intact (shared SsoLoginState table)
     states = (
-        await db.execute(
-            select(SsoLoginState).where(SsoLoginState.sso_connection_id == conn.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(SsoLoginState).where(SsoLoginState.sso_connection_id == conn.id)))
+        .scalars()
+        .all()
+    )
     assert isinstance(states, list)
 
 
@@ -402,14 +398,17 @@ async def test_cert_expiry_sweep_alerts_once_per_day(db):
     svc = SsoAdminService(db)
     assert await svc.sweep_expiring_certificates() == 1
     events = (
-        await db.execute(
-            _select(IntegrationEvent).where(
-                IntegrationEvent.subject == conn.id,
-                IntegrationEvent.type
-                == "com.openskill.integration.sso.cert_expiring.v1",
+        (
+            await db.execute(
+                _select(IntegrationEvent).where(
+                    IntegrationEvent.subject == conn.id,
+                    IntegrationEvent.type == "com.openskill.integration.sso.cert_expiring.v1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(events) == 1 and 9 <= events[0].data["days_left"] <= 10
     # Daily dedup: a second sweep within 23h stays quiet.
     assert await svc.sweep_expiring_certificates() == 0
@@ -462,9 +461,7 @@ async def test_saml_condition_and_subject_vectors(db):
     state = await _start(db, conn)
     xml = _assertion_xml(in_response_to=state, email=email)
     naive = "2099-01-01T00:00:00"  # no tz — would be naive, but still future-expiry
-    await expect_reject(
-        _re.sub(r'NotBefore="[^"]*"', 'NotBefore="2099-01-01T00:00:00"', xml)
-    )
+    await expect_reject(_re.sub(r'NotBefore="[^"]*"', 'NotBefore="2099-01-01T00:00:00"', xml))
     assert naive  # referenced
 
     # Conditions without NotOnOrAfter.
@@ -499,9 +496,7 @@ async def test_saml_dtd_forbidden(db):
     conn = await _saml_conn(db, org)
     svc = SamlService(db)
     state = await _start(db, conn)
-    signed = _sign_assertion(
-        _assertion_xml(in_response_to=state, email=f"d@{domain}")
-    )
+    signed = _sign_assertion(_assertion_xml(in_response_to=state, email=f"d@{domain}"))
     resp = etree.Element(f"{{{SAMLP_NS}}}Response", nsmap={"samlp": SAMLP_NS})
     resp.set("ID", f"_R{uuid.uuid4().hex}")
     resp.append(signed)
@@ -518,11 +513,14 @@ async def test_saml_dtd_forbidden(db):
 # ── R51: SAML metadata auto-refresh ──
 
 
-def _metadata_xml(cert_pem: str, *, entity="https://idp.example.com/meta",
-                  sso="https://idp.example.com/sso2", use="signing") -> bytes:
-    b64 = "".join(
-        line for line in cert_pem.strip().splitlines() if "CERTIFICATE" not in line
-    )
+def _metadata_xml(
+    cert_pem: str,
+    *,
+    entity="https://idp.example.com/meta",
+    sso="https://idp.example.com/sso2",
+    use="signing",
+) -> bytes:
+    b64 = "".join(line for line in cert_pem.strip().splitlines() if "CERTIFICATE" not in line)
     return f"""<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
   xmlns:ds="http://www.w3.org/2000/09/xmldsig#" entityID="{entity}">
   <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
@@ -544,9 +542,7 @@ class _MetaEgress:
     async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
         import httpx
 
-        return httpx.Response(
-            self.status, content=self.body, request=httpx.Request(method, url)
-        )
+        return httpx.Response(self.status, content=self.body, request=httpx.Request(method, url))
 
 
 @pytest.mark.asyncio
@@ -573,7 +569,8 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
     pinned_before = conn.idp_certificates
     with pytest.raises(AppError) as mm:
         await svc.refresh_from_metadata(
-            org.id, conn.id,
+            org.id,
+            conn.id,
             egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity="https://imposter.example.com")),
         )
     assert mm.value.code == "SSO_METADATA_INVALID"
@@ -592,7 +589,9 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
     # Encryption-only keys are ignored -> no signing certs -> 422.
     with pytest.raises(AppError):
         await svc.refresh_from_metadata(
-            org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY, use="encryption"))
+            org.id,
+            conn.id,
+            egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY, use="encryption")),
         )
     # DTD refused outright.
     dtd = b'<!DOCTYPE md [<!ENTITY x "y">]>' + _metadata_xml(ROGUE_CERT)
@@ -600,16 +599,17 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
         await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(dtd))
     # Upstream failure is a 502-class error, not a crash.
     with pytest.raises(AppError) as exc:
-        await svc.refresh_from_metadata(
-            org.id, conn.id, egress=_MetaEgress(b"", status=500)
-        )
+        await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(b"", status=500))
     assert exc.value.status_code == 502
     # Wrong protocol (oidc) with a metadata URL set anyway -> 422 as well.
     from app.integrations.services.sso_admin import SsoAdminService as _Svc
 
     oidc_conn = await _Svc(db).create(
-        org.id, protocol="oidc", oidc_issuer="https://idp9.example.com",
-        oidc_client_id="c9", oidc_client_secret="s",
+        org.id,
+        protocol="oidc",
+        oidc_issuer="https://idp9.example.com",
+        oidc_client_id="c9",
+        oidc_client_secret="s",
     )
     oidc_conn.idp_metadata_url = "https://idp9.example.com/metadata.xml"
     await db.flush()
@@ -672,8 +672,9 @@ async def test_saml_deep_link_round_trip(db):
 # ── R88: Single Logout ──
 
 
-def _signed_slo_query(subject: str, *, key_pem=IDP_KEY, issuer=IDP_ENTITY,
-                      relay: str | None = None, sign: bool = True) -> str:
+def _signed_slo_query(
+    subject: str, *, key_pem=IDP_KEY, issuer=IDP_ENTITY, relay: str | None = None, sign: bool = True
+) -> str:
     import zlib
     from urllib.parse import quote
 
@@ -692,9 +693,7 @@ def _signed_slo_query(subject: str, *, key_pem=IDP_KEY, issuer=IDP_ENTITY,
     parts = [f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"]
     if relay is not None:
         parts.append(f"RelayState={quote(relay, safe='')}")
-    parts.append(
-        "SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
-    )
+    parts.append("SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""))
     query = "&".join(parts)
     if not sign:
         return query
@@ -724,8 +723,11 @@ async def test_slo_signed_request_revokes_sessions(db):
         connection_id=conn.id, saml_response_b64=_wrap_response(signed), relay_state=state
     )
     subject = result.link.subject
-    db.add(RefreshToken(user_id=result.user.id, token_hash="s" * 64,
-                        expires_at=datetime.now(UTC) + _td(days=7)))
+    db.add(
+        RefreshToken(
+            user_id=result.user.id, token_hash="s" * 64, expires_at=datetime.now(UTC) + _td(days=7)
+        )
+    )
     await db.flush()
 
     conn2, swept, relay = await svc.handle_slo_request(
@@ -734,13 +736,17 @@ async def test_slo_signed_request_revokes_sessions(db):
     )
     assert swept == 1 and relay == "r-1"
     live = (
-        await db.execute(
-            select(RefreshToken).where(
-                RefreshToken.user_id == result.user.id,
-                RefreshToken.revoked_at.is_(None),
+        (
+            await db.execute(
+                select(RefreshToken).where(
+                    RefreshToken.user_id == result.user.id,
+                    RefreshToken.revoked_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert live == []
     redirect = svc.build_slo_response_redirect(conn2, in_response_to=None, relay_state=relay)
     assert redirect.startswith("https://idp.example.com/slo?SAMLResponse=")
@@ -751,7 +757,9 @@ async def test_slo_signed_request_revokes_sessions(db):
 
     row = (
         await db.execute(
-            select(LinkModel).where(LinkModel.connection_ref == conn.id, LinkModel.subject == subject)
+            select(LinkModel).where(
+                LinkModel.connection_ref == conn.id, LinkModel.subject == subject
+            )
         )
     ).scalar_one()
     row.revoked_at = datetime.now(UTC)
@@ -788,13 +796,14 @@ async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
             await svc.handle_slo_request(connection_id=conn.id, raw_query=query)
         assert e.value.code == "SSO_ASSERTION_INVALID"
 
-    await expect_reject(_signed_slo_query("s", sign=False))          # logout-CSRF
-    await expect_reject(_signed_slo_query("s", key_pem=ROGUE_KEY))    # rogue key
+    await expect_reject(_signed_slo_query("s", sign=False))  # logout-CSRF
+    await expect_reject(_signed_slo_query("s", key_pem=ROGUE_KEY))  # rogue key
     await expect_reject(_signed_slo_query("s", issuer="https://rogue.example.com"))
     # BOTH SigAlg and Signature absent -> clean 401 AppError, never a
     # KeyError/500 (kills the skip-presence-check mutant).
     bare = "&".join(
-        seg for seg in _signed_slo_query("s").split("&")
+        seg
+        for seg in _signed_slo_query("s").split("&")
         if not seg.startswith(("SigAlg=", "Signature="))
     )
     await expect_reject(bare)
@@ -822,9 +831,8 @@ async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
         f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer></samlp:LogoutResponse>"
     )
     deflated = zlib.compress(resp_xml.encode())[2:-4]
-    base_q = (
-        f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"
-        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    base_q = f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}&SigAlg=" + quote(
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""
     )
     key = _ser.load_pem_private_key(
         IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
@@ -842,14 +850,11 @@ async def test_slo_rejects_unsigned_rogue_and_wrong_issuer(db):
         "<saml:NameID>victim-subject</saml:NameID></samlp:LogoutResponse>"
     )
     deflated2 = zlib.compress(resp_with_nameid.encode())[2:-4]
-    base_q2 = (
-        f"SAMLRequest={quote(base64.b64encode(deflated2).decode(), safe='')}"
-        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    base_q2 = f"SAMLRequest={quote(base64.b64encode(deflated2).decode(), safe='')}&SigAlg=" + quote(
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""
     )
     sig2 = key.sign(base_q2.encode(), _pad.PKCS1v15(), _h.SHA256())
-    await expect_reject(
-        base_q2 + "&Signature=" + quote(base64.b64encode(sig2).decode(), safe="")
-    )
+    await expect_reject(base_q2 + "&Signature=" + quote(base64.b64encode(sig2).decode(), safe=""))
 
 
 @pytest.mark.asyncio
@@ -968,7 +973,8 @@ async def test_saml_request_id_single_use_and_connection_scoped(db):
     ab = _sign_assertion(_assertion_xml(in_response_to=state_b_victim, email=email))
     with pytest.raises(AppError) as xconn:
         await SamlService(db).handle_acs(
-            connection_id=conn_b.id, saml_response_b64=_wrap_response(ab),
+            connection_id=conn_b.id,
+            saml_response_b64=_wrap_response(ab),
             relay_state=state_b_victim,
         )
     assert xconn.value.status_code == 401
@@ -990,7 +996,7 @@ async def test_slo_dtd_forbidden_even_when_signed(db):
     conn = await _saml_conn(db, org)
     svc = SamlService(db)
     req = (
-        "<!DOCTYPE foo [<!ENTITY bar \"x\">]>"
+        '<!DOCTYPE foo [<!ENTITY bar "x">]>'
         f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
         f'ID="_LO{uuid.uuid4().hex}" Version="2.0" '
         f'IssueInstant="{datetime.now(UTC).isoformat()}">'
@@ -999,9 +1005,8 @@ async def test_slo_dtd_forbidden_even_when_signed(db):
         "</samlp:LogoutRequest>"
     )
     deflated = zlib.compress(req.encode())[2:-4]
-    base_q = (
-        f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"
-        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    base_q = f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}&SigAlg=" + quote(
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""
     )
     key = _ser.load_pem_private_key(
         IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
@@ -1055,9 +1060,7 @@ async def test_metadata_refresh_rejects_doctype(db):
         body = body.decode()
     doc = '<!DOCTYPE md [<!ENTITY x "y">]>' + body
     with pytest.raises(AppError) as e:
-        await SsoAdminService(db).refresh_from_metadata(
-            org.id, conn.id, egress=_MetaEgress(doc)
-        )
+        await SsoAdminService(db).refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(doc))
     assert e.value.code == "SSO_METADATA_INVALID"
 
 
@@ -1079,7 +1082,8 @@ async def test_rotation_requires_fresh_break_glass_under_enforced_sso(db):
     # (a) manual rotation with CHANGED certs and no hatch exercise -> 409
     with pytest.raises(AppError) as e:
         await svc.refresh_from_metadata(
-            org.id, conn.id,
+            org.id,
+            conn.id,
             egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
             require_fresh_break_glass=True,
         )
@@ -1089,25 +1093,27 @@ async def test_rotation_requires_fresh_break_glass_under_enforced_sso(db):
 
     # (b) the automated sweep (flag off) still rotates zero-touch
     out = await svc.refresh_from_metadata(
-        org.id, conn.id,
+        org.id,
+        conn.id,
         egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
     )
     assert out["rotated"] is True
 
     # (c) a no-change manual refresh is not blocked either
     out2 = await svc.refresh_from_metadata(
-        org.id, conn.id,
+        org.id,
+        conn.id,
         egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
         require_fresh_break_glass=True,
     )
     assert out2["rotated"] is False
 
     # (d) after a break-glass login event, manual rotation proceeds
-    await emit_event(db, org.id, "org.breakglass.login", subject="u1",
-                     data={"user_id": "u1"})
+    await emit_event(db, org.id, "org.breakglass.login", subject="u1", data={"user_id": "u1"})
     await db.flush()
     out3 = await svc.refresh_from_metadata(
-        org.id, conn.id,
+        org.id,
+        conn.id,
         egress=_MetaEgress(_metadata_xml(IDP_CERT, entity=IDP_ENTITY)),
         require_fresh_break_glass=True,
     )

@@ -77,18 +77,14 @@ async def dynamic_register(
     egress = egress or EgressClient()
     resp = await egress.request("GET", openid_configuration_url)
     if resp.status_code != 200:
-        raise AppError(
-            "LTI_DYNREG_CONFIG_FAILED", f"platform config {resp.status_code}", 502
-        )
+        raise AppError("LTI_DYNREG_CONFIG_FAILED", f"platform config {resp.status_code}", 502)
     try:
         config = resp.json()
     except Exception as exc:
         raise AppError("LTI_DYNREG_CONFIG_FAILED", "config not JSON", 502) from exc
     missing = [k for k in _REQUIRED_CONFIG_KEYS if not isinstance(config.get(k), str)]
     if missing:
-        raise AppError(
-            "LTI_DYNREG_CONFIG_INVALID", f"config missing {missing}", 422
-        )
+        raise AppError("LTI_DYNREG_CONFIG_INVALID", f"config missing {missing}", 422)
     if not isinstance(config.get(PLATFORM_CONFIG_CLAIM), dict):
         raise AppError(
             "LTI_DYNREG_CONFIG_INVALID",

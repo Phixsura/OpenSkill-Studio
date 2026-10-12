@@ -334,9 +334,7 @@ class MappingService:
                 self.db.add(profile)
                 await self.db.flush()
         except IntegrityError as exc:
-            raise AppError(
-                "MAPPING_NAME_TAKEN", "A mapping with this name exists", 409
-            ) from exc
+            raise AppError("MAPPING_NAME_TAKEN", "A mapping with this name exists", 409) from exc
         await self.db.refresh(profile)
         return profile
 

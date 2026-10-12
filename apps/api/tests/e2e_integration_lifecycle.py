@@ -80,9 +80,12 @@ async def drive_outbox(rounds: int = 25) -> None:
     db = await db_session()
     async with db:
         for _ in range(rounds):
-            if await process_outbox_once(
-                db, topics=["intg.event.created", "intg.delivery.attempt", "intg.sync.run"]
-            ) == 0:
+            if (
+                await process_outbox_once(
+                    db, topics=["intg.event.created", "intg.delivery.attempt", "intg.sync.run"]
+                )
+                == 0
+            ):
                 break
 
 
@@ -214,9 +217,7 @@ async def main() -> int:
         domain_id = r.json()["data"]["id"]
         await verify_domain_directly(domain_id)
 
-        r = await c.post(
-            f"{base}/scim-tokens", json={"name": "e2e", "group_map": {}}, headers=h
-        )
+        r = await c.post(f"{base}/scim-tokens", json={"name": "e2e", "group_map": {}}, headers=h)
         check("scim token minted once", r.status_code == 201 and r.json()["data"]["token"])
         scim_raw = r.json()["data"]["token"]
         scim_h = {"Authorization": f"Bearer {scim_raw}"}
@@ -236,9 +237,7 @@ async def main() -> int:
         check("scim provision 201", r.status_code == 201, r.text[:300])
         scim_user_id = r.json()["id"]
 
-        r = await c.get(
-            f'/scim/v2/Users?filter=userName eq "{learner_email}"', headers=scim_h
-        )
+        r = await c.get(f'/scim/v2/Users?filter=userName eq "{learner_email}"', headers=scim_h)
         check(
             "scim filter finds user",
             r.status_code == 200 and r.json()["totalResults"] == 1,
@@ -379,9 +378,7 @@ async def main() -> int:
         )
         check("sso connection created", r.status_code == 201, r.text[:300])
         sso_id = r.json()["data"]["id"]
-        r = await c.patch(
-            f"{base}/sso-connections/{sso_id}", json={"status": "active"}, headers=h
-        )
+        r = await c.patch(f"{base}/sso-connections/{sso_id}", json={"status": "active"}, headers=h)
         check("sso connection activated", r.status_code == 200, r.text[:300])
         r = await c.get(f"/sso/login?email=nobody@{domain}")
         disc = r.json()["data"]
@@ -406,10 +403,8 @@ async def main() -> int:
             json={
                 "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
                 "Operations": [
-                    {"method": "POST", "path": "/Users",
-                     "data": {"userName": bulk_email}},
-                    {"method": "POST", "path": "/Users",
-                     "data": {"userName": bulk_email}},
+                    {"method": "POST", "path": "/Users", "data": {"userName": bulk_email}},
+                    {"method": "POST", "path": "/Users", "data": {"userName": bulk_email}},
                 ],
             },
             headers=scim_h,
@@ -429,9 +424,7 @@ async def main() -> int:
             r.text[:200],
         )
         if ok_rows:
-            r = await c.get(
-                f"{base}/deliveries/{ok_rows[0]['id']}/payload", headers=h
-            )
+            r = await c.get(f"{base}/deliveries/{ok_rows[0]['id']}/payload", headers=h)
             check(
                 "payload archive byte view",
                 r.status_code == 200 and r.json().get("id") == event_id,
@@ -447,9 +440,7 @@ async def main() -> int:
         hooks = r.json().get("data", [])
         check("subscription list", r.status_code == 200 and len(hooks) >= 1, r.text[:200])
         if hooks:
-            r = await c.post(
-                f"/orgs/{org_id}/webhooks/{hooks[0]['id']}/rotate-secret", headers=h
-            )
+            r = await c.post(f"/orgs/{org_id}/webhooks/{hooks[0]['id']}/rotate-secret", headers=h)
             check(
                 "rotate returns fresh secret once",
                 r.status_code == 200 and r.json()["data"]["secret"].count("*") == 0,
@@ -462,8 +453,11 @@ async def main() -> int:
         r = await c.post(
             f"{base}/imports",
             headers=h,
-            data={"kind": "users", "mode": "partial",
-                  "idempotency_key": f"e2e-{uuid.uuid4().hex[:10]}"},
+            data={
+                "kind": "users",
+                "mode": "partial",
+                "idempotency_key": f"e2e-{uuid.uuid4().hex[:10]}",
+            },
             files={"file": ("users.json", payload.encode(), "application/json")},
         )
         check(
@@ -483,8 +477,11 @@ async def main() -> int:
             r = await c.post(
                 f"{base}/imports",
                 headers=h,
-                data={"kind": "users", "mode": "partial",
-                      "idempotency_key": f"e2e2-{uuid.uuid4().hex[:10]}"},
+                data={
+                    "kind": "users",
+                    "mode": "partial",
+                    "idempotency_key": f"e2e2-{uuid.uuid4().hex[:10]}",
+                },
                 files={"file": ("users.json", payload.encode(), "application/json")},
             )
             check(
@@ -514,8 +511,11 @@ async def main() -> int:
             r = await c.post(
                 f"{base}/imports",
                 headers=h,
-                data={"kind": "roster", "mode": "partial",
-                      "idempotency_key": f"e2er-{uuid.uuid4().hex[:10]}"},
+                data={
+                    "kind": "roster",
+                    "mode": "partial",
+                    "idempotency_key": f"e2er-{uuid.uuid4().hex[:10]}",
+                },
                 files={"file": ("roster.csv", roster_csv.encode(), "text/csv")},
             )
             check(
@@ -535,16 +535,24 @@ async def main() -> int:
         # ── opportunities kind over HTTP: drafts behind the profile gate ──
         opp_title = f"E2E Role {uuid.uuid4().hex[:6]}"
         opp_json = json.dumps(
-            {"opportunities": [
-                {"title": opp_title,
-                 "opportunity_type": "internship", "location_mode": "remote"},
-            ]}
+            {
+                "opportunities": [
+                    {
+                        "title": opp_title,
+                        "opportunity_type": "internship",
+                        "location_mode": "remote",
+                    },
+                ]
+            }
         )
         r = await c.post(
             f"{base}/imports",
             headers=h,
-            data={"kind": "opportunities", "mode": "partial",
-                  "idempotency_key": f"e2eo-{uuid.uuid4().hex[:10]}"},
+            data={
+                "kind": "opportunities",
+                "mode": "partial",
+                "idempotency_key": f"e2eo-{uuid.uuid4().hex[:10]}",
+            },
             files={"file": ("opps.json", opp_json.encode(), "application/json")},
         )
         check(
@@ -559,8 +567,11 @@ async def main() -> int:
         r = await c.post(
             f"{base}/imports",
             headers=h,
-            data={"kind": "opportunities", "mode": "partial",
-                  "idempotency_key": f"e2eo2-{uuid.uuid4().hex[:10]}"},
+            data={
+                "kind": "opportunities",
+                "mode": "partial",
+                "idempotency_key": f"e2eo2-{uuid.uuid4().hex[:10]}",
+            },
             files={"file": ("opps.json", opp_json.encode(), "application/json")},
         )
         check(
@@ -577,7 +588,8 @@ async def main() -> int:
                 r.text[:300],
             )
             r = await c.get(
-                "/talent/opportunities", headers=h,
+                "/talent/opportunities",
+                headers=h,
                 params={"org_id": org_id, "status": "draft"},
             )
             check(

@@ -54,9 +54,7 @@ SYNC_DIRECTIONS = frozenset({"pull", "push", "bidirectional"})
 SYNC_SCHEDULES = frozenset({"manual", "hourly", "daily"})
 RUN_STATUSES = frozenset({"queued", "running", "succeeded", "failed", "cancelled", "partial"})
 RUN_TRIGGERS = frozenset({"schedule", "manual", "webhook", "backfill"})
-RECORD_OUTCOMES = frozenset(
-    {"created", "updated", "unchanged", "tombstoned", "conflict", "error"}
-)
+RECORD_OUTCOMES = frozenset({"created", "updated", "unchanged", "tombstoned", "conflict", "error"})
 CONFLICT_CLASSES = frozenset(
     {
         "ambiguous_identity",

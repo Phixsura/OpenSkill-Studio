@@ -8,10 +8,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-OPS_DOC = (
-    pathlib.Path(__file__).resolve().parents[3]
-    / "docs/ops/integration-fabric-operations.md"
-)
+OPS_DOC = pathlib.Path(__file__).resolve().parents[3] / "docs/ops/integration-fabric-operations.md"
 
 
 def _doc_caps() -> dict[str, int]:
@@ -49,9 +46,5 @@ def test_ops_caps_table_matches_code():
     }
     doc = _doc_caps()
     assert doc, "caps table not found in the ops doc — heading or format moved"
-    drift = {
-        k: (doc.get(k), v)
-        for k, v in code.items()
-        if doc.get(k) != v
-    }
+    drift = {k: (doc.get(k), v) for k, v in code.items() if doc.get(k) != v}
     assert drift == {}, f"ops caps table drifted from code (doc, code): {drift}"

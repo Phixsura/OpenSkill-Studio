@@ -187,6 +187,7 @@ def test_no_direct_httpx_outside_security_module():
 
 # ── provider/connector registry parity (§13) ──
 
+
 def _fresh_connectors():
     """FRESH connector instances from the real classes: many tests swap
     fakes into the module-level CONNECTORS singleton (order pollution) —
@@ -297,9 +298,7 @@ def test_every_protocol_route_is_rate_limited():
                 yield prefix + getattr(r, "path", ""), r
 
     protocol = [
-        (p, r)
-        for p, r in walk(fastapi_app.routes)
-        if p.startswith(("/sso", "/scim/v2", "/lti"))
+        (p, r) for p, r in walk(fastapi_app.routes) if p.startswith(("/sso", "/scim/v2", "/lti"))
     ]
     assert len(protocol) >= 20, "guard went vacuous — protocol prefixes moved?"
     missing = [
@@ -318,21 +317,21 @@ def test_forbidden_ip_classification_matrix():
     from app.integrations.security import _is_forbidden_ip
 
     forbidden = [
-        "10.1.2.3",            # private
-        "127.0.0.1",           # loopback
-        "169.254.169.254",     # link-local (cloud metadata)
-        "224.0.0.1",           # multicast
-        "240.0.0.1",           # reserved
-        "0.0.0.0",             # unspecified
-        "100.64.0.1",          # carrier-grade NAT
-        "::1",                 # v6 loopback
-        "::",                  # v6 unspecified
-        "fe80::1",             # v6 link-local
-        "ff02::1",             # v6 multicast
-        "fc00::1",             # v6 ULA (private)
-        "::ffff:10.0.0.1",     # IPv4-mapped v6 smuggling a private v4
-        "::ffff:127.0.0.1",    # IPv4-mapped loopback
-        "not-an-ip",           # unparseable is forbidden, not ignored
+        "10.1.2.3",  # private
+        "127.0.0.1",  # loopback
+        "169.254.169.254",  # link-local (cloud metadata)
+        "224.0.0.1",  # multicast
+        "240.0.0.1",  # reserved
+        "0.0.0.0",  # unspecified
+        "100.64.0.1",  # carrier-grade NAT
+        "::1",  # v6 loopback
+        "::",  # v6 unspecified
+        "fe80::1",  # v6 link-local
+        "ff02::1",  # v6 multicast
+        "fc00::1",  # v6 ULA (private)
+        "::ffff:10.0.0.1",  # IPv4-mapped v6 smuggling a private v4
+        "::ffff:127.0.0.1",  # IPv4-mapped loopback
+        "not-an-ip",  # unparseable is forbidden, not ignored
     ]
     for ip in forbidden:
         assert _is_forbidden_ip(ip), ip
@@ -396,14 +395,14 @@ def test_every_fabric_sweep_has_a_registered_cron():
 
     names = {j.name for j in _cron_jobs()}
     required = {
-        "intg_domain_sweep",     # pending-domain DNS polling
+        "intg_domain_sweep",  # pending-domain DNS polling
         "intg_scheduled_syncs",  # SyncProfile.schedule driver
-        "intg_stale_run_reaper", # crashed-run reaper
-        "intg_exports",          # ExportStream.schedule driver
-        "intg_cert_expiry",      # SAML cert expiry alerts
-        "intg_conn_health",      # connection health decay + alerts
-        "intg_retention",        # terminal-data age-out (R44)
-        "intg_metadata_refresh", # SAML metadata cert rotation (R51)
+        "intg_stale_run_reaper",  # crashed-run reaper
+        "intg_exports",  # ExportStream.schedule driver
+        "intg_cert_expiry",  # SAML cert expiry alerts
+        "intg_conn_health",  # connection health decay + alerts
+        "intg_retention",  # terminal-data age-out (R44)
+        "intg_metadata_refresh",  # SAML metadata cert rotation (R51)
     }
     missing = required - names
     assert missing == set(), f"fabric sweeps without a cron: {sorted(missing)}"
@@ -464,16 +463,14 @@ def test_generic_connector_contracts():
             self.calls = []
 
         async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
-            self.calls.append({"method": method, "url": url, "headers": headers,
-                               "body": content})
+            self.calls.append({"method": method, "url": url, "headers": headers, "body": content})
             return httpx.Response(self.code, request=httpx.Request(method, url))
 
     async def loader():
         return {"api_key": "sk-123"}
 
     def ctx(egress, config=None, base="https://api.vendor.example.com"):
-        c = ConnCtx(connection_id="x", config=config or {}, base_url=base,
-                    _secret_loader=loader)
+        c = ConnCtx(connection_id="x", config=config or {}, base_url=base, _secret_loader=loader)
         c.egress = egress
         return c
 
@@ -509,9 +506,7 @@ def test_generic_connector_contracts():
         assert [r["external_id"] for r in body["applications"]] == ["a1", "a2"]
         assert all(r["ok"] is True and r["error"] is None for r in out)
         # Non-2xx -> every record reports the failure, never ok.
-        out2 = await ats.write(
-            ctx(Scripted(422)), "talent.application", [{"external_id": "b1"}]
-        )
+        out2 = await ats.write(ctx(Scripted(422)), "talent.application", [{"external_id": "b1"}])
         assert out2 == [{"external_id": "b1", "ok": False, "error": "http_422"}]
 
     asyncio.run(main())
@@ -546,16 +541,16 @@ def test_request_with_retry_honors_retry_after_and_caps():
         # Hostile Retry-After is CAPPED (3600 -> retry_cap_s), not slept raw.
         s = Scripted([(429, {"retry-after": "3600"}), (200, {})])
         t0 = _time.monotonic()
-        resp = await request_with_retry(
-            s, "GET", "https://x.example.com/", retry_cap_s=0.05
-        )
+        resp = await request_with_retry(s, "GET", "https://x.example.com/", retry_cap_s=0.05)
         assert resp.status_code == 200
         assert _time.monotonic() - t0 < 2.0  # never slept the hour
 
         # Transient 503 retried; retries BOUNDED (3 attempts total), final
         # response returned for the caller to classify.
         s = Scripted([(503, {}), (200, {})])
-        assert (await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)).status_code == 200
+        assert (
+            await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
+        ).status_code == 200
         s = Scripted([(429, {"retry-after": "0"})] * 5)
         resp = await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
         assert resp.status_code == 429 and s.calls == 3
@@ -588,9 +583,13 @@ def test_redirect_uris_derive_from_config_not_host_header():
     from app.integrations.api.sso import _callback_uri
 
     scope = {
-        "type": "http", "method": "GET", "path": "/", "query_string": b"",
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "query_string": b"",
         "headers": [(b"host", b"evil.attacker.example")],
-        "server": ("evil.attacker.example", 443), "scheme": "https",
+        "server": ("evil.attacker.example", 443),
+        "scheme": "https",
     }
     req = Request(scope)
     assert "evil.attacker.example" not in _callback_uri(req)
@@ -655,18 +654,26 @@ def test_generic_crm_connector_contract():
         return {"api_key": "crm-key"}
 
     def ctx(egress, page_size=2):
-        c = ConnCtx(connection_id="x", config={"page_size": page_size, "auth_header": "X-Api-Key"},
-                    base_url="https://crm.example.com/api/", _secret_loader=loader)
+        c = ConnCtx(
+            connection_id="x",
+            config={"page_size": page_size, "auth_header": "X-Api-Key"},
+            base_url="https://crm.example.com/api/",
+            _secret_loader=loader,
+        )
         c.egress = egress
         return c
 
     async def main():
         conn = GenericCrmConnector()
-        api = CrmApi({
-            "accounts": [{"id": "a1", "name": "Acme", "domain": "acme.io"},
-                         {"id": "a2", "name": "Globex"},
-                         {"id": "a3", "name": "Initech"}],
-        })
+        api = CrmApi(
+            {
+                "accounts": [
+                    {"id": "a1", "name": "Acme", "domain": "acme.io"},
+                    {"id": "a2", "name": "Globex"},
+                    {"id": "a3", "name": "Initech"},
+                ],
+            }
+        )
         batches = [b async for b in conn.read(ctx(api), "crm.account", {})]
         recs = [r for b in batches for r in b["records"]]
         assert [r["external_id"] for r in recs] == ["a1", "a2", "a3"]
@@ -678,8 +685,12 @@ def test_generic_crm_connector_contract():
         # contacts map account_external_id; deals map stage.
         api2 = CrmApi({"contacts": [{"id": "c1", "email": "p@acme.io", "account_id": "a1"}]})
         [c1] = [r async for b in conn.read(ctx(api2), "crm.contact", {}) for r in b["records"]]
-        assert c1 == {"external_id": "c1", "email": "p@acme.io", "name": None,
-                      "account_external_id": "a1"}
+        assert c1 == {
+            "external_id": "c1",
+            "email": "p@acme.io",
+            "name": None,
+            "account_external_id": "a1",
+        }
 
         # error classification + unknown model.
         try:
@@ -786,7 +797,9 @@ def test_write_amplifying_routes_are_rate_limited():
         return out
 
     ev = _paths_with_ratelimit(ev_api.router)
-    assert ev[(("POST",), "/orgs/{org_id}/integrations/webhooks/{subscription_id}/replay-exhausted")]
+    assert ev[
+        (("POST",), "/orgs/{org_id}/integrations/webhooks/{subscription_id}/replay-exhausted")
+    ]
     im = _paths_with_ratelimit(im_api.router)
     assert im[(("POST",), "/orgs/{org_id}/integrations/imports")]
     assert im[(("POST",), "/orgs/{org_id}/integrations/imports/{job_id}/commit")]
@@ -851,8 +864,10 @@ async def test_response_size_cap_aborts_before_buffering(monkeypatch):
         if state["mode"] == "declared":
             # Content-Length says 4096 — must be rejected with ZERO chunk reads.
             return _httpx.Response(
-                200, headers={"content-length": "4096"},
-                stream=CountingStream(), request=request,
+                200,
+                headers={"content-length": "4096"},
+                stream=CountingStream(),
+                request=request,
             )
         if state["mode"] == "chunked":
             # No usable length — must abort mid-stream at the cap.
@@ -900,9 +915,7 @@ def test_event_catalog_covers_every_emitted_name():
                 emitted.add(found.group(1))
         for m in re.finditer(r'_audit\(\s*"([a-z][a-z_.]+)"', text):
             emitted.add(m.group(1))
-        for m in re.finditer(
-            r'f"\{INTERNAL_EVENT_PREFIX\}([a-z][a-z_.]+)"', text
-        ):
+        for m in re.finditer(r'f"\{INTERNAL_EVENT_PREFIX\}([a-z][a-z_.]+)"', text):
             emitted.add("integration." + m.group(1))
 
     assert emitted, "source scan found nothing — the regex broke, fix the test"
@@ -910,15 +923,10 @@ def test_event_catalog_covers_every_emitted_name():
         set(VALID_EVENT_TYPES)
         | {_MESH_NAME_MAP.get(n, n) for n in VALID_EVENT_TYPES}
         | set(DIRECT_EMISSIONS)
-        | {
-            t.removeprefix("com.openskill.").removesuffix(".v1")
-            for t in _INTERNAL_ALERTABLE
-        }
+        | {t.removeprefix("com.openskill.").removesuffix(".v1") for t in _INTERNAL_ALERTABLE}
     )
     uncatalogued = {
-        n for n in emitted
-        if n not in catalog_bare
-        and _MESH_NAME_MAP.get(n, n) not in catalog_bare
+        n for n in emitted if n not in catalog_bare and _MESH_NAME_MAP.get(n, n) not in catalog_bare
     }
     assert not uncatalogued, f"emitted but not in the catalog: {sorted(uncatalogued)}"
     phantom = set(DIRECT_EMISSIONS) - emitted

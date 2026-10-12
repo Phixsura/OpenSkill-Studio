@@ -44,15 +44,11 @@ class SsoAdminService:
             raise AppError("SSO_JIT_ROLE_INVALID", "default_role must be student|instructor", 422)
         if protocol == "oidc":
             if not oidc_issuer or not oidc_client_id:
-                raise AppError(
-                    "SSO_CONFIG_INVALID", "oidc_issuer and oidc_client_id required", 422
-                )
+                raise AppError("SSO_CONFIG_INVALID", "oidc_issuer and oidc_client_id required", 422)
             validate_egress_url(oidc_issuer)
         else:  # saml (P3b)
             if not idp_entity_id or not idp_sso_url:
-                raise AppError(
-                    "SSO_CONFIG_INVALID", "idp_entity_id and idp_sso_url required", 422
-                )
+                raise AppError("SSO_CONFIG_INVALID", "idp_entity_id and idp_sso_url required", 422)
             validate_egress_url(idp_sso_url)
             if idp_metadata_url:
                 validate_egress_url(idp_metadata_url)
@@ -112,9 +108,7 @@ class SsoAdminService:
 
                 cert = x509.load_pem_x509_certificate(pem.encode())
                 fingerprint = hashlib.sha256(
-                    cert.public_bytes_raw
-                    if hasattr(cert, "public_bytes_raw")
-                    else pem.encode()
+                    cert.public_bytes_raw if hasattr(cert, "public_bytes_raw") else pem.encode()
                 ).hexdigest()
             except Exception as exc:
                 raise AppError("SSO_CONFIG_INVALID", "certificate does not parse", 422) from exc
@@ -233,7 +227,11 @@ class SsoAdminService:
             )
 
     async def refresh_from_metadata(
-        self, org_id: str, conn_id: str, *, egress=None,
+        self,
+        org_id: str,
+        conn_id: str,
+        *,
+        egress=None,
         require_fresh_break_glass: bool = False,
     ) -> dict:
         """R51: drive the never-driven idp_metadata_url column — fetch the
@@ -346,13 +344,17 @@ class SsoAdminService:
         from app.integrations.models import IntegrationEvent
 
         conns = (
-            await self.db.execute(
-                select(SsoConnection).where(
-                    SsoConnection.protocol == "saml",
-                    SsoConnection.status.in_(("testing", "active")),
+            (
+                await self.db.execute(
+                    select(SsoConnection).where(
+                        SsoConnection.protocol == "saml",
+                        SsoConnection.status.in_(("testing", "active")),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         now = datetime.now(UTC)
         emitted = 0
         for conn in conns:
@@ -377,8 +379,7 @@ class SsoAdminService:
                     select(IntegrationEvent.id)
                     .where(
                         IntegrationEvent.org_id == conn.org_id,
-                        IntegrationEvent.type
-                        == "com.openskill.integration.sso.cert_expiring.v1",
+                        IntegrationEvent.type == "com.openskill.integration.sso.cert_expiring.v1",
                         IntegrationEvent.subject == conn.id,
                         IntegrationEvent.time > now - timedelta(hours=23),
                     )
@@ -405,9 +406,7 @@ class SsoAdminService:
             except Exception:  # fail-safe sweep
                 import structlog
 
-                structlog.get_logger().warning(
-                    "cert_expiry_emit_failed", sso_connection_id=conn.id
-                )
+                structlog.get_logger().warning("cert_expiry_emit_failed", sso_connection_id=conn.id)
         return emitted
 
     async def set_break_glass(

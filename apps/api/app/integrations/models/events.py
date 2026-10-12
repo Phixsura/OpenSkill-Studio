@@ -76,9 +76,7 @@ class EventDelivery(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Replay lineage: a replayed delivery points at the one it clones.
     # R94: the EXACT body bytes signed on first dispatch — retries and
     # replays resend these bytes, so receiver-side signature checks are

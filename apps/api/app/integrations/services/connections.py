@@ -173,9 +173,7 @@ class ConnectionService:
         count = len(
             (
                 await self.db.execute(
-                    select(IntegrationConnection.id).where(
-                        IntegrationConnection.org_id == org_id
-                    )
+                    select(IntegrationConnection.id).where(IntegrationConnection.org_id == org_id)
                 )
             ).all()
         )
@@ -325,15 +323,19 @@ class ConnectionService:
         from app.integrations.models import SyncProfile, SyncRun
 
         live = (
-            await self.db.execute(
-                select(SyncRun.id)
-                .join(SyncProfile, SyncProfile.id == SyncRun.profile_id)
-                .where(
-                    SyncProfile.connection_id == connection_id,
-                    SyncRun.status.in_(("queued", "running")),
+            (
+                await self.db.execute(
+                    select(SyncRun.id)
+                    .join(SyncProfile, SyncProfile.id == SyncRun.profile_id)
+                    .where(
+                        SyncProfile.connection_id == connection_id,
+                        SyncRun.status.in_(("queued", "running")),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if live is not None:
             raise AppError(
                 "CONNECTION_BUSY",
@@ -356,7 +358,9 @@ class ConnectionService:
     ) -> IntegrationConnectionCredential:
         conn = await self.get(org_id, connection_id)
         if kind not in CREDENTIAL_KINDS:
-            raise AppError("CREDENTIAL_KIND_INVALID", f"kind must be one of {sorted(CREDENTIAL_KINDS)}", 422)
+            raise AppError(
+                "CREDENTIAL_KIND_INVALID", f"kind must be one of {sorted(CREDENTIAL_KINDS)}", 422
+            )
         for k, v in values.items():
             if not isinstance(v, str) or len(v) > _MAX_SECRET_VALUE_LEN or len(k) > 100:
                 raise AppError("CREDENTIAL_VALUE_INVALID", "credential values malformed", 422)
@@ -461,13 +465,17 @@ class ConnectionService:
         ascending — a ping bumps it, so rotation is fair) and COMMITS PER
         CONNECTION: a mid-sweep kill keeps all completed work."""
         rows = (
-            await self.db.execute(
-                select(IntegrationConnection)
-                .where(IntegrationConnection.status.in_(("active", "degraded")))
-                .order_by(IntegrationConnection.updated_at.asc().nulls_first())
-                .limit(limit)
+            (
+                await self.db.execute(
+                    select(IntegrationConnection)
+                    .where(IntegrationConnection.status.in_(("active", "degraded")))
+                    .order_by(IntegrationConnection.updated_at.asc().nulls_first())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         swept = 0
         for conn in rows:
             before = conn.status

@@ -27,12 +27,8 @@ integrations_router.include_router(imports_router)
 integrations_router.include_router(export_router)
 integrations_router.include_router(lti_admin_router)
 # Protocol endpoints are tighter-limited: they are unauthenticated.
-integrations_router.include_router(
-    sso_protocol_router, dependencies=[Depends(rate_limit(30, 60))]
-)
-integrations_router.include_router(
-    lti_protocol_router, dependencies=[Depends(rate_limit(60, 60))]
-)
+integrations_router.include_router(sso_protocol_router, dependencies=[Depends(rate_limit(30, 60))])
+integrations_router.include_router(lti_protocol_router, dependencies=[Depends(rate_limit(60, 60))])
 # SCIM rides its own bearer auth; IdPs burst during resyncs — keep the
 # shared 120/60 window (429 + Retry-After comes from the limiter).
 integrations_router.include_router(scim_router)

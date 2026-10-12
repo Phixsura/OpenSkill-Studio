@@ -102,9 +102,7 @@ async def sync_memberships(
                 report["skipped"] += 1
                 continue
             roles = m.get("roles") or []
-            is_instructor = any(
-                isinstance(r, str) and _INSTRUCTOR_MARKER in r for r in roles
-            )
+            is_instructor = any(isinstance(r, str) and _INSTRUCTOR_MARKER in r for r in roles)
             # Role ceiling: NRPS can mint at most instructor, never above the
             # registration's own JIT ceiling semantics.
             jit_role = "instructor" if is_instructor else reg.default_role
@@ -118,9 +116,7 @@ async def sync_memberships(
                 display_name=m.get("name"),
             )
             try:
-                result = await identity.resolve(
-                    ident, allow_jit=reg.allow_jit, jit_role=jit_role
-                )
+                result = await identity.resolve(ident, allow_jit=reg.allow_jit, jit_role=jit_role)
                 report["resolved"] += 1
                 report["jit_created"] += 1 if result.jit_created else 0
             except AppError as exc:

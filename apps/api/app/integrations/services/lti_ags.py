@@ -69,9 +69,7 @@ async def ensure_tool_key(db: AsyncSession) -> LtiToolKey:
     except Exception:
         # Concurrent first-use race: someone else created it — use theirs.
         existing = (
-            await db.execute(
-                select(LtiToolKey).where(LtiToolKey.active.is_(True)).limit(1)
-            )
+            await db.execute(select(LtiToolKey).where(LtiToolKey.active.is_(True)).limit(1))
         ).scalar_one_or_none()
         if existing is not None:
             return existing
@@ -80,9 +78,7 @@ async def ensure_tool_key(db: AsyncSession) -> LtiToolKey:
 
 
 async def tool_jwks(db: AsyncSession) -> dict:
-    keys = (
-        await db.execute(select(LtiToolKey).where(LtiToolKey.active.is_(True)))
-    ).scalars().all()
+    keys = (await db.execute(select(LtiToolKey).where(LtiToolKey.active.is_(True)))).scalars().all()
     return {"keys": [k.public_jwk for k in keys]}
 
 
@@ -120,9 +116,7 @@ async def service_token(
         content=urlencode(
             {
                 "grant_type": "client_credentials",
-                "client_assertion_type": (
-                    "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-                ),
+                "client_assertion_type": ("urn:ietf:params:oauth:client-assertion-type:jwt-bearer"),
                 "client_assertion": assertion,
                 "scope": scope,
             }
@@ -182,7 +176,9 @@ async def push_score(
     ).encode()
     url = link.ags_lineitem_url.rstrip("/") + "/scores"
     resp = await egress.request(
-        "POST", url, headers={"authorization": f"Bearer {token}", "content-type": SCORE_CONTENT_TYPE},
+        "POST",
+        url,
+        headers={"authorization": f"Bearer {token}", "content-type": SCORE_CONTENT_TYPE},
         content=body,
     )
     ok = 200 <= resp.status_code < 300
@@ -258,18 +254,22 @@ async def handle_gradeable_event(db: AsyncSession, event) -> int:
     if not target_id or not user_id:
         return 0
     links = (
-        await db.execute(
-            select(LtiResourceLink)
-            .join(LtiRegistration, LtiRegistration.id == LtiResourceLink.registration_id)
-            .where(
-                LtiRegistration.org_id == event.org_id,
-                LtiResourceLink.kind == kind,
-                LtiResourceLink.target_id == target_id,
-                LtiResourceLink.grade_sync_enabled.is_(True),
-                LtiResourceLink.ags_lineitem_url.is_not(None),
+        (
+            await db.execute(
+                select(LtiResourceLink)
+                .join(LtiRegistration, LtiRegistration.id == LtiResourceLink.registration_id)
+                .where(
+                    LtiRegistration.org_id == event.org_id,
+                    LtiResourceLink.kind == kind,
+                    LtiResourceLink.target_id == target_id,
+                    LtiResourceLink.grade_sync_enabled.is_(True),
+                    LtiResourceLink.ags_lineitem_url.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     pushed = 0
     for link in links:
         score = 100.0

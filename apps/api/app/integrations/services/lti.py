@@ -119,7 +119,9 @@ class LtiService:
                 self.db.add(reg)
                 await self.db.flush()
         except Exception as exc:
-            raise AppError("LTI_REGISTRATION_EXISTS", "issuer+client already registered", 409) from exc
+            raise AppError(
+                "LTI_REGISTRATION_EXISTS", "issuer+client already registered", 409
+            ) from exc
         for dep in deployment_ids:
             if isinstance(dep, str) and dep:
                 self.db.add(LtiDeployment(registration_id=reg.id, deployment_id=dep[:255]))
@@ -177,8 +179,14 @@ class LtiService:
     # ── login initiation (step 1) ──
 
     async def login_initiation(
-        self, *, iss: str, login_hint: str, client_id: str | None, lti_message_hint: str | None,
-        target_link_uri: str, redirect_uri: str,
+        self,
+        *,
+        iss: str,
+        login_hint: str,
+        client_id: str | None,
+        lti_message_hint: str | None,
+        target_link_uri: str,
+        redirect_uri: str,
     ) -> str:
         q = select(LtiRegistration).where(
             LtiRegistration.issuer == iss.rstrip("/"), LtiRegistration.status == "active"
@@ -236,9 +244,7 @@ class LtiService:
         if res.scalar_one_or_none() is None:
             raise _invalid("state_unknown_used_or_expired")
         return (
-            await self.db.execute(
-                select(LtiLaunchState).where(LtiLaunchState.id == state_value)
-            )
+            await self.db.execute(select(LtiLaunchState).where(LtiLaunchState.id == state_value))
         ).scalar_one()
 
     async def _jwks_keys(self, reg: LtiRegistration, *, kid: str) -> dict:
@@ -359,14 +365,11 @@ class LtiService:
                 except AppError:
                     log.warning("lti_ags_lineitem_blocked", url=lineitem[:100])
             # NRPS claim: remember the membership endpoint for roster sync.
-            nrps = claims.get(
-                f"{CLAIM.replace('lti/claim/', 'lti-nrps/claim/')}namesroleservice"
-            ) or {}
-            if (
-                link is not None
-                and isinstance(nrps, dict)
-                and nrps.get("context_memberships_url")
-            ):
+            nrps = (
+                claims.get(f"{CLAIM.replace('lti/claim/', 'lti-nrps/claim/')}namesroleservice")
+                or {}
+            )
+            if link is not None and isinstance(nrps, dict) and nrps.get("context_memberships_url"):
                 nrps_url = str(nrps["context_memberships_url"])[:500]
                 try:
                     validate_egress_url(nrps_url)

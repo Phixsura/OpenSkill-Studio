@@ -310,10 +310,14 @@ async def test_connection_upgrade_revalidates(ctx):
     assert same.provider_version == 1
 
     provider = (
-        await db.execute(
-            select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+        (
+            await db.execute(
+                select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     # Catalog publishes v2 with a TIGHTER schema the stored config violates.
     provider.version = 2
     provider.config_schema = {
@@ -332,7 +336,8 @@ async def test_connection_upgrade_revalidates(ctx):
     assert conn.provider_version == 1  # never silently bumped
     # Fix the config -> upgrade succeeds.
     await svc.update(
-        org.id, conn.id,
+        org.id,
+        conn.id,
         config={"token_url": "https://idp.example.com/token", "page_size": 15},
     )
     upgraded = await svc.upgrade(org.id, conn.id)
@@ -357,9 +362,12 @@ async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
     await svc.sync_provider_catalog()
     await db.flush()
     conn = await svc.create(
-        org.id, provider_key="oneroster", name=f"up-{uuid.uuid4().hex[:6]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"up-{uuid.uuid4().hex[:6]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=user.id,
     )
     # Update path must run the same egress screen as create (the test env
     # keeps egress_allow_private unset, so literal private IPs are refused).
@@ -371,15 +379,19 @@ async def test_update_base_url_screened_and_unknown_config_key_rejected(db):
     # Unknown config key refused on create AND update (schema is closed).
     with pytest.raises(AppError) as exc:
         await svc.update(
-            org.id, conn.id,
+            org.id,
+            conn.id,
             config={"token_url": "https://idp.example.com/token", "surprise": 1},
         )
     assert exc.value.status_code == 422
     with pytest.raises(AppError) as exc2:
         await svc.create(
-            org.id, provider_key="oneroster", name=f"uc-{uuid.uuid4().hex[:6]}",
+            org.id,
+            provider_key="oneroster",
+            name=f"uc-{uuid.uuid4().hex[:6]}",
             config={"token_url": "https://idp.example.com/token", "surprise": 1},
-            base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+            base_url="https://sis.example.com/ims/oneroster",
+            created_by=user.id,
         )
     assert exc2.value.status_code == 422
 
@@ -406,8 +418,11 @@ async def test_concurrent_first_credential_set_no_500(ctx):
     async def _set(tag):
         async with AsyncSessionLocal() as s:
             cred = await ConnectionService(s).set_credential(
-                org.id, conn.id, kind="api_key",
-                values={"api_key": f"k-{tag}"}, expires_at=None,
+                org.id,
+                conn.id,
+                kind="api_key",
+                values={"api_key": f"k-{tag}"},
+                expires_at=None,
             )
             cid = cred.id
             await s.commit()
@@ -415,12 +430,16 @@ async def test_concurrent_first_credential_set_no_500(ctx):
 
     r1, r2 = await asyncio.gather(_set("a"), _set("b"))
     rows = (
-        await ctx["db"].execute(
-            select(IntegrationConnectionCredential).where(
-                IntegrationConnectionCredential.connection_id == conn.id
+        (
+            await ctx["db"].execute(
+                select(IntegrationConnectionCredential).where(
+                    IntegrationConnectionCredential.connection_id == conn.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].id in (r1, r2)
 
@@ -435,9 +454,7 @@ async def test_config_fix_reopens_errored_connection(ctx):
     conn = await _mk_conn(ctx)
     conn.status = "error"
     await ctx["db"].flush()
-    updated = await svc.update(
-        org.id, conn.id, base_url="https://fixed.example.com/v2"
-    )
+    updated = await svc.update(org.id, conn.id, base_url="https://fixed.example.com/v2")
     assert updated.status == "pending"
 
     # same for a config edit

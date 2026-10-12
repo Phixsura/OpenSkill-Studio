@@ -51,13 +51,15 @@ async def _org(db):
         with_trial=False,
     )
     org = Organization(
-        name=f"Org {ULID()}", slug=f"o-{str(ULID()).lower()}",
-        status=OrgStatus.ACTIVE, tenant_id=tenant.id, created_by=u.id,
+        name=f"Org {ULID()}",
+        slug=f"o-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant.id,
+        created_by=u.id,
     )
     db.add(org)
     await db.flush()
-    db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.OWNER,
-                     status=MemberStatus.ACTIVE))
+    db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE))
     await db.flush()
     return org, u
 
@@ -76,9 +78,12 @@ async def test_sync_run_claim_wins_exactly_once_under_race(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn = await csvc.create(
-        org.id, provider_key="oneroster", name=f"rc-{uuid.uuid4().hex[:8]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"rc-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner.id,
     )
     conn.status = "active"
 
@@ -97,8 +102,12 @@ async def test_sync_run_claim_wins_exactly_once_under_race(db):
 
     registry.CONNECTORS["oneroster"] = CountingConnector()
     profile = await SyncProfileService(db).create(
-        org.id, connection_id=conn.id, name=f"rp-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org.id,
+        connection_id=conn.id,
+        name=f"rp-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     run = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
@@ -132,8 +141,12 @@ async def test_import_commit_applies_exactly_once_under_race(db):
     email = f"rc-{uuid.uuid4().hex[:8]}@x.edu"
     data = f"email,display_name,role\n{email},Race,student\n".encode()
     job = await BulkImportService(db).create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="race", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="race",
+        created_by=owner.id,
         idempotency_key=f"race-{uuid.uuid4().hex[:8]}",
     )
     await db.commit()
@@ -173,10 +186,15 @@ async def test_delivery_dispatch_race_is_at_least_once_consistent(db, monkeypatc
     from app.models.webhook import WebhookSubscription
 
     org, owner = await _org(db)
-    db.add(WebhookSubscription(
-        org_id=org.id, url="https://sink.example.com/h",
-        events=["com.openskill.project.*"], secret="r" * 64, active=True,
-    ))
+    db.add(
+        WebhookSubscription(
+            org_id=org.id,
+            url="https://sink.example.com/h",
+            events=["com.openskill.project.*"],
+            secret="r" * 64,
+            active=True,
+        )
+    )
     event = await emit_event(db, org.id, "project.approved", subject="race", data={})
     await db.commit()
     # Fan out once (serial) to mint the delivery row.
@@ -187,9 +205,7 @@ async def test_delivery_dispatch_race_is_at_least_once_consistent(db, monkeypatc
         from sqlalchemy import select as _sel
 
         delivery_id = (
-            await s0.execute(
-                _sel(EventDelivery.id).where(EventDelivery.event_id == event.id)
-            )
+            await s0.execute(_sel(EventDelivery.id).where(EventDelivery.event_id == event.id))
         ).scalar_one()
 
     posts = []
@@ -216,9 +232,9 @@ async def test_delivery_dispatch_race_is_at_least_once_consistent(db, monkeypatc
         row = await s1.get(EventDelivery, delivery_id)
         attempts = (
             await s1.execute(
-                _sel(_f.count()).select_from(DeliveryAttempt).where(
-                    DeliveryAttempt.delivery_id == delivery_id
-                )
+                _sel(_f.count())
+                .select_from(DeliveryAttempt)
+                .where(DeliveryAttempt.delivery_id == delivery_id)
             )
         ).scalar_one()
     assert row.status == "succeeded" and row.next_attempt_at is None
@@ -242,16 +258,29 @@ async def test_sso_first_login_race_single_link(db):
 
     org, owner = await _org(db)
     domain = f"race-{uuid.uuid4().hex[:6]}.io"
-    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
-                     verification_token="t", verified_at=datetime.now(UTC)))
+    db.add(
+        OrgDomain(
+            org_id=org.id,
+            domain=domain,
+            status="verified",
+            verification_token="t",
+            verified_at=datetime.now(UTC),
+        )
+    )
     member = User(
-        email=f"kid@{domain}", password_hash=hash_password("Test123!"),
-        display_name="Kid", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=f"kid@{domain}",
+        password_hash=hash_password("Test123!"),
+        display_name="Kid",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(member)
     await db.flush()
-    db.add(OrgMember(org_id=org.id, user_id=member.id, role=OrgRole.STUDENT,
-                     status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=member.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
     await db.commit()
     subject = f"race-sub-{uuid.uuid4().hex[:6]}"
     conn_ref = f"01RACE{uuid.uuid4().hex[:20].upper()}"
@@ -259,8 +288,12 @@ async def test_sso_first_login_race_single_link(db):
     async def login():
         async with AsyncSessionLocal() as own:
             ident = VerifiedExternalIdentity(
-                org_id=org.id, source="sso", connection_ref=conn_ref,
-                subject=subject, email=f"kid@{domain}", email_verified=True,
+                org_id=org.id,
+                source="sso",
+                connection_ref=conn_ref,
+                subject=subject,
+                email=f"kid@{domain}",
+                email_verified=True,
             )
             res = await IdentityService(own).resolve(ident)
             await own.commit()
@@ -269,14 +302,18 @@ async def test_sso_first_login_race_single_link(db):
     u1, u2 = await asyncio.gather(login(), login())
     assert u1 == u2 == member.id
     links = (
-        await db.execute(
-            select(ExternalIdentityLink).where(
-                ExternalIdentityLink.connection_ref == conn_ref,
-                ExternalIdentityLink.subject == subject,
-                ExternalIdentityLink.revoked_at.is_(None),
+        (
+            await db.execute(
+                select(ExternalIdentityLink).where(
+                    ExternalIdentityLink.connection_ref == conn_ref,
+                    ExternalIdentityLink.subject == subject,
+                    ExternalIdentityLink.revoked_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(links) == 1
 
 
@@ -308,17 +345,24 @@ async def test_webhook_cap_holds_under_concurrent_creates(db):
 
     org, owner = await _org(db)
     for i in range(MAX_WEBHOOKS_PER_ORG - 1):
-        db.add(WebhookSubscription(
-            org_id=org.id, url=f"https://sink{i}.example.com/h",
-            events=["project.approved"], secret="c" * 64, active=True,
-        ))
+        db.add(
+            WebhookSubscription(
+                org_id=org.id,
+                url=f"https://sink{i}.example.com/h",
+                events=["project.approved"],
+                secret="c" * 64,
+                active=True,
+            )
+        )
     await db.commit()
 
     async def creator(n):
         async with AsyncSessionLocal() as own:
             try:
                 await WebhookService(own).create(
-                    org.id, f"https://racer{n}.example.com/h", ["credential.issued"],
+                    org.id,
+                    f"https://racer{n}.example.com/h",
+                    ["credential.issued"],
                     actor_user_id=owner.id,
                 )
                 await own.commit()
@@ -332,9 +376,9 @@ async def test_webhook_cap_holds_under_concurrent_creates(db):
 
     n = (
         await db.execute(
-            select(_f.count()).select_from(WebhookSubscription).where(
-                WebhookSubscription.org_id == org.id
-            )
+            select(_f.count())
+            .select_from(WebhookSubscription)
+            .where(WebhookSubscription.org_id == org.id)
         )
     ).scalar_one()
     assert n == MAX_WEBHOOKS_PER_ORG
@@ -356,8 +400,7 @@ async def test_domain_verify_exclusivity_under_race(db, monkeypatch):
     domain = f"race-dom-{uuid.uuid4().hex[:6]}.io"
     ids = {}
     for org in (org1, org2):
-        d = OrgDomain(org_id=org.id, domain=domain, status="pending",
-                      verification_token="t")
+        d = OrgDomain(org_id=org.id, domain=domain, status="pending", verification_token="t")
         db.add(d)
         await db.flush()
         ids[org.id] = d.id
@@ -382,18 +425,18 @@ async def test_domain_verify_exclusivity_under_race(db, monkeypatch):
     results = sorted(await asyncio.gather(verifier(org1.id), verifier(org2.id)))
     assert results == ["DOMAIN_ALREADY_VERIFIED", "won"]
     verified = (
-        await db.execute(
-            select(OrgDomain.status).where(OrgDomain.domain == domain)
-        )
-    ).scalars().all()
+        (await db.execute(select(OrgDomain.status).where(OrgDomain.domain == domain)))
+        .scalars()
+        .all()
+    )
     assert verified.count("verified") == 1
     # Clean up the COMMITTED rows so the global sweep_pending (no org filter)
     # in sibling tests never trips over a leftover same-domain pending pair.
     async with AsyncSessionLocal() as cleanup:
         from sqlalchemy import delete as _del
+
         await cleanup.execute(_del(OrgDomain).where(OrgDomain.domain == domain))
         await cleanup.commit()
-
 
 
 @pytest.mark.asyncio
@@ -410,7 +453,9 @@ async def test_roster_import_race_single_membership(db):
 
     org, owner = await _org(db)
     cohort = Cohort(
-        org_id=org.id, name="Race Cohort", slug=f"race-{uuid.uuid4().hex[:8]}",
+        org_id=org.id,
+        name="Race Cohort",
+        slug=f"race-{uuid.uuid4().hex[:8]}",
         created_by=owner.id,
     )
     db.add(cohort)
@@ -419,8 +464,13 @@ async def test_roster_import_race_single_membership(db):
     useed = f"email\n{email}\n".encode()
     svc = BulkImportService(db)
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"rru-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"rru-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
@@ -428,8 +478,12 @@ async def test_roster_import_race_single_membership(db):
     job_ids = []
     for i in range(2):
         j = await svc.create_job(
-            org.id, kind="roster", mode="partial", file_bytes=data,
-            file_key=f"r{i}", created_by=owner.id,
+            org.id,
+            kind="roster",
+            mode="partial",
+            file_bytes=data,
+            file_key=f"r{i}",
+            created_by=owner.id,
             idempotency_key=f"rrj{i}-{uuid.uuid4().hex[:8]}",
         )
         job_ids.append(j.id)
@@ -453,9 +507,9 @@ async def test_roster_import_race_single_membership(db):
     created_total = sum(r[1].get("created", 0) for r in results)
     n = (
         await db.execute(
-            select(func.count()).select_from(CohortMember).where(
-                CohortMember.cohort_id == cohort_id
-            )
+            select(func.count())
+            .select_from(CohortMember)
+            .where(CohortMember.cohort_id == cohort_id)
         )
     ).scalar_one()
     assert n == 1, f"expected exactly one membership, got {n} ({results})"
@@ -483,8 +537,15 @@ async def test_concurrent_jit_provision_single_user(db):
 
     org, owner = await _org(db)
     domain = f"jit-{uuid.uuid4().hex[:6]}.edu"
-    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
-                     verification_token="t", verified_at=datetime.now(UTC)))
+    db.add(
+        OrgDomain(
+            org_id=org.id,
+            domain=domain,
+            status="verified",
+            verification_token="t",
+            verified_at=datetime.now(UTC),
+        )
+    )
     await db.commit()
     email = f"newbie-{uuid.uuid4().hex[:8]}@{domain}"
     conn_ref = f"01JIT{uuid.uuid4().hex[:21].upper()}"
@@ -492,8 +553,12 @@ async def test_concurrent_jit_provision_single_user(db):
     async def login(sub_suffix):
         async with AsyncSessionLocal() as own:
             ident = VerifiedExternalIdentity(
-                org_id=org.id, source="sso", connection_ref=conn_ref,
-                subject=f"jit-sub-{sub_suffix}", email=email, email_verified=True,
+                org_id=org.id,
+                source="sso",
+                connection_ref=conn_ref,
+                subject=f"jit-sub-{sub_suffix}",
+                email=email,
+                email_verified=True,
             )
             res = await IdentityService(own).resolve(ident, allow_jit=True, jit_role="student")
             await own.commit()
@@ -507,14 +572,20 @@ async def test_concurrent_jit_provision_single_user(db):
     assert results[0] == results[1], "both logins must resolve to the same user"
 
     users = (
-        await db.execute(select(_User).where(func.lower(_User.email) == email))
-    ).scalars().all()
+        (await db.execute(select(_User).where(func.lower(_User.email) == email))).scalars().all()
+    )
     assert len(users) == 1, f"JIT created {len(users)} users for one email"
     members = (
-        await db.execute(
-            select(OrgMemberModel).where(OrgMemberModel.org_id == org.id, OrgMemberModel.user_id == users[0].id)
+        (
+            await db.execute(
+                select(OrgMemberModel).where(
+                    OrgMemberModel.org_id == org.id, OrgMemberModel.user_id == users[0].id
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(members) == 1
 
 
@@ -535,13 +606,23 @@ async def test_concurrent_membership_jit_single_member(db):
 
     org, owner = await _org(db)
     domain = f"mjit-{uuid.uuid4().hex[:6]}.edu"
-    db.add(OrgDomain(org_id=org.id, domain=domain, status="verified",
-                     verification_token="t", verified_at=datetime.now(UTC)))
+    db.add(
+        OrgDomain(
+            org_id=org.id,
+            domain=domain,
+            status="verified",
+            verification_token="t",
+            verified_at=datetime.now(UTC),
+        )
+    )
     email = f"exist-{uuid.uuid4().hex[:8]}@{domain}"
     # An ACTIVE platform user that is NOT yet a member of this org.
     platform_user = User(
-        email=email, password_hash=hash_password("Test123!"),
-        display_name="Exist", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=email,
+        password_hash=hash_password("Test123!"),
+        display_name="Exist",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(platform_user)
     await db.commit()
@@ -550,8 +631,12 @@ async def test_concurrent_membership_jit_single_member(db):
     async def login(sub_suffix):
         async with AsyncSessionLocal() as own:
             ident = VerifiedExternalIdentity(
-                org_id=org.id, source="sso", connection_ref=conn_ref,
-                subject=f"mjit-sub-{sub_suffix}", email=email, email_verified=True,
+                org_id=org.id,
+                source="sso",
+                connection_ref=conn_ref,
+                subject=f"mjit-sub-{sub_suffix}",
+                email=email,
+                email_verified=True,
             )
             res = await IdentityService(own).resolve(ident, allow_jit=True, jit_role="student")
             await own.commit()
@@ -563,13 +648,17 @@ async def test_concurrent_membership_jit_single_member(db):
     assert results[0] == results[1] == platform_user.id
 
     members = (
-        await db.execute(
-            select(OrgMemberModel).where(
-                OrgMemberModel.org_id == org.id,
-                OrgMemberModel.user_id == platform_user.id,
+        (
+            await db.execute(
+                select(OrgMemberModel).where(
+                    OrgMemberModel.org_id == org.id,
+                    OrgMemberModel.user_id == platform_user.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(members) == 1
 
 
@@ -593,8 +682,12 @@ async def test_concurrent_connection_create_same_name(db):
         async with AsyncSessionLocal() as own:
             try:
                 await ConnectionService(own).create(
-                    org.id, provider_key="generic_crm", name=name,
-                    config={}, base_url="https://crm.example.edu", created_by=owner.id,
+                    org.id,
+                    provider_key="generic_crm",
+                    name=name,
+                    config={},
+                    base_url="https://crm.example.edu",
+                    created_by=owner.id,
                 )
                 await own.commit()
                 return "created"
@@ -609,7 +702,9 @@ async def test_concurrent_connection_create_same_name(db):
 
     n = (
         await db.execute(
-            select(func.count()).select_from(IntegrationConnection).where(
+            select(func.count())
+            .select_from(IntegrationConnection)
+            .where(
                 IntegrationConnection.org_id == org.id,
                 IntegrationConnection.name == name,
             )
@@ -638,8 +733,11 @@ async def test_concurrent_mapping_create_same_name(db):
         async with AsyncSessionLocal() as own:
             try:
                 await MappingService(own).create(
-                    org.id, name=name, direction="inbound",
-                    model="roster.class", document=doc,
+                    org.id,
+                    name=name,
+                    direction="inbound",
+                    model="roster.class",
+                    document=doc,
                 )
                 await own.commit()
                 return "created"
@@ -654,9 +752,9 @@ async def test_concurrent_mapping_create_same_name(db):
 
     n = (
         await db.execute(
-            select(func.count()).select_from(MappingProfile).where(
-                MappingProfile.org_id == org.id, MappingProfile.name == name
-            )
+            select(func.count())
+            .select_from(MappingProfile)
+            .where(MappingProfile.org_id == org.id, MappingProfile.name == name)
         )
     ).scalar_one()
     assert n == 1
@@ -674,12 +772,20 @@ async def test_connection_rename_collision_is_clean_409(db):
     svc = ConnectionService(db)
     await svc.sync_provider_catalog()
     a = await svc.create(
-        org.id, provider_key="generic_crm", name="conn-a",
-        config={}, base_url="https://a.example.edu", created_by=owner.id,
+        org.id,
+        provider_key="generic_crm",
+        name="conn-a",
+        config={},
+        base_url="https://a.example.edu",
+        created_by=owner.id,
     )
     b = await svc.create(
-        org.id, provider_key="generic_crm", name="conn-b",
-        config={}, base_url="https://b.example.edu", created_by=owner.id,
+        org.id,
+        provider_key="generic_crm",
+        name="conn-b",
+        config={},
+        base_url="https://b.example.edu",
+        created_by=owner.id,
     )
     await db.commit()
 
@@ -748,12 +854,15 @@ async def test_break_glass_cap_holds_under_concurrent_enables(db):
         u = User(
             email=f"bg-{uuid.uuid4().hex[:16]}@test.com",
             password_hash=hash_password("Test123!"),
-            display_name="BG", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+            display_name="BG",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
         )
         db.add(u)
         await db.flush()
-        db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.ADMIN,
-                         status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.ADMIN, status=MemberStatus.ACTIVE)
+        )
         users.append(u)
     await db.commit()
     # one designee already set -> cap-1
@@ -773,17 +882,19 @@ async def test_break_glass_cap_holds_under_concurrent_enables(db):
             except AppError as exc:
                 return exc.code
 
-    results = sorted(
-        await asyncio.gather(enabler(users[1].id), enabler(users[2].id))
-    )
+    results = sorted(await asyncio.gather(enabler(users[1].id), enabler(users[2].id)))
     assert results == ["BREAK_GLASS_LIMIT", "won"]
     n = (
-        await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.is_break_glass.is_(True)
+        (
+            await db.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == org.id, OrgMember.is_break_glass.is_(True)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(n) == 2
 
 
@@ -832,8 +943,10 @@ async def test_sso_connection_cap_holds_under_concurrent_creates(db):
     org, owner = await _org(db)
     for i in range(MAX_SSO_CONNECTIONS_PER_ORG - 1):
         await SsoAdminService(db).create(
-            org.id, protocol="oidc",
-            oidc_issuer=f"https://idp{i}.example.com", oidc_client_id="c",
+            org.id,
+            protocol="oidc",
+            oidc_issuer=f"https://idp{i}.example.com",
+            oidc_client_id="c",
         )
     await db.commit()
 
@@ -841,8 +954,10 @@ async def test_sso_connection_cap_holds_under_concurrent_creates(db):
         async with AsyncSessionLocal() as own:
             try:
                 await SsoAdminService(own).create(
-                    org.id, protocol="oidc",
-                    oidc_issuer=f"https://racer{n}.example.com", oidc_client_id="c",
+                    org.id,
+                    protocol="oidc",
+                    oidc_issuer=f"https://racer{n}.example.com",
+                    oidc_client_id="c",
                 )
                 await own.commit()
                 return "won"

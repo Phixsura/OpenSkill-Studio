@@ -207,8 +207,10 @@ async def test_fanout_idempotent_on_outbox_redelivery(db, egress):
     await handle_event_created(db, {"event_id": event.id})
     await handle_event_created(db, {"event_id": event.id})  # redelivery
     count = (
-        await db.execute(select(EventDelivery).where(EventDelivery.event_id == event.id))
-    ).scalars().all()
+        (await db.execute(select(EventDelivery).where(EventDelivery.event_id == event.id)))
+        .scalars()
+        .all()
+    )
     assert len(count) == 1
 
 
@@ -236,12 +238,19 @@ async def test_failure_schedules_ladder_and_exhausts(db, monkeypatch):
     assert d.status == "pending"
     assert d.attempt_count == 1
     msg = (
-        await db.execute(
-            select(OutboxMessage)
-            .where(OutboxMessage.topic == "intg.delivery.attempt", OutboxMessage.status == "pending")
-            .order_by(OutboxMessage.created_at.desc())
+        (
+            await db.execute(
+                select(OutboxMessage)
+                .where(
+                    OutboxMessage.topic == "intg.delivery.attempt",
+                    OutboxMessage.status == "pending",
+                )
+                .order_by(OutboxMessage.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert msg is not None
 
     # Force each scheduled retry due NOW and drain, until exhaustion.
@@ -258,34 +267,43 @@ async def test_failure_schedules_ladder_and_exhausts(db, monkeypatch):
             delta = (d.next_attempt_at - datetime.now(UTC)).total_seconds()
             assert expected - 60 < delta <= expected + 5
             msg = (
-                await db.execute(
-                    select(OutboxMessage)
-                    .where(
-                        OutboxMessage.topic == "intg.delivery.attempt",
-                        OutboxMessage.status == "pending",
+                (
+                    await db.execute(
+                        select(OutboxMessage)
+                        .where(
+                            OutboxMessage.topic == "intg.delivery.attempt",
+                            OutboxMessage.status == "pending",
+                        )
+                        .order_by(OutboxMessage.created_at.desc())
                     )
-                    .order_by(OutboxMessage.created_at.desc())
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
         else:
             assert d.status == "exhausted"
 
     attempts = (
-        await db.execute(select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id))
-    ).scalars().all()
+        (await db.execute(select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)))
+        .scalars()
+        .all()
+    )
     assert len(attempts) == MAX_ATTEMPTS
     assert all(a.error == "http_500" for a in attempts)
 
     # Exhaustion emitted the alertable internal event.
     exhausted_ev = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.org_id == org.id,
-                IntegrationEvent.type
-                == "com.openskill.integration.delivery.exhausted.v1",
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.org_id == org.id,
+                    IntegrationEvent.type == "com.openskill.integration.delivery.exhausted.v1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(exhausted_ev) == 1
     assert exhausted_ev[0].data["subscription_id"] == sub.id
 
@@ -453,9 +471,7 @@ async def test_subscription_accepts_mesh_patterns(db):
     )
     assert sub.id
     with pytest.raises(AppError) as e:
-        await svc.create(
-            org.id, "https://hooks.example.com/x", ["com.openskill.UPPER.*"]
-        )
+        await svc.create(org.id, "https://hooks.example.com/x", ["com.openskill.UPPER.*"])
     assert e.value.code == "INVALID_EVENT"
     with pytest.raises(AppError):
         await svc.create(org.id, "https://hooks.example.com/x", ["totally.unknown"])
@@ -521,26 +537,46 @@ async def test_retention_sweep_ages_out_terminal_data_only(db):
     old_time = datetime.now(UTC) - _td(days=200)
     mid_time = datetime.now(UTC) - _td(days=100)
 
-    ev_old = IntegrationEvent(org_id=org.id, type="com.openskill.project.approved.v1",
-                              source="/t", subject="old", time=old_time)
-    ev_new = IntegrationEvent(org_id=org.id, type="com.openskill.project.approved.v1",
-                              source="/t", subject="new")
+    ev_old = IntegrationEvent(
+        org_id=org.id,
+        type="com.openskill.project.approved.v1",
+        source="/t",
+        subject="old",
+        time=old_time,
+    )
+    ev_new = IntegrationEvent(
+        org_id=org.id, type="com.openskill.project.approved.v1", source="/t", subject="new"
+    )
     db.add_all([ev_old, ev_new])
     await db.flush()
-    d_term = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
-                           status="succeeded", attempt_count=1, created_at=mid_time)
-    d_pend = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
-                           status="pending", attempt_count=0, created_at=mid_time,
-                           replay_of="X")  # dodge the partial-unique original index
+    d_term = EventDelivery(
+        event_id=ev_new.id,
+        subscription_id=sub.id,
+        status="succeeded",
+        attempt_count=1,
+        created_at=mid_time,
+    )
+    d_pend = EventDelivery(
+        event_id=ev_new.id,
+        subscription_id=sub.id,
+        status="pending",
+        attempt_count=0,
+        created_at=mid_time,
+        replay_of="X",
+    )  # dodge the partial-unique original index
     db.add_all([d_term, d_pend])
     await db.flush()
-    ids = {"ev_old": ev_old.id, "ev_new": ev_new.id,
-           "d_term": d_term.id, "d_pend": d_pend.id}
+    ids = {"ev_old": ev_old.id, "ev_new": ev_new.id, "d_term": d_term.id, "d_pend": d_pend.id}
     await db.commit()
 
     # A RECENT terminal delivery must survive (age cutoff, not status alone).
-    d_recent = EventDelivery(event_id=ev_new.id, subscription_id=sub.id,
-                             status="succeeded", attempt_count=1, replay_of="Y")
+    d_recent = EventDelivery(
+        event_id=ev_new.id,
+        subscription_id=sub.id,
+        status="succeeded",
+        attempt_count=1,
+        replay_of="Y",
+    )
     db.add(d_recent)
     await db.flush()
     ids["d_recent"] = d_recent.id
@@ -588,10 +624,8 @@ async def test_subscription_stats_grouped_and_org_scoped(db, egress):
 
     # The org owner sees only its own subscription's counts.
     owner = (
-        await db.execute(
-            select(OrgMember).where(OrgMember.org_id == org.id)
-        )
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
     from app.models.user import User as _User
 
     user = await db.get(_User, owner.user_id)
@@ -621,17 +655,15 @@ async def test_events_api_org_scoping_and_filters(db, egress):
     await _drain(db)
 
     owner_row = (
-        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
     user = await db.get(_User, owner_row.user_id)
 
     out = await list_events(org.id, type_prefix=None, limit=50, db=db, user=user)
     subjects = {e.subject for e in out["data"]}
     assert "api-1" in subjects and "FOREIGN" not in subjects
 
-    out2 = await list_events(
-        org.id, type_prefix="com.openskill.skill.", limit=50, db=db, user=user
-    )
+    out2 = await list_events(org.id, type_prefix="com.openskill.skill.", limit=50, db=db, user=user)
     assert {e.subject for e in out2["data"]} == {"api-2"}
 
     dels = await list_deliveries(
@@ -643,8 +675,8 @@ async def test_events_api_org_scoping_and_filters(db, egress):
     # Cross-org delivery detail: uniform 404.
     mine = next(d for d in dels["data"] if d.event_id == ev.id)
     other_owner_row = (
-        await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))).scalars().first()
+    )
     other_user = await db.get(_User, other_owner_row.user_id)
     with pytest.raises(AppError) as exc:
         await get_delivery(other.id, mine.id, db=db, user=other_user)
@@ -733,7 +765,8 @@ async def test_webhook_update_in_place(db):
     old_secret = sub.secret
 
     out = await svc.update(
-        sub.id, org.id,
+        sub.id,
+        org.id,
         url="https://new-receiver.example.com/hook",
         events=["com.openskill.skill.*"],
         actor_user_id=None,
@@ -768,8 +801,8 @@ async def test_event_catalog_lists_legacy_canonical_and_internals(db):
 
     org = await _org(db)
     owner_row = (
-        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
     user = await db.get(_User, owner_row.user_id)
     out = await event_catalog(org.id, db=db, user=user)
     data = out["data"]
@@ -817,10 +850,10 @@ async def test_payload_archive_byte_stable_and_replay_inherits(db, egress):
     await db.commit()
     await _drain(db)
     d = (
-        await db.execute(
-            select(EventDelivery).where(EventDelivery.event_id == ev.id)
-        )
-    ).scalars().first()
+        (await db.execute(select(EventDelivery).where(EventDelivery.event_id == ev.id)))
+        .scalars()
+        .first()
+    )
     assert d.request_body is not None
     wire = next(c for c in egress.calls if c["headers"].get("webhook-id") == ev.id)
     assert wire["body"] == d.request_body.encode()  # byte-exact
@@ -830,16 +863,16 @@ async def test_payload_archive_byte_stable_and_replay_inherits(db, egress):
     await db.commit()
 
     owner_row = (
-        await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
     user = await db.get(_User, owner_row.user_id)
     resp = await delivery_payload(org.id, d.id, db=db, user=user)
     assert resp.body.decode() == d.request_body
 
     other = await _org(db)
     other_owner_row = (
-        await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))
-    ).scalars().first()
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == other.id))).scalars().first()
+    )
     other_user = await db.get(_User, other_owner_row.user_id)
     from app.exceptions import AppError
 
@@ -863,16 +896,18 @@ async def test_terminal_delivery_redelivery_is_noop(db, egress, terminal):
     await db.commit()
     await _drain(db)  # one real delivery to succeeded
     d = (
-        await db.execute(select(EventDelivery).where(EventDelivery.event_id == ev.id))
-    ).scalars().first()
+        (await db.execute(select(EventDelivery).where(EventDelivery.event_id == ev.id)))
+        .scalars()
+        .first()
+    )
     d.status = terminal
     await db.flush()
     calls_before = len(egress.calls)
     attempts_before = (
-        await db.execute(
-            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)))
+        .scalars()
+        .all()
+    )
     ac_before = d.attempt_count
 
     await handle_delivery_attempt(db, {"delivery_id": d.id})
@@ -881,10 +916,10 @@ async def test_terminal_delivery_redelivery_is_noop(db, egress, terminal):
     await db.refresh(d)
     assert d.status == terminal and d.attempt_count == ac_before
     attempts_after = (
-        await db.execute(
-            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == d.id)))
+        .scalars()
+        .all()
+    )
     assert len(attempts_after) == len(attempts_before)
 
 
@@ -906,9 +941,13 @@ async def test_bulk_replay_exhausted(db):
 
     def mk(ev_id, status, replay_of=None):
         d = EventDelivery(
-            event_id=ev_id, subscription_id=sub.id, status=status,
+            event_id=ev_id,
+            subscription_id=sub.id,
+            status=status,
             attempt_count=5 if status == "exhausted" else 0,
-            next_attempt_at=None, replay_of=replay_of, request_body="{}",
+            next_attempt_at=None,
+            replay_of=replay_of,
+            request_body="{}",
         )
         db.add(d)
         return d
@@ -917,8 +956,8 @@ async def test_bulk_replay_exhausted(db):
     d2 = mk(evs[1].id, "exhausted")
     d3 = mk(evs[2].id, "exhausted")
     await db.flush()
-    mk(evs[1].id, "succeeded", replay_of=d2.id)   # d2 already recovered
-    mk(evs[2].id, "pending", replay_of=d3.id)     # d3 replay in flight
+    mk(evs[1].id, "succeeded", replay_of=d2.id)  # d2 already recovered
+    mk(evs[2].id, "pending", replay_of=d3.id)  # d3 replay in flight
     await db.flush()
 
     # A non-exhausted (e.g. succeeded) original must NEVER be bulk-replayed.
@@ -995,15 +1034,19 @@ async def test_410_gone_disables_subscription_immediately(db, egress):
     assert delivery.status == "cancelled" and delivery.next_attempt_at is None
     assert sub.active is False
     disabled_ev = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.org_id == org.id,
-                IntegrationEvent.type
-                == "com.openskill.integration.subscription.auto_disabled.v1",
-                IntegrationEvent.subject == sub.id,
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.org_id == org.id,
+                    IntegrationEvent.type
+                    == "com.openskill.integration.subscription.auto_disabled.v1",
+                    IntegrationEvent.subject == sub.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(disabled_ev) == 1
     assert disabled_ev[0].data["reason"] == "endpoint_gone"
     # a second replayed attempt is a no-op (delivery no longer pending)
@@ -1034,7 +1077,8 @@ async def test_3xx_is_a_delivery_failure_not_success(db, egress):
 
     async def _redirect(method, url, *, headers=None, content=None, read_timeout=None):
         return httpx.Response(
-            302, headers={"location": "https://elsewhere.example.com/"},
+            302,
+            headers={"location": "https://elsewhere.example.com/"},
             request=httpx.Request(method, url),
         )
 
@@ -1045,10 +1089,14 @@ async def test_3xx_is_a_delivery_failure_not_success(db, egress):
     from app.integrations.models import DeliveryAttempt
 
     attempt = (
-        await db.execute(
-            select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == delivery.id)
+        (
+            await db.execute(
+                select(DeliveryAttempt).where(DeliveryAttempt.delivery_id == delivery.id)
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
     assert attempt.status_code == 302
     assert attempt.error == "http_302"
     assert delivery.status == "pending"  # scheduled for retry, NOT succeeded
@@ -1099,8 +1147,11 @@ def test_delivery_timestamp_header_is_fresh():
     from app.models.webhook import WebhookSubscription
 
     sub = WebhookSubscription(
-        org_id="o", url="https://hooks.example.com/x",
-        events=["project.approved"], secret=_secrets.token_hex(32), active=True,
+        org_id="o",
+        url="https://hooks.example.com/x",
+        events=["project.approved"],
+        secret=_secrets.token_hex(32),
+        active=True,
     )
     now = datetime.now(UTC)
     headers = build_delivery_headers(sub, "evt_1", b"{}", now)
@@ -1180,23 +1231,39 @@ async def test_retention_sweep_covers_export_runs_and_resolved_queue(db):
     org = await _org(db)
     old = datetime.now(UTC) - _td(days=200)
     stream = ExportStream(
-        org_id=org.id, name=f"r-{uuid.uuid4().hex[:6]}", dataset="events",
-        field_allowlist=["id"], anonymize={}, schedule="manual",
+        org_id=org.id,
+        name=f"r-{uuid.uuid4().hex[:6]}",
+        dataset="events",
+        field_allowlist=["id"],
+        anonymize={},
+        schedule="manual",
     )
     db.add(stream)
     await db.flush()
-    run_old = ExportRun(stream_id=stream.id, status="succeeded", created_at=old,
-                        cursor_from={})
-    run_live = ExportRun(stream_id=stream.id, status="running", created_at=old,
-                         cursor_from={})
-    q_old = IdentityMatchQueue(org_id=org.id, source="scim", connection_ref="c",
-                               subject=f"s-{uuid.uuid4().hex[:6]}", email="a@x.edu",
-                               reason="ambiguous", payload={}, status="dismissed",
-                               created_at=old)
-    q_pending = IdentityMatchQueue(org_id=org.id, source="scim", connection_ref="c",
-                                   subject=f"p-{uuid.uuid4().hex[:6]}", email="b@x.edu",
-                                   reason="ambiguous", payload={}, status="pending",
-                                   created_at=old)
+    run_old = ExportRun(stream_id=stream.id, status="succeeded", created_at=old, cursor_from={})
+    run_live = ExportRun(stream_id=stream.id, status="running", created_at=old, cursor_from={})
+    q_old = IdentityMatchQueue(
+        org_id=org.id,
+        source="scim",
+        connection_ref="c",
+        subject=f"s-{uuid.uuid4().hex[:6]}",
+        email="a@x.edu",
+        reason="ambiguous",
+        payload={},
+        status="dismissed",
+        created_at=old,
+    )
+    q_pending = IdentityMatchQueue(
+        org_id=org.id,
+        source="scim",
+        connection_ref="c",
+        subject=f"p-{uuid.uuid4().hex[:6]}",
+        email="b@x.edu",
+        reason="ambiguous",
+        payload={},
+        status="pending",
+        created_at=old,
+    )
     db.add_all([run_old, run_live, q_old, q_pending])
     await db.flush()
     ids = (run_old.id, run_live.id, q_old.id, q_pending.id)
@@ -1204,9 +1271,9 @@ async def test_retention_sweep_covers_export_runs_and_resolved_queue(db):
 
     counts = await sweep_retention(db)
     assert counts["export_runs"] >= 1 and counts["queue_items"] >= 1
-    assert await db.get(ExportRun, ids[0]) is None       # old terminal: gone
-    assert await db.get(ExportRun, ids[1]) is not None   # running: kept
-    assert await db.get(IdentityMatchQueue, ids[2]) is None      # resolved: gone
+    assert await db.get(ExportRun, ids[0]) is None  # old terminal: gone
+    assert await db.get(ExportRun, ids[1]) is not None  # running: kept
+    assert await db.get(IdentityMatchQueue, ids[2]) is None  # resolved: gone
     assert await db.get(IdentityMatchQueue, ids[3]) is not None  # pending: kept
     # tidy the kept rows so later sweeps/suites see a clean slate.
     await db.delete(await db.get(ExportRun, ids[1]))
@@ -1250,8 +1317,11 @@ async def test_legacy_webhook_dispatch_client_flags(db, monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
     await WebhookService._deliver_background(
-        url="https://receiver.example.com/hook", secret="s" * 64,
-        webhook_id="w1", event_type="project.approved", payload={},
+        url="https://receiver.example.com/hook",
+        secret="s" * 64,
+        webhook_id="w1",
+        event_type="project.approved",
+        payload={},
     )
     assert seen.get("trust_env") is False
     assert seen.get("follow_redirects") is False

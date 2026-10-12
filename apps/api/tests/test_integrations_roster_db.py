@@ -133,15 +133,24 @@ async def test_provision_classes_enrollments_full_path(db):
     _stage(db, conn, "roster.user", "u-new", {"email": "newkid@school.example.edu"})
     _stage(db, conn, "roster.user", "u-teach", {"email": "teach@school.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-1",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-1",
         {"class_external_id": "c-1", "user_external_id": "u-alice", "role": "student"},
     )
     _stage(
-        db, conn, "roster.enrollment", "e-2",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-2",
         {"class_external_id": "c-1", "user_external_id": "u-new", "role": "student"},
     )
     _stage(
-        db, conn, "roster.enrollment", "e-3",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-3",
         {"class_external_id": "c-1", "user_external_id": "u-teach", "role": "teacher"},
     )
     await db.flush()
@@ -163,8 +172,10 @@ async def test_provision_classes_enrollments_full_path(db):
         "external_id": "c-1",
     }
     members = (
-        await db.execute(select(CohortMember).where(CohortMember.cohort_id == cohort.id))
-    ).scalars().all()
+        (await db.execute(select(CohortMember).where(CohortMember.cohort_id == cohort.id)))
+        .scalars()
+        .all()
+    )
     assert len(members) == 3
     roles = {m.user_id: m.role for m in members}
     assert roles[alice.id] == CohortRole.LEARNER
@@ -206,24 +217,36 @@ async def test_provision_conflicts_skip_never_guess(db):
     _stage(db, conn, "roster.class", "c-ok", {"title": "OK Class"})
     # enrollment -> unknown class
     _stage(
-        db, conn, "roster.enrollment", "e-dangling",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-dangling",
         {"class_external_id": "c-MISSING", "user_external_id": "u-x", "role": "student"},
     )
     # enrollment -> user with no roster.user record (no email to resolve)
     _stage(
-        db, conn, "roster.enrollment", "e-noid",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-noid",
         {"class_external_id": "c-ok", "user_external_id": "u-ghost", "role": "student"},
     )
     # unknown role
     _stage(db, conn, "roster.user", "u-r", {"email": "r@sch2.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-badrole",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-badrole",
         {"class_external_id": "c-ok", "user_external_id": "u-r", "role": "principal"},
     )
     # JIT disabled: unknown email queues as ambiguous
     _stage(db, conn, "roster.user", "u-new", {"email": "nojit@sch2.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-nojit",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-nojit",
         {"class_external_id": "c-ok", "user_external_id": "u-new", "role": "student"},
     )
     await db.flush()
@@ -234,10 +257,10 @@ async def test_provision_conflicts_skip_never_guess(db):
     assert report["members_added"] == 0
     # ambiguity landed in the admin queue (resolvable, then next pass applies)
     q = (
-        await db.execute(
-            select(IdentityMatchQueue).where(IdentityMatchQueue.org_id == org.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(IdentityMatchQueue).where(IdentityMatchQueue.org_id == org.id)))
+        .scalars()
+        .all()
+    )
     assert {i.subject for i in q} >= {"u-new"}
 
 
@@ -250,16 +273,17 @@ async def test_provision_role_conflict_reports_not_overwrites(db):
     _stage(db, conn, "roster.class", "c-1", {"title": "C"})
     _stage(db, conn, "roster.user", "u-bob", {"email": "bob@sch3.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-1",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-1",
         {"class_external_id": "c-1", "user_external_id": "u-bob", "role": "student"},
     )
     await db.flush()
     svc = RosterProvisioningService(db)
     await svc.provision(org.id, conn.id, actor_id=owner.id)
     # A human promotes bob to cohort instructor afterwards.
-    cohort = (
-        await db.execute(select(Cohort).where(Cohort.org_id == org.id))
-    ).scalars().first()
+    cohort = (await db.execute(select(Cohort).where(Cohort.org_id == org.id))).scalars().first()
     member = (
         await db.execute(
             select(CohortMember).where(
@@ -285,7 +309,10 @@ async def test_unenroll_policy_removes_or_ignores(db):
     _stage(db, conn, "roster.class", "c-1", {"title": "C"})
     _stage(db, conn, "roster.user", "u-kid", {"email": "kid@sch4.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-1",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-1",
         {"class_external_id": "c-1", "user_external_id": "u-kid", "role": "student"},
     )
     await db.flush()
@@ -309,12 +336,16 @@ async def test_unenroll_policy_removes_or_ignores(db):
     r2 = await svc.provision(org.id, conn.id, actor_id=owner.id)
     assert r2["members_removed"] == 1
     members = (
-        await db.execute(
-            select(CohortMember)
-            .join(Cohort, Cohort.id == CohortMember.cohort_id)
-            .where(Cohort.org_id == org.id)
+        (
+            await db.execute(
+                select(CohortMember)
+                .join(Cohort, Cohort.id == CohortMember.cohort_id)
+                .where(Cohort.org_id == org.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert members == []
     # cross-tenant uniform 404
     other, _ = await _org(db)
@@ -346,9 +377,7 @@ class FakeSis:
         flat = [c for page in self.pages for c in page]
         items = flat[offset : offset + limit]
         assert headers["authorization"] == "Bearer tok-1"
-        return httpx.Response(
-            200, json={"classes": items}, request=httpx.Request(method, url)
-        )
+        return httpx.Response(200, json={"classes": items}, request=httpx.Request(method, url))
 
 
 @pytest.mark.asyncio
@@ -429,13 +458,17 @@ async def _run_for(db, conn, org):
     from app.integrations.models import SyncProfile, SyncRun
 
     prof = SyncProfile(
-        org_id=org.id, connection_id=conn.id, name=f"rp-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull",
+        org_id=org.id,
+        connection_id=conn.id,
+        name=f"rp-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
     )
     db.add(prof)
     await db.flush()
-    run = SyncRun(profile_id=prof.id, status="succeeded", trigger="manual",
-                  cursor_in={}, cursor_out={})
+    run = SyncRun(
+        profile_id=prof.id, status="succeeded", trigger="manual", cursor_in={}, cursor_out={}
+    )
     db.add(run)
     await db.flush()
     return run
@@ -455,21 +488,26 @@ async def test_conflict_classes_pinned_and_auto_create_off(db):
     _stage(db, conn, "roster.class", "c-off", {"title": "NoCreate"})
     _stage(db, conn, "roster.user", "u-5", {"email": "five@sch5.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-dang",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-dang",
         {"class_external_id": "c-NOPE", "user_external_id": "u-5", "role": "student"},
     )
     await db.flush()
     svc = RosterProvisioningService(db)
     report = await svc.provision(
-        org.id, conn.id, actor_id=owner.id,
+        org.id,
+        conn.id,
+        actor_id=owner.id,
         options={"auto_create_cohorts": False, "jit_users": True},
     )
     assert report["cohorts_created"] == 0  # auto_create off honored
     rows = (
-        await db.execute(
-            select(SyncRecordResult).where(SyncRecordResult.run_id == run.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(SyncRecordResult).where(SyncRecordResult.run_id == run.id)))
+        .scalars()
+        .all()
+    )
     by_ext = {r.external_id: r for r in rows}
     assert by_ext["c-off"].detail == {"reason": "no_cohort_and_auto_create_off"}
     assert by_ext["e-dang"].conflict_class == "missing_reference"
@@ -478,19 +516,26 @@ async def test_conflict_classes_pinned_and_auto_create_off(db):
     # Second pass with auto_create ON: the cohort exists, so an unknown SIS
     # role is reported as role_conflict (not masked by missing_reference).
     _stage(
-        db, conn, "roster.enrollment", "e-role",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-role",
         {"class_external_id": "c-off", "user_external_id": "u-5", "role": "principal"},
     )
     await db.flush()
     await svc.provision(org.id, conn.id, actor_id=owner.id, options={"jit_users": True})
     rows2 = (
-        await db.execute(
-            select(SyncRecordResult).where(
-                SyncRecordResult.run_id == run.id,
-                SyncRecordResult.external_id == "e-role",
+        (
+            await db.execute(
+                select(SyncRecordResult).where(
+                    SyncRecordResult.run_id == run.id,
+                    SyncRecordResult.external_id == "e-role",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows2 and rows2[0].conflict_class == "role_conflict"
     assert rows2[0].detail == {"role": "principal"}
 
@@ -510,7 +555,10 @@ async def test_revoked_link_never_drives_unenroll(db):
     _stage(db, conn, "roster.class", "c-6", {"title": "C6"})
     _stage(db, conn, "roster.user", "u-6", {"email": "six@sch6.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-6",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-6",
         {"class_external_id": "c-6", "user_external_id": "u-6", "role": "student"},
     )
     await db.flush()
@@ -592,9 +640,7 @@ async def test_oneroster_multi_page_and_overfull_page(db):
             offset = int(parse_qs(parsed.query).get("offset", ["0"])[0])
             flat = [c for page in self.pages for c in page]
             items = flat[offset : offset + 3]  # over-returns
-            return httpx.Response(
-                200, json={"classes": items}, request=httpx.Request(method, url)
-            )
+            return httpx.Response(200, json={"classes": items}, request=httpx.Request(method, url))
 
     over = OverfullSis([[cls(1), cls(2), cls(3)]])
     batches2 = [b async for b in connector.read(_ctx(over), "roster.class", {})]
@@ -621,6 +667,7 @@ async def test_oneroster_error_classification(db):
                 return httpx.Response(
                     data_status, json={"classes": []}, request=httpx.Request(method, url)
                 )
+
         return S()
 
     connector = OneRosterConnector()
@@ -655,7 +702,10 @@ async def test_whole_class_tombstone_still_removes_members(db):
     _stage(db, conn, "roster.class", "c-gone", {"title": "Closing"})
     _stage(db, conn, "roster.user", "u-gone", {"email": "gone@sch9.example.edu"})
     _stage(
-        db, conn, "roster.enrollment", "e-gone",
+        db,
+        conn,
+        "roster.enrollment",
+        "e-gone",
         {"class_external_id": "c-gone", "user_external_id": "u-gone", "role": "student"},
     )
     await db.flush()
@@ -665,13 +715,17 @@ async def test_whole_class_tombstone_still_removes_members(db):
 
     # SIS deletes the whole class: class AND enrollment tombstone together.
     rows = (
-        await db.execute(
-            select(StagedRecord).where(
-                StagedRecord.connection_id == conn.id,
-                StagedRecord.external_id.in_(("c-gone", "e-gone")),
+        (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.connection_id == conn.id,
+                    StagedRecord.external_id.in_(("c-gone", "e-gone")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2
     for r in rows:
         r.status = "tombstoned"
@@ -680,12 +734,16 @@ async def test_whole_class_tombstone_still_removes_members(db):
     r1 = await svc.provision(org.id, conn.id, actor_id=owner.id)
     assert r1["members_removed"] == 1
     members = (
-        await db.execute(
-            select(CohortMember)
-            .join(Cohort, Cohort.id == CohortMember.cohort_id)
-            .where(Cohort.org_id == org.id)
+        (
+            await db.execute(
+                select(CohortMember)
+                .join(Cohort, Cohort.id == CohortMember.cohort_id)
+                .where(Cohort.org_id == org.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert members == []
 
 
@@ -711,10 +769,12 @@ async def test_offset_ignoring_server_bounded_not_infinite(db, monkeypatch):
             # Ignores offset: ALWAYS a full page of page_size=2 items.
             return httpx.Response(
                 200,
-                json={"classes": [
-                    {"sourcedId": "a", "title": "A"},
-                    {"sourcedId": "b", "title": "B"},
-                ]},
+                json={
+                    "classes": [
+                        {"sourcedId": "a", "title": "A"},
+                        {"sourcedId": "b", "title": "B"},
+                    ]
+                },
                 request=httpx.Request(method, url),
             )
 

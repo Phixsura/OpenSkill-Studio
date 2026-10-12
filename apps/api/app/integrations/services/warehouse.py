@@ -135,7 +135,8 @@ def _check_fields(dataset: str, spec: dict, fields, *, what: str) -> None:
     dataset only, capped) join the plain field universe."""
     dotted = [f for f in fields if isinstance(f, str) and f.startswith("data.")]
     plain_bad = [
-        f for f in fields
+        f
+        for f in fields
         if f not in spec["fields"] and not (dataset == "events" and _DATA_KEY_RE.fullmatch(str(f)))
     ]
     if plain_bad:
@@ -145,9 +146,7 @@ def _check_fields(dataset: str, spec: dict, fields, *, what: str) -> None:
             422,
         )
     if len(dotted) > MAX_DATA_KEYS:
-        raise AppError(
-            "EXPORT_CONFIG_INVALID", f"at most {MAX_DATA_KEYS} data.<key> entries", 422
-        )
+        raise AppError("EXPORT_CONFIG_INVALID", f"at most {MAX_DATA_KEYS} data.<key> entries", 422)
 
 
 def _org_salt(org_id: str) -> str:
@@ -192,9 +191,7 @@ class WarehouseExportService:
         await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         count = len(
             (
-                await self.db.execute(
-                    select(ExportStream.id).where(ExportStream.org_id == org_id)
-                )
+                await self.db.execute(select(ExportStream.id).where(ExportStream.org_id == org_id))
             ).all()
         )
         if count >= MAX_STREAMS_PER_ORG:
@@ -240,9 +237,7 @@ class WarehouseExportService:
             _check_fields(stream.dataset, spec, anonymize.keys(), what="anonymize fields")
             for mode in anonymize.values():
                 if mode not in ANONYMIZE_MODES:
-                    raise AppError(
-                        "EXPORT_CONFIG_INVALID", "bad anonymize mode", 422
-                    )
+                    raise AppError("EXPORT_CONFIG_INVALID", "bad anonymize mode", 422)
             stream.anonymize = dict(anonymize)
         if schedule is not None:
             if schedule not in EXPORT_SCHEDULES:
@@ -311,9 +306,7 @@ class WarehouseExportService:
         # NEXT run re-export the whole span again. The row lock makes the
         # read-cursor → export → advance-cursor sequence atomic per stream.
         await self.db.execute(
-            select(ExportStream.id)
-            .where(ExportStream.id == stream.id)
-            .with_for_update()
+            select(ExportStream.id).where(ExportStream.id == stream.id).with_for_update()
         )
         await self.db.refresh(stream)  # re-read cursor under the lock
         if not stream.enabled:
@@ -344,9 +337,7 @@ class WarehouseExportService:
                 for row in rows:
                     last_cursor = row.pop("_cursor", last_cursor)
                     lines.append(
-                        json.dumps(
-                            self._project_row(stream, row, salt), separators=(",", ":")
-                        )
+                        json.dumps(self._project_row(stream, row, salt), separators=(",", ":"))
                     )
                 part_key = f"{base}/part-{part_no:05d}.ndjson"
                 await self.writer.write(part_key, ("\n".join(lines) + "\n").encode())
@@ -361,9 +352,7 @@ class WarehouseExportService:
                 "dataset": stream.dataset,
                 "schema_version": SCHEMA_VERSION,
                 "fields": [
-                    f
-                    for f in stream.field_allowlist
-                    if (stream.anonymize or {}).get(f) != "drop"
+                    f for f in stream.field_allowlist if (stream.anonymize or {}).get(f) != "drop"
                 ],
                 "cursor_from": run.cursor_from,
                 "cursor_to": {"last_id": last_cursor},
@@ -402,13 +391,17 @@ async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
     from app.integrations.models.export import ExportRun
 
     streams = (
-        await db.execute(
-            select(ExportStream).where(
-                ExportStream.enabled.is_(True),
-                ExportStream.schedule.in_(tuple(_EXPORT_CADENCE)),
+        (
+            await db.execute(
+                select(ExportStream).where(
+                    ExportStream.enabled.is_(True),
+                    ExportStream.schedule.in_(tuple(_EXPORT_CADENCE)),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     ran = 0
     now = datetime.now(UTC)
     for stream in streams:
@@ -429,9 +422,7 @@ async def sweep_scheduled_exports(db: AsyncSession, writer: PartWriter) -> int:
             if now - last < cadence:
                 continue
         try:
-            await WarehouseExportService(db, writer=writer).run_export(
-                stream.org_id, stream.id
-            )
+            await WarehouseExportService(db, writer=writer).run_export(stream.org_id, stream.id)
             ran += 1
         except AppError as exc:
             log.warning("scheduled_export_skipped", stream_id=stream.id, code=exc.code)

@@ -928,6 +928,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R322 (tenth window, CI format-gate: fabric scope cleaned)**: CI's
+  lint-backend job runs `ruff format --check .` — the R318 finding is not
+  just a local make-target: a PR cannot pass CI with unformatted files.
+  Of the 196 repo-wide, the fabric owns 51 (services/api/tests/contract
+  guards) — all reformatted (semantics-preserving; ruff check and the
+  360-test fabric battery stay green). The remaining ~145 belong to the
+  unmerged upstream stack (talent/ecosystem/experiments branches) and are
+  those PRs' concern.
 - **R321 (tenth window, IDN-helper totality)**: hypothesis property over
   normalized_email_domain — arbitrary text folds to a lowercase domain or
   "", never raises (it sits on the login path; a hostile address must not

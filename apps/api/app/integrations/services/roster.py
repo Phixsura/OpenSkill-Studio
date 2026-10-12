@@ -80,8 +80,14 @@ class RosterProvisioningService:
             org_id, connection_id, actor_id, auto_create, run_id, report
         )
         await self._provision_enrollments(
-            org_id, connection_id, cohort_by_class, linked_cohorts,
-            jit_users, on_unenroll, run_id, report,
+            org_id,
+            connection_id,
+            cohort_by_class,
+            linked_cohorts,
+            jit_users,
+            on_unenroll,
+            run_id,
+            report,
         )
         await self.db.flush()
         return report
@@ -136,18 +142,22 @@ class RosterProvisioningService:
         report: dict,
     ) -> tuple[dict[str, str], dict[str, str]]:
         staged = (
-            await self.db.execute(
-                select(StagedRecord).where(
-                    StagedRecord.connection_id == connection_id,
-                    StagedRecord.model == "roster.class",
-                    StagedRecord.status == "active",
+            (
+                await self.db.execute(
+                    select(StagedRecord).where(
+                        StagedRecord.connection_id == connection_id,
+                        StagedRecord.model == "roster.class",
+                        StagedRecord.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Existing provisioned cohorts: settings.integration backlink.
         cohorts = (
-            await self.db.execute(select(Cohort).where(Cohort.org_id == org_id))
-        ).scalars().all()
+            (await self.db.execute(select(Cohort).where(Cohort.org_id == org_id))).scalars().all()
+        )
         by_external: dict[str, Cohort] = {}
         for c in cohorts:
             integ = (c.settings or {}).get("integration") or {}
@@ -160,16 +170,24 @@ class RosterProvisioningService:
             title = str((rec.payload or {}).get("title") or "").strip()
             if not title:
                 self._conflict(
-                    run_id, rec.external_id, "roster.class", "schema_invalid",
-                    {"missing": "title"}, report,
+                    run_id,
+                    rec.external_id,
+                    "roster.class",
+                    "schema_invalid",
+                    {"missing": "title"},
+                    report,
                 )
                 continue
             cohort = by_external.get(rec.external_id)
             if cohort is None:
                 if not auto_create:
                     self._conflict(
-                        run_id, rec.external_id, "roster.class", "missing_reference",
-                        {"reason": "no_cohort_and_auto_create_off"}, report,
+                        run_id,
+                        rec.external_id,
+                        "roster.class",
+                        "missing_reference",
+                        {"reason": "no_cohort_and_auto_create_off"},
+                        report,
                     )
                     continue
                 cohort = await svc.create_cohort(
@@ -212,13 +230,17 @@ class RosterProvisioningService:
         report: dict,
     ) -> None:
         staged = (
-            await self.db.execute(
-                select(StagedRecord).where(
-                    StagedRecord.connection_id == connection_id,
-                    StagedRecord.model == "roster.enrollment",
+            (
+                await self.db.execute(
+                    select(StagedRecord).where(
+                        StagedRecord.connection_id == connection_id,
+                        StagedRecord.model == "roster.enrollment",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         svc = CohortService(self.db)
         # R220 (R218 class): prefetch the per-record point SELECTs — identity
         # links and staged roster.user rows for every user referenced by an
@@ -266,20 +288,35 @@ class RosterProvisioningService:
             if rec.status == "active":
                 if cohort_id is None:
                     self._conflict(
-                        run_id, rec.external_id, "roster.enrollment", "missing_reference",
-                        {"class_external_id": class_ext}, report,
+                        run_id,
+                        rec.external_id,
+                        "roster.enrollment",
+                        "missing_reference",
+                        {"class_external_id": class_ext},
+                        report,
                     )
                     continue
                 role = ROSTER_ROLE_MAP.get(role_raw)
                 if role is None:
                     self._conflict(
-                        run_id, rec.external_id, "roster.enrollment", "role_conflict",
-                        {"role": role_raw}, report,
+                        run_id,
+                        rec.external_id,
+                        "roster.enrollment",
+                        "role_conflict",
+                        {"role": role_raw},
+                        report,
                     )
                     continue
                 user_id = await self._resolve_user(
-                    org_id, connection_id, user_ext, jit_users, run_id, rec, report,
-                    links_map=links_map, users_map=users_map,
+                    org_id,
+                    connection_id,
+                    user_ext,
+                    jit_users,
+                    run_id,
+                    rec,
+                    report,
+                    links_map=links_map,
+                    users_map=users_map,
                 )
                 if user_id is None:
                     continue
@@ -296,8 +333,12 @@ class RosterProvisioningService:
                         # Manual role differs from SIS: a human decided —
                         # report, never overwrite (§6.2 rule 4).
                         self._conflict(
-                            run_id, rec.external_id, "roster.enrollment", "role_conflict",
-                            {"local": existing.role.value, "external": role.value}, report,
+                            run_id,
+                            rec.external_id,
+                            "roster.enrollment",
+                            "role_conflict",
+                            {"local": existing.role.value, "external": role.value},
+                            report,
                         )
                     else:
                         report["unchanged"] += 1
@@ -309,8 +350,12 @@ class RosterProvisioningService:
                     report["unchanged"] += 1
                 except AppError as exc:
                     self._conflict(
-                        run_id, rec.external_id, "roster.enrollment", "schema_invalid",
-                        {"code": exc.code}, report,
+                        run_id,
+                        rec.external_id,
+                        "roster.enrollment",
+                        "schema_invalid",
+                        {"code": exc.code},
+                        report,
                     )
             elif rec.status == "tombstoned" and on_unenroll == "remove_membership":
                 # R209: fall back to the backlink map — the class may itself
@@ -361,8 +406,12 @@ class RosterProvisioningService:
     ) -> str | None:
         if not user_ext:
             self._conflict(
-                run_id, rec.external_id, "roster.enrollment", "schema_invalid",
-                {"missing": "user_external_id"}, report,
+                run_id,
+                rec.external_id,
+                "roster.enrollment",
+                "schema_invalid",
+                {"missing": "user_external_id"},
+                report,
             )
             return None
         # R220: prefetch maps when the caller built them; point SELECTs stay
@@ -389,8 +438,12 @@ class RosterProvisioningService:
         email = str(((user_rec.payload if user_rec else {}) or {}).get("email") or "").lower()
         if not email:
             self._conflict(
-                run_id, rec.external_id, "roster.enrollment", "ambiguous_identity",
-                {"user_external_id": user_ext, "reason": "no_email"}, report,
+                run_id,
+                rec.external_id,
+                "roster.enrollment",
+                "ambiguous_identity",
+                {"user_external_id": user_ext, "reason": "no_email"},
+                report,
             )
             return None
         ident = VerifiedExternalIdentity(
@@ -411,8 +464,12 @@ class RosterProvisioningService:
         except AppError:
             # Queued for admin confirmation — skip, never guess (§6.2).
             self._conflict(
-                run_id, rec.external_id, "roster.enrollment", "ambiguous_identity",
-                {"user_external_id": user_ext}, report,
+                run_id,
+                rec.external_id,
+                "roster.enrollment",
+                "ambiguous_identity",
+                {"user_external_id": user_ext},
+                report,
             )
             return None
         if links_map is not None:

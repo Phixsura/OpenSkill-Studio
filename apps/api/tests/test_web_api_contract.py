@@ -88,10 +88,12 @@ def _route_methods() -> list[tuple[list[str], set[str]]]:
     out = []
     for path, ops in app.openapi()["paths"].items():
         p = path.removeprefix("/api/v1")
-        out.append((
-            [seg for seg in p.split("/") if seg],
-            {m.upper() for m in ops},
-        ))
+        out.append(
+            (
+                [seg for seg in p.split("/") if seg],
+                {m.upper() for m in ops},
+            )
+        )
     return out
 
 

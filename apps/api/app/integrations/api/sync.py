@@ -146,7 +146,12 @@ async def create_mapping(
     )
     resp = MappingResponse.model_validate(row, from_attributes=True)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.mapping.created", "mapping_profile", row.id,
+        db,
+        org_id,
+        user.id,
+        "intg.mapping.created",
+        "mapping_profile",
+        row.id,
         after={"model": row.model, "version": row.version},
     )
     await db.commit()
@@ -330,13 +335,17 @@ async def delete_sync_profile(
     if profile is None or profile.org_id != org_id:
         raise AppError("SYNC_PROFILE_NOT_FOUND", "Profile not found", 404)
     live = (
-        await db.execute(
-            _select(SyncRun.id).where(
-                SyncRun.profile_id == profile.id,
-                SyncRun.status.in_(("queued", "running")),
+        (
+            await db.execute(
+                _select(SyncRun.id).where(
+                    SyncRun.profile_id == profile.id,
+                    SyncRun.status.in_(("queued", "running")),
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if live is not None:
         raise AppError("SYNC_PROFILE_BUSY", "Cancel the live run first", 409)
     await db.delete(profile)
@@ -362,10 +371,10 @@ async def delete_mapping_profile(
     await _admin(org_id, user, db)
     mp = await MappingService(db).get(org_id, profile_id)
     ref = (
-        await db.execute(
-            _select(SyncProfile.id).where(SyncProfile.mapping_profile_id == mp.id)
-        )
-    ).scalars().first()
+        (await db.execute(_select(SyncProfile.id).where(SyncProfile.mapping_profile_id == mp.id)))
+        .scalars()
+        .first()
+    )
     if ref is not None:
         raise AppError("MAPPING_IN_USE", "A sync profile still uses this mapping", 409)
     await db.delete(mp)
@@ -413,9 +422,7 @@ async def cancel_sync_run(
     return {"data": resp}
 
 
-@router.get(
-    "/sync-runs/{run_id}/records", response_model=DataResponse[list[RecordResultResponse]]
-)
+@router.get("/sync-runs/{run_id}/records", response_model=DataResponse[list[RecordResultResponse]])
 async def sync_run_records(
     org_id: str,
     run_id: str,
@@ -446,7 +453,13 @@ async def resolve_sync_conflict(
     )
     resp = RecordResultResponse.model_validate(result, from_attributes=True)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.conflict.resolved", "sync_record", result.id, after={"action": body.action}
+        db,
+        org_id,
+        user.id,
+        "intg.conflict.resolved",
+        "sync_record",
+        result.id,
+        after={"action": body.action},
     )
     await db.commit()
     return {"data": resp}

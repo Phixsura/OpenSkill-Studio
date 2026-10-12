@@ -41,7 +41,6 @@ async def _dispose_engine_pool():
     await engine.dispose()
 
 
-
 @pytest_asyncio.fixture
 async def db():
     from app.core.database import AsyncSessionLocal, engine
@@ -246,8 +245,10 @@ async def test_gradeable_event_hook_pushes_clamped_score(db, monkeypatch):
     assert platform.scores[0]["scoreGiven"] == 100.0  # clamped
     # Missing user_id -> 0 pushes (guard, not crash).
     ev_nouser = IntegrationEvent(
-        org_id=org.id, type="com.openskill.project.approved.v1",
-        source=f"/orgs/{org.id}", data={"project_id": "01PROJXXXXXXXXXXXXXXXXXXXX"},
+        org_id=org.id,
+        type="com.openskill.project.approved.v1",
+        source=f"/orgs/{org.id}",
+        data={"project_id": "01PROJXXXXXXXXXXXXXXXXXXXX"},
     )
     db.add(ev_nouser)
     await db.flush()
@@ -258,13 +259,21 @@ async def test_gradeable_event_hook_pushes_clamped_score(db, monkeypatch):
     org2, user2 = await _org(db)
     svc2 = LtiService(db)
     reg2 = await svc2.create_registration(
-        org2.id, issuer=f"{ISS}-{uuid.uuid4().hex[:6]}", client_id="tool-2",
-        auth_login_url=f"{ISS}/auth", auth_token_url=f"{ISS}/token",
-        jwks_url=f"{ISS}/jwks", deployment_ids=["dep-1"],
+        org2.id,
+        issuer=f"{ISS}-{uuid.uuid4().hex[:6]}",
+        client_id="tool-2",
+        auth_login_url=f"{ISS}/auth",
+        auth_token_url=f"{ISS}/token",
+        jwks_url=f"{ISS}/jwks",
+        deployment_ids=["dep-1"],
     )
     link2 = await svc2.map_resource_link(
-        org2.id, reg2.id, deployment_id="dep-1", resource_link_id="rl-1",
-        kind="project", target_id="01PROJXXXXXXXXXXXXXXXXXXXX",
+        org2.id,
+        reg2.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-1",
+        kind="project",
+        target_id="01PROJXXXXXXXXXXXXXXXXXXXX",
         grade_sync_enabled=True,
     )
     link2.ags_lineitem_url = f"{ISS}/ags/lineitems/other"
@@ -331,7 +340,10 @@ async def test_deep_linking_response_signed_and_verifiable(db):
         if k["kid"] == header["kid"]
     )
     claims = pyjwt.decode(
-        token, key=key, algorithms=["RS256"], audience=ISS,
+        token,
+        key=key,
+        algorithms=["RS256"],
+        audience=ISS,
         options={"require": ["exp", "iat", "iss", "aud", "nonce"]},
     )
     claim = "https://purl.imsglobal.org/spec/lti/claim/"
@@ -384,7 +396,10 @@ async def test_push_score_failure_and_guard_matrix(db):
     # Token endpoint refuses -> push reports failure.
     assert (
         await push_score(
-            db, link, user_id=user.id, score_given=1,
+            db,
+            link,
+            user_id=user.id,
+            score_given=1,
             egress=_RefusingPlatform(jwks, token_status=401),
         )
         is False
@@ -392,7 +407,10 @@ async def test_push_score_failure_and_guard_matrix(db):
     # Score endpoint 403 -> failure, never success.
     assert (
         await push_score(
-            db, link, user_id=user.id, score_given=1,
+            db,
+            link,
+            user_id=user.id,
+            score_given=1,
             egress=_RefusingPlatform(jwks, score_status=403),
         )
         is False

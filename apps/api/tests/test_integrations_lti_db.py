@@ -97,9 +97,7 @@ async def _org(db):
 class FakePlatform:
     async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
         if urlsplit(url).path.endswith("/jwks"):
-            return httpx.Response(
-                200, json={"keys": [_JWK]}, request=httpx.Request(method, url)
-            )
+            return httpx.Response(200, json={"keys": [_JWK]}, request=httpx.Request(method, url))
         return httpx.Response(404, request=httpx.Request(method, url))
 
 
@@ -211,14 +209,18 @@ async def test_launch_rejection_vectors(db):
     await expect_reject(**{f"{CLAIM}version": "1.1"})  # version
     await expect_reject(**{f"{CLAIM}message_type": "EvilMessage"})  # type
     await expect_reject(azp="other-client")  # azp
-    await expect_reject(
-        code="LTI_DEPLOYMENT_UNKNOWN", **{f"{CLAIM}deployment_id": "dep-ROGUE"}
-    )
+    await expect_reject(code="LTI_DEPLOYMENT_UNKNOWN", **{f"{CLAIM}deployment_id": "dep-ROGUE"})
     # alg=none / HS256 forgery with the public key as secret
     state, nonce = await _start(svc, reg)
     forged = pyjwt.encode(
-        {"iss": ISS, "aud": "tool-client-1", "sub": "x", "nonce": nonce,
-         "iat": int(time.time()), "exp": int(time.time()) + 600},
+        {
+            "iss": ISS,
+            "aud": "tool-client-1",
+            "sub": "x",
+            "nonce": nonce,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 600,
+        },
         "not-a-key",
         algorithm="HS256",
         headers={"kid": "lms-k1"},
@@ -383,8 +385,12 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
 
     # Launch with the NRPS claim: link captures the membership URL.
     link = await svc.map_resource_link(
-        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-1",
-        kind="skill", target_id="SKILL1",
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-1",
+        kind="skill",
+        target_id="SKILL1",
     )
     state, nonce = await _start(svc, reg)
     nrps_claim = {
@@ -401,14 +407,21 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
 
     # Fake platform: token endpoint verifies our assertion; two NRPS pages.
     page2_url = "https://lms.example.com/api/nrps/ctx-1?page=2"
-    m1 = {"user_id": "stu-1", "status": "Active", "email": f"n1@{_mint.domain}",
-          "name": "N One", "roles": [
-              "http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"]}
-    m2 = {"user_id": "teach-1", "status": "Active", "email": f"n2@{_mint.domain}",
-          "name": "N Two", "roles": [
-              "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"]}
-    m3 = {"user_id": "gone-1", "status": "Deleted", "email": f"n3@{_mint.domain}",
-          "roles": []}
+    m1 = {
+        "user_id": "stu-1",
+        "status": "Active",
+        "email": f"n1@{_mint.domain}",
+        "name": "N One",
+        "roles": ["http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"],
+    }
+    m2 = {
+        "user_id": "teach-1",
+        "status": "Active",
+        "email": f"n2@{_mint.domain}",
+        "name": "N Two",
+        "roles": ["http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor"],
+    }
+    m3 = {"user_id": "gone-1", "status": "Deleted", "email": f"n3@{_mint.domain}", "roles": []}
     m4 = {"user_id": "noemail-1", "status": "Active", "roles": []}
 
     class NrpsPlatform:
@@ -420,18 +433,21 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
             path = urlsplit(url).path
             if path.endswith("/token"):
                 return httpx.Response(
-                    200, json={"access_token": "nrps-tok"},
+                    200,
+                    json={"access_token": "nrps-tok"},
                     request=httpx.Request(method, url),
                 )
             assert headers["authorization"] == "Bearer nrps-tok"
             assert "membershipcontainer" in headers["accept"]
             if "page=2" in url:
                 return httpx.Response(
-                    200, json={"members": [m2, m3, m4]},
+                    200,
+                    json={"members": [m2, m3, m4]},
                     request=httpx.Request(method, url),
                 )
             return httpx.Response(
-                200, json={"members": [m1]},
+                200,
+                json={"members": [m1]},
                 headers={"link": f'<{page2_url}>; rel="next"'},
                 request=httpx.Request(method, url),
             )
@@ -441,7 +457,7 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
     assert report["read"] == 4
     assert report["resolved"] == 2 and report["jit_created"] == 2
     assert report["skipped"] == 1  # deleted member
-    assert report["queued"] == 1   # no email -> admin queue
+    assert report["queued"] == 1  # no email -> admin queue
     assert _json is not None and jwks is not None
 
     # Instructor got the instructor role; learner got student.
@@ -452,8 +468,11 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
 
     teach = (
         await db.execute(
-            select(MemberModel.role).join(UserModel, UserModel.id == MemberModel.user_id).where(
-                MemberModel.org_id == org.id, _f.lower(UserModel.email) == f"n2@{_mint.domain}".lower()
+            select(MemberModel.role)
+            .join(UserModel, UserModel.id == MemberModel.user_id)
+            .where(
+                MemberModel.org_id == org.id,
+                _f.lower(UserModel.email) == f"n2@{_mint.domain}".lower(),
             )
         )
     ).scalar_one()
@@ -464,20 +483,27 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
     # instructor assertion existed.
     stud = (
         await db.execute(
-            select(MemberModel.role).join(UserModel, UserModel.id == MemberModel.user_id).where(
-                MemberModel.org_id == org.id, _f.lower(UserModel.email) == f"n1@{_mint.domain}".lower()
+            select(MemberModel.role)
+            .join(UserModel, UserModel.id == MemberModel.user_id)
+            .where(
+                MemberModel.org_id == org.id,
+                _f.lower(UserModel.email) == f"n1@{_mint.domain}".lower(),
             )
         )
     ).scalar_one()
     assert stud.value == "student"
     q = (
-        await db.execute(
-            select(IdentityMatchQueue).where(
-                IdentityMatchQueue.org_id == org.id,
-                IdentityMatchQueue.subject == f"{ISS}|noemail-1",
+        (
+            await db.execute(
+                select(IdentityMatchQueue).where(
+                    IdentityMatchQueue.org_id == org.id,
+                    IdentityMatchQueue.subject == f"{ISS}|noemail-1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(q) == 1
 
     # Second sync: everyone linked -> resolved, nothing new.
@@ -534,7 +560,8 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
                     200, json={"access_token": "t"}, request=httpx.Request(method, url)
                 )
             return httpx.Response(
-                200, json={"members": []},
+                200,
+                json={"members": []},
                 headers={"link": '<https://169.254.169.254/x>; rel="next"'},
                 request=httpx.Request(method, url),
             )
@@ -556,7 +583,8 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
                 )
             self.data_calls += 1
             return httpx.Response(
-                200, json={"members": []},
+                200,
+                json={"members": []},
                 headers={"link": '<https://lms.example.com/api/nrps/ctx-1?loop=1>; rel="next"'},
                 request=httpx.Request(method, url),
             )
@@ -567,8 +595,12 @@ async def test_nrps_sync_provisions_members_with_pagination_and_ceiling(db):
 
     # No NRPS URL -> explicit 422 with guidance.
     link2 = await svc.map_resource_link(
-        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-2",
-        kind="skill", target_id="SKILL2",
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-2",
+        kind="skill",
+        target_id="SKILL2",
     )
     with pytest.raises(AppError) as exc2:
         await sync_memberships(db, org.id, link2.id, egress=platform)
@@ -624,7 +656,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
 
     platform = FakePlatform(config)
     reg = await dynamic_register(
-        db, org.id,
+        db,
+        org.id,
         openid_configuration_url=f"{iss}/.well-known/openid-configuration",
         registration_token="one-time-tok",
         egress=platform,
@@ -641,12 +674,14 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     from app.integrations.models import LtiDeployment
 
     deps = (
-        await db.execute(
-            _select(LtiDeployment.deployment_id).where(
-                LtiDeployment.registration_id == reg.id
+        (
+            await db.execute(
+                _select(LtiDeployment.deployment_id).where(LtiDeployment.registration_id == reg.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert sorted(deps) == ["dep-A", "dep-B"]
 
     # Missing required key (token_endpoint) -> CONFIG_INVALID.
@@ -655,7 +690,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     broken["issuer"] = f"{iss}/t-broken"
     with pytest.raises(AppError) as e_missing:
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{iss}/.well-known/openid-configuration",
             registration_token=None,
             egress=FakePlatform(broken),
@@ -675,7 +711,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     eb_cfg["issuer"] = f"{iss}/t-eb"
     with pytest.raises(AppError) as e_empty:
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{iss}/.well-known/openid-configuration",
             registration_token=None,
             egress=EmptyBody(eb_cfg),
@@ -688,7 +725,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     bare["issuer"] = f"{iss}/t-bare"
     with pytest.raises(AppError) as e1:
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{iss}/.well-known/openid-configuration",
             registration_token=None,
             egress=FakePlatform(bare),
@@ -703,7 +741,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
 
     with pytest.raises(EgressBlockedError):
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{iss}/.well-known/openid-configuration",
             registration_token=None,
             egress=FakePlatform(evil),
@@ -722,7 +761,8 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     ref_cfg["issuer"] = f"{iss}/t-ref"
     with pytest.raises(AppError) as e2:
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{iss}/.well-known/openid-configuration",
             registration_token="t",
             egress=Refusing(ref_cfg),
@@ -778,7 +818,8 @@ async def test_dynreg_rejects_cross_origin_issuer(db):
 
     with pytest.raises(AppError) as e:
         await dynamic_register(
-            db, org.id,
+            db,
+            org.id,
             openid_configuration_url=f"{lms}/.well-known/openid-configuration",
             registration_token=None,
             egress=Fake(),
@@ -799,7 +840,9 @@ async def test_lti_registration_caps(db):
     svc = LtiService(db)
     for i in range(MAX_LTI_REGISTRATIONS_PER_ORG):
         await svc.create_registration(
-            org.id, issuer=f"https://lms{i}.example.com", client_id="c1",
+            org.id,
+            issuer=f"https://lms{i}.example.com",
+            client_id="c1",
             auth_login_url=f"https://lms{i}.example.com/auth",
             auth_token_url=f"https://lms{i}.example.com/token",
             jwks_url=f"https://lms{i}.example.com/jwks",
@@ -807,7 +850,9 @@ async def test_lti_registration_caps(db):
         )
     with pytest.raises(AppError) as e:
         await svc.create_registration(
-            org.id, issuer="https://lms-over.example.com", client_id="c1",
+            org.id,
+            issuer="https://lms-over.example.com",
+            client_id="c1",
             auth_login_url="https://lms-over.example.com/auth",
             auth_token_url="https://lms-over.example.com/token",
             jwks_url="https://lms-over.example.com/jwks",
@@ -818,7 +863,9 @@ async def test_lti_registration_caps(db):
     org2, _owner2 = await _org(db)
     with pytest.raises(AppError) as e:
         await LtiService(db).create_registration(
-            org2.id, issuer="https://lms-dep.example.com", client_id="c1",
+            org2.id,
+            issuer="https://lms-dep.example.com",
+            client_id="c1",
             auth_login_url="https://lms-dep.example.com/auth",
             auth_token_url="https://lms-dep.example.com/token",
             jwks_url="https://lms-dep.example.com/jwks",

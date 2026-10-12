@@ -93,9 +93,7 @@ async def test_stream_config_rules(db):
     assert e.value.code == "EXPORT_DATASET_UNKNOWN"
     # a field outside the universe is refused AT CONFIG TIME
     with pytest.raises(AppError) as e2:
-        await svc.create_stream(
-            org.id, name="x", dataset="events", field_allowlist=["id", "data"]
-        )
+        await svc.create_stream(org.id, name="x", dataset="events", field_allowlist=["id", "data"])
     assert e2.value.code == "EXPORT_FIELD_NOT_ALLOWED"
     with pytest.raises(AppError) as e3:
         await svc.create_stream(
@@ -140,10 +138,7 @@ async def test_export_events_incremental_and_tenant_scoped(db):
     await db.flush()
     run2 = await svc.run_export(org.id, stream.id)
     assert run2.row_count == 1
-    rows2 = [
-        json.loads(line)
-        for line in writer.files[run2.parts[0]].decode().strip().split("\n")
-    ]
+    rows2 = [json.loads(line) for line in writer.files[run2.parts[0]].decode().strip().split("\n")]
     assert rows2[0]["subject"] == "p-new"
     # Empty incremental run: zero rows, no parts, cursor unchanged.
     run3 = await svc.run_export(org.id, stream.id)
@@ -181,10 +176,7 @@ async def test_export_enrollments_hash_and_drop(db):
     # default: user_id hashed
     s1 = await svc.create_stream(org.id, name=f"en-{ULID()}", dataset="enrollments")
     r1 = await svc.run_export(org.id, s1.id)
-    rows = [
-        json.loads(line)
-        for line in writer.files[r1.parts[0]].decode().strip().split("\n")
-    ]
+    rows = [json.loads(line) for line in writer.files[r1.parts[0]].decode().strip().split("\n")]
     assert rows[0]["user_id"] != learner.id  # hashed
     assert len(rows[0]["user_id"]) == 32
     assert rows[0]["cohort_name"].startswith("C ")
@@ -196,10 +188,7 @@ async def test_export_enrollments_hash_and_drop(db):
         anonymize={"user_id": "drop"},
     )
     r2 = await svc.run_export(org.id, s2.id)
-    rows2 = [
-        json.loads(line)
-        for line in writer.files[r2.parts[0]].decode().strip().split("\n")
-    ]
+    rows2 = [json.loads(line) for line in writer.files[r2.parts[0]].decode().strip().split("\n")]
     assert "user_id" not in rows2[0]
     # per-org salt: same user exported by another org hashes DIFFERENTLY
     salted = hashlib.sha256(f"x:{learner.id}".encode()).hexdigest()[:32]
@@ -216,9 +205,7 @@ async def test_sweep_scheduled_exports_runs_due_daily_streams(db):
     org, owner = await _org(db)
     writer = MemWriter()
     svc = WarehouseExportService(db, writer=writer)
-    daily = await svc.create_stream(
-        org.id, name=f"d-{ULID()}", dataset="events", schedule="daily"
-    )
+    daily = await svc.create_stream(org.id, name=f"d-{ULID()}", dataset="events", schedule="daily")
     manual = await svc.create_stream(org.id, name=f"m-{ULID()}", dataset="events")
     await emit_event(db, org.id, "project.approved", subject="s", data={})
     await db.flush()
@@ -259,12 +246,18 @@ async def test_narrowed_allowlist_disabled_gate_salt_pagination_failure(db, monk
     # (cross-org joinability guard).
     w1, w2 = MemWriter(), MemWriter()
     sa = await WarehouseExportService(db, writer=w1).create_stream(
-        org.id, name=f"ha-{ULID()}", dataset="events",
-        field_allowlist=["id", "subject"], anonymize={"subject": "hash"},
+        org.id,
+        name=f"ha-{ULID()}",
+        dataset="events",
+        field_allowlist=["id", "subject"],
+        anonymize={"subject": "hash"},
     )
     sb = await WarehouseExportService(db, writer=w2).create_stream(
-        org2.id, name=f"hb-{ULID()}", dataset="events",
-        field_allowlist=["id", "subject"], anonymize={"subject": "hash"},
+        org2.id,
+        name=f"hb-{ULID()}",
+        dataset="events",
+        field_allowlist=["id", "subject"],
+        anonymize={"subject": "hash"},
     )
     ra = await WarehouseExportService(db, writer=w1).run_export(org.id, sa.id)
     rb = await WarehouseExportService(db, writer=w2).run_export(org2.id, sb.id)
@@ -319,7 +312,8 @@ async def test_update_stream_edits_and_validates(db):
     s = await svc.create_stream(org.id, name=f"up-{ULID()}", dataset="events")
 
     out = await svc.update_stream(
-        org.id, s.id,
+        org.id,
+        s.id,
         field_allowlist=["id", "type"],
         anonymize={"subject": "hash"},
         schedule="daily",
@@ -392,12 +386,17 @@ async def test_export_enrollments_tenant_isolation(db):
         learner = User(
             email=f"iso-{uuid.uuid4().hex[:8]}@test.com",
             password_hash=hash_password("Test123!"),
-            display_name="L", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+            display_name="L",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
         )
         db.add(learner)
         await db.flush()
-        db.add(OrgMember(org_id=org.id, user_id=learner.id, role=OrgRole.STUDENT,
-                         status=MemberStatus.ACTIVE))
+        db.add(
+            OrgMember(
+                org_id=org.id, user_id=learner.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+            )
+        )
         await db.flush()
         await csvc.add_member(cohort.id, learner.id, CohortRole.LEARNER, org.id)
         orgs.append((org, cohort.id))
@@ -409,8 +408,11 @@ async def test_export_enrollments_tenant_isolation(db):
         others = {c for o, c in orgs if o.id != org.id}
         writer = MemWriter()
         s = await WarehouseExportService(db, writer=writer).create_stream(
-            org.id, name=f"en-{ULID()}", dataset="enrollments",
-            field_allowlist=["id", "cohort_id", "role"], anonymize={},
+            org.id,
+            name=f"en-{ULID()}",
+            dataset="enrollments",
+            field_allowlist=["id", "cohort_id", "role"],
+            anonymize={},
         )
         run = await WarehouseExportService(db, writer=writer).run_export(org.id, s.id)
         cohort_ids = set()
@@ -429,7 +431,10 @@ async def test_per_key_data_selection(db):
     dataset scoping enforced."""
     org, _ = await _org(db)
     await emit_event(
-        db, org.id, "project.approved", subject="p1",
+        db,
+        org.id,
+        "project.approved",
+        subject="p1",
         data={"score": 97, "secret_note": "do not export", "learner": "u_1"},
     )
     await db.flush()
@@ -437,7 +442,9 @@ async def test_per_key_data_selection(db):
     svc = WarehouseExportService(db, writer=writer)
 
     stream = await svc.create_stream(
-        org.id, name=f"dk-{ULID()}", dataset="events",
+        org.id,
+        name=f"dk-{ULID()}",
+        dataset="events",
         field_allowlist=["id", "type", "data.score", "data.learner", "data.absent"],
         anonymize={"data.learner": "hash"},
     )
@@ -460,13 +467,17 @@ async def test_per_key_data_selection(db):
         assert e.value.code == "EXPORT_FIELD_NOT_ALLOWED", bad
     with pytest.raises(AppError) as e2:
         await svc.create_stream(
-            org.id, name=f"bad-{ULID()}", dataset="enrollments",
+            org.id,
+            name=f"bad-{ULID()}",
+            dataset="enrollments",
             field_allowlist=["id", "data.score"],
         )
     assert e2.value.code == "EXPORT_FIELD_NOT_ALLOWED"
     with pytest.raises(AppError) as e3:
         await svc.create_stream(
-            org.id, name=f"bad-{ULID()}", dataset="events",
+            org.id,
+            name=f"bad-{ULID()}",
+            dataset="events",
             field_allowlist=[f"data.k{i}" for i in range(21)],
         )
     assert e3.value.code == "EXPORT_CONFIG_INVALID"
@@ -474,9 +485,7 @@ async def test_per_key_data_selection(db):
     # update_stream enforces the same rules
     with pytest.raises(AppError):
         await svc.update_stream(org.id, stream.id, field_allowlist=["data"])
-    updated = await svc.update_stream(
-        org.id, stream.id, field_allowlist=["id", "data.score"]
-    )
+    updated = await svc.update_stream(org.id, stream.id, field_allowlist=["id", "data.score"])
     assert updated.field_allowlist == ["id", "data.score"]
 
 
@@ -558,9 +567,7 @@ async def test_concurrent_run_export_serializes_on_stream_lock(db):
 
     async def _run():
         async with AsyncSessionLocal() as s:
-            run = await WarehouseExportService(s, writer=SlowWriter()).run_export(
-                org.id, stream.id
-            )
+            run = await WarehouseExportService(s, writer=SlowWriter()).run_export(org.id, stream.id)
             counts = (run.status, run.row_count or 0)
             await s.commit()
             return counts
@@ -597,6 +604,6 @@ async def test_sweep_never_runs_manual_or_disabled_streams(db):
     await sweep_scheduled_exports(db, writer)
     for s in (manual, hourly_off):
         runs = (
-            await db.execute(select(ExportRun).where(ExportRun.stream_id == s.id))
-        ).scalars().all()
+            (await db.execute(select(ExportRun).where(ExportRun.stream_id == s.id))).scalars().all()
+        )
         assert runs == [], f"stream {s.schedule}/{s.enabled} must not auto-run"

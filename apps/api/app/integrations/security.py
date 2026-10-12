@@ -169,7 +169,10 @@ class EgressClient:
             # worker before the "cap" ever ran. Reject early on a declared
             # Content-Length, else count chunks and cut the connection.
             req = client.build_request(
-                method, pinned_url, headers=send_headers, content=content,
+                method,
+                pinned_url,
+                headers=send_headers,
+                content=content,
                 extensions=extensions,
             )
             resp = await client.send(req, stream=True)

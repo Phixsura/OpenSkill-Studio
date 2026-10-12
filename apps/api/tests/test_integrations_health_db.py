@@ -50,13 +50,16 @@ async def _org(db, user):
         with_trial=False,
     )
     org = Organization(
-        name=f"Org {ULID()}", slug=f"o-{str(ULID()).lower()}", status=OrgStatus.ACTIVE,
+        name=f"Org {ULID()}",
+        slug=f"o-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
         tenant_id=tenant.id,
     )
     db.add(org)
     await db.flush()
-    db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER,
-                     status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE)
+    )
     await db.flush()
     return org
 
@@ -75,18 +78,31 @@ async def test_health_counts_are_org_scoped(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     await csvc.create(
-        org.id, provider_key="generic_webhook", name=f"h-{uuid.uuid4().hex[:6]}",
-        config={}, base_url="https://x.example.com", created_by=owner.id,
+        org.id,
+        provider_key="generic_webhook",
+        name=f"h-{uuid.uuid4().hex[:6]}",
+        config={},
+        base_url="https://x.example.com",
+        created_by=owner.id,
     )
     # Noise in ANOTHER org must not leak into this org's counts.
     await csvc.create(
-        other.id, provider_key="generic_webhook", name=f"h-{uuid.uuid4().hex[:6]}",
-        config={}, base_url="https://y.example.com", created_by=other_owner.id,
+        other.id,
+        provider_key="generic_webhook",
+        name=f"h-{uuid.uuid4().hex[:6]}",
+        config={},
+        base_url="https://y.example.com",
+        created_by=other_owner.id,
     )
-    db.add(WebhookSubscription(
-        org_id=org.id, url="https://sink.example.com/h", events=["project.approved"],
-        secret="whsec_x", active=False,
-    ))
+    db.add(
+        WebhookSubscription(
+            org_id=org.id,
+            url="https://sink.example.com/h",
+            events=["project.approved"],
+            secret="whsec_x",
+            active=False,
+        )
+    )
     await db.flush()
 
     out = await fabric_health(org.id, db=db, user=owner)
@@ -122,8 +138,11 @@ async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
     owner = await _user(db)
     org = await _org(db, owner)
     sub = WebhookSubscription(
-        org_id=org.id, url="https://sink.example.com/h",
-        events=["project.approved"], secret="b" * 64, active=True,
+        org_id=org.id,
+        url="https://sink.example.com/h",
+        events=["project.approved"],
+        secret="b" * 64,
+        active=True,
     )
     db.add(sub)
     await db.flush()
@@ -190,9 +209,12 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
     await svc.sync_provider_catalog()
     await db.flush()
     conn = await svc.create(
-        org.id, provider_key="oneroster", name=f"hs-{uuid.uuid4().hex[:6]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"hs-{uuid.uuid4().hex[:6]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=user.id,
     )
     conn.status = "active"
     await db.flush()
@@ -228,14 +250,18 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
         await db.refresh(conn)
         assert conn.status == "error"
         events = (
-            await db.execute(
-                _select(IntegrationEvent).where(
-                    IntegrationEvent.subject == conn.id,
-                    IntegrationEvent.type
-                    == "com.openskill.integration.connection.unhealthy.v1",
+            (
+                await db.execute(
+                    _select(IntegrationEvent).where(
+                        IntegrationEvent.subject == conn.id,
+                        IntegrationEvent.type
+                        == "com.openskill.integration.connection.unhealthy.v1",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(events) == 1
         assert events[0].data["error_class"] == "CONNECTION_AUTH_REJECTED"
         # Error connections are NOT pinged again (load guard) — count calls.
@@ -271,10 +297,10 @@ async def test_connection_health_sweep_pings_and_alerts_on_transition(db):
         # Error connections are NOT re-swept (not in active/degraded).
         await svc.sweep_connection_health(limit=100_000)
         events2 = (
-            await db.execute(
-                _select(IntegrationEvent).where(IntegrationEvent.subject == conn.id)
-            )
-        ).scalars().all()
+            (await db.execute(_select(IntegrationEvent).where(IntegrationEvent.subject == conn.id)))
+            .scalars()
+            .all()
+        )
         assert len(events2) == 1
     finally:
         registry.CONNECTORS.clear()
@@ -300,8 +326,12 @@ async def test_health_sweep_slice_is_stalest_first_and_rotates(db):
     conns = []
     for _i in range(2):
         c = await svc.create(
-            org.id, provider_key="generic_rest", name=f"hs-{uuid.uuid4().hex[:8]}",
-            config={}, base_url="https://api.example.com/v1", created_by=owner.id,
+            org.id,
+            provider_key="generic_rest",
+            name=f"hs-{uuid.uuid4().hex[:8]}",
+            config={},
+            base_url="https://api.example.com/v1",
+            created_by=owner.id,
         )
         c.status = "active"
         conns.append(c)
@@ -333,9 +363,9 @@ async def test_health_sweep_slice_is_stalest_first_and_rotates(db):
 
         for idx, c in enumerate(conns):
             await db.execute(
-                _update(IntgConn).where(IntgConn.id == c.id).values(
-                    updated_at=_dt(2000, 1, 1 + idx, tzinfo=_UTC)
-                )
+                _update(IntgConn)
+                .where(IntgConn.id == c.id)
+                .values(updated_at=_dt(2000, 1, 1 + idx, tzinfo=_UTC))
             )
         await db.commit()
         await svc.sweep_connection_health(limit=1)
@@ -370,9 +400,12 @@ async def test_degraded_connection_alert_is_edge_triggered(db):
     await svc.sync_provider_catalog()
     await db.flush()
     conn = await svc.create(
-        org.id, provider_key="oneroster", name=f"eg-{uuid.uuid4().hex[:6]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"eg-{uuid.uuid4().hex[:6]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=user.id,
     )
     conn.status = "active"
     await db.flush()
@@ -403,14 +436,18 @@ async def test_degraded_connection_alert_is_edge_triggered(db):
         await svc.sweep_connection_health(limit=100_000)
         await svc.sweep_connection_health(limit=100_000)
         events = (
-            await db.execute(
-                _select(IntegrationEvent).where(
-                    IntegrationEvent.subject == conn.id,
-                    IntegrationEvent.type
-                    == "com.openskill.integration.connection.unhealthy.v1",
+            (
+                await db.execute(
+                    _select(IntegrationEvent).where(
+                        IntegrationEvent.subject == conn.id,
+                        IntegrationEvent.type
+                        == "com.openskill.integration.connection.unhealthy.v1",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(events) == 1  # edge-triggered, never per-sweep
     finally:
         registry.CONNECTORS.clear()

@@ -62,7 +62,6 @@ def _secret_loader_for(db: AsyncSession, connection_id: str):
     return load
 
 
-
 log = structlog.get_logger()
 
 TOPIC_SYNC_RUN = "intg.sync.run"
@@ -130,9 +129,7 @@ class SyncProfileService:
         await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         count = len(
             (
-                await self.db.execute(
-                    select(SyncProfile.id).where(SyncProfile.org_id == org_id)
-                )
+                await self.db.execute(select(SyncProfile.id).where(SyncProfile.org_id == org_id))
             ).all()
         )
         if count >= MAX_SYNC_PROFILES_PER_ORG:
@@ -165,9 +162,7 @@ class SyncProfileService:
     def _validate_field_policy(policy: dict) -> None:
         for field, rule in policy.items():
             if not isinstance(field, str) or rule not in FIELD_POLICIES:
-                raise AppError(
-                    "SYNC_PROFILE_INVALID", f"bad field policy for {field!r}", 422
-                )
+                raise AppError("SYNC_PROFILE_INVALID", f"bad field policy for {field!r}", 422)
 
     async def _check_capability(
         self, conn: IntegrationConnection, model: str, direction: str
@@ -249,7 +244,9 @@ class SyncProfileService:
         except AppError:
             raise
         except Exception as exc:
-            raise AppError("SYNC_PREVIEW_FAILED", f"connector read failed: {type(exc).__name__}", 502) from exc
+            raise AppError(
+                "SYNC_PREVIEW_FAILED", f"connector read failed: {type(exc).__name__}", 502
+            ) from exc
         return {"model": profile.model, "count": len(records), "records": records}
 
     async def list(self, org_id: str) -> list[SyncProfile]:
@@ -328,9 +325,7 @@ class SyncProfileService:
         if live is not None:
             return live
         cursor_in = {} if trigger == "backfill" else await self._last_cursor(profile.id)
-        run = SyncRun(
-            profile_id=profile.id, status="queued", trigger=trigger, cursor_in=cursor_in
-        )
+        run = SyncRun(profile_id=profile.id, status="queued", trigger=trigger, cursor_in=cursor_in)
         try:
             async with self.db.begin_nested():
                 self.db.add(run)
@@ -565,7 +560,13 @@ async def execute_run(db: AsyncSession, run_id: str) -> None:
                     staged_map = {r.external_id: r for r in rows_pref}
                 for raw in chunk:
                     outcome, detail = await _apply_record(
-                        db, run, profile, conn, mapping_doc, raw, seen_external_ids,
+                        db,
+                        run,
+                        profile,
+                        conn,
+                        mapping_doc,
+                        raw,
+                        seen_external_ids,
                         staged_map,
                     )
                     stats[outcome] = stats.get(outcome, 0) + 1
@@ -1035,7 +1036,9 @@ def _ts(value) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-async def _finish(db: AsyncSession, run: SyncRun, status: str, *, error: dict | None = None) -> None:
+async def _finish(
+    db: AsyncSession, run: SyncRun, status: str, *, error: dict | None = None
+) -> None:
     # R306: the terminal transition is an atomic claim — an operator may
     # CANCEL a running run while the worker is mid-execution; without the
     # WHERE guard the worker's finish would overwrite the operator's
@@ -1075,13 +1078,17 @@ async def sweep_scheduled_profiles(db: AsyncSession) -> int:
     """Worker cron: trigger enabled hourly/daily profiles whose last run is
     older than their period (nothing else drives `schedule` — R11 gap)."""
     profiles = (
-        await db.execute(
-            select(SyncProfile).where(
-                SyncProfile.enabled.is_(True),
-                SyncProfile.schedule.in_(("hourly", "daily")),
+        (
+            await db.execute(
+                select(SyncProfile).where(
+                    SyncProfile.enabled.is_(True),
+                    SyncProfile.schedule.in_(("hourly", "daily")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     triggered = 0
     now = datetime.now(UTC)
     for profile in profiles:
@@ -1100,14 +1107,10 @@ async def sweep_scheduled_profiles(db: AsyncSession) -> int:
             if now - last < period:
                 continue
         try:
-            await SyncProfileService(db).trigger(
-                profile.org_id, profile.id, trigger="schedule"
-            )
+            await SyncProfileService(db).trigger(profile.org_id, profile.id, trigger="schedule")
             triggered += 1
         except AppError as exc:
-            log.warning(
-                "scheduled_sync_skipped", profile_id=profile.id, code=exc.code
-            )
+            log.warning("scheduled_sync_skipped", profile_id=profile.id, code=exc.code)
     return triggered
 
 

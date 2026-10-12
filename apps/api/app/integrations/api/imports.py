@@ -115,7 +115,12 @@ async def upload_import(
     resp = _resp(job)
     # R138 (Part O): bulk provisioning is exactly what auditors ask about.
     await record_fabric_audit(
-        db, org_id, user.id, "intg.import.created", "import_job", job.id,
+        db,
+        org_id,
+        user.id,
+        "intg.import.created",
+        "import_job",
+        job.id,
         after={"kind": job.kind, "mode": job.mode, "dry_stats": job.dry_stats},
     )
     await db.commit()
@@ -160,13 +165,17 @@ async def list_imports(
 
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     rows = (
-        await db.execute(
-            select(ImportJob)
-            .where(ImportJob.org_id == org_id)
-            .order_by(ImportJob.created_at.desc())
-            .limit(50)
+        (
+            await db.execute(
+                select(ImportJob)
+                .where(ImportJob.org_id == org_id)
+                .order_by(ImportJob.created_at.desc())
+                .limit(50)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {"data": [ImportJobResponse.model_validate(r, from_attributes=True) for r in rows]}
 
 
@@ -199,7 +208,12 @@ async def commit_import(
     job = await svc.commit(org_id, job_id, file_bytes=content)
     resp = _resp(job)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.import.committed", "import_job", job.id,
+        db,
+        org_id,
+        user.id,
+        "intg.import.committed",
+        "import_job",
+        job.id,
         after={"kind": job.kind, "status": job.status, "stats": job.stats},
     )
     # R143: downstream systems (SIS/HRIS webhooks) can react to bulk
@@ -207,7 +221,9 @@ async def commit_import(
     from app.integrations.facade import emit_event
 
     await emit_event(
-        db, org_id, "org.import.committed",
+        db,
+        org_id,
+        "org.import.committed",
         subject=job.id,
         data={"kind": job.kind, "status": job.status, "stats": job.stats},
     )

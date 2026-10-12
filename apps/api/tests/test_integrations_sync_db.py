@@ -106,9 +106,7 @@ def test_validate_document_matrix():
     )
     assert any(
         "must be a list" in p
-        for p in validate_document(
-            {"fields": [{"target": "x", "path": "a", "transform": "trim"}]}
-        )
+        for p in validate_document({"fields": [{"target": "x", "path": "a", "transform": "trim"}]})
     )
 
 
@@ -238,14 +236,10 @@ def test_apply_mapping_matrix():
     )
     assert e4[0]["code"] == "transform_to_int"
     # non-finite floats are rejected at the boundary (R87)
-    _, e5 = apply_mapping(
-        {"fields": [{"target": "v", "path": "x"}]}, {"x": float("inf")}
-    )
+    _, e5 = apply_mapping({"fields": [{"target": "v", "path": "x"}]}, {"x": float("inf")})
     assert e5[0]["code"] == "non_finite"
     # oversized string rejected
-    _, e6 = apply_mapping(
-        {"fields": [{"target": "s", "path": "x"}]}, {"x": "y" * 20_000}
-    )
+    _, e6 = apply_mapping({"fields": [{"target": "s", "path": "x"}]}, {"x": "y" * 20_000})
     assert e6[0]["code"] == "too_long"
 
 
@@ -275,9 +269,7 @@ async def test_mapping_profile_crud_and_version_bump(db):
             document={"fields": [{"target": "x", "path": "a[["}]},
         )
     assert e2.value.code == "MAPPING_EXPRESSION_INVALID"
-    p2 = await svc.update_document(
-        org.id, p.id, {"fields": [{"target": "title", "path": "title"}]}
-    )
+    p2 = await svc.update_document(org.id, p.id, {"fields": [{"target": "title", "path": "title"}]})
     assert p2.version == 2
     preview = await svc.preview(org.id, p.id, [{"title": "A"}])
     assert preview[0]["mapped"] == {"title": "A"}
@@ -405,10 +397,10 @@ async def test_run_happy_path_counts_and_cursor(db):
     assert run.stats["read"] == 3 and run.stats["created"] == 3
     assert run.cursor_out == {"batch": 2}
     staged = (
-        await db.execute(
-            select(StagedRecord).where(StagedRecord.connection_id == conn.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(StagedRecord).where(StagedRecord.connection_id == conn.id)))
+        .scalars()
+        .all()
+    )
     assert len(staged) == 3
 
     # Second incremental run with unchanged data: all unchanged, cursor resumes.
@@ -424,8 +416,10 @@ async def test_run_happy_path_counts_and_cursor(db):
     assert runb.stats["unchanged"] == 1 and runb.status == "succeeded"
     # unchanged leaves NO record rows (§11.4 — counters only)
     rows = (
-        await db.execute(select(SyncRecordResult).where(SyncRecordResult.run_id == runb.id))
-    ).scalars().all()
+        (await db.execute(select(SyncRecordResult).where(SyncRecordResult.run_id == runb.id)))
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 
@@ -456,10 +450,10 @@ async def test_crash_resumes_from_committed_cursor_no_dupes(db):
     await db.refresh(run2)
     assert run2.status == "succeeded"
     staged = (
-        await db.execute(
-            select(StagedRecord).where(StagedRecord.connection_id == conn.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(StagedRecord).where(StagedRecord.connection_id == conn.id)))
+        .scalars()
+        .all()
+    )
     assert sorted(s.external_id for s in staged) == ["r1", "r2"]
     # the re-read r1 counted as unchanged, not duplicate-created
     assert run2.stats["created"] == 1 and run2.stats["unchanged"] == 1
@@ -516,7 +510,9 @@ async def test_tombstones_only_on_backfill(db):
     # Incremental delta missing t2: NOT a delete.
     from app.integrations import registry
 
-    registry.CONNECTORS["oneroster"] = FakeRosterConnector([[{"external_id": "t1"}]], respect_state=False)
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "t1"}]], respect_state=False
+    )
     run2 = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
     await execute_run(db, run2.id)
@@ -530,7 +526,9 @@ async def test_tombstones_only_on_backfill(db):
     assert t2.status == "active"
 
     # Backfill snapshot missing t2: tombstoned (never deleted).
-    registry.CONNECTORS["oneroster"] = FakeRosterConnector([[{"external_id": "t1"}]], respect_state=False)
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "t1"}]], respect_state=False
+    )
     run3 = await SyncProfileService(db).trigger(org.id, profile.id, trigger="backfill")
     await db.commit()
     await execute_run(db, run3.id)
@@ -591,7 +589,7 @@ async def test_field_policy_ours_theirs_prefer_and_clock(db):
                     "updated_at": "2026-10-11T00:00:00+00:00",  # newer than ours
                 }
             ]
-        ]
+        ],
     )
     run2 = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
@@ -773,7 +771,9 @@ async def test_echo_suppression(db):
     # The provider reflects our own write back: must count as unchanged.
     from app.integrations import registry
 
-    registry.CONNECTORS["oneroster"] = FakeRosterConnector([[{"external_id": "e1", "v": "pushed"}]], respect_state=False)
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "e1", "v": "pushed"}]], respect_state=False
+    )
     run2 = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
     await execute_run(db, run2.id)
@@ -833,10 +833,14 @@ async def test_disabled_provider_refuses_trigger(db):
     fake = FakeRosterConnector([[]])
     conn, profile = await _setup_profile(db, org, owner, fake)
     provider = (
-        await db.execute(
-            select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+        (
+            await db.execute(
+                select(IntegrationProvider).where(IntegrationProvider.key == "oneroster")
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     provider.enabled = False
     await db.flush()
     with pytest.raises(AppError) as e:
@@ -880,23 +884,25 @@ async def test_sweep_scheduled_profiles_triggers_due_only(db):
     # due again an hour later (time-dependent pollution).
     assert await sweep_scheduled_profiles(db) >= 1
     run = (
-        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
-    ).scalars().first()
+        (await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id)))
+        .scalars()
+        .first()
+    )
     assert run is not None and run.trigger == "schedule"
     # A live run exists -> idempotent trigger returns it; sweep counts it but
     # creates no second run.
     await sweep_scheduled_profiles(db)
     runs = (
-        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
-    ).scalars().all()
+        (await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))).scalars().all()
+    )
     assert len(runs) == 1
     # Finish the run recently -> NOT due within the hour (profile-scoped).
     runs[0].status = "succeeded"
     await db.commit()
     await sweep_scheduled_profiles(db)
     runs_after = (
-        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
-    ).scalars().all()
+        (await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))).scalars().all()
+    )
     assert len(runs_after) == 1
 
 
@@ -1006,14 +1012,20 @@ async def test_profile_update_and_mapping_repin(db):
     org, owner = await _org(db)
     fake = FakeRosterConnector([[]])
     conn, profile = await _setup_profile(
-        db, org, owner, fake,
+        db,
+        org,
+        owner,
+        fake,
         mapping={"fields": [{"target": "title", "path": "title"}]},
     )
     svc = SyncProfileService(db)
     assert profile.mapping_version == 1
 
     out = await svc.update(
-        org.id, profile.id, schedule="hourly", enabled=False,
+        org.id,
+        profile.id,
+        schedule="hourly",
+        enabled=False,
         field_policy={"_default": "theirs"},
     )
     assert out.schedule == "hourly" and out.enabled is False
@@ -1047,7 +1059,10 @@ async def test_delete_guards_profile_busy_and_mapping_in_use(db):
     org, owner = await _org(db)
     fake = FakeRosterConnector([[]])
     conn, profile = await _setup_profile(
-        db, org, owner, fake,
+        db,
+        org,
+        owner,
+        fake,
         mapping={"fields": [{"target": "title", "path": "title"}]},
     )
     mapping_id = profile.mapping_profile_id
@@ -1082,8 +1097,7 @@ async def test_strict_schema_gate_blocks_broken_mappings(db):
 
     org, owner = await _org(db)
     fake = FakeRosterConnector(
-        [[{"external_id": "ok-1", "title": "Has Title"},
-          {"external_id": "bad-1", "v": "no-title"}]]
+        [[{"external_id": "ok-1", "title": "Has Title"}, {"external_id": "bad-1", "v": "no-title"}]]
     )
     conn, profile = await _setup_profile(db, org, owner, fake)
     profile.options = {"strict_schema": True}
@@ -1140,21 +1154,27 @@ async def test_admin_mutations_write_audit_rows(db):
 
     doc = {"fields": [{"target": "title", "path": "title"}]}
     body = sync_api.MappingCreateRequest(
-        name=f"au-{uuid.uuid4().hex[:6]}", direction="inbound",
-        model="roster.class", document=doc,
+        name=f"au-{uuid.uuid4().hex[:6]}",
+        direction="inbound",
+        model="roster.class",
+        document=doc,
     )
     out = await create_mapping(org.id, body, db=db, user=owner_user)
     await db.commit()
     mp_id = out["data"].id
 
     rows = (
-        await db.execute(
-            _select(AuditEvent).where(
-                AuditEvent.target_type == "mapping_profile",
-                AuditEvent.target_id == mp_id,
+        (
+            await db.execute(
+                _select(AuditEvent).where(
+                    AuditEvent.target_type == "mapping_profile",
+                    AuditEvent.target_id == mp_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [r.action for r in rows] == ["intg.mapping.created"]
     assert rows[0].actor_user_id == owner.id
     assert rows[0].tenant_id == org.tenant_id  # scoped to the tenant
@@ -1225,8 +1245,12 @@ async def test_bidirectional_profile_rejected(db):
     conn, _p = await _setup_profile(db, org, owner, fake)
     with pytest.raises(AppError) as exc:
         await SyncProfileService(db).create(
-            org.id, connection_id=conn.id, name=f"bi-{uuid.uuid4().hex[:6]}",
-            model="roster.class", direction="bidirectional", mapping_profile_id=None,
+            org.id,
+            connection_id=conn.id,
+            name=f"bi-{uuid.uuid4().hex[:6]}",
+            model="roster.class",
+            direction="bidirectional",
+            mapping_profile_id=None,
         )
     assert exc.value.code == "SYNC_PROFILE_INVALID"
     assert "bidirectional" in exc.value.message
@@ -1269,10 +1293,9 @@ async def test_connection_delete_refuses_while_run_live(db):
     run_id = run.id
     await ConnectionService(db).delete(org.id, conn.id)  # now allowed
     from sqlalchemy import func as _func
+
     n = (
-        await db.execute(
-            select(_func.count()).select_from(SyncRun).where(SyncRun.id == run_id)
-        )
+        await db.execute(select(_func.count()).select_from(SyncRun).where(SyncRun.id == run_id))
     ).scalar_one()
     assert n == 0  # cascade cleaned the run
 
@@ -1305,12 +1328,15 @@ async def test_clock_conflict_tolerates_naive_provider_timestamp(db):
 
     registry.CONNECTORS["oneroster"] = FakeRosterConnector(
         respect_state=False,
-        batches=[[
-            {
-                "external_id": "n1", "timed": "REMOTE",
-                "updated_at": "2026-10-11T00:00:00",  # NAIVE, newer than ours
-            }
-        ]],
+        batches=[
+            [
+                {
+                    "external_id": "n1",
+                    "timed": "REMOTE",
+                    "updated_at": "2026-10-11T00:00:00",  # NAIVE, newer than ours
+                }
+            ]
+        ],
     )
     run2 = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
@@ -1347,13 +1373,18 @@ async def test_sync_run_loads_connection_credentials(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn = await csvc.create(
-        org.id, provider_key="oneroster", name=f"c-{uuid.uuid4().hex[:8]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"c-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner.id,
     )
     conn.status = "active"
     await csvc.set_credential(
-        org.id, conn.id, kind="client_secret",
+        org.id,
+        conn.id,
+        kind="client_secret",
         values={"client_id": "cid-123", "client_secret": "shhh-secret"},
         expires_at=None,
     )
@@ -1361,8 +1392,12 @@ async def test_sync_run_loads_connection_credentials(db):
     registry.CONNECTORS["oneroster"] = SecretCapturingConnector()
 
     profile = await SyncProfileService(db).create(
-        org.id, connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org.id,
+        connection_id=conn.id,
+        name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     run = await SyncProfileService(db).trigger(org.id, profile.id)
     await db.commit()
@@ -1385,7 +1420,10 @@ async def test_sync_preview_pull_dry_run(db):
         [[{"external_id": "pv1", "title": "Algebra"}, {"external_id": "pv2", "title": "Calc"}]]
     )
     conn, profile = await _setup_profile(
-        db, org, owner, fake,
+        db,
+        org,
+        owner,
+        fake,
         mapping={"fields": [{"target": "title", "path": "title", "transform": ["upper"]}]},
     )
 
@@ -1413,16 +1451,12 @@ async def test_sync_preview_pull_dry_run(db):
     # No side effects: no staged records, no run rows for this profile.
     staged = (
         await db.execute(
-            _func.count(StagedRecord.id).select().where(
-                StagedRecord.connection_id == conn.id
-            )
+            _func.count(StagedRecord.id).select().where(StagedRecord.connection_id == conn.id)
         )
     ).scalar()
     assert staged in (0, None)
     runs = (
-        await db.execute(
-            select(_func.count(SyncRun.id)).where(SyncRun.profile_id == profile.id)
-        )
+        await db.execute(select(_func.count(SyncRun.id)).where(SyncRun.profile_id == profile.id))
     ).scalar_one()
     assert runs == 0
 
@@ -1463,13 +1497,17 @@ async def test_overfull_connector_page_fully_staged_never_mistombstoned(db, monk
     await se.execute_run(db, run.id)
 
     staged = (
-        await db.execute(
-            select(StagedRecord).where(
-                StagedRecord.connection_id == conn.id,
-                StagedRecord.model == "roster.class",
+        (
+            await db.execute(
+                select(StagedRecord).where(
+                    StagedRecord.connection_id == conn.id,
+                    StagedRecord.model == "roster.class",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(staged) == 8
     assert all(s.status == "active" for s in staged)  # none mis-tombstoned
     refetched = await db.get(type(run), run.id)
@@ -1492,8 +1530,7 @@ async def test_staged_lookup_batched_not_per_record(db, monkeypatch):
     monkeypatch.setattr(se, "BATCH_SIZE", 3)
     org, owner = await _org(db)
     pages = [
-        [{"sourcedId": f"nq-{p}-{i}", "title": f"C{p}{i}", "status": "active"}
-         for i in range(6)]
+        [{"sourcedId": f"nq-{p}-{i}", "title": f"C{p}{i}", "status": "active"} for i in range(6)]
         for p in range(2)
     ]
     conn, profile = await _setup_profile(db, org, owner, FakeRosterConnector(pages))
@@ -1513,9 +1550,7 @@ async def test_staged_lookup_batched_not_per_record(db, monkeypatch):
     finally:
         event.remove(sync_engine_, "before_cursor_execute", _count)
 
-    refetched = (
-        await db.execute(select(type(run)).where(type(run).id == run.id))
-    ).scalar_one()
+    refetched = (await db.execute(select(type(run)).where(type(run).id == run.id))).scalar_one()
     assert refetched.status == "succeeded" and refetched.stats["created"] == 12
     assert counts["staged_selects"] <= 6, counts
 
@@ -1544,8 +1579,8 @@ async def test_scheduled_sweep_never_triggers_manual_profiles(db):
     await db.commit()
     await sweep_scheduled_profiles(db)
     runs = (
-        await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))
-    ).scalars().all()
+        (await db.execute(select(SyncRun).where(SyncRun.profile_id == profile.id))).scalars().all()
+    )
     assert runs == []
 
 
@@ -1573,8 +1608,11 @@ async def test_conflict_resolve_requires_result_belongs_to_run(db):
     _conn_b, prof_b = await _setup_profile(db, org_b, owner_b, FakeRosterConnector([[]]))
     run_b = await SyncProfileService(db).trigger(org_b.id, prof_b.id)
     conflict_b = SyncRecordResult(
-        run_id=run_b.id, external_id="x-1", model="roster.class",
-        outcome="conflict", conflict_class="clock_unresolvable",
+        run_id=run_b.id,
+        external_id="x-1",
+        model="roster.class",
+        outcome="conflict",
+        conflict_class="clock_unresolvable",
         detail={"field": "title", "ours": "a", "theirs": "b"},
     )
     db.add(conflict_b)
@@ -1599,13 +1637,9 @@ async def test_mapping_field_count_cap(db):
     compile list per save (CPU/JSONB blow-up at every sync run)."""
     from app.integrations.services.mapping import MAX_FIELDS, validate_document
 
-    ok_doc = {
-        "fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS)]
-    }
+    ok_doc = {"fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS)]}
     assert validate_document(ok_doc) == []
-    over = {
-        "fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS + 1)]
-    }
+    over = {"fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS + 1)]}
     problems = validate_document(over)
     assert problems and "more than" in problems[0]
 
@@ -1634,18 +1668,24 @@ async def test_per_org_sprawl_caps(db):
     first = None
     for i in range(MAX_CONNECTIONS_PER_ORG):
         c = await csvc.create(
-            org.id, provider_key="oneroster", name=f"cap-{i}",
+            org.id,
+            provider_key="oneroster",
+            name=f"cap-{i}",
             config={"token_url": "https://idp.example.com/token"},
-            base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+            base_url="https://sis.example.com/ims/oneroster",
+            created_by=owner.id,
         )
         if first is None:
             first = c
             first.status = "active"
     with pytest.raises(AppError) as e:
         await csvc.create(
-            org.id, provider_key="oneroster", name="over",
+            org.id,
+            provider_key="oneroster",
+            name="over",
             config={"token_url": "https://idp.example.com/token"},
-            base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+            base_url="https://sis.example.com/ims/oneroster",
+            created_by=owner.id,
         )
     assert e.value.code == "CONNECTION_LIMIT_REACHED"
 
@@ -1661,16 +1701,27 @@ async def test_per_org_sprawl_caps(db):
     # one profile per (connection, model, direction) — the cap is what we
     # are testing here, not that rule)
     for i in range(MAX_SYNC_PROFILES_PER_ORG):
-        db.add(SyncProfile(
-            org_id=org.id, connection_id=first.id, name=f"p-{i}",
-            model="roster.class", direction=f"pull-{i}",
-            schedule="manual", field_policy={}, options={},
-        ))
+        db.add(
+            SyncProfile(
+                org_id=org.id,
+                connection_id=first.id,
+                name=f"p-{i}",
+                model="roster.class",
+                direction=f"pull-{i}",
+                schedule="manual",
+                field_policy={},
+                options={},
+            )
+        )
     await db.flush()
     with pytest.raises(AppError) as e:
         await psvc.create(
-            org.id, connection_id=first.id, name="p-over", model="roster.class",
-            direction="pull", mapping_profile_id=None,
+            org.id,
+            connection_id=first.id,
+            name="p-over",
+            model="roster.class",
+            direction="pull",
+            mapping_profile_id=None,
         )
     assert e.value.code == "SYNC_PROFILE_LIMIT_REACHED"
 
@@ -1691,9 +1742,12 @@ async def test_sync_profile_cross_org_walls(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn_a = await csvc.create(
-        org_a.id, provider_key="oneroster", name=f"a-{uuid.uuid4().hex[:8]}",
+        org_a.id,
+        provider_key="oneroster",
+        name=f"a-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner_a.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner_a.id,
     )
     conn_a.status = "active"
     await db.flush()
@@ -1701,22 +1755,28 @@ async def test_sync_profile_cross_org_walls(db):
     # (a) org B cannot attach a profile to org A's connection.
     with pytest.raises(AppError) as e:
         await SyncProfileService(db).create(
-            org_b.id, connection_id=conn_a.id, name="steal",
-            model="roster.class", direction="pull", mapping_profile_id=None,
+            org_b.id,
+            connection_id=conn_a.id,
+            name="steal",
+            model="roster.class",
+            direction="pull",
+            mapping_profile_id=None,
         )
     assert e.value.code == "CONNECTION_NOT_FOUND"
     assert e.value.status_code == 404
 
     # (b) org B cannot delete org A's profile through the route.
     profile_a = await SyncProfileService(db).create(
-        org_a.id, connection_id=conn_a.id, name=f"p-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org_a.id,
+        connection_id=conn_a.id,
+        name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     await db.flush()
     with pytest.raises(AppError) as e:
-        await delete_sync_profile(
-            org_id=org_b.id, profile_id=profile_a.id, db=db, user=owner_b
-        )
+        await delete_sync_profile(org_id=org_b.id, profile_id=profile_a.id, db=db, user=owner_b)
     assert e.value.code == "SYNC_PROFILE_NOT_FOUND"
     assert e.value.status_code == 404
     assert await db.get(SyncProfile, profile_a.id) is not None
@@ -1737,14 +1797,20 @@ async def test_cross_org_mapping_and_profile_gates(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn_b = await csvc.create(
-        org_b.id, provider_key="oneroster", name=f"b-{uuid.uuid4().hex[:8]}",
+        org_b.id,
+        provider_key="oneroster",
+        name=f"b-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner_b.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner_b.id,
     )
     conn_b.status = "active"
     mp_a = MappingProfile(
-        org_id=org_a.id, name=f"ma-{uuid.uuid4().hex[:6]}", direction="inbound",
-        model="roster.class", document={"fields": [{"target": "t", "path": "a"}]},
+        org_id=org_a.id,
+        name=f"ma-{uuid.uuid4().hex[:6]}",
+        direction="inbound",
+        model="roster.class",
+        document={"fields": [{"target": "t", "path": "a"}]},
         version=1,
     )
     db.add(mp_a)
@@ -1754,14 +1820,22 @@ async def test_cross_org_mapping_and_profile_gates(db):
     # (b) create with org A's mapping -> 404
     with pytest.raises(AppError) as e:
         await svc.create(
-            org_b.id, connection_id=conn_b.id, name="x", model="roster.class",
-            direction="pull", mapping_profile_id=mp_a.id,
+            org_b.id,
+            connection_id=conn_b.id,
+            name="x",
+            model="roster.class",
+            direction="pull",
+            mapping_profile_id=mp_a.id,
         )
     assert e.value.code == "MAPPING_NOT_FOUND" and e.value.status_code == 404
 
     p_b = await svc.create(
-        org_b.id, connection_id=conn_b.id, name=f"pb-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org_b.id,
+        connection_id=conn_b.id,
+        name=f"pb-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     # (a) org A reading org B's profile -> 404
     with pytest.raises(AppError) as e:
@@ -1787,15 +1861,22 @@ async def test_trigger_and_cancel_state_machine_guards(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn = await csvc.create(
-        org.id, provider_key="oneroster", name=f"t-{uuid.uuid4().hex[:8]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"t-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner.id,
     )
     conn.status = "active"
     svc = SyncProfileService(db)
     profile = await svc.create(
-        org.id, connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org.id,
+        connection_id=conn.id,
+        name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
 
     # disabled profile -> 409
@@ -1837,7 +1918,9 @@ async def test_update_twins_revalidate(db):
     org, owner = await _org(db)
     msvc = MappingService(db)
     mp = await msvc.create(
-        org.id, name=f"ut-{uuid.uuid4().hex[:6]}", direction="inbound",
+        org.id,
+        name=f"ut-{uuid.uuid4().hex[:6]}",
+        direction="inbound",
         model="roster.class",
         document={"fields": [{"target": "t", "path": "a"}]},
     )
@@ -1852,15 +1935,22 @@ async def test_update_twins_revalidate(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn = await csvc.create(
-        org.id, provider_key="oneroster", name=f"ut-{uuid.uuid4().hex[:8]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"ut-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner.id,
     )
     conn.status = "active"
     psvc = SyncProfileService(db)
     profile = await psvc.create(
-        org.id, connection_id=conn.id, name=f"up-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org.id,
+        connection_id=conn.id,
+        name=f"up-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     with pytest.raises(AppError) as e:
         await psvc.update(org.id, profile.id, field_policy={"email": "banana"})
@@ -1883,15 +1973,22 @@ async def test_cancelled_run_not_overwritten_by_worker_finish(db):
     await csvc.sync_provider_catalog()
     await db.flush()
     conn = await csvc.create(
-        org.id, provider_key="oneroster", name=f"zf-{uuid.uuid4().hex[:8]}",
+        org.id,
+        provider_key="oneroster",
+        name=f"zf-{uuid.uuid4().hex[:8]}",
         config={"token_url": "https://idp.example.com/token"},
-        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        base_url="https://sis.example.com/ims/oneroster",
+        created_by=owner.id,
     )
     conn.status = "active"
     svc = SyncProfileService(db)
     profile = await svc.create(
-        org.id, connection_id=conn.id, name=f"zp-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="pull", mapping_profile_id=None,
+        org.id,
+        connection_id=conn.id,
+        name=f"zp-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="pull",
+        mapping_profile_id=None,
     )
     run = await svc.trigger(org.id, profile.id)
     run.status = "running"  # worker claimed it
@@ -1906,13 +2003,17 @@ async def test_cancelled_run_not_overwritten_by_worker_finish(db):
     await db.refresh(run)
     assert run.status == "cancelled"  # operator state preserved
     ev = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.type == "com.openskill.integration.sync.completed.v1",
-                IntegrationEvent.subject == run.id,
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.type == "com.openskill.integration.sync.completed.v1",
+                    IntegrationEvent.subject == run.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert ev == []  # no bogus completion event
 
     # the normal path still lands: a RUNNING run finishes fine.

@@ -69,9 +69,7 @@ def _sanitize_cell(value: str) -> str:
     return value
 
 
-def _validate_user_rows(
-    raw_rows: list[tuple[int, dict]]
-) -> tuple[list[dict], list[dict]]:
+def _validate_user_rows(raw_rows: list[tuple[int, dict]]) -> tuple[list[dict], list[dict]]:
     """Shared user-row validation for every import format (R128). Input is
     (row_number, canonicalized-dict) pairs; output is (clean_rows, errors)
     with identical rules to the CSV path: valid email shape, NUL guard,
@@ -82,12 +80,7 @@ def _validate_user_rows(
     for i, row in raw_rows:
         email = str(row.get("email", "") or "").strip().lower()
         problems: list[tuple[str, str, str]] = []
-        if (
-            not email
-            or len(email) > 255
-            or "\x00" in email
-            or not _EMAIL_RE.fullmatch(email)
-        ):
+        if not email or len(email) > 255 or "\x00" in email or not _EMAIL_RE.fullmatch(email):
             problems.append(("email", "invalid_email", "not a valid email address"))
         display = str(row.get("display_name", "") or "")[:100]
         if "\x00" in display:
@@ -96,24 +89,25 @@ def _validate_user_rows(
         if role not in IMPORT_ROLE_MAP:
             problems.append(("role", "invalid_role", "role must be student|instructor"))
         if email and email in seen_emails:
-            problems.append(
-                ("email", "duplicate_in_file", f"also on row {seen_emails[email]}")
-            )
+            problems.append(("email", "duplicate_in_file", f"also on row {seen_emails[email]}"))
         if problems:
             for col, code, message in problems:
-                errors.append({
-                    "row_number": i, "column": col, "code": code, "message": message,
-                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
-                })
+                errors.append(
+                    {
+                        "row_number": i,
+                        "column": col,
+                        "code": code,
+                        "message": message,
+                        "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                    }
+                )
             continue
         seen_emails[email] = i
         rows.append({"row_number": i, "email": email, "display_name": display, "role": role})
     return rows, errors
 
 
-def _validate_roster_rows(
-    raw_rows: list[tuple[int, dict]]
-) -> tuple[list[dict], list[dict]]:
+def _validate_roster_rows(raw_rows: list[tuple[int, dict]]) -> tuple[list[dict], list[dict]]:
     """Roster template rows (R129, Part K deferred kind): email + cohort_slug
     (org-scoped stable key) + optional role (learner|instructor). Duplicate
     detection is per (email, cohort_slug) pair — the same user may legally
@@ -124,38 +118,36 @@ def _validate_roster_rows(
     for i, row in raw_rows:
         email = str(row.get("email", "") or "").strip().lower()
         problems: list[tuple[str, str, str]] = []
-        if (
-            not email
-            or len(email) > 255
-            or "\x00" in email
-            or not _EMAIL_RE.fullmatch(email)
-        ):
+        if not email or len(email) > 255 or "\x00" in email or not _EMAIL_RE.fullmatch(email):
             problems.append(("email", "invalid_email", "not a valid email address"))
         slug = str(row.get("cohort_slug", "") or "").strip().lower()
         if not slug or len(slug) > 200 or "\x00" in slug:
-            problems.append(("cohort_slug", "invalid_cohort_slug", "cohort_slug required (max 200)"))
+            problems.append(
+                ("cohort_slug", "invalid_cohort_slug", "cohort_slug required (max 200)")
+            )
         role = str(row.get("role") or "learner").lower()
         if role not in ROSTER_ROLE_MAP:
             problems.append(("role", "invalid_role", "role must be learner|instructor"))
         if email and slug and (email, slug) in seen:
-            problems.append(
-                ("email", "duplicate_in_file", f"also on row {seen[(email, slug)]}")
-            )
+            problems.append(("email", "duplicate_in_file", f"also on row {seen[(email, slug)]}"))
         if problems:
             for col, code, message in problems:
-                errors.append({
-                    "row_number": i, "column": col, "code": code, "message": message,
-                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
-                })
+                errors.append(
+                    {
+                        "row_number": i,
+                        "column": col,
+                        "code": code,
+                        "message": message,
+                        "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                    }
+                )
             continue
         seen[(email, slug)] = i
         rows.append({"row_number": i, "email": email, "cohort_slug": slug, "role": role})
     return rows, errors
 
 
-def _validate_opportunity_rows(
-    raw_rows: list[tuple[int, dict]]
-) -> tuple[list[dict], list[dict]]:
+def _validate_opportunity_rows(raw_rows: list[tuple[int, dict]]) -> tuple[list[dict], list[dict]]:
     """Opportunities template rows (R131, Part K deferred kind): employer
     migrations land postings as DRAFTS — a human publishes. Dup detection by
     lower(title) within the file; idempotency against the DB is at apply."""
@@ -172,17 +164,14 @@ def _validate_opportunity_rows(
         otype = str(row.get("opportunity_type", "") or "").strip().lower()
         if otype not in OPPORTUNITY_TYPES:
             problems.append(
-                ("opportunity_type", "invalid_type",
-                 f"must be one of {sorted(OPPORTUNITY_TYPES)}")
+                ("opportunity_type", "invalid_type", f"must be one of {sorted(OPPORTUNITY_TYPES)}")
             )
         description = str(row.get("description", "") or "")[:10000]
         if "\x00" in description:
             problems.append(("description", "control_chars", "NUL character"))
         loc_mode = str(row.get("location_mode", "") or "").strip().lower() or None
         if loc_mode is not None and loc_mode not in OPPS_LOCATION_MODES:
-            problems.append(
-                ("location_mode", "invalid_location_mode", "remote|onsite|hybrid")
-            )
+            problems.append(("location_mode", "invalid_location_mode", "remote|onsite|hybrid"))
         loc_text = str(row.get("location_text", "") or "")[:200]
         comp = str(row.get("compensation_display", "") or "")[:200]
         if "\x00" in loc_text or "\x00" in comp:
@@ -197,23 +186,32 @@ def _validate_opportunity_rows(
             openings = 1
         key = title.lower()
         if title and key in seen_titles:
-            problems.append(
-                ("title", "duplicate_in_file", f"also on row {seen_titles[key]}")
-            )
+            problems.append(("title", "duplicate_in_file", f"also on row {seen_titles[key]}"))
         if problems:
             for col, code, message in problems:
-                errors.append({
-                    "row_number": i, "column": col, "code": code, "message": message,
-                    "raw_row": {k: str(v)[:200] for k, v in row.items()},
-                })
+                errors.append(
+                    {
+                        "row_number": i,
+                        "column": col,
+                        "code": code,
+                        "message": message,
+                        "raw_row": {k: str(v)[:200] for k, v in row.items()},
+                    }
+                )
             continue
         seen_titles[key] = i
-        rows.append({
-            "row_number": i, "title": title, "opportunity_type": otype,
-            "description": description or None, "location_mode": loc_mode,
-            "location_text": loc_text or None,
-            "compensation_display": comp or None, "openings": openings,
-        })
+        rows.append(
+            {
+                "row_number": i,
+                "title": title,
+                "opportunity_type": otype,
+                "description": description or None,
+                "location_mode": loc_mode,
+                "location_text": loc_text or None,
+                "compensation_display": comp or None,
+                "openings": openings,
+            }
+        )
     return rows, errors
 
 
@@ -236,8 +234,13 @@ def parse_users_json(
     if isinstance(doc, dict):
         doc = doc.get(kind, doc.get("rows"))
     if not isinstance(doc, list):
-        return [], [{"row_number": 1, "code": "invalid_shape",
-                     "message": "expected a list of users or {\"users\": [...]}"}]
+        return [], [
+            {
+                "row_number": 1,
+                "code": "invalid_shape",
+                "message": 'expected a list of users or {"users": [...]}',
+            }
+        ]
     alias = {str(k).strip().lower(): str(v).strip().lower() for k, v in (header_map or {}).items()}
 
     def _canon_obj(obj: dict) -> dict:
@@ -303,13 +306,24 @@ KIND_SPECS = {
     ),
     "opportunities": _KindSpec(
         OPPS_REQUIRED,
-        ("title", "opportunity_type", "description", "location_mode",
-         "location_text", "compensation_display", "openings"),
+        (
+            "title",
+            "opportunity_type",
+            "description",
+            "location_mode",
+            "location_text",
+            "compensation_display",
+            "openings",
+        ),
         _validate_opportunity_rows,
         {
-            "title": "ML Engineering Intern", "opportunity_type": "internship",
-            "description": "Build models with our team.", "location_mode": "remote",
-            "location_text": "Anywhere", "compensation_display": "$30/hr", "openings": "2",
+            "title": "ML Engineering Intern",
+            "opportunity_type": "internship",
+            "description": "Build models with our team.",
+            "location_mode": "remote",
+            "location_text": "Anywhere",
+            "compensation_display": "$30/hr",
+            "openings": "2",
         },
     ),
 }
@@ -349,8 +363,7 @@ def parse_users_csv(
     # R92 column mapping: {canonical: csv-header-alias}, case-insensitive on
     # the alias side. Unknown canonical keys are refused at create_job.
     alias_to_canonical = {
-        str(v).strip().lower(): str(k).strip().lower()
-        for k, v in (header_map or {}).items()
+        str(v).strip().lower(): str(k).strip().lower() for k, v in (header_map or {}).items()
     }
 
     def _canon(header: str) -> str:
@@ -394,8 +407,9 @@ def parse_users_csv(
         ]
     raw_rows = []
     for i, raw in enumerate(reader, start=2):  # header is row 1
-        raw_rows.append((i, {_canon(k or ""): (v or "").strip() for k, v in raw.items()
-                             if k is not None}))
+        raw_rows.append(
+            (i, {_canon(k or ""): (v or "").strip() for k, v in raw.items() if k is not None})
+        )
     return KIND_SPECS[kind].validator(raw_rows)
 
 
@@ -415,16 +429,20 @@ async def sweep_import_files(db: AsyncSession, deleter=None) -> int:
     callable from the worker."""
     cutoff = datetime.now(UTC) - RETAIN_IMPORT_FILES
     jobs = (
-        await db.execute(
-            select(ImportJob)
-            .where(
-                ImportJob.status.in_(("succeeded", "partial", "failed")),
-                ImportJob.created_at < cutoff,
-                ImportJob.file_key != "",
+        (
+            await db.execute(
+                select(ImportJob)
+                .where(
+                    ImportJob.status.in_(("succeeded", "partial", "failed")),
+                    ImportJob.created_at < cutoff,
+                    ImportJob.file_key != "",
+                )
+                .limit(1000)
             )
-            .limit(1000)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     purged = 0
     for job in jobs:
         try:
@@ -463,7 +481,9 @@ class BulkImportService:
         header_map: dict | None = None,
     ) -> ImportJob:
         if kind not in IMPORT_KINDS:
-            raise AppError("IMPORT_KIND_INVALID", f"kind must be one of {sorted(IMPORT_KINDS)}", 422)
+            raise AppError(
+                "IMPORT_KIND_INVALID", f"kind must be one of {sorted(IMPORT_KINDS)}", 422
+            )
         if mode not in IMPORT_MODES:
             raise AppError("IMPORT_MODE_INVALID", "mode must be atomic|partial", 422)
         if len(file_bytes) > MAX_IMPORT_BYTES:
@@ -573,18 +593,21 @@ class BulkImportService:
         """(cohort, user, member?) for a roster row — or an error dict."""
         cohort = (
             await self.db.execute(
-                select(Cohort).where(
-                    Cohort.org_id == org_id, Cohort.slug == row["cohort_slug"]
-                )
+                select(Cohort).where(Cohort.org_id == org_id, Cohort.slug == row["cohort_slug"])
             )
         ).scalar_one_or_none()
         if cohort is None:
-            return None, None, {
-                "row_number": row["row_number"], "column": "cohort_slug",
-                "code": "cohort_not_found",
-                "message": f"no cohort with slug {row['cohort_slug']!r}",
-                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
-            }
+            return (
+                None,
+                None,
+                {
+                    "row_number": row["row_number"],
+                    "column": "cohort_slug",
+                    "code": "cohort_not_found",
+                    "message": f"no cohort with slug {row['cohort_slug']!r}",
+                    "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+                },
+            )
         user = (
             await self.db.execute(
                 select(User)
@@ -597,12 +620,17 @@ class BulkImportService:
             )
         ).scalar_one_or_none()
         if user is None:
-            return None, None, {
-                "row_number": row["row_number"], "column": "email",
-                "code": "user_not_in_org",
-                "message": "no active org member with this email (import users first)",
-                "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
-            }
+            return (
+                None,
+                None,
+                {
+                    "row_number": row["row_number"],
+                    "column": "email",
+                    "code": "user_not_in_org",
+                    "message": "no active org member with this email (import users first)",
+                    "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
+                },
+            )
         return cohort, user, None
 
     async def _roster_preview_maps(self, org_id: str, rows: list[dict]):
@@ -654,7 +682,8 @@ class BulkImportService:
         cohort = cohorts.get(row["cohort_slug"])
         if cohort is None:
             return None, {
-                "row_number": row["row_number"], "column": "cohort_slug",
+                "row_number": row["row_number"],
+                "column": "cohort_slug",
                 "code": "cohort_not_found",
                 "message": f"no cohort with slug {row['cohort_slug']!r}",
                 "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
@@ -662,7 +691,8 @@ class BulkImportService:
         user = users.get(row["email"])
         if user is None:
             return None, {
-                "row_number": row["row_number"], "column": "email",
+                "row_number": row["row_number"],
+                "column": "email",
                 "code": "user_not_in_org",
                 "message": "no active org member with this email (import users first)",
                 "raw_row": {"email": row["email"], "cohort_slug": row["cohort_slug"]},
@@ -811,7 +841,11 @@ class BulkImportService:
                 await self.db.flush()
                 return job
             job.stats = {
-                "applied": a, "created": c, "updated": u, "skipped": sk, "errors": 0,
+                "applied": a,
+                "created": c,
+                "updated": u,
+                "skipped": sk,
+                "errors": 0,
             }
             job.status = "succeeded"
             await self.db.flush()
@@ -845,17 +879,13 @@ class BulkImportService:
             "skipped": skipped,
             "errors": len(errors) + row_failures,
         }
-        job.status = (
-            "succeeded" if not errors and not row_failures else "partial"
-        )
+        job.status = "succeeded" if not errors and not row_failures else "partial"
         await self.db.flush()
         return job
 
     async def _apply_row(self, org_id: str, row: dict) -> str:
         user = (
-            await self.db.execute(
-                select(User).where(func.lower(User.email) == row["email"])
-            )
+            await self.db.execute(select(User).where(func.lower(User.email) == row["email"]))
         ).scalar_one_or_none()
         outcome = "skipped"
         if user is None:
@@ -875,9 +905,7 @@ class BulkImportService:
             outcome = "updated"
         member = (
             await self.db.execute(
-                select(OrgMember).where(
-                    OrgMember.org_id == org_id, OrgMember.user_id == user.id
-                )
+                select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user.id)
             )
         ).scalar_one_or_none()
         # NOTE (R189, known gap — deliberately NOT enforced here): adding/
@@ -947,9 +975,7 @@ class BulkImportService:
                     f"cohort_full: cohort is at capacity ({cohort.max_learners} learners)",
                     422,
                 )
-        self.db.add(
-            CohortMember(cohort_id=cohort.id, user_id=user.id, role=role)
-        )
+        self.db.add(CohortMember(cohort_id=cohort.id, user_id=user.id, role=role))
         await self.db.flush()
         return "created"
 
@@ -959,20 +985,29 @@ class BulkImportService:
 
         profile = await self.db.get(EmployerProfile, org_id)
         if profile is None:
-            return False, None, {
-                "row_number": row["row_number"], "column": None,
-                "code": "employer_profile_missing",
-                "message": "org has no employer profile — register first",
-                "raw_row": {"title": row["title"]},
-            }
+            return (
+                False,
+                None,
+                {
+                    "row_number": row["row_number"],
+                    "column": None,
+                    "code": "employer_profile_missing",
+                    "message": "org has no employer profile — register first",
+                    "raw_row": {"title": row["title"]},
+                },
+            )
         existing = (
-            await self.db.execute(
-                select(Opportunity).where(
-                    Opportunity.employer_org_id == org_id,
-                    func.lower(Opportunity.title) == row["title"].lower(),
+            (
+                await self.db.execute(
+                    select(Opportunity).where(
+                        Opportunity.employer_org_id == org_id,
+                        func.lower(Opportunity.title) == row["title"].lower(),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         return True, existing, None
 
     async def _preview_opportunity_row(self, org_id: str, row: dict):
@@ -1014,12 +1049,16 @@ class BulkImportService:
     async def errors_csv(self, org_id: str, job_id: str) -> str:
         job = await self.get(org_id, job_id)
         rows = (
-            await self.db.execute(
-                select(ImportRowError)
-                .where(ImportRowError.job_id == job.id)
-                .order_by(ImportRowError.row_number)
+            (
+                await self.db.execute(
+                    select(ImportRowError)
+                    .where(ImportRowError.job_id == job.id)
+                    .order_by(ImportRowError.row_number)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(["row_number", "column", "code", "message", "identifier"])

@@ -68,9 +68,7 @@ class OrgDomainService:
 
         await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         count = len(
-            (
-                await self.db.execute(select(OrgDomain.id).where(OrgDomain.org_id == org_id))
-            ).all()
+            (await self.db.execute(select(OrgDomain.id).where(OrgDomain.org_id == org_id))).all()
         )
         if count >= MAX_DOMAINS_PER_ORG:
             raise AppError("DOMAIN_LIMIT_REACHED", "Too many domains for this org", 422)
@@ -91,9 +89,7 @@ class OrgDomainService:
             )
         dup = (
             await self.db.execute(
-                select(OrgDomain).where(
-                    OrgDomain.org_id == org_id, OrgDomain.domain == domain
-                )
+                select(OrgDomain).where(OrgDomain.org_id == org_id, OrgDomain.domain == domain)
             )
         ).scalar_one_or_none()
         if dup is not None:
@@ -115,9 +111,7 @@ class OrgDomainService:
             # someone claimed it concurrently — idempotent return of theirs.
             dup = (
                 await self.db.execute(
-                    select(OrgDomain).where(
-                        OrgDomain.org_id == org_id, OrgDomain.domain == domain
-                    )
+                    select(OrgDomain).where(OrgDomain.org_id == org_id, OrgDomain.domain == domain)
                 )
             ).scalar_one()
             return dup
@@ -188,10 +182,14 @@ class OrgDomainService:
 
         now = datetime.now(UTC)
         pending = (
-            await self.db.execute(
-                select(OrgDomain).where(OrgDomain.status == "pending").limit(200)
+            (
+                await self.db.execute(
+                    select(OrgDomain).where(OrgDomain.status == "pending").limit(200)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         changed = 0
         verifier = get_verifier()
         for row in pending:

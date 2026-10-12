@@ -96,9 +96,7 @@ class AcceptanceWorld:
             if path.endswith("/jwks"):
                 return httpx.Response(200, json={"keys": [_IDP_JWK]}, request=req)
             if path.endswith("/token"):
-                return httpx.Response(
-                    200, json={"id_token": self.pending_id_token}, request=req
-                )
+                return httpx.Response(200, json={"id_token": self.pending_id_token}, request=req)
         # SIS (OneRoster)
         if "sis.acceptance" in host:
             if path.endswith("/token"):
@@ -125,9 +123,7 @@ class AcceptanceWorld:
                     for k in self.tool_jwks["keys"]
                     if k["kid"] == header["kid"]
                 )
-                pyjwt.decode(
-                    assertion, key=key, algorithms=["RS256"], audience=f"{LMS}/token"
-                )
+                pyjwt.decode(assertion, key=key, algorithms=["RS256"], audience=f"{LMS}/token")
                 return httpx.Response(200, json={"access_token": "ags-tok"}, request=req)
             if path.endswith("/scores"):
                 self.ags_scores.append(json.loads(content))
@@ -257,8 +253,11 @@ async def test_full_acceptance_chain(db, monkeypatch):
     )
     conn.status = "active"
     await csvc.set_credential(
-        org.id, conn.id, kind="oauth2_tokens",
-        values={"client_id": "cid", "client_secret": "cs"}, expires_at=None,
+        org.id,
+        conn.id,
+        kind="oauth2_tokens",
+        values={"client_id": "cid", "client_secret": "cs"},
+        expires_at=None,
     )
     # Real OneRosterConnector, egress swapped for the fake world.
     real = registry.OneRosterConnector()
@@ -412,9 +411,7 @@ async def test_full_acceptance_chain(db, monkeypatch):
     for _ in range(40):
         await process_outbox_once(db, topics=INTG_TOPICS)
         delivery = (
-            await db.execute(
-                select(EventDelivery).where(EventDelivery.event_id == event.id)
-            )
+            await db.execute(select(EventDelivery).where(EventDelivery.event_id == event.id))
         ).scalar_one_or_none()
         if delivery is not None and delivery.status in ("succeeded", "exhausted"):
             break
@@ -464,9 +461,7 @@ async def test_full_acceptance_chain(db, monkeypatch):
     )
     archived = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.user_id == learner_id
-            )
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == learner_id)
         )
     ).scalar_one()
     assert archived.status == MemberStatus.ARCHIVED
@@ -492,11 +487,15 @@ async def test_full_acceptance_chain(db, monkeypatch):
     # wide (multi-org); org access is governed by membership, which is
     # archived. The chain asserts membership-based surfaces are closed.
     events_count = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.org_id == org.id,
-                IntegrationEvent.type == "com.openskill.org.scim.deprovisioned.v1",
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.org_id == org.id,
+                    IntegrationEvent.type == "com.openskill.org.scim.deprovisioned.v1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(events_count) == 1

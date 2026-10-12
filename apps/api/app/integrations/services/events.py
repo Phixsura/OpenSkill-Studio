@@ -377,9 +377,9 @@ async def _maybe_auto_disable(db: AsyncSession, sub: WebhookSubscription, now: d
 # ── retention (R44) ──
 
 # Operational data ages out on a fixed clock; business data never does.
-RETAIN_DELIVERIES = timedelta(days=90)   # terminal deliveries + attempts
-RETAIN_EVENTS = timedelta(days=180)      # canonical events (cascade deliveries)
-RETAIN_SYNC_RUNS = timedelta(days=180)   # terminal runs (cascade record rows)
+RETAIN_DELIVERIES = timedelta(days=90)  # terminal deliveries + attempts
+RETAIN_EVENTS = timedelta(days=180)  # canonical events (cascade deliveries)
+RETAIN_SYNC_RUNS = timedelta(days=180)  # terminal runs (cascade record rows)
 RETAIN_ROW_ERRORS = timedelta(days=180)  # import row errors
 RETAIN_EXPORT_RUNS = timedelta(days=90)  # R280: hourly streams mint ~720 rows/month each
 RETAIN_RESOLVED_QUEUE = timedelta(days=180)  # R280: resolved identity-match items

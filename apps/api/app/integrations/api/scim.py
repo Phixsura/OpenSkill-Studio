@@ -36,9 +36,7 @@ def _scim_json(body: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(body, status_code=status, media_type=_CT)
 
 
-async def _auth(
-    db: AsyncSession, authorization: str | None
-) -> ScimToken:
+async def _auth(db: AsyncSession, authorization: str | None) -> ScimToken:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise ScimError(401, "Bearer token required")
     return await ScimTokenService(db).authenticate(authorization[7:].strip())
@@ -399,16 +397,12 @@ async def create_scim_token(
         org_id, name=body.name, group_map=body.group_map, created_by=user.id
     )
     resp = _token_resp(token, raw)
-    await record_fabric_audit(
-        db, org_id, user.id, "intg.scim_token.minted", "scim_token", token.id
-    )
+    await record_fabric_audit(db, org_id, user.id, "intg.scim_token.minted", "scim_token", token.id)
     await db.commit()
     return {"data": resp}
 
 
-@token_admin_router.patch(
-    "/scim-tokens/{token_id}", response_model=DataResponse[ScimTokenResponse]
-)
+@token_admin_router.patch("/scim-tokens/{token_id}", response_model=DataResponse[ScimTokenResponse])
 async def update_scim_token(
     org_id: str,
     token_id: str,

@@ -175,9 +175,7 @@ async def subscription_stats(
     await _admin(org_id, user, db)
     rows = (
         await db.execute(
-            select(
-                EventDelivery.subscription_id, EventDelivery.status, func.count()
-            )
+            select(EventDelivery.subscription_id, EventDelivery.status, func.count())
             .join(WebhookSubscription, WebhookSubscription.id == EventDelivery.subscription_id)
             .where(WebhookSubscription.org_id == org_id)
             .group_by(EventDelivery.subscription_id, EventDelivery.status)
@@ -281,8 +279,13 @@ async def replay_exhausted_bulk(
     await _admin(org_id, user, db)
     clones = await replay_exhausted(db, org_id, subscription_id)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.delivery.bulk_replayed", "webhook_subscription",
-        subscription_id, after={"requeued": len(clones)},
+        db,
+        org_id,
+        user.id,
+        "intg.delivery.bulk_replayed",
+        "webhook_subscription",
+        subscription_id,
+        after={"requeued": len(clones)},
     )
     await db.commit()
     return {"data": {"requeued": len(clones)}}

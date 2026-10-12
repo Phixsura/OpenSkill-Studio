@@ -278,10 +278,14 @@ async def test_consent_revoke_then_regrant_last_write_wins(db):
     assert run1.stats["pushed"] == 1 and run1.stats["conflicts"] == 0
 
     # Revoke LATER than the grant -> next run is a consent conflict.
-    db.add(ConsentLog(
-        user_id=cand.id, consent_type="ats_share", action="revoked",
-        created_at=datetime.now(UTC) + timedelta(seconds=1),
-    ))
+    db.add(
+        ConsentLog(
+            user_id=cand.id,
+            consent_type="ats_share",
+            action="revoked",
+            created_at=datetime.now(UTC) + timedelta(seconds=1),
+        )
+    )
     await db.commit()
     run2 = await svc.trigger(org.id, profile.id)
     await db.commit()
@@ -290,10 +294,14 @@ async def test_consent_revoke_then_regrant_last_write_wins(db):
     assert run2.stats["conflicts"] == 1 and run2.stats["pushed"] == 0
 
     # Re-grant LATER still -> push resumes (last write wins, not sticky-revoked).
-    db.add(ConsentLog(
-        user_id=cand.id, consent_type="ats_share", action="granted",
-        created_at=datetime.now(UTC) + timedelta(seconds=2),
-    ))
+    db.add(
+        ConsentLog(
+            user_id=cand.id,
+            consent_type="ats_share",
+            action="granted",
+            created_at=datetime.now(UTC) + timedelta(seconds=2),
+        )
+    )
     await db.commit()
     run3 = await svc.trigger(org.id, profile.id)
     await db.commit()
@@ -327,7 +335,10 @@ async def test_push_loads_connection_credentials(db):
 
     conn, profile = await _setup(db, org, owner, SecretCapturingAts())
     await ConnectionService(db).set_credential(
-        org.id, conn.id, kind="api_key", values={"api_key": "ats-secret-xyz"},
+        org.id,
+        conn.id,
+        kind="api_key",
+        values={"api_key": "ats-secret-xyz"},
         expires_at=None,
     )
     registry.CONNECTORS["generic_ats"] = SecretCapturingAts()
@@ -358,9 +369,14 @@ async def test_push_model_gate_and_mapping_drift_fail_run(db):
 
     # (a) model gate: direct row with a non-push model.
     rogue = SyncProfile(
-        org_id=org.id, connection_id=conn.id, name=f"rogue-{uuid.uuid4().hex[:6]}",
-        model="roster.class", direction="push", schedule="manual",
-        field_policy={}, options={},
+        org_id=org.id,
+        connection_id=conn.id,
+        name=f"rogue-{uuid.uuid4().hex[:6]}",
+        model="roster.class",
+        direction="push",
+        schedule="manual",
+        field_policy={},
+        options={},
     )
     db.add(rogue)
     await db.flush()
@@ -375,8 +391,12 @@ async def test_push_model_gate_and_mapping_drift_fail_run(db):
     # (b) mapping drift on push: pin version, then bump the mapping.
     doc = {"fields": [{"target": "status", "path": "status"}]}
     mp = MappingProfile(
-        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", direction="outbound",
-        model="talent.application", document=doc, version=1,
+        org_id=org.id,
+        name=f"m-{uuid.uuid4().hex[:6]}",
+        direction="outbound",
+        model="talent.application",
+        document=doc,
+        version=1,
     )
     db.add(mp)
     await db.flush()

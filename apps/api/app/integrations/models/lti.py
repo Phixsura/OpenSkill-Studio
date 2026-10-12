@@ -46,9 +46,7 @@ class LtiRegistration(Base):
 
 class LtiDeployment(Base):
     __tablename__ = "intg_lti_deployments"
-    __table_args__ = (
-        Index("uq_intg_lti_deploy", "registration_id", "deployment_id", unique=True),
-    )
+    __table_args__ = (Index("uq_intg_lti_deploy", "registration_id", "deployment_id", unique=True),)
 
     id: Mapped[str] = ulid_pk()
     registration_id: Mapped[str] = mapped_column(

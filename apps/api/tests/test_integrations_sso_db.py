@@ -182,19 +182,19 @@ async def test_resolution_unverified_email_queues(db):
     # Lesson 8/24: never assert on the LAST row of a global, unordered
     # select against the shared dev DB — key on our own org instead.
     q = (
-        await db.execute(
-            select(IdentityMatchQueue).where(IdentityMatchQueue.org_id == org.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(IdentityMatchQueue).where(IdentityMatchQueue.org_id == org.id)))
+        .scalars()
+        .all()
+    )
     assert q and q[-1].reason == "email_unverified_or_foreign_domain"
     # Retried login does not duplicate the pending row.
     with pytest.raises(AppError):
         await svc.resolve(_ident(org, email="a@acme.edu", verified=False))
     q2 = (
-        await db.execute(
-            select(IdentityMatchQueue).where(IdentityMatchQueue.subject == "sub-1")
-        )
-    ).scalars().all()
+        (await db.execute(select(IdentityMatchQueue).where(IdentityMatchQueue.subject == "sub-1")))
+        .scalars()
+        .all()
+    )
     assert len(q2) == 1
 
 
@@ -239,13 +239,17 @@ async def test_resolution_links_then_sticks_to_subject(db):
     r3 = await svc.resolve(_ident(org, subject="sub-OTHER", email=member.email))
     assert r3.user.id == member.id
     links = (
-        await db.execute(
-            select(ExternalIdentityLink).where(
-                ExternalIdentityLink.user_id == member.id,
-                ExternalIdentityLink.revoked_at.is_(None),
+        (
+            await db.execute(
+                select(ExternalIdentityLink).where(
+                    ExternalIdentityLink.user_id == member.id,
+                    ExternalIdentityLink.revoked_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert {link.subject for link in links} == {"sub-1", "sub-OTHER"}
 
 
@@ -265,9 +269,7 @@ async def test_resolution_jit_creates_and_respects_role_ceiling(db):
     assert r.jit_created and r.user.email == fresh
     member = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.user_id == r.user.id
-            )
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == r.user.id)
         )
     ).scalar_one()
     assert member.role == OrgRole.STUDENT and member.is_break_glass is False
@@ -291,19 +293,33 @@ async def test_same_subject_two_orgs_two_links(db):
     await _verified_domain(db, org2, "two.example.edu")
     svc = IdentityService(db)
     r1 = await svc.resolve(
-        _ident(org1, conn_ref="01CONNA", subject="dup", email=f"a-{uuid.uuid4().hex[:5]}@one.example.edu"),
+        _ident(
+            org1,
+            conn_ref="01CONNA",
+            subject="dup",
+            email=f"a-{uuid.uuid4().hex[:5]}@one.example.edu",
+        ),
         allow_jit=True,
     )
     r2 = await svc.resolve(
-        _ident(org2, conn_ref="01CONNB", subject="dup", email=f"b-{uuid.uuid4().hex[:5]}@two.example.edu"),
+        _ident(
+            org2,
+            conn_ref="01CONNB",
+            subject="dup",
+            email=f"b-{uuid.uuid4().hex[:5]}@two.example.edu",
+        ),
         allow_jit=True,
     )
     assert r1.user.id != r2.user.id
     links = (
-        await db.execute(
-            select(ExternalIdentityLink).where(ExternalIdentityLink.subject == "dup")
+        (
+            await db.execute(
+                select(ExternalIdentityLink).where(ExternalIdentityLink.subject == "dup")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(links) == 2
     assert {link.org_id for link in links} == {org1.id, org2.id}
 
@@ -434,8 +450,11 @@ async def test_oidc_rejects_bad_nonce_aud_expiry(db, monkeypatch):
 
         def factory(form):
             return _mint_id_token(
-                sub="s", email=email, aud=mint_kwargs.pop("aud", "client-1"),
-                nonce=mint_kwargs.pop("nonce", factory.real_nonce), **mint_kwargs
+                sub="s",
+                email=email,
+                aud=mint_kwargs.pop("aud", "client-1"),
+                nonce=mint_kwargs.pop("nonce", factory.real_nonce),
+                **mint_kwargs,
             )
 
         svc.egress = FakeIdp(factory)
@@ -491,13 +510,17 @@ async def test_enforce_sso_blocks_password_login_break_glass_passes(db):
     result = await auth.login(email, "Test123!")
     assert result.access_token
     audit = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.org_id == org.id,
-                IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.org_id == org.id,
+                    IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audit) == 1
 
 
@@ -506,9 +529,7 @@ async def test_enforce_flag_requires_break_glass_member(db):
     owner = await _user(db)
     org = await _org(db, owner)
     svc = SsoAdminService(db)
-    conn = await svc.create(
-        org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="c"
-    )
+    conn = await svc.create(org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="c")
     with pytest.raises(AppError) as e:
         await svc.update(org.id, conn.id, enforce_sso=True)
     assert e.value.code == "BREAK_GLASS_UNVERIFIED"
@@ -534,7 +555,10 @@ async def test_sso_admin_rules(db):
         )
     assert e.value.code == "SSO_JIT_ROLE_INVALID"
     conn = await svc.create(
-        org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="c",
+        org.id,
+        protocol="oidc",
+        oidc_issuer=ISSUER,
+        oidc_client_id="c",
         oidc_client_secret="x",
     )
     # secret is stored as ciphertext only
@@ -558,9 +582,7 @@ async def test_resolution_tolerates_junk_claim_types(db):
     await _verified_domain(db, org, "junk.example.edu")
     svc = IdentityService(db)
     with pytest.raises(AppError) as e:
-        await svc.resolve(
-            _ident(org, subject="junk-1", email={"evil": "dict"}, verified=True)
-        )
+        await svc.resolve(_ident(org, subject="junk-1", email={"evil": "dict"}, verified=True))
     assert e.value.code in ("IDENTITY_AMBIGUOUS", "SSO_NO_ACCOUNT")
     with pytest.raises(AppError):
         await svc.resolve(
@@ -737,9 +759,7 @@ async def test_jit_user_properties_and_inactive_platform_account(db):
     dead.status = UserStatus.SUSPENDED
     await db.flush()
     with pytest.raises(AppError) as exc:
-        await svc.resolve(
-            _ident(org, subject="dead-sub", email="dead@jit-r29.io"), allow_jit=True
-        )
+        await svc.resolve(_ident(org, subject="dead-sub", email="dead@jit-r29.io"), allow_jit=True)
     assert exc.value.code == "IDENTITY_AMBIGUOUS"
     q = await svc.list_queue(org.id)
     assert any(i.reason == "existing_account_inactive" for i in q)
@@ -751,8 +771,9 @@ async def test_queue_link_refuses_archived_target(db):
     owner = await _user(db)
     org = await _org(db, owner)
     svc = IdentityService(db)
-    ghost = await _add_member(db, org, f"ghost-{uuid.uuid4().hex[:6]}@q-r29.io",
-                              status=MemberStatus.ARCHIVED)
+    ghost = await _add_member(
+        db, org, f"ghost-{uuid.uuid4().hex[:6]}@q-r29.io", status=MemberStatus.ARCHIVED
+    )
     with pytest.raises(AppError):
         await svc.resolve(_ident(org, subject="q-sub", email=None, verified=False))
     item = next(i for i in await svc.list_queue(org.id) if i.subject == "q-sub")
@@ -898,20 +919,27 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
 
     from app.services.auth import AuthService
 
-    db.add(RefreshToken(user_id=user_id, token_hash="h" * 64,
-                        expires_at=datetime.now(UTC) + _td(days=7)))
+    db.add(
+        RefreshToken(
+            user_id=user_id, token_hash="h" * 64, expires_at=datetime.now(UTC) + _td(days=7)
+        )
+    )
     await db.flush()
 
     tok = _mint_logout_token(sub="bcl-sub")
     swept = await handle_backchannel_logout(db, conn.id, tok, service=svc)
     assert swept == 1
     live = (
-        await db.execute(
-            select(RefreshToken).where(
-                RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None)
+        (
+            await db.execute(
+                select(RefreshToken).where(
+                    RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert live == []
 
     # jti replay refused.
@@ -929,15 +957,15 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
         )
     # missing sub refused.
     with pytest.raises(AppError):
-        await handle_backchannel_logout(
-            db, conn.id, _mint_logout_token(sub=None), service=svc
-        )
+        await handle_backchannel_logout(db, conn.id, _mint_logout_token(sub=None), service=svc)
     # stale iat refused.
     with pytest.raises(AppError):
         await handle_backchannel_logout(
-            db, conn.id,
-            _mint_logout_token(sub="bcl-sub", iat=int(time.time()) - 3600,
-                               exp=int(time.time()) + 3600),
+            db,
+            conn.id,
+            _mint_logout_token(
+                sub="bcl-sub", iat=int(time.time()) - 3600, exp=int(time.time()) + 3600
+            ),
             service=svc,
         )
     # A REVOKED link is not authoritative: logout for its subject sweeps 0.
@@ -945,17 +973,13 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
 
     link_row = (
         await db.execute(
-            select(_Link).where(
-                _Link.connection_ref == conn.id, _Link.subject == "bcl-sub"
-            )
+            select(_Link).where(_Link.connection_ref == conn.id, _Link.subject == "bcl-sub")
         )
     ).scalar_one()
     link_row.revoked_at = datetime.now(UTC)
     await db.flush()
     assert (
-        await handle_backchannel_logout(
-            db, conn.id, _mint_logout_token(sub="bcl-sub"), service=svc
-        )
+        await handle_backchannel_logout(db, conn.id, _mint_logout_token(sub="bcl-sub"), service=svc)
         == 0
     )
     link_row.revoked_at = None
@@ -987,25 +1011,34 @@ async def test_sso_admin_input_screens(db):
 
     with pytest.raises(EgressBlockedError):
         await svc.create(
-            org.id, protocol="oidc", oidc_issuer="https://169.254.169.254/",
-            oidc_client_id="c", oidc_client_secret="s",
+            org.id,
+            protocol="oidc",
+            oidc_issuer="https://169.254.169.254/",
+            oidc_client_id="c",
+            oidc_client_secret="s",
         )
     with pytest.raises(EgressBlockedError):
         await svc.create(
-            org.id, protocol="saml", idp_entity_id="e",
+            org.id,
+            protocol="saml",
+            idp_entity_id="e",
             idp_sso_url="ftp://idp.example.com/sso",
         )
 
     with pytest.raises(AppError) as e2:
         await svc.create(
-            org.id, protocol="saml", idp_entity_id="e",
+            org.id,
+            protocol="saml",
+            idp_entity_id="e",
             idp_sso_url="https://idp.example.com/sso",
             idp_certificates=[{"pem": "x" * 10_001}],
         )
     assert e2.value.code == "SSO_CONFIG_INVALID"
     with pytest.raises(AppError):
         await svc.create(
-            org.id, protocol="saml", idp_entity_id="e",
+            org.id,
+            protocol="saml",
+            idp_entity_id="e",
             idp_sso_url="https://idp.example.com/sso",
             idp_certificates=[{"pem": 123}],
         )
@@ -1015,9 +1048,11 @@ async def test_sso_admin_input_screens(db):
     with pytest.raises(AppError) as e3:
         for i in range(25):
             await svc.create(
-                org.id, protocol="oidc",
+                org.id,
+                protocol="oidc",
                 oidc_issuer=f"https://idp{i}.example.com",
-                oidc_client_id=f"c{i}", oidc_client_secret="s",
+                oidc_client_id=f"c{i}",
+                oidc_client_secret="s",
             )
             made += 1
     assert e3.value.code == "SSO_LIMIT_REACHED" and made >= 1
@@ -1073,9 +1108,7 @@ async def test_oidc_pkce_s256(db):
 
     def factory(form):
         captured_forms.append(form)
-        return _mint_id_token(
-            sub="pkce-sub", email=email, nonce=factory.nonce, aud="client-1"
-        )
+        return _mint_id_token(sub="pkce-sub", email=email, nonce=factory.nonce, aud="client-1")
 
     fake = FakeIdp(factory)
     svc.egress = fake
@@ -1128,9 +1161,7 @@ async def test_concurrent_domain_claim_same_org_no_500(db):
 
     r1, r2 = await asyncio.gather(_claim(), _claim())
     assert r1 == r2  # serialized + idempotent: one row, no IntegrityError 500
-    rows = (
-        await db.execute(select(OrgDomain).where(OrgDomain.domain == domain))
-    ).scalars().all()
+    rows = (await db.execute(select(OrgDomain).where(OrgDomain.domain == domain))).scalars().all()
     assert len(rows) == 1
 
 
@@ -1147,7 +1178,9 @@ async def test_unparseable_certificate_rejected_at_create(db):
             protocol="saml",
             idp_entity_id="https://idp.example.com",
             idp_sso_url="https://idp.example.com/sso",
-            idp_certificates=[{"pem": "-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----"}],
+            idp_certificates=[
+                {"pem": "-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----"}
+            ],
         )
     assert e.value.code == "SSO_CONFIG_INVALID"
 
@@ -1177,9 +1210,7 @@ async def test_discovery_issuer_mismatch_rejected(db):
 
     svc.egress = EvilDiscoveryIdp(lambda form: "unused")
     with pytest.raises(AppError) as e:
-        await svc.build_authorize_redirect(
-            conn.id, redirect_uri="https://app.example.com/cb"
-        )
+        await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.example.com/cb")
     assert e.value.status_code == 401
 
 
@@ -1196,10 +1227,19 @@ async def test_enforce_sso_gate_requires_verified_domain(db):
     db.add(OrgDomain(org_id=org.id, domain=pend, status="pending", verification_token="t"))
     email = f"pp-{uuid.uuid4().hex[:8]}@{pend}"
     emp = await _user(db, email=email)
-    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT,
-                     status=MemberStatus.ACTIVE))
-    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
-                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    db.add(
+        OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE)
+    )
+    db.add(
+        SsoConnection(
+            org_id=org.id,
+            protocol="oidc",
+            status="active",
+            oidc_issuer=ISSUER,
+            oidc_client_id="c",
+            enforce_sso=True,
+        )
+    )
     await db.flush()
     result = await AuthService(db).login(email, "Test123!")
     assert result.access_token  # pending domain never enforces
@@ -1217,8 +1257,7 @@ async def test_break_glass_capped_at_two(db):
     members = [owner]
     for _i in range(2):
         u = await _user(db)
-        db.add(OrgMember(org_id=org.id, user_id=u.id, role=_Role.ADMIN,
-                         status=MemberStatus.ACTIVE))
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=_Role.ADMIN, status=MemberStatus.ACTIVE))
         members.append(u)
     await db.flush()
     await svc.set_break_glass(org.id, members[0].id, enabled=True, actor_role=_Role.OWNER)
@@ -1264,8 +1303,14 @@ async def test_match_queue_cross_org_wall(db):
     owner_b = await _user(db)
     org_b = await _org(db, owner_b)
     item = IdentityMatchQueue(
-        org_id=org_a.id, source="scim", connection_ref="c", subject="s",
-        email="q@x.edu", reason="ambiguous", payload={}, status="pending",
+        org_id=org_a.id,
+        source="scim",
+        connection_ref="c",
+        subject="s",
+        email="q@x.edu",
+        reason="ambiguous",
+        payload={},
+        status="pending",
     )
     db.add(item)
     await db.flush()
@@ -1290,8 +1335,10 @@ async def test_sso_update_validations(db):
     org = await _org(db, owner)
     svc = SsoAdminService(db)
     conn = await svc.create(
-        org.id, protocol="oidc",
-        oidc_issuer="https://idp.example.com", oidc_client_id="c",
+        org.id,
+        protocol="oidc",
+        oidc_issuer="https://idp.example.com",
+        oidc_client_id="c",
     )
 
     with pytest.raises(AppError) as e:
@@ -1324,9 +1371,14 @@ async def test_queue_resolve_single_winner_under_race(db):
     owner = await _user(db)
     org = await _org(db, owner)
     item = IdentityMatchQueue(
-        org_id=org.id, source="scim", connection_ref="c",
-        subject=f"rq-{uuid.uuid4().hex[:6]}", email="rq@x.edu",
-        reason="ambiguous", payload={}, status="pending",
+        org_id=org.id,
+        source="scim",
+        connection_ref="c",
+        subject=f"rq-{uuid.uuid4().hex[:6]}",
+        email="rq@x.edu",
+        reason="ambiguous",
+        payload={},
+        status="pending",
     )
     db.add(item)
     await db.commit()
@@ -1335,7 +1387,10 @@ async def test_queue_resolve_single_winner_under_race(db):
         async with AsyncSessionLocal() as own:
             try:
                 await IdentityService(own).resolve_queue_item(
-                    org.id, item.id, action="reject", user_id=None,
+                    org.id,
+                    item.id,
+                    action="reject",
+                    user_id=None,
                     actor_id=owner.id,
                 )
                 await own.commit()
@@ -1366,23 +1421,42 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
     await _verified_domain(db, org, dom)
     email = f"bg-{uuid.uuid4().hex[:8]}@{dom}"
     emp = await _user(db, email=email)
-    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.ADMIN,
-                     status=MemberStatus.ACTIVE, is_break_glass=True))
-    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
-                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    db.add(
+        OrgMember(
+            org_id=org.id,
+            user_id=emp.id,
+            role=OrgRole.ADMIN,
+            status=MemberStatus.ACTIVE,
+            is_break_glass=True,
+        )
+    )
+    db.add(
+        SsoConnection(
+            org_id=org.id,
+            protocol="oidc",
+            status="active",
+            oidc_issuer=ISSUER,
+            oidc_client_id="c",
+            enforce_sso=True,
+        )
+    )
     await db.flush()
     result = await AuthService(db).login(
         email, "Test123!", ip_address="198.51.100.7", device_info="E2E-UA/1.0"
     )
     assert result.access_token
     ev = (
-        await db.execute(
-            select(IntegrationEvent).where(
-                IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
-                IntegrationEvent.subject == emp.id,
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
+                    IntegrationEvent.subject == emp.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert ev is not None
     assert ev.data["ip_address"] == "198.51.100.7"
     assert ev.data["user_agent"] == "E2E-UA/1.0"
@@ -1418,10 +1492,19 @@ async def test_idn_domain_email_matching_consistent(db):
     # enforce gate covers the IDN member's password login
     email = f"idn-{uuid.uuid4().hex[:6]}@{uni}"
     emp = await _user(db, email=email)
-    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT,
-                     status=MemberStatus.ACTIVE))
-    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
-                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    db.add(
+        OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE)
+    )
+    db.add(
+        SsoConnection(
+            org_id=org.id,
+            protocol="oidc",
+            status="active",
+            oidc_issuer=ISSUER,
+            oidc_client_id="c",
+            enforce_sso=True,
+        )
+    )
     await db.flush()
     with pytest.raises(AppError) as e:
         await AuthService(db).login(email, "Test123!")
@@ -1429,8 +1512,12 @@ async def test_idn_domain_email_matching_consistent(db):
 
     # identity resolution matches the verified IDN domain by email
     ident = VerifiedExternalIdentity(
-        org_id=org.id, source="oidc", connection_ref="conn-idn",
-        subject=f"s-{uuid.uuid4().hex[:6]}", email=email, email_verified=True,
+        org_id=org.id,
+        source="oidc",
+        connection_ref="conn-idn",
+        subject=f"s-{uuid.uuid4().hex[:6]}",
+        email=email,
+        email_verified=True,
     )
     res = await IdentityService(db).resolve(ident)
     assert res.user.id == emp.id

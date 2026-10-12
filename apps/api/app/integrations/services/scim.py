@@ -247,9 +247,7 @@ class ScimTokenService:
             ).scalars()
         )
         if set(ids) - owned:
-            raise AppError(
-                "SCIM_GROUP_MAP_INVALID", "cohort does not belong to this org", 422
-            )
+            raise AppError("SCIM_GROUP_MAP_INVALID", "cohort does not belong to this org", 422)
 
     async def update_group_map(self, org_id: str, token_id: str, group_map: dict) -> ScimToken:
         token = await self.db.get(ScimToken, token_id)
@@ -371,9 +369,7 @@ class ScimUserService:
 
     # — list + filter —
 
-    async def list(
-        self, *, filter_expr: str | None, start_index: int, count: int
-    ) -> dict:
+    async def list(self, *, filter_expr: str | None, start_index: int, count: int) -> dict:
         q = (
             select(User, OrgMember)
             .join(OrgMember, OrgMember.user_id == User.id)
@@ -396,12 +392,8 @@ class ScimUserService:
                 raise ScimError(400, f"Unsupported filter attribute: {attr}", "invalidFilter")
         # R162: push paging into SQL so a large tenant does not materialize
         # every row on each page (IdPs page through the whole directory).
-        total = (
-            await self.db.execute(select(func.count()).select_from(q.subquery()))
-        ).scalar_one()
-        page = (
-            await self.db.execute(q.offset(start_index - 1).limit(count))
-        ).all()
+        total = (await self.db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+        page = (await self.db.execute(q.offset(start_index - 1).limit(count))).all()
         # R221 (R218 class): ONE link query for the page instead of a point
         # SELECT per row — IdPs page the whole directory nightly, so a
         # 10k-user org was paying 10k extra round-trips per sweep.
@@ -438,7 +430,9 @@ class ScimUserService:
         # RFC 7644 §3.4.2.2: operators are case-insensitive ("Eq" happens).
         m = re.fullmatch(r'\s*([A-Za-z.]+)\s+eq\s+"((?:[^"\\]|\\.)*)"\s*', expr, re.IGNORECASE)
         if not m:
-            raise ScimError(400, "Only '<attr> eq \"value\"' filters are supported", "invalidFilter")
+            raise ScimError(
+                400, "Only '<attr> eq \"value\"' filters are supported", "invalidFilter"
+            )
         return m.group(1).lower(), m.group(2)
 
     # — create (POST /Users) —
@@ -505,9 +499,7 @@ class ScimUserService:
                     self.db.add(user)
                     await self.db.flush()
             except IntegrityError as exc:
-                raise ScimError(
-                    409, "userName already exists", "uniqueness"
-                ) from exc
+                raise ScimError(409, "userName already exists", "uniqueness") from exc
             member = OrgMember(
                 org_id=self.org_id,
                 user_id=user.id,
@@ -866,7 +858,9 @@ class ScimGroupService:
                 )
             ).scalar_one_or_none()
             if member is None:
-                raise ScimError(400, "Member value is not a user in this organization", "invalidValue")
+                raise ScimError(
+                    400, "Member value is not a user in this organization", "invalidValue"
+                )
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
             await self.db.execute(
@@ -924,9 +918,7 @@ class ScimGroupService:
                 except AppError as exc:
                     # Already-member is fine; anything else surfaces.
                     if exc.code not in ("ALREADY_ENROLLED",):
-                        log.warning(
-                            "scim_cohort_map_failed", cohort_id=cohort_id, code=exc.code
-                        )
+                        log.warning("scim_cohort_map_failed", cohort_id=cohort_id, code=exc.code)
             else:
                 # R277: scope the removal to THIS org's cohorts — the add
                 # path goes through CohortService.add_member (org-checked),

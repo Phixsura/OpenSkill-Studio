@@ -106,17 +106,21 @@ class IdentityService:
             raise AppError("IDENTITY_AMBIGUOUS", "Identity requires admin confirmation", 403)
 
         members = (
-            await self.db.execute(
-                select(User)
-                .join(OrgMember, OrgMember.user_id == User.id)
-                .where(
-                    OrgMember.org_id == ident.org_id,
-                    OrgMember.status == MemberStatus.ACTIVE,
-                    func.lower(User.email) == email,
-                    User.status == UserStatus.ACTIVE,
+            (
+                await self.db.execute(
+                    select(User)
+                    .join(OrgMember, OrgMember.user_id == User.id)
+                    .where(
+                        OrgMember.org_id == ident.org_id,
+                        OrgMember.status == MemberStatus.ACTIVE,
+                        func.lower(User.email) == email,
+                        User.status == UserStatus.ACTIVE,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if len(members) == 1:
             return ResolutionResult(
@@ -133,9 +137,7 @@ class IdentityService:
             await self._queue(ident, reason="no_member_match")
             raise AppError("SSO_NO_ACCOUNT", "No account for this identity", 403)
         user = await self._jit_provision(ident, jit_role)
-        return ResolutionResult(
-            user=user, link=await self._link(ident, user.id), jit_created=True
-        )
+        return ResolutionResult(user=user, link=await self._link(ident, user.id), jit_created=True)
 
     async def _link(self, ident: VerifiedExternalIdentity, user_id: str) -> ExternalIdentityLink:
         link = ExternalIdentityLink(
@@ -208,9 +210,7 @@ class IdentityService:
                     await self.db.flush()
             except IntegrityError:
                 user = (
-                    await self.db.execute(
-                        select(User).where(func.lower(User.email) == email)
-                    )
+                    await self.db.execute(select(User).where(func.lower(User.email) == email))
                 ).scalar_one()
                 if user.status != UserStatus.ACTIVE:
                     await self._queue(ident, reason="existing_account_inactive")

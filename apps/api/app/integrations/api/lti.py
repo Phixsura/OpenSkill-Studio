@@ -90,10 +90,10 @@ async def list_registrations(
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     regs = (
-        await db.execute(
-            select(LtiRegistration).where(LtiRegistration.org_id == org_id)
-        )
-    ).scalars().all()
+        (await db.execute(select(LtiRegistration).where(LtiRegistration.org_id == org_id)))
+        .scalars()
+        .all()
+    )
     return {"data": [await _reg_response(db, r) for r in regs]}
 
 
@@ -177,7 +177,8 @@ class DynamicRegistrationRequest(BaseModel):
 
 
 @admin_router.post(
-    "/registrations/dynamic", response_model=DataResponse[LtiRegistrationResponse],
+    "/registrations/dynamic",
+    response_model=DataResponse[LtiRegistrationResponse],
     status_code=201,
 )
 async def dynamic_registration(
@@ -219,9 +220,7 @@ async def delete_registration(
     await db.commit()
 
 
-@admin_router.get(
-    "/registrations/{reg_id}/resource-links", response_model=DataResponse[list[dict]]
-)
+@admin_router.get("/registrations/{reg_id}/resource-links", response_model=DataResponse[list[dict]])
 async def list_resource_links(
     org_id: str,
     reg_id: str,
@@ -234,13 +233,17 @@ async def list_resource_links(
     from app.integrations.models import LtiResourceLink
 
     rows = (
-        await db.execute(
-            select(LtiResourceLink)
-            .where(LtiResourceLink.registration_id == reg_id)
-            .order_by(LtiResourceLink.created_at.desc())
-            .limit(200)
+        (
+            await db.execute(
+                select(LtiResourceLink)
+                .where(LtiResourceLink.registration_id == reg_id)
+                .order_by(LtiResourceLink.created_at.desc())
+                .limit(200)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         "data": [
             {
@@ -258,9 +261,7 @@ async def list_resource_links(
     }
 
 
-@admin_router.post(
-    "/resource-links/{link_id}/nrps-sync", response_model=DataResponse[dict]
-)
+@admin_router.post("/resource-links/{link_id}/nrps-sync", response_model=DataResponse[dict])
 async def nrps_sync(
     org_id: str,
     link_id: str,
@@ -402,9 +403,7 @@ async def lti_launch(
         "resource": (
             {"kind": link.kind, "target_id": link.target_id} if link is not None else None
         ),
-        "message_type": claims.get(
-            "https://purl.imsglobal.org/spec/lti/claim/message_type"
-        ),
+        "message_type": claims.get("https://purl.imsglobal.org/spec/lti/claim/message_type"),
     }
     if settings.app_env in ("development", "test"):
         return {"data": body}

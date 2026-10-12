@@ -70,10 +70,10 @@ def sp_metadata_xml(connection_id: str | None = None) -> str:
         '<md:SPSSODescriptor AuthnRequestsSigned="false" '
         'WantAssertionsSigned="true" '
         'protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">'
-        f'<md:SingleLogoutService '
+        f"<md:SingleLogoutService "
         'Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" '
         f'Location="{acs.replace("/acs/", "/slo/")}"/>'
-        f'<md:AssertionConsumerService '
+        f"<md:AssertionConsumerService "
         'Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" '
         f'Location="{acs}" index="0"/>'
         "</md:SPSSODescriptor></md:EntityDescriptor>"
@@ -190,11 +190,7 @@ class SamlService:
 
         # Rebuild the EXACT signed string from the raw query (spec order:
         # SAMLRequest[&RelayState]&SigAlg, original percent-encoding kept).
-        raw_parts = {
-            seg.split("=", 1)[0]: seg
-            for seg in raw_query.split("&")
-            if "=" in seg
-        }
+        raw_parts = {seg.split("=", 1)[0]: seg for seg in raw_query.split("&") if "=" in seg}
         ordered = [raw_parts["SAMLRequest"]]
         if "RelayState" in raw_parts:
             ordered.append(raw_parts["RelayState"])
@@ -204,9 +200,7 @@ class SamlService:
         # already plus-decoded signature_b64, which corrupts base64 '+'.
         sig_seg = raw_parts.get("Signature", "")
         try:
-            signature = base64.b64decode(
-                unquote(sig_seg.split("=", 1)[1]), validate=True
-            )
+            signature = base64.b64decode(unquote(sig_seg.split("=", 1)[1]), validate=True)
         except Exception as exc:
             raise _invalid("slo_signature_invalid") from exc
         verified = False
@@ -227,9 +221,7 @@ class SamlService:
             raise _invalid("slo_signature_invalid")
 
         try:
-            xml_bytes = zlib.decompress(
-                base64.b64decode(saml_request, validate=True), -15
-            )
+            xml_bytes = zlib.decompress(base64.b64decode(saml_request, validate=True), -15)
         except Exception as exc:
             raise _invalid("slo_request_invalid") from exc
         parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False)
@@ -286,7 +278,7 @@ class SamlService:
             + (f'InResponseTo="{in_response_to}" ' if in_response_to else "")
             + f'Destination="{conn.idp_slo_url}">'
             f"<saml:Issuer>{sp_entity_id()}</saml:Issuer>"
-            '<samlp:Status><samlp:StatusCode '
+            "<samlp:Status><samlp:StatusCode "
             'Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>'
             "</samlp:LogoutResponse>"
         )
@@ -427,7 +419,9 @@ class SamlService:
             f"{{{NS['saml']}}}Subject/{{{NS['saml']}}}SubjectConfirmation/"
             f"{{{NS['saml']}}}SubjectConfirmationData"
         )
-        in_response_to = (subject_conf.get("InResponseTo") if subject_conf is not None else None) or ""
+        in_response_to = (
+            subject_conf.get("InResponseTo") if subject_conf is not None else None
+        ) or ""
         if not in_response_to.startswith("_"):
             raise _invalid("unsolicited_response")  # IdP-initiated not supported v1
         return_to = await self._consume_request_id(in_response_to[1:], conn.id)
@@ -455,9 +449,7 @@ class SamlService:
             if name:
                 attrs[name] = value
         amap = conn.attribute_map or {}
-        email = attrs.get(amap.get("email", "email")) or (
-            name_id if "@" in name_id else None
-        )
+        email = attrs.get(amap.get("email", "email")) or (name_id if "@" in name_id else None)
         display = attrs.get(amap.get("display_name", "displayName"))
 
         ident = VerifiedExternalIdentity(

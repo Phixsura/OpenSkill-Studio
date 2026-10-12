@@ -129,14 +129,16 @@ def test_parse_users_any_bytes_never_raises(blob):
 _EMAILS = st.from_regex(r"[a-z0-9]{1,10}@[a-z0-9]{1,8}\.[a-z]{2,4}", fullmatch=True)
 _NAMES = st.text(
     alphabet=string.ascii_letters + string.digits + " -_",
-    min_size=0, max_size=30,
+    min_size=0,
+    max_size=30,
 )
 
 
 @given(
     st.lists(
         st.tuples(_EMAILS, _NAMES, st.sampled_from(["student", "instructor", ""])),
-        min_size=0, max_size=8,
+        min_size=0,
+        max_size=8,
     )
 )
 @settings(max_examples=400, deadline=None)
@@ -157,9 +159,7 @@ def test_csv_json_parity_for_users(rows):
         w.writerow([e, d, r])
     csv_rows, csv_errors = parse_users(buf.getvalue().encode(), "csv")
 
-    payload = _json.dumps(
-        [{"email": e, "display_name": d, "role": r} for e, d, r in rows]
-    ).encode()
+    payload = _json.dumps([{"email": e, "display_name": d, "role": r} for e, d, r in rows]).encode()
     json_rows, json_errors = parse_users(payload, "json")
 
     def key(row):

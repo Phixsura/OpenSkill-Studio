@@ -96,14 +96,14 @@ async def fabric_health(
     conn_by_status = {status: n for status, n in conn_rows}
 
     subs_total = await one(
-        select(func.count()).select_from(WebhookSubscription).where(
-            WebhookSubscription.org_id == org_id
-        )
+        select(func.count())
+        .select_from(WebhookSubscription)
+        .where(WebhookSubscription.org_id == org_id)
     )
     subs_disabled = await one(
-        select(func.count()).select_from(WebhookSubscription).where(
-            WebhookSubscription.org_id == org_id, WebhookSubscription.active.is_(False)
-        )
+        select(func.count())
+        .select_from(WebhookSubscription)
+        .where(WebhookSubscription.org_id == org_id, WebhookSubscription.active.is_(False))
     )
     deliveries_pending = await one(
         select(func.count())
@@ -122,9 +122,9 @@ async def fabric_health(
         )
     )
     queue_pending = await one(
-        select(func.count()).select_from(IdentityMatchQueue).where(
-            IdentityMatchQueue.org_id == org_id, IdentityMatchQueue.status == "pending"
-        )
+        select(func.count())
+        .select_from(IdentityMatchQueue)
+        .where(IdentityMatchQueue.org_id == org_id, IdentityMatchQueue.status == "pending")
     )
     sync_profiles = await one(
         select(func.count()).select_from(SyncProfile).where(SyncProfile.org_id == org_id)
@@ -140,9 +140,9 @@ async def fabric_health(
         )
     )
     sso_active = await one(
-        select(func.count()).select_from(SsoConnection).where(
-            SsoConnection.org_id == org_id, SsoConnection.status == "active"
-        )
+        select(func.count())
+        .select_from(SsoConnection)
+        .where(SsoConnection.org_id == org_id, SsoConnection.status == "active")
     )
     return {
         "data": {
@@ -202,7 +202,13 @@ async def create_connection(
     )
     resp = await _to_response(db, conn)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.connection.created", "connection", conn.id, after={"provider": body.provider_key}
+        db,
+        org_id,
+        user.id,
+        "intg.connection.created",
+        "connection",
+        conn.id,
+        after={"provider": body.provider_key},
     )
     await db.commit()
     return {"data": resp}

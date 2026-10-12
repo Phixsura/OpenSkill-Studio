@@ -218,15 +218,19 @@ async def create_sso_connection(
     )
     resp = _sso_response(conn)
     await record_fabric_audit(
-        db, org_id, user.id, "intg.sso.created", "sso_connection", conn.id, after={"protocol": conn.protocol}
+        db,
+        org_id,
+        user.id,
+        "intg.sso.created",
+        "sso_connection",
+        conn.id,
+        after={"protocol": conn.protocol},
     )
     await db.commit()
     return {"data": resp}
 
 
-@admin_router.get(
-    "/sso-connections/{conn_id}", response_model=DataResponse[SsoConnectionResponse]
-)
+@admin_router.get("/sso-connections/{conn_id}", response_model=DataResponse[SsoConnectionResponse])
 async def get_sso_connection(
     org_id: str,
     conn_id: str,
@@ -250,9 +254,7 @@ async def update_sso_connection(
     await _admin(org_id, user, db)
     conn = await SsoAdminService(db).update(org_id, conn_id, **body.model_dump())
     resp = _sso_response(conn)
-    await record_fabric_audit(
-        db, org_id, user.id, "intg.sso.updated", "sso_connection", conn.id
-    )
+    await record_fabric_audit(db, org_id, user.id, "intg.sso.updated", "sso_connection", conn.id)
     await db.commit()
     return {"data": resp}
 
@@ -283,9 +285,7 @@ async def set_break_glass(
     await db.commit()
 
 
-@admin_router.post(
-    "/sso-connections/{conn_id}/refresh-metadata", response_model=DataResponse[dict]
-)
+@admin_router.post("/sso-connections/{conn_id}/refresh-metadata", response_model=DataResponse[dict])
 async def refresh_sso_metadata(
     org_id: str,
     conn_id: str,
@@ -418,13 +418,17 @@ async def sso_discovery(
     from app.integrations.models import SsoConnection
 
     conn = (
-        await db.execute(
-            select(SsoConnection).where(
-                SsoConnection.org_id == org_id,
-                SsoConnection.status == "active",
+        (
+            await db.execute(
+                select(SsoConnection).where(
+                    SsoConnection.org_id == org_id,
+                    SsoConnection.status == "active",
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if conn is None:
         return {"data": {"sso": False}}
     # R67: route by the connection's PROTOCOL — a SAML org was being sent to
@@ -465,9 +469,7 @@ async def saml_authorize(
     return RedirectResponse(url, status_code=302)
 
 
-@protocol_router.get(
-    "/saml/slo/{connection_id}", dependencies=[Depends(rate_limit(10, 60))]
-)
+@protocol_router.get("/saml/slo/{connection_id}", dependencies=[Depends(rate_limit(10, 60))])
 async def saml_slo(
     connection_id: str,
     request: Request,
@@ -496,9 +498,7 @@ async def saml_slo(
                 data={"sso_connection_id": conn.id},
             )
     await db.commit()
-    redirect = svc.build_slo_response_redirect(
-        conn, in_response_to=None, relay_state=relay_state
-    )
+    redirect = svc.build_slo_response_redirect(conn, in_response_to=None, relay_state=relay_state)
     if redirect:
         return RedirectResponse(redirect, status_code=302)
     return {"data": {"logged_out": True}}

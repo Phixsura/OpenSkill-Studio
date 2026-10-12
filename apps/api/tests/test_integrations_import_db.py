@@ -128,32 +128,38 @@ async def test_preview_commit_and_idempotent_reupload(db):
     )
     svc = BulkImportService(db)
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k1", created_by=owner.id, idempotency_key="idem-1",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k1",
+        created_by=owner.id,
+        idempotency_key="idem-1",
     )
     assert job.status == "previewed"
     assert job.dry_stats == {"valid": 2, "errors": 0, "creates": 1, "updates": 1, "skips": 0}
     # idempotent re-upload returns the SAME job
     again = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k2", created_by=owner.id, idempotency_key="idem-1",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k2",
+        created_by=owner.id,
+        idempotency_key="idem-1",
     )
     assert again.id == job.id
 
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.status == "succeeded"
     assert committed.stats["created"] == 1 and committed.stats["updated"] == 1
-    new_user = (
-        await db.execute(select(User).where(func.lower(User.email) == fresh))
-    ).scalar_one()
+    new_user = (await db.execute(select(User).where(func.lower(User.email) == fresh))).scalar_one()
     assert new_user.email_verified is False  # imported, not IdP-verified
     await db.refresh(existing)
     assert existing.display_name == "New Name"
     member = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.user_id == existing.id
-            )
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == existing.id)
         )
     ).scalar_one()
     assert member.role == OrgRole.INSTRUCTOR  # initial role from the file
@@ -163,8 +169,12 @@ async def test_preview_commit_and_idempotent_reupload(db):
         await svc.commit(org.id, job.id, file_bytes=data)
     assert e.value.code == "IMPORT_NOT_COMMITTABLE"
     job2 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k3", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k3",
+        created_by=owner.id,
     )
     committed2 = await svc.commit(org.id, job2.id, file_bytes=data)
     assert committed2.stats["created"] == 0
@@ -179,8 +189,12 @@ async def test_stale_preview_refused(db):
     data = _csv([f"a-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
     svc = BulkImportService(db)
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k",
+        created_by=owner.id,
     )
     drifted = data + b"\r\nnew@x.edu,N,student"
     with pytest.raises(AppError) as e:
@@ -196,8 +210,12 @@ async def test_atomic_mode_rejects_whole_file(db):
     data = _csv([f"{good},G,student", "broken-email,B,student"])
     svc = BulkImportService(db)
     job = await svc.create_job(
-        org.id, kind="users", mode="atomic", file_bytes=data,
-        file_key="k", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="atomic",
+        file_bytes=data,
+        file_key="k",
+        created_by=owner.id,
     )
     assert job.dry_stats["errors"] == 1
     committed = await svc.commit(org.id, job.id, file_bytes=data)
@@ -221,8 +239,12 @@ async def test_partial_mode_applies_valid_rows_and_error_report(db):
     )
     svc = BulkImportService(db)
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k",
+        created_by=owner.id,
     )
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.status == "partial"
@@ -242,18 +264,30 @@ async def test_import_cross_org_404_and_caps(db):
     svc = BulkImportService(db)
     with pytest.raises(AppError) as e:
         await svc.create_job(
-            org.id, kind="users", mode="partial",
-            file_bytes=b"x" * (52_428_800 + 1), file_key="k", created_by=owner.id,
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=b"x" * (52_428_800 + 1),
+            file_key="k",
+            created_by=owner.id,
         )
     assert e.value.code == "IMPORT_TOO_LARGE"
     with pytest.raises(AppError):
         await svc.create_job(
-            org.id, kind="nope", mode="partial", file_bytes=b"a", file_key="k",
+            org.id,
+            kind="nope",
+            mode="partial",
+            file_bytes=b"a",
+            file_key="k",
             created_by=owner.id,
         )
     data = _csv([f"a-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data, file_key="k",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k",
         created_by=owner.id,
     )
     other, _ = await _org(db)
@@ -276,8 +310,12 @@ async def test_concurrent_commit_single_winner(db):
     data = _csv([f"cc-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
     svc = BulkImportService(db)
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="k", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="k",
+        created_by=owner.id,
     )
     # First commit wins; a racer that lost the claim gets 409 even with the
     # right fingerprint.
@@ -302,27 +340,33 @@ async def test_display_truncation_error_cap_and_committing_claim(db):
     email = f"long-{uuid.uuid4().hex[:6]}@x.edu"
     data = _csv([f"{email},{'D' * 150},student"])
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="t1", created_by=owner.id, idempotency_key=f"r38-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="t1",
+        created_by=owner.id,
+        idempotency_key=f"r38-{uuid.uuid4().hex[:8]}",
     )
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1 and committed.stats.get("row_errors", 0) == 0
-    u = (
-        await db.execute(select(User).where(func.lower(User.email) == email))
-    ).scalar_one()
+    u = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one()
     assert len(u.display_name) == 100
 
     # 2. Preview stores at most MAX_ROW_ERRORS row errors (JSONB blow-up cap).
     bad = _csv([f"not-an-email-{i},X,student" for i in range(MAX_ROW_ERRORS + 5)])
     job2 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=bad,
-        file_key="t2", created_by=owner.id, idempotency_key=f"r38b-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=bad,
+        file_key="t2",
+        created_by=owner.id,
+        idempotency_key=f"r38b-{uuid.uuid4().hex[:8]}",
     )
     stored = (
         await db.execute(
-            select(func.count()).select_from(ImportRowError).where(
-                ImportRowError.job_id == job2.id
-            )
+            select(func.count()).select_from(ImportRowError).where(ImportRowError.job_id == job2.id)
         )
     ).scalar_one()
     assert stored == MAX_ROW_ERRORS
@@ -333,8 +377,13 @@ async def test_display_truncation_error_cap_and_committing_claim(db):
     email3 = f"claim-{uuid.uuid4().hex[:6]}@x.edu"
     data3 = _csv([f"{email3},C,student"])
     job3 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data3,
-        file_key="t3", created_by=owner.id, idempotency_key=f"r38c-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data3,
+        file_key="t3",
+        created_by=owner.id,
+        idempotency_key=f"r38c-{uuid.uuid4().hex[:8]}",
     )
     job3.status = "committing"
     await db.flush()
@@ -354,12 +403,21 @@ async def test_list_imports_org_scoped(db):
     svc = BulkImportService(db)
     data = _csv([f"li-{uuid.uuid4().hex[:6]}@x.edu,A,student"])
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="l1", created_by=owner.id, idempotency_key=f"r83-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="l1",
+        created_by=owner.id,
+        idempotency_key=f"r83-{uuid.uuid4().hex[:8]}",
     )
     foreign = await svc.create_job(
-        other.id, kind="users", mode="partial", file_bytes=data,
-        file_key="l2", created_by=other_owner.id,
+        other.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="l2",
+        created_by=other_owner.id,
         idempotency_key=f"r83b-{uuid.uuid4().hex[:8]}",
     )
     owner_user = await db.get(_User, owner.id)
@@ -376,28 +434,31 @@ async def test_header_map_aliases_and_validation(db):
     org, owner = await _org(db)
     svc = BulkImportService(db)
     email = f"hm-{uuid.uuid4().hex[:6]}@x.edu"
-    data = (
-        "E-mail Address,Full Name,Role\n"
-        f"{email},Mapped Person,student\n"
-    ).encode()
+    data = (f"E-mail Address,Full Name,Role\n{email},Mapped Person,student\n").encode()
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="hm1", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="hm1",
+        created_by=owner.id,
         idempotency_key=f"r92-{uuid.uuid4().hex[:8]}",
         header_map={"email": "E-mail Address", "display_name": "Full Name", "role": "Role"},
     )
     assert job.dry_stats == {"valid": 1, "errors": 0, "creates": 1, "updates": 0, "skips": 0}
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1
-    u = (
-        await db.execute(select(User).where(func.lower(User.email) == email))
-    ).scalar_one()
+    u = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one()
     assert u.display_name == "Mapped Person"
 
     # Without the map the same file fails on missing columns.
     job2 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="hm2", created_by=owner.id,
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="hm2",
+        created_by=owner.id,
         idempotency_key=f"r92b-{uuid.uuid4().hex[:8]}",
     )
     assert job2.dry_stats["errors"] >= 1 and job2.dry_stats["valid"] == 0
@@ -405,16 +466,24 @@ async def test_header_map_aliases_and_validation(db):
     # Unknown canonical key / junk alias refused.
     with pytest.raises(AppError) as e1:
         await svc.create_job(
-            org.id, kind="users", mode="partial", file_bytes=data,
-            file_key="hm3", created_by=owner.id,
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=data,
+            file_key="hm3",
+            created_by=owner.id,
             idempotency_key=f"r92c-{uuid.uuid4().hex[:8]}",
             header_map={"password": "Secret"},
         )
     assert e1.value.code == "IMPORT_HEADER_MAP_INVALID"
     with pytest.raises(AppError):
         await svc.create_job(
-            org.id, kind="users", mode="partial", file_bytes=data,
-            file_key="hm4", created_by=owner.id,
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=data,
+            file_key="hm4",
+            created_by=owner.id,
             idempotency_key=f"r92d-{uuid.uuid4().hex[:8]}",
             header_map={"email": 7},
         )
@@ -427,20 +496,17 @@ def test_csv_parser_robustness_matrix():
     from app.integrations.services.bulk_import import parse_users_csv
 
     # BOM + CRLF + a quoted display_name containing a comma.
-    data = ('\ufeffemail,display_name,role\r\n'
-            'a@x.edu,"Doe, Jane",student\r\n').encode("utf-8")
+    data = ('\ufeffemail,display_name,role\r\na@x.edu,"Doe, Jane",student\r\n').encode("utf-8")
     rows, errors = parse_users_csv(data)
     assert errors == [] and rows[0]["display_name"] == "Doe, Jane"
 
     # Quoted embedded newline in a field.
-    data2 = (b'email,display_name,role\n'
-            b'b@x.edu,"Line1\nLine2",student\n')
+    data2 = b'email,display_name,role\nb@x.edu,"Line1\nLine2",student\n'
     rows2, errors2 = parse_users_csv(data2)
     assert errors2 == [] and "Line1" in rows2[0]["display_name"]
 
     # Extra/unknown columns are ignored, not fatal.
-    data3 = (b'email,display_name,role,department,notes\n'
-            b'c@x.edu,C,student,eng,hi\n')
+    data3 = b"email,display_name,role,department,notes\nc@x.edu,C,student,eng,hi\n"
     rows3, errors3 = parse_users_csv(data3)
     assert errors3 == [] and rows3[0]["email"] == "c@x.edu"
 
@@ -495,37 +561,52 @@ async def test_json_import_template(db):
     svc = BulkImportService(db)
     email = f"js-{uuid.uuid4().hex[:6]}@x.edu"
     data = _json.dumps(
-        {"users": [
-            {"email": email, "display_name": "JSON User", "role": "instructor"},
-            {"email": "bad-no-at", "display_name": "Nope"},
-        ]}
+        {
+            "users": [
+                {"email": email, "display_name": "JSON User", "role": "instructor"},
+                {"email": "bad-no-at", "display_name": "Nope"},
+            ]
+        }
     ).encode()
     job = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data,
-        file_key="j1", created_by=owner.id, idempotency_key=f"r128-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="j1",
+        created_by=owner.id,
+        idempotency_key=f"r128-{uuid.uuid4().hex[:8]}",
     )
     assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 1
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1
     from sqlalchemy import func as _f
 
-    u = (
-        await db.execute(select(User).where(_f.lower(User.email) == email))
-    ).scalar_one()
+    u = (await db.execute(select(User).where(_f.lower(User.email) == email))).scalar_one()
     assert u.display_name == "JSON User"
 
     # Top-level list form also works.
     data2 = _json.dumps([{"email": f"js2-{uuid.uuid4().hex[:6]}@x.edu"}]).encode()
     job2 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=data2,
-        file_key="j2", created_by=owner.id, idempotency_key=f"r128b-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data2,
+        file_key="j2",
+        created_by=owner.id,
+        idempotency_key=f"r128b-{uuid.uuid4().hex[:8]}",
     )
     assert job2.dry_stats["valid"] == 1
 
     # Malformed JSON -> file-level error, zero valid.
     job3 = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=b"{not json",
-        file_key="j3", created_by=owner.id, idempotency_key=f"r128c-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=b"{not json",
+        file_key="j3",
+        created_by=owner.id,
+        idempotency_key=f"r128c-{uuid.uuid4().hex[:8]}",
     )
     assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] >= 1
 
@@ -565,8 +646,13 @@ async def test_roster_import_kind(db):
     email = f"ro-{uuid.uuid4().hex[:6]}@x.edu"
     useed = f"email\n{email}\n".encode()
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"ru-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"ru-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
@@ -577,8 +663,13 @@ async def test_roster_import_kind(db):
         f"{email},no-such-cohort,learner\n"
     ).encode()
     job = await svc.create_job(
-        org.id, kind="roster", mode="partial", file_bytes=data,
-        file_key="r1", created_by=owner.id, idempotency_key=f"rr-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="partial",
+        file_bytes=data,
+        file_key="r1",
+        created_by=owner.id,
+        idempotency_key=f"rr-{uuid.uuid4().hex[:8]}",
     )
     # preview: 1 enrollable, 2 resolution errors
     assert job.dry_stats["creates"] == 1 and job.dry_stats["errors"] == 2
@@ -587,17 +678,20 @@ async def test_roster_import_kind(db):
     assert committed.stats["created"] == 1
     assert committed.status == "partial"
     member = (
-        await db.execute(
-            select(CohortMember).where(CohortMember.cohort_id == cohort.id)
-        )
+        await db.execute(select(CohortMember).where(CohortMember.cohort_id == cohort.id))
     ).scalar_one()
     assert member.role == CohortRole.INSTRUCTOR
 
     # Idempotent re-import: same pair skips, role NOT downgraded to learner.
     data2 = f"email,cohort_slug,role\n{email},{cohort.slug},learner\n".encode()
     job2 = await svc.create_job(
-        org.id, kind="roster", mode="partial", file_bytes=data2,
-        file_key="r2", created_by=owner.id, idempotency_key=f"rr2-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="partial",
+        file_bytes=data2,
+        file_key="r2",
+        created_by=owner.id,
+        idempotency_key=f"rr2-{uuid.uuid4().hex[:8]}",
     )
     committed2 = await svc.commit(org.id, job2.id, file_bytes=data2)
     assert committed2.stats["skipped"] == 1 and committed2.stats["created"] == 0
@@ -619,17 +713,25 @@ async def test_roster_import_json_and_atomic(db):
     email = f"rj-{uuid.uuid4().hex[:6]}@x.edu"
     useed = f"email\n{email}\n".encode()
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"rj-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"rj-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
-    data = _json.dumps(
-        {"roster": [{"email": email, "cohort_slug": cohort.slug}]}
-    ).encode()
+    data = _json.dumps({"roster": [{"email": email, "cohort_slug": cohort.slug}]}).encode()
     job = await svc.create_job(
-        org.id, kind="roster", mode="partial", file_bytes=data,
-        file_key="r1", created_by=owner.id, idempotency_key=f"rj1-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="partial",
+        file_bytes=data,
+        file_key="r1",
+        created_by=owner.id,
+        idempotency_key=f"rj1-{uuid.uuid4().hex[:8]}",
     )
     assert job.dry_stats["creates"] == 1 and job.dry_stats["errors"] == 0
     committed = await svc.commit(org.id, job.id, file_bytes=data)
@@ -641,20 +743,27 @@ async def test_roster_import_json_and_atomic(db):
     email2 = f"ra-{uuid.uuid4().hex[:6]}@x.edu"
     useed2 = f"email\n{email2}\n".encode()
     ujob2 = await svc.create_job(
-        org2.id, kind="users", mode="partial", file_bytes=useed2,
-        file_key="u2", created_by=owner2.id, idempotency_key=f"ra-{uuid.uuid4().hex[:8]}",
+        org2.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed2,
+        file_key="u2",
+        created_by=owner2.id,
+        idempotency_key=f"ra-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org2.id, ujob2.id, file_bytes=useed2)
     # Bad row FIRST: the service aborts before applying anything in-session.
     # (A failure AFTER a success relies on the request-boundary rollback in
     # get_db — the whole transaction, claim included, returns to previewed.)
-    bad = (
-        f"email,cohort_slug\n{email2},missing-cohort\n"
-        f"{email2},{cohort2.slug}\n"
-    ).encode()
+    bad = (f"email,cohort_slug\n{email2},missing-cohort\n{email2},{cohort2.slug}\n").encode()
     job2 = await svc.create_job(
-        org2.id, kind="roster", mode="atomic", file_bytes=bad,
-        file_key="r2", created_by=owner2.id, idempotency_key=f"ra2-{uuid.uuid4().hex[:8]}",
+        org2.id,
+        kind="roster",
+        mode="atomic",
+        file_bytes=bad,
+        file_key="r2",
+        created_by=owner2.id,
+        idempotency_key=f"ra2-{uuid.uuid4().hex[:8]}",
     )
     # R198: atomic apply-failure returns a terminal status='failed' (no raise,
     # consistent with the validation-error path) — nothing is applied.
@@ -663,9 +772,9 @@ async def test_roster_import_json_and_atomic(db):
     assert failed.stats["applied"] == 0 and failed.stats["errors"] == 1
     n = (
         await db.execute(
-            select(func.count()).select_from(CohortMember).where(
-                CohortMember.cohort_id == cohort2.id
-            )
+            select(func.count())
+            .select_from(CohortMember)
+            .where(CohortMember.cohort_id == cohort2.id)
         )
     ).scalar_one()
     assert n == 0
@@ -693,16 +802,19 @@ async def test_opportunities_import_kind(db):
         f"Bad Openings {uuid.uuid4().hex[:4]},internship,remote,0\n"
     ).encode()
     job = await svc.create_job(
-        org.id, kind="opportunities", mode="partial", file_bytes=data,
-        file_key="o1", created_by=owner.id, idempotency_key=f"op-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="opportunities",
+        mode="partial",
+        file_bytes=data,
+        file_key="o1",
+        created_by=owner.id,
+        idempotency_key=f"op-{uuid.uuid4().hex[:8]}",
     )
     assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 2
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1
     opp = (
-        await db.execute(
-            select(Opportunity).where(Opportunity.employer_org_id == org.id)
-        )
+        await db.execute(select(Opportunity).where(Opportunity.employer_org_id == org.id))
     ).scalar_one()
     assert opp.status == "draft"  # import NEVER publishes
     assert opp.openings == 2 and opp.location_mode == "remote"
@@ -713,8 +825,13 @@ async def test_opportunities_import_kind(db):
         {"opportunities": [{"title": title.upper(), "opportunity_type": "internship"}]}
     ).encode()
     job2 = await svc.create_job(
-        org.id, kind="opportunities", mode="partial", file_bytes=data2,
-        file_key="o2", created_by=owner.id, idempotency_key=f"op2-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="opportunities",
+        mode="partial",
+        file_bytes=data2,
+        file_key="o2",
+        created_by=owner.id,
+        idempotency_key=f"op2-{uuid.uuid4().hex[:8]}",
     )
     assert job2.dry_stats["skips"] == 1
     committed2 = await svc.commit(org.id, job2.id, file_bytes=data2)
@@ -724,8 +841,13 @@ async def test_opportunities_import_kind(db):
     org2, owner2 = await _org(db)
     data3 = b"title,opportunity_type\nX,internship\n"
     job3 = await svc.create_job(
-        org2.id, kind="opportunities", mode="partial", file_bytes=data3,
-        file_key="o3", created_by=owner2.id, idempotency_key=f"op3-{uuid.uuid4().hex[:8]}",
+        org2.id,
+        kind="opportunities",
+        mode="partial",
+        file_bytes=data3,
+        file_key="o3",
+        created_by=owner2.id,
+        idempotency_key=f"op3-{uuid.uuid4().hex[:8]}",
     )
     assert job3.dry_stats["valid"] == 0 and job3.dry_stats["errors"] == 1
     # R153: the error report names the offending row by TITLE for this kind.
@@ -748,34 +870,36 @@ async def test_roster_default_role_and_infile_dup(db):
     email = f"rd-{uuid.uuid4().hex[:6]}@x.edu"
     useed = f"email\n{email}\n".encode()
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"rd-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"rd-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
     # no role column at all + the same pair twice
-    data = (
-        "email,cohort_slug\n"
-        f"{email},{cohort.slug}\n"
-        f"{email},{cohort.slug}\n"
-    ).encode()
+    data = (f"email,cohort_slug\n{email},{cohort.slug}\n{email},{cohort.slug}\n").encode()
     job = await svc.create_job(
-        org.id, kind="roster", mode="partial", file_bytes=data,
-        file_key="r", created_by=owner.id, idempotency_key=f"rd2-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="partial",
+        file_bytes=data,
+        file_key="r",
+        created_by=owner.id,
+        idempotency_key=f"rd2-{uuid.uuid4().hex[:8]}",
     )
     assert job.dry_stats["valid"] == 1 and job.dry_stats["errors"] == 1
     err = (
-        await db.execute(
-            select(ImportRowError).where(ImportRowError.job_id == job.id)
-        )
+        await db.execute(select(ImportRowError).where(ImportRowError.job_id == job.id))
     ).scalar_one()
     assert err.code == "duplicate_in_file"
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1
     member = (
-        await db.execute(
-            select(CohortMember).where(CohortMember.cohort_id == cohort.id)
-        )
+        await db.execute(select(CohortMember).where(CohortMember.cohort_id == cohort.id))
     ).scalar_one()
     assert member.role == CohortRole.LEARNER  # omitted role -> learner
 
@@ -796,8 +920,12 @@ async def test_import_file_retention_sweep(db):
     async def mk(status: str, age_days: int, file_key: str):
         data = f"email\nsw-{uuid.uuid4().hex[:6]}@x.edu\n".encode()
         job = await svc.create_job(
-            org.id, kind="users", mode="partial", file_bytes=data,
-            file_key=file_key, created_by=owner.id,
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=data,
+            file_key=file_key,
+            created_by=owner.id,
             idempotency_key=f"sw-{uuid.uuid4().hex[:10]}",
         )
         job.status = status
@@ -825,7 +953,7 @@ async def test_import_file_retention_sweep(db):
     await db.refresh(old_previewed)
     await db.refresh(fresh_done)
     await db.refresh(old_poison)
-    assert old_done.file_key == ""           # purged + blanked
+    assert old_done.file_key == ""  # purged + blanked
     assert old_previewed.file_key == "k-old-previewed"  # non-terminal kept
     assert fresh_done.file_key == "k-fresh"  # inside the window
     assert old_poison.file_key == "k-poison"  # delete failed -> retried later
@@ -879,15 +1007,19 @@ async def test_import_create_and_commit_write_audit_rows(db, monkeypatch):
     assert out2["data"].status == "succeeded"
 
     rows = (
-        await db.execute(
-            select(AuditEvent)
-            .where(
-                AuditEvent.target_type == "import_job",
-                AuditEvent.target_id == job_id,
+        (
+            await db.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.target_type == "import_job",
+                    AuditEvent.target_id == job_id,
+                )
+                .order_by(AuditEvent.created_at)
             )
-            .order_by(AuditEvent.created_at)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     actions = [r.action for r in rows]
     assert actions == ["intg.import.created", "intg.import.committed"]
     assert all(r.actor_user_id == owner.id for r in rows)
@@ -975,8 +1107,11 @@ async def test_roster_import_honors_cohort_capacity(db):
 
     org, owner = await _org(db)
     cohort = Cohort(
-        org_id=org.id, name="Capped", slug=f"cap-{uuid.uuid4().hex[:8]}",
-        created_by=owner.id, max_learners=1,
+        org_id=org.id,
+        name="Capped",
+        slug=f"cap-{uuid.uuid4().hex[:8]}",
+        created_by=owner.id,
+        max_learners=1,
     )
     db.add(cohort)
     await db.flush()
@@ -986,26 +1121,36 @@ async def test_roster_import_honors_cohort_capacity(db):
     e2 = f"cap2-{uuid.uuid4().hex[:6]}@x.edu"
     useed = f"email\n{e1}\n{e2}\n".encode()
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"cap-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"cap-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
     data = (
-        "email,cohort_slug,role\n"
-        f"{e1},{cohort.slug},learner\n"
-        f"{e2},{cohort.slug},learner\n"
+        f"email,cohort_slug,role\n{e1},{cohort.slug},learner\n{e2},{cohort.slug},learner\n"
     ).encode()
     job = await svc.create_job(
-        org.id, kind="roster", mode="partial", file_bytes=data,
-        file_key="r", created_by=owner.id, idempotency_key=f"capr-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="partial",
+        file_bytes=data,
+        file_key="r",
+        created_by=owner.id,
+        idempotency_key=f"capr-{uuid.uuid4().hex[:8]}",
     )
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1  # only one fit
-    assert committed.stats["errors"] == 1   # the other hit capacity
+    assert committed.stats["errors"] == 1  # the other hit capacity
     n = (
         await db.execute(
-            select(func.count()).select_from(CohortMember).where(
+            select(func.count())
+            .select_from(CohortMember)
+            .where(
                 CohortMember.cohort_id == cohort.id,
                 CohortMember.role == CohortRole.LEARNER,
             )
@@ -1028,21 +1173,27 @@ async def test_atomic_apply_failure_persists_failed_status(db):
     email = f"ap-{uuid.uuid4().hex[:6]}@x.edu"
     useed = f"email\n{email}\n".encode()
     ujob = await svc.create_job(
-        org.id, kind="users", mode="partial", file_bytes=useed,
-        file_key="u", created_by=owner.id, idempotency_key=f"ap-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=useed,
+        file_key="u",
+        created_by=owner.id,
+        idempotency_key=f"ap-{uuid.uuid4().hex[:8]}",
     )
     await svc.commit(org.id, ujob.id, file_bytes=useed)
 
     # Atomic roster: first row valid, second references a missing cohort —
     # validation passes (slug shape ok) but APPLY fails on resolution.
-    data = (
-        "email,cohort_slug\n"
-        f"{email},{cohort.slug}\n"
-        f"{email},missing-cohort-xyz\n"
-    ).encode()
+    data = (f"email,cohort_slug\n{email},{cohort.slug}\n{email},missing-cohort-xyz\n").encode()
     job = await svc.create_job(
-        org.id, kind="roster", mode="atomic", file_bytes=data,
-        file_key="r", created_by=owner.id, idempotency_key=f"apr-{uuid.uuid4().hex[:8]}",
+        org.id,
+        kind="roster",
+        mode="atomic",
+        file_bytes=data,
+        file_key="r",
+        created_by=owner.id,
+        idempotency_key=f"apr-{uuid.uuid4().hex[:8]}",
     )
     job_id = job.id
     result = await svc.commit(org.id, job_id, file_bytes=data)
@@ -1060,9 +1211,9 @@ async def test_atomic_apply_failure_persists_failed_status(db):
     # Atomic = nothing applied: the valid first row did not enroll.
     n = (
         await db.execute(
-            select(func.count()).select_from(CohortMember).where(
-                CohortMember.cohort_id == cohort.id
-            )
+            select(func.count())
+            .select_from(CohortMember)
+            .where(CohortMember.cohort_id == cohort.id)
         )
     ).scalar_one()
     assert n == 0
@@ -1088,9 +1239,7 @@ def test_duplicate_canonical_column_rejected():
     assert errors2 == [] and len(rows2) == 1
 
     data3 = b"primary,secondary,role\r\na@x.edu,b@x.edu,student\r\n"
-    rows3, errors3 = parse_users_csv(
-        data3, header_map={"email": "primary"}
-    )
+    rows3, errors3 = parse_users_csv(data3, header_map={"email": "primary"})
     # Only primary->email; secondary stays unknown (ignored). One email col.
     assert errors3 == [] and len(rows3) == 1
 
@@ -1118,8 +1267,12 @@ async def test_concurrent_same_idempotency_key_upload_no_500(db):
     async def _upload():
         async with AsyncSessionLocal() as s:
             job = await BulkImportService(s).create_job(
-                org.id, kind="users", mode="partial", file_bytes=content,
-                file_key=f"imports/{org.id}/x.csv", created_by=owner.id,
+                org.id,
+                kind="users",
+                mode="partial",
+                file_bytes=content,
+                file_key=f"imports/{org.id}/x.csv",
+                created_by=owner.id,
                 idempotency_key=key,
             )
             jid = job.id
@@ -1129,12 +1282,16 @@ async def test_concurrent_same_idempotency_key_upload_no_500(db):
     j1, j2 = await asyncio.gather(_upload(), _upload())
     assert j1 == j2  # idempotent: same job either way
     rows = (
-        await db.execute(
-            select(ImportJob).where(
-                ImportJob.org_id == org.id, ImportJob.idempotency_key == key
+        (
+            await db.execute(
+                select(ImportJob).where(
+                    ImportJob.org_id == org.id, ImportJob.idempotency_key == key
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
 
 

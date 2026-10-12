@@ -62,9 +62,7 @@ async def list_streams(
     return {"data": [ExportStreamResponse.model_validate(r, from_attributes=True) for r in rows]}
 
 
-@router.post(
-    "/export-streams", response_model=DataResponse[ExportStreamResponse], status_code=201
-)
+@router.post("/export-streams", response_model=DataResponse[ExportStreamResponse], status_code=201)
 async def create_stream(
     org_id: str,
     body: ExportStreamCreateRequest,
@@ -93,9 +91,7 @@ class ExportStreamUpdateRequest(BaseModel):
     enabled: bool | None = None
 
 
-@router.patch(
-    "/export-streams/{stream_id}", response_model=DataResponse[ExportStreamResponse]
-)
+@router.patch("/export-streams/{stream_id}", response_model=DataResponse[ExportStreamResponse])
 async def update_stream(
     org_id: str,
     stream_id: str,

@@ -119,7 +119,9 @@ async def test_token_group_map_validation_and_limit(ctx):
     svc = ScimTokenService(db)
     with pytest.raises(AppError) as e:
         await svc.create(
-            org.id, name="bad", group_map={"G": {"kind": "role", "role": "owner"}},
+            org.id,
+            name="bad",
+            group_map={"G": {"kind": "role", "role": "owner"}},
             created_by=owner.id,
         )
     assert e.value.code == "SCIM_GROUP_MAP_INVALID"
@@ -144,9 +146,7 @@ async def test_create_get_filter_roundtrip(ctx):
     got = await _usvc(ctx).get(res["id"])
     assert got["id"] == res["id"]
     # filters
-    lst = await _usvc(ctx).list(
-        filter_expr=f'userName eq "{email}"', start_index=1, count=100
-    )
+    lst = await _usvc(ctx).list(filter_expr=f'userName eq "{email}"', start_index=1, count=100)
     assert lst["totalResults"] == 1 and lst["Resources"][0]["id"] == res["id"]
     lst2 = await _usvc(ctx).list(filter_expr='externalId eq "ext-1"', start_index=1, count=100)
     assert lst2["totalResults"] == 1
@@ -329,9 +329,7 @@ async def test_group_role_mapping_with_ceiling_and_revert(ctx):
     )
     member = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == ctx["org"].id, OrgMember.user_id == u["id"]
-            )
+            select(OrgMember).where(OrgMember.org_id == ctx["org"].id, OrgMember.user_id == u["id"])
         )
     ).scalar_one()
     assert member.role == OrgRole.INSTRUCTOR
@@ -368,9 +366,7 @@ async def test_group_cohort_mapping(ctx):
     await db.flush()
     email = f"cm-{uuid.uuid4().hex[:8]}@corp.example.edu"
     u, _ = await _usvc(ctx).create({"userName": email})
-    g = await _gsvc(ctx).create(
-        {"displayName": "Class A", "members": [{"value": u["id"]}]}
-    )
+    g = await _gsvc(ctx).create({"displayName": "Class A", "members": [{"value": u["id"]}]})
     from app.models.cohort import CohortMember
 
     cm = (
@@ -471,20 +467,29 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
     e1 = f"b1-{uuid.uuid4().hex[:8]}@corp.example.edu"
     e2 = f"b2-{uuid.uuid4().hex[:8]}@corp.example.edu"
 
-    out = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "Operations": [
-            {"method": "POST", "path": "/Users", "bulkId": "a",
-             "data": {"userName": e1, "displayName": "B One"}},
-            {"method": "POST", "path": "/Users", "bulkId": "b",
-             "data": {"userName": e2}},
-            # duplicate -> per-op 409, others unaffected (savepoint)
-            {"method": "POST", "path": "/Users", "bulkId": "c",
-             "data": {"userName": e1}},
-            {"method": "POST", "path": "/Groups",
-             "data": {"displayName": f"BG-{uuid.uuid4().hex[:6]}"}},
-        ],
-    })
+    out = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "POST",
+                    "path": "/Users",
+                    "bulkId": "a",
+                    "data": {"userName": e1, "displayName": "B One"},
+                },
+                {"method": "POST", "path": "/Users", "bulkId": "b", "data": {"userName": e2}},
+                # duplicate -> per-op 409, others unaffected (savepoint)
+                {"method": "POST", "path": "/Users", "bulkId": "c", "data": {"userName": e1}},
+                {
+                    "method": "POST",
+                    "path": "/Groups",
+                    "data": {"displayName": f"BG-{uuid.uuid4().hex[:6]}"},
+                },
+            ],
+        },
+    )
     import json as _json
 
     _json.dumps(out)  # R53 e2e-caught: exc.body (unbound method) crashed render
@@ -494,40 +499,63 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
     uid1 = out["Operations"][0]["location"].removeprefix("/Users/")
 
     # PATCH deactivate + DELETE inside bulk.
-    out2 = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "Operations": [
-            {"method": "PATCH", "path": f"/Users/{uid1}",
-             "data": {"Operations": [
-                 {"op": "replace", "path": "active", "value": False}]}},
-            {"method": "DELETE", "path": f"/Users/{uid1}"},
-            {"method": "PUT", "path": "/Groups/01NOPENOPENOPENOPENOPENOPE",
-             "data": {"displayName": "nope"}},
-            {"method": "TRACE", "path": "/Users"},
-        ],
-    })
+    out2 = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "PATCH",
+                    "path": f"/Users/{uid1}",
+                    "data": {"Operations": [{"op": "replace", "path": "active", "value": False}]},
+                },
+                {"method": "DELETE", "path": f"/Users/{uid1}"},
+                {
+                    "method": "PUT",
+                    "path": "/Groups/01NOPENOPENOPENOPENOPENOPE",
+                    "data": {"displayName": "nope"},
+                },
+                {"method": "TRACE", "path": "/Users"},
+            ],
+        },
+    )
     assert [op["status"] for op in out2["Operations"]] == ["200", "204", "404", "400"]
 
     # failOnErrors stops after the first failure.
-    out3 = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "failOnErrors": 1,
-        "Operations": [
-            {"method": "DELETE", "path": "/Users/01NOPENOPENOPENOPENOPENOPE"},
-            {"method": "POST", "path": "/Users",
-             "data": {"userName": f"never-{uuid.uuid4().hex[:6]}@corp.example.edu"}},
-        ],
-    })
+    out3 = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "failOnErrors": 1,
+            "Operations": [
+                {"method": "DELETE", "path": "/Users/01NOPENOPENOPENOPENOPENOPE"},
+                {
+                    "method": "POST",
+                    "path": "/Users",
+                    "data": {"userName": f"never-{uuid.uuid4().hex[:6]}@corp.example.edu"},
+                },
+            ],
+        },
+    )
     assert len(out3["Operations"]) == 1 and out3["Operations"][0]["status"] == "404"
 
     # bulkId cross-references unsupported -> per-op 501.
-    out4 = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "Operations": [
-            {"method": "POST", "path": "/Groups",
-             "data": {"displayName": "X", "members": [{"value": "bulkId:a"}]}},
-        ],
-    })
+    out4 = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "POST",
+                    "path": "/Groups",
+                    "data": {"displayName": "X", "members": [{"value": "bulkId:a"}]},
+                },
+            ],
+        },
+    )
     assert out4["Operations"][0]["status"] == "501"
 
     # Failed-op response carries the real RFC error body and status
@@ -541,24 +569,40 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
     # bad active value must roll back the mutation — without the savepoint
     # the half-applied displayName would commit with the rest of the bulk.
     e3 = f"b3-{uuid.uuid4().hex[:8]}@corp.example.edu"
-    out5 = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "Operations": [
-            {"method": "POST", "path": "/Users",
-             "data": {"userName": e3, "displayName": "Before"}},
-        ],
-    })
+    out5 = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "POST",
+                    "path": "/Users",
+                    "data": {"userName": e3, "displayName": "Before"},
+                },
+            ],
+        },
+    )
     uid3 = out5["Operations"][0]["location"].removeprefix("/Users/")
-    out6 = await apply_bulk(db, token, {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-        "Operations": [
-            {"method": "PATCH", "path": f"/Users/{uid3}",
-             "data": {"Operations": [
-                 {"op": "replace", "path": "displayName", "value": "HalfApplied"},
-                 {"op": "replace", "path": "active", "value": "garbage"},
-             ]}},
-        ],
-    })
+    out6 = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "PATCH",
+                    "path": f"/Users/{uid3}",
+                    "data": {
+                        "Operations": [
+                            {"op": "replace", "path": "displayName", "value": "HalfApplied"},
+                            {"op": "replace", "path": "active", "value": "garbage"},
+                        ]
+                    },
+                },
+            ],
+        },
+    )
     assert out6["Operations"][0]["status"] == "400"
     got = await _usvc(ctx).get(uid3)
     assert got["displayName"] == "Before"  # savepoint rolled the mutation back
@@ -567,11 +611,15 @@ async def test_bulk_mixed_operations_savepoints_and_fail_on_errors(ctx):
     with pytest.raises(ScimError):
         await apply_bulk(db, token, {"schemas": [], "Operations": [{}]})
     with pytest.raises(ScimError):
-        await apply_bulk(db, token, {
-            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-            "Operations": [{"method": "DELETE", "path": "/Users/x"}]
-            * (MAX_BULK_OPERATIONS + 1),
-        })
+        await apply_bulk(
+            db,
+            token,
+            {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "Operations": [{"method": "DELETE", "path": "/Users/x"}]
+                * (MAX_BULK_OPERATIONS + 1),
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -580,9 +628,7 @@ async def test_filter_operator_case_insensitive(ctx):
     email = f"ci-{uuid.uuid4().hex[:8]}@corp.example.edu"
     await _usvc(ctx).create({"userName": email})
     for op in ("Eq", "EQ"):
-        lst = await _usvc(ctx).list(
-            filter_expr=f'userName {op} "{email}"', start_index=1, count=10
-        )
+        lst = await _usvc(ctx).list(filter_expr=f'userName {op} "{email}"', start_index=1, count=10)
         assert lst["totalResults"] == 1, op
 
 
@@ -622,13 +668,9 @@ async def test_list_pagination_edges(ctx):
     out-of-range startIndex returns an empty page, never an error."""
     email = f"pg-{uuid.uuid4().hex[:8]}@corp.example.edu"
     await _usvc(ctx).create({"userName": email})
-    out = await _usvc(ctx).list(
-        filter_expr=f'userName eq "{email}"', start_index=1, count=0
-    )
+    out = await _usvc(ctx).list(filter_expr=f'userName eq "{email}"', start_index=1, count=0)
     assert out["totalResults"] == 1 and out["Resources"] == []
-    out2 = await _usvc(ctx).list(
-        filter_expr=f'userName eq "{email}"', start_index=99, count=10
-    )
+    out2 = await _usvc(ctx).list(filter_expr=f'userName eq "{email}"', start_index=99, count=10)
     assert out2["totalResults"] == 1 and out2["Resources"] == []
     g = await _gsvc(ctx).create({"displayName": f"PG-{uuid.uuid4().hex[:6]}"})
     out3 = await _gsvc(ctx).list(start_index=1, count=0)
@@ -658,10 +700,10 @@ async def test_scim_event_feed_mirrors_lifecycle(ctx):
     await _usvc(ctx).replace(uid, {"userName": email, "active": False})
     await _usvc(ctx).replace(uid, {"userName": email, "active": True})
     events = (
-        await db.execute(
-            _select(IntegrationEvent).where(IntegrationEvent.subject == uid)
-        )
-    ).scalars().all()
+        (await db.execute(_select(IntegrationEvent).where(IntegrationEvent.subject == uid)))
+        .scalars()
+        .all()
+    )
     types = [e.type for e in events]
     for expected in (
         "com.openskill.org.scim.provisioned.v1",
@@ -720,9 +762,7 @@ async def test_concurrent_scim_create_same_username(ctx):
     async def create():
         async with AsyncSessionLocal() as own:
             try:
-                await ScimUserService(own, token).create(
-                    {"userName": username, "active": True}
-                )
+                await ScimUserService(own, token).create({"userName": username, "active": True})
                 await own.commit()
                 return "created"
             except ScimError as e:
@@ -774,9 +814,9 @@ async def test_concurrent_scim_group_create_same_name(ctx):
 
     n = (
         await ctx["db"].execute(
-            select(func.count()).select_from(ScimGroup).where(
-                ScimGroup.org_id == ctx["org"].id, ScimGroup.display_name == name
-            )
+            select(func.count())
+            .select_from(ScimGroup)
+            .where(ScimGroup.org_id == ctx["org"].id, ScimGroup.display_name == name)
         )
     ).scalar_one()
     assert n == 1
@@ -820,14 +860,21 @@ async def test_bulk_fail_on_errors_must_be_nonnegative_int(ctx):
     db, token = ctx["db"], ctx["token"]
     for bad in (-1, "2"):
         with pytest.raises(ScimError) as e:
-            await apply_bulk(db, token, {
-                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-                "failOnErrors": bad,
-                "Operations": [
-                    {"method": "POST", "path": "/Users",
-                     "data": {"userName": f"fo-{uuid.uuid4().hex[:8]}@corp.example.edu"}},
-                ],
-            })
+            await apply_bulk(
+                db,
+                token,
+                {
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                    "failOnErrors": bad,
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "data": {"userName": f"fo-{uuid.uuid4().hex[:8]}@corp.example.edu"},
+                        },
+                    ],
+                },
+            )
         assert e.value.status == 400
 
 
@@ -836,9 +883,7 @@ async def test_patch_operations_must_be_nonempty_list(ctx):
     """R274 (survivor pins): user-PATCH and group-PATCH validate the
     Operations envelope — missing, non-list, or empty yields a clean
     ScimError 400, never an iteration crash (IdPs send garbage)."""
-    res, _ = await _usvc(ctx).create(
-        {"userName": f"po-{uuid.uuid4().hex[:8]}@corp.example.edu"}
-    )
+    res, _ = await _usvc(ctx).create({"userName": f"po-{uuid.uuid4().hex[:8]}@corp.example.edu"})
     g = await _gsvc(ctx).create({"displayName": f"PG-{uuid.uuid4().hex[:6]}"})
     for bad in ({}, {"Operations": "x"}, {"Operations": []}):
         with pytest.raises(ScimError) as e:
@@ -907,13 +952,14 @@ async def test_group_map_foreign_cohort_walls(ctx):
     await db.flush()
     email = f"fx-{uuid.uuid4().hex[:8]}@corp.example.edu"
     u, _ = await _usvc(ctx).create({"userName": email})
-    db.add(OrgMember(org_id=org_a.id, user_id=u["id"], role=OrgRole.STUDENT,
-                     status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(
+            org_id=org_a.id, user_id=u["id"], role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
     db.add(CohortMember(cohort_id=cohort_a.id, user_id=u["id"], role=CohortRole.LEARNER))
     await db.flush()
-    g = await _gsvc(ctx).create(
-        {"displayName": "G", "members": [{"value": u["id"]}]}
-    )
+    g = await _gsvc(ctx).create({"displayName": "G", "members": [{"value": u["id"]}]})
     await _gsvc(ctx).patch(
         g["id"],
         {"Operations": [{"op": "remove", "path": f'members[value eq "{u["id"]}"]'}]},
@@ -935,9 +981,7 @@ async def test_unicode_displayname_roundtrip(ctx):
     a byte-slice would shear a multibyte sequence)."""
     name = "李小龙 🐉 Ẑoë"
     email = f"uni-{uuid.uuid4().hex[:8]}@corp.example.edu"
-    res, created = await _usvc(ctx).create(
-        {"userName": email, "displayName": name}
-    )
+    res, created = await _usvc(ctx).create({"userName": email, "displayName": name})
     assert created
     got = await _usvc(ctx).get(res["id"])
     assert got["displayName"] == name
@@ -945,8 +989,6 @@ async def test_unicode_displayname_roundtrip(ctx):
     # valid text of exactly 100 chars.
     long_name = "汉" * 120
     email2 = f"uni2-{uuid.uuid4().hex[:8]}@corp.example.edu"
-    res2, _ = await _usvc(ctx).create(
-        {"userName": email2, "displayName": long_name}
-    )
+    res2, _ = await _usvc(ctx).create({"userName": email2, "displayName": long_name})
     got2 = await _usvc(ctx).get(res2["id"])
     assert got2["displayName"] == "汉" * 100

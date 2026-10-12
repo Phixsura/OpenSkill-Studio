@@ -432,17 +432,21 @@ class GenericCrmConnector:
         if model == "crm.account":
             out.update({"name": item.get("name"), "domain": item.get("domain")})
         elif model == "crm.contact":
-            out.update({
-                "email": item.get("email"),
-                "name": item.get("name") or item.get("full_name"),
-                "account_external_id": str(item.get("account_id") or "") or None,
-            })
+            out.update(
+                {
+                    "email": item.get("email"),
+                    "name": item.get("name") or item.get("full_name"),
+                    "account_external_id": str(item.get("account_id") or "") or None,
+                }
+            )
         else:  # crm.deal
-            out.update({
-                "name": item.get("name") or item.get("title"),
-                "stage": item.get("stage"),
-                "account_external_id": str(item.get("account_id") or "") or None,
-            })
+            out.update(
+                {
+                    "name": item.get("name") or item.get("title"),
+                    "stage": item.get("stage"),
+                    "account_external_id": str(item.get("account_id") or "") or None,
+                }
+            )
         return out
 
     async def read(self, ctx: ConnCtx, model: str, state: dict):
@@ -461,9 +465,7 @@ class GenericCrmConnector:
         pages = 0
         while True:
             if pages >= MAX_READ_PAGES:  # R216: misbehaving-server bound
-                raise AppError(
-                    "CONNECTION_PING_FAILED", "CRM pagination never terminated", 422
-                )
+                raise AppError("CONNECTION_PING_FAILED", "CRM pagination never terminated", 422)
             pages += 1
             url = f"{base}/{path}?limit={page_size}&offset={offset}"
             resp = await request_with_retry(ctx.egress, "GET", url, headers=headers)
