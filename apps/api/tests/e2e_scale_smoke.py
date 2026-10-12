@@ -138,6 +138,40 @@ async def main() -> None:
         )
         check("bulk wall-clock bound (<20s)", dt_b < 20, f"{dt_b:.1f}s")
 
+        # ── import at size: 500-row CSV upload -> preview -> commit ──
+        idom = f"imp-{uuid.uuid4().hex[:8]}.example.edu"
+        csv_body = "email,display_name,role\n" + "\n".join(
+            f"i{i}-{uuid.uuid4().hex[:4]}@{idom},Import {i},student" for i in range(500)
+        )
+        t0 = time.monotonic()
+        rr = await c.post(
+            f"{base}/imports",
+            headers=h,
+            data={"kind": "users", "mode": "partial",
+                  "idempotency_key": f"scale-{uuid.uuid4().hex[:10]}"},
+            files={"file": ("users.csv", csv_body.encode(), "text/csv")},
+        )
+        dt_prev = time.monotonic() - t0
+        ok_prev = rr.status_code in (200, 201) and rr.json()["data"]["dry_stats"]["valid"] == 500
+        check("500-row CSV previews clean", ok_prev, rr.text[:160])
+        check("preview wall-clock bound (<30s)", dt_prev < 30, f"{dt_prev:.1f}s")
+        if ok_prev:
+            job_id = rr.json()["data"]["id"]
+            t0 = time.monotonic()
+            rr = await c.post(
+                f"{base}/imports/{job_id}/commit", headers=h,
+                timeout=httpx.Timeout(180.0),
+            )
+            dt_commit = time.monotonic() - t0
+            applied = rr.json().get("data", {}).get("stats", {}).get("applied", 0)
+            check("500 rows committed", rr.status_code == 200 and applied == 500,
+                  f"{rr.status_code} {rr.text[:140]}")
+            check("commit wall-clock bound (<60s)", dt_commit < 60, f"{dt_commit:.1f}s")
+            rr = await c.get(f"{API}/orgs/{org}/members", params={"limit": 1}, headers=h)
+            total_members = rr.json().get("meta", {}).get("total", 0)
+            check("member count reflects the import", total_members >= 500,
+                  f"total={total_members} {rr.text[:100]}")
+
         # ── mesh at size: 200 events fan out to 2 subscriptions ──
         sink_payloads: list[bytes] = []
 

@@ -928,6 +928,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R334 (tenth window, PERFORMANCE fix — lower(email) seq scan)**: the
+  scale smoke's third section (500-row CSV import) blew its bound at
+  87.7s (~175ms/row) and led straight to the real cause: every identity
+  path compares `lower(users.email)` (SCIM create/filter dup-checks, JIT
+  verified-email matching, import row dedup) but the only email index is
+  the plain unique btree(email) — at the dev directory's 1,078,425 user
+  rows each lookup was a parallel sequential scan. New migration
+  intg16a00016 adds the functional index ix_users_email_lower; the plan
+  flips to an index scan and the whole 22-check scale smoke passes every
+  bound (commit back under its 60s ceiling). Fresh-DB zero->head and
+  head-reversibility re-verified at intg16. This is the class the smoke
+  exists for: invisible at unit-test row counts, catastrophic at
+  directory scale.
 - **R333/R332 (tenth window, guards + DX)**: doc-reference guard — every
   tests/*.py|mjs path the ADR/ops doc name must exist (a renamed suite
   can't leave docs pointing at nothing). The scale make target gained
