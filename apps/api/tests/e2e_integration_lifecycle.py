@@ -197,6 +197,18 @@ async def main() -> int:
             r.text[:200],
         )
 
+        # R344 regression wall: a live PATCH must serialize updated_at
+        # cleanly (the update flush expires the onupdate column; without a
+        # refresh the serializer's lazy load 500s with MissingGreenlet).
+        r = await c.patch(
+            f"{base}/connections/{conn_id}", json={"name": f"conn-{uid()}"}, headers=h
+        )
+        check(
+            "connection PATCH serializes updated_at",
+            r.status_code == 200 and r.json()["data"].get("updated_at"),
+            r.text[:200],
+        )
+
         # SSRF wall over HTTP (EGRESS_ALLOW_PRIVATE on, so use a blocked port)
         r = await c.post(
             f"{base}/connections",

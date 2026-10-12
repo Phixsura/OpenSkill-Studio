@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R345 (tenth window, lifecycle gains the PATCH wall)**: the live
+  lifecycle now PATCHes a connection and asserts updated_at serializes
+  (the exact R344 crash shape) — 63 checks, and the regression wall rides
+  the CI e2e-integration-fabric job.
 - **R344 (tenth window, 500-class fix — expired-column lazy refresh)**:
   the smoke's tidy PATCH was the FIRST live-HTTP connection update any
   suite ever made — and it 500'd with MissingGreenlet: the update flush
