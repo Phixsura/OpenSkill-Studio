@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R344 (tenth window, 500-class fix — expired-column lazy refresh)**:
+  the smoke's tidy PATCH was the FIRST live-HTTP connection update any
+  suite ever made — and it 500'd with MissingGreenlet: the update flush
+  expires the server-onupdate updated_at column, the response serializer
+  reads it, and the implicit lazy refresh runs outside the greenlet.
+  Create already refreshed; update now does too. Swept the sibling
+  routers: connections was the only one serializing updated_at. Smoke
+  37/37 (incl. the new tidy section that parks the active connection so
+  the half-hourly health sweep stops pinging every past run's fake URL,
+  R150 class). Fake-connector contract note: read() yields
+  {"records": [...], "state": {...}}, not bare lists.
 - **R343 (tenth window, provision-scale 7b)**: the 1,000 staged classes
   are then provisioned — 1,000 cohorts auto-created through the governed
   path within its bound. 35/35; the smoke's five pipelines all run at

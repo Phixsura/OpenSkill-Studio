@@ -294,6 +294,13 @@ class ConnectionService:
             raise AppError(
                 "CONNECTION_NAME_TAKEN", "A connection with this name exists", 409
             ) from exc
+        # R344: the flush expires server-onupdate columns (updated_at) —
+        # the route then reads them while SERIALIZING, and that implicit
+        # lazy refresh raises MissingGreenlet (an unhandled 500) in the
+        # async stack. Create already refreshes; update must too. Found
+        # live by the scale smoke's tidy PATCH — the first live-HTTP
+        # connection PATCH any suite ever made.
+        await self.db.refresh(conn)
         return conn
 
     async def upgrade(self, org_id: str, connection_id: str) -> IntegrationConnection:

@@ -390,6 +390,21 @@ async def main() -> None:
         )
         check("provision bound (<120s)", dt_p < 120, f"{dt_p:.1f}s")
 
+        # ── tidy (R150 class): the shared dev DB hosts every run — park
+        # the active connection (the half-hourly health sweep would keep
+        # pinging its fake URL) and disable the export stream.
+        t0 = time.monotonic()
+        rr = await c.patch(
+            f"{base}/connections/{conn_id}", json={"status": "disabled"}, headers=h,
+            timeout=httpx.Timeout(120.0),
+        )
+        check("tidy: connection parked", rr.status_code == 200,
+              f"{rr.status_code} in {time.monotonic()-t0:.1f}s {rr.text[:80]}")
+        rr = await c.patch(
+            f"{base}/export-streams/{stream_id}", json={"enabled": False}, headers=h
+        )
+        check("tidy: stream disabled", rr.status_code == 200, rr.text[:100])
+
     print(f"\nPASS={PASS} FAIL={FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)
 
