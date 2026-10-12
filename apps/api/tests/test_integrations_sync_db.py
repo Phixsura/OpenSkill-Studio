@@ -1867,3 +1867,58 @@ async def test_update_twins_revalidate(db):
     assert e.value.code == "SYNC_PROFILE_INVALID"
     await db.refresh(profile)
     assert profile.field_policy == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_not_overwritten_by_worker_finish(db):
+    """R306: an operator cancel is TERMINAL — a worker finishing the same
+    run afterwards must not flip cancelled -> succeeded (zombie overwrite)
+    nor emit a completion event for it."""
+    from app.integrations.models import IntegrationEvent
+    from app.integrations.services.connections import ConnectionService
+    from app.integrations.services.sync_engine import _finish
+
+    org, owner = await _org(db)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn = await csvc.create(
+        org.id, provider_key="oneroster", name=f"zf-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+    )
+    conn.status = "active"
+    svc = SyncProfileService(db)
+    profile = await svc.create(
+        org.id, connection_id=conn.id, name=f"zp-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+    run = await svc.trigger(org.id, profile.id)
+    run.status = "running"  # worker claimed it
+    await db.commit()
+
+    cancelled = await svc.cancel(org.id, run.id)
+    assert cancelled.status == "cancelled"
+    await db.commit()
+
+    # the worker, oblivious, finishes "successfully"
+    await _finish(db, run, "succeeded")
+    await db.refresh(run)
+    assert run.status == "cancelled"  # operator state preserved
+    ev = (
+        await db.execute(
+            select(IntegrationEvent).where(
+                IntegrationEvent.type == "com.openskill.integration.sync.completed.v1",
+                IntegrationEvent.subject == run.id,
+            )
+        )
+    ).scalars().all()
+    assert ev == []  # no bogus completion event
+
+    # the normal path still lands: a RUNNING run finishes fine.
+    run2 = await svc.trigger(org.id, profile.id)
+    run2.status = "running"
+    await db.commit()
+    await _finish(db, run2, "succeeded")
+    await db.refresh(run2)
+    assert run2.status == "succeeded"

@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R306 (ninth window, fix — zombie terminal overwrite)**: `_finish`
+  set run.status unconditionally — an operator CANCELLING a running run
+  mid-execution would get it flipped back to "succeeded" by the oblivious
+  worker, complete with a bogus sync.completed event. The terminal
+  transition is now an atomic claim (UPDATE ... WHERE status IN
+  queued/running): if the cancel won, the worker's finish is a no-op and
+  no event fires. Pinned both directions (cancelled stays cancelled with
+  zero completion events; a running run still finishes normally);
+  revert-probed KILLED.
 - **R305 (ninth window, error-report journey)**: the walk uploads a CSV
   with an invalid row and asserts the operator-facing failure path: the
   dry-run surfaces a nonzero error count and the "Download error report"

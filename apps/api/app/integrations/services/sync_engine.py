@@ -1036,10 +1036,24 @@ def _ts(value) -> datetime | None:
 
 
 async def _finish(db: AsyncSession, run: SyncRun, status: str, *, error: dict | None = None) -> None:
-    run.status = status
-    run.error = error
-    run.finished_at = datetime.now(UTC)
+    # R306: the terminal transition is an atomic claim — an operator may
+    # CANCEL a running run while the worker is mid-execution; without the
+    # WHERE guard the worker's finish would overwrite the operator's
+    # terminal state (cancelled -> "succeeded", a zombie flip that also
+    # emits a bogus completion event).
+    claimed = (
+        await db.execute(
+            update(SyncRun)
+            .where(SyncRun.id == run.id, SyncRun.status.in_(("queued", "running")))
+            .values(status=status, error=error, finished_at=datetime.now(UTC))
+            .returning(SyncRun.id)
+        )
+    ).scalar_one_or_none()
     await db.commit()
+    if claimed is None:
+        await db.refresh(run)
+        return  # cancelled underneath us — keep the operator's state, no event
+    await db.refresh(run)
     profile = await db.get(SyncProfile, run.profile_id)
     if profile is not None:
         try:
