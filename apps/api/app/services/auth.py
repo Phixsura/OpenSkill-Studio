@@ -509,9 +509,10 @@ class AuthService:
         """Raise SSO_REQUIRED for password logins covered by enforced SSO
         (fail-safe OPEN only for mesh audit, never for the gate itself)."""
         from app.integrations.models import OrgDomain, SsoConnection
+        from app.integrations.services.domains import normalized_email_domain
         from app.models.organization import MemberStatus, OrgMember
 
-        domain = user.email.rsplit("@", 1)[-1].lower()
+        domain = normalized_email_domain(user.email)  # R319: IDNA-consistent
         rows = (
             await self.db.execute(
                 select(OrgMember.is_break_glass, OrgMember.org_id)

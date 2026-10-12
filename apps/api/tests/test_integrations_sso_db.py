@@ -1386,3 +1386,51 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
     assert ev is not None
     assert ev.data["ip_address"] == "198.51.100.7"
     assert ev.data["user_agent"] == "E2E-UA/1.0"
+
+
+@pytest.mark.asyncio
+async def test_idn_domain_email_matching_consistent(db):
+    """R319: claim stores IDN domains as IDNA/UTS46 punycode — every
+    email-domain comparison must normalize the SAME way or IDN tenants'
+    discovery / enforce gate / JIT matching silently un-match. Walks the
+    unicode domain end to end."""
+    from app.integrations.services.domains import normalized_email_domain
+    from app.services.auth import AuthService
+
+    uni = f"школа-{uuid.uuid4().hex[:6]}.рф"
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = OrgDomainService(db)
+    row = await svc.claim(org.id, uni)
+    assert row.domain.startswith("xn--")  # stored canonical punycode
+
+    # helper folds the unicode email domain to the same form
+    assert normalized_email_domain(f"u@{uni}") == row.domain
+    assert normalized_email_domain(f"u@{row.domain}") == row.domain
+    assert normalized_email_domain("not-an-email") == ""
+
+    row.status = "verified"
+    await db.flush()
+
+    # discovery routes the unicode email to the org
+    assert await svc.org_for_email_domain(f"user@{uni}") == org.id
+
+    # enforce gate covers the IDN member's password login
+    email = f"idn-{uuid.uuid4().hex[:6]}@{uni}"
+    emp = await _user(db, email=email)
+    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT,
+                     status=MemberStatus.ACTIVE))
+    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
+                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await AuthService(db).login(email, "Test123!")
+    assert e.value.code == "SSO_REQUIRED"
+
+    # identity resolution matches the verified IDN domain by email
+    ident = VerifiedExternalIdentity(
+        org_id=org.id, source="oidc", connection_ref="conn-idn",
+        subject=f"s-{uuid.uuid4().hex[:6]}", email=email, email_verified=True,
+    )
+    res = await IdentityService(db).resolve(ident)
+    assert res.user.id == emp.id

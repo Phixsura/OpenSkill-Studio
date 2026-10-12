@@ -97,7 +97,9 @@ class IdentityService:
         # 2. Verified-email match — ONLY a verified IdP email whose domain is
         # verified for this org participates (takeover guard).
         email = (ident.email or "").strip().lower()
-        domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+        from app.integrations.services.domains import normalized_email_domain
+
+        domain = normalized_email_domain(email)  # R319: IDNA-consistent
         verified_domains = await OrgDomainService(self.db).verified_domains(ident.org_id)
         if not ident.email_verified or not email or domain not in verified_domains:
             await self._queue(ident, reason="email_unverified_or_foreign_domain")

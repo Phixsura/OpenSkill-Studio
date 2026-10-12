@@ -928,6 +928,24 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R320 (tenth window, ordering-hazard fix)**: a deterministic
+  cross-file hazard surfaced while verifying R319 — test_auth.py's
+  client-fixture tests leave pooled connections bound to a closed event
+  loop, and saml_db's fixture only disposed AFTER the session, so the
+  FIRST saml test crashed ("Event loop is closed") under auth->saml
+  ordering. The fixture now disposes BEFORE minting the session too
+  (lesson 4 completed: after-dispose protects the NEXT file, only a
+  before-dispose protects THIS one).
+- **R319 (tenth window, fix — IDN normalization split-brain)**: the claim
+  path stores IDN domains as IDNA/UTS46 punycode (R83[M3]), but all three
+  email-domain comparison sites (SSO discovery, the enforce gate, JIT
+  email matching) derived the domain with a bare .lower() — an IDN
+  tenant's unicode-address users silently fell out of discovery,
+  enforcement and matching. New `normalized_email_domain` helper folds
+  emails to the same canonical form (tolerant: unparseable -> no-match),
+  wired at all three sites. End-to-end IDN pin (claim 'школа-*.рф' ->
+  xn--, discovery routes, gate fires, identity matches); both bare-lower
+  regressions revert-probed KILLED.
 - **R317 (ninth window, terminal-HEAD chunk proof)**: after the last
   production edits (R311/R313), all 12 backend chunks were re-run AT THE
   TERMINAL HEAD — 10,765 items, zero failures — so the closing evidence

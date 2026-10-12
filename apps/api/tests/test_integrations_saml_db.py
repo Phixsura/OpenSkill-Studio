@@ -58,6 +58,12 @@ ROGUE_KEY, ROGUE_CERT = _mint_keypair("rogue.example.com")
 async def db():
     from app.core.database import AsyncSessionLocal, engine
 
+    # R320 (lesson 4): dispose BEFORE minting the session too — a prior
+    # file's client-fixture tests can leave pooled connections bound to a
+    # now-closed event loop, and the after-dispose alone cannot save the
+    # FIRST test of this file ("Event loop is closed" under e.g.
+    # test_auth.py -> this file ordering).
+    await engine.dispose()
     async with AsyncSessionLocal() as session:
         yield session
         await session.rollback()

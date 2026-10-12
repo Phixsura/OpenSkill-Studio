@@ -25,6 +25,26 @@ log = structlog.get_logger()
 MAX_DOMAINS_PER_ORG = 20
 
 
+def normalized_email_domain(email: str) -> str:
+    """R319: an email's domain in the SAME canonical form claim() stores
+    (IDNA/UTS46 punycode via normalize_hostname). The claim path encoded
+    'школа.рф' as xn--80a..., but every email-domain comparison used a bare
+    .lower() — IDN tenants' SSO discovery, the enforce gate and JIT email
+    matching all silently un-matched. Tolerant: unparseable -> "" (callers
+    treat as no-match, never 500 on a hostile address)."""
+    if "@" not in (email or ""):
+        return ""
+    raw = email.rsplit("@", 1)[-1].strip().lower().rstrip(".")
+    if not raw:
+        return ""
+    if raw.isascii():
+        return raw
+    try:
+        return normalize_hostname(raw)
+    except Exception:
+        return ""
+
+
 class OrgDomainService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -211,7 +231,7 @@ class OrgDomainService:
     async def org_for_email_domain(self, email: str) -> str | None:
         """IdP discovery: the single org holding the VERIFIED domain of this
         email, or None. Freemail domains never route."""
-        domain = email.rsplit("@", 1)[-1].strip().lower().rstrip(".")
+        domain = normalized_email_domain(email)  # R319: IDNA-consistent
         if not domain or domain in PUBLIC_EMAIL_DOMAINS:
             return None
         row = await self.db.execute(
