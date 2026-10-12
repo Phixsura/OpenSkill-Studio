@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R346 (R344 class closure)**: live PATCH walls added for the
+  remaining update routes only ever exercised in-process — sync-profile
+  schedule (round-trip) and webhook re-enable. Lifecycle 66/66; every
+  fabric PATCH surface now has at least one live-HTTP exercise riding CI.
 - **R345 (tenth window, lifecycle gains the PATCH wall)**: the live
   lifecycle now PATCHes a connection and asserts updated_at serializes
   (the exact R344 crash shape) — 63 checks, and the regression wall rides

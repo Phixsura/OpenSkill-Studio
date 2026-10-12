@@ -317,6 +317,21 @@ async def main() -> int:
         check("push profile created", r.status_code == 201, r.text[:300])
         profile_id = r.json()["data"]["id"]
 
+        # R346 (R344 class): live PATCH walls for the remaining update
+        # routes the suites only ever exercised in-process.
+        r = await c.patch(
+            f"{base}/sync-profiles/{profile_id}", json={"schedule": "daily"}, headers=h
+        )
+        check(
+            "sync-profile PATCH live",
+            r.status_code == 200 and r.json()["data"]["schedule"] == "daily",
+            r.text[:200],
+        )
+        r = await c.patch(
+            f"{base}/sync-profiles/{profile_id}", json={"schedule": "manual"}, headers=h
+        )
+        check("sync-profile PATCH back to manual", r.status_code == 200, r.text[:120])
+
         r = await c.post(f"{base}/sync-profiles/{profile_id}/run", headers=h)
         check("run queued (202)", r.status_code == 202, r.text[:200])
         run_id = r.json()["data"]["id"]
@@ -452,6 +467,12 @@ async def main() -> int:
         hooks = r.json().get("data", [])
         check("subscription list", r.status_code == 200 and len(hooks) >= 1, r.text[:200])
         if hooks:
+            r = await c.patch(
+                f"/orgs/{org_id}/webhooks/{hooks[0]['id']}",
+                json={"active": True},
+                headers=h,
+            )
+            check("webhook PATCH live", r.status_code == 200, r.text[:160])
             r = await c.post(f"/orgs/{org_id}/webhooks/{hooks[0]['id']}/rotate-secret", headers=h)
             check(
                 "rotate returns fresh secret once",
