@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R255 (eighth window, enforce/break-glass pins)**: two unpinned
+  directions on the SSO-required gate. Over-enforcement: the gate must key on
+  VERIFIED domains only — an org with a merely PENDING claim cannot lock its
+  members out of password login. And the break-glass designee cap (≤2, the
+  bound on the password-bypass surface) had no test; re-enabling an existing
+  designee stays idempotent. Both mutants now killed (plus gate-open).
 - **R254 (eighth window, probe ledger)**: 17 more mutants killed —
   PII-purge filters (2), error-report identifier, SCIM filter case, revoked
   links (2), conflict run-attachment + stale-accept guard, NRPS next-link

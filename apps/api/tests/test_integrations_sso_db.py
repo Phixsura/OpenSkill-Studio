@@ -1175,3 +1175,50 @@ async def test_discovery_issuer_mismatch_rejected(db):
             conn.id, redirect_uri="https://app.example.com/cb"
         )
     assert e.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_enforce_sso_gate_requires_verified_domain(db):
+    """R255 (survivor pin — over-enforcement direction): the SSO-required
+    gate keys on VERIFIED domains only. An org whose domain claim is still
+    PENDING must not block its members' password logins."""
+    from app.services.auth import AuthService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    pend = f"pend-{uuid.uuid4().hex[:8]}.example.edu"
+    db.add(OrgDomain(org_id=org.id, domain=pend, status="pending", verification_token="t"))
+    email = f"pp-{uuid.uuid4().hex[:8]}@{pend}"
+    emp = await _user(db, email=email)
+    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.STUDENT,
+                     status=MemberStatus.ACTIVE))
+    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
+                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    await db.flush()
+    result = await AuthService(db).login(email, "Test123!")
+    assert result.access_token  # pending domain never enforces
+
+
+@pytest.mark.asyncio
+async def test_break_glass_capped_at_two(db):
+    """R255 (survivor pin): at most TWO break-glass designees per org — the
+    cap bounds the password-bypass surface under enforced SSO."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+    from app.models.organization import OrgRole as _Role
+
+    members = [owner]
+    for _i in range(2):
+        u = await _user(db)
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=_Role.ADMIN,
+                         status=MemberStatus.ACTIVE))
+        members.append(u)
+    await db.flush()
+    await svc.set_break_glass(org.id, members[0].id, enabled=True, actor_role=_Role.OWNER)
+    await svc.set_break_glass(org.id, members[1].id, enabled=True, actor_role=_Role.OWNER)
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(org.id, members[2].id, enabled=True, actor_role=_Role.OWNER)
+    assert e.value.code == "BREAK_GLASS_LIMIT"
+    # Re-enabling an EXISTING designee is idempotent, not a third slot.
+    await svc.set_break_glass(org.id, members[1].id, enabled=True, actor_role=_Role.OWNER)
