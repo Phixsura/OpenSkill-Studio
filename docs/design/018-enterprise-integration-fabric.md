@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R292 (ninth window, unicode round-trip pin)**: CJK+emoji display
+  names survive SCIM create/get, and the 100-char display-name cap cuts
+  CHARACTERS not bytes (a 120-char CJK name truncates to exactly 100
+  valid chars — a byte-slice would shear a multibyte sequence).
 - **R291 (ninth window, DX targets)**: Makefile gained `make test-intg`
   (the 19-file fabric battery incl. both contract guards — 347 tests),
   `make e2e-intg` (self-hosting live-HTTP lifecycle on :8443, same idiom

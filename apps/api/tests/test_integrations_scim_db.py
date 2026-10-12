@@ -926,3 +926,27 @@ async def test_group_map_foreign_cohort_walls(ctx):
         )
     ).scalar_one_or_none()
     assert still is not None  # foreign cohort untouched
+
+
+@pytest.mark.asyncio
+async def test_unicode_displayname_roundtrip(ctx):
+    """R292: CJK + emoji display names survive SCIM create/get and the
+    member resource rendering (truncation is by CHARACTERS, not bytes —
+    a byte-slice would shear a multibyte sequence)."""
+    name = "李小龙 🐉 Ẑoë"
+    email = f"uni-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    res, created = await _usvc(ctx).create(
+        {"userName": email, "displayName": name}
+    )
+    assert created
+    got = await _usvc(ctx).get(res["id"])
+    assert got["displayName"] == name
+    # 100-char cap cuts characters, never bytes: a 120-char CJK name stays
+    # valid text of exactly 100 chars.
+    long_name = "汉" * 120
+    email2 = f"uni2-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    res2, _ = await _usvc(ctx).create(
+        {"userName": email2, "displayName": long_name}
+    )
+    got2 = await _usvc(ctx).get(res2["id"])
+    assert got2["displayName"] == "汉" * 100
