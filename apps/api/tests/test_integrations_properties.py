@@ -232,3 +232,37 @@ def test_schedule_and_import_registries_are_coherent():
     assert set(KIND_SPECS) == IMPORT_KINDS == set(TEMPLATE_VERSIONS), (
         "import kind registries drifted"
     )
+
+
+@given(st.text(max_size=120))
+@settings(max_examples=300, deadline=None)
+def test_scim_parse_filter_total(expr):
+    """R268: the SCIM filter parser is TOTAL over arbitrary text — it either
+    returns (attr, value) for the supported eq-grammar or raises ScimError;
+    no other exception may escape (IdPs send garbage filters)."""
+    from app.integrations.services.scim import ScimError, ScimUserService
+
+    try:
+        attr, value = ScimUserService._parse_filter(expr)
+    except ScimError as e:
+        assert e.status == 400
+    else:
+        assert isinstance(attr, str) and attr == attr.lower()
+        assert isinstance(value, str)
+
+
+@given(st.text(max_size=200))
+@settings(max_examples=300, deadline=None)
+def test_validate_egress_url_total(url):
+    """R268: the egress screen is TOTAL over arbitrary URL text — returns
+    the normalized URL or raises EgressBlockedError, never a parser leak
+    (IndexError/ValueError/UnicodeError), since every protocol feeds it
+    attacker-influenced URLs."""
+    from app.integrations.security import EgressBlockedError, validate_egress_url
+
+    try:
+        out = validate_egress_url(url)
+    except EgressBlockedError:
+        pass
+    else:
+        assert isinstance(out, str)

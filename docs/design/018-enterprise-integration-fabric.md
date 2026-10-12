@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R268 (eighth window, totality properties)**: two hypothesis
+  properties added over attacker-facing parsers — the SCIM filter parser
+  (arbitrary text -> (attr, value) or ScimError 400, nothing else escapes)
+  and the egress URL screen (arbitrary text -> normalized URL or
+  EgressBlockedError, no IndexError/ValueError parser leak). 300 examples
+  each; both hold.
 - **R267 (eighth window, full foreground regression)**: post R250-R266
   (4 security fixes, 3 race-proofed caps, sprawl caps, 8 survivor pins,
   ~50 probes) the whole stack re-verified foreground: backend full suite
