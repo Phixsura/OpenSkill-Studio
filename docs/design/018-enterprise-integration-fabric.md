@@ -914,6 +914,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R256 (eighth window, SAML request-id pins)**: batch-21 probes left two
+  genuine coverage gaps in `_consume_request_id` — dropping the
+  `used_at IS NULL` filter (request-id replay: a fresh assertion reusing an
+  already-consumed InResponseTo would log in again) and dropping the
+  `sso_connection_id` filter (connection A's request-id satisfying an
+  assertion presented to connection B) both SURVIVED. The guards exist in
+  code; no test exercised them independently of the assertion-replay cache.
+  Pinned with `test_saml_request_id_single_use_and_connection_scoped`
+  (second distinct assertion on a consumed InResponseTo -> 401; cross-
+  connection presentation -> 401). Both mutants re-probed KILLED. The third
+  batch-21 "survivor" (cert-expiry window inverted) was a probe artifact —
+  batch21 ran it against sso_db while the sweep test lives in saml_db;
+  re-probed against the correct file: KILLED, no change needed.
 - **R255 (eighth window, enforce/break-glass pins)**: two unpinned
   directions on the SSO-required gate. Over-enforcement: the gate must key on
   VERIFIED domains only — an org with a merely PENDING claim cannot lock its

@@ -928,3 +928,41 @@ async def test_unsolicited_assertion_without_inresponseto_rejected(db):
             connection_id=conn.id, saml_response_b64=b64, relay_state=state
         )
     assert e.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_saml_request_id_single_use_and_connection_scoped(db):
+    """R256 (survivor pins): the AuthnRequest state (InResponseTo target) is
+    single-use AND bound to the connection that minted it.
+    (1) A SECOND distinct assertion reusing an already-consumed InResponseTo
+        is rejected even though its assertion ID is fresh (so the
+        assertion-replay cache is NOT what catches it).
+    (2) A request minted for connection A cannot satisfy an assertion
+        presented to connection B."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    email = f"ru-{uuid.uuid4().hex[:6]}@{domain}"
+
+    state = await _start(db, conn)
+    a1 = _sign_assertion(_assertion_xml(in_response_to=state, email=email))
+    await SamlService(db).handle_acs(
+        connection_id=conn.id, saml_response_b64=_wrap_response(a1), relay_state=state
+    )
+    # Fresh assertion ID, SAME consumed InResponseTo -> request already used.
+    a2 = _sign_assertion(_assertion_xml(in_response_to=state, email=email))
+    with pytest.raises(AppError) as reuse:
+        await SamlService(db).handle_acs(
+            connection_id=conn.id, saml_response_b64=_wrap_response(a2), relay_state=state
+        )
+    assert reuse.value.status_code == 401
+
+    # Connection-scoped: state minted on conn, assertion presented to conn_b.
+    conn_b = await _saml_conn(db, org)
+    state_b_victim = await _start(db, conn)  # minted for conn, NOT conn_b
+    ab = _sign_assertion(_assertion_xml(in_response_to=state_b_victim, email=email))
+    with pytest.raises(AppError) as xconn:
+        await SamlService(db).handle_acs(
+            connection_id=conn_b.id, saml_response_b64=_wrap_response(ab),
+            relay_state=state_b_victim,
+        )
+    assert xconn.value.status_code == 401
