@@ -914,6 +914,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R275 (eighth window CLOSE — final tally)**: window 8 (single-chat
+  foreground, T0 12:26) R250-R274: 4 SECURITY fixes (R250 conflict IDOR,
+  R251/R252/R253 issuer/entityID/origin mix-up trilogy, R260/R261 cap
+  TOCTOU races, R272 SAML authorize open redirect), sprawl caps
+  (R262/R263), 16 survivor-pin tests across SAML request-id, domain IDOR,
+  mapping field cap, SLO/metadata DTD, bulk failOnErrors, push gates,
+  sync-profile IDOR walls, SCIM PATCH envelopes; ~75 mutants probed with
+  the hardened harness (path-existence assert + tail print + per-
+  occurrence twin probing); layered-defense equivalents documented
+  (bcl jti/alg, SLO unsigned/sigalg, router import cap). Final state:
+  backend full suite 12 chunks zero-fail, fabric 338, web 764 + tsc +
+  eslint, live E2E 62/62 twice, adversarial 178/0 twice, migration chain
+  fresh-DB verified reversible. Branch pushed; NOT merged (one task = one
+  PR awaits explicit instruction).
 - **R274 (eighth window, twin-guard sweep round 2 — 3 pins)**: remaining
   duplicated-guard occurrences probed per-index. Profile-UPDATE schedule
   and mapping-create model guards KILLED. THREE survived and are pinned:
