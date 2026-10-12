@@ -914,6 +914,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R286 (ninth window, browser walk — a11y gate)**: section 9 audits
+  every input/select/textarea on the five pages for an accessible name
+  (aria-label, label[for], or wrapping label) — all clean. 53/53 PASS.
 - **R285 (ninth window, browser walk — mobile viewport)**: section 8
   re-walks all five fabric pages at 390px asserting render + zero
   page-level horizontal overflow (tables scroll inside their own

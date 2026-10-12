@@ -339,6 +339,33 @@ try {
     check(`${label} has no page-level x-overflow`, overflow <= 2, `overflow=${overflow}px`);
   }
 
+  // ── 9. Accessibility: every form control has an accessible name ──
+  section("9. Form-control accessibility");
+  await page.setViewportSize({ width: 1380, height: 900 });
+  for (const [label, path] of [
+    ["hub", ""], ["identity", "/identity"], ["events", "/events"],
+    ["sync", "/sync"], ["data", "/data"],
+  ]) {
+    await page.goto(`${intgBase}${path}`, { waitUntil: "networkidle", timeout: 30000 });
+    const unnamed = await page.$$eval(
+      "input:not([type=hidden]), select, textarea",
+      (els) =>
+        els
+          .filter((el) => {
+            if (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby")) return false;
+            if (el.id && document.querySelector(`label[for="${el.id}"]`)) return false;
+            if (el.closest("label")) return false;
+            return true;
+          })
+          .map((el) => `${el.tagName.toLowerCase()}[placeholder=${el.getAttribute("placeholder") ?? ""}]`),
+    );
+    check(
+      `${label}: all form controls have accessible names`,
+      unnamed.length === 0,
+      unnamed.slice(0, 4).join(" ; "),
+    );
+  }
+
 } catch (err) {
   fail++;
   results.push(`  ❌ UNCAUGHT: ${String(err).slice(0, 300)}`);
