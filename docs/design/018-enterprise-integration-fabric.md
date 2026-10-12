@@ -928,6 +928,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R326 (tenth window, private_key_jwt conformance pin)**: the
+  client_credentials grant's client_assertion had no shape test — a
+  drifted claim (iss/sub/aud/jti/exp) or a key not in our advertised
+  JWKS fails every AGS/NRPS call at real LMSes with opaque 401s. Pinned:
+  form fields (grant_type/assertion_type/scope), RS256 + kid header, the
+  assertion VERIFIES against our own /lti/jwks (exactly what the platform
+  does), iss=sub=client_id, aud=token URL, 16+-hex jti, exp-iat <= 300s.
 - **R325 (tenth window, JWKS refetch-floor pin)**: coverage mapping
   (services 81-100%, routers covered by the live suites) pointed at the
   JWKS cache paths — the kid-miss 30s refetch floor (an attacker spraying

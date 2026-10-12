@@ -872,3 +872,56 @@ async def test_lti_registration_caps(db):
             deployment_ids=[f"d{i}" for i in range(MAX_DEPLOYMENTS_PER_REGISTRATION + 1)],
         )
     assert e.value.code == "LTI_REGISTRATION_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_service_token_private_key_jwt_shape(db):
+    """R326 (spec-conformance pin): the client_credentials grant sends a
+    private_key_jwt whose claims the platform actually validates —
+    iss=sub=client_id, aud=token URL, fresh jti, bounded exp, RS256 signed
+    by the ACTIVE tool key (kid in header, verifiable against /lti/jwks).
+    A drift here fails every AGS/NRPS call at real LMSes with opaque 401s."""
+    from urllib.parse import parse_qs
+
+    import jwt as pyjwt
+
+    from app.integrations.services.lti_ags import service_token, tool_jwks
+
+    org, owner = await _org(db)
+    _svc, reg = await _registration(db, org)
+
+    seen = {}
+
+    class _Egress:
+        async def request(self, method, url, headers=None, content=None, **kw):
+            seen["url"] = url
+            seen["form"] = parse_qs((content or b"").decode())
+            return httpx.Response(
+                200, json={"access_token": "at-1"},
+                request=httpx.Request(method, url),
+            )
+
+    token = await service_token(db, reg, _Egress(), scope="https://purl.imsglobal.org/spec/lti-ags/scope/score")
+    assert token == "at-1"
+    assert seen["url"] == reg.auth_token_url
+    form = seen["form"]
+    assert form["grant_type"] == ["client_credentials"]
+    assert form["client_assertion_type"] == [
+        "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+    ]
+    assert form["scope"] == ["https://purl.imsglobal.org/spec/lti-ags/scope/score"]
+
+    assertion = form["client_assertion"][0]
+    header = pyjwt.get_unverified_header(assertion)
+    assert header["alg"] == "RS256" and header.get("kid")
+    # verify against OUR advertised jwks (the platform does exactly this)
+    jwks = await tool_jwks(db)
+    jwk = next(k for k in jwks["keys"] if k["kid"] == header["kid"])
+    pub = pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+    claims = pyjwt.decode(
+        assertion, key=pub, algorithms=["RS256"], audience=reg.auth_token_url
+    )
+    assert claims["iss"] == reg.client_id
+    assert claims["sub"] == reg.client_id
+    assert claims["jti"] and len(claims["jti"]) >= 16
+    assert 0 < claims["exp"] - claims["iat"] <= 300
