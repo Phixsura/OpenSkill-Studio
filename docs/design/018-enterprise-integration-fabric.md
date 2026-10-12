@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R266 (eighth window, group-map/mesh/dynreg probe ledger)**: batches
+  30-31. KILLED: group_map role mint-ceiling, group-sync admin demotion
+  guard, wildcard-matches-internal-events, wildcard-matches-everything,
+  dynreg plain-OIDC rejection, dynreg required-keys screen, dynreg empty
+  client_id. One EQUIVALENT documented: dropping `role != STUDENT` from
+  the group-leave demotion arm only re-assigns STUDENT to an
+  already-STUDENT member (identity write, no behavior change).
 - **R265 (eighth window, SLO probe ledger + DTD pin)**: batch 29 probed
   the SAML Single Logout validator. Bad-signature and issuer-mismatch
   KILLED. Two layered-defense equivalents documented: dropping the
