@@ -928,6 +928,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R327 (tenth window, walk — LTI registration journey)**: the LTI
+  Register-LMS form was the last create surface the walk never drove —
+  now filled end-to-end (issuer/client/URLs/deployment ids -> row
+  listed). 65/65 PASS; every fabric admin create form is browser-proven.
 - **R326 (tenth window, private_key_jwt conformance pin)**: the
   client_credentials grant's client_assertion had no shape test — a
   drifted claim (iss/sub/aud/jti/exp) or a key not in our advertised

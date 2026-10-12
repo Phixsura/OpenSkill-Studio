@@ -208,6 +208,26 @@ try {
     }
   }
 
+  // ── 3d. Register an LMS through the real LTI form ──
+  const ltiIssuer = `https://lms-${Date.now()}.example.com`;
+  const issField = await page.$('input[aria-label="LTI issuer"]');
+  check("LTI registration form present", issField !== null);
+  if (issField) {
+    await issField.fill(ltiIssuer);
+    await page.fill('input[aria-label="LTI client_id"]', "walk-tool");
+    await page.fill('input[aria-label="LTI auth_login_url"]', `${ltiIssuer}/auth`);
+    await page.fill('input[aria-label="LTI auth_token_url"]', `${ltiIssuer}/token`);
+    await page.fill('input[aria-label="LTI jwks_url"]', `${ltiIssuer}/jwks`);
+    await page.fill('input[aria-label="LTI deployment_ids"]', "dep-1, dep-2");
+    const regBtn = await page.$('button:has-text("Register LMS")');
+    if (regBtn) {
+      await regBtn.click();
+      await page.waitForTimeout(2500);
+      const afterReg = await page.textContent("body");
+      check("LTI registration row listed", afterReg.includes(ltiIssuer), afterReg.slice(0, 160));
+    }
+  }
+
   // ── 4. Events: catalog + create subscription ──
   section("4. Events page");
   await page.goto(`${intgBase}/events`, { waitUntil: "networkidle", timeout: 30000 });
