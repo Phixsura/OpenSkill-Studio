@@ -348,3 +348,70 @@ async def test_health_sweep_slice_is_stalest_first_and_rotates(db):
     finally:
         if old is not None:
             registry.CONNECTORS["generic_rest"] = old
+
+
+@pytest.mark.asyncio
+async def test_degraded_connection_alert_is_edge_triggered(db):
+    """R309 (survivor pin): a DEGRADED connection stays in the sweep set —
+    the unhealthy alert must fire exactly once on the transition INTO
+    degraded, not on every half-hourly sweep afterwards (alert fatigue +
+    mesh noise). The existing auth->error path couldn't prove this because
+    parked connections leave the sweep set."""
+    from sqlalchemy import select as _select
+
+    from app.exceptions import AppError
+    from app.integrations import registry
+    from app.integrations.models import DEGRADE_AFTER_FAILURES, IntegrationEvent
+    from app.integrations.services.connections import ConnectionService
+
+    user = await _user(db)
+    org = await _org(db, user)
+    svc = ConnectionService(db)
+    await svc.sync_provider_catalog()
+    await db.flush()
+    conn = await svc.create(
+        org.id, provider_key="oneroster", name=f"eg-{uuid.uuid4().hex[:6]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=user.id,
+    )
+    conn.status = "active"
+    await db.flush()
+
+    class _Timeouting:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read"})
+
+        async def ping(self, ctx):
+            raise AppError("CONNECTION_PING_FAILED", "timeout", 502)
+
+    class _InstantOk:
+        capabilities = frozenset()
+
+        async def ping(self, ctx):
+            return None
+
+    saved = dict(registry.CONNECTORS)
+    for key in list(registry.CONNECTORS):
+        registry.CONNECTORS[key] = _InstantOk()
+    registry.CONNECTORS["oneroster"] = _Timeouting()
+    try:
+        for _ in range(DEGRADE_AFTER_FAILURES):
+            await svc.sweep_connection_health(limit=100_000)
+        await db.refresh(conn)
+        assert conn.status == "degraded"
+        # two MORE sweeps while still degraded: no additional alerts
+        await svc.sweep_connection_health(limit=100_000)
+        await svc.sweep_connection_health(limit=100_000)
+        events = (
+            await db.execute(
+                _select(IntegrationEvent).where(
+                    IntegrationEvent.subject == conn.id,
+                    IntegrationEvent.type
+                    == "com.openskill.integration.connection.unhealthy.v1",
+                )
+            )
+        ).scalars().all()
+        assert len(events) == 1  # edge-triggered, never per-sweep
+    finally:
+        registry.CONNECTORS.clear()
+        registry.CONNECTORS.update(saved)

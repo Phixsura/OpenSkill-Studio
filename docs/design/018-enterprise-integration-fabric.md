@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R309 (ninth window, alert edge-trigger pin)**: the unhealthy-alert
+  edge condition (`status != before`) survived mutation — the existing
+  transition test rode the auth->ERROR path, and parked connections leave
+  the sweep set, making the mutant equivalent there. The spam surface is
+  DEGRADED (still swept every 30 min): pinned with a timeout-degraded
+  connection swept thrice more -> exactly ONE unhealthy event ever.
+  Re-probed KILLED. Probe lesson: when a guard survives, ask which STATE
+  keeps the entity inside the loop — that's the path the pin must ride.
 - **R308 (ninth window, fix — queue-adjudication race)**: R306's class
   swept across terminal-state writers found one more check-then-set:
   resolve_queue_item read `status == "pending"` then wrote the terminal
