@@ -371,6 +371,34 @@ try {
     check(`${label} has no page-level x-overflow`, overflow <= 2, `overflow=${overflow}px`);
   }
 
+  // ── 8b. Outsider lockout: a fresh user hitting org A's fabric URLs ──
+  section("8b. Outsider lockout");
+  const ctx2 = await browser.newContext({ viewport: { width: 1380, height: 900 } });
+  const page2 = await ctx2.newPage();
+  await page2.goto(`${BASE}/register`, { waitUntil: "networkidle", timeout: 30000 });
+  await page2.fill("#displayName", "Outsider");
+  await page2.fill("#email", `outsider-${Date.now()}@test.com`);
+  await page2.fill("#password", password);
+  await page2.click('button[type="submit"]');
+  await page2.waitForTimeout(3000);
+  const cont2 = await page2.$('button:has-text("Continue to Dashboard")');
+  if (cont2) { await cont2.click(); await page2.waitForTimeout(2000); }
+  await page2.goto(intgBase, { waitUntil: "networkidle", timeout: 30000 });
+  const outText = await page2.textContent("body");
+  check(
+    "outsider sees no fabric data on org A's hub",
+    !outText.includes("Walk ATS") && !outText.includes("oskst_"),
+    outText.slice(0, 160),
+  );
+  await page2.goto(`${intgBase}/identity`, { waitUntil: "networkidle", timeout: 30000 });
+  const outId = await page2.textContent("body");
+  check(
+    "outsider sees no domains/tokens on org A's identity page",
+    !outId.includes("osks-verify-") && !outId.includes("Browser E2E IdP"),
+    outId.slice(0, 160),
+  );
+  await ctx2.close();
+
   // ── 9. Accessibility: every form control has an accessible name ──
   section("9. Form-control accessibility");
   await page.setViewportSize({ width: 1380, height: 900 });

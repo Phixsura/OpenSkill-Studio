@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R300 (ninth window, outsider-lockout journey)**: the walk registers a
+  SECOND user in a fresh browser context and drives them straight at org
+  A's fabric URLs — neither the hub nor the identity page may leak any of
+  org A's data (connection names, verification tokens, token names) to a
+  non-member. 60/60 PASS. The browser walk now covers: happy paths for
+  every create surface, negative UX, shown-once secret hygiene,
+  cross-user lockout, mobile viewport, and form a11y.
 - **R299 (ninth window, shown-once-really-once)**: the walk now reloads
   after minting the SCIM token and after creating the subscription, and
   asserts neither secret survives the refresh (shown-once lives in
