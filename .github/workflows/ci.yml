@@ -198,6 +198,14 @@ jobs:
           S3_ENDPOINT: http://localhost:9000
           S3_ACCESS_KEY: minioadmin
           S3_SECRET_KEY: minioadmin
+      - name: Run fabric hostile-input fuzz (zero 5xx invariant)
+        run: make e2e-intg-fuzz
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
 
   test-playwright:
     name: Test (Playwright E2E)
