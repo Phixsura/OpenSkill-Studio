@@ -931,6 +931,22 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R353 (eleventh window, FUZZER + 3 real finds)**: new bounded seeded
+  live-HTTP fuzzer (`tests/e2e_fuzz_fabric.py`, `make e2e-intg-fuzz`) —
+  hostile bodies (wrong JSON types, NULs, 4KB strings, deep nesting,
+  junk path ids) across every fabric mutating route, asserting the one
+  platform invariant: NEVER a 5xx. First run found THREE production
+  defects: (1) /Bulk 500 — `BULK_REQUEST_SCHEMA not in schemas` with a
+  float schemas (TypeError before validation); members=float on group
+  PUT crashed the same way; both now clean 400s with container guards.
+  (2) LOG AMPLIFICATION — one unhandled exception rendered a rich
+  traceback WITH LOCALS, expanding the route table into ~550k lines /
+  ~100MB of log per 500 (a disk-filling primitive); the console renderer
+  now uses bounded plain tracebacks — the same change took the fuzz run
+  from 128s (server busy RENDERING) to 2.9s. (3) two SCIM routes parsed
+  the body OUTSIDE the _run wrapper, so _json_body's own ScimError
+  escaped as a 500 — parse moved inside. 6 seeds x 250 = 1,500 hostile
+  requests now pass with zero 5xx; fabric battery green.
 - **R352 (tenth window, terminal-HEAD chunk proof)**: all 12 backend
   chunks re-run AT THE FINAL HEAD after the last test additions — 10,772
   items, zero failures; the closing evidence is a full pass of the exact

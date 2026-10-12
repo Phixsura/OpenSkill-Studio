@@ -19,7 +19,15 @@ def setup_logging(level: str = "DEBUG", fmt: str = "console") -> None:
     if fmt == "json":
         processors.append(structlog.processors.JSONRenderer())
     else:
-        processors.append(structlog.dev.ConsoleRenderer())
+        # R353 (log-amplification guard): with rich installed, the default
+        # console exception formatter prints LOCALS for every frame — one
+        # unhandled exception in a request handler expanded the FastAPI
+        # route table into ~550k lines (~100MB) of log. A hostile request
+        # that triggers any 500 becomes a disk-filling primitive. Plain,
+        # bounded tracebacks carry the same diagnostic value here.
+        processors.append(
+            structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)
+        )
 
     log_level = getattr(logging, level.upper(), logging.INFO)
 

@@ -143,9 +143,11 @@ async def bulk(
     raw = await request.body()
     if len(raw) > 1_048_576:
         return _scim_json(ScimError(413, "Payload exceeds 1MB", "tooLarge").body(), 413)
-    body = await _json_body(request)
 
     async def run(token):
+        # R353: parse INSIDE the _run wrapper — a ScimError raised out here
+        # (non-dict JSON) escaped as a 500 before.
+        body = await _json_body(request)
         return _scim_json(await apply_bulk(db, token, body))
 
     return await _run(db, authorization, run)
@@ -285,9 +287,8 @@ async def replace_group(
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
-    payload = await _json_body(request)
-
     async def run(token):
+        payload = await _json_body(request)  # R353: inside the wrapper
         return _scim_json(await ScimGroupService(db, token).replace(group_id, payload))
 
     return await _run(db, authorization, run)

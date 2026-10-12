@@ -78,6 +78,17 @@ e2e-intg-scale: ## Fabric scale smoke: 300 SCIM users + 400 mesh deliveries (uvi
 		status=$$?; kill $$(cat /tmp/intg-scale-uvicorn.pid) 2>/dev/null; \
 		rm -f /tmp/intg-scale-uvicorn.pid; exit $$status)
 
+e2e-intg-fuzz: ## Fabric hostile-input fuzz: 250 reqs, asserts zero 5xx (uvicorn :8443)
+	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
+		APP_ENV=test uv run uvicorn app.main:app --port 8443 & \
+		echo $$! > /tmp/intg-fuzz-uvicorn.pid; \
+		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
+			! kill -0 $$(cat /tmp/intg-fuzz-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
+		APP_ENV=test E2E_INTG_API=http://localhost:8443/api/v1 \
+			PYTHONPATH=. uv run python tests/e2e_fuzz_fabric.py; \
+		status=$$?; kill $$(cat /tmp/intg-fuzz-uvicorn.pid) 2>/dev/null; \
+		rm -f /tmp/intg-fuzz-uvicorn.pid; exit $$status)
+
 e2e-intg-browser: ## Fabric browser journey (needs web on :3000 + api on :8000, APP_ENV=test)
 	cd apps/api && node tests/browser_e2e_integrations.mjs
 

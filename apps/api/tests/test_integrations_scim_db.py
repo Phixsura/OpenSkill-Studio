@@ -1037,3 +1037,22 @@ async def test_scim_cannot_deprovision_last_owner(ctx):
     await _usvc(ctx).delete(owner_scim_id)
     await db.refresh(member)
     assert member.status == MemberStatus.ARCHIVED
+
+
+@pytest.mark.asyncio
+async def test_bulk_and_members_reject_non_container_types(ctx):
+    """R353 (fuzz-found 500s): `in`/iteration over an untrusted
+    non-container raises TypeError — schemas=1e308 crashed /Bulk before
+    validation, and members=3.14 would crash group PUT the same way.
+    Both must be clean 400s."""
+    from app.integrations.services.scim import apply_bulk
+
+    db, token = ctx["db"], ctx["token"]
+    with pytest.raises(ScimError) as e:
+        await apply_bulk(db, token, {"schemas": 1e308, "Operations": [{}]})
+    assert e.value.status == 400
+
+    g = await _gsvc(ctx).create({"displayName": f"NC-{uuid.uuid4().hex[:6]}"})
+    with pytest.raises(ScimError) as e:
+        await _gsvc(ctx).replace(g["id"], {"displayName": "NC2", "members": 3.14})
+    assert e.value.status == 400

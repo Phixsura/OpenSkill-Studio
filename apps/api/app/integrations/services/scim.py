@@ -79,8 +79,10 @@ async def apply_bulk(db, token, payload: dict) -> dict:
     bulkId cross-references are NOT supported (no parent-child resources in
     our model) — a data payload referencing "bulkId:" fails that operation.
     """
-    schemas = payload.get("schemas") or []
-    if BULK_REQUEST_SCHEMA not in schemas:
+    # R353 (fuzz-found 500): `in` over an untrusted non-container raises
+    # TypeError — schemas=1e308 made `not in` crash before any validation.
+    schemas = payload.get("schemas")
+    if not isinstance(schemas, list) or BULK_REQUEST_SCHEMA not in schemas:
         raise ScimError(400, "BulkRequest schema required", "invalidSyntax")
     ops = payload.get("Operations")
     if not isinstance(ops, list) or not ops:
@@ -771,9 +773,12 @@ class ScimGroupService:
         group.display_name = name
         if payload.get("externalId") is not None:
             group.external_id = str(payload["externalId"])
+        members_raw = payload.get("members")
+        if members_raw is not None and not isinstance(members_raw, list):
+            raise ScimError(400, "members must be a list", "invalidSyntax")
         wanted = {
             str(m["value"])
-            for m in (payload.get("members") or [])
+            for m in (members_raw or [])
             if isinstance(m, dict) and isinstance(m.get("value"), str)
         }
         current = set(await self._member_ids(group.id))
