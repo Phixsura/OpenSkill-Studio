@@ -292,9 +292,13 @@ async def refresh_sso_metadata(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """R51: pull the IdP's SAML metadata now and refresh pinned certs."""
+    """R51: pull the IdP's SAML metadata now and refresh pinned certs.
+    R311 (ADR §5.2 S1.3): under enforced SSO the manual rotation refuses
+    unless the break-glass hatch was exercised in the last 90 days."""
     await _admin(org_id, user, db)
-    out = await SsoAdminService(db).refresh_from_metadata(org_id, conn_id)
+    out = await SsoAdminService(db).refresh_from_metadata(
+        org_id, conn_id, require_fresh_break_glass=True
+    )
     await record_fabric_audit(
         db, org_id, user.id, "intg.sso.metadata_refreshed", "sso_connection", conn_id, after=out
     )

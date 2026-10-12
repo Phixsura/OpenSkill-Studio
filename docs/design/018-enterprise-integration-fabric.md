@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R311 (ninth window, fix — ADR commitment never implemented)**:
+  §5.2's S1.3 runbook rule ("the rotation endpoint refuses 409
+  BREAK_GLASS_UNVERIFIED if no break-glass login succeeded in the last 90
+  days and enforce_sso is on") existed only in a docstring aside — the
+  check was never written. Implemented on the manual refresh-metadata
+  endpoint (keyed on the org.breakglass.login mesh events auth.py already
+  emits): fires only when enforce_sso is on AND the cert set actually
+  changes; the automated daily sweep stays exempt (zero-touch rotation
+  must not wedge on an unused hatch) and a no-change refresh passes.
+  Pinned 4 ways; revert-probed KILLED. Hunting heuristic: grep ADR
+  MUST/refuses clauses and docstring asides for commitments with no
+  grep-able implementation.
 - **R310 (ninth window, shared-DB assertion hardening)**: R308's
   committed race rows tripped a latent time bomb — an old test asserted
   the reason of the LAST row of a GLOBAL unordered IdentityMatchQueue

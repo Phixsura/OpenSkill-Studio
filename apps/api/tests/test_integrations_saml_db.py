@@ -1053,3 +1053,56 @@ async def test_metadata_refresh_rejects_doctype(db):
             org.id, conn.id, egress=_MetaEgress(doc)
         )
     assert e.value.code == "SSO_METADATA_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_rotation_requires_fresh_break_glass_under_enforced_sso(db):
+    """R311 (ADR §5.2 S1.3, previously unimplemented): with enforce_sso on,
+    the MANUAL cert-rotation endpoint refuses (409 BREAK_GLASS_UNVERIFIED)
+    unless a break-glass login succeeded in the last 90 days. The
+    automated sweep path (flag off) and a no-change refresh stay exempt."""
+    from app.integrations.facade import emit_event
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_metadata_url = "https://idp.example.com/metadata.xml"
+    conn.enforce_sso = True
+    await db.flush()
+    svc = SsoAdminService(db)
+
+    # (a) manual rotation with CHANGED certs and no hatch exercise -> 409
+    with pytest.raises(AppError) as e:
+        await svc.refresh_from_metadata(
+            org.id, conn.id,
+            egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
+            require_fresh_break_glass=True,
+        )
+    assert e.value.code == "BREAK_GLASS_UNVERIFIED"
+    await db.refresh(conn)
+    assert (conn.idp_certificates or [{}])[0].get("pem", "").strip() != ROGUE_CERT.strip()
+
+    # (b) the automated sweep (flag off) still rotates zero-touch
+    out = await svc.refresh_from_metadata(
+        org.id, conn.id,
+        egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
+    )
+    assert out["rotated"] is True
+
+    # (c) a no-change manual refresh is not blocked either
+    out2 = await svc.refresh_from_metadata(
+        org.id, conn.id,
+        egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY)),
+        require_fresh_break_glass=True,
+    )
+    assert out2["rotated"] is False
+
+    # (d) after a break-glass login event, manual rotation proceeds
+    await emit_event(db, org.id, "org.breakglass.login", subject="u1",
+                     data={"user_id": "u1"})
+    await db.flush()
+    out3 = await svc.refresh_from_metadata(
+        org.id, conn.id,
+        egress=_MetaEgress(_metadata_xml(IDP_CERT, entity=IDP_ENTITY)),
+        require_fresh_break_glass=True,
+    )
+    assert out3["rotated"] is True

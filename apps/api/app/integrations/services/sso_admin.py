@@ -202,8 +202,39 @@ class SsoAdminService:
                 409,
             )
 
+    async def _assert_fresh_break_glass(self, org_id: str) -> None:
+        """ADR §5.2 S1.3 (R311): under enforced SSO, the MANUAL cert-rotation
+        endpoint refuses unless a break-glass login succeeded in the last 90
+        days — the escape hatch must stay TESTED before admins touch the
+        trust anchors (a botched rotation plus an untested hatch is a full
+        org lockout). The automated daily sweep is exempt (zero-touch
+        rotation must not wedge on an unused hatch)."""
+        from datetime import UTC, datetime, timedelta
+
+        from app.integrations.models import IntegrationEvent
+
+        recent = (
+            await self.db.execute(
+                select(IntegrationEvent.id)
+                .where(
+                    IntegrationEvent.org_id == org_id,
+                    IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
+                    IntegrationEvent.time > datetime.now(UTC) - timedelta(days=90),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if recent is None:
+            raise AppError(
+                "BREAK_GLASS_UNVERIFIED",
+                "No successful break-glass login in the last 90 days — test the "
+                "escape hatch before rotating certificates under enforced SSO",
+                409,
+            )
+
     async def refresh_from_metadata(
-        self, org_id: str, conn_id: str, *, egress=None
+        self, org_id: str, conn_id: str, *, egress=None,
+        require_fresh_break_glass: bool = False,
     ) -> dict:
         """R51: drive the never-driven idp_metadata_url column — fetch the
         IdP's SAML metadata and refresh the pinned signing certificates (and
@@ -292,6 +323,8 @@ class SsoAdminService:
             )
         before = {(c.get("pem") or "").strip() for c in (conn.idp_certificates or [])}
         after = {(c.get("pem") or "").strip() for c in screened}
+        if require_fresh_break_glass and conn.enforce_sso and after != before:
+            await self._assert_fresh_break_glass(org_id)
         conn.idp_certificates = screened
         if entity_id:
             conn.idp_entity_id = str(entity_id)[:500]
