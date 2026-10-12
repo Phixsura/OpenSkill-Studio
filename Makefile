@@ -56,6 +56,31 @@ lint:                             ## Lint all code
 lint-fix:                         ## Fix lint issues
 	pnpm lint:fix
 
+e2e-intg: ## Live-API E2E for the integration fabric (starts its own uvicorn on :8443)
+	cd apps/api && (APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
+		echo $$! > /tmp/intg-e2e-uvicorn.pid; \
+		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
+			! kill -0 $$(cat /tmp/intg-e2e-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
+		APP_ENV=test EGRESS_ALLOW_PRIVATE=true E2E_INTG_API=http://localhost:8443/api/v1 \
+			PYTHONPATH=. uv run python tests/e2e_integration_lifecycle.py; \
+		status=$$?; kill $$(cat /tmp/intg-e2e-uvicorn.pid) 2>/dev/null; \
+		rm -f /tmp/intg-e2e-uvicorn.pid; exit $$status)
+
+e2e-intg-browser: ## Fabric browser journey (needs web on :3000 + api on :8000, APP_ENV=test)
+	cd apps/api && node tests/browser_e2e_integrations.mjs
+
+test-intg: ## Run the integration-fabric suites (ADR-018, needs infra-up + db-migrate)
+	cd apps/api && uv run pytest tests/test_integrations_core.py tests/test_integrations_db.py \
+		tests/test_integrations_events_db.py tests/test_integrations_sso_db.py \
+		tests/test_integrations_saml_db.py tests/test_integrations_scim_db.py \
+		tests/test_integrations_sync_db.py tests/test_integrations_roster_db.py \
+		tests/test_integrations_lti_db.py tests/test_integrations_ags_db.py \
+		tests/test_integrations_import_db.py tests/test_integrations_export_db.py \
+		tests/test_integrations_health_db.py tests/test_integrations_push_db.py \
+		tests/test_integrations_races_db.py tests/test_integrations_properties.py \
+		tests/test_integrations_acceptance_db.py tests/test_web_api_contract.py \
+		tests/test_ops_doc_contract.py -q
+
 e2e-exp: ## Live-API E2E for the experimentation platform (starts its own uvicorn on :8442)
 	cd apps/api && (APP_ENV=test uv run uvicorn app.main:app --port 8442 & \
 		echo $$! > /tmp/exp-e2e-uvicorn.pid; \

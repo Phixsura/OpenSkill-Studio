@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R291 (ninth window, DX targets)**: Makefile gained `make test-intg`
+  (the 19-file fabric battery incl. both contract guards — 347 tests),
+  `make e2e-intg` (self-hosting live-HTTP lifecycle on :8443, same idiom
+  as e2e-exp) and `make e2e-intg-browser` (the Playwright journey).
+  Verified: test-intg 347 green, e2e-intg 62/62.
 - **R290 (ninth window, ops-doc caps drift guard)**: new
   `tests/test_ops_doc_contract.py` parses the operator caps table out of
   docs/ops and compares every row against the code constants — a cap
