@@ -141,7 +141,7 @@ one-live-run partial unique index and the queued→running claim). Revisit if
 a connector with genuine refresh-token rotation lands.
 Rotated refresh tokens would overwrite previous ciphertext in the same txn; a
 refresh failure with `invalid_grant` moves the connection to `error` and emits
-`integration.connection.errored`. API never returns credential material — the
+`integration.connection.unhealthy`. API never returns credential material — the
 credential response model has exactly `{id, kind, expires_at, rotated_at}`.
 
 Error codes (this part): `PROVIDER_NOT_FOUND`, `PROVIDER_DISABLED`,
@@ -578,7 +578,7 @@ subject, data)` inserts the row **and** a `cp_outbox` message (`topic=
 Initial catalog (issue Part F list): `learner.enrolled, skill.completed,
 project.approved, brief.created, client.accepted, credential.issued,
 placement.started, invoice.finalized, ecosystem.change_verified` (each `.v1`), plus
-fabric-internal `integration.connection.errored, integration.sync.completed,
+fabric-internal `integration.connection.unhealthy, integration.sync.completed,
 integration.delivery.exhausted, org.sso.login, org.breakglass.login,
 org.scim.deprovisioned`.
 
