@@ -923,3 +923,34 @@ def test_event_catalog_covers_every_emitted_name():
     assert not uncatalogued, f"emitted but not in the catalog: {sorted(uncatalogued)}"
     phantom = set(DIRECT_EMISSIONS) - emitted
     assert not phantom, f"catalogued but nothing emits them: {sorted(phantom)}"
+
+
+@pytest.mark.asyncio
+async def test_egress_never_follows_redirects(monkeypatch):
+    """R301 (survivor pin): a 3xx from the receiver is a TERMINAL answer —
+    following it would fetch an attacker-chosen Location (e.g. the cloud
+    metadata IP) from inside our network, bypassing the URL screen. The
+    transport must be hit exactly once and the 302 returned as-is.
+    (Patched at the TRANSPORT layer: httpx's redirect loop lives inside
+    AsyncClient.send, so a send-level fake would mask the flag.)"""
+    import httpx
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34"))
+
+    hops = []
+
+    async def fake_handle(self, request):
+        hops.append(str(request.url))
+        return httpx.Response(
+            302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_handle)
+    resp = await EgressClient().request("POST", "https://hooks.example.com/deliver")
+    assert resp.status_code == 302
+    assert len(hops) == 1  # one hop, Location never fetched

@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R301 (ninth window, redirect-SSRF pin)**: `follow_redirects=False`
+  on the EgressClient had NO test — flipping it survives the whole core
+  suite, yet following would fetch an attacker-chosen Location (cloud
+  metadata IP) from inside our network, bypassing the URL screen
+  entirely. Pinned at the TRANSPORT layer (httpx's redirect loop lives
+  inside AsyncClient.send, so a send-level fake masks the flag): one hop,
+  302 returned as-is, Location never fetched. Re-probed KILLED. Also
+  audited clean this pass: delivery timeouts (connect/read/write/pool all
+  bounded), secrets never logged, list endpoints bounded.
 - **R300 (ninth window, outsider-lockout journey)**: the walk registers a
   SECOND user in a fresh browser context and drives them straight at org
   A's fabric URLs — neither the hub nor the identity page may leak any of
