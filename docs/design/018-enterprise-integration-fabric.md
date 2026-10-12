@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R295 (ninth window, R294 class — update-twin sweep)**: swept every
+  fabric update twin. Webhook PATCH URL screen and the enforce/break-glass
+  arm were covered; TWO more unpinned twins found and pinned — mapping
+  update_document re-validates the document (and the version pin does NOT
+  bump on a refused update) and sync-profile update re-validates
+  field_policy. 3/3 re-probed KILLED. The update-twin class is now swept
+  fabric-wide (sso_admin R294, warehouse batch-23, sync schedule batch-38,
+  webhook/mapping/field_policy here).
 - **R294 (ninth window, UPDATE-path validation pins)**: the create path's
   validations were all pinned, their UPDATE twins were not — three
   survivors on SsoAdminService.update (bogus status, admin default_role

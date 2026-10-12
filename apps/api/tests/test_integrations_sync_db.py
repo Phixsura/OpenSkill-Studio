@@ -1823,3 +1823,47 @@ async def test_trigger_and_cancel_state_machine_guards(db):
     assert e.value.code == "SYNC_RUN_NOT_CANCELLABLE"
     await db.refresh(run)
     assert run.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_update_twins_revalidate(db):
+    """R295 (R294 class): update twins re-validate what create validates —
+    an invalid document on mapping update and a bad field_policy on
+    profile update are refused, and the row (incl. its version pin) stays
+    unchanged."""
+    from app.integrations.services.connections import ConnectionService
+    from app.integrations.services.mapping import MappingService
+
+    org, owner = await _org(db)
+    msvc = MappingService(db)
+    mp = await msvc.create(
+        org.id, name=f"ut-{uuid.uuid4().hex[:6]}", direction="inbound",
+        model="roster.class",
+        document={"fields": [{"target": "t", "path": "a"}]},
+    )
+    v0 = mp.version
+    with pytest.raises(AppError) as e:
+        await msvc.update_document(org.id, mp.id, {"fields": []})
+    assert e.value.code == "MAPPING_EXPRESSION_INVALID"
+    await db.refresh(mp)
+    assert mp.version == v0 and mp.document["fields"]
+
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn = await csvc.create(
+        org.id, provider_key="oneroster", name=f"ut-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+    )
+    conn.status = "active"
+    psvc = SyncProfileService(db)
+    profile = await psvc.create(
+        org.id, connection_id=conn.id, name=f"up-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+    with pytest.raises(AppError) as e:
+        await psvc.update(org.id, profile.id, field_policy={"email": "banana"})
+    assert e.value.code == "SYNC_PROFILE_INVALID"
+    await db.refresh(profile)
+    assert profile.field_policy == {}
