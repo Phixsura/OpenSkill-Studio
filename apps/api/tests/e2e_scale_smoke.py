@@ -269,6 +269,31 @@ async def main() -> None:
             server.close()
             await server.wait_closed()
 
+        # ── export at size: the org's event history to object storage ──
+        rr = await c.post(
+            f"{base}/export-streams",
+            json={"name": f"scale-ev-{uuid.uuid4().hex[:6]}", "dataset": "events"},
+            headers=h,
+        )
+        check("export stream created", rr.status_code == 201, rr.text[:120])
+        stream_id = rr.json()["data"]["id"]
+        t0 = time.monotonic()
+        rr = await c.post(
+            f"{base}/export-streams/{stream_id}/run",
+            headers=h,
+            timeout=httpx.Timeout(120.0),
+        )
+        dt_x = time.monotonic() - t0
+        data = rr.json().get("data", {})
+        check(
+            "export of 200+ events succeeded",
+            rr.status_code == 202
+            and data.get("status") == "succeeded"
+            and data.get("row_count", 0) >= 200,
+            f"{rr.status_code} {str(data)[:140]}",
+        )
+        check("export wall-clock bound (<60s)", dt_x < 60, f"{dt_x:.1f}s")
+
     print(f"\nPASS={PASS} FAIL={FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)
 

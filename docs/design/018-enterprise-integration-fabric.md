@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R341 (tenth window, export-scale section)**: section six exports the
+  org's 200+ mesh events to object storage through the API run endpoint —
+  succeeded, row_count verified, bounded. The smoke now exercises every
+  fabric pipeline at size: directory (SCIM), import (users+roster), mesh
+  fan-out, and export. 28/28.
 - **R340 (tenth window, roster-scale section)**: the smoke's fifth
   section enrolls all 500 imported users into one cohort through the
   roster import (the add_member funnel with its capacity lock, 500 rows)
