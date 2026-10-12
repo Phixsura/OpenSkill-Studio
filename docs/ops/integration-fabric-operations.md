@@ -204,6 +204,28 @@ import uploads all absorb concurrent duplicates with a clean idempotent
 response instead of a 500. The expensive triggers (`.../run` on export
 streams, `.../provision-roster`) are rate-limited 10/min per route.
 
+### Per-org resource caps (window 8, R260–R263)
+
+All count-then-insert caps are serialized under a `FOR UPDATE` org-row lock
+(the R208/R113 idiom), so they hold under concurrent admin writes:
+
+| Resource                      | Cap                        | Error code                       |
+| ----------------------------- | -------------------------- | -------------------------------- |
+| Break-glass designees         | 2                          | `BREAK_GLASS_LIMIT`              |
+| SCIM tokens (active)          | 5                          | `SCIM_TOKEN_LIMIT`               |
+| SSO connections               | 5                          | `SSO_LIMIT_REACHED`              |
+| Integration connections       | 20                         | `CONNECTION_LIMIT_REACHED`       |
+| Export streams                | 20                         | `EXPORT_LIMIT_REACHED`           |
+| Sync profiles                 | 50                         | `SYNC_PROFILE_LIMIT_REACHED`     |
+| LTI registrations             | 10                         | `LTI_REGISTRATION_LIMIT_REACHED` |
+| deployment_ids per LTI create | 50                         | `LTI_REGISTRATION_INVALID`       |
+| Org domains                   | 20                         | `DOMAIN_LIMIT_REACHED`           |
+| Webhook subscriptions         | per `MAX_WEBHOOKS_PER_ORG` | `WEBHOOK_LIMIT_REACHED`          |
+
+The connection/stream/profile caps exist because the shared sweeps
+(half-hourly pings, hourly exports, scheduled syncs) fan out over those
+rows for every org — one tenant must not degrade every tenant's scheduler.
+
 Whole-class SIS removals now unenroll members: the tombstone pass resolves
 cohorts through the connection backlink map, so offboarding a class in the
 SIS removes its memberships on the next provision pass.
