@@ -321,6 +321,10 @@ def _normalize_path(path: str | None) -> str:
     """Strip fully-qualified attribute URNs; lowercase the attribute."""
     if not path:
         return ""
+    if not isinstance(path, str):
+        # R358 (fuzz-found 500): path=123 reached .strip() — IdPs are
+        # trusted-ish but the op grammar is attacker-shaped input.
+        raise ScimError(400, "op path must be a string", "invalidPath")
     p = path.strip()
     if p.lower().startswith(SCIM_USER_SCHEMA.lower() + ":"):
         p = p[len(SCIM_USER_SCHEMA) + 1 :]

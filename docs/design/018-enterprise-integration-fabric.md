@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R358 (eleventh window, fuzz phase 5 + fourth 500)**: SCIM PATCH
+  path-filter bombs (unclosed brackets, emoji filters, 3KB expressions,
+  2,000-op arrays, non-string paths) — found the window's FOURTH 500:
+  op path=123 reached str.strip() in _normalize_path (both user and
+  group PATCH). Guarded with a clean 400 invalidPath, unit-pinned, 290
+  hostile requests per seed now zero-5xx across 3 seeds.
 - **R356/R357 (eleventh window, fuzzer phases 3-4)**: hostile-HEADER
   phase (8KB bearer, junk JWT shapes, giant XFF) and the unauthenticated
   PROTOCOL surface (discovery with hostile emails, authorize/callback

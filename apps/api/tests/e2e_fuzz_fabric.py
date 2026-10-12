@@ -260,6 +260,49 @@ async def main() -> None:
                 check(f"5xx: {method} {url[-45:]}", False,
                       f"{rr.status_code} {rr.text[:140]}")
 
+        # 5) SCIM PATCH path-filter bombs (the op-path mini-grammar)
+        rr = await c.post(f"{API}/scim/v2/Groups",
+                          json={"displayName": f"FZ-{uuid.uuid4().hex[:6]}"}, headers=sh)
+        gid = rr.json().get("id", "x")
+        rr = await c.post(f"{API}/scim/v2/Users",
+                          json={"userName": f"fz-{uuid.uuid4().hex[:6]}@fz.example.edu"},
+                          headers=sh)
+        uid2 = rr.json().get("id", "x")
+        path_bombs = [
+            'members[value eq "unclosed',
+            "members[💥]",
+            'members[value eq "a"][value eq "b"]',
+            "members[[[[",
+            'members[value eq "' + "x" * 3000 + '"]',
+            "members[value ne null]",
+            "", None, 123,
+            "displayName[sub]",
+        ]
+        for pb in path_bombs:
+            ops = [{"op": "remove", "path": pb}]
+            rr = await c.patch(f"{API}/scim/v2/Groups/{gid}",
+                               json={"Operations": ops}, headers=sh)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: scim path bomb", False, f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}")
+            rr = await c.patch(f"{API}/scim/v2/Users/{uid2}",
+                               json={"Operations": [{"op": "replace", "path": pb,
+                                                     "value": False}]}, headers=sh)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: user path bomb", False, f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}")
+        # giant Operations array (over the 100-op bulk cap analogue in PATCH)
+        rr = await c.patch(f"{API}/scim/v2/Groups/{gid}",
+                           json={"Operations": [{"op": "remove",
+                                                 "path": 'members[value eq "x"]'}] * 2000},
+                           headers=sh)
+        total += 1
+        if rr.status_code >= 500:
+            n_5xx += 1
+            check("5xx: 2000-op PATCH", False, f"{rr.status_code} {rr.text[:100]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         print(f"elapsed={_t.monotonic()-_t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")

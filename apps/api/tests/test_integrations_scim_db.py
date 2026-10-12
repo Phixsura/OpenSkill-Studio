@@ -1056,3 +1056,16 @@ async def test_bulk_and_members_reject_non_container_types(ctx):
     with pytest.raises(ScimError) as e:
         await _gsvc(ctx).replace(g["id"], {"displayName": "NC2", "members": 3.14})
     assert e.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_path_must_be_string(ctx):
+    """R358 (fuzz-found 500): a non-string op path (123) reached
+    str.strip() — clean 400 on both user and group PATCH now."""
+    email = f"pp-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u, _ = await _usvc(ctx).create({"userName": email})
+    g = await _gsvc(ctx).create({"displayName": f"PPG-{uuid.uuid4().hex[:6]}"})
+    for svc, rid in ((_usvc(ctx), u["id"]), (_gsvc(ctx), g["id"])):
+        with pytest.raises(ScimError) as e:
+            await svc.patch(rid, {"Operations": [{"op": "remove", "path": 123}]})
+        assert e.value.status == 400
