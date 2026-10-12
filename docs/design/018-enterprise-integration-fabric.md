@@ -914,6 +914,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R267 (eighth window, full foreground regression)**: post R250-R266
+  (4 security fixes, 3 race-proofed caps, sprawl caps, 8 survivor pins,
+  ~50 probes) the whole stack re-verified foreground: backend full suite
+  in 12 chunks — every chunk zero failures; web 764 Vitest + tsc + ESLint
+  clean; live-HTTP E2E lifecycle 62/62; adversarial battery 178/0
+  (initial 10 "failures" were the SSRF screen correctly disabled by the
+  E2E-only EGRESS_ALLOW_PRIVATE flag — re-run with the production screen
+  active: all pass). Runner lesson recorded: `uv run uvicorn` must be
+  killed by process group (start_new_session + killpg), else the uvicorn
+  child survives the uv parent and a stale server on the port serves the
+  next run's requests with the previous env.
 - **R266 (eighth window, group-map/mesh/dynreg probe ledger)**: batches
   30-31. KILLED: group_map role mint-ceiling, group-sync admin demotion
   guard, wildcard-matches-internal-events, wildcard-matches-everything,
