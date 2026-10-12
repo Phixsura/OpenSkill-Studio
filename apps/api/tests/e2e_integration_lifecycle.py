@@ -421,6 +421,31 @@ async def main() -> int:
             r.text[:160],
         )
 
+        # identity-queue live resolve (pending row minted in-process —
+        # producing one over HTTP needs a real IdP's ambiguous assertion)
+        from app.integrations.models import IdentityMatchQueue
+
+        qdb = await db_session()
+        async with qdb:
+            item = IdentityMatchQueue(
+                org_id=org_id, source="scim", connection_ref="e2e",
+                subject=f"q-{uid()}", email=f"q-{uid()}@q.example.edu",
+                reason="ambiguous", payload={}, status="pending",
+            )
+            qdb.add(item)
+            await qdb.commit()
+            queue_item_id = item.id
+        r = await c.post(
+            f"{base}/identity-queue/{queue_item_id}/resolve",
+            json={"action": "reject"},
+            headers=h,
+        )
+        check(
+            "live identity-queue resolve",
+            r.status_code == 200 and r.json()["data"]["status"] == "rejected",
+            r.text[:160],
+        )
+
         # ── export (MinIO) ──
         r = await c.post(
             f"{base}/export-streams",

@@ -931,6 +931,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R349 (tenth window)**: identity-queue resolve walled live too (a
+  pending row minted in-process; producing one over HTTP needs a real
+  IdP's ambiguous assertion). Lifecycle 74/74.
 - **R348 (tenth window, never-called-live closure)**: mechanized the
   R344 heuristic — diffed the fabric OpenAPI (method, path) table against
   what the four live scripts actually call, then walled the risky
