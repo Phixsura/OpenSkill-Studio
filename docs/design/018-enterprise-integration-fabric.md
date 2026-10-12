@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R264 (eighth window, back-channel-logout probe ledger)**: batch 28
+  probed the OIDC back-channel logout validator — nonce-prohibition, events
+  member, iat freshness and sub requirement all KILLED. Two documented
+  EQUIVALENT mutants (layered defenses, outcome already pinned): dropping
+  the jti pre-check still rejects replay through the deterministic-key
+  unique index + SAVEPOINT (the pre-check is a fast path; the existing
+  replay test passes through the IntegrityError layer), and dropping the
+  header alg!=RS256 check is absorbed by pyjwt's decode(algorithms=
+  ["RS256"]) enforcement (same equivalence class recorded for login
+  id_token validation).
 - **R263 (eighth window, R262 class — LTI caps)**: LTI registrations had
   no per-org bound (each is a platform trust anchor) and `deployment_ids`
   was inserted row-per-entry with no request bound (a single create could
