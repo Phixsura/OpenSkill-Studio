@@ -59,6 +59,42 @@ def _route_patterns() -> list[list[str]]:
     return out
 
 
+_CALL_RE = re.compile(
+    r"apiWithAuth(?:<[^>]*>)?\(\s*`([^`]+)`\s*,\s*\{[^}]*method:\s*\"([A-Z]+)\"",
+    re.DOTALL,
+)
+
+
+def _page_calls_with_methods() -> set[tuple[str, str]]:
+    """(path-pattern, METHOD) pairs for every non-GET page call."""
+    calls: set[tuple[str, str]] = set()
+    for page in sorted(WEB_INTG.rglob("*.tsx")):
+        src = page.read_text()
+        m = _BASE_RE.search(src)
+        base = m.group(1) if m else "/orgs/${orgId}/integrations"
+        for tmpl, method in _CALL_RE.findall(src):
+            t = tmpl.replace("${base}", base).split("?", 1)[0]
+            t = re.sub(r"\$\{[^}]*$", "", t)
+            if not t.startswith("/orgs/"):
+                continue
+            t = _VAR_RE.sub("{param}", t).rstrip("/")
+            calls.add((t, method))
+    return calls
+
+
+def _route_methods() -> list[tuple[list[str], set[str]]]:
+    from app.main import app
+
+    out = []
+    for path, ops in app.openapi()["paths"].items():
+        p = path.removeprefix("/api/v1")
+        out.append((
+            [seg for seg in p.split("/") if seg],
+            {m.upper() for m in ops},
+        ))
+    return out
+
+
 def _matches(call: str, patterns: list[list[str]]) -> bool:
     segs = [s for s in call.split("/") if s]
     for pat in patterns:
@@ -82,3 +118,27 @@ def test_every_fabric_page_api_call_has_a_route():
     patterns = _route_patterns()
     missing = sorted(c for c in calls if not _matches(c, patterns))
     assert missing == [], f"web pages call routes nobody serves: {missing}"
+
+
+def test_every_fabric_mutation_call_uses_a_served_method():
+    """A path can exist while the page's METHOD is wrong (PATCH vs PUT) —
+    match each explicit-method call against the operations the route
+    actually serves."""
+    calls = _page_calls_with_methods()
+    assert calls, "method extraction found no calls — the regex rotted"
+    table = _route_methods()
+    bad = []
+    for path, method in sorted(calls):
+        segs = [s for s in path.split("/") if s]
+        served: set[str] = set()
+        for pat, methods in table:
+            if len(pat) != len(segs):
+                continue
+            if all(
+                ps.startswith("{") or cs == "{param}" or ps == cs
+                for ps, cs in zip(pat, segs, strict=True)
+            ):
+                served |= methods
+        if method not in served:
+            bad.append(f"{method} {path} (served: {sorted(served) or 'nothing'})")
+    assert bad == [], f"web pages use methods the API does not serve: {bad}"

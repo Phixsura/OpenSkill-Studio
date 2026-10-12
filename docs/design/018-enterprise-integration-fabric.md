@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R288 (ninth window, method-level contract guard)**: second contract
+  test matches every explicit-method page call (POST/PATCH/DELETE, ~30
+  calls) against the operations the route actually serves — a page
+  sending PATCH where the API serves PUT now breaks CI. Detection proven
+  on domains/{id}/verify (POST->PATCH mutation fails the test and names
+  the call); first probe target was a false negative because
+  scim-tokens/{id} legitimately serves PATCH — the probe must mutate onto
+  a method the route does NOT serve.
 - **R287 (ninth window, cross-layer contract drift guard)**: new
   `tests/test_web_api_contract.py` extracts every template-literal API
   call from the five fabric pages (expanding the shared `base` prefix,
