@@ -373,6 +373,23 @@ async def main() -> None:
               run_rows and run_rows[0]["status"] == "succeeded",
               str(run_rows)[:120])
 
+        # 7b: provision the 1,000 staged classes into cohorts (auto-create)
+        t0 = time.monotonic()
+        rr = await c.post(
+            f"{base}/connections/{conn_id}/provision-roster",
+            json={"auto_create_cohorts": True},
+            headers=h,
+            timeout=httpx.Timeout(180.0),
+        )
+        dt_p = time.monotonic() - t0
+        pdata = rr.json().get("data", {})
+        check(
+            "1,000 cohorts auto-provisioned",
+            rr.status_code == 200 and pdata.get("cohorts_created", 0) == 1000,
+            f"{rr.status_code} {str(pdata)[:140]}",
+        )
+        check("provision bound (<120s)", dt_p < 120, f"{dt_p:.1f}s")
+
     print(f"\nPASS={PASS} FAIL={FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)
 

@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R343 (tenth window, provision-scale 7b)**: the 1,000 staged classes
+  are then provisioned — 1,000 cohorts auto-created through the governed
+  path within its bound. 35/35; the smoke's five pipelines all run at
+  size end to end (stage AND apply for sync).
 - **R342 (tenth window, sync-pull-scale section)**: section seven stages
   1,000 connector records through execute_run (profile + run minted via
   the API, a two-batch in-process fake registered for the pull) — staged
