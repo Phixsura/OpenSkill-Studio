@@ -928,6 +928,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R317 (ninth window, terminal-HEAD chunk proof)**: after the last
+  production edits (R311/R313), all 12 backend chunks were re-run AT THE
+  TERMINAL HEAD — 10,765 items, zero failures — so the closing evidence
+  is not "mid-window chunks + later diffs" but a full pass of the exact
+  shipped tree.
 - **R316 (ninth window CLOSE — final tally)**: window 9 (single-chat
   foreground, T0 17:30) R277-R315, ~38 commits. SECURITY/behavior fixes:
   R277 group_map foreign-cohort wall, R296 production build (never-run
