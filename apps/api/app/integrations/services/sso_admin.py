@@ -377,10 +377,17 @@ class SsoAdminService:
         self, org_id: str, member_user_id: str, *, enabled: bool, actor_role
     ) -> None:
         """Owner-only; max 2 per org."""
-        from app.models.organization import MemberStatus, OrgMember, OrgRole
+        from app.models.organization import MemberStatus, Organization, OrgMember, OrgRole
 
         if actor_role != OrgRole.OWNER:
             raise AppError("FORBIDDEN", "Only the owner can manage break-glass", 403)
+        # R260: serialize the count-then-set under a FOR UPDATE org lock —
+        # two concurrent enables at cap-1 would otherwise BOTH count 1 < 2
+        # and yield three designees (the cap bounds the password-bypass
+        # surface under enforced SSO, so it must hold under races too).
+        await self.db.execute(
+            select(Organization.id).where(Organization.id == org_id).with_for_update()
+        )
         member = (
             await self.db.execute(
                 select(OrgMember).where(

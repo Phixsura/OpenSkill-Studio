@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R260 (eighth window, SECURITY fix — break-glass cap TOCTOU)**:
+  `set_break_glass` counted designees and then set the flag with no
+  serialization — two concurrent enables at cap-1 both count 1 < 2 and
+  yield THREE break-glass members (each one is a password bypass under
+  enforced SSO, so the <=2 cap is a security bound). Fixed with the R208
+  pattern: a FOR UPDATE lock on the org row serializes count-then-set.
+  Race pinned in races_db (`test_break_glass_cap_holds_under_concurrent_
+enables`: two gather'd sessions at cap-1 -> exactly one win, final
+  count 2) and demonstrated real: with the lock removed and adverse
+  scheduling injected after the count, the same test yields 3 designees.
 - **R259 (eighth window, SSRF + registry probe ledger)**: batches 26-27
   probed the egress screen itself (userinfo smuggling, non-http(s) scheme,
   port screen, literal private IP, internal TLD/localhost, CGNAT range,

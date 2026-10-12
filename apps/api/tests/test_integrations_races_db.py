@@ -731,3 +731,57 @@ async def test_saml_assertion_replay_cache_concurrent_clean_reject(db):
         assert not isinstance(r, BaseException), f"raw crash (not clean replay): {r!r}"
     assert "recorded" in results
     assert "SSO_ASSERTION_INVALID" in results, f"expected one clean replay, got {results}"
+
+
+@pytest.mark.asyncio
+async def test_break_glass_cap_holds_under_concurrent_enables(db):
+    """R260: the break-glass cap (<=2) is a security bound — two concurrent
+    enables at cap-1 must yield exactly one success (FOR UPDATE org lock
+    serializes the count-then-set)."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.services.sso_admin import SsoAdminService
+
+    org, owner = await _org(db)
+    users = []
+    for _ in range(3):
+        u = User(
+            email=f"bg-{uuid.uuid4().hex[:16]}@test.com",
+            password_hash=hash_password("Test123!"),
+            display_name="BG", role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        )
+        db.add(u)
+        await db.flush()
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.ADMIN,
+                         status=MemberStatus.ACTIVE))
+        users.append(u)
+    await db.commit()
+    # one designee already set -> cap-1
+    await SsoAdminService(db).set_break_glass(
+        org.id, users[0].id, enabled=True, actor_role=OrgRole.OWNER
+    )
+    await db.commit()
+
+    async def enabler(uid):
+        async with AsyncSessionLocal() as own:
+            try:
+                await SsoAdminService(own).set_break_glass(
+                    org.id, uid, enabled=True, actor_role=OrgRole.OWNER
+                )
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(
+        await asyncio.gather(enabler(users[1].id), enabler(users[2].id))
+    )
+    assert results == ["BREAK_GLASS_LIMIT", "won"]
+    n = (
+        await db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org.id, OrgMember.is_break_glass.is_(True)
+            )
+        )
+    ).scalars().all()
+    assert len(n) == 2
