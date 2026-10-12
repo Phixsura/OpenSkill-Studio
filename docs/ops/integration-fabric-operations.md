@@ -245,6 +245,16 @@ SIS removes its memberships on the next provision pass.
   restoring a mutant — a restored source can otherwise keep executing the
   mutant's bytecode (mtime-granularity collision).
 
+### Mix-up defenses (window 8)
+
+Issuer/entity binding is enforced at every trust-bootstrap point: OIDC
+discovery metadata must carry the configured issuer (RFC 8414 §3.3), a SAML
+metadata refresh refuses a document whose entityID differs from the
+configured IdP entity (nothing is adopted from it), and LTI dynamic
+registration refuses a configuration whose issuer lives on a different
+origin than the admin-pasted URL. Conflict adjudication now also verifies
+the result row belongs to the addressed run (uniform 404 otherwise).
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned
