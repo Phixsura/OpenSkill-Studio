@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R354 (eleventh window, concurrency storm)**: new live storm
+  (`tests/e2e_storm_fabric.py`, `make e2e-intg-storm`) — 20 workers x 15
+  rounds of interleaved admin CRUD in one org (connections/streams/
+  profiles/tokens/domains/webhooks create-patch-delete, trigger+cancel).
+  Asserts zero 5xx, no request past 20s (deadlock guard), bounded
+  wall-clock, and terminal consistency (both caps respected, no orphan
+  live runs). 4 seeds green — the R260-class locks hold at surface level
+  under genuine interleaving.
 - **R353 (eleventh window, FUZZER + 3 real finds)**: new bounded seeded
   live-HTTP fuzzer (`tests/e2e_fuzz_fabric.py`, `make e2e-intg-fuzz`) —
   hostile bodies (wrong JSON types, NULs, 4KB strings, deep nesting,
