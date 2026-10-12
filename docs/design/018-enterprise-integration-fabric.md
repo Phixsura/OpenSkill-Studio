@@ -914,6 +914,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R277 (ninth window, SECURITY fix — group_map foreign-cohort wall)**:
+  extended the R276 heuristic from "is this id org-gated at READ" to "is
+  this STORED id org-validated at WRITE and org-scoped at EFFECT". The
+  SCIM group_map accepted ANY string as a cohort id: the join path was
+  safe (CohortService.add_member checks org), but the group-LEAVE path
+  deleted CohortMember keyed only on (cohort_id, user_id) — a foreign
+  cohort id in group_map could unenroll a cross-org user from ANOTHER
+  org's cohort. Fixed both layers: the delete now joins Cohort and
+  requires org_id match, and create/update_group_map validate every
+  cohort-mapped id belongs to the org (422 SCIM_GROUP_MAP_INVALID).
+  Pinned with `test_group_map_foreign_cohort_walls` (validation at both
+  write sites + smuggled-id leave leaves the foreign membership intact);
+  both fixes revert-probed KILLED.
 - **R276 (eighth window, org-gate completeness sweep — 6 IDOR pins)**:
   exhaustive probe of EVERY `org_id !=` gate in the fabric (11 sites, each
   occurrence by index). Five were already killed (subscription, import

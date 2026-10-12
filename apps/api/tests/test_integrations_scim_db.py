@@ -869,3 +869,60 @@ async def test_scim_token_cross_org_walls(ctx):
     assert e.value.code == "SCIM_TOKEN_NOT_FOUND"
     assert e.value.status_code == 404
     assert token_a.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_group_map_foreign_cohort_walls(ctx):
+    """R277 (SECURITY): a cohort id in group_map is a cross-org capability.
+    (1) create/update_group_map refuse a cohort belonging to another org;
+    (2) even with a foreign id smuggled into group_map, the group-LEAVE
+    path must not delete the user's membership in the other org's cohort
+    (the join path is org-checked via CohortService; the delete path is
+    now scoped too)."""
+    from app.exceptions import AppError
+    from app.models.cohort import CohortMember, CohortRole
+    from app.models.organization import MemberStatus, OrgMember, OrgRole
+    from app.services.cohort import CohortService
+
+    db, owner = ctx["db"], ctx["owner"]
+    org_b = ctx["org"]
+    owner_a = await _user(db)
+    org_a = await _org(db, owner_a)
+    cohort_a = await CohortService(db).create_cohort(
+        org_id=org_a.id, name=f"A {ULID()}", description=None, created_by=owner_a.id
+    )
+
+    # (1) validation walls at create and update.
+    svc = ScimTokenService(db)
+    bad_map = {"G": {"kind": "cohort", "id": cohort_a.id}}
+    with pytest.raises(AppError) as e:
+        await svc.create(org_b.id, name="bad", group_map=bad_map, created_by=owner.id)
+    assert e.value.code == "SCIM_GROUP_MAP_INVALID"
+    with pytest.raises(AppError) as e:
+        await svc.update_group_map(org_b.id, ctx["token"].id, bad_map)
+    assert e.value.code == "SCIM_GROUP_MAP_INVALID"
+
+    # (2) leave path with a smuggled foreign id: org A's membership survives.
+    ctx["token"].group_map = bad_map  # direct set, bypassing validation
+    await db.flush()
+    email = f"fx-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u, _ = await _usvc(ctx).create({"userName": email})
+    db.add(OrgMember(org_id=org_a.id, user_id=u["id"], role=OrgRole.STUDENT,
+                     status=MemberStatus.ACTIVE))
+    db.add(CohortMember(cohort_id=cohort_a.id, user_id=u["id"], role=CohortRole.LEARNER))
+    await db.flush()
+    g = await _gsvc(ctx).create(
+        {"displayName": "G", "members": [{"value": u["id"]}]}
+    )
+    await _gsvc(ctx).patch(
+        g["id"],
+        {"Operations": [{"op": "remove", "path": f'members[value eq "{u["id"]}"]'}]},
+    )
+    still = (
+        await db.execute(
+            select(CohortMember).where(
+                CohortMember.cohort_id == cohort_a.id, CohortMember.user_id == u["id"]
+            )
+        )
+    ).scalar_one_or_none()
+    assert still is not None  # foreign cohort untouched

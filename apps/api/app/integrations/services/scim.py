@@ -187,6 +187,7 @@ class ScimTokenService:
         if len(active) >= MAX_SCIM_TOKENS_PER_ORG:
             raise AppError("SCIM_TOKEN_LIMIT", "Too many active SCIM tokens", 422)
         self._validate_group_map(group_map or {})
+        await self._check_cohort_ownership(org_id, group_map or {})
         raw = f"{SCIM_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
         token = ScimToken(
             org_id=org_id,
@@ -225,11 +226,37 @@ class ScimTokenService:
             ).scalars()
         )
 
+    async def _check_cohort_ownership(self, org_id: str, group_map: dict) -> None:
+        """R277: every cohort-mapped id must belong to THIS org — a foreign
+        cohort id in group_map is a cross-org capability (the group-leave
+        path acts on it)."""
+        from app.models.cohort import Cohort
+
+        ids = [
+            spec["id"]
+            for spec in group_map.values()
+            if isinstance(spec, dict) and spec.get("kind") == "cohort"
+        ]
+        if not ids:
+            return
+        owned = set(
+            (
+                await self.db.execute(
+                    select(Cohort.id).where(Cohort.id.in_(ids), Cohort.org_id == org_id)
+                )
+            ).scalars()
+        )
+        if set(ids) - owned:
+            raise AppError(
+                "SCIM_GROUP_MAP_INVALID", "cohort does not belong to this org", 422
+            )
+
     async def update_group_map(self, org_id: str, token_id: str, group_map: dict) -> ScimToken:
         token = await self.db.get(ScimToken, token_id)
         if token is None or token.org_id != org_id:
             raise AppError("SCIM_TOKEN_NOT_FOUND", "Token not found", 404)
         self._validate_group_map(group_map)
+        await self._check_cohort_ownership(org_id, group_map)
         token.group_map = group_map
         await self.db.flush()
         return token
@@ -901,11 +928,21 @@ class ScimGroupService:
                             "scim_cohort_map_failed", cohort_id=cohort_id, code=exc.code
                         )
             else:
+                # R277: scope the removal to THIS org's cohorts — the add
+                # path goes through CohortService.add_member (org-checked),
+                # but a bare delete keyed only on (cohort_id, user_id) would
+                # let a foreign cohort id in group_map unenroll the user
+                # from ANOTHER org's cohort.
+                from app.models.cohort import Cohort
+
                 row = (
                     await self.db.execute(
-                        select(CohortMember).where(
+                        select(CohortMember)
+                        .join(Cohort, Cohort.id == CohortMember.cohort_id)
+                        .where(
                             CohortMember.cohort_id == cohort_id,
                             CohortMember.user_id == member.user_id,
+                            Cohort.org_id == self.org_id,
                         )
                     )
                 ).scalar_one_or_none()
