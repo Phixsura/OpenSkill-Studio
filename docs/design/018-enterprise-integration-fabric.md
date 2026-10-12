@@ -914,6 +914,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R257 (eighth window, domain-IDOR pin + probe ledger)**: batches 22-24
+  probed 16 more mutants across identity (unverified-email auto-link, revoked
+  link honored, inactive user, ambiguous multi-member, email hijack), AGS
+  (sync-disabled fires, inactive registration, cross-org resource link),
+  warehouse (cursor boundary re-export, unsalted/org-unscoped anonymize hash,
+  disabled stream runs, empty allowlist), bulk import (formula injection,
+  unknown role, duplicate email), domains (freemail claim, pending expiry),
+  and SCIM (revoked token authenticates, deactivate no-op) — 15 KILLED by
+  existing coverage. ONE survivor: `OrgDomainService.get` org-scoping had no
+  test, so org B could in principle read/verify/DELETE org A's domain claim
+  (deleting a verified domain drops the victim's SSO enforcement). Pinned
+  with `test_domain_cross_org_idor_uniform_404` (get/verify/delete all
+  uniform 404); re-probed KILLED.
 - **R256 (eighth window, SAML request-id pins)**: batch-21 probes left two
   genuine coverage gaps in `_consume_request_id` — dropping the
   `used_at IS NULL` filter (request-id replay: a fresh assertion reusing an

@@ -1222,3 +1222,25 @@ async def test_break_glass_capped_at_two(db):
     assert e.value.code == "BREAK_GLASS_LIMIT"
     # Re-enabling an EXISTING designee is idempotent, not a third slot.
     await svc.set_break_glass(org.id, members[1].id, enabled=True, actor_role=_Role.OWNER)
+
+
+@pytest.mark.asyncio
+async def test_domain_cross_org_idor_uniform_404(db):
+    """R257 (survivor pin): OrgDomainService.get keys on (id, org_id) — org B
+    must not read, verify, or DELETE org A's domain claim (deleting a rival's
+    verified domain would drop their SSO enforcement). Uniform 404, no
+    existence oracle."""
+    owner_a = await _user(db)
+    org_a = await _org(db, owner_a)
+    dom = f"idor-{uuid.uuid4().hex[:8]}.example.edu"
+    row = await _verified_domain(db, org_a, dom)
+    owner_b = await _user(db)
+    org_b = await _org(db, owner_b)
+    svc = OrgDomainService(db)
+    for op in (svc.get, svc.verify, svc.delete):
+        with pytest.raises(AppError) as e:
+            await op(org_b.id, row.id)
+        assert e.value.code == "DOMAIN_NOT_FOUND"
+        assert e.value.status_code == 404
+    # the domain is untouched
+    assert (await svc.get(org_a.id, row.id)).status == "verified"
