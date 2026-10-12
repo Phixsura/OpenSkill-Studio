@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R269 (eighth window, bulk failOnErrors pin + migration check)**:
+  batch 32 probed SCIM /Bulk — op-count cap and BulkRequest-schema guard
+  KILLED; the failOnErrors non-negative-int validation had no test (a
+  negative threshold would stop the batch from the first operation) —
+  pinned (-1 and "2" both 400); re-probed KILLED. Also verified the
+  migration chain on a scratch database: zero -> head (intg15a00015)
+  upgrades cleanly, head downgrades one step and re-upgrades (newest
+  migration reversible).
 - **R268 (eighth window, totality properties)**: two hypothesis
   properties added over attacker-facing parsers — the SCIM filter parser
   (arbitrary text -> (attr, value) or ScimError 400, nothing else escapes)

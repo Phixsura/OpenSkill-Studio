@@ -807,3 +807,25 @@ async def test_scim_group_patch_rename_collision_clean_409(ctx):
         {"Operations": [{"op": "replace", "path": "displayName", "value": name_b + "-2"}]},
     )
     assert ok["displayName"] == name_b + "-2"
+
+
+@pytest.mark.asyncio
+async def test_bulk_fail_on_errors_must_be_nonnegative_int(ctx):
+    """R269 (survivor pin): failOnErrors is validated as a non-negative
+    integer — -1 or a string yields a clean 400, never a bogus early stop
+    (a negative threshold would make `failures >= fail_on` true from the
+    first operation)."""
+    from app.integrations.services.scim import ScimError, apply_bulk
+
+    db, token = ctx["db"], ctx["token"]
+    for bad in (-1, "2"):
+        with pytest.raises(ScimError) as e:
+            await apply_bulk(db, token, {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                "failOnErrors": bad,
+                "Operations": [
+                    {"method": "POST", "path": "/Users",
+                     "data": {"userName": f"fo-{uuid.uuid4().hex[:8]}@corp.example.edu"}},
+                ],
+            })
+        assert e.value.status == 400
