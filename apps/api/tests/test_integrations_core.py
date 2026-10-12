@@ -423,6 +423,22 @@ def test_every_fabric_sweep_has_a_registered_cron():
     src = Path(cp_worker.__file__).read_text()
     assert "app.integrations.worker" in src  # outbox handlers registered
 
+    # R289: the name list above is hand-maintained — back it with a source
+    # scan so a brand-new sweep function cannot ship undriven. Every
+    # `async def sweep_*` under app/integrations must be referenced by the
+    # worker module (directly or inside another cron's body).
+    import re as _re
+
+    import app.integrations as _intg
+
+    intg_root = Path(_intg.__file__).parent
+    sweep_names = set()
+    for f in intg_root.rglob("*.py"):
+        sweep_names |= set(_re.findall(r"async def (sweep_\w+)", f.read_text()))
+    assert sweep_names, "sweep source-scan found nothing — the regex rotted"
+    undriven = sorted(n for n in sweep_names if n not in src)
+    assert undriven == [], f"fabric sweeps nobody drives: {undriven}"
+
 
 # ── R61: generic connector contracts (previously untested) ──
 

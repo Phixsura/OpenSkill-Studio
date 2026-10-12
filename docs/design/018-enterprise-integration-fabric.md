@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R289 (ninth window, sweep-registry source scan)**: the sweep-cron
+  guard's hand-maintained name list was itself the drift shape it guards
+  against (sweep_import_files was already missing from it, though wired).
+  Backed it with a source scan: every `async def sweep_*` under
+  app/integrations must be referenced by the worker module — a brand-new
+  sweep can no longer ship undriven. Detection proven by injecting a fake
+  sweep (test fails and names it).
 - **R288 (ninth window, method-level contract guard)**: second contract
   test matches every explicit-method page call (POST/PATCH/DELETE, ~30
   calls) against the operations the route actually serves — a page
