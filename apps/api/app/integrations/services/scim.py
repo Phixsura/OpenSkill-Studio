@@ -604,6 +604,30 @@ class ScimUserService:
         """PATCH-deactivate ≡ DELETE: archive membership AND revoke sessions
         immediately (R88 revoke sweep incl. rotation predecessors). The user
         row is retained (soft delete; referential integrity + ≥90d window)."""
+        # R330 (found by the scale smoke deprovisioning its own admin): the
+        # IdP must not be able to archive the LAST active OWNER — that
+        # bricks the org's entire admin surface (SSO/SCIM/break-glass all
+        # owner/admin-gated) with every owner session revoked on top.
+        # Owner lifecycle is managed in-app; the IdP gets a clean error.
+        from app.models.organization import OrgRole as _Role
+
+        if member.role == _Role.OWNER:
+            others = (
+                await self.db.execute(
+                    select(OrgMember.id).where(
+                        OrgMember.org_id == member.org_id,
+                        OrgMember.role == _Role.OWNER,
+                        OrgMember.status == MemberStatus.ACTIVE,
+                        OrgMember.user_id != member.user_id,
+                    )
+                )
+            ).first()
+            if others is None:
+                raise ScimError(
+                    409,
+                    "Cannot deprovision the organization's last active owner",
+                    "mutability",
+                )
         member.status = MemberStatus.ARCHIVED
         from app.services.auth import AuthService
 

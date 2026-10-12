@@ -108,8 +108,10 @@ async def main() -> None:
         check("filter wall-clock bound (<2s)", dt_f < 2, f"{dt_f:.2f}s")
 
         # ── bulk deactivate 50 ──
-        rr = await c.get(f"{scim}/Users", params={"count": 50}, headers=sh)
-        ids = [res["id"] for res in rr.json()["Resources"]]
+        rr = await c.get(f"{scim}/Users", params={"count": 51}, headers=sh)
+        # R330: the admin who minted the token is in the directory too —
+        # deactivating them revokes our own session mid-smoke.
+        ids = [res["id"] for res in rr.json()["Resources"] if res["userName"] != email][:50]
         ops = [
             {
                 "method": "PATCH",
@@ -135,6 +137,73 @@ async def main() -> None:
             f"{rr.status_code} {st[:5]}",
         )
         check("bulk wall-clock bound (<20s)", dt_b < 20, f"{dt_b:.1f}s")
+
+        # ── mesh at size: 200 events fan out to 2 subscriptions ──
+        sink_payloads: list[bytes] = []
+
+        async def handle(reader, writer):
+            import contextlib
+
+            data = await reader.read(65536)
+            with contextlib.suppress(Exception):
+                sink_payloads.append(data.split(b"\r\n\r\n", 1)[1])
+            writer.write(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 8080)
+        try:
+            for name in ("a", "b"):
+                rr = await c.post(
+                    f"{API}/orgs/{org}/webhooks",
+                    json={"url": f"http://127.0.0.1:8080/scale-{name}",
+                          "events": ["com.openskill.project.approved.v1"]},
+                    headers=h,
+                )
+                check(f"sub {name} created", rr.status_code == 201, rr.text[:120])
+
+            from app.controlplane.worker import process_outbox_once
+            from app.core.database import AsyncSessionLocal, engine
+            from app.integrations.facade import emit_event
+
+            await engine.dispose(close=False)
+            t0 = time.monotonic()
+            async with AsyncSessionLocal() as db:
+                for i in range(200):
+                    await emit_event(db, org, "project.approved",
+                                     subject=f"scale-{i}", data={"i": i})
+                await db.commit()
+            dt_emit = time.monotonic() - t0
+            check("200 events emitted (<30s)", dt_emit < 30, f"{dt_emit:.1f}s")
+
+            t0 = time.monotonic()
+            async with AsyncSessionLocal() as db:
+                for _ in range(400):
+                    n = await process_outbox_once(
+                        db, topics=["intg.event.created", "intg.delivery.attempt"]
+                    )
+                    if n == 0:
+                        break
+            dt_drive = time.monotonic() - t0
+            check("outbox drained (<90s)", dt_drive < 90, f"{dt_drive:.1f}s")
+            check(
+                "all 400 deliveries landed on the sink",
+                len(sink_payloads) >= 400,
+                f"got={len(sink_payloads)}",
+            )
+            rr = await c.get(f"{API}/orgs/{org}/integrations/subscription-stats", headers=h)
+            stats = rr.json().get("data") if rr.status_code == 200 else None
+            total_ok = (
+                sum(v.get("succeeded", 0) for v in stats.values()) if isinstance(stats, dict) else -1
+            )
+            check(
+                "stats report >=400 succeeded",
+                total_ok >= 400,
+                f"status={rr.status_code} stats={str(stats)[:140]}",
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
 
     print(f"\nPASS={PASS} FAIL={FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)

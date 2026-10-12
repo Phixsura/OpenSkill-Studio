@@ -928,6 +928,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R330 (tenth window, SECURITY/availability fix — last-owner
+  deprovision)**: the scale smoke found it the honest way — its own bulk
+  deactivate archived the admin who minted the token, and every
+  subsequent admin call 403'd. SCIM deactivate/DELETE could archive the
+  LAST active OWNER (bricking the whole owner/admin-gated surface with
+  every owner session revoked on top). _deprovision now refuses (409
+  mutability) when the target is the only active owner; with a second
+  owner present it proceeds. Pinned both ways (PATCH active=false and
+  DELETE refuse; membership untouched; allowed after a second owner);
+  guard-removed mutant KILLED. The smoke's mesh section also landed: 200
+  events -> 2 subscriptions -> 400 live deliveries to a local sink, all
+  succeeded within bounds, stats endpoint agreeing. 17/17.
 - **R329 (tenth window, scale smoke)**: first realistic-size run —
   `tests/e2e_scale_smoke.py` (+ `make e2e-intg-scale`) creates 300 SCIM
   users 10-way concurrent over live HTTP, pages the whole directory

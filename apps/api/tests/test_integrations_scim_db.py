@@ -992,3 +992,48 @@ async def test_unicode_displayname_roundtrip(ctx):
     res2, _ = await _usvc(ctx).create({"userName": email2, "displayName": long_name})
     got2 = await _usvc(ctx).get(res2["id"])
     assert got2["displayName"] == "汉" * 100
+
+
+@pytest.mark.asyncio
+async def test_scim_cannot_deprovision_last_owner(ctx):
+    """R330 (found by the scale smoke bricking its own org): the IdP must
+    not archive the LAST active owner — every admin surface is
+    owner/admin-gated and the deprovision also revokes all their sessions.
+    With a second owner present, deprovisioning one owner is allowed."""
+    from app.exceptions import AppError  # noqa: F401 (symmetry with suite)
+    from app.models.organization import OrgRole
+
+    db, owner, org = ctx["db"], ctx["owner"], ctx["org"]
+    # the owner appears in the SCIM directory; find their SCIM id by email
+    lst = await _usvc(ctx).list(filter_expr=f'userName eq "{owner.email}"',
+                                start_index=1, count=10)
+    assert lst["totalResults"] == 1
+    owner_scim_id = lst["Resources"][0]["id"]
+
+    # sole owner: PATCH active=false AND DELETE both refuse with 409
+    with pytest.raises(ScimError) as e:
+        await _usvc(ctx).patch(
+            owner_scim_id,
+            {"Operations": [{"op": "replace", "path": "active", "value": False}]},
+        )
+    assert e.value.status == 409
+    with pytest.raises(ScimError) as e:
+        await _usvc(ctx).delete(owner_scim_id)
+    assert e.value.status == 409
+    member = (
+        await db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org.id, OrgMember.user_id == owner.id
+            )
+        )
+    ).scalar_one()
+    assert member.status == MemberStatus.ACTIVE  # untouched
+
+    # add a SECOND active owner -> deprovisioning the first is now allowed
+    u2 = await _user(db)
+    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.OWNER,
+                     status=MemberStatus.ACTIVE))
+    await db.flush()
+    await _usvc(ctx).delete(owner_scim_id)
+    await db.refresh(member)
+    assert member.status == MemberStatus.ARCHIVED
