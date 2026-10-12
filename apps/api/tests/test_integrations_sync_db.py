@@ -1608,3 +1608,68 @@ async def test_mapping_field_count_cap(db):
     }
     problems = validate_document(over)
     assert problems and "more than" in problems[0]
+
+
+@pytest.mark.asyncio
+async def test_per_org_sprawl_caps(db):
+    """R262: per-org caps bound the shared sweeps' fan-out — connections,
+    export streams and sync profiles all reject at their cap with a stable
+    error code (one tenant must not degrade every tenant's scheduler)."""
+    from app.integrations.models import SyncProfile
+    from app.integrations.services.connections import (
+        MAX_CONNECTIONS_PER_ORG,
+        ConnectionService,
+    )
+    from app.integrations.services.sync_engine import MAX_SYNC_PROFILES_PER_ORG
+    from app.integrations.services.warehouse import (
+        MAX_STREAMS_PER_ORG,
+        WarehouseExportService,
+    )
+
+    org, owner = await _org(db)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+
+    first = None
+    for i in range(MAX_CONNECTIONS_PER_ORG):
+        c = await csvc.create(
+            org.id, provider_key="oneroster", name=f"cap-{i}",
+            config={"token_url": "https://idp.example.com/token"},
+            base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        )
+        if first is None:
+            first = c
+            first.status = "active"
+    with pytest.raises(AppError) as e:
+        await csvc.create(
+            org.id, provider_key="oneroster", name="over",
+            config={"token_url": "https://idp.example.com/token"},
+            base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+        )
+    assert e.value.code == "CONNECTION_LIMIT_REACHED"
+
+    wsvc = WarehouseExportService(db)
+    for i in range(MAX_STREAMS_PER_ORG):
+        await wsvc.create_stream(org.id, name=f"s-{i}", dataset="events")
+    with pytest.raises(AppError) as e:
+        await wsvc.create_stream(org.id, name="s-over", dataset="events")
+    assert e.value.code == "EXPORT_LIMIT_REACHED"
+
+    psvc = SyncProfileService(db)
+    # fill to the cap with direct rows (the service's uniqueness rule is
+    # one profile per (connection, model, direction) — the cap is what we
+    # are testing here, not that rule)
+    for i in range(MAX_SYNC_PROFILES_PER_ORG):
+        db.add(SyncProfile(
+            org_id=org.id, connection_id=first.id, name=f"p-{i}",
+            model="roster.class", direction=f"pull-{i}",
+            schedule="manual", field_policy={}, options={},
+        ))
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await psvc.create(
+            org.id, connection_id=first.id, name="p-over", model="roster.class",
+            direction="pull", mapping_profile_id=None,
+        )
+    assert e.value.code == "SYNC_PROFILE_LIMIT_REACHED"

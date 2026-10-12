@@ -26,6 +26,10 @@ from app.integrations.registry import CONNECTORS, PROVIDER_CATALOG, ConnCtx
 from app.integrations.security import validate_egress_url
 
 _MAX_CONFIG_BYTES = 16_384
+# R262: the half-hourly health sweep visits every active connection across
+# every org — without a per-org bound one tenant can degrade the shared
+# sweep (and each connection holds credentials, so sprawl is audit surface).
+MAX_CONNECTIONS_PER_ORG = 20
 _MAX_SECRET_VALUE_LEN = 4_096
 
 
@@ -162,6 +166,21 @@ class ConnectionService:
         self._screen_config(config, provider)
         if base_url is not None:
             validate_egress_url(base_url)
+        # R262 (R260 class): FOR UPDATE org lock makes the cap race-proof.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
+        count = len(
+            (
+                await self.db.execute(
+                    select(IntegrationConnection.id).where(
+                        IntegrationConnection.org_id == org_id
+                    )
+                )
+            ).all()
+        )
+        if count >= MAX_CONNECTIONS_PER_ORG:
+            raise AppError("CONNECTION_LIMIT_REACHED", "Too many connections for this org", 422)
         dup = await self.db.execute(
             select(IntegrationConnection.id).where(
                 IntegrationConnection.org_id == org_id,

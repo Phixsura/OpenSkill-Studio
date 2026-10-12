@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R262 (eighth window, sprawl caps — shared-sweep fan-out bound)**: the
+  fabric had NO per-org bound on connections, export streams, or sync
+  profiles, yet three shared sweeps fan out over those rows for every org
+  (half-hourly connection pings, hourly export runs, scheduled syncs) — one
+  tenant scripting creates could degrade every tenant's scheduler, and each
+  connection also holds credentials (audit surface). Added
+  MAX_CONNECTIONS_PER_ORG=20, MAX_STREAMS_PER_ORG=20,
+  MAX_SYNC_PROFILES_PER_ORG=50, each enforced count-then-insert under the
+  FOR UPDATE org lock (R260 idiom) with stable error codes
+  (CONNECTION/EXPORT/SYNC_PROFILE _LIMIT_REACHED). Outcome test
+  `test_per_org_sprawl_caps` drives all three to their cap and asserts the
+  rejections; full sync/export/races/acceptance suites green.
 - **R261 (eighth window, R260 class — cap TOCTOU sweep)**: swept every
   per-org cap in the fabric for the same count-then-insert race. Domains
   (R113) and webhooks already lock; SCIM token create and SSO connection

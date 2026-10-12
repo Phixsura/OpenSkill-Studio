@@ -126,6 +126,7 @@ DATASETS: dict[str, dict] = {
 
 _DATA_KEY_RE = re.compile(r"^data\.[a-zA-Z0-9_-]{1,64}$")
 MAX_DATA_KEYS = 20
+MAX_STREAMS_PER_ORG = 20  # R262: bounds the shared hourly sweep's fan-out
 
 
 def _check_fields(dataset: str, spec: dict, fields, *, what: str) -> None:
@@ -184,6 +185,20 @@ class WarehouseExportService:
         for mode in anon.values():
             if mode not in ANONYMIZE_MODES:
                 raise AppError("EXPORT_CONFIG_INVALID", "bad anonymize mode", 422)
+        # R262 (R260 class): the hourly sweep visits every enabled stream
+        # across every org — bound per-org sprawl, race-proof under the lock.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
+        count = len(
+            (
+                await self.db.execute(
+                    select(ExportStream.id).where(ExportStream.org_id == org_id)
+                )
+            ).all()
+        )
+        if count >= MAX_STREAMS_PER_ORG:
+            raise AppError("EXPORT_LIMIT_REACHED", "Too many export streams for this org", 422)
         stream = ExportStream(
             org_id=org_id,
             name=name,

@@ -37,6 +37,8 @@ from app.integrations.models import (
 from app.integrations.registry import CONNECTORS
 from app.integrations.services.mapping import apply_mapping
 
+MAX_SYNC_PROFILES_PER_ORG = 50  # R262: bounds the shared schedule sweep's fan-out
+
 
 def _secret_loader_for(db: AsyncSession, connection_id: str):
     """R194: the same credential loader ConnectionService.ping uses. Sync
@@ -121,6 +123,20 @@ class SyncProfileService:
             if mp.model != model:
                 raise AppError("SYNC_PROFILE_INVALID", "mapping model mismatch", 422)
             mapping_version = mp.version  # pin (§10.1)
+        # R262 (R260 class): scheduled profiles fan out in the shared sweep —
+        # bound per-org sprawl, race-proof under the FOR UPDATE org lock.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
+        count = len(
+            (
+                await self.db.execute(
+                    select(SyncProfile.id).where(SyncProfile.org_id == org_id)
+                )
+            ).all()
+        )
+        if count >= MAX_SYNC_PROFILES_PER_ORG:
+            raise AppError("SYNC_PROFILE_LIMIT_REACHED", "Too many sync profiles for this org", 422)
         profile = SyncProfile(
             org_id=org_id,
             connection_id=connection_id,
