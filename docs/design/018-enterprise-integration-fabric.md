@@ -928,6 +928,24 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R316 (ninth window CLOSE — final tally)**: window 9 (single-chat
+  foreground, T0 17:30) R277-R315, ~38 commits. SECURITY/behavior fixes:
+  R277 group_map foreign-cohort wall, R296 production build (never-run
+  gate), R303 legacy dispatch proxy-env, R306/R308 terminal-claim races
+  (cancel vs worker finish; queue double-adjudication), R311 90-day
+  break-glass freshness (unimplemented ADR commitment), R313 break-glass
+  IP+UA, R279 UI staleness, R280 retention, R309 alert edge-trigger.
+  NEW INFRASTRUCTURE: 63-check Playwright fabric journey (creates,
+  negatives, shown-once hygiene, outsider lockout, error report, 390px,
+  a11y) + runner; web->API path+method contract guards; sweep source-scan;
+  ops-caps doc guard; make targets (test-intg/e2e-intg/e2e-intg-browser).
+  Probes: ~35 more mutants, survivors pinned (R278 trigger gates, R294/
+  R295 update twins, R301/R302 client flags, R309, bulk failOnErrors-era
+  carryovers) or documented equivalent. ADR-commitment sweep closed §5.2/
+  §6 gaps (implemented, deferred-with-controls, or text aligned).
+  Terminal state: backend 12 chunks zero-fail, fabric 358, auth 37, web
+  764 + tsc + eslint + production build, E2E 62/62, adversarial 178/0,
+  walk 63/63, ruff repo-clean. Branch pushed; NOT merged.
 - **R314 (ninth window, ADR-reality alignment)**: the §6 credential
   advisory-lock clause described a refresh-token rotation flow that was
   never built — shipped connectors mint fresh client_credentials per run
