@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R271 (eighth window, import-cap layering)**: batch 34 probed the
+  upload size cap. The router-side check is a documented layered
+  equivalent (it bounds MEMORY by reading at most MAX+1 bytes before the
+  check); the authoritative DATA bound lives in the service
+  (create_import) and that mutant is KILLED by existing coverage.
 - **R270 (eighth window, push defense-in-depth pins)**: batch 33 probed
   the push pipeline. Consent semantics KILLED both ways (revoked treated
   as consent; default-consent). Two defense-in-depth gaps pinned: the
