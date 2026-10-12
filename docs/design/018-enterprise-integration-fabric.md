@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R290 (ninth window, ops-doc caps drift guard)**: new
+  `tests/test_ops_doc_contract.py` parses the operator caps table out of
+  docs/ops and compares every row against the code constants — a cap
+  change that skips the doc now fails CI (R231 drift class, docs
+  edition).
 - **R289 (ninth window, sweep-registry source scan)**: the sweep-cron
   guard's hand-maintained name list was itself the drift shape it guards
   against (sweep_import_files was already missing from it, though wired).
