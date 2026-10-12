@@ -196,6 +196,30 @@ async def main() -> None:
                     check(f"5xx: {method} {url[-50:]}", False,
                           f"{rr.status_code} resp={rr.text[:140]}")
 
+        # 3) hostile HEADERS on a representative authed route
+        hostile_headers = [
+            {"Authorization": "Bearer " + "A" * 8000},
+            {"Authorization": "Basic!!!"},
+            {"Content-Type": "application/json; charset=utf-7"},
+            {"X-Forwarded-For": "1.2.3.4" * 500},
+            {"Authorization": "Bearer " + ".".join(["e30"] * 3)},  # junk JWT
+        ]
+        for extra in hostile_headers:
+            merged = {**h, **{k: v for k, v in extra.items()}}
+            try:
+                rr = await c.get(f"{base}/domains", headers=merged)
+            except httpx.HTTPError as exc:
+                # httpx may refuse to SEND illegal header values — that's a
+                # client-side wall, not a server defect; skip those.
+                if isinstance(exc, (httpx.LocalProtocolError, httpx.InvalidURL)):
+                    continue
+                check("hostile header transport", False, f"{type(exc).__name__} {extra}")
+                continue
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: hostile header", False, f"{rr.status_code} {extra} {rr.text[:100]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         print(f"elapsed={_t.monotonic()-_t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")
