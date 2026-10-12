@@ -220,6 +220,46 @@ async def main() -> None:
                 n_5xx += 1
                 check("5xx: hostile header", False, f"{rr.status_code} {extra} {rr.text[:100]}")
 
+        # 4) unauthenticated PROTOCOL endpoints — the most exposed surface
+        proto_cases = [
+            ("GET", f"{API}/sso/login", {"params": {"email": "💥@💥"}}),
+            ("GET", f"{API}/sso/login", {"params": {"email": "a" * 400 + "@x.com"}}),
+            ("GET", f"{API}/sso/login", {"params": {"email": "no-at-sign"}}),
+            ("GET", f"{API}/sso/oidc/authorize",
+             {"params": {"connection": "x" * 26, "return_to": "//evil"}}),
+            ("GET", f"{API}/sso/oidc/callback",
+             {"params": {"state": "junk", "code": "junk"}}),
+            ("GET", f"{API}/sso/oidc/callback",
+             {"params": {"error": "access_denied", "state": "x"}}),
+            ("POST", f"{API}/sso/saml/acs/{'0' * 26}",
+             {"data": {"SAMLResponse": "not-base64!!!", "RelayState": "x"}}),
+            ("POST", f"{API}/sso/saml/acs/{'0' * 26}",
+             {"data": {"SAMLResponse": "aGVsbG8=", "RelayState": "y" * 600}}),
+            ("GET", f"{API}/sso/saml/slo/{'0' * 26}",
+             {"params": {"SAMLRequest": "zzz", "SigAlg": "x", "Signature": "y"}}),
+            ("POST", f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
+             {"data": {"logout_token": "nope.nope.nope"}}),
+            ("POST", f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
+             {"data": {"logout_token": "x" * 5000}}),
+            ("GET", f"{API}/lti/jwks", {}),
+            ("POST", f"{API}/lti/login",
+             {"data": {"iss": "https://nope.example.com", "login_hint": "x" * 2000,
+                        "target_link_uri": "https://x/launch"}}),
+            ("POST", f"{API}/lti/launch",
+             {"data": {"state": "junk", "id_token": "a.b.c"}}),
+        ]
+        for method, url, kw in proto_cases:
+            try:
+                rr = await c.request(method, url, **kw)
+            except httpx.HTTPError as exc:
+                check(f"proto transport {url[-30:]}", False, type(exc).__name__)
+                continue
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(f"5xx: {method} {url[-45:]}", False,
+                      f"{rr.status_code} {rr.text[:140]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         print(f"elapsed={_t.monotonic()-_t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")

@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R356/R357 (eleventh window, fuzzer phases 3-4)**: hostile-HEADER
+  phase (8KB bearer, junk JWT shapes, giant XFF) and the unauthenticated
+  PROTOCOL surface (discovery with hostile emails, authorize/callback
+  junk, ACS garbage b64 + oversized RelayState, SLO junk query, bcl
+  junk/oversized tokens, lti login/launch junk) — 269 hostile requests
+  per seed, zero 5xx across 4 more seeds. The tokenless surface holds.
 - **R355 (eleventh window, response hardening + drills)**: live header
   audit found two gaps — authed JSON had NO Cache-Control (token-gated
   data cacheable by intermediaries/bfcache) and the Server header
