@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R347 (tenth window, final regression record)**: terminal-HEAD
+  verification — backend 12 chunks zero-fail (10,772 items), fabric
+  battery 366, web 764 + tsc + eslint + production build, live lifecycle
+  66/66, scale smoke 37/37 (all five pipelines at size), adversarial
+  178/0, browser walk 65/65, migrations fresh-DB reversible at intg17.
 - **R346 (R344 class closure)**: live PATCH walls added for the
   remaining update routes only ever exercised in-process — sync-profile
   schedule (round-trip) and webhook re-enable. Lifecycle 66/66; every
