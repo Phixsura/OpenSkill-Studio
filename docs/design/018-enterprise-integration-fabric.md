@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R284 (ninth window, browser walk — negative journeys)**: the walk now
+  provokes rejections and asserts the UX: a freemail domain claim shows a
+  visible "public email" error and the form stays interactive, and a
+  plain-http webhook URL shows a visible egress error. The console gate
+  exempts the browser's echo of these INTENTIONAL 4xx resource logs while
+  still failing on any JS exception or React warning. 38/38 PASS.
 - **R283 (ninth window, browser walk — create journeys)**: the walk now
   also drives the hub's New-connection form (generic_rest + base URL ->
   row listed with the write-only credential affordance) and the data

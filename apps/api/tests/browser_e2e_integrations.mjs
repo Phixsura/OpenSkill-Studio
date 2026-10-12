@@ -147,6 +147,24 @@ try {
     }
   }
 
+  // ── 3b. Negative: freemail claim shows a friendly error, no crash ──
+  if (domainInput) {
+    await domainInput.fill("gmail.com");
+    const claimBtn2 = await page.$('button:has-text("Claim")');
+    if (claimBtn2) {
+      await claimBtn2.click();
+      await page.waitForTimeout(2500);
+      const afterBad = await page.textContent("body");
+      check(
+        "freemail claim shows a visible error (not a crash)",
+        /public email|not eligible|cannot/i.test(afterBad),
+        afterBad.slice(0, 160),
+      );
+      check("page still interactive after rejected claim",
+        (await page.$('button:has-text("Claim")')) !== null);
+    }
+  }
+
   const tokenNameInput = await page.$('input[placeholder="Entra ID"]');
   check("SCIM token name input present", tokenNameInput !== null);
   if (tokenNameInput) await tokenNameInput.fill("Browser E2E IdP");
@@ -197,6 +215,21 @@ try {
         afterSub.slice(0, 160),
       );
       check("subscription row listed", afterSub.includes("sink.example.com"));
+      // Negative: plain-http URL is refused with a visible message.
+      await urlInput.fill("http://10.0.0.5/hook");
+      const patInput2 = await page.$('input[aria-label="Event patterns"]');
+      if (patInput2) await patInput2.fill("com.openskill.project.approved.v1");
+      const subBtn2 = await page.$('button:has-text("Subscribe")');
+      if (subBtn2) {
+        await subBtn2.click();
+        await page.waitForTimeout(2500);
+        const afterBadSub = await page.textContent("body");
+        check(
+          "bad webhook URL shows a visible error",
+          /not allowed|invalid|https|blocked/i.test(afterBadSub),
+          afterBadSub.slice(0, 160),
+        );
+      }
       if (webhookPosts.length) results.push(`  (webhook POSTs: ${webhookPosts.join(" ; ")})`);
       else results.push("  (webhook POSTs: NONE FIRED)");
     }
@@ -275,8 +308,12 @@ try {
   // Known upstream nit (outside fabric scope): the org-creation route
   // emits a missing-key warning from the base repo's layout (present since
   // PR #22, untouched by issue #43). Everything else stays strict.
+  // 4xx resource logs are the browser echoing INTENTIONAL rejections the
+  // negative journeys provoke (freemail claim, bad webhook URL) and the
+  // pre-auth 401 dance. Real JS errors (exceptions, React warnings) still
+  // fail the gate.
   const realErrors = consoleErrors.filter(
-    (e) => !/401 \(Unauthorized\)/.test(e) &&
+    (e) => !/Failed to load resource.*4\d\d/.test(e) &&
       !(/unique "key" prop/.test(e) && /orgs\/new/.test(e)),
   );
   check(
