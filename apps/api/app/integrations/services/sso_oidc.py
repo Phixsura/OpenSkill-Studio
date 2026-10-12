@@ -82,6 +82,13 @@ class OidcService:
             if not isinstance(doc.get(key), str):
                 raise _invalid(f"discovery_missing_{key}")
             validate_egress_url(doc[key]) if key != "issuer" else None
+        # R251 (RFC 8414 §3.3 — issuer mix-up defense): the metadata's issuer
+        # MUST equal the configured issuer the discovery URL was derived from.
+        # A multi-tenant IdP host (or a confused deployment) returning a
+        # DIFFERENT issuer would otherwise make us accept that other issuer's
+        # tokens, since decode validates against doc["issuer"].
+        if doc["issuer"].rstrip("/") != (conn.oidc_issuer or "").rstrip("/"):
+            raise _invalid("discovery_issuer_mismatch")
         return doc
 
     # ── authorize (step 1) ──

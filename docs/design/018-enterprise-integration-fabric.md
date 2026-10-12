@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R251 (eighth window, SECURITY fix — issuer mix-up, mutation-killed)**:
+  `_discovery` never validated that the metadata's `issuer` equals the
+  configured `oidc_issuer` the discovery URL was derived from (RFC 8414
+  §3.3). Since id_token decode validates against `doc["issuer"]`, a
+  multi-tenant IdP host (or confused deployment) returning a DIFFERENT
+  issuer would make us accept THAT issuer's tokens. Fix: trailing-slash-
+  normalized equality check → generic 401 on mismatch; existing flows
+  (issuer-consistent) unaffected, SSO file 30/30.
 - **R250 (eighth window, IDOR-class survivor pin)**: `resolve_conflict`
   verified the RUN belongs to the org but the RESULT was fetched by id alone
   — removing the `result.run_id == run.id` check let an admin resolve a

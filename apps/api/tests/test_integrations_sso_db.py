@@ -1144,3 +1144,34 @@ async def test_unparseable_certificate_rejected_at_create(db):
             idp_certificates=[{"pem": "-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----"}],
         )
     assert e.value.code == "SSO_CONFIG_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_discovery_issuer_mismatch_rejected(db):
+    """R251 (RFC 8414 §3.3 — issuer mix-up defense): the discovery metadata's
+    issuer MUST equal the configured issuer. A multi-tenant IdP host (or a
+    confused deployment) returning a DIFFERENT issuer would otherwise make us
+    accept that other issuer's tokens, since decode validates against
+    doc["issuer"]."""
+    import app.integrations.services.sso_oidc as mod
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+
+    class EvilDiscoveryIdp(FakeIdp):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            path = urlsplit(url).path
+            if path.endswith("/.well-known/openid-configuration"):
+                doc = _discovery_doc()
+                doc["issuer"] = "https://other-tenant.example.com"
+                return httpx.Response(200, json=doc, request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    svc.egress = EvilDiscoveryIdp(lambda form: "unused")
+    with pytest.raises(AppError) as e:
+        await svc.build_authorize_redirect(
+            conn.id, redirect_uri="https://app.example.com/cb"
+        )
+    assert e.value.status_code == 401
