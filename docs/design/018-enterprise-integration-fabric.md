@@ -928,6 +928,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R337 (tenth window, import row-count cap)**: the 50MB byte cap alone
+  admits ~1M CSV rows — all parsed into memory and, on commit, a
+  savepoint per row (the R329 smoke measured 175ms/row even BEFORE the
+  index fix; a million-row hostile file is an hours-long request).
+  MAX_IMPORT_ROWS=100,000 enforced in the format dispatcher as ONE
+  file-level `row_limit` error for both CSV and JSON; MAX_ROW_ERRORS
+  (10k) already bounded stored error rows. Pinned both formats + at-cap
+  acceptance; cap-removed mutant KILLED.
 - **R336 (tenth window, PERF — EXPLAIN audit + events time index)**:
   generalized R334 into a systematic EXPLAIN audit over ~26 fabric
   hot-path predicates against the million-row dev DB. One more real find:

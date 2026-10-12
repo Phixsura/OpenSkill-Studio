@@ -1306,3 +1306,35 @@ def test_fingerprint_binds_template_version():
     data = b"email,role\r\na@x.edu,student\r\n"
     assert fingerprint(data, 1) != fingerprint(data, 2)
     assert fingerprint(data, 1) == fingerprint(data, 1)
+
+
+def test_import_row_count_capped():
+    """R337: the 50MB byte cap alone admits ~1M CSV rows (a megabyte of
+    commas is a savepoint storm on commit) — parse refuses past
+    MAX_IMPORT_ROWS with ONE file-level error, for both formats."""
+    import json as _json
+
+    from app.integrations.models.bulk import MAX_IMPORT_ROWS
+    from app.integrations.services.bulk_import import parse_users
+
+    over = MAX_IMPORT_ROWS + 1
+    csv_body = ("email,display_name,role\n" + "\n".join(
+        f"u{i}@x.example.edu,U {i},student" for i in range(over)
+    )).encode()
+    rows, errors = parse_users(csv_body, "csv")
+    assert rows == []
+    assert len(errors) == 1 and errors[0]["code"] == "row_limit"
+
+    json_body = _json.dumps(
+        {"users": [{"email": f"j{i}@x.example.edu"} for i in range(over)]}
+    ).encode()
+    rows, errors = parse_users(json_body, "json")
+    assert rows == []
+    assert len(errors) == 1 and errors[0]["code"] == "row_limit"
+
+    # at the cap exactly: parses normally
+    ok_body = ("email\n" + "\n".join(
+        f"k{i}@x.example.edu" for i in range(1000)
+    )).encode()
+    rows, errors = parse_users(ok_body, "csv")
+    assert len(rows) == 1000 and errors == []

@@ -30,6 +30,7 @@ from app.integrations.models.bulk import (
     IMPORT_KINDS,
     IMPORT_MODES,
     MAX_IMPORT_BYTES,
+    MAX_IMPORT_ROWS,
     MAX_ROW_ERRORS,
     ImportJob,
     ImportRowError,
@@ -267,8 +268,19 @@ def parse_users(
 ) -> tuple[list[dict], list[dict]]:
     """Format dispatcher (R128); kind selects the template spec (R129)."""
     if fmt == "json":
-        return parse_users_json(file_bytes, header_map, kind=kind)
-    return parse_users_csv(file_bytes, header_map, kind=kind)
+        rows, errors = parse_users_json(file_bytes, header_map, kind=kind)
+    else:
+        rows, errors = parse_users_csv(file_bytes, header_map, kind=kind)
+    # R337: the 50MB byte cap alone admits ~1M CSV rows — fully parsed into
+    # memory and (on commit) a savepoint per row. Bound the ROW count as a
+    # file-level error; MAX_ROW_ERRORS already bounds stored error rows.
+    if len(rows) + len(errors) > MAX_IMPORT_ROWS:
+        return [], [{
+            "row_number": 1,
+            "code": "row_limit",
+            "message": f"File exceeds {MAX_IMPORT_ROWS} rows — split the import",
+        }]
+    return rows, errors
 
 
 def detect_format(file_bytes: bytes) -> str:
