@@ -954,3 +954,37 @@ async def test_egress_never_follows_redirects(monkeypatch):
     resp = await EgressClient().request("POST", "https://hooks.example.com/deliver")
     assert resp.status_code == 302
     assert len(hops) == 1  # one hop, Location never fetched
+
+
+@pytest.mark.asyncio
+async def test_egress_client_hardening_flags(monkeypatch):
+    """R302 (survivor pin): the EgressClient must be constructed with
+    trust_env=False (HTTP(S)_PROXY env vars must never reroute pinned
+    egress through an attacker-influenced proxy) and
+    follow_redirects=False (R301). Pinned at construction — behavioral
+    proxy routing is invisible under a patched transport, so the honest
+    assertion is the client config itself."""
+    import httpx
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34"))
+
+    seen = {}
+    real_init = httpx.AsyncClient.__init__
+
+    def spy_init(self, *args, **kwargs):
+        seen.update(kwargs)
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy_init)
+
+    async def fake_handle(self, request):
+        return httpx.Response(200, request=request)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fake_handle)
+    resp = await EgressClient().request("GET", "https://hooks.example.com/x")
+    assert resp.status_code == 200
+    assert seen.get("trust_env") is False
+    assert seen.get("follow_redirects") is False

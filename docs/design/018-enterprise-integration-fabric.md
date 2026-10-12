@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R302 (ninth window, proxy-env pin)**: trust_env=False was the second
+  unpinned hardening flag on the same constructor — with trust_env=True,
+  an HTTP(S)_PROXY environment variable would silently reroute ALL pinned
+  egress through an attacker-influenced proxy. Pinned at construction via
+  an **init** spy (behavioral proxy routing is invisible under a patched
+  transport); re-probed KILLED.
 - **R301 (ninth window, redirect-SSRF pin)**: `follow_redirects=False`
   on the EgressClient had NO test — flipping it survives the whole core
   suite, yet following would fetch an attacker-chosen Location (cloud
