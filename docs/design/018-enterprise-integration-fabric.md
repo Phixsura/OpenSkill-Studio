@@ -914,6 +914,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R258 (eighth window, mapping field-cap pin + probe-harness lesson)**:
+  batch 25 probed roster (cross-org connection IDOR, bad unenroll policy)
+  and NRPS (cross-org resource link, inactive registration, next-link SSRF
+  screen) — all KILLED. The mapping probes initially targeted a nonexistent
+  test path; pytest's usage-error exit was misread as KILLED (probe-harness
+  lesson: a probe must verify the test path collects before trusting a
+  nonzero exit — tails are now printed). Re-probed against the real
+  coverage (sync_db + core): int-range and 64KB document caps KILLED; the
+  MAX_FIELDS cap (DoS bound on per-save compile lists) had NO test —
+  pinned with `test_mapping_field_count_cap` (at-cap accepted, cap+1
+  rejected); re-probed KILLED.
 - **R257 (eighth window, domain-IDOR pin + probe ledger)**: batches 22-24
   probed 16 more mutants across identity (unverified-email auto-link, revoked
   link honored, inactive user, ambiguous multi-member, email hijack), AGS

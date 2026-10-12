@@ -1590,3 +1590,21 @@ async def test_conflict_resolve_requires_result_belongs_to_run(db):
     assert e.value.status_code == 404  # uniform 404, never resolved
     await db.refresh(conflict_b)
     assert conflict_b.resolved_action is None
+
+
+@pytest.mark.asyncio
+async def test_mapping_field_count_cap(db):
+    """R258 (survivor pin): validate_document bounds the field list at
+    MAX_FIELDS — without the cap a tenant could park an arbitrarily long
+    compile list per save (CPU/JSONB blow-up at every sync run)."""
+    from app.integrations.services.mapping import MAX_FIELDS, validate_document
+
+    ok_doc = {
+        "fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS)]
+    }
+    assert validate_document(ok_doc) == []
+    over = {
+        "fields": [{"target": f"t{i}", "path": "a"} for i in range(MAX_FIELDS + 1)]
+    }
+    problems = validate_document(over)
+    assert problems and "more than" in problems[0]
