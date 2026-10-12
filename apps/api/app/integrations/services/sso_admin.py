@@ -269,6 +269,23 @@ class SsoAdminService:
             if svc.get("Binding", "").endswith("HTTP-Redirect") and svc.get("Location"):
                 slo_url = svc.get("Location")
                 break
+        # R252 (R251 class — SAML metadata mix-up defense): a document whose
+        # entityID differs from the CONFIGURED one must be rejected, not
+        # adopted — otherwise a wrong document at the metadata URL (multi-
+        # tenant host, path confusion) silently re-points this connection at
+        # a different IdP: certs, SSO URL and the issuer check would all
+        # follow the imposter. entityID is only adopted when previously
+        # unset (bootstrap convenience).
+        if (
+            entity_id
+            and conn.idp_entity_id
+            and str(entity_id).strip() != conn.idp_entity_id.strip()
+        ):
+            raise AppError(
+                "SSO_METADATA_INVALID",
+                "metadata entityID does not match the configured IdP entity",
+                422,
+            )
         before = {(c.get("pem") or "").strip() for c in (conn.idp_certificates or [])}
         after = {(c.get("pem") or "").strip() for c in screened}
         conn.idp_certificates = screened

@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R252 (eighth window, SECURITY fix — SAML metadata mix-up,
+  mutation-killed)**: the R251 class on the SAML side. `refresh_from_metadata`
+  ADOPTED whatever entityID the fetched document carried — a wrong document
+  at the metadata URL (multi-tenant host, path confusion) silently re-pointed
+  the connection at a different IdP: pinned certs, SSO URL and the issuer
+  check all followed the imposter. Fix: a configured entityID must MATCH the
+  document's (422 on mismatch, nothing adopted); adoption only when
+  previously unset. The rotate test's old expectation (silent overwrite)
+  embodied the vulnerable behavior and was rewritten to pin both directions.
 - **R251 (eighth window, SECURITY fix — issuer mix-up, mutation-killed)**:
   `_discovery` never validated that the metadata's `issuer` equals the
   configured `oidc_issuer` the discovery URL was derived from (RFC 8414

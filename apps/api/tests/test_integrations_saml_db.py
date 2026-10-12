@@ -552,25 +552,41 @@ async def test_metadata_refresh_rotates_certs_and_rejects_dtd(db):
     svc = SsoAdminService(db)
 
     # Fresh cert from the ROGUE pair = a rotation (different from pinned).
+    # R252: the metadata's entityID must MATCH the configured one — the old
+    # behavior (silently adopting a different entityID) was the SAML
+    # mix-up vector this test now pins shut below.
     out = await svc.refresh_from_metadata(
-        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT))
+        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY))
     )
     assert out == {"certificates": 1, "rotated": True}
     await db.refresh(conn)
-    assert conn.idp_entity_id == "https://idp.example.com/meta"
+    assert conn.idp_entity_id == IDP_ENTITY
+
+    # R252 mismatch direction: a document for a DIFFERENT entity is refused
+    # and nothing (certs/entity/sso) is adopted from it.
+    pinned_before = conn.idp_certificates
+    with pytest.raises(AppError) as mm:
+        await svc.refresh_from_metadata(
+            org.id, conn.id,
+            egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity="https://imposter.example.com")),
+        )
+    assert mm.value.code == "SSO_METADATA_INVALID"
+    await db.refresh(conn)
+    assert conn.idp_entity_id == IDP_ENTITY
+    assert conn.idp_certificates == pinned_before
     assert conn.idp_sso_url == "https://idp.example.com/sso2"
     assert len(conn.idp_certificates) == 1 and conn.idp_certificates[0]["not_after"]
 
     # Same metadata again: no rotation.
     out2 = await svc.refresh_from_metadata(
-        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT))
+        org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY))
     )
     assert out2["rotated"] is False
 
     # Encryption-only keys are ignored -> no signing certs -> 422.
     with pytest.raises(AppError):
         await svc.refresh_from_metadata(
-            org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, use="encryption"))
+            org.id, conn.id, egress=_MetaEgress(_metadata_xml(ROGUE_CERT, entity=IDP_ENTITY, use="encryption"))
         )
     # DTD refused outright.
     dtd = b'<!DOCTYPE md [<!ENTITY x "y">]>' + _metadata_xml(ROGUE_CERT)
