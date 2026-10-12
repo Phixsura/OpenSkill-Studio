@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R297 (ninth window, alembic-check audit)**: ran `alembic check` for
+  model/migration drift (another never-run production gate). Findings:
+  repo-wide, long-standing cosmetic drift — hand-written migrations omit
+  explicit NOT NULL on TimestampMixin's created_at/updated_at (every
+  epic's tables, user_points to webhook_subscriptions), plus a handful of
+  base-epic FK ondelete/index declarations. The fabric's intg_* tables
+  show ONLY the timestamp-mixin class, nothing structural; zero-to-head on
+  a fresh DB remains verified working (R269). Normalizing the convention
+  is a repo-wide, cross-epic migration change — documented here, not
+  changed under issue #43 (R189 precedent).
 - **R296 (ninth window, PRODUCTION-BUILD fix)**: `pnpm --filter web
 build` had never been run in the marathons — and it FAILED: the
   experiments promotions page exported a test-only helper
