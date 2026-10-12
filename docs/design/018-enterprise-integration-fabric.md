@@ -914,6 +914,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R281 (ninth window, fabric BROWSER E2E + walk-caught UI bug)**: built
+  `tests/browser_e2e_integrations.mjs` — a Playwright walk of the whole
+  fabric admin journey (register -> org -> hub catalog+health -> identity:
+  claim domain with visible TXT token + mint SCIM token with shown-once
+  secret -> events: datalist catalog + create subscription with shown-once
+  signing secret + row listed -> sync -> data: template buttons), with a
+  strict console-hygiene gate (pre-auth 401 dance and one documented
+  upstream layout nit exempted) and 4xx/5xx response tracing. 24/24 PASS.
+  The walk immediately caught a real UI bug: the subscription form's
+  placeholder recommended `project.approved`, which the API REJECTS (legal
+  values are the legacy list or com.openskill.* mesh names) — an admin
+  following the placeholder got a 422. Placeholder fixed to valid
+  examples. Driver: `run_browser_e2e.py` boots api+web as process groups
+  (killpg both; ports cleared first). Lesson 13 reaffirmed: the browser
+  walk found in minutes what 338 fabric tests could not see.
 - **R280 (ninth window, unbounded-growth round 3)**: table-by-table
   retention audit found two tables the nightly sweep missed — ExportRun
   (hourly streams mint ~720 bookkeeping rows per month EACH; manifests

@@ -258,7 +258,7 @@ export default function IntegrationEventsPage() {
           <Input
             aria-label="Event patterns"
             className="max-w-sm"
-            placeholder="com.openskill.integration.*, project.approved"
+            placeholder="com.openskill.project.approved.v1, com.openskill.integration.*"
             list="event-catalog-options"
             value={subEvents}
             onChange={(e) => setSubEvents(e.target.value)}
