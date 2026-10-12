@@ -1521,3 +1521,69 @@ async def test_idn_domain_email_matching_consistent(db):
     )
     res = await IdentityService(db).resolve(ident)
     assert res.user.id == emp.id
+
+
+@pytest.mark.asyncio
+async def test_jwks_kid_miss_refetch_floor(db, monkeypatch):
+    """R325: the JWKS cache's kid-miss behavior is a security/availability
+    bound — a cache hit never refetches, a kid MISS within the 30s floor
+    returns the stale set WITHOUT a network call (an attacker spraying
+    random kids cannot stampede our egress at the IdP), and a miss after
+    the floor refetches exactly once."""
+    import app.integrations.services.sso_oidc as oidc_mod
+    from app.integrations.services.sso_oidc import OidcService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    conn = await SsoAdminService(db).create(
+        org.id, protocol="oidc",
+        oidc_issuer=f"https://jwks-{uuid.uuid4().hex[:6]}.example.com",
+        oidc_client_id="c",
+    )
+
+    calls = {"n": 0}
+    from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
+
+    jwk_key = _rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub = jwk_key.public_key().public_numbers()
+
+    def _b64u(i, length):
+        import base64 as _b
+        return _b.urlsafe_b64encode(i.to_bytes(length, "big")).rstrip(b"=").decode()
+
+    class _Egress:
+        async def request(self, method, url, **kw):
+            calls["n"] += 1
+            return httpx.Response(
+                200,
+                json={"keys": [{
+                    "kty": "RSA", "kid": f"kid-{calls['n']}", "use": "sig",
+                    "n": _b64u(pub.n, 256), "e": _b64u(pub.e, 3),
+                }]},
+                request=httpx.Request(method, url),
+            )
+
+    svc = OidcService(db)
+    svc.egress = _Egress()
+    now = {"t": 1000.0}
+    monkeypatch.setattr(oidc_mod.time, "monotonic", lambda: now["t"])
+    oidc_mod._jwks_cache.pop(conn.id, None)
+
+    # first call: no cache -> one fetch
+    keys = await svc._jwks_keys(conn, "https://idp/jwks", kid="kid-1")
+    assert calls["n"] == 1 and "kid-1" in keys
+
+    # cache hit (known kid): zero additional fetches
+    await svc._jwks_keys(conn, "https://idp/jwks", kid="kid-1")
+    assert calls["n"] == 1
+
+    # kid MISS inside the floor: stale set returned, still no fetch
+    now["t"] += 5
+    stale = await svc._jwks_keys(conn, "https://idp/jwks", kid="kid-sprayed")
+    assert calls["n"] == 1 and "kid-1" in stale
+
+    # kid miss AFTER the floor: exactly one refetch
+    now["t"] += 60
+    fresh = await svc._jwks_keys(conn, "https://idp/jwks", kid="kid-2")
+    assert calls["n"] == 2 and "kid-2" in fresh
+    oidc_mod._jwks_cache.pop(conn.id, None)

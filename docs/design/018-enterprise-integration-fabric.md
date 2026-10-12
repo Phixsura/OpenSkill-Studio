@@ -928,6 +928,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R325 (tenth window, JWKS refetch-floor pin)**: coverage mapping
+  (services 81-100%, routers covered by the live suites) pointed at the
+  JWKS cache paths — the kid-miss 30s refetch floor (an attacker spraying
+  random kids must not stampede our egress at the IdP) had NO direct
+  test. Pinned 4 ways on a monotonic-clock fake (no-cache fetch, cache
+  hit, in-floor miss returns stale with ZERO fetches, post-floor miss
+  refetches once); floor-removed mutant KILLED.
+- **R324 (tenth window, fabric live E2E in CI)**: new CI job
+  `e2e-integration-fabric` (postgres/redis/minio services + alembic head
+  - `make e2e-intg`) runs the 62-check live-HTTP lifecycle on every PR —
+    it existed only as a local marathon ritual before.
 - **R323 (tenth window, fabric pages enter CI)**: CI's Playwright job
   never visited the five fabric pages — a crashed page component or
   route rename would ship invisibly. New `e2e/sweep-integrations.spec.ts`
