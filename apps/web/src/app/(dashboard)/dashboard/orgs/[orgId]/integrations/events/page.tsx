@@ -186,11 +186,13 @@ export default function IntegrationEventsPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Update failed"),
   });
 
+  // (R279: deleting a subscription removes its stats row too)
   const deleteSub = useMutation({
     mutationFn: (id: string) => apiWithAuth(`/orgs/${orgId}/webhooks/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       toast.success("Subscription deleted");
       queryClient.invalidateQueries({ queryKey: ["intg-subs", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["intg-sub-stats", orgId] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Delete failed"),
   });
@@ -200,6 +202,8 @@ export default function IntegrationEventsPage() {
     onSuccess: () => {
       toast.success("Replay queued");
       queryClient.invalidateQueries({ queryKey: ["intg-deliveries", orgId] });
+      // R279 (R229 class): per-subscription stats count these deliveries.
+      queryClient.invalidateQueries({ queryKey: ["intg-sub-stats", orgId] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Replay failed"),
   });
@@ -213,6 +217,7 @@ export default function IntegrationEventsPage() {
     onSuccess: (res) => {
       toast.success(`Requeued ${res.data.requeued} exhausted deliveries`);
       queryClient.invalidateQueries({ queryKey: ["intg-deliveries", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["intg-sub-stats", orgId] });
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : "Bulk replay failed"),
   });

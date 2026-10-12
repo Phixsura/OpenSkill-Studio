@@ -86,7 +86,13 @@ export default function IntegrationsHubPage() {
   });
   const connections = connectionsData?.data ?? [];
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["intg-connections", orgId] });
+  // R279 (R229 class): connection mutations (ping/create/delete/upgrade)
+  // change the health strip's counts too — invalidate BOTH co-rendered
+  // queries, not just the table.
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["intg-connections", orgId] });
+    queryClient.invalidateQueries({ queryKey: ["intg-health", orgId] });
+  };
 
   const createConnection = useMutation({
     mutationFn: () =>

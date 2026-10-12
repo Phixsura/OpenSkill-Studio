@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R279 (ninth window, R229 class — UI staleness sweep round 2)**:
+  re-ran the queryKey-vs-invalidation map over every fabric page. Two
+  co-rendered queries were never invalidated: the hub page's health strip
+  (`intg-health`) went stale after ping/create/delete/upgrade mutations
+  (the strip kept old status counts while the table updated), and the
+  events page's per-subscription stats (`intg-sub-stats`) went stale
+  after replay/bulk-replay/delete. Both now invalidated alongside the
+  primary keys; web 764 + tsc + eslint green.
 - **R278 (ninth window, state-machine pins)**: the MANUAL trigger's own
   gates had no tests (the scheduler-side negatives were pinned in R243):
   triggering a disabled profile or a profile on a disabled connection must
