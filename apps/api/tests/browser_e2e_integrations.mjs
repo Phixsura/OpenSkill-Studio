@@ -53,6 +53,12 @@ page.on("console", (msg) => {
 });
 const badResponses = [];
 const webhookPosts = [];
+const ltiPosts = [];
+page.on("response", async (res) => {
+  if (res.request().method() === "POST" && res.url().includes("/lti/registrations")) {
+    ltiPosts.push(res.status());
+  }
+});
 page.on("response", async (res) => {
   if (res.request().method() === "POST" && res.url().includes("/webhooks")) {
     let body = "";
@@ -227,6 +233,11 @@ try {
       check("LTI registration row listed", afterReg.includes(ltiIssuer), afterReg.slice(0, 160));
     }
   }
+
+  // (An internal-issuer negative is deliberately NOT walked here: this
+  // harness runs the API with EGRESS_ALLOW_PRIVATE=true for its local
+  // sinks, so the screen is off by design — the egress walls are proven
+  // by the adversarial battery against a production-flagged server.)
 
   // ── 4. Events: catalog + create subscription ──
   section("4. Events page");

@@ -928,6 +928,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R338 (tenth window, walk-harness scoping note)**: attempted an
+  internal-LTI-issuer negative in the walk; it CANNOT prove the egress
+  screen there — the walk's API runs EGRESS_ALLOW_PRIVATE=true for its
+  local sinks, so the screen is off by design (the 409 the probe got was
+  a prior run's identical literal, not a wall). The negative is
+  deliberately omitted with an explanatory comment; the egress walls stay
+  proven by the adversarial battery against a production-flagged server.
+  Environment-vs-assertion scoping recorded as a walk-design rule.
 - **R337 (tenth window, import row-count cap)**: the 50MB byte cap alone
   admits ~1M CSV rows — all parsed into memory and, on commit, a
   savepoint per row (the R329 smoke measured 175ms/row even BEFORE the
