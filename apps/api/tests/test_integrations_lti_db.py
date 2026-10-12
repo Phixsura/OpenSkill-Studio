@@ -897,11 +897,14 @@ async def test_service_token_private_key_jwt_shape(db):
             seen["url"] = url
             seen["form"] = parse_qs((content or b"").decode())
             return httpx.Response(
-                200, json={"access_token": "at-1"},
+                200,
+                json={"access_token": "at-1"},
                 request=httpx.Request(method, url),
             )
 
-    token = await service_token(db, reg, _Egress(), scope="https://purl.imsglobal.org/spec/lti-ags/scope/score")
+    token = await service_token(
+        db, reg, _Egress(), scope="https://purl.imsglobal.org/spec/lti-ags/scope/score"
+    )
     assert token == "at-1"
     assert seen["url"] == reg.auth_token_url
     form = seen["form"]
@@ -918,9 +921,7 @@ async def test_service_token_private_key_jwt_shape(db):
     jwks = await tool_jwks(db)
     jwk = next(k for k in jwks["keys"] if k["kid"] == header["kid"])
     pub = pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
-    claims = pyjwt.decode(
-        assertion, key=pub, algorithms=["RS256"], audience=reg.auth_token_url
-    )
+    claims = pyjwt.decode(assertion, key=pub, algorithms=["RS256"], audience=reg.auth_token_url)
     assert claims["iss"] == reg.client_id
     assert claims["sub"] == reg.client_id
     assert claims["jti"] and len(claims["jti"]) >= 16

@@ -28,15 +28,22 @@ async def db():
 async def _mk_change(db, entity_id, severity):
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed",
-        canonical_entity_kind="model", canonical_entity_id=entity_id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="pricing_changed",
+        canonical_entity_kind="model",
+        canonical_entity_id=entity_id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="price", field="pricing",
-        severity=severity, entity_kind="model", canonical_entity_id=entity_id,
+        observation_id=obs.id,
+        change_type="price",
+        field="pricing",
+        severity=severity,
+        entity_kind="model",
+        canonical_entity_id=entity_id,
     )
     db.add(change)
     await db.flush()
@@ -97,6 +104,7 @@ async def test_mute_and_unmute_roundtrip(db):
     with pytest.raises(AppError):
         await svc.update_settings(wl.id, other.id, min_severity="info")
 
+
 async def test_quick_watch_creates_default_list_idempotently(db):
     from app.ecosystem.services.watchlists import WatchlistService
 
@@ -112,6 +120,7 @@ async def test_quick_watch_creates_default_list_idempotently(db):
     assert wl2.id == wl1.id
     assert item2.id == item1.id
     assert len(await svc.list_for_owner(user.id)) == 1
+
 
 async def test_concurrent_quick_watch_creates_one_default_list(db):
     import asyncio
@@ -138,12 +147,13 @@ async def test_concurrent_quick_watch_creates_one_default_list(db):
     finally:
         await _retire_models(["RaceWatch"])
     async with AsyncSessionLocal() as session:
-        lists = list(await session.scalars(
-            select(Watchlist).where(
-                Watchlist.owner_id == user_id, Watchlist.name == "Default"
+        lists = list(
+            await session.scalars(
+                select(Watchlist).where(Watchlist.owner_id == user_id, Watchlist.name == "Default")
             )
-        ))
+        )
         assert len(lists) == 1  # advisory lock: never two Default lists
+
 
 async def test_merge_repoints_watchers_to_survivor(db):
     from app.ecosystem.models.replacement import WatchItem, Watchlist
@@ -153,8 +163,12 @@ async def test_merge_repoints_watchers_to_survivor(db):
     admin = await _mk_user(db, "admin")
     watcher = await _mk_user(db)
     both_watcher = await _mk_user(db)
-    dup = AIModel(canonical_name=f"DupGen-{str(ULID()).lower()[:6]}", slug=f"dg-{str(ULID()).lower()}")
-    survivor = AIModel(canonical_name=f"SurvGen-{str(ULID()).lower()[:6]}", slug=f"sg-{str(ULID()).lower()}")
+    dup = AIModel(
+        canonical_name=f"DupGen-{str(ULID()).lower()[:6]}", slug=f"dg-{str(ULID()).lower()}"
+    )
+    survivor = AIModel(
+        canonical_name=f"SurvGen-{str(ULID()).lower()[:6]}", slug=f"sg-{str(ULID()).lower()}"
+    )
     db.add_all([dup, survivor])
     await db.flush()
     wsvc = WatchlistService(db)
@@ -163,28 +177,31 @@ async def test_merge_repoints_watchers_to_survivor(db):
     await wsvc.quick_watch(both_watcher.id, target_kind="model", target_id=dup.id)
     await wsvc.quick_watch(both_watcher.id, target_kind="model", target_id=survivor.id)
 
-    out = await CatalogService(db).merge_entities(
-        "model", dup.id, survivor.id, actor_id=admin.id
-    )
+    out = await CatalogService(db).merge_entities("model", dup.id, survivor.id, actor_id=admin.id)
     assert out["moved"]["watch_items"] == 1 if "moved" in out else True
 
     # watcher now follows the survivor
-    items = list(await db.scalars(
-        select(WatchItem)
-        .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
-        .where(Watchlist.owner_id == watcher.id)
-    ))
+    items = list(
+        await db.scalars(
+            select(WatchItem)
+            .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
+            .where(Watchlist.owner_id == watcher.id)
+        )
+    )
     assert [i.target_id for i in items] == [survivor.id]
     # both_watcher keeps exactly ONE item (duplicate dropped, not doubled)
-    both_items = list(await db.scalars(
-        select(WatchItem)
-        .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
-        .where(Watchlist.owner_id == both_watcher.id)
-    ))
+    both_items = list(
+        await db.scalars(
+            select(WatchItem)
+            .join(Watchlist, WatchItem.watchlist_id == Watchlist.id)
+            .where(Watchlist.owner_id == both_watcher.id)
+        )
+    )
     assert [i.target_id for i in both_items] == [survivor.id]
     # nothing left pointing at the retired duplicate
     stale = await db.scalar(select(WatchItem.id).where(WatchItem.target_id == dup.id))
     assert stale is None
+
 
 async def _retire_models(prefixes):
     """Committed fixture models must not pollute other tests (duplicates scan,
@@ -207,6 +224,7 @@ async def _retire_models(prefixes):
             m.lifecycle_status = "retired"
         await session.commit()
 
+
 async def test_push_fanout_respects_threshold_and_mute(db):
     """Mutation-audit killers: the PUSH path (worker fan-out) must honor both
     noise controls — a below-threshold list and a muted list produce NO
@@ -220,7 +238,9 @@ async def test_push_fanout_respects_threshold_and_mute(db):
     loud = await _mk_user(db)
     quiet = await _mk_user(db)
     muted = await _mk_user(db)
-    model = AIModel(canonical_name=f"PushGen-{str(ULID()).lower()[:6]}", slug=f"pg-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"PushGen-{str(ULID()).lower()[:6]}", slug=f"pg-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     svc = WatchlistService(db)
@@ -235,15 +255,22 @@ async def test_push_fanout_respects_threshold_and_mute(db):
 
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="pricing_changed",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="price", field="pricing",
-        severity="info", entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="price",
+        field="pricing",
+        severity="info",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.flush()
@@ -259,9 +286,10 @@ async def test_push_fanout_respects_threshold_and_mute(db):
             )
         )
     }
-    assert loud.id in notified          # default threshold, unmuted → notified
-    assert quiet.id not in notified     # info < security_critical threshold
-    assert muted.id not in notified     # snoozed → silent
+    assert loud.id in notified  # default threshold, unmuted → notified
+    assert quiet.id not in notified  # info < security_critical threshold
+    assert muted.id not in notified  # snoozed → silent
+
 
 async def test_duplicate_delivery_is_idempotent(db):
     """Mutation-audit killers: the outbox is at-least-once — BOTH consumers
@@ -273,22 +301,32 @@ async def test_duplicate_delivery_is_idempotent(db):
     from app.models.notification import Notification
 
     user = await _mk_user(db)
-    model = AIModel(canonical_name=f"IdemGen-{str(ULID()).lower()[:6]}", slug=f"ig-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"IdemGen-{str(ULID()).lower()[:6]}", slug=f"ig-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     await WatchlistService(db).quick_watch(user.id, target_kind="model", target_id=model.id)
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="license", field="license",
-        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
-        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="license",
+        field="license",
+        old_value={"value": "MIT"},
+        new_value={"value": "BUSL"},
+        severity="breaking",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.flush()
@@ -296,20 +334,23 @@ async def test_duplicate_delivery_is_idempotent(db):
     payload = {"change_event_id": change.id}
     await handle_compute_impact(db, payload)
     await handle_compute_impact(db, payload)  # duplicate delivery
-    analyses = list(await db.scalars(
-        select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change.id)
-    ))
+    analyses = list(
+        await db.scalars(select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change.id))
+    )
     assert len(analyses) == 1
 
     await handle_notify_watchers(db, payload)
     await handle_notify_watchers(db, payload)  # duplicate delivery
-    notes = list(await db.scalars(
-        select(Notification).where(
-            Notification.user_id == user.id,
-            Notification.data["change_event_id"].as_string() == change.id,
+    notes = list(
+        await db.scalars(
+            select(Notification).where(
+                Notification.user_id == user.id,
+                Notification.data["change_event_id"].as_string() == change.id,
+            )
         )
-    ))
+    )
     assert len(notes) == 1
+
 
 async def test_concurrent_compute_impact_is_exactly_once(db):
     """Round-128 killer: TWO WORKERS holding the same redelivered message
@@ -332,16 +373,24 @@ async def test_concurrent_compute_impact_is_exactly_once(db):
     await db.flush()
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="license", field="license",
-        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
-        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="license",
+        field="license",
+        old_value={"value": "MIT"},
+        new_value={"value": "BUSL"},
+        severity="breaking",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.commit()
@@ -355,13 +404,16 @@ async def test_concurrent_compute_impact_is_exactly_once(db):
     try:
         await asyncio.gather(worker(), worker())
         async with AsyncSessionLocal() as session:
-            rows = list(await session.scalars(
-                select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_id)
-            ))
+            rows = list(
+                await session.scalars(
+                    select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_id)
+                )
+            )
             assert len(rows) == 1, f"concurrent workers created {len(rows)} analyses"
     finally:
         async with AsyncSessionLocal() as session:
             from sqlalchemy import delete
+
             await session.execute(
                 delete(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change_id)
             )
@@ -373,6 +425,7 @@ async def test_concurrent_compute_impact_is_exactly_once(db):
             if row:
                 row.lifecycle_status = "retired"
             await session.commit()
+
 
 async def test_concurrent_notify_watchers_is_exactly_once(db):
     """Round-129 killer: two workers concurrently delivering the same
@@ -394,16 +447,24 @@ async def test_concurrent_notify_watchers_is_exactly_once(db):
     await WatchlistService(db).quick_watch(user.id, target_kind="model", target_id=model.id)
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="license", field="license",
-        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
-        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="license",
+        field="license",
+        old_value={"value": "MIT"},
+        new_value={"value": "BUSL"},
+        severity="breaking",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.commit()
@@ -417,17 +478,20 @@ async def test_concurrent_notify_watchers_is_exactly_once(db):
     try:
         await asyncio.gather(worker(), worker())
         async with AsyncSessionLocal() as session:
-            rows = list(await session.scalars(
-                select(Notification).where(
-                    Notification.user_id == user_id,
-                    Notification.type == "ecosystem_change",
-                    Notification.data["change_event_id"].as_string() == change_id,
+            rows = list(
+                await session.scalars(
+                    select(Notification).where(
+                        Notification.user_id == user_id,
+                        Notification.type == "ecosystem_change",
+                        Notification.data["change_event_id"].as_string() == change_id,
+                    )
                 )
-            ))
+            )
             assert len(rows) == 1, f"concurrent workers created {len(rows)} notifications"
     finally:
         async with AsyncSessionLocal() as session:
             from sqlalchemy import delete
+
             await session.execute(
                 delete(Notification).where(
                     Notification.user_id == user_id,
@@ -466,25 +530,48 @@ async def test_merge_moves_telemetry_and_benchmark_history(db):
     w0 = datetime(2026, 9, 1, tzinfo=UTC)
     w1 = w0 + timedelta(hours=1)
     w2 = w1 + timedelta(hours=1)
-    db.add_all([
-        # unique window: must MOVE to the survivor
-        TelemetrySnapshot(entity_kind="model", entity_id=dup.id,
-                          window_start=w0, window_end=w1,
-                          sample_size=25, metrics={"success_rate": 0.9}),
-        # colliding window: survivor already has this aggregate -> dup DROPPED
-        TelemetrySnapshot(entity_kind="model", entity_id=dup.id,
-                          window_start=w1, window_end=w2,
-                          sample_size=25, metrics={"success_rate": 0.5}),
-        TelemetrySnapshot(entity_kind="model", entity_id=survivor.id,
-                          window_start=w1, window_end=w2,
-                          sample_size=40, metrics={"success_rate": 0.8}),
-    ])
-    suite = BenchmarkSuite(key=f"merge-suite-{tag}", name="M", family="text_generation",
-                           capability_key="text.generate", created_by=admin.id)
+    db.add_all(
+        [
+            # unique window: must MOVE to the survivor
+            TelemetrySnapshot(
+                entity_kind="model",
+                entity_id=dup.id,
+                window_start=w0,
+                window_end=w1,
+                sample_size=25,
+                metrics={"success_rate": 0.9},
+            ),
+            # colliding window: survivor already has this aggregate -> dup DROPPED
+            TelemetrySnapshot(
+                entity_kind="model",
+                entity_id=dup.id,
+                window_start=w1,
+                window_end=w2,
+                sample_size=25,
+                metrics={"success_rate": 0.5},
+            ),
+            TelemetrySnapshot(
+                entity_kind="model",
+                entity_id=survivor.id,
+                window_start=w1,
+                window_end=w2,
+                sample_size=40,
+                metrics={"success_rate": 0.8},
+            ),
+        ]
+    )
+    suite = BenchmarkSuite(
+        key=f"merge-suite-{tag}",
+        name="M",
+        family="text_generation",
+        capability_key="text.generate",
+        created_by=admin.id,
+    )
     db.add(suite)
     await db.flush()
     run = BenchmarkRun(
-        suite_id=suite.id, status="completed",
+        suite_id=suite.id,
+        status="completed",
         target={"entity_kind": "model", "entity_id": dup.id},
         dimension_scores={"reliability": 0.7},
         finished_at=datetime.now(UTC),
@@ -492,9 +579,7 @@ async def test_merge_moves_telemetry_and_benchmark_history(db):
     db.add(run)
     await db.flush()
 
-    out = await CatalogService(db).merge_entities(
-        "model", dup.id, survivor.id, actor_id=admin.id
-    )
+    out = await CatalogService(db).merge_entities("model", dup.id, survivor.id, actor_id=admin.id)
     assert out["moved"]["telemetry_snapshots"] == 1
     assert out["moved"]["benchmark_runs"] == 1
 
@@ -567,9 +652,7 @@ async def test_export_pagination_is_stable_under_concurrent_inserts(db):
             seen += [r.id for r in rows]
             offset += len(rows)
             if first and insert_after_first_page:
-                mid = AIModel(
-                    canonical_name=f"Mid-{tag}", slug=f"mid-{tag}"
-                )
+                mid = AIModel(canonical_name=f"Mid-{tag}", slug=f"mid-{tag}")
                 db.add(mid)
                 await db.flush()
                 first = False
@@ -607,10 +690,7 @@ async def test_catalog_search_uses_the_trgm_index(db):
     plan = "\n".join(
         (
             await db.execute(
-                _sql(
-                    "EXPLAIN SELECT * FROM eco_ai_models "
-                    "WHERE lower(canonical_name) LIKE '%gen%'"
-                )
+                _sql("EXPLAIN SELECT * FROM eco_ai_models WHERE lower(canonical_name) LIKE '%gen%'")
             )
         ).scalars()
     )
@@ -637,9 +717,7 @@ async def test_watchlist_item_cap_enforced(db, monkeypatch):
     assert exc.value.code == "ECO_WATCHLIST_FULL"
     assert exc.value.status_code == 422
     # dedupe path is NOT blocked by the cap (existing item returned)
-    again = await svc.add_item(
-        lst.id, user.id, target_kind="github_repo", target_ref="a/two"
-    )
+    again = await svc.add_item(lst.id, user.id, target_kind="github_repo", target_ref="a/two")
     assert again.target_ref == "a/two"
 
 
@@ -671,8 +749,7 @@ async def test_overview_serves_every_key_the_web_cards_read(db):
             flat_keys |= {f"{k}.{sub}" for sub in v}
 
     page = (
-        Path(__file__).resolve().parents[2]
-        / "web/src/app/(dashboard)/dashboard/ecosystem/page.tsx"
+        Path(__file__).resolve().parents[2] / "web/src/app/(dashboard)/dashboard/ecosystem/page.tsx"
     ).read_text()
     used = set(re.findall(r"overview\.([a-z0-9_]+(?:\.[a-z0-9_]+)?)", page))
     assert len(used) >= 6, f"scan looks broken ({sorted(used)})"

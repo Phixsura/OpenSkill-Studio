@@ -103,9 +103,7 @@ class SignalsService:
                 .where(
                     ReplacementEdge.from_kind == kind,
                     ReplacementEdge.from_id == entity_id,
-                    ReplacementEdge.edge_type.in_(
-                        ("recommended_replacement", "supersedes")
-                    ),
+                    ReplacementEdge.edge_type.in_(("recommended_replacement", "supersedes")),
                 )
                 .limit(1)
             )

@@ -29,9 +29,7 @@ async def run_analysis(
     from app.experiments.services.experiments import ExperimentService
 
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
-    payload = await AnalysisService(db).run(
-        experiment_id, actor=scope.user, segment=segment
-    )
+    payload = await AnalysisService(db).run(experiment_id, actor=scope.user, segment=segment)
     await db.commit()
     return {"data": payload}
 

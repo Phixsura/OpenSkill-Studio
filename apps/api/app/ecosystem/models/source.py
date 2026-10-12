@@ -111,6 +111,7 @@ class SourceSyncRun(Base):
 
     __table_args__ = (Index("ix_eco_sync_runs_source", "source_id", "started_at"),)
 
+
 class RawSnapshot(Base):
     """Retained raw payload for replay (ADR-016 §42, deps.dev reprocessing bar).
 

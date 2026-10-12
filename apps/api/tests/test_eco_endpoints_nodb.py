@@ -18,8 +18,11 @@ WRITE_ENDPOINTS = [
     ("post", "/api/v1/ecosystem/impact/analyses", {}),
     # ADR-016 §11 amendments
     ("post", "/api/v1/ecosystem/observations/bulk-verify", {"ids": ["a" * 26]}),
-    ("post", "/api/v1/ecosystem/resolution-candidates/bulk-decide",
-     {"ids": ["a" * 26], "decision": "confirm"}),
+    (
+        "post",
+        "/api/v1/ecosystem/resolution-candidates/bulk-decide",
+        {"ids": ["a" * 26], "decision": "confirm"},
+    ),
     ("post", "/api/v1/ecosystem/pricing/availability/probe/model/" + "a" * 26, {}),
 ]
 
@@ -127,9 +130,7 @@ def test_handbook_cron_schedule_matches_registry():
 
     from app.controlplane.worker import _cron_jobs
 
-    doc = (
-        Path(__file__).resolve().parents[3] / "docs/ops/ecosystem-operations.md"
-    ).read_text()
+    doc = (Path(__file__).resolve().parents[3] / "docs/ops/ecosystem-operations.md").read_text()
     eco_crons = [j for j in _cron_jobs() if j.name.startswith("eco_")]
     assert len(eco_crons) >= 7  # floor: a broken filter can't vacuously pass
     for job in eco_crons:
@@ -252,8 +253,7 @@ def test_web_test_mock_paths_exist_in_the_route_table():
         if isinstance(path, str) and path.startswith("/ecosystem")
     ]
     route_res = [
-        re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path) + "$")
-        for path in route_paths
+        re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", path) + "$") for path in route_paths
     ]
     assert len(route_res) >= 60
 
@@ -307,10 +307,7 @@ def test_every_orm_order_by_carries_the_id_tiebreak():
                 continue  # id tiebreak present, or trgm score (unique per row)
             offenders.append(f"{f.name}: order_by({inner[:70]})")
     assert checked >= 30, f"pattern scan looks broken ({checked})"
-    assert not offenders, (
-        "order_by without id tiebreak (nondeterministic on ties): "
-        f"{offenders}"
-    )
+    assert not offenders, f"order_by without id tiebreak (nondeterministic on ties): {offenders}"
 
 
 def test_web_lifecycle_dropdown_matches_backend_vocabulary():
@@ -323,8 +320,7 @@ def test_web_lifecycle_dropdown_matches_backend_vocabulary():
     from app.ecosystem.models.catalog import LIFECYCLE_STATUSES
 
     lib = (
-        Path(__file__).resolve().parents[2]
-        / "web/src/app/(dashboard)/dashboard/ecosystem/lib.ts"
+        Path(__file__).resolve().parents[2] / "web/src/app/(dashboard)/dashboard/ecosystem/lib.ts"
     ).read_text()
     m = re.search(r"LIFECYCLE_STYLES[^=]*= \{(.*?)\};", lib, re.S)
     assert m
@@ -377,11 +373,22 @@ def test_every_enum_named_filter_is_whitelisted():
 
     api = Path(__file__).resolve().parents[1] / "app" / "ecosystem" / "api"
     enumish = {
-        "status", "family", "severity", "change_type", "draft_type",
-        "lifecycle_status", "trust_level", "evidence_level", "decision",
-        "record_type", "reconciliation_status",
+        "status",
+        "family",
+        "severity",
+        "change_type",
+        "draft_type",
+        "lifecycle_status",
+        "trust_level",
+        "evidence_level",
+        "decision",
+        "record_type",
+        "reconciliation_status",
         # R382: names the first sweep missed — closed write-path vocabularies
-        "source_type", "classification", "deprecated_kind", "event_type",
+        "source_type",
+        "classification",
+        "deprecated_kind",
+        "event_type",
         "entity_kind",
     }
     # R382 exemptions: entity_kind values on these surfaces are NOT closed to
@@ -418,9 +425,8 @@ def test_every_enum_named_filter_is_whitelisted():
                 if not guarded:
                     offenders.append(f"{f.name}:{fname}({pname})")
     assert checked >= 10, f"scan looks broken ({checked})"
-    assert not offenders, (
-        f"enum-named filters without a whitelist guard: {offenders}"
-    )
+    assert not offenders, f"enum-named filters without a whitelist guard: {offenders}"
+
 
 def test_web_source_status_dropdown_matches_backend_vocabulary():
     """Round-378 (fifth vocabulary): sources page status filter pinned to
@@ -439,6 +445,7 @@ def test_web_source_status_dropdown_matches_backend_vocabulary():
     web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
     assert web_values == set(SOURCE_STATUSES)
 
+
 def test_web_advisory_status_dropdown_matches_backend_vocabulary():
     """Round-379 (sixth vocabulary): security page advisory-status filter
     pinned to ADVISORY_STATUSES."""
@@ -455,6 +462,7 @@ def test_web_advisory_status_dropdown_matches_backend_vocabulary():
     assert m
     web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
     assert web_values == set(ADVISORY_STATUSES)
+
 
 def test_web_lifecycle_tab_dropdowns_match_backend_vocabularies():
     """Round-380 (seventh & eighth vocabularies): components-page impact and
@@ -476,6 +484,7 @@ def test_web_lifecycle_tab_dropdowns_match_backend_vocabularies():
         m = re.search(rf"const {const} = \[(.*?)\];", page, re.S)
         assert m, const
         assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), const
+
 
 def test_web_remaining_status_dropdowns_match_backend_vocabularies():
     """Round-381 (ninth-twelfth vocabularies): suite/run (benchmarks page) and
@@ -499,7 +508,6 @@ def test_web_remaining_status_dropdowns_match_backend_vocabularies():
         m = re.search(rf"const {const} = \[(.*?)\];", page, re.S)
         assert m, (rel, const)
         assert set(re.findall(r'"([a-z_]+)"', m.group(1))) == set(vocab), (rel, const)
-
 
 
 def test_no_static_route_is_shadowed_by_an_earlier_dynamic_route():
@@ -536,9 +544,7 @@ def test_no_static_route_is_shadowed_by_an_earlier_dynamic_route():
                 continue
             pattern = getattr(earlier, "path_regex", None)
             if pattern is None:
-                pattern = re.compile(
-                    "^" + re.sub(r"\{[^}]+\}", "[^/]+", earlier.path) + "$"
-                )
+                pattern = re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", earlier.path) + "$")
             if pattern.match(r.path):
                 shadowed.append(f"{r.path} shadowed by {earlier.path}")
     assert not shadowed, sorted(set(shadowed))
@@ -546,9 +552,7 @@ def test_no_static_route_is_shadowed_by_an_earlier_dynamic_route():
     # twice means the second endpoint never runs.
     from collections import Counter
 
-    pairs = Counter(
-        (m, r.path) for r in routes for m in r.methods - {"HEAD", "OPTIONS"}
-    )
+    pairs = Counter((m, r.path) for r in routes for m in r.methods - {"HEAD", "OPTIONS"})
     dupes = {k: v for k, v in pairs.items() if v > 1}
     assert not dupes, dupes
     # non-vacuity: the walk saw a real route table, and the detector fires on
@@ -579,6 +583,7 @@ def test_no_static_route_is_shadowed_by_an_earlier_dynamic_route():
     ]
     assert hits == [("/api/x/{seg}", "/api/x/static")], hits
 
+
 def test_web_reconciliation_dropdown_matches_backend_vocabulary():
     """Round-385 (thirteenth vocabulary): pricing page reconciliation-status
     filter pinned to RECONCILIATION_STATUSES (it was the only wired dropdown
@@ -599,4 +604,3 @@ def test_web_reconciliation_dropdown_matches_backend_vocabulary():
     assert m, "reconciliation dropdown literal not found"
     web_values = set(re.findall(r'"([a-z_]+)"', m.group(1)))
     assert web_values == set(RECONCILIATION_STATUSES)
-

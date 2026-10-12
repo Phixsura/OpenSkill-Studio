@@ -35,6 +35,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -54,24 +55,30 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
 
     from app.experiments.models import Experiment
 
-    await db.execute(
-        delete(Experiment).where(Experiment.key == hooks.SURFACE_MATCHING_CONFIG)
-    )
+    await db.execute(delete(Experiment).where(Experiment.key == hooks.SURFACE_MATCHING_CONFIG))
     # ── 0 · Actors & target-domain baseline ──────────────────────────
     admin = User(
-        email=f"exp-e2e-{ULID()}@example.com", display_name="Operator",
-        role=UserRole.ADMIN, status=UserStatus.ACTIVE,
+        email=f"exp-e2e-{ULID()}@example.com",
+        display_name="Operator",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
     )
     db.add(admin)
     await db.flush()
     entity_type = f"exp-{str(ULID()).lower()[-10:]}"
     active_config = MatchingConfig(
-        version=1, target_entity_type=entity_type,
-        weights={"skill_fit": 1.0}, thresholds={}, is_active=True,
+        version=1,
+        target_entity_type=entity_type,
+        weights={"skill_fit": 1.0},
+        thresholds={},
+        is_active=True,
     )
     candidate_config = MatchingConfig(
-        version=2, target_entity_type=entity_type,
-        weights={"skill_fit": 0.6, "history": 0.4}, thresholds={}, is_active=False,
+        version=2,
+        target_entity_type=entity_type,
+        weights={"skill_fit": 0.6, "history": 0.4},
+        thresholds={},
+        is_active=False,
     )
     db.add_all([active_config, candidate_config])
     await MetricService(db).ensure_seed_definitions()
@@ -81,8 +88,10 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     esvc = ExperimentService(db)
     exp = await esvc.create(
         key=hooks.SURFACE_MATCHING_CONFIG,  # controls the matching surface
-        title="Alternative matching weights", domain="matching",
-        layer_key=layer.key, owner_user_id=admin.id,
+        title="Alternative matching weights",
+        domain="matching",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     version = await esvc.create_version(
         exp.id,
@@ -90,18 +99,25 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
             "hypothesis": "candidate weights improve match acceptance safely",
             "unit_type": "organization",
             "variants": [
-                {"key": "control", "name": "Active config", "weight_bp": 5000,
-                 "is_control": True},
-                {"key": "treatment", "name": "Candidate config", "weight_bp": 5000,
-                 "config": {"matching_config_id": candidate_config.id}},
+                {"key": "control", "name": "Active config", "weight_bp": 5000, "is_control": True},
+                {
+                    "key": "treatment",
+                    "name": "Candidate config",
+                    "weight_bp": 5000,
+                    "config": {"matching_config_id": candidate_config.id},
+                },
             ],
             "metrics": {
                 "primary": ["exposure_rate"],
                 "guardrails": [
                     # Both arms record exposures at the decision point, so a
                     # fully-exercised surface legitimately reaches 1.0
-                    {"metric_key": "exposure_rate", "op": "lte", "threshold": 1.0,
-                     "window_hours": 24}
+                    {
+                        "metric_key": "exposure_rate",
+                        "op": "lte",
+                        "threshold": 1.0,
+                        "window_hours": 24,
+                    }
                 ],
             },
             "sequential": "obrien_fleming",
@@ -117,7 +133,9 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     # ── 2 · Schedule → run → ramp ────────────────────────────────────
     for status in ("review", "scheduled", "running"):
         await esvc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
@@ -158,9 +176,7 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     )
     snapshots = list(
         (
-            await db.execute(
-                select(MetricSnapshot).where(MetricSnapshot.experiment_id == exp.id)
-            )
+            await db.execute(select(MetricSnapshot).where(MetricSnapshot.experiment_id == exp.id))
         ).scalars()
     )
     assert snapshots, "snapshot pipeline produced nothing"
@@ -181,13 +197,18 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     # ── 7 · Human decision, hash-gated ───────────────────────────────
     with pytest.raises(AppError):  # forged hash refused
         await DecisionService(db).create(
-            exp.id, decision="promote", summary="forged evidence must not pass",
-            analysis_result_hash="0" * 64, actor=admin,
+            exp.id,
+            decision="promote",
+            summary="forged evidence must not pass",
+            analysis_result_hash="0" * 64,
+            actor=admin,
         )
     record = await DecisionService(db).create(
-        exp.id, decision="promote",
+        exp.id,
+        decision="promote",
         summary="candidate weights won cleanly under guardrails",
-        analysis_result_hash=result_hash, actor=admin,
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     assert record.guardrail_outcome["clean"] is True
     assert (await esvc.get(exp.id)).status == "promoted"
@@ -195,8 +216,11 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     # ── 8 · Controlled promotion → target-domain DRAFT object ────────
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        record.id, target_type="matching_config", target_ref=active_config.id,
-        draft_payload={"weights": {"skill_fit": 0.6, "history": 0.4}}, actor=admin,
+        record.id,
+        target_type="matching_config",
+        target_ref=active_config.id,
+        draft_payload={"weights": {"skill_fit": 0.6, "history": 0.4}},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     applied = await psvc.apply(draft.id, actor=admin)
@@ -209,15 +233,18 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
     events = list(
         (
             await db.execute(
-                select(ExperimentEvent.event_type).where(
-                    ExperimentEvent.experiment_id == exp.id
-                )
+                select(ExperimentEvent.event_type).where(ExperimentEvent.experiment_id == exp.id)
             )
         ).scalars()
     )
     for expected in (
-        "created", "version_created", "transition", "ramp_changed",
-        "analysis_look", "decision_recorded", "promotion_drafted",
+        "created",
+        "version_created",
+        "transition",
+        "ramp_changed",
+        "analysis_look",
+        "decision_recorded",
+        "promotion_drafted",
     ):
         assert expected in events, f"audit trail missing {expected}"
 
@@ -227,9 +254,7 @@ async def test_full_lifecycle_hypothesis_to_controlled_promotion(db):
 
     await db.execute(delete(Experiment).where(Experiment.id == exp.id))
     await db.execute(delete(ExperimentLayer).where(ExperimentLayer.key == layer.key))
-    await db.execute(
-        delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
-    )
+    await db.execute(delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type))
     await db.execute(delete(User).where(User.id == admin.id))
     await db.commit()
 
@@ -253,37 +278,47 @@ async def test_number_conservation_resolve_to_analysis(db):
     from app.models.user import User, UserRole, UserStatus
 
     admin = User(
-        email=f"conserve-{ULID()}@example.com", display_name="C",
-        role=UserRole.ADMIN, status=UserStatus.ACTIVE,
+        email=f"conserve-{ULID()}@example.com",
+        display_name="C",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
     )
     db.add(admin)
     await db.flush()
     await MetricService(db).ensure_seed_definitions()
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     esvc = ExperimentService(db)
     exp = await esvc.create(
-        key=f"exp-{str(ULID()).lower()}", title="Conservation", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="Conservation",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
-    await esvc.create_version(exp.id, spec={
-        "hypothesis": "every stage agrees on the same unit counts",
-        "unit_type": "user",
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 5000},
-        ],
-        "metrics": {"primary": ["exposure_rate"],
-                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                    "threshold": 100.0}]},
-    }, actor=admin)
+    await esvc.create_version(
+        exp.id,
+        spec={
+            "hypothesis": "every stage agrees on the same unit counts",
+            "unit_type": "user",
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
+        },
+        actor=admin,
+    )
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
         await esvc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
@@ -295,9 +330,7 @@ async def test_number_conservation_resolve_to_analysis(db):
     per_variant_assigned: dict[str, int] = {}
     per_variant_exposed: dict[str, int] = {}
     for i in range(total_units):
-        r = await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=f"cons-{i:03d}"
-        )
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"cons-{i:03d}")
         assert r is not None
         per_variant_assigned[r.variant_key] = per_variant_assigned.get(r.variant_key, 0) + 1
         if i % 3 == 0:
@@ -305,9 +338,7 @@ async def test_number_conservation_resolve_to_analysis(db):
                 experiment_key=exp.key, unit_type="user", unit_id=f"cons-{i:03d}"
             )
             exposed_expected += 1
-            per_variant_exposed[r.variant_key] = (
-                per_variant_exposed.get(r.variant_key, 0) + 1
-            )
+            per_variant_exposed[r.variant_key] = per_variant_exposed.get(r.variant_key, 0) + 1
 
     # Stage 2: funnel diagnostics must agree with stage 1 exactly
     stats = await asvc.assignment_stats(exp.id)
@@ -358,52 +389,58 @@ async def test_promoted_experiment_archives_and_prunes(db):
     from app.models.user import User, UserRole, UserStatus
 
     admin = User(
-        email=f"arch-{ULID()}@example.com", display_name="A",
-        role=UserRole.ADMIN, status=UserStatus.ACTIVE,
+        email=f"arch-{ULID()}@example.com",
+        display_name="A",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
     )
     db.add(admin)
     await db.flush()
     await MetricService(db).ensure_seed_definitions()
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     esvc = ExperimentService(db)
     exp = await esvc.create(
-        key=f"exp-{str(ULID()).lower()}", title="Arch", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="Arch",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
-    await esvc.create_version(exp.id, spec={
-        "hypothesis": "promoted experiments can archive and then prune",
-        "unit_type": "user",
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 5000},
-        ],
-        "metrics": {"primary": ["exposure_rate"],
-                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                    "threshold": 100.0}]},
-    }, actor=admin)
+    await esvc.create_version(
+        exp.id,
+        spec={
+            "hypothesis": "promoted experiments can archive and then prune",
+            "unit_type": "user",
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
+        },
+        actor=admin,
+    )
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
         await esvc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await esvc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     asvc = AssignmentService(db)
     r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="arch-1")
     assert r is not None
-    assert await asvc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id="arch-1"
-    )
+    assert await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id="arch-1")
     # land in promoted via a direct status write (the decision machinery is
     # exercised elsewhere; here the matrix edge itself is under test)
     exp_id = exp.id  # capture BEFORE expire_all (expired attrs refresh sync)
-    await db.execute(
-        _update(Experiment).where(Experiment.id == exp_id).values(status="promoted")
-    )
+    await db.execute(_update(Experiment).where(Experiment.id == exp_id).values(status="promoted"))
     await db.refresh(exp)
     archived = await esvc.transition(exp_id, to_status="archived", actor=admin)
     assert archived.status == "archived"
@@ -416,10 +453,12 @@ async def test_promoted_experiment_archives_and_prunes(db):
     result = await prune_experiment_history(db)
     assert result["exposures"] >= 1
     remaining = (
-        await db.execute(
-            select(ExperimentExposure).where(
-                ExperimentExposure.experiment_id == exp_id
+        (
+            await db.execute(
+                select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert remaining == []

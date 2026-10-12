@@ -42,9 +42,7 @@ class CapabilityMappingService:
             raise AppError("VALIDATION_ERROR", f"Unknown entity kind: {entity_kind}", 422)
         if await self.db.get(CATALOG_KIND_TO_MODEL[entity_kind], entity_id) is None:
             raise AppError("NOT_FOUND", "Entity not found", 404)
-        tag = await self.db.scalar(
-            select(CapabilityTag).where(CapabilityTag.key == capability_key)
-        )
+        tag = await self.db.scalar(select(CapabilityTag).where(CapabilityTag.key == capability_key))
         if tag is None:
             raise AppError("NOT_FOUND", f"Capability {capability_key!r} not found", 404)
 
@@ -127,7 +125,9 @@ class CapabilityMappingService:
         rows = await self.db.scalars(
             select(CapabilityMapping)
             .where(CapabilityMapping.capability_key == capability_key)
-            .order_by(CapabilityMapping.entity_kind, CapabilityMapping.entity_id, CapabilityMapping.id)
+            .order_by(
+                CapabilityMapping.entity_kind, CapabilityMapping.entity_id, CapabilityMapping.id
+            )
         )
         mappings = list(rows)
         if min_evidence:

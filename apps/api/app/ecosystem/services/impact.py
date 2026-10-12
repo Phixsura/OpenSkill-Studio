@@ -209,7 +209,9 @@ class ImpactService:
             query = query.where(ImpactAnalysis.classification == classification)
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(ImpactAnalysis.computed_at.desc(), ImpactAnalysis.id.desc()).limit(limit).offset(offset)
+            query.order_by(ImpactAnalysis.computed_at.desc(), ImpactAnalysis.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), int(total or 0)
 

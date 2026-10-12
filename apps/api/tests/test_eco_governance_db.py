@@ -44,7 +44,8 @@ async def test_draft_creator_cannot_approve_or_publish_own_draft(db):
     second_admin = await _mk_user(db, "admin")
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="skill_pack_update", title="4-eyes",
+        draft_type="skill_pack_update",
+        title="4-eyes",
         payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
         created_by=creator.id,
     )
@@ -61,7 +62,8 @@ async def test_draft_creator_cannot_approve_or_publish_own_draft(db):
     assert draft.status == "published"
     # Creator CAN reject their own draft (self-service withdrawal)
     draft2 = await svc.create(
-        draft_type="skill_pack_update", title="withdraw",
+        draft_type="skill_pack_update",
+        title="withdraw",
         payload={"target_pack_id": "P" * 26, "suggestions": [{}]},
         created_by=creator.id,
     )
@@ -105,13 +107,17 @@ async def test_export_changes_delta_pagination(db):
     base = datetime.now(UTC)
     for i in range(3):
         obs = EcosystemObservation(
-            source_id=source.id, event_type="catalog_snapshot",
-            raw_hash=f"{i}d" * 32, normalized={},
+            source_id=source.id,
+            event_type="catalog_snapshot",
+            raw_hash=f"{i}d" * 32,
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         change = ChangeEvent(
-            observation_id=obs.id, change_type="lifecycle", field=f"delta-{i}",
+            observation_id=obs.id,
+            change_type="lifecycle",
+            field=f"delta-{i}",
             severity="info",
         )
         db.add(change)
@@ -181,8 +187,13 @@ async def test_eco_audit_trail_is_queryable(db):
     admin = await _mk_user(db, "admin")
     target = str(ULID())
     await eco_audit(
-        db, admin, action="eco.lifecycle_transitioned", target_type="eco_model",
-        target_id=target, before={"status": "verified"}, after={"status": "deprecated"},
+        db,
+        admin,
+        action="eco.lifecycle_transitioned",
+        target_type="eco_model",
+        target_id=target,
+        before={"status": "verified"},
+        after={"status": "deprecated"},
     )
     rows = list(
         await db.scalars(
@@ -206,10 +217,7 @@ async def test_eco_seed_sources_paused_and_idempotent(db, monkeypatch):
 
     # Point the CLI at the test session factory (avoid a second engine)
     unique = str(ULID()).lower()[-6:]
-    specs = [
-        {**spec, "name": f"{spec['name']} [{unique}]"}
-        for spec in cli.ECO_STARTER_SOURCES
-    ]
+    specs = [{**spec, "name": f"{spec['name']} [{unique}]"} for spec in cli.ECO_STARTER_SOURCES]
     monkeypatch.setattr(cli, "ECO_STARTER_SOURCES", specs)
 
     from app.ecosystem.services.sources import SourceService
@@ -224,9 +232,12 @@ async def test_eco_seed_sources_paused_and_idempotent(db, monkeypatch):
             if existing:
                 continue
             source = await svc.create(
-                name=spec["name"], source_type=spec["source_type"],
-                trust_level=spec["trust_level"], adapter_key=spec["adapter_key"],
-                base_url=spec.get("base_url"), config=spec.get("config") or {},
+                name=spec["name"],
+                source_type=spec["source_type"],
+                trust_level=spec["trust_level"],
+                adapter_key=spec["adapter_key"],
+                base_url=spec.get("base_url"),
+                config=spec.get("config") or {},
                 sync_interval_minutes=spec["sync_interval_minutes"],
                 robots_compliant=True,
             )
@@ -237,9 +248,7 @@ async def test_eco_seed_sources_paused_and_idempotent(db, monkeypatch):
     assert await seed(db) == len(specs)
     assert await seed(db) == 0  # idempotent
     rows = list(
-        await db.scalars(
-            select(EcosystemSource).where(EcosystemSource.name.like(f"%[{unique}]"))
-        )
+        await db.scalars(select(EcosystemSource).where(EcosystemSource.name.like(f"%[{unique}]")))
     )
     assert len(rows) == len(specs)
     # Never auto-fetch: everything seeded PAUSED, awaiting explicit activation
@@ -247,15 +256,19 @@ async def test_eco_seed_sources_paused_and_idempotent(db, monkeypatch):
     # Seeded specs validate against the SSRF guard + adapter registry
     assert all(r.adapter_key in ("huggingface", "github_releases", "manual") for r in rows)
 
+
 async def test_audit_csv_defuses_formula_injection(db):
     from app.controlplane.services.audit import Actor, record_audit
     from app.ecosystem.api.dashboard import eco_audit_trail_csv
 
     admin = await _mk_user(db, "admin")
     await record_audit(
-        db, actor=Actor(user_id=admin.id, type="platform"), action="eco.conflict_resolved",
-        target_type="eco_source", target_id="0" * 26,
-        reason="=HYPERLINK(\"http://evil\")",
+        db,
+        actor=Actor(user_id=admin.id, type="platform"),
+        action="eco.conflict_resolved",
+        target_type="eco_source",
+        target_id="0" * 26,
+        reason='=HYPERLINK("http://evil")',
     )
     await db.flush()
     resp = await eco_audit_trail_csv(
@@ -266,6 +279,7 @@ async def test_audit_csv_defuses_formula_injection(db):
     assert "'=HYPERLINK" in body  # formula defused with leading apostrophe
     assert body.splitlines()[0].startswith("id,actor_user_id,action")
 
+
 async def test_editing_in_review_draft_dismisses_review(db):
     """GitHub 'new commits dismiss review' semantics: an in_review payload
     edit drops the draft back to draft status — closing the TOCTOU window
@@ -274,7 +288,8 @@ async def test_editing_in_review_draft_dismisses_review(db):
     second_admin = await _mk_user(db, "admin")
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="skill_pack_update", title="toctou",
+        draft_type="skill_pack_update",
+        title="toctou",
         payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
         created_by=creator.id,
     )
@@ -296,8 +311,10 @@ async def test_editing_in_review_draft_dismisses_review(db):
     assert draft.status == "approved"
     # Approved drafts are immutable
     with pytest.raises(AppError):
-        await svc.update_payload(draft.id, payload={"target_pack_id": "P" * 26,
-                                                    "suggestions": [{"kind": "late"}]})
+        await svc.update_payload(
+            draft.id, payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "late"}]}
+        )
+
 
 async def test_budget_cap_is_inclusive_boundary(db):
     """Mutation-audit killer: the budget check is >= — when spend REACHES the
@@ -310,9 +327,15 @@ async def test_budget_cap_is_inclusive_boundary(db):
 
     class FixedCost:
         async def execute_case(self, run, case, repeat):
-            return {"output_assets": [], "latency_ms": 100, "usage": {},
-                    "cost_usd": 1.0, "automated_scores": {},
-                    "failed": False, "retries": 0}
+            return {
+                "output_assets": [],
+                "latency_ms": 100,
+                "usage": {},
+                "cost_usd": 1.0,
+                "automated_scores": {},
+                "failed": False,
+                "retries": 0,
+            }
 
     admin = await _mk_user(db, "admin")
     suite = await _mk_suite_with_cases(db, admin, n_cases=3)
@@ -320,17 +343,19 @@ async def test_budget_cap_is_inclusive_boundary(db):
     await db.flush()
     svc = BenchmarkService(db, executor=FixedCost())
     run = await svc.create_run(
-        suite.id, target={"entity_kind": "model", "entity_id": "0" * 26},
+        suite.id,
+        target={"entity_kind": "model", "entity_id": "0" * 26},
         budget_usd_cap=2.0,
     )
     run = await svc.execute_run(run.id)
     assert run.status == "failed"
     assert "ECO_BUDGET_EXCEEDED" in (run.error or "")
-    results = list(await db.scalars(
-        select(BenchmarkResult).where(BenchmarkResult.run_id == run.id)
-    ))
+    results = list(
+        await db.scalars(select(BenchmarkResult).where(BenchmarkResult.run_id == run.id))
+    )
     assert len(results) == 2  # stops the moment spend REACHES the cap
     assert run.total_cost_usd == Decimal("2")
+
 
 async def test_generated_drafts_carry_gates_and_provenance(db):
     """Mutation-audit killers ×2: every generated step keeps its human
@@ -349,16 +374,18 @@ async def test_generated_drafts_carry_gates_and_provenance(db):
     db.add(workflow)
     await db.flush()
     await _mk_capability_tag(db, "image_generation")
-    db.add(CapabilityMapping(
-        entity_kind="workflow", entity_id=workflow.id,
-        capability_key="image_generation", evidence_level="vendor_claimed",
-        io_spec={},
-    ))
+    db.add(
+        CapabilityMapping(
+            entity_kind="workflow",
+            entity_id=workflow.id,
+            capability_key="image_generation",
+            evidence_level="vendor_claimed",
+            io_spec={},
+        )
+    )
     await db.flush()
 
-    draft = await DraftService(db).generate_workflow_pack_draft(
-        external_workflow_id=workflow.id
-    )
+    draft = await DraftService(db).generate_workflow_pack_draft(external_workflow_id=workflow.id)
     steps = draft.payload["definition"]["steps"]
     assert steps and all(s["review_gate"] is True for s in steps)
     origin = draft.payload["origin"]
@@ -379,10 +406,14 @@ async def test_published_eco_draft_materializes_private_draft_pack(db):
     org = await _mk_org(db)
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="workflow_pack", title="matpack",
-        payload={"name": "MatPack",
-                 "definition": {"steps": [{"id": "s1", "capability": "image_generation"}]}},
-        created_by=creator.id, org_id=org.id,
+        draft_type="workflow_pack",
+        title="matpack",
+        payload={
+            "name": "MatPack",
+            "definition": {"steps": [{"id": "s1", "capability": "image_generation"}]},
+        },
+        created_by=creator.id,
+        org_id=org.id,
     )
     await svc.transition(draft.id, to_status="in_review", actor_id=creator.id, org_id=org.id)
     await svc.transition(draft.id, to_status="approved", actor_id=approver.id, org_id=org.id)
@@ -391,8 +422,9 @@ async def test_published_eco_draft_materializes_private_draft_pack(db):
     )
     pack = await db.get(WorkflowPack, draft.published_ref)
     assert pack is not None
-    assert pack.status == PackStatus.DRAFT          # product-side stays draft
+    assert pack.status == PackStatus.DRAFT  # product-side stays draft
     assert pack.visibility == PackVisibility.PRIVATE  # and private
+
 
 async def test_lifecycle_gates_refuse_archived_inactive_and_bad_targets(db):
     """Mutation-audit killers ×3: an ARCHIVED source never syncs; a
@@ -412,9 +444,7 @@ async def test_lifecycle_gates_refuse_archived_inactive_and_bad_targets(db):
     await db.flush()
     svc = BenchmarkService(db)
     with pytest.raises(AppError) as exc:
-        await svc.create_run(
-            suite.id, target={"entity_kind": "model", "entity_id": "0" * 26}
-        )
+        await svc.create_run(suite.id, target={"entity_kind": "model", "entity_id": "0" * 26})
     assert exc.value.code == "VALIDATION_ERROR"
 
     suite.status = "active"
@@ -424,6 +454,7 @@ async def test_lifecycle_gates_refuse_archived_inactive_and_bad_targets(db):
     assert exc.value.code == "VALIDATION_ERROR"
     with pytest.raises(AppError):
         await svc.create_run(suite.id, target="not-a-dict")  # type: ignore[arg-type]
+
 
 async def test_payload_edit_racing_publish_cannot_mutate_published_draft(db):
     """Round-133 killer: a payload edit racing the approve->publish transition

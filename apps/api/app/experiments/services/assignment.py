@@ -148,9 +148,7 @@ def aa_probe(layer_key: str, *, n: int = 2000, unit_type: str = "user") -> dict:
 SWITCHBACK_PLACEHOLDER = "__switchback__"
 
 
-def switchback_variant(
-    experiment_key: str, version_salt: str, spec: ExperimentSpec, at
-) -> str:
+def switchback_variant(experiment_key: str, version_salt: str, spec: ExperimentSpec, at) -> str:
     """Switchback design (§4.5 v2): the randomization unit is the TIME
     WINDOW (spec.switchback.window_minutes, epoch-aligned) — every eligible
     unit sees the same variant inside a window, and windows are randomized
@@ -158,9 +156,7 @@ def switchback_variant(
     re-randomized). Weight_bp governs each variant's share of windows."""
     window_minutes = spec.switchback.window_minutes if spec.switchback else 1440
     bucket_index = int(at.timestamp() // 60 // window_minutes)
-    roll = _roll(
-        "variant", experiment_key, version_salt, "switchback", str(bucket_index)
-    )
+    roll = _roll("variant", experiment_key, version_salt, "switchback", str(bucket_index))
     return pick_variant(spec, roll)
 
 
@@ -259,11 +255,7 @@ class AssignmentService:
 
     async def _spec_and_salt(self, exp: Experiment) -> tuple[ExperimentSpec, str]:
         cached = _SPEC_CACHE.get(exp.id)
-        if (
-            cached is not None
-            and cached[0] > time.monotonic()
-            and cached[1] == exp.current_version
-        ):
+        if cached is not None and cached[0] > time.monotonic() and cached[1] == exp.current_version:
             return cached[2], cached[3]
         rows = (
             await self.db.execute(
@@ -283,9 +275,7 @@ class AssignmentService:
         except Exception as exc:  # noqa: BLE001 — poison spec: typed, not a 500
             # never cache a poison spec — a data repair must take effect at once
             forget_spec(exp.id)
-            raise AppError(
-                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
-            ) from exc
+            raise AppError("EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422) from exc
         _SPEC_CACHE[exp.id] = (
             time.monotonic() + _SPEC_CACHE_TTL_SECONDS,
             exp.current_version,
@@ -440,9 +430,7 @@ class AssignmentService:
             if link is not None:
                 # #73 self-heal: idempotent re-link sweeps any orphan
                 # anon-keyed rows a pre-fix race may have stranded
-                await self.link_identity(
-                    anonymous_id=unit_id, user_id=link.user_id
-                )
+                await self.link_identity(anonymous_id=unit_id, user_id=link.user_id)
                 unit_id = link.user_id
             else:
                 anon_pending = unit_id
@@ -453,8 +441,12 @@ class AssignmentService:
 
         if spec.design == "switchback":
             return await self._resolve_switchback(
-                exp, spec, unit_type=unit_type, unit_id=unit_id,
-                context=context, anon_pending=anon_pending,
+                exp,
+                spec,
+                unit_type=unit_type,
+                unit_id=unit_id,
+                context=context,
+                anon_pending=anon_pending,
             )
 
         # Sticky first: an existing assignment keeps serving through
@@ -501,19 +493,13 @@ class AssignmentService:
             # the standard user-row-wins conflict rule.
             late_link = await self.db.get(ExperimentIdentityLink, anon_pending)
             if late_link is not None:
-                await self.link_identity(
-                    anonymous_id=anon_pending, user_id=late_link.user_id
-                )
+                await self.link_identity(anonymous_id=anon_pending, user_id=late_link.user_id)
                 row = await self._existing(exp.id, "user", late_link.user_id)
                 if row is None:  # pragma: no cover — migration guarantees one
-                    raise AppError(
-                        "EXPERIMENT_NOT_FOUND", "Assignment write lost", 500
-                    )
+                    raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
         return self._to_resolved(exp, spec, row)
 
-    async def link_identity(
-        self, *, anonymous_id: str, user_id: str
-    ) -> dict:
+    async def link_identity(self, *, anonymous_id: str, user_id: str) -> dict:
         """§4.17 (round 210): bind an anonymous id to a user — first link
         wins (rebinding to a DIFFERENT user is 422), re-linking the same
         pair is idempotent. Every assignment the anon id holds migrates IN
@@ -542,14 +528,12 @@ class AssignmentService:
             # the cap is exact.
             from app.models.user import User as _User
 
-            await self.db.execute(
-                select(_User.id).where(_User.id == user_id).with_for_update()
-            )
+            await self.db.execute(select(_User.id).where(_User.id == user_id).with_for_update())
             n_links = (
                 await self.db.execute(
-                    select(func.count()).select_from(ExperimentIdentityLink).where(
-                        ExperimentIdentityLink.user_id == user_id
-                    )
+                    select(func.count())
+                    .select_from(ExperimentIdentityLink)
+                    .where(ExperimentIdentityLink.user_id == user_id)
                 )
             ).scalar_one()
             if n_links >= IDENTITY_LINK_CAP_PER_USER:
@@ -575,13 +559,17 @@ class AssignmentService:
                 422,
             )
         anon_rows = (
-            await self.db.execute(
-                select(ExperimentAssignment).where(
-                    ExperimentAssignment.unit_type == "user",
-                    ExperimentAssignment.unit_id == anonymous_id,
+            (
+                await self.db.execute(
+                    select(ExperimentAssignment).where(
+                        ExperimentAssignment.unit_type == "user",
+                        ExperimentAssignment.unit_id == anonymous_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         migrated = 0
         conflicts = 0
         from sqlalchemy import delete as _delete
@@ -605,8 +593,7 @@ class AssignmentService:
                     ExperimentExposure.dedup_key.isnot(None),
                     ExperimentExposure.dedup_key.in_(
                         select(ExperimentExposure.dedup_key).where(
-                            ExperimentExposure.assignment_id
-                            == existing_user_row.id,
+                            ExperimentExposure.assignment_id == existing_user_row.id,
                             ExperimentExposure.dedup_key.isnot(None),
                         )
                     ),
@@ -617,23 +604,23 @@ class AssignmentService:
                 .where(ExperimentExposure.assignment_id == row.id)
                 .values(assignment_id=existing_user_row.id)
             )
-            self.db.add(ExperimentEvent(
-                experiment_id=row.experiment_id,
-                actor_user_id=user_id,
-                event_type="experiment_identity_conflict",
-                payload={
-                    "anonymous_id": anonymous_id,
-                    "user_id": user_id,
-                    "anon_variant": row.variant_key,
-                    "user_variant": existing_user_row.variant_key,
-                },
-            ))
+            self.db.add(
+                ExperimentEvent(
+                    experiment_id=row.experiment_id,
+                    actor_user_id=user_id,
+                    event_type="experiment_identity_conflict",
+                    payload={
+                        "anonymous_id": anonymous_id,
+                        "user_id": user_id,
+                        "anon_variant": row.variant_key,
+                        "user_variant": existing_user_row.variant_key,
+                    },
+                )
+            )
             await self.db.delete(row)
 
         for row in anon_rows:
-            existing_user_row = await self._existing(
-                row.experiment_id, "user", user_id
-            )
+            existing_user_row = await self._existing(row.experiment_id, "user", user_id)
             if existing_user_row is not None:
                 conflicts += 1
                 await _fold_conflict(row, existing_user_row)
@@ -649,16 +636,18 @@ class AssignmentService:
                     # check-then-update window — re-read and take the
                     # conflict branch; the user row wins, as always.
                     await self.db.refresh(row)  # rollback expired the attrs
-                    late_row = await self._existing(
-                        row.experiment_id, "user", user_id
-                    )
+                    late_row = await self._existing(row.experiment_id, "user", user_id)
                     if late_row is None:  # pragma: no cover — the violator
                         raise
                     conflicts += 1
                     await _fold_conflict(row, late_row)
         await self.db.flush()
-        return {"anonymous_id": anonymous_id, "user_id": user_id,
-                "migrated": migrated, "conflicts": conflicts}
+        return {
+            "anonymous_id": anonymous_id,
+            "user_id": user_id,
+            "migrated": migrated,
+            "conflicts": conflicts,
+        }
 
     async def _resolve_switchback(
         self,
@@ -706,20 +695,12 @@ class AssignmentService:
                 # #73's switchback mirror (round 215): the same race window
                 # exists around the placeholder insert — re-check the link
                 # and migrate immediately so no orphan ITT row survives.
-                late_link = await self.db.get(
-                    ExperimentIdentityLink, anon_pending
-                )
+                late_link = await self.db.get(ExperimentIdentityLink, anon_pending)
                 if late_link is not None:
-                    await self.link_identity(
-                        anonymous_id=anon_pending, user_id=late_link.user_id
-                    )
-                    existing = await self._existing(
-                        exp.id, "user", late_link.user_id
-                    )
+                    await self.link_identity(anonymous_id=anon_pending, user_id=late_link.user_id)
+                    existing = await self._existing(exp.id, "user", late_link.user_id)
                     if existing is None:  # pragma: no cover — migration guarantees one
-                        raise AppError(
-                            "EXPERIMENT_NOT_FOUND", "Assignment write lost", 500
-                        )
+                        raise AppError("EXPERIMENT_NOT_FOUND", "Assignment write lost", 500)
         elif exp.status not in _SERVE_EXISTING_STATUSES:
             return None
         if existing.is_holdout:
@@ -848,7 +829,10 @@ class AssignmentService:
         """Assignment→exposure funnel per variant (exposure-SRM raw material)."""
         assigned = await self.assignment_stats(experiment_id)
         exposed_q = (
-            select(ExperimentAssignment.variant_key, func.count(func.distinct(ExperimentExposure.assignment_id)))
+            select(
+                ExperimentAssignment.variant_key,
+                func.count(func.distinct(ExperimentExposure.assignment_id)),
+            )
             .join(
                 ExperimentAssignment,
                 ExperimentAssignment.id == ExperimentExposure.assignment_id,
@@ -873,7 +857,5 @@ class AssignmentService:
         return {
             "funnel": funnel,
             "holdout": assigned["holdout"],
-            "last_exposure_at": (
-                last_exposure_at.isoformat() if last_exposure_at else None
-            ),
+            "last_exposure_at": (last_exposure_at.isoformat() if last_exposure_at else None),
         }

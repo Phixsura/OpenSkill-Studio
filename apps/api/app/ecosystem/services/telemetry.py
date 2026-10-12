@@ -51,9 +51,7 @@ def aggregate_metrics(rows: list[dict]) -> dict:
         "error_distribution": error_dist,
     }
     if approvals:
-        metrics["human_approval_rate"] = round(
-            sum(1 for a in approvals if a) / len(approvals), 4
-        )
+        metrics["human_approval_rate"] = round(sum(1 for a in approvals if a) / len(approvals), 4)
     return metrics
 
 
@@ -74,8 +72,10 @@ class TelemetryService:
     ) -> TelemetrySnapshot:
         """Persist one aggregate. Cross-tenant rows enforce privacy thresholds."""
         if org_id is None:
-            orgs = contributing_orgs if contributing_orgs is not None else len(
-                {r.get("org_id") for r in rows if r.get("org_id")}
+            orgs = (
+                contributing_orgs
+                if contributing_orgs is not None
+                else len({r.get("org_id") for r in rows if r.get("org_id")})
             )
             if len(rows) < TELEMETRY_MIN_SAMPLE or orgs < TELEMETRY_MIN_ORGS:
                 raise AppError(
@@ -200,7 +200,9 @@ class TelemetryService:
         else:
             query = query.where(TelemetrySnapshot.org_id.is_(None))
         rows = await self.db.scalars(
-            query.order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc()).limit(limit)
+            query.order_by(TelemetrySnapshot.window_end.desc(), TelemetrySnapshot.id.desc()).limit(
+                limit
+            )
         )
         return list(rows)
 

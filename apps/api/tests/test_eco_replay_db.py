@@ -36,9 +36,7 @@ async def test_sync_retains_snapshot_and_replay_is_idempotent(db):
     body = _payload(f"gen-{str(ULID()).lower()[:8]}")
     run = await svc.run_sync(source.id, raw_payload=body)
     assert run.status == "success"
-    snap = await db.scalar(
-        select(RawSnapshot).where(RawSnapshot.source_id == source.id)
-    )
+    snap = await db.scalar(select(RawSnapshot).where(RawSnapshot.source_id == source.id))
     assert snap is not None and snap.content == body
 
     # Replay with the SAME parser: everything unchanged, nothing new

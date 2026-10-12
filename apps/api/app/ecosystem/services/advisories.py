@@ -87,9 +87,10 @@ class AdvisoryService:
             return
         obs = await self.db.scalar(
             select(EcosystemObservation)
-            .where(EcosystemObservation.raw_hash == hashlib.sha256(
-                f"advisory:{advisory.advisory_ref}".encode()
-            ).hexdigest())
+            .where(
+                EcosystemObservation.raw_hash
+                == hashlib.sha256(f"advisory:{advisory.advisory_ref}".encode()).hexdigest()
+            )
             .limit(1)
         )
         if obs is None:
@@ -196,7 +197,9 @@ class AdvisoryService:
         if severity:
             query = query.where(SecurityAdvisory.severity == severity)
         rows = await self.db.scalars(
-            query.order_by(SecurityAdvisory.created_at.desc(), SecurityAdvisory.id.desc()).limit(limit)
+            query.order_by(SecurityAdvisory.created_at.desc(), SecurityAdvisory.id.desc()).limit(
+                limit
+            )
         )
         return list(rows)
 
@@ -219,11 +222,7 @@ class AdvisoryService:
         version_in_range with FAIL-OPEN semantics: an unparseable range still
         counts as affected (unknown never means safe)."""
         advisory = await self.get(advisory_id)
-        kinds = (
-            [advisory.affected_kind]
-            if advisory.affected_kind
-            else list(CATALOG_KIND_TO_MODEL)
-        )
+        kinds = [advisory.affected_kind] if advisory.affected_kind else list(CATALOG_KIND_TO_MODEL)
         ref_lower = advisory.affected_ref.lower()
         out: list[dict] = []
         for kind in kinds:
@@ -269,8 +268,10 @@ class AdvisoryService:
                         "canonical_name": entity.canonical_name,
                         "version": version,
                         "range_match": (
-                            "confirmed" if in_range is True and advisory.affected_range
-                            else "unknown_fail_open" if in_range is None
+                            "confirmed"
+                            if in_range is True and advisory.affected_range
+                            else "unknown_fail_open"
+                            if in_range is None
                             else "name_only"
                         ),
                         "lifecycle_status": entity.lifecycle_status,

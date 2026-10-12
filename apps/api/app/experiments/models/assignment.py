@@ -106,6 +106,4 @@ class ExperimentIdentityLink(Base):
     user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

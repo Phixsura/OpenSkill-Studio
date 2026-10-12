@@ -38,9 +38,7 @@ class HoldoutGroup(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_experiment_holdout_groups_domain", "domain", "status"),

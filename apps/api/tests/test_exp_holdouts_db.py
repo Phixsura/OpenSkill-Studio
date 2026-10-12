@@ -73,7 +73,10 @@ async def _mk_admin(db) -> User:
 
 
 async def _mk_running(
-    db, *, domain: str = "learning", layer_key: str | None = None,
+    db,
+    *,
+    domain: str = "learning",
+    layer_key: str | None = None,
     spec_overrides: dict | None = None,
 ):
     admin = await _mk_admin(db)
@@ -117,8 +120,9 @@ def _member_and_nonmember(group_key: str, bp: int) -> tuple[str, str]:
 
 async def test_holdout_group_create_validate_and_release(db):
     svc = HoldoutGroupService(db)
-    group = await svc.create(key=f"hg-{str(ULID()).lower()}", title="Q4 holdout",
-                             domain="learning", holdout_bp=500)
+    group = await svc.create(
+        key=f"hg-{str(ULID()).lower()}", title="Q4 holdout", domain="learning", holdout_bp=500
+    )
     assert group.status == "active"
 
     with pytest.raises(AppError) as exc:
@@ -126,11 +130,13 @@ async def test_holdout_group_create_validate_and_release(db):
     assert exc.value.code == "EXPERIMENT_DOMAIN_INVALID"
     assert exc.value.status_code == 422
     # bp boundaries: 1 and the max are legal; 0 is not
-    ok_low = await svc.create(key=f"hg-{str(ULID()).lower()}", title="lo",
-                              domain="learning", holdout_bp=1)
+    ok_low = await svc.create(
+        key=f"hg-{str(ULID()).lower()}", title="lo", domain="learning", holdout_bp=1
+    )
     assert ok_low.holdout_bp == 1
-    ok_high = await svc.create(key=f"hg-{str(ULID()).lower()}", title="hi",
-                               domain="learning", holdout_bp=2000)
+    ok_high = await svc.create(
+        key=f"hg-{str(ULID()).lower()}", title="hi", domain="learning", holdout_bp=2000
+    )
     assert ok_high.holdout_bp == 2000
     with pytest.raises(AppError) as exc:
         await svc.create(key="hg-zero", title="x", domain="learning", holdout_bp=0)
@@ -145,8 +151,9 @@ async def test_holdout_group_create_validate_and_release(db):
     assert exc.value.status_code == 409
     # bogus org → uniform 404, not FK crash (R89 class)
     with pytest.raises(AppError) as exc:
-        await svc.create(key="hg-bad-org", title="x", domain="learning",
-                         holdout_bp=100, scope_org_id="0" * 26)
+        await svc.create(
+            key="hg-bad-org", title="x", domain="learning", holdout_bp=100, scope_org_id="0" * 26
+        )
     assert exc.value.status_code == 404
 
     released = await svc.release(group.id)
@@ -175,16 +182,13 @@ async def test_holdout_group_excludes_new_enrollment_across_domain(db):
     member, nonmember = _member_and_nonmember(group.key, 1000)
     svc = AssignmentService(db)
     for exp in (exp1, exp2):
-        assert await svc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=member
-        ) is None
-        assert await svc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=nonmember
-        ) is not None
-    rows = (
-        await db.execute(
-            select(ExperimentAssignment).where(ExperimentAssignment.unit_id == member)
+        assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=member) is None
+        assert (
+            await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=nonmember)
+            is not None
         )
+    rows = (
+        await db.execute(select(ExperimentAssignment).where(ExperimentAssignment.unit_id == member))
     ).scalars()
     assert list(rows) == []
     # preview names the group
@@ -243,15 +247,16 @@ async def test_holdout_group_org_scoped_skips_platform_experiments(db):
     tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(
-        name="hg org", slug=f"hg-{str(ULID()).lower()}", tenant_id=tenant.id
-    )
+    org = Organization(name="hg org", slug=f"hg-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     exp, _ = await _mk_running(db)  # platform experiment
     group = await HoldoutGroupService(db).create(
-        key=f"hg-{str(ULID()).lower()}", title="org hold", domain="learning",
-        holdout_bp=2000, scope_org_id=org.id,
+        key=f"hg-{str(ULID()).lower()}",
+        title="org hold",
+        domain="learning",
+        holdout_bp=2000,
+        scope_org_id=org.id,
     )
     member, _ = _member_and_nonmember(group.key, 2000)
     resolved = await AssignmentService(db).resolve(
@@ -265,13 +270,19 @@ async def test_holdout_group_expired_ends_at_stops_excluding(db):
 
     exp, _ = await _mk_running(db)
     group = await HoldoutGroupService(db).create(
-        key=f"hg-{str(ULID()).lower()}", title="hold", domain="learning",
-        holdout_bp=2000, ends_at=datetime.now(UTC) - timedelta(days=1),
+        key=f"hg-{str(ULID()).lower()}",
+        title="hold",
+        domain="learning",
+        holdout_bp=2000,
+        ends_at=datetime.now(UTC) - timedelta(days=1),
     )
     member, _ = _member_and_nonmember(group.key, 2000)
-    assert await AssignmentService(db).resolve(
-        experiment_key=exp.key, unit_type="user", unit_id=member
-    ) is not None
+    assert (
+        await AssignmentService(db).resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=member
+        )
+        is not None
+    )
     row = await db.get(HoldoutGroup, group.id)
     assert row.status == "active"  # expiry needs no status write
 
@@ -279,9 +290,7 @@ async def test_holdout_group_expired_ends_at_stops_excluding(db):
 async def test_holdout_group_fraction_roughly_matches_bp(db):
     group_key = f"hg-{str(ULID()).lower()}"
     n = 2000
-    members = sum(
-        1 for i in range(n) if holdout_group_roll(group_key, "user", f"u{i:025d}") < 1000
-    )
+    members = sum(1 for i in range(n) if holdout_group_roll(group_key, "user", f"u{i:025d}") < 1000)
     assert 0.07 * n < members < 0.13 * n  # 10% ±3pp
 
 
@@ -302,8 +311,13 @@ async def _mk_pair_with_shared_units(db, *, correlated: bool, n: int = 200):
         for exp, v in ((exp1, v1), (exp2, v2)):
             db.add(
                 ExperimentAssignment(
-                    experiment_id=exp.id, unit_type="user", unit_id=uid,
-                    variant_key=v, assigned_version=1, bucket=0, is_holdout=False,
+                    experiment_id=exp.id,
+                    unit_type="user",
+                    unit_id=uid,
+                    variant_key=v,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
                 )
             )
     await db.flush()
@@ -382,8 +396,13 @@ async def test_interaction_sweep_skips_same_layer_and_small_overlap(db):
         for exp in (admin_exp1, exp2):
             db.add(
                 ExperimentAssignment(
-                    experiment_id=exp.id, unit_type="user", unit_id=uid,
-                    variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+                    experiment_id=exp.id,
+                    unit_type="user",
+                    unit_id=uid,
+                    variant_key="control",
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
                 )
             )
     await db.flush()
@@ -420,16 +439,16 @@ async def _mk_org_admin(db):
     from app.models.organization import Organization, OrgMember, OrgRole
 
     user = User(
-        email=f"orgadm-{ULID()}@example.com", display_name="OA",
-        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=f"orgadm-{ULID()}@example.com",
+        display_name="OA",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(user)
     tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(
-        name="delegated", slug=f"d-{str(ULID()).lower()}", tenant_id=tenant.id
-    )
+    org = Organization(name="delegated", slug=f"d-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.ADMIN))
@@ -448,8 +467,11 @@ async def test_org_admin_read_scope_filters_and_uniform_404(db):
     platform_exp, admin = await _mk_running(db)
     svc = ExperimentService(db)
     org_exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="Org exp", domain="learning",
-        layer_key=platform_exp.layer_key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="Org exp",
+        domain="learning",
+        layer_key=platform_exp.layer_key,
+        owner_user_id=admin.id,
         scope_org_id=org.id,
     )
 
@@ -477,8 +499,10 @@ async def test_org_admin_read_scope_filters_and_uniform_404(db):
 
     # no org-admin role anywhere → 403, not an empty allow-list
     nobody = User(
-        email=f"nobody-{ULID()}@example.com", display_name="N",
-        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=f"nobody-{ULID()}@example.com",
+        display_name="N",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(nobody)
     await db.flush()
@@ -502,18 +526,24 @@ async def test_interaction_pair_cap_rotates_weekly(db):
         for i in range(120):
             db.add(
                 ExperimentAssignment(
-                    experiment_id=exp.id, unit_type="user", unit_id=f"r{i:024d}",
+                    experiment_id=exp.id,
+                    unit_type="user",
+                    unit_id=f"r{i:024d}",
                     variant_key="control" if i % 2 == 0 else "treatment",
-                    assigned_version=1, bucket=0, is_holdout=False,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
                 )
             )
     await db.flush()
     # fully-correlated shared rosters → every inspected pair alerts; which
     # experiments got events tells us which pair the week's window covered
     seen_pairs = set()
-    for week_day in (datetime(2026, 1, 5, tzinfo=UTC),   # ISO week 2
-                     datetime(2026, 1, 12, tzinfo=UTC),  # ISO week 3
-                     datetime(2026, 1, 19, tzinfo=UTC)):  # ISO week 4
+    for week_day in (
+        datetime(2026, 1, 5, tzinfo=UTC),  # ISO week 2
+        datetime(2026, 1, 12, tzinfo=UTC),  # ISO week 3
+        datetime(2026, 1, 19, tzinfo=UTC),
+    ):  # ISO week 4
         await sweep_experiment_interactions(db, cap_pairs=1, now=week_day)
         events = list(
             (
@@ -525,9 +555,7 @@ async def test_interaction_pair_cap_rotates_weekly(db):
                 )
             ).scalars()
         )
-        pair = frozenset(
-            (ev.experiment_id, ev.detail["with"]) for ev in events
-        )
+        pair = frozenset((ev.experiment_id, ev.detail["with"]) for ev in events)
         seen_pairs.add(pair)
         # reset for the next simulated week
         for ev in events:
@@ -604,8 +632,12 @@ async def test_org_admin_write_delegation_transition_and_ramp(db):
     svc = ExperimentService(db)
     layer_key = platform_exp.layer_key
     org_exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="Org-run", domain="learning",
-        layer_key=layer_key, owner_user_id=admin.id, scope_org_id=org.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="Org-run",
+        domain="learning",
+        layer_key=layer_key,
+        owner_user_id=admin.id,
+        scope_org_id=org.id,
     )
     await svc.create_version(org_exp.id, spec=_spec(), actor=org_admin)
 
@@ -644,24 +676,34 @@ async def test_holdout_group_org_scoped_applies_to_org_experiments(db):
     await db.flush()
     platform_exp, admin = await _mk_running(db)
     svc = ExperimentService(db)
-    layer2 = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer2 = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     org_exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="OrgScoped", domain="learning",
-        layer_key=layer2.key, owner_user_id=admin.id, scope_org_id=org.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="OrgScoped",
+        domain="learning",
+        layer_key=layer2.key,
+        owner_user_id=admin.id,
+        scope_org_id=org.id,
     )
     await svc.create_version(org_exp.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
-        layer_key=layer2.key, experiment_id=org_exp.id, slice_start=0, slice_end=9999,
+        layer_key=layer2.key,
+        experiment_id=org_exp.id,
+        slice_start=0,
+        slice_end=9999,
     )
     group = await HoldoutGroupService(db).create(
-        key=f"hg-{str(ULID()).lower()}", title="org hold", domain="learning",
-        holdout_bp=2000, scope_org_id=org.id,
+        key=f"hg-{str(ULID()).lower()}",
+        title="org hold",
+        domain="learning",
+        holdout_bp=2000,
+        scope_org_id=org.id,
     )
     member, _ = _member_and_nonmember(group.key, 2000)
     preview = await AssignmentService(db).compute(
-        experiment=org_exp, unit_type="user", unit_id=member,
+        experiment=org_exp,
+        unit_type="user",
+        unit_id=member,
         context={"org_id": org.id},
     )
     assert preview["eligible"] is False
@@ -720,9 +762,7 @@ async def test_holdout_key_reusable_after_release(db):
     # exclusion follows the ACTIVE group's band (200bp, not the released 100)
     member, _ = _member_and_nonmember(key, 200)
     exp, _admin = await _mk_running(db)
-    preview = await AssignmentService(db).compute(
-        experiment=exp, unit_type="user", unit_id=member
-    )
+    preview = await AssignmentService(db).compute(experiment=exp, unit_type="user", unit_id=member)
     assert preview["eligible"] is False
     assert preview["holdout_group"] == key
 
@@ -744,8 +784,12 @@ async def test_org_admin_delegation_covers_snapshots_and_analysis(db):
     assert e.value.status_code == 404
     layer2 = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     org_exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="OwnAnalysis", domain="learning",
-        layer_key=layer2.key, owner_user_id=admin.id, scope_org_id=org.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="OwnAnalysis",
+        domain="learning",
+        layer_key=layer2.key,
+        owner_user_id=admin.id,
+        scope_org_id=org.id,
     )
     assert (await svc.get_scoped(org_exp.id, scope.org_ids)).id == org_exp.id
 
@@ -758,8 +802,10 @@ async def test_platform_admin_dep_direct(db):
     admin = await _mk_admin(db)
     assert (await require_platform_admin(user=admin)) is admin
     student = User(
-        email=f"dep-{ULID()}@example.com", display_name="S",
-        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=f"dep-{ULID()}@example.com",
+        display_name="S",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(student)
     await db.flush()
@@ -775,14 +821,17 @@ async def test_list_experiments_filters_and_cursor_scope(db):
     next_cursor appears exactly when a full page returned."""
     from app.experiments.services.experiments import ExperimentService
 
-    exp1, admin = await _mk_running(db)                       # learning, running
+    exp1, admin = await _mk_running(db)  # learning, running
     svc = ExperimentService(db)
     ops_layer = await LayerService(db).create(
         key=f"lyr-{str(ULID()).lower()}", domain="operational"
     )
     draft = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="Draft", domain="operational",
-        layer_key=ops_layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="Draft",
+        domain="operational",
+        layer_key=ops_layer.key,
+        owner_user_id=admin.id,
     )
     rows, total, _ = await svc.list_experiments(status="running")
     assert all(r.status == "running" for r in rows)
@@ -824,17 +873,15 @@ async def test_holdout_group_excludes_switchback_enrollment_too(db):
         },
     )
     group = await HoldoutGroupService(db).create(
-        key=f"hg-{str(ULID()).lower()}", title="sb hold", domain="learning",
+        key=f"hg-{str(ULID()).lower()}",
+        title="sb hold",
+        domain="learning",
         holdout_bp=2000,
     )
     member, nonmember = _member_and_nonmember(group.key, 2000)
     svc = AssignmentService(db)
-    assert await svc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id=member
-    ) is None
-    served = await svc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id=nonmember
-    )
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=member) is None
+    served = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=nonmember)
     assert served is not None and served.variant_key in ("control", "treatment")
 
 
@@ -849,7 +896,9 @@ async def test_holdout_group_report_splits_and_compares(db):
     await MetricService(db).ensure_seed_definitions()
     svc = HoldoutGroupService(db)
     group = await svc.create(
-        key=f"hg-rep-{str(ULID()).lower()}", title="Report", domain="learning",
+        key=f"hg-rep-{str(ULID()).lower()}",
+        title="Report",
+        domain="learning",
         holdout_bp=2000,
     )
     # a known universe: users minted here, membership derived by the SAME roll
@@ -857,8 +906,12 @@ async def test_holdout_group_report_splits_and_compares(db):
 
     minted = []
     for i in range(40):
-        u = User(email=f"hrep-{i}-{ULID()}@example.com", display_name=f"H{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"hrep-{i}-{ULID()}@example.com",
+            display_name=f"H{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         minted.append(u)
     await db.flush()
@@ -868,8 +921,7 @@ async def test_holdout_group_report_splits_and_compares(db):
     assert report["sampled_units"] >= 40
     # the split is EXACTLY the membership roll, not an independent sample
     expected_held = sum(
-        1 for u in minted
-        if holdout_group_roll(group.key, "user", u.id) < group.holdout_bp
+        1 for u in minted if holdout_group_roll(group.key, "user", u.id) < group.holdout_bp
     )
     assert expected_held <= report["holdout_units"]
     assert set(report["arms"]) == {"holdout", "general"}
@@ -895,22 +947,22 @@ async def test_holdout_report_org_scoped_exact_values(db):
     from app.models.project import Project, Submission, SubmissionStatus
     from app.models.user import User, UserRole, UserStatus
 
-    tenant = TenantAccount(
-        name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}"
-    )
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(
-        name="report org", slug=f"rep-{str(ULID()).lower()}", tenant_id=tenant.id
-    )
+    org = Organization(name="report org", slug=f"rep-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
 
     key = f"hg-exact-{str(ULID()).lower()}"
     members: list[User] = []
     for i in range(30):
-        u = User(email=f"rep-{i}-{ULID()}@example.com", display_name=f"R{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"rep-{i}-{ULID()}@example.com",
+            display_name=f"R{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         members.append(u)
     await db.flush()
@@ -925,15 +977,17 @@ async def test_holdout_report_org_scoped_exact_values(db):
         # a roll in bp range with at least one STRICTLY smaller roll below it
         # (otherwise the held side is empty and the arms carry no numerator)
         values = sorted(rs.values())
-        return next(
-            (r for r in values if 1 <= r <= 2000 and values[0] < r), None
-        )
+        return next((r for r in values if 1 <= r <= 2000 and values[0] < r), None)
 
     boundary = _candidate(rolls)
     if boundary is None:  # rare key draw; widen deterministically
         extra = [
-            User(email=f"repx-{i}-{ULID()}@example.com", display_name="RX",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+            User(
+                email=f"repx-{i}-{ULID()}@example.com",
+                display_name="RX",
+                role=UserRole.STUDENT,
+                status=UserStatus.ACTIVE,
+            )
             for i in range(30)
         ]
         for u in extra:
@@ -950,7 +1004,10 @@ async def test_holdout_report_org_scoped_exact_values(db):
 
     svc = HoldoutGroupService(db)
     group = await svc.create(
-        key=key, title="Exact", domain="learning", holdout_bp=bp,
+        key=key,
+        title="Exact",
+        domain="learning",
+        holdout_bp=bp,
         scope_org_id=org.id,
     )
     held_ids = sorted(uid for uid, r in rolls.items() if r < bp)
@@ -958,8 +1015,11 @@ async def test_holdout_report_org_scoped_exact_values(db):
 
     # real data: approvals today for one unit on each side that exists
     project = Project(
-        org_id=org.id, title="RP", slug=f"rp-{str(ULID()).lower()}",
-        description="d", instructions="i",
+        org_id=org.id,
+        title="RP",
+        slug=f"rp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
         rubric=[{"criterion": "c", "max_score": 5}],
     )
     db.add(project)
@@ -967,10 +1027,24 @@ async def test_holdout_report_org_scoped_exact_values(db):
     expected = {"holdout": [0, 0], "general": [0, 0]}  # [numerator, denominator]
     for side, ids in (("holdout", held_ids), ("general", general_ids)):
         for uid in ids[:2]:
-            db.add(Submission(org_id=org.id, project_id=project.id, user_id=uid,
-                              status=SubmissionStatus.APPROVED, version=1))
-            db.add(Submission(org_id=org.id, project_id=project.id, user_id=uid,
-                              status=SubmissionStatus.REJECTED, version=1))
+            db.add(
+                Submission(
+                    org_id=org.id,
+                    project_id=project.id,
+                    user_id=uid,
+                    status=SubmissionStatus.APPROVED,
+                    version=1,
+                )
+            )
+            db.add(
+                Submission(
+                    org_id=org.id,
+                    project_id=project.id,
+                    user_id=uid,
+                    status=SubmissionStatus.REJECTED,
+                    version=1,
+                )
+            )
             expected[side][0] += 1
             expected[side][1] += 2
     await db.flush()
@@ -987,13 +1061,9 @@ async def test_holdout_report_org_scoped_exact_values(db):
     if expected["holdout"][1] and expected["general"][1]:
         assert report["comparison"] is not None
 
-    clamped_low = await svc.report(
-        group.id, metric_key="project_approval_rate", window_days=0
-    )
+    clamped_low = await svc.report(group.id, metric_key="project_approval_rate", window_days=0)
     assert clamped_low["window_days"] == 1
-    clamped_high = await svc.report(
-        group.id, metric_key="project_approval_rate", window_days=4000
-    )
+    clamped_high = await svc.report(group.id, metric_key="project_approval_rate", window_days=4000)
     assert clamped_high["window_days"] == 365
 
     with pytest.raises(AppError) as exc:
@@ -1017,14 +1087,10 @@ async def test_holdout_report_comparison_edges(db):
     from app.models.project import Project, Submission, SubmissionStatus
     from app.models.user import User, UserRole, UserStatus
 
-    tenant = TenantAccount(
-        name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}"
-    )
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(
-        name="edge org", slug=f"edge-{str(ULID()).lower()}", tenant_id=tenant.id
-    )
+    org = Organization(name="edge org", slug=f"edge-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     key = f"hg-edge-{str(ULID()).lower()}"
@@ -1034,8 +1100,12 @@ async def test_holdout_report_comparison_edges(db):
     for i in range(200):
         if len(held) >= 1 and len(general) >= 1:
             break
-        u = User(email=f"edge-{i}-{ULID()}@example.com", display_name="E",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"edge-{i}-{ULID()}@example.com",
+            display_name="E",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
@@ -1044,22 +1114,42 @@ async def test_holdout_report_comparison_edges(db):
     assert held and general
     svc = HoldoutGroupService(db)
     group = await svc.create(
-        key=key, title="Edge", domain="learning", holdout_bp=bp,
+        key=key,
+        title="Edge",
+        domain="learning",
+        holdout_bp=bp,
         scope_org_id=org.id,
     )
     project = Project(
-        org_id=org.id, title="EP", slug=f"ep-{str(ULID()).lower()}",
-        description="d", instructions="i",
+        org_id=org.id,
+        title="EP",
+        slug=f"ep-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
         rubric=[{"criterion": "c", "max_score": 5}],
     )
     db.add(project)
     await db.flush()
 
     # Case A: data ONLY on the general side -> binary comparison must be None
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=general[0],
-                      status=SubmissionStatus.APPROVED, version=2))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=general[0],
-                      status=SubmissionStatus.REJECTED, version=4))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=general[0],
+            status=SubmissionStatus.APPROVED,
+            version=2,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=general[0],
+            status=SubmissionStatus.REJECTED,
+            version=4,
+        )
+    )
     await db.flush()
     one_sided = await svc.report(group.id, metric_key="project_approval_rate")
     assert one_sided["arms"]["holdout"].get("denominator", 0) == 0
@@ -1067,10 +1157,24 @@ async def test_holdout_report_comparison_edges(db):
     assert one_sided["comparison"] is None
 
     # Case B: n EXACTLY 2 per side -> continuous comparison computes
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=held[0],
-                      status=SubmissionStatus.APPROVED, version=1))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=held[0],
-                      status=SubmissionStatus.REJECTED, version=3))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=held[0],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=held[0],
+            status=SubmissionStatus.REJECTED,
+            version=3,
+        )
+    )
     await db.flush()
     continuous = await svc.report(group.id, metric_key="revision_count")
     assert continuous["arms"]["holdout"]["n"] == 2
@@ -1091,7 +1195,10 @@ async def test_holdout_report_comparison_edges(db):
             break
         i += 1
     group2 = await svc.create(
-        key=key2, title="Inverse", domain="learning", holdout_bp=bp,
+        key=key2,
+        title="Inverse",
+        domain="learning",
+        holdout_bp=bp,
         scope_org_id=org.id,
     )
     # BOTH data-bearing users are held under group2 — the general side has
@@ -1111,8 +1218,11 @@ async def test_holdout_report_comparison_edges(db):
 
     t2e_key = f"t2e_{str(ULID()).lower()[:12]}"
     await MetricService(db).create_definition(
-        key=t2e_key, title="T2E probe", kind="time_to_event",
-        domain="learning", source_kind="service",
+        key=t2e_key,
+        title="T2E probe",
+        kind="time_to_event",
+        domain="learning",
+        source_kind="service",
         spec={"source": "projects", "measure": "revision_count"},
     )
     t2e = await svc.report(group.id, metric_key=t2e_key)
@@ -1137,18 +1247,27 @@ async def test_worker_cold_arms_necropsy(db, monkeypatch):
     )
 
     # (1) handler evaluates a breaching experiment -> breach log arm runs
-    exp, admin = await _mk_running(db, spec_overrides={
-        "metrics": {"primary": ["exposure_rate"],
-                    "guardrails": [{"metric_key": "exposure_rate", "op": "lte",
-                                    "threshold": 0.4, "window_hours": 24}]},
-    })
+    exp, admin = await _mk_running(
+        db,
+        spec_overrides={
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [
+                    {
+                        "metric_key": "exposure_rate",
+                        "op": "lte",
+                        "threshold": 0.4,
+                        "window_hours": 24,
+                    }
+                ],
+            },
+        },
+    )
     asvc = AssignmentService(db)
     for i in range(6):
-        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                               unit_id=f"wk-{i}")
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"wk-{i}")
         assert r is not None
-        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
-                                   unit_id=f"wk-{i}")
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"wk-{i}")
     await handle_evaluate_guardrails(db, {"experiment_id": exp.id})
     assert (await db.get(_Exp, exp.id)).status == "paused"
 
@@ -1158,24 +1277,23 @@ async def test_worker_cold_arms_necropsy(db, monkeypatch):
     )  # no crash, nothing to assert beyond survival — the arm logs and returns
 
     # (3) no cross-layer RUNNING pairs -> interaction sweep returns 0
-    await db.execute(
-        _update(_Exp).where(_Exp.status == "running").values(status="paused")
-    )
+    await db.execute(_update(_Exp).where(_Exp.status == "running").values(status="paused"))
     only, _ = await _mk_running(db)
     assert await sweep_experiment_interactions(db) == 0
 
     # (4) a single-variant table (1bp control) -> df < 1 -> skipped, 0 alerts
-    other, _ = await _mk_running(db, spec_overrides={
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 1, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 9999},
-        ],
-    })
+    other, _ = await _mk_running(
+        db,
+        spec_overrides={
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 1, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 9999},
+            ],
+        },
+    )
     for i in range(30):
-        await asvc.resolve(experiment_key=only.key, unit_type="user",
-                           unit_id=f"ia-{i}")
-        await asvc.resolve(experiment_key=other.key, unit_type="user",
-                           unit_id=f"ia-{i}")
+        await asvc.resolve(experiment_key=only.key, unit_type="user", unit_id=f"ia-{i}")
+        await asvc.resolve(experiment_key=other.key, unit_type="user", unit_id=f"ia-{i}")
     # (5) notify except arm: exploding notifications never block the sweep
     from app.services.notification import NotificationService
 
@@ -1190,9 +1308,7 @@ async def test_worker_cold_arms_necropsy(db, monkeypatch):
     stale, _ = await _mk_running(db)
     stale_row = await db.get(_Exp, stale.id)
     stale_row.started_at = datetime.now(UTC) - timedelta(days=99)
-    await db.execute(
-        _update(_Exp).where(_Exp.id == stale.id).values(current_version=77)
-    )
+    await db.execute(_update(_Exp).where(_Exp.id == stale.id).values(current_version=77))
     closed = await sweep_experiment_closures(db)
     assert isinstance(closed, int)
     assert (await db.get(_Exp, stale.id)).status == "running"  # skipped

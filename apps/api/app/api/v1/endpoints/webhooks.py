@@ -190,9 +190,7 @@ async def rotate_webhook_secret(
     leaked-secret path (old key stops signing now)."""
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
     svc = WebhookService(db)
-    sub = await svc.rotate_secret(
-        webhook_id, org_id, actor_user_id=user.id, immediate=immediate
-    )
+    sub = await svc.rotate_secret(webhook_id, org_id, actor_user_id=user.id, immediate=immediate)
     await db.commit()
     return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
 
@@ -253,8 +251,7 @@ async def test_webhook(
             "error": None,
         }
     except EgressBlockedError as exc:
-        result = {"delivered": False, "status_code": None, "latency_ms": None,
-                  "error": exc.message}
+        result = {"delivered": False, "status_code": None, "latency_ms": None, "error": exc.message}
     except Exception as exc:  # connection refused / timeout — a result, not a 500
         result = {
             "delivered": False,

@@ -58,11 +58,11 @@ def _catalog_payload(models: list[dict]) -> bytes:
     return json.dumps({"models": models}).encode()
 
 
-def _fetcher_for(body: bytes, status: int = 200, etag: str | None = "W/\"abc\""):
+def _fetcher_for(body: bytes, status: int = 200, etag: str | None = 'W/"abc"'):
     async def fetch(url, *, etag=None, last_modified=None, timeout, max_bytes):
         if status == 304:
             return FetchResult(304, b"")
-        return FetchResult(200, body, etag="W/\"abc\"", last_modified="Mon, 01 Sep 2026")
+        return FetchResult(200, body, etag='W/"abc"', last_modified="Mon, 01 Sep 2026")
 
     return fetch
 
@@ -209,12 +209,26 @@ async def test_observation_parser_provenance_stamped(db):
 async def test_price_and_license_changes_are_typed(db):
     source = await _mk_source(db)
     v1 = _catalog_payload(
-        [{"id": "m-c", "name": "C", "version": "1", "license": "research",
-          "pricing": [{"unit": "image", "price": 0.02, "currency": "USD"}]}]
+        [
+            {
+                "id": "m-c",
+                "name": "C",
+                "version": "1",
+                "license": "research",
+                "pricing": [{"unit": "image", "price": 0.02, "currency": "USD"}],
+            }
+        ]
     )
     v2 = _catalog_payload(
-        [{"id": "m-c", "name": "C", "version": "1", "license": "commercial",
-          "pricing": [{"unit": "image", "price": 0.05, "currency": "USD"}]}]
+        [
+            {
+                "id": "m-c",
+                "name": "C",
+                "version": "1",
+                "license": "commercial",
+                "pricing": [{"unit": "image", "price": 0.05, "currency": "USD"}],
+            }
+        ]
     )
     await SyncService(db, fetcher=_fetcher_for(v1)).run_sync(source.id)
     run2 = await SyncService(db, fetcher=_fetcher_for(v2)).run_sync(source.id)
@@ -235,11 +249,14 @@ async def test_price_and_license_changes_are_typed(db):
 
 
 async def test_security_advisory_creates_critical_change(db):
-    source = await _mk_source(db, source_type="manual_analyst", adapter_key="manual",
-                              base_url=None)
+    source = await _mk_source(db, source_type="manual_analyst", adapter_key="manual", base_url=None)
     payload = json.dumps(
-        {"event_type": "security_advisory", "entity_kind": "node_package",
-         "external_ref": "org/nodes", "normalized": {"advisory": "GHSA-1"}}
+        {
+            "event_type": "security_advisory",
+            "entity_kind": "node_package",
+            "external_ref": "org/nodes",
+            "normalized": {"advisory": "GHSA-1"},
+        }
     ).encode()
     run = await SyncService(db).run_sync(source.id, raw_payload=payload)
     assert run.changes_detected == 1
@@ -266,12 +283,21 @@ async def test_official_id_alias_auto_merges(db):
     model = AIModel(canonical_name="Gen3", slug=f"gen3-{str(ULID()).lower()}")
     db.add(model)
     await db.flush()
-    db.add(EntityAlias(entity_kind="model", entity_id=model.id,
-                       alias="gen-3-official", alias_type="official_id"))
+    db.add(
+        EntityAlias(
+            entity_kind="model",
+            entity_id=model.id,
+            alias="gen-3-official",
+            alias_type="official_id",
+        )
+    )
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref="gen-3-official", raw_hash="h" * 64,
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref="gen-3-official",
+        raw_hash="h" * 64,
         normalized={"official_id": "gen-3-official", "name": "Gen3"},
     )
     db.add(obs)
@@ -287,8 +313,11 @@ async def test_similarity_match_requires_human_confirmation(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref="imagegen-ultra-x", raw_hash="i" * 64,
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref="imagegen-ultra-x",
+        raw_hash="i" * 64,
         normalized={"name": "ImageGen Ultra X"},
     )
     db.add(obs)
@@ -299,9 +328,7 @@ async def test_similarity_match_requires_human_confirmation(db):
     assert obs.canonical_entity_id is None
     # Human confirms
     admin = await _mk_user(db, "admin")
-    confirmed, entity_id = await ResolutionService(db).confirm(
-        candidate.id, actor_id=admin.id
-    )
+    confirmed, entity_id = await ResolutionService(db).confirm(candidate.id, actor_id=admin.id)
     assert confirmed.status == "confirmed"
     assert obs.canonical_entity_id == entity_id
 
@@ -309,10 +336,12 @@ async def test_similarity_match_requires_human_confirmation(db):
 async def test_resolution_creates_new_entity_when_no_match(db):
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model_version",
-        external_ref="brand-new-model-1.0", raw_hash="n" * 64,
-        normalized={"name": "Brand New Model", "version": "1.0",
-                    "api_identifier": "bnm-1-0"},
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model_version",
+        external_ref="brand-new-model-1.0",
+        raw_hash="n" * 64,
+        normalized={"name": "Brand New Model", "version": "1.0", "api_identifier": "bnm-1-0"},
     )
     db.add(obs)
     await db.flush()
@@ -325,8 +354,11 @@ async def test_resolution_creates_new_entity_when_no_match(db):
     assert version.lifecycle_status == "discovered"
     # Aliases registered so the NEXT observation auto-merges
     obs2 = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model_version",
-        external_ref="brand-new-model-1.0", raw_hash="n2" + "n" * 62,
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model_version",
+        external_ref="brand-new-model-1.0",
+        raw_hash="n2" + "n" * 62,
         normalized={"name": "Brand New Model", "version": "1.0"},
     )
     db.add(obs2)
@@ -342,11 +374,17 @@ async def test_source_conflicts_surfaced_not_merged(db):
     db.add(model)
     await db.flush()
     for src, license_val, h in ((s1, "commercial", "a"), (s2, "research-only", "b")):
-        db.add(EcosystemObservation(
-            source_id=src.id, event_type="catalog_snapshot", entity_kind="model",
-            canonical_entity_kind="model", canonical_entity_id=model.id,
-            raw_hash=h * 64, normalized={"license": license_val},
-        ))
+        db.add(
+            EcosystemObservation(
+                source_id=src.id,
+                event_type="catalog_snapshot",
+                entity_kind="model",
+                canonical_entity_kind="model",
+                canonical_entity_id=model.id,
+                raw_hash=h * 64,
+                normalized={"license": license_val},
+            )
+        )
     await db.flush()
     conflicts = await CatalogService(db).conflicting_observations("model", model.id)
     fields = {c["field"] for c in conflicts}
@@ -368,9 +406,7 @@ async def test_lifecycle_valid_and_invalid_transitions(db):
     assert exc.value.code == "ECO_INVALID_TRANSITION"
     with pytest.raises(AppError):  # deprecation needs a reason
         await svc.transition("model", model.id, to_status="deprecated")
-    await svc.transition(
-        "model", model.id, to_status="deprecated", reason="official_sunset"
-    )
+    await svc.transition("model", model.id, to_status="deprecated", reason="official_sunset")
     history = await svc.history("model", model.id)
     assert [t.to_status for t in history] == ["under_review", "verified", "deprecated"]
 
@@ -398,24 +434,34 @@ async def test_evidence_upgrade_ok_downgrade_blocked(db):
     await db.flush()
     svc = CapabilityMappingService(db)
     mapping = await svc.upsert(
-        entity_kind="model", entity_id=model.id, capability_key="image_generation",
+        entity_kind="model",
+        entity_id=model.id,
+        capability_key="image_generation",
         evidence_level="vendor_claimed",
     )
     mapping = await svc.upsert(
-        entity_kind="model", entity_id=model.id, capability_key="image_generation",
+        entity_kind="model",
+        entity_id=model.id,
+        capability_key="image_generation",
         evidence_level="benchmark_verified",
     )
     assert mapping.evidence_level == "benchmark_verified"
     with pytest.raises(AppError) as exc:
         await svc.upsert(
-            entity_kind="model", entity_id=model.id, capability_key="image_generation",
+            entity_kind="model",
+            entity_id=model.id,
+            capability_key="image_generation",
             evidence_level="vendor_claimed",
         )
     assert exc.value.code == "ECO_EVIDENCE_DOWNGRADE"
     # force + admin allows the downgrade
     mapping = await svc.upsert(
-        entity_kind="model", entity_id=model.id, capability_key="image_generation",
-        evidence_level="vendor_claimed", force=True, actor_is_admin=True,
+        entity_kind="model",
+        entity_id=model.id,
+        capability_key="image_generation",
+        evidence_level="vendor_claimed",
+        force=True,
+        actor_is_admin=True,
     )
     assert mapping.evidence_level == "vendor_claimed"
 
@@ -429,8 +475,11 @@ async def test_pricing_approval_mints_cost_rate_never_auto(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="price_changed", entity_kind="model",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
+        source_id=source.id,
+        event_type="price_changed",
+        entity_kind="model",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
         raw_hash="p" * 64,
         normalized={"pricing": [{"unit": "image", "price": 0.03, "currency": "USD"}]},
     )
@@ -446,8 +495,11 @@ async def test_pricing_approval_mints_cost_rate_never_auto(db):
     with pytest.raises(AppError):  # approve requires provider_key
         await svc.reconcile(row.id, decision="approve", actor_id=admin.id)
     row = await svc.reconcile(
-        row.id, decision="approve", actor_id=admin.id,
-        provider_key="mock", model_or_service="priced-model",
+        row.id,
+        decision="approve",
+        actor_id=admin.id,
+        provider_key="mock",
+        model_or_service="priced-model",
     )
     assert row.reconciliation_status == "approved"
     from app.controlplane.models.pricing import ProviderCostRate
@@ -463,7 +515,9 @@ async def test_pricing_approval_mints_cost_rate_never_auto(db):
 async def test_pricing_requires_resolved_entity(db):
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="price_changed", entity_kind="model",
+        source_id=source.id,
+        event_type="price_changed",
+        entity_kind="model",
         raw_hash="q" * 64,
         normalized={"pricing": [{"unit": "image", "price": 0.03}]},
     )
@@ -480,8 +534,13 @@ async def test_pricing_requires_resolved_entity(db):
 def test_aggregate_metrics_pure():
     rows = [
         {"succeeded": True, "retries": 0, "latency_ms": 100, "cost_usd": 0.1},
-        {"succeeded": False, "retries": 2, "latency_ms": 900, "cost_usd": 0.2,
-         "error_code": "provider_500"},
+        {
+            "succeeded": False,
+            "retries": 2,
+            "latency_ms": 900,
+            "cost_usd": 0.2,
+            "error_code": "provider_500",
+        },
     ]
     m = aggregate_metrics(rows)
     assert m["success_rate"] == 0.5
@@ -496,25 +555,34 @@ async def test_cross_tenant_snapshot_requires_thresholds(db):
     rows = [{"org_id": "o1", "succeeded": True, "retries": 0}] * 5
     with pytest.raises(AppError) as exc:
         await svc.write_snapshot(
-            entity_kind="provider_offering", entity_id="X" * 26,
-            window_start=now - timedelta(days=1), window_end=now,
-            rows=rows, org_id=None,
+            entity_kind="provider_offering",
+            entity_id="X" * 26,
+            window_start=now - timedelta(days=1),
+            window_end=now,
+            rows=rows,
+            org_id=None,
         )
     assert exc.value.code == "ECO_TELEMETRY_THRESHOLD"
     # 20 samples from only 2 orgs — still blocked
     rows = [{"org_id": f"o{i % 2}", "succeeded": True} for i in range(20)]
     with pytest.raises(AppError):
         await svc.write_snapshot(
-            entity_kind="provider_offering", entity_id="X" * 26,
-            window_start=now - timedelta(days=1), window_end=now,
-            rows=rows, org_id=None,
+            entity_kind="provider_offering",
+            entity_id="X" * 26,
+            window_start=now - timedelta(days=1),
+            window_end=now,
+            rows=rows,
+            org_id=None,
         )
     # 21 samples from 3 orgs — allowed
     rows = [{"org_id": f"o{i % 3}", "succeeded": True} for i in range(21)]
     snap = await svc.write_snapshot(
-        entity_kind="provider_offering", entity_id="X" * 26,
-        window_start=now - timedelta(days=1), window_end=now,
-        rows=rows, org_id=None,
+        entity_kind="provider_offering",
+        entity_id="X" * 26,
+        window_start=now - timedelta(days=1),
+        window_end=now,
+        rows=rows,
+        org_id=None,
     )
     assert snap.sample_size == 21 and snap.org_id is None
 
@@ -530,27 +598,42 @@ async def test_impact_bfs_transitive_and_cycle_safe(db):
     graph = GraphService(db)
     ids = {k: str(ULID()) for k in "abcd"}
     # workflow_pack a -> model root; skill_pack b -> a; learning_path c -> b
-    await graph.add_edge(from_kind="workflow_pack", from_id=ids["a"],
-                         to_kind="model", to_id=model.id,
-                         constraint_type="requires_model_version")
-    await graph.add_edge(from_kind="skill_pack", from_id=ids["b"],
-                         to_kind="workflow_pack", to_id=ids["a"])
-    await graph.add_edge(from_kind="learning_path", from_id=ids["c"],
-                         to_kind="skill_pack", to_id=ids["b"])
+    await graph.add_edge(
+        from_kind="workflow_pack",
+        from_id=ids["a"],
+        to_kind="model",
+        to_id=model.id,
+        constraint_type="requires_model_version",
+    )
+    await graph.add_edge(
+        from_kind="skill_pack", from_id=ids["b"], to_kind="workflow_pack", to_id=ids["a"]
+    )
+    await graph.add_edge(
+        from_kind="learning_path", from_id=ids["c"], to_kind="skill_pack", to_id=ids["b"]
+    )
     # cycle: a depends on c's artifact somehow — must not loop
-    await graph.add_edge(from_kind="workflow_pack", from_id=ids["a"],
-                         to_kind="learning_path", to_id=ids["c"])
+    await graph.add_edge(
+        from_kind="workflow_pack", from_id=ids["a"], to_kind="learning_path", to_id=ids["c"]
+    )
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_deprecated", entity_kind="model",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash="r" * 64, normalized={"sunset_at": "2026-12-31T00:00:00Z"},
+        source_id=source.id,
+        event_type="model_deprecated",
+        entity_kind="model",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash="r" * 64,
+        normalized={"sunset_at": "2026-12-31T00:00:00Z"},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="lifecycle", field="sunset_at",
-        new_value={"sunset_at": "2026-12-31T00:00:00Z"}, severity="sunset_risk",
-        entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="lifecycle",
+        field="sunset_at",
+        new_value={"sunset_at": "2026-12-31T00:00:00Z"},
+        severity="sunset_risk",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.flush()
@@ -573,8 +656,12 @@ async def test_private_edges_isolated_by_org(db):
     graph = GraphService(db)
     node = str(ULID())
     edge = await graph.add_edge(
-        from_kind="workflow_pack", from_id=str(ULID()), to_kind="capability",
-        to_id=node, constraint_type="requires_capability", org_id=org.id,
+        from_kind="workflow_pack",
+        from_id=str(ULID()),
+        to_kind="capability",
+        to_id=node,
+        constraint_type="requires_capability",
+        org_id=org.id,
     )
     visible = await graph.edges_for_node("capability", node, org_id=org.id)
     assert len(visible["dependents"]) == 1
@@ -590,8 +677,12 @@ async def test_private_edges_isolated_by_org(db):
 async def _mk_suite_with_cases(db, admin, n_cases=2) -> BenchmarkSuite:
     svc = BenchmarkService(db)
     suite = await svc.create_suite(
-        key=f"suite-{str(ULID()).lower()}", name="Hero Suite", family="ecommerce_hero",
-        capability_key="image_generation", budget_usd_cap=5.0, repeat_count=2,
+        key=f"suite-{str(ULID()).lower()}",
+        name="Hero Suite",
+        family="ecommerce_hero",
+        capability_key="image_generation",
+        budget_usd_cap=5.0,
+        repeat_count=2,
         created_by=admin.id,
     )
     for i in range(n_cases):
@@ -605,7 +696,8 @@ async def test_benchmark_run_dimensions_and_budget(db):
     suite = await _mk_suite_with_cases(db, admin)
     svc = BenchmarkService(db)
     run = await svc.create_run(
-        suite.id, target={"entity_kind": "model_version", "entity_id": "M" * 26},
+        suite.id,
+        target={"entity_kind": "model_version", "entity_id": "M" * 26},
         triggered_by=admin.id,
     )
     run = await svc.execute_run(run.id)
@@ -618,8 +710,10 @@ async def test_benchmark_run_dimensions_and_budget(db):
     assert float(run.total_cost_usd) > 0
     # Budget abort
     tiny = await svc.create_run(
-        suite.id, target={"entity_kind": "model_version", "entity_id": "M" * 26},
-        budget_usd_cap=0.005, triggered_by=admin.id,
+        suite.id,
+        target={"entity_kind": "model_version", "entity_id": "M" * 26},
+        budget_usd_cap=0.005,
+        triggered_by=admin.id,
     )
     tiny = await svc.execute_run(tiny.id)
     assert tiny.status == "failed"
@@ -634,9 +728,15 @@ async def test_provider_failure_captured_not_fatal(db):
         async def execute_case(self, run, case, repeat):
             if repeat == 0:
                 raise RuntimeError("provider 500")
-            return {"output_assets": [], "latency_ms": 100, "usage": {},
-                    "cost_usd": 0.01, "automated_scores": {}, "failed": False,
-                    "retries": 1}
+            return {
+                "output_assets": [],
+                "latency_ms": 100,
+                "usage": {},
+                "cost_usd": 0.01,
+                "automated_scores": {},
+                "failed": False,
+                "retries": 1,
+            }
 
     svc = BenchmarkService(db, executor=FailingExecutor())
     run = await svc.create_run(
@@ -662,8 +762,10 @@ async def test_blind_review_hides_identity_until_all_submit(db):
         runs.append(await bench.execute_run(run.id))
     blind = BlindReviewService(db)
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id],
+        created_by=admin.id,
     )
     # Assignments never expose run identity
     assignments = await blind.assignments_for(batch.id, r1.id)
@@ -682,8 +784,9 @@ async def test_blind_review_hides_identity_until_all_submit(db):
     # All submit → reveal allowed and human dims fold into run scores
     for reviewer in (r1, r2):
         for a in await blind.assignments_for(batch.id, reviewer.id):
-            await blind.submit(a["review_id"], reviewer_id=reviewer.id,
-                               scores={"quality": 4, "brief_adherence": 5})
+            await blind.submit(
+                a["review_id"], reviewer_id=reviewer.id, scores={"quality": 4, "brief_adherence": 5}
+            )
     revealed = await blind.reveal(batch.id)
     assert {r["alias_label"] for r in revealed["runs"]} == {"Model A", "Model B"}
     run = await bench.get_run(runs[0].id)
@@ -715,27 +818,41 @@ async def test_review_score_bounds(db):
 # ── Part J: replacement ─────────────────────────────────────────────
 
 
-async def _mk_model_version(db, name, *, commercial=True, lifecycle="verified",
-                            model=None, caps=("image_generation",),
-                            io=None) -> ModelVersion:
+async def _mk_model_version(
+    db,
+    name,
+    *,
+    commercial=True,
+    lifecycle="verified",
+    model=None,
+    caps=("image_generation",),
+    io=None,
+) -> ModelVersion:
     if model is None:
         model = AIModel(canonical_name=name, slug=f"{name.lower()}-{str(ULID()).lower()}")
         db.add(model)
         await db.flush()
     version = ModelVersion(
-        model_id=model.id, version="1.0", canonical_name=f"{name} 1.0",
-        lifecycle_status=lifecycle, commercial_use_allowed=commercial,
+        model_id=model.id,
+        version="1.0",
+        canonical_name=f"{name} 1.0",
+        lifecycle_status=lifecycle,
+        commercial_use_allowed=commercial,
     )
     db.add(version)
     await db.flush()
     await _mk_capability_tag(db)
     for cap in caps:
         await _mk_capability_tag(db, cap)
-        db.add(CapabilityMapping(
-            entity_kind="model_version", entity_id=version.id, capability_key=cap,
-            evidence_level="benchmark_verified",
-            io_spec=io or {"inputs": [{"type": "text"}], "outputs": [{"type": "image"}]},
-        ))
+        db.add(
+            CapabilityMapping(
+                entity_kind="model_version",
+                entity_id=version.id,
+                capability_key=cap,
+                evidence_level="benchmark_verified",
+                io_spec=io or {"inputs": [{"type": "text"}], "outputs": [{"type": "image"}]},
+            )
+        )
     await db.flush()
     return version
 
@@ -745,7 +862,8 @@ async def test_replacement_hard_incompatible_separated(db):
     good = await _mk_model_version(db, "NewGen")
     # Bad candidate: missing output type => IO mismatch
     bad = await _mk_model_version(
-        db, "BadGen",
+        db,
+        "BadGen",
         io={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
     )
     blocked = await _mk_model_version(db, "BlockedGen", lifecycle="blocked")
@@ -761,10 +879,18 @@ async def test_replacement_hard_incompatible_separated(db):
     # Explanation + breakdown present, weights normalized
     top = ranked[0]
     assert top.score_breakdown and top.explanation
-    assert abs(sum(top.score_breakdown[k] * w for k, w in
-                   __import__("app.ecosystem.models.replacement",
-                              fromlist=["DEFAULT_REPLACEMENT_WEIGHTS"]
-                              ).DEFAULT_REPLACEMENT_WEIGHTS.items()) - float(top.score)) < 0.01
+    assert (
+        abs(
+            sum(
+                top.score_breakdown[k] * w
+                for k, w in __import__(
+                    "app.ecosystem.models.replacement", fromlist=["DEFAULT_REPLACEMENT_WEIGHTS"]
+                ).DEFAULT_REPLACEMENT_WEIGHTS.items()
+            )
+            - float(top.score)
+        )
+        < 0.01
+    )
     # Approving a hard-incompatible candidate is refused
     admin = await _mk_user(db, "admin")
     bad_candidate = next(c for c in incompatible if c.candidate_id == bad.id)
@@ -780,12 +906,14 @@ async def test_replacement_weight_validation(db):
     svc = ReplacementService(db)
     with pytest.raises(AppError):
         await svc.generate_candidates(
-            deprecated_kind="model_version", deprecated_id=deprecated.id,
+            deprecated_kind="model_version",
+            deprecated_id=deprecated.id,
             weights={"bogus": 1.0},
         )
     with pytest.raises(AppError):
         await svc.generate_candidates(
-            deprecated_kind="model_version", deprecated_id=deprecated.id,
+            deprecated_kind="model_version",
+            deprecated_id=deprecated.id,
             weights={"cost": float("nan")},
         )
 
@@ -798,7 +926,8 @@ async def test_draft_cannot_skip_to_published(db):
     approver = await _mk_user(db, "admin")  # §17 four-eyes: approver ≠ creator
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="skill_pack_update", title="Update",
+        draft_type="skill_pack_update",
+        title="Update",
         payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
         created_by=admin.id,
     )
@@ -819,7 +948,9 @@ async def test_invalid_draft_cannot_publish(db):
     approver = await _mk_user(db, "admin")  # §17 four-eyes
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="workflow_pack", title="Broken", payload={"definition": {}},
+        draft_type="workflow_pack",
+        title="Broken",
+        payload={"definition": {}},
         created_by=admin.id,
     )
     assert draft.validation["valid"] is False
@@ -834,9 +965,11 @@ async def test_org_scoped_draft_uniform_404(db):
     org = await _mk_org(db)
     admin = await _mk_user(db, "admin")
     draft = await DraftService(db).create(
-        draft_type="skill_pack_update", title="Private",
+        draft_type="skill_pack_update",
+        title="Private",
         payload={"target_pack_id": "P" * 26, "suggestions": [{}]},
-        org_id=org.id, created_by=admin.id,
+        org_id=org.id,
+        created_by=admin.id,
     )
     with pytest.raises(AppError) as exc:
         await DraftService(db).get(draft.id, org_id="Z" * 26)
@@ -856,10 +989,8 @@ async def test_rollout_state_machine_and_promote_gate(db):
     candidate = ranked[0]
     svc = RolloutService(db)
     with pytest.raises(AppError):  # non-benchmark scope needs scope_ref
-        await svc.create(replacement_candidate_id=candidate.id,
-                         scope_type="selected_cohort")
-    plan = await svc.create(replacement_candidate_id=candidate.id,
-                            scope_type="benchmark_only")
+        await svc.create(replacement_candidate_id=candidate.id, scope_type="selected_cohort")
+    plan = await svc.create(replacement_candidate_id=candidate.id, scope_type="benchmark_only")
     with pytest.raises(AppError) as exc:  # cannot promote before evaluation
         await svc.decide(plan.id, decision="promote", actor_id=admin.id)
     assert exc.value.code == "ECO_ROLLOUT_NOT_EVALUATED"
@@ -873,10 +1004,12 @@ async def test_rollout_state_machine_and_promote_gate(db):
 
     from app.ecosystem.models.replacement import ReplacementEdge
 
-    edge = await db.scalar(select(ReplacementEdge).where(
-        ReplacementEdge.from_id == deprecated.id,
-        ReplacementEdge.edge_type == "recommended_replacement",
-    ))
+    edge = await db.scalar(
+        select(ReplacementEdge).where(
+            ReplacementEdge.from_id == deprecated.id,
+            ReplacementEdge.edge_type == "recommended_replacement",
+        )
+    )
     assert edge is not None
     # Terminal states are frozen
     with pytest.raises(AppError):
@@ -886,7 +1019,8 @@ async def test_rollout_state_machine_and_promote_gate(db):
 async def test_rollout_refuses_hard_incompatible_candidate(db):
     deprecated = await _mk_model_version(db, "HIOld")
     await _mk_model_version(
-        db, "HIBad",
+        db,
+        "HIBad",
         io={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
     )
     _, incompatible = await ReplacementService(db).generate_candidates(
@@ -906,17 +1040,15 @@ async def test_watchlist_ownership_uniform_404(db):
     owner, other = await _mk_user(db), await _mk_user(db)
     svc = WatchlistService(db)
     watchlist = await svc.create(owner_id=owner.id, name="My watches")
-    await svc.add_item(watchlist.id, owner.id, target_kind="provider",
-                       target_id="P" * 26)
+    await svc.add_item(watchlist.id, owner.id, target_kind="provider", target_id="P" * 26)
     with pytest.raises(AppError) as exc:
         await svc.list_items(watchlist.id, other.id)
     assert exc.value.status_code == 404
     # Duplicate add is a no-op returning the same row
-    a = await svc.add_item(watchlist.id, owner.id, target_kind="provider",
-                           target_id="P" * 26)
-    b = await svc.add_item(watchlist.id, owner.id, target_kind="provider",
-                           target_id="P" * 26)
+    a = await svc.add_item(watchlist.id, owner.id, target_kind="provider", target_id="P" * 26)
+    b = await svc.add_item(watchlist.id, owner.id, target_kind="provider", target_id="P" * 26)
     assert a.id == b.id
+
 
 async def test_retired_entities_never_recommended(db):
     deprecated = await _mk_model_version(db, "RetOld")
@@ -929,6 +1061,7 @@ async def test_retired_entities_never_recommended(db):
     assert good.id in {c.candidate_id for c in ranked}
     # Retired is history — appears in NEITHER channel
     assert retired.id not in all_ids
+
 
 async def test_merge_repoints_change_history_and_pending_resolutions(db):
     from app.ecosystem.models.catalog import ResolutionCandidate
@@ -943,25 +1076,38 @@ async def test_merge_repoints_change_history_and_pending_resolutions(db):
     await db.flush()
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed",
-        canonical_entity_kind="model", canonical_entity_id=dup.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="pricing_changed",
+        canonical_entity_kind="model",
+        canonical_entity_id=dup.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="price", field="pricing",
-        severity="info", entity_kind="model", canonical_entity_id=dup.id,
+        observation_id=obs.id,
+        change_type="price",
+        field="pricing",
+        severity="info",
+        entity_kind="model",
+        canonical_entity_id=dup.id,
     )
     pending = ResolutionCandidate(
-        observation_id=obs.id, entity_kind="model",
-        candidate_entity_id=dup.id, match_method="similarity",
-        confidence=0.5, status="pending",
+        observation_id=obs.id,
+        entity_kind="model",
+        candidate_entity_id=dup.id,
+        match_method="similarity",
+        confidence=0.5,
+        status="pending",
     )
     decided = ResolutionCandidate(
-        observation_id=obs.id, entity_kind="model",
-        candidate_entity_id=dup.id, match_method="similarity",
-        confidence=0.5, status="confirmed",
+        observation_id=obs.id,
+        entity_kind="model",
+        candidate_entity_id=dup.id,
+        match_method="similarity",
+        confidence=0.5,
+        status="confirmed",
     )
     db.add_all([change, pending, decided])
     await db.flush()
@@ -993,6 +1139,7 @@ async def test_rollout_refuses_stale_retired_candidate(db):
         )
     assert exc.value.code == "ECO_INVALID_TRANSITION"
 
+
 async def test_rollout_min_samples_guardrail_blocks_promote(db):
     """Mutation-audit killer: with min_samples above the collected sample
     count, promote must refuse with ECO_ROLLOUT_INSUFFICIENT_SAMPLES."""
@@ -1004,7 +1151,8 @@ async def test_rollout_min_samples_guardrail_blocks_promote(db):
     )
     svc = RolloutService(db)
     plan = await svc.create(
-        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only",
+        replacement_candidate_id=ranked[0].id,
+        scope_type="benchmark_only",
         guardrails={"min_samples": 999, "thresholds": {}},
     )
     await svc.start(plan.id)
@@ -1012,6 +1160,7 @@ async def test_rollout_min_samples_guardrail_blocks_promote(db):
     with pytest.raises(AppError) as exc:
         await svc.decide(plan.id, decision="promote", actor_id=admin.id)
     assert exc.value.code == "ECO_ROLLOUT_INSUFFICIENT_SAMPLES"
+
 
 def test_auto_merge_policy_constants_are_pinned():
     """Mutation-audit pin: the auto-merge safety posture is a CONTRACT.
@@ -1040,8 +1189,11 @@ async def test_identical_name_similarity_still_needs_human(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref=name.lower(), raw_hash=(str(ULID()).lower() * 3)[:64],
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref=name.lower(),
+        raw_hash=(str(ULID()).lower() * 3)[:64],
         normalized={"name": name},
     )
     db.add(obs)
@@ -1052,6 +1204,7 @@ async def test_identical_name_similarity_still_needs_human(db):
     assert obs.canonical_entity_id is None
     assert float(candidate.confidence) >= 0.9  # it DID clear the floor
 
+
 async def test_resolution_confidence_values_are_exact(db):
     """Mutation-audit killer: recorded confidences are calibrated constants —
     alias hits are exactly 0.95 and a no-match candidate is exactly 0.0
@@ -1061,12 +1214,18 @@ async def test_resolution_confidence_values_are_exact(db):
     model = AIModel(canonical_name=f"AliasCal-{tag}", slug=f"ac-{tag}")
     db.add(model)
     await db.flush()
-    db.add(EntityAlias(entity_kind="model", entity_id=model.id,
-                       alias=f"Alias Cal {tag}", alias_type="name"))
+    db.add(
+        EntityAlias(
+            entity_kind="model", entity_id=model.id, alias=f"Alias Cal {tag}", alias_type="name"
+        )
+    )
     await db.flush()
     obs_alias = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref=f"zz-ext-{tag}", raw_hash=(str(ULID()).lower() * 3)[:64],
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref=f"zz-ext-{tag}",
+        raw_hash=(str(ULID()).lower() * 3)[:64],
         normalized={"name": f"Alias Cal {tag}"},
     )
     db.add(obs_alias)
@@ -1080,8 +1239,11 @@ async def test_resolution_confidence_values_are_exact(db):
     assert cand_alias.status == "auto_merged"
 
     obs_none = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref=f"zz-nomatch-{tag}", raw_hash=(str(ULID()).lower() * 3)[:64],
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref=f"zz-nomatch-{tag}",
+        raw_hash=(str(ULID()).lower() * 3)[:64],
         normalized={"name": f"Zz Totally Unrelated {tag}"},
     )
     db.add(obs_none)
@@ -1089,6 +1251,7 @@ async def test_resolution_confidence_values_are_exact(db):
     cand_none = await propose_resolution(db, obs_none)
     assert cand_none.candidate_entity_id is None
     assert float(cand_none.confidence) == 0.0
+
 
 async def test_review_submit_ownership_and_immutability(db):
     """Mutation-audit killers: (a) reviewer A cannot submit reviewer B's
@@ -1106,8 +1269,10 @@ async def test_review_submit_ownership_and_immutability(db):
         runs.append(await bench.execute_run(run.id))
     blind = BlindReviewService(db)
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id],
+        created_by=admin.id,
     )
     a1 = (await blind.assignments_for(batch.id, r1.id))[0]
 
@@ -1123,6 +1288,7 @@ async def test_review_submit_ownership_and_immutability(db):
         await blind.submit(a1["review_id"], reviewer_id=r1.id, scores={"quality": 1})
     assert exc.value.code == "ECO_INVALID_TRANSITION"
 
+
 async def test_capability_evidence_gates_and_curation_hygiene(db):
     """Mutation-audit killers ×3: (a) force WITHOUT admin cannot downgrade
     evidence; (b) an unknown evidence level is a 422, never a KeyError-500;
@@ -1135,69 +1301,85 @@ async def test_capability_evidence_gates_and_curation_hygiene(db):
     svc = CapabilityMappingService(db)
     await _mk_capability_tag(db, "video_generation")
     await svc.upsert(
-        entity_kind="model_version", entity_id=version.id,
-        capability_key="video_generation", evidence_level="benchmark_verified",
+        entity_kind="model_version",
+        entity_id=version.id,
+        capability_key="video_generation",
+        evidence_level="benchmark_verified",
         io_spec={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
         actor_id=admin.id,
     )
     # (a) downgrade with force but WITHOUT admin → refused
     with pytest.raises(AppError):
         await svc.upsert(
-            entity_kind="model_version", entity_id=version.id,
-            capability_key="video_generation", evidence_level="vendor_claimed",
+            entity_kind="model_version",
+            entity_id=version.id,
+            capability_key="video_generation",
+            evidence_level="vendor_claimed",
             io_spec={"inputs": [{"type": "text"}], "outputs": [{"type": "video"}]},
-            actor_id=admin.id, force=True, actor_is_admin=False,
+            actor_id=admin.id,
+            force=True,
+            actor_is_admin=False,
         )
     # (b) unknown evidence level → clean 422
     with pytest.raises(AppError) as exc:
         await svc.upsert(
-            entity_kind="model_version", entity_id=version.id,
-            capability_key="video_generation", evidence_level="totally_made_up",
-            io_spec={}, actor_id=admin.id,
+            entity_kind="model_version",
+            entity_id=version.id,
+            capability_key="video_generation",
+            evidence_level="totally_made_up",
+            io_spec={},
+            actor_id=admin.id,
         )
     assert exc.value.code == "VALIDATION_ERROR"
     # (c) curated value with a NUL byte is stored sanitized
     curated = await CatalogService(db).resolve_conflict(
-        "model_version", version.id, field="license",
-        chosen_value="MIT\x00 injected", actor_id=admin.id,
+        "model_version",
+        version.id,
+        field="license",
+        chosen_value="MIT\x00 injected",
+        actor_id=admin.id,
     )
     assert "\x00" not in curated["value"]  # NUL screened before JSONB
+
 
 async def test_hard_compatibility_gate_covers_all_axes(db):
     """Mutation-audit killers ×4: missing capability, input-direction,
     non-commercial license and the license score direction are each hard
     gates — none may silently pass."""
     deprecated = await _mk_model_version(
-        db, "AxesOld",
+        db,
+        "AxesOld",
         caps=("image_generation", "video_generation"),
-        io={"inputs": [{"type": "text"}, {"type": "image"}],
-            "outputs": [{"type": "image"}]},
+        io={"inputs": [{"type": "text"}, {"type": "image"}], "outputs": [{"type": "image"}]},
     )
     # Missing one required capability
     lacks_cap = await _mk_model_version(
-        db, "AxesNoCap", caps=("image_generation",),
-        io={"inputs": [{"type": "text"}, {"type": "image"}],
-            "outputs": [{"type": "image"}]},
+        db,
+        "AxesNoCap",
+        caps=("image_generation",),
+        io={"inputs": [{"type": "text"}, {"type": "image"}], "outputs": [{"type": "image"}]},
     )
     # Same capabilities but can't accept the image input
     lacks_input = await _mk_model_version(
-        db, "AxesNoImgIn",
+        db,
+        "AxesNoImgIn",
         caps=("image_generation", "video_generation"),
         io={"inputs": [{"type": "text"}], "outputs": [{"type": "image"}]},
     )
     # Non-commercial license
     non_commercial = await _mk_model_version(
-        db, "AxesNoncom", commercial=False,
+        db,
+        "AxesNoncom",
+        commercial=False,
         caps=("image_generation", "video_generation"),
-        io={"inputs": [{"type": "text"}, {"type": "image"}],
-            "outputs": [{"type": "image"}]},
+        io={"inputs": [{"type": "text"}, {"type": "image"}], "outputs": [{"type": "image"}]},
     )
     # Fully compatible control
     good = await _mk_model_version(
-        db, "AxesGood",
+        db,
+        "AxesGood",
         caps=("image_generation", "video_generation"),
-        io={"inputs": [{"type": "text"}, {"type": "image"}],
-            "outputs": [{"type": "image"}]},
+        io={"inputs": [{"type": "text"}, {"type": "image"}], "outputs": [{"type": "image"}]},
     )
 
     ranked, incompatible = await ReplacementService(db).generate_candidates(
@@ -1219,6 +1401,7 @@ async def test_hard_compatibility_gate_covers_all_axes(db):
     assert good_row.score_breakdown["license"] == 1.0
     assert bad[non_commercial.id].score_breakdown["license"] == 0.0
 
+
 async def test_signals_expose_only_approved_verified_evidence(db):
     """Mutation-audit killers ×4: the matching/workforce signal surface is a
     DATA CONTRACT — only verified/recommended entities with evidence >=
@@ -1230,40 +1413,51 @@ async def test_signals_expose_only_approved_verified_evidence(db):
     approved = await _mk_model_version(db, "SigOK", caps=())
     unapproved = await _mk_model_version(db, "SigNew", lifecycle="discovered", caps=())
     weak_evidence = await _mk_model_version(db, "SigWeak", caps=())
-    db.add_all([
-        CapabilityMapping(
-            entity_kind="model_version", entity_id=approved.id,
-            capability_key="signal_gen", evidence_level="benchmark_verified",
-            io_spec={},
-        ),
-        CapabilityMapping(
-            entity_kind="model_version", entity_id=unapproved.id,
-            capability_key="signal_gen", evidence_level="benchmark_verified",
-            io_spec={},
-        ),
-        CapabilityMapping(
-            entity_kind="model_version", entity_id=weak_evidence.id,
-            capability_key="signal_gen", evidence_level="vendor_claimed",
-            io_spec={},
-        ),
-    ])
+    db.add_all(
+        [
+            CapabilityMapping(
+                entity_kind="model_version",
+                entity_id=approved.id,
+                capability_key="signal_gen",
+                evidence_level="benchmark_verified",
+                io_spec={},
+            ),
+            CapabilityMapping(
+                entity_kind="model_version",
+                entity_id=unapproved.id,
+                capability_key="signal_gen",
+                evidence_level="benchmark_verified",
+                io_spec={},
+            ),
+            CapabilityMapping(
+                entity_kind="model_version",
+                entity_id=weak_evidence.id,
+                capability_key="signal_gen",
+                evidence_level="vendor_claimed",
+                io_spec={},
+            ),
+        ]
+    )
     await db.flush()
 
     svc = SignalsService(db)
     rows = await svc.matching_signals(capability_key="signal_gen")
     ids = {r["entity_id"] for r in rows}
     assert approved.id in ids
-    assert unapproved.id not in ids       # lifecycle gate
-    assert weak_evidence.id not in ids    # evidence floor
+    assert unapproved.id not in ids  # lifecycle gate
+    assert weak_evidence.id not in ids  # evidence floor
 
-    badges = await svc.registry_badges(entity_refs=[
-        ("model_version", approved.id),
-        ("model_version", weak_evidence.id),
-    ])
+    badges = await svc.registry_badges(
+        entity_refs=[
+            ("model_version", approved.id),
+            ("model_version", weak_evidence.id),
+        ]
+    )
     assert "benchmark_verified" in badges[f"model_version:{approved.id}"]
     assert "benchmark_verified" not in badges.get(
         f"model_version:{weak_evidence.id}", []
     )  # vendor claims never badge
+
 
 async def test_sync_release_edges_from_manifest_definition(db):
     """Regression + mutation killers ×4: sync-release reads the definition
@@ -1283,9 +1477,11 @@ async def test_sync_release_edges_from_manifest_definition(db):
 
     org = await _mk_org(db)
     pack = WorkflowPack(
-        owner_org_id=org.id, name="EdgePack",
+        owner_org_id=org.id,
+        name="EdgePack",
         slug=f"edgepack-{str(ULID()).lower()}",
-        status=PackStatus.DRAFT, visibility=PackVisibility.PRIVATE,
+        status=PackStatus.DRAFT,
+        visibility=PackVisibility.PRIVATE,
     )
     db.add(pack)
     await db.flush()
@@ -1293,15 +1489,19 @@ async def test_sync_release_edges_from_manifest_definition(db):
         "schema_version": 1,
         "version": "1.0.0",
         "name": "EdgePack",
-        "definition": {"steps": [
-            {"id": "s1", "capability": "image_generation"},
-            {"id": "s2", "capability": "image_generation"},  # duplicate → one edge
-            {"id": "s3", "capability": 123},                  # non-string → skipped
-            {"id": "s4", "capability": "video_generation"},
-        ]},
+        "definition": {
+            "steps": [
+                {"id": "s1", "capability": "image_generation"},
+                {"id": "s2", "capability": "image_generation"},  # duplicate → one edge
+                {"id": "s3", "capability": 123},  # non-string → skipped
+                {"id": "s4", "capability": "video_generation"},
+            ]
+        },
     }
     release = WorkflowPackRelease(
-        pack_id=pack.id, version="1.0.0", manifest=manifest,
+        pack_id=pack.id,
+        version="1.0.0",
+        manifest=manifest,
         checksum=hashlib.sha256(_json.dumps(manifest, sort_keys=True).encode()).hexdigest(),
         step_count=4,
     )
@@ -1310,16 +1510,18 @@ async def test_sync_release_edges_from_manifest_definition(db):
 
     created = await GraphService(db).sync_release_edges(release.id)
     assert created == 2  # dedup + non-string skip
-    edges = list(await db.scalars(
-        _select(DependencyEdge).where(DependencyEdge.from_id == release.id)
-    ))
+    edges = list(
+        await db.scalars(_select(DependencyEdge).where(DependencyEdge.from_id == release.id))
+    )
     assert len(edges) == 2
     for edge in edges:
         assert edge.from_kind == "workflow_pack_release"
         assert edge.constraint_type == "requires_capability"
     assert {e.constraint_spec["capability_key"] for e in edges} == {
-        "image_generation", "video_generation",
+        "image_generation",
+        "video_generation",
     }
+
 
 async def test_search_wildcards_are_literal(db):
     """Round-83 killer: LIKE wildcards in user search text are LITERAL —
@@ -1351,6 +1553,7 @@ def test_escape_like_helper():
     assert escape_like("50%_off") == "50\\%\\_off"
     assert escape_like("a\\b") == "a\\\\b"
 
+
 def test_normalize_name_bounds_and_strictness():
     """Round-84 killers: the resolution key is BOUNDED (300 chars — an
     unbounded key defeats the alias index) and STRICT (non-strings are None,
@@ -1358,10 +1561,11 @@ def test_normalize_name_bounds_and_strictness():
     from app.ecosystem.services.resolution import normalize_name
 
     assert normalize_name("A" * 1000) == "a" * 300  # capped, casefolded
-    assert normalize_name(12345) is None            # never coerced
+    assert normalize_name(12345) is None  # never coerced
     assert normalize_name({"name": "x"}) is None
     assert normalize_name(None) is None
     assert normalize_name("GPT-Image 2") == normalize_name("gpt_image_2")
+
 
 async def test_source_update_guards(db):
     """Round-86 killers ×3: updating base_url re-runs the SSRF validator
@@ -1410,8 +1614,10 @@ async def test_conflicts_need_two_values_and_use_latest_per_source(db):
 
     def obs(source, license_val, days_ago):
         return EcosystemObservation(
-            source_id=source.id, event_type="catalog_snapshot",
-            canonical_entity_kind="model", canonical_entity_id=model.id,
+            source_id=source.id,
+            event_type="catalog_snapshot",
+            canonical_entity_kind="model",
+            canonical_entity_id=model.id,
             raw_hash=(str(ULID()).lower() * 3)[:64],
             normalized={"license": license_val},
             observed_at=datetime.now(UTC) - timedelta(days=days_ago),
@@ -1425,6 +1631,7 @@ async def test_conflicts_need_two_values_and_use_latest_per_source(db):
     # Latest-per-source: both sources NOW say MIT → agreement, no conflict
     assert licenses == []
 
+
 async def test_price_extraction_bounds(db):
     """Round-87 killers ×4: extraction drops negative prices, absurd prices
     (>1e9), unknown units — and caps currency to 3 chars — while keeping the
@@ -1437,15 +1644,19 @@ async def test_price_extraction_bounds(db):
     await db.flush()
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
+        source_id=source.id,
+        event_type="pricing_changed",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
         raw_hash=(str(ULID()).lower() * 3)[:64],
-        normalized={"pricing": [
-            {"unit": "image", "price": -5},              # negative → dropped
-            {"unit": "image", "price": 2e9},             # absurd → dropped
-            {"unit": "gpu_hour", "price": 1.0},          # unknown unit → dropped
-            {"unit": "image", "price": 0.04, "currency": "dollars"},  # kept, capped
-        ]},
+        normalized={
+            "pricing": [
+                {"unit": "image", "price": -5},  # negative → dropped
+                {"unit": "image", "price": 2e9},  # absurd → dropped
+                {"unit": "gpu_hour", "price": 1.0},  # unknown unit → dropped
+                {"unit": "image", "price": 0.04, "currency": "dollars"},  # kept, capped
+            ]
+        },
     )
     db.add(obs)
     await db.flush()
@@ -1453,6 +1664,7 @@ async def test_price_extraction_bounds(db):
     assert len(rows) == 1
     assert float(rows[0].price) == 0.04
     assert rows[0].currency == "DOL"  # capped to 3 chars, uppercased
+
 
 async def test_rollout_decide_note_sanitized_and_terminal_states_frozen(db):
     """Round-89 killers: the operator note is screened (NUL would 500 at the
@@ -1464,9 +1676,7 @@ async def test_rollout_decide_note_sanitized_and_terminal_states_frozen(db):
         deprecated_kind="model_version", deprecated_id=deprecated.id
     )
     svc = RolloutService(db)
-    plan = await svc.create(
-        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only"
-    )
+    plan = await svc.create(replacement_candidate_id=ranked[0].id, scope_type="benchmark_only")
     await svc.start(plan.id)
     await svc.evaluate(plan.id)
     plan = await svc.decide(
@@ -1478,6 +1688,7 @@ async def test_rollout_decide_note_sanitized_and_terminal_states_frozen(db):
     # Terminal: even abort is refused
     with pytest.raises(AppError):
         await svc.decide(plan.id, decision="abort", actor_id=admin.id)
+
 
 async def test_review_comment_is_screened(db):
     """Round-90 killer: reviewer comments are sanitized — NUL bytes must not
@@ -1494,17 +1705,22 @@ async def test_review_comment_is_screened(db):
         runs.append(await bench.execute_run(run.id))
     blind = BlindReviewService(db)
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id],
+        created_by=admin.id,
     )
     a1 = (await blind.assignments_for(batch.id, r1.id))[0]
     review = await blind.submit(
-        a1["review_id"], reviewer_id=r1.id,
-        scores={"quality": 4}, comment="good\x00but\x02odd",
+        a1["review_id"],
+        reviewer_id=r1.id,
+        scores={"quality": 4},
+        comment="good\x00but\x02odd",
     )
     assert "\x00" not in (review.comment or "")
     assert "\x02" not in (review.comment or "")
     assert "good" in (review.comment or "")
+
 
 async def test_catalog_update_screens_and_bounds_inputs(db):
     """Round-91 killers: PATCHed catalog fields are screened (NUL) and
@@ -1517,7 +1733,8 @@ async def test_catalog_update_screens_and_bounds_inputs(db):
     db.add(model)
     await db.flush()
     entity = await CatalogService(db).update(
-        "model", model.id,
+        "model",
+        model.id,
         {
             "canonical_name": "Clean\x00Name",
             "aliases": [f"a{i}\x00x" for i in range(80)],
@@ -1529,6 +1746,7 @@ async def test_catalog_update_screens_and_bounds_inputs(db):
     assert all("\x00" not in a for a in entity.aliases)
     assert len(entity.external_ids) <= 50
     assert all("\x00" not in (v or "") for v in entity.external_ids.values())
+
 
 async def test_suite_update_is_symmetric_with_create(db):
     """Round-93 killers: PATCHing a suite screens text and re-checks numeric
@@ -1545,6 +1763,7 @@ async def test_suite_update_is_symmetric_with_create(db):
     with pytest.raises(AppError):
         await svc.update_suite(suite.id, {"status": "published"})
 
+
 async def test_add_case_screens_and_bounds(db):
     """Round-94 killers: case name/prompt are screened (NUL) and weight is
     bounded — the suite-IMPORT path relies on these service-level guards."""
@@ -1560,6 +1779,7 @@ async def test_add_case_screens_and_bounds(db):
     with pytest.raises(AppError):
         await svc.add_case(suite.id, name="\x00", prompt="ok")
 
+
 async def test_io_spec_size_bounded(db):
     """Round-96 killer: a single capability mapping cannot store an unbounded
     io_spec blob (20k JSON cap, depth guard behind the admin-only API)."""
@@ -1570,10 +1790,12 @@ async def test_io_spec_size_bounded(db):
     svc = CapabilityMappingService(db)
     with pytest.raises(AppError):
         await svc.upsert(
-            entity_kind="model_version", entity_id=version.id,
+            entity_kind="model_version",
+            entity_id=version.id,
             capability_key="audio_generation",
             io_spec={"blob": "x" * 30_000},
         )
+
 
 async def test_watch_item_dedupe_uses_screened_ref(db):
     """Round-97 killer: adding the same target_ref with control-char noise must
@@ -1584,15 +1806,14 @@ async def test_watch_item_dedupe_uses_screened_ref(db):
     user = await _mk_user(db)
     svc = WatchlistService(db)
     wl = await svc.create(owner_id=user.id, name="DedupeWL")
-    first = await svc.add_item(
-        wl.id, user.id, target_kind="github_repo", target_ref="vendor/model"
-    )
+    first = await svc.add_item(wl.id, user.id, target_kind="github_repo", target_ref="vendor/model")
     second = await svc.add_item(
         wl.id, user.id, target_kind="github_repo", target_ref="vendor/model\x00"
     )
     assert second.id == first.id
     items = await svc.list_items(wl.id, user.id)
     assert len(items) == 1
+
 
 async def test_constraint_spec_size_bounded(db):
     """Round-103 killer: a dependency edge cannot store an unbounded
@@ -1603,10 +1824,13 @@ async def test_constraint_spec_size_bounded(db):
     v2 = await _mk_model_version(db, "EdgeB")
     with pytest.raises(AppError):
         await GraphService(db).add_edge(
-            from_kind="model_version", from_id=v1.id,
-            to_kind="model_version", to_id=v2.id,
+            from_kind="model_version",
+            from_id=v1.id,
+            to_kind="model_version",
+            to_id=v2.id,
             constraint_spec={"blob": "x" * 30_000},
         )
+
 
 async def test_jsonb_depth_guards_round104(db):
     """Round-104 killers ×2: benchmark seed_settings and source config are
@@ -1633,6 +1857,7 @@ async def test_jsonb_depth_guards_round104(db):
             config={"blob": "x" * 30_000},
         )
 
+
 async def test_draft_payload_size_bounded(db):
     """Round-105 killer: a generation draft cannot store an unbounded payload
     (100k serialized cap — payloads embed workflow definitions)."""
@@ -1646,6 +1871,7 @@ async def test_draft_payload_size_bounded(db):
             payload={"suggestions": ["x" * 120_000]},
             created_by=user.id,
         )
+
 
 async def test_concurrent_confirm_decides_once(db):
     """Round-132 killer: two admins racing to confirm the same NEW-entity
@@ -1663,16 +1889,20 @@ async def test_concurrent_confirm_decides_once(db):
     source = await _mk_source(db)
     tag = str(ULID()).lower()[:8]
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released",
+        source_id=source.id,
+        event_type="model_released",
         raw_hash=(str(ULID()).lower() * 3)[:64],
         normalized={"name": f"RaceConfirm-{tag}"},
     )
     db.add(obs)
     await db.flush()
     candidate = ResolutionCandidate(
-        observation_id=obs.id, entity_kind="model",
-        candidate_entity_id=None, match_method="none",
-        confidence=0.0, status="pending",
+        observation_id=obs.id,
+        entity_kind="model",
+        candidate_entity_id=None,
+        match_method="none",
+        confidence=0.0,
+        status="pending",
         proposed_payload={"name": f"RaceConfirm-{tag}"},
     )
     db.add(candidate)
@@ -1682,9 +1912,7 @@ async def test_concurrent_confirm_decides_once(db):
     async def confirm():
         async with AsyncSessionLocal() as session:
             try:
-                _, entity_id = await ResolutionService(session).confirm(
-                    cand_id, actor_id=actor
-                )
+                _, entity_id = await ResolutionService(session).confirm(cand_id, actor_id=actor)
                 await session.commit()
                 return ("ok", entity_id)
             except AppError as exc:
@@ -1695,18 +1923,21 @@ async def test_concurrent_confirm_decides_once(db):
         results = await asyncio.gather(confirm(), confirm())
         codes = sorted(r[0] for r in results)
         assert codes == ["ECO_INVALID_TRANSITION", "ok"], results
-        entities = list(await db.scalars(
-            select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}")
-        ))
+        entities = list(
+            await db.scalars(select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}"))
+        )
         assert len(entities) == 1, "double confirm minted two canonical entities"
     finally:
         async with AsyncSessionLocal() as session:
-            rows = list(await session.scalars(
-                select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}")
-            ))
+            rows = list(
+                await session.scalars(
+                    select(AIModel).where(AIModel.canonical_name == f"RaceConfirm-{tag}")
+                )
+            )
             for r in rows:
                 r.lifecycle_status = "retired"
             await session.commit()
+
 
 async def test_scorecard_check_semantics(db):
     """Round-141 killers ×2: a deprecated entity FAILS the lifecycle check
@@ -1721,11 +1952,16 @@ async def test_scorecard_check_semantics(db):
     db.add(model)
     await db.flush()
     source = await _mk_source(db)
-    db.add(EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
-    ))
+    db.add(
+        EcosystemObservation(
+            source_id=source.id,
+            event_type="catalog_snapshot",
+            canonical_entity_kind="model",
+            canonical_entity_id=model.id,
+            raw_hash=(str(ULID()).lower() * 3)[:64],
+            normalized={},
+        )
+    )
     await db.flush()
     card = await CatalogService(db).scorecard("model", model.id)
     by_key = {c["check"]: c["status"] for c in card["checks"]}
@@ -1747,20 +1983,28 @@ async def test_estimate_never_sums_across_currencies(db):
         ("image", "EUR", "0.05"),
     ):
         obs = EcosystemObservation(
-            source_id=source.id, event_type="pricing_changed",
+            source_id=source.id,
+            event_type="pricing_changed",
             raw_hash=(str(ULID()).lower() * 3)[:64],
             normalized={"unit": unit, "price": price},
         )
         db.add(obs)
         await db.flush()
-        db.add(PriceObservation(
-            observation_id=obs.id, entity_kind="model_version", entity_id=version.id,
-            unit=unit, price=price, currency=currency,
-            reconciliation_status="unreviewed",
-        ))
+        db.add(
+            PriceObservation(
+                observation_id=obs.id,
+                entity_kind="model_version",
+                entity_id=version.id,
+                unit=unit,
+                price=price,
+                currency=currency,
+                reconciliation_status="unreviewed",
+            )
+        )
     await db.flush()
     out = await PricingService(db).estimate(
-        entity_kind="model_version", entity_ids=[version.id],
+        entity_kind="model_version",
+        entity_ids=[version.id],
         workload={"token_input": 1000, "image": 2},
     )
     row = out[0]
@@ -1768,6 +2012,7 @@ async def test_estimate_never_sums_across_currencies(db):
     assert row["estimated_total"] is None
     assert row["currency"] is None
     assert len(row["breakdown"]) == 2  # both lines still itemized
+
 
 async def test_concurrent_internal_source_get_or_create(db):
     """Round-146 killer: two sessions concurrently triggering the internal
@@ -1798,11 +2043,13 @@ async def test_concurrent_internal_source_get_or_create(db):
         )
         assert results == ["ok", "ok"]
         async with AsyncSessionLocal() as session:
-            rows = list(await session.scalars(
-                select(EcosystemSource).where(
-                    EcosystemSource.name == "internal:availability-probes"
+            rows = list(
+                await session.scalars(
+                    select(EcosystemSource).where(
+                        EcosystemSource.name == "internal:availability-probes"
+                    )
                 )
-            ))
+            )
             assert len(rows) == 1
     finally:
         # self-clean: the committed fixture version must not stay an ACTIVE
@@ -1815,6 +2062,7 @@ async def test_concurrent_internal_source_get_or_create(db):
                 if parent:
                     parent.lifecycle_status = "retired"
             await session.commit()
+
 
 async def test_suite_case_count_is_bounded(db, monkeypatch):
     """Round-171 killer: a suite cannot grow beyond 500 cases — every case
@@ -1831,6 +2079,7 @@ async def test_suite_case_count_is_bounded(db, monkeypatch):
         await svc.add_case(suite.id, name="one too many", prompt="p")
     assert "500" in str(exc.value)
 
+
 async def test_watchlist_count_is_bounded(db, monkeypatch):
     """Round-172 killer: a user cannot create more than 100 watchlists."""
     from app.ecosystem.services.watchlists import WatchlistService
@@ -1846,6 +2095,7 @@ async def test_watchlist_count_is_bounded(db, monkeypatch):
         await svc.create(owner_id=user.id, name="one too many")
     assert "100" in str(exc.value)
 
+
 async def test_org_watchlist_manageable_by_org_admin_not_outsiders(db):
     """Round-185 killers ×3: an org-attached watchlist is manageable by its
     creator AND the org's admin (a departed creator must not lock the org
@@ -1858,12 +2108,19 @@ async def test_org_watchlist_manageable_by_org_admin_not_outsiders(db):
     plain_member = await _mk_user(db)
     outsider = await _mk_user(db)
     org = await _mk_org(db)
-    db.add_all([
-        OrgMember(org_id=org.id, user_id=org_admin.id,
-                  role=OrgRole.ADMIN, status=MemberStatus.ACTIVE),
-        OrgMember(org_id=org.id, user_id=plain_member.id,
-                  role=OrgRole.STUDENT, status=MemberStatus.ACTIVE),
-    ])
+    db.add_all(
+        [
+            OrgMember(
+                org_id=org.id, user_id=org_admin.id, role=OrgRole.ADMIN, status=MemberStatus.ACTIVE
+            ),
+            OrgMember(
+                org_id=org.id,
+                user_id=plain_member.id,
+                role=OrgRole.STUDENT,
+                status=MemberStatus.ACTIVE,
+            ),
+        ]
+    )
     await db.flush()
     svc = WatchlistService(db)
     wl = await svc.create(owner_id=creator.id, name="OrgManaged", org_id=org.id)
@@ -1884,6 +2141,7 @@ async def test_org_watchlist_manageable_by_org_admin_not_outsiders(db):
     with pytest.raises(AppError):
         await svc.get_owned(personal.id, org_admin.id)
 
+
 async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
     """Round-186 killer: an org watchlist is a shared radar — a plain org
     member (not the creator) sees its matching changes in their pull feed;
@@ -1895,8 +2153,11 @@ async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
     member = await _mk_user(db)
     outsider = await _mk_user(db)
     org = await _mk_org(db)
-    db.add(OrgMember(org_id=org.id, user_id=member.id,
-                     role=OrgRole.STUDENT, status=MemberStatus.ACTIVE))
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=member.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
     await db.flush()
 
     tag = str(ULID()).lower()[:6]
@@ -1909,16 +2170,24 @@ async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
 
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="license", field="license",
-        old_value={"value": "MIT"}, new_value={"value": "BUSL"},
-        severity="breaking", entity_kind="model", canonical_entity_id=model.id,
+        observation_id=obs.id,
+        change_type="license",
+        field="license",
+        old_value={"value": "MIT"},
+        new_value={"value": "BUSL"},
+        severity="breaking",
+        entity_kind="model",
+        canonical_entity_id=model.id,
     )
     db.add(change)
     await db.flush()
@@ -1930,13 +2199,17 @@ async def test_org_members_see_org_watchlist_changes_in_pull_feed(db):
     # R187: an ARCHIVED (departed) member loses the org feed too — and org
     # management (the _is_org_admin path checks the same status)
     archived = await _mk_user(db)
-    db.add(OrgMember(org_id=org.id, user_id=archived.id,
-                     role=OrgRole.ADMIN, status=MemberStatus.ARCHIVED))
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=archived.id, role=OrgRole.ADMIN, status=MemberStatus.ARCHIVED
+        )
+    )
     await db.flush()
     archived_feed = [c.id for c in await svc.matching_changes(archived.id)]
     assert change.id not in archived_feed
     with pytest.raises(AppError):
         await svc.get_owned(wl.id, archived.id)
+
 
 async def test_uptime_slo_semantics(db):
     """Round-214 killers ×4: the §11.3 uptime number is honest —
@@ -1951,19 +2224,23 @@ async def test_uptime_slo_semantics(db):
     version = await _mk_model_version(db, "SloSem")
     base = datetime.now(UTC) - timedelta(hours=5)
     seq = [
-        ("operational", 0),   # 1h up
-        ("unknown", 1),       # 1h excluded
-        ("degraded", 2),      # 1h down (+1 incident: op→degraded via unknown?
-                              #   prev=unknown → not a good→bad transition)
-        ("unreachable", 3),   # 1h down (bad→bad: NOT a new incident)
-        ("operational", 4),   # up until now (~1h)
+        ("operational", 0),  # 1h up
+        ("unknown", 1),  # 1h excluded
+        ("degraded", 2),  # 1h down (+1 incident: op→degraded via unknown?
+        #   prev=unknown → not a good→bad transition)
+        ("unreachable", 3),  # 1h down (bad→bad: NOT a new incident)
+        ("operational", 4),  # up until now (~1h)
     ]
     for status, offset in seq:
-        db.add(AvailabilityRecord(
-            entity_kind="model_version", entity_id=version.id,
-            record_type="status", value={"status": status},
-            observed_at=base + timedelta(hours=offset),
-        ))
+        db.add(
+            AvailabilityRecord(
+                entity_kind="model_version",
+                entity_id=version.id,
+                record_type="status",
+                value={"status": status},
+                observed_at=base + timedelta(hours=offset),
+            )
+        )
     await db.flush()
 
     out = await AvailabilityService(db).uptime(
@@ -1977,6 +2254,7 @@ async def test_uptime_slo_semantics(db):
     # after good start still counts once at most
     assert out["incidents"] <= 1, out["incidents"]
     assert out["current_status"] == "operational"
+
 
 async def test_curated_facts_reach_compare_and_entity_responses(db):
     """Round-220 killer: a conflict arbitration (curated fact) must be visible
@@ -1994,8 +2272,12 @@ async def test_curated_facts_reach_compare_and_entity_responses(db):
     await db.flush()
     svc = CatalogService(db)
     await svc.resolve_conflict(
-        "model", a.id, field="license", chosen_value="MIT",
-        winning_source_id=None, actor_id=admin.id,
+        "model",
+        a.id,
+        field="license",
+        chosen_value="MIT",
+        winning_source_id=None,
+        actor_id=admin.id,
     )
 
     # single-entity response carries the curated fact
@@ -2036,8 +2318,10 @@ async def test_last_two_submits_racing_still_complete_the_batch(db):
         runs.append(await bench.execute_run(run.id))
     blind = BlindReviewService(db)
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id],
+        created_by=admin.id,
     )
     # deterministic review rows straight from the DB (assignments_for has
     # no stable order): submit each reviewer's first serially, keep the
@@ -2058,8 +2342,7 @@ async def test_last_two_submits_racing_still_complete_the_batch(db):
         )
         assert len(rows) >= 2
         for row in rows[:-1]:
-            await blind.submit(row.id, reviewer_id=reviewer.id,
-                               scores={"quality": 3})
+            await blind.submit(row.id, reviewer_id=reviewer.id, scores={"quality": 3})
         last[reviewer.id] = rows[-1].id
     await db.commit()
     batch_id = batch.id
@@ -2080,9 +2363,7 @@ async def test_last_two_submits_racing_still_complete_the_batch(db):
             from sqlalchemy import select as _sel
 
             rows = (
-                await s.scalars(
-                    _sel(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id)
-                )
+                await s.scalars(_sel(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id))
             ).all()
             debug = [(r.id[-6:], r.submitted_at is not None) for r in rows]
             fresh = await s.get(ReviewBatch, batch_id)
@@ -2091,9 +2372,7 @@ async def test_last_two_submits_racing_still_complete_the_batch(db):
         async with AsyncSessionLocal() as s:
             from sqlalchemy import delete as _delete
 
-            await s.execute(
-                _delete(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id)
-            )
+            await s.execute(_delete(BenchmarkReview).where(BenchmarkReview.batch_id == batch_id))
             b = await s.get(ReviewBatch, batch_id)
             if b:
                 await s.delete(b)
@@ -2112,8 +2391,9 @@ async def test_capability_mapping_lists_are_stably_ordered(db):
     from app.ecosystem.services.capability_mapping import CapabilityMappingService
 
     admin = await _mk_user(db, "admin")
-    model = AIModel(canonical_name=f"MapOrd-{str(ULID()).lower()[:6]}",
-                    slug=f"mo-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"MapOrd-{str(ULID()).lower()[:6]}", slug=f"mo-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     svc = CapabilityMappingService(db)
@@ -2122,8 +2402,11 @@ async def test_capability_mapping_lists_are_stably_ordered(db):
         await _mk_capability_tag(db, key)
     for key in ("video_generation", "audio_generation", "image_generation"):
         await svc.upsert(
-            entity_kind="model", entity_id=model.id, capability_key=key,
-            evidence_level="vendor_claimed", actor_id=admin.id,
+            entity_kind="model",
+            entity_id=model.id,
+            capability_key=key,
+            evidence_level="vendor_claimed",
+            actor_id=admin.id,
         )
     first = [m.capability_key for m in await svc.list_for_entity("model", model.id)]
     second = [m.capability_key for m in await svc.list_for_entity("model", model.id)]
@@ -2150,21 +2433,27 @@ async def test_create_batch_rejects_ghost_and_duplicate_reviewers(db):
 
     with pytest.raises(AppError) as exc:
         await blind.create_batch(
-            suite_id=suite.id, run_ids=[r.id for r in runs],
-            reviewer_ids=[r1.id, "0" * 26], created_by=admin.id,
+            suite_id=suite.id,
+            run_ids=[r.id for r in runs],
+            reviewer_ids=[r1.id, "0" * 26],
+            created_by=admin.id,
         )
     assert exc.value.code == "VALIDATION_ERROR"
 
     with pytest.raises(AppError) as exc:
         await blind.create_batch(
-            suite_id=suite.id, run_ids=[r.id for r in runs],
-            reviewer_ids=[r1.id, r1.id], created_by=admin.id,
+            suite_id=suite.id,
+            run_ids=[r.id for r in runs],
+            reviewer_ids=[r1.id, r1.id],
+            created_by=admin.id,
         )
     assert "Duplicate" in exc.value.message
 
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id],
+        created_by=admin.id,
     )
     assert batch.status == "open"
 
@@ -2186,8 +2475,9 @@ async def test_concurrent_first_mapping_upserts_adopt_the_winner(db):
 
     admin = await _mk_user(db, "admin")
     await _mk_capability_tag(db, "image_generation")
-    model = AIModel(canonical_name=f"RaceMap-{str(ULID()).lower()[:6]}",
-                    slug=f"rm-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"RaceMap-{str(ULID()).lower()[:6]}", slug=f"rm-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.commit()
     model_id = model.id
@@ -2197,9 +2487,11 @@ async def test_concurrent_first_mapping_upserts_adopt_the_winner(db):
         async with AsyncSessionLocal() as s:
             svc = CapabilityMappingService(s)
             m = await svc.upsert(
-                entity_kind="model", entity_id=model_id,
+                entity_kind="model",
+                entity_id=model_id,
                 capability_key="image_generation",
-                evidence_level="vendor_claimed", confidence=conf,
+                evidence_level="vendor_claimed",
+                confidence=conf,
                 actor_id=admin.id,
             )
             await s.commit()
@@ -2210,18 +2502,16 @@ async def test_concurrent_first_mapping_upserts_adopt_the_winner(db):
         assert len(set(ids)) == 1  # both adopted the same surviving row
         async with AsyncSessionLocal() as s:
             n = await s.scalar(
-                _sel(_f.count()).select_from(CapabilityMapping).where(
-                    CapabilityMapping.entity_id == model_id
-                )
+                _sel(_f.count())
+                .select_from(CapabilityMapping)
+                .where(CapabilityMapping.entity_id == model_id)
             )
             assert n == 1
     finally:
         async with AsyncSessionLocal() as s:
             from sqlalchemy import delete as _del
 
-            await s.execute(
-                _del(CapabilityMapping).where(CapabilityMapping.entity_id == model_id)
-            )
+            await s.execute(_del(CapabilityMapping).where(CapabilityMapping.entity_id == model_id))
             obj = await s.get(AIModel, model_id)
             if obj:
                 await s.delete(obj)
@@ -2247,14 +2537,18 @@ async def test_create_batch_caps_the_reviewer_panel(db):
 
     with pytest.raises(AppError) as exc:
         await blind.create_batch(
-            suite_id=suite.id, run_ids=[r.id for r in runs],
-            reviewer_ids=[u.id for u in reviewers], created_by=admin.id,
+            suite_id=suite.id,
+            run_ids=[r.id for r in runs],
+            reviewer_ids=[u.id for u in reviewers],
+            created_by=admin.id,
         )
     assert "20" in exc.value.message
 
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[u.id for u in reviewers[:20]], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[u.id for u in reviewers[:20]],
+        created_by=admin.id,
     )
     assert batch.status == "open"
 
@@ -2279,13 +2573,18 @@ async def test_suite_keys_are_slug_validated(db):
     for bad in ("Key-Upper", "has space", "nul\x00key", "-leading", ""):
         with pytest.raises(AppError) as exc:
             await svc.create_suite(
-                key=bad, name="X", family="ecommerce_hero",
-                capability_key="image_generation", created_by=admin.id,
+                key=bad,
+                name="X",
+                family="ecommerce_hero",
+                capability_key="image_generation",
+                created_by=admin.id,
             )
         assert exc.value.code == "VALIDATION_ERROR", bad
     good = await svc.create_suite(
-        key=f"slug-ok.{str(ULID()).lower()[:6]}", name="X",
-        family="ecommerce_hero", capability_key="image_generation",
+        key=f"slug-ok.{str(ULID()).lower()[:6]}",
+        name="X",
+        family="ecommerce_hero",
+        capability_key="image_generation",
         created_by=admin.id,
     )
     assert good.status == "draft"
@@ -2299,21 +2598,30 @@ async def test_resolve_conflict_validates_provenance_source(db):
     wrong — decided_by carries accountability.)"""
     admin = await _mk_user(db, "admin")
     source = await _mk_source(db)
-    model = AIModel(canonical_name=f"Prov-{str(ULID()).lower()[:6]}",
-                    slug=f"pv-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"Prov-{str(ULID()).lower()[:6]}", slug=f"pv-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     svc = CatalogService(db)
 
     with pytest.raises(AppError) as exc:
         await svc.resolve_conflict(
-            "model", model.id, field="license", chosen_value="MIT",
-            winning_source_id="0" * 26, actor_id=admin.id,
+            "model",
+            model.id,
+            field="license",
+            chosen_value="MIT",
+            winning_source_id="0" * 26,
+            actor_id=admin.id,
         )
     assert exc.value.code == "NOT_FOUND"
 
     out = await svc.resolve_conflict(
-        "model", model.id, field="license", chosen_value="MIT",
-        winning_source_id=source.id, actor_id=admin.id,
+        "model",
+        model.id,
+        field="license",
+        chosen_value="MIT",
+        winning_source_id=source.id,
+        actor_id=admin.id,
     )
     assert out["source_id"] == source.id  # return is the per-field overlay

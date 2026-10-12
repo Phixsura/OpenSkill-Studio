@@ -81,7 +81,10 @@ async def reconcile_price(
         model_or_service=body.model_or_service,
     )
     await eco_audit(
-        db, user, action="eco.price_reconciled", target_type="eco_price_observation",
+        db,
+        user,
+        action="eco.price_reconciled",
+        target_type="eco_price_observation",
         target_id=price_obs_id,
         after={"decision": body.decision, "cost_rate_id": row.approved_cost_rate_id},
     )
@@ -127,6 +130,7 @@ async def list_availability(
     )
     return {"data": rows}
 
+
 @router.post("/estimate", response_model=DataResponse[list])
 async def estimate_workload_cost(
     payload: EstimateRequest,
@@ -145,6 +149,7 @@ async def estimate_workload_cost(
     )
     return {"data": rows}
 
+
 @router.get("/availability/uptime", response_model=DataResponse[dict])
 async def availability_uptime(
     entity_kind: str = Query(...),
@@ -160,6 +165,7 @@ async def availability_uptime(
     )
     return {"data": out}
 
+
 @router.get("/history", response_model=DataResponse[dict])
 async def price_history(
     entity_kind: str = Query(...),
@@ -169,8 +175,5 @@ async def price_history(
     _user: User = Depends(get_current_user),
 ):
     """Per-unit price time series + linear trend (advisory projection)."""
-    out = await PricingService(db).history(
-        entity_kind=entity_kind, entity_id=entity_id, unit=unit
-    )
+    out = await PricingService(db).history(entity_kind=entity_kind, entity_id=entity_id, unit=unit)
     return {"data": out}
-

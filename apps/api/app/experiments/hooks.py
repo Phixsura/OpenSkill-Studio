@@ -43,7 +43,6 @@ REGISTRY_SORTS = frozenset({"newest", "most_installed", "popular", "recently_upd
 RETRY_ATTEMPTS_MIN, RETRY_ATTEMPTS_MAX = 1, 10
 
 
-
 def _shield(fn):
     """Defect #39: the host call sites rely on hooks being TOTAL — but only
     facade.resolve_variant was shielded; the override's own validation
@@ -78,15 +77,17 @@ async def _expose(
     db: AsyncSession, *, key: str, unit_type: str, unit_id: str, context: dict
 ) -> None:
     await facade.record_exposure(
-        db, experiment_key=key, unit_type=unit_type, unit_id=unit_id,
-        dedup_key=_dedup_key(unit_type, unit_id), context=context,
+        db,
+        experiment_key=key,
+        unit_type=unit_type,
+        unit_id=unit_id,
+        dedup_key=_dedup_key(unit_type, unit_id),
+        context=context,
     )
 
 
 @_shield
-async def matching_config_override(
-    db: AsyncSession, *, org_id: str, target_entity_type: str
-):
+async def matching_config_override(db: AsyncSession, *, org_id: str, target_entity_type: str):
     """Part H: controlled test of an alternative (typically still-inactive)
     MatchingConfig version. Soft weights/thresholds only by construction —
     hard eligibility constraints live outside MatchingConfig and are not
@@ -106,8 +107,13 @@ async def matching_config_override(
         # experience IS this unit's exposure — record it so the funnel and
         # exposure-based metrics compare like with like (exposure must cover
         # BOTH arms at the decision point).
-        await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
-                      unit_id=org_id, context={"surface": "matching", "arm": "control"})
+        await _expose(
+            db,
+            key=SURFACE_MATCHING_CONFIG,
+            unit_type="organization",
+            unit_id=org_id,
+            context={"surface": "matching", "arm": "control"},
+        )
         return None
     from app.models.matching import MatchingConfig
 
@@ -122,11 +128,21 @@ async def matching_config_override(
         # Defect #37: a treatment unit falling back to the default is STILL
         # exposed at the decision point — dropping it from the funnel biases
         # exposed-only analysis and false-fires exposure-SRM
-        await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
-                      unit_id=org_id, context={"surface": "matching", "arm": "fallback"})
+        await _expose(
+            db,
+            key=SURFACE_MATCHING_CONFIG,
+            unit_type="organization",
+            unit_id=org_id,
+            context={"surface": "matching", "arm": "fallback"},
+        )
         return None
-    await _expose(db, key=SURFACE_MATCHING_CONFIG, unit_type="organization",
-                  unit_id=org_id, context={"surface": "matching", "config_id": config_id})
+    await _expose(
+        db,
+        key=SURFACE_MATCHING_CONFIG,
+        unit_type="organization",
+        unit_id=org_id,
+        context={"surface": "matching", "config_id": config_id},
+    )
     return candidate
 
 
@@ -155,17 +171,25 @@ async def workflow_binding_override(
         return None
     offering_id = resolved.config.get("offering_id")
     if not offering_id:
-        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
-                      unit_id=installation_id,
-                      context={"surface": "workflow_binding", "arm": "control"})
+        await _expose(
+            db,
+            key=SURFACE_WORKFLOW_BINDING,
+            unit_type="workflow_installation",
+            unit_id=installation_id,
+            context={"surface": "workflow_binding", "arm": "control"},
+        )
         return None
     from app.models.provider import ProviderConnection, ProviderModelOffering
 
     offering = await db.get(ProviderModelOffering, offering_id)
     if offering is None or not offering.is_active:
-        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
-                      unit_id=installation_id,
-                      context={"surface": "workflow_binding", "arm": "fallback"})
+        await _expose(
+            db,
+            key=SURFACE_WORKFLOW_BINDING,
+            unit_type="workflow_installation",
+            unit_id=installation_id,
+            context={"surface": "workflow_binding", "arm": "fallback"},
+        )
         return None
     conn = await db.get(ProviderConnection, offering.connection_id)
     if (
@@ -180,12 +204,21 @@ async def workflow_binding_override(
             offering_id=offering_id,
             capability=capability,
         )
-        await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
-                      unit_id=installation_id,
-                      context={"surface": "workflow_binding", "arm": "fallback"})
+        await _expose(
+            db,
+            key=SURFACE_WORKFLOW_BINDING,
+            unit_type="workflow_installation",
+            unit_id=installation_id,
+            context={"surface": "workflow_binding", "arm": "fallback"},
+        )
         return None
-    await _expose(db, key=SURFACE_WORKFLOW_BINDING, unit_type="workflow_installation",
-                  unit_id=installation_id, context={"surface": "workflow_binding", "offering_id": offering_id})
+    await _expose(
+        db,
+        key=SURFACE_WORKFLOW_BINDING,
+        unit_type="workflow_installation",
+        unit_id=installation_id,
+        context={"surface": "workflow_binding", "offering_id": offering_id},
+    )
     return offering
 
 
@@ -215,27 +248,38 @@ async def registry_sort_override(db: AsyncSession, *, user_id: str) -> str | Non
             return None
         sort = resolved.config.get("sort")
         if sort is None:
-            await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                          unit_id=user_id,
-                          context={"surface": "registry", "arm": "control"})
+            await _expose(
+                own,
+                key=SURFACE_REGISTRY_ORDERING,
+                unit_type="user",
+                unit_id=user_id,
+                context={"surface": "registry", "arm": "control"},
+            )
             await own.commit()
             return None
         if sort not in REGISTRY_SORTS:
-            await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                          unit_id=user_id,
-                          context={"surface": "registry", "arm": "fallback"})
+            await _expose(
+                own,
+                key=SURFACE_REGISTRY_ORDERING,
+                unit_type="user",
+                unit_id=user_id,
+                context={"surface": "registry", "arm": "fallback"},
+            )
             await own.commit()
             return None
-        await _expose(own, key=SURFACE_REGISTRY_ORDERING, unit_type="user",
-                      unit_id=user_id, context={"surface": "registry", "sort": sort})
+        await _expose(
+            own,
+            key=SURFACE_REGISTRY_ORDERING,
+            unit_type="user",
+            unit_id=user_id,
+            context={"surface": "registry", "sort": sort},
+        )
         await own.commit()
         return sort
 
 
 @_shield
-async def cohort_path_override(
-    db: AsyncSession, *, cohort_id: str, org_id: str
-) -> str | None:
+async def cohort_path_override(db: AsyncSession, *, cohort_id: str, org_id: str) -> str | None:
     """Part F: alternative learning-path structure for a cohort. The
     alternative must be a real path in the SAME org (may be a draft produced
     by a promotion — that is the controlled exposure of a candidate).
@@ -259,9 +303,13 @@ async def cohort_path_override(
             return None
         path_id = resolved.config.get("alternative_path_id")
         if not path_id:
-            await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                          unit_id=cohort_id,
-                          context={"surface": "cohort_path", "arm": "control"})
+            await _expose(
+                own,
+                key=SURFACE_COHORT_PATH,
+                unit_type="cohort",
+                unit_id=cohort_id,
+                context={"surface": "cohort_path", "arm": "control"},
+            )
             await own.commit()
             return None
         from app.models.learning_path import LearningPath
@@ -269,22 +317,28 @@ async def cohort_path_override(
         path = await own.get(LearningPath, path_id)
         if path is None or path.org_id != org_id:
             log.warning("experiment_path_override_invalid", path_id=path_id, org_id=org_id)
-            await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                          unit_id=cohort_id,
-                          context={"surface": "cohort_path", "arm": "fallback"})
+            await _expose(
+                own,
+                key=SURFACE_COHORT_PATH,
+                unit_type="cohort",
+                unit_id=cohort_id,
+                context={"surface": "cohort_path", "arm": "fallback"},
+            )
             await own.commit()
             return None
-        await _expose(own, key=SURFACE_COHORT_PATH, unit_type="cohort",
-                      unit_id=cohort_id,
-                      context={"surface": "cohort_path", "path_id": path_id})
+        await _expose(
+            own,
+            key=SURFACE_COHORT_PATH,
+            unit_type="cohort",
+            unit_id=cohort_id,
+            context={"surface": "cohort_path", "path_id": path_id},
+        )
         await own.commit()
         return path_id
 
 
 @_shield
-async def rubric_override(
-    db: AsyncSession, *, project_id: str
-) -> list | dict | None:
+async def rubric_override(db: AsyncSession, *, project_id: str) -> list | dict | None:
     """Part F: rubric-wording experiment, randomized per project (a rubric is
     shared by every submission of the project — project is the natural
     cluster). The override must be a plausible rubric shape: a non-empty list
@@ -299,18 +353,35 @@ async def rubric_override(
         return None
     rubric = resolved.config.get("rubric")
     if rubric is None:
-        await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
-                      unit_id=project_id, context={"surface": "rubric", "arm": "control"})
+        await _expose(
+            db,
+            key=SURFACE_RUBRIC_WORDING,
+            unit_type="project",
+            unit_id=project_id,
+            context={"surface": "rubric", "arm": "control"},
+        )
         return None
-    if not isinstance(rubric, list) or not rubric or not all(
-        isinstance(item, dict) and item.get("criterion") for item in rubric
+    if (
+        not isinstance(rubric, list)
+        or not rubric
+        or not all(isinstance(item, dict) and item.get("criterion") for item in rubric)
     ):
         log.warning("experiment_rubric_override_invalid", project_id=project_id)
-        await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
-                      unit_id=project_id, context={"surface": "rubric", "arm": "fallback"})
+        await _expose(
+            db,
+            key=SURFACE_RUBRIC_WORDING,
+            unit_type="project",
+            unit_id=project_id,
+            context={"surface": "rubric", "arm": "fallback"},
+        )
         return None
-    await _expose(db, key=SURFACE_RUBRIC_WORDING, unit_type="project",
-                  unit_id=project_id, context={"surface": "rubric"})
+    await _expose(
+        db,
+        key=SURFACE_RUBRIC_WORDING,
+        unit_type="project",
+        unit_id=project_id,
+        context={"surface": "rubric"},
+    )
     return rubric
 
 
@@ -327,14 +398,29 @@ async def retry_policy_override(db: AsyncSession, *, tenant_id: str) -> int | No
         return None
     attempts = resolved.config.get("max_attempts")
     if attempts is None:
-        await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
-                      unit_id=tenant_id, context={"surface": "retry_policy", "arm": "control"})
+        await _expose(
+            db,
+            key=SURFACE_RETRY_POLICY,
+            unit_type="tenant",
+            unit_id=tenant_id,
+            context={"surface": "retry_policy", "arm": "control"},
+        )
         return None
     if not isinstance(attempts, int):
-        await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
-                      unit_id=tenant_id, context={"surface": "retry_policy", "arm": "fallback"})
+        await _expose(
+            db,
+            key=SURFACE_RETRY_POLICY,
+            unit_type="tenant",
+            unit_id=tenant_id,
+            context={"surface": "retry_policy", "arm": "fallback"},
+        )
         return None
     clamped = max(RETRY_ATTEMPTS_MIN, min(RETRY_ATTEMPTS_MAX, attempts))
-    await _expose(db, key=SURFACE_RETRY_POLICY, unit_type="tenant",
-                  unit_id=tenant_id, context={"surface": "retry_policy", "max_attempts": clamped})
+    await _expose(
+        db,
+        key=SURFACE_RETRY_POLICY,
+        unit_type="tenant",
+        unit_id=tenant_id,
+        context={"surface": "retry_policy", "max_attempts": clamped},
+    )
     return clamped

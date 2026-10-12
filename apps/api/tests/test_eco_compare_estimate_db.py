@@ -35,16 +35,25 @@ async def _mk_model(db, name):
 async def _mk_price(db, entity_id, unit, price, *, status="unreviewed"):
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed", entity_kind="model",
-        external_ref=f"px-{str(ULID()).lower()}", raw_hash="p" * 64,
+        source_id=source.id,
+        event_type="pricing_changed",
+        entity_kind="model",
+        external_ref=f"px-{str(ULID()).lower()}",
+        raw_hash="p" * 64,
         normalized={"price": price, "unit": unit},
-        canonical_entity_kind="model", canonical_entity_id=entity_id,
+        canonical_entity_kind="model",
+        canonical_entity_id=entity_id,
     )
     db.add(obs)
     await db.flush()
     row = PriceObservation(
-        observation_id=obs.id, entity_kind="model", entity_id=entity_id,
-        unit=unit, price=price, currency="USD", reconciliation_status=status,
+        observation_id=obs.id,
+        entity_kind="model",
+        entity_id=entity_id,
+        unit=unit,
+        price=price,
+        currency="USD",
+        reconciliation_status=status,
     )
     db.add(row)
     await db.flush()
@@ -93,7 +102,9 @@ async def test_estimate_prefers_approved_price_over_newer_observed(db):
     await db.flush()
 
     rows = await PricingService(db).estimate(
-        entity_kind="model", entity_ids=[model.id], workload={"token_input": 2},
+        entity_kind="model",
+        entity_ids=[model.id],
+        workload={"token_input": 2},
     )
     assert rows[0]["estimated_total"] == pytest.approx(10.0)
     assert rows[0]["all_prices_approved"] is True
@@ -109,7 +120,9 @@ async def test_estimate_prefers_approved_price_over_newer_observed(db):
     bad.observed_at = datetime.now(UTC)
     await db.flush()
     rows = await PricingService(db).estimate(
-        entity_kind="model", entity_ids=[lone.id], workload={"token_input": 2},
+        entity_kind="model",
+        entity_ids=[lone.id],
+        workload={"token_input": 2},
     )
     assert rows[0]["estimated_total"] == pytest.approx(2.0)  # 1.0×2, never 0.001
 
@@ -118,12 +131,16 @@ async def test_estimate_rejects_unknown_unit_and_bad_quantity(db):
     model = await _mk_model(db, "BadInputGen")
     with pytest.raises(AppError) as exc:
         await PricingService(db).estimate(
-            entity_kind="model", entity_ids=[model.id], workload={"gpu_hour": 1},
+            entity_kind="model",
+            entity_ids=[model.id],
+            workload={"gpu_hour": 1},
         )
     assert exc.value.code == "VALIDATION_ERROR"
     with pytest.raises(AppError):
         await PricingService(db).estimate(
-            entity_kind="model", entity_ids=[model.id], workload={"token_input": -1},
+            entity_kind="model",
+            entity_ids=[model.id],
+            workload={"token_input": -1},
         )
 
 
@@ -149,6 +166,7 @@ async def test_compare_entities_returns_facts_prices_and_uniform_404(db):
         await CatalogService(db).compare_entities("model", [a.id, "0" * 26])
     assert exc.value.status_code == 404
 
+
 async def test_price_history_series_and_trend(db):
     from datetime import UTC, datetime, timedelta
 
@@ -171,9 +189,7 @@ async def test_price_history_series_and_trend(db):
     assert trend["slope"] < 0  # falling price
     # Unknown unit rejected; unit filter works
     with pytest.raises(AppError):
-        await PricingService(db).history(
-            entity_kind="model", entity_id=model.id, unit="gpu_hour"
-        )
+        await PricingService(db).history(entity_kind="model", entity_id=model.id, unit="gpu_hour")
     only = await PricingService(db).history(
         entity_kind="model", entity_id=model.id, unit="token_input"
     )

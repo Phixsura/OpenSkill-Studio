@@ -66,9 +66,7 @@ async def planning_sample_size(
     swallow it."""
     from app.experiments.services import analysis as stats
 
-    n = stats.required_n_per_arm(
-        baseline_rate, mde_rel, alpha=alpha, power=power
-    )
+    n = stats.required_n_per_arm(baseline_rate, mde_rel, alpha=alpha, power=power)
     return {
         "data": {
             "required_n_per_arm": n,
@@ -96,7 +94,11 @@ async def list_experiments(
     check_enum(status, EXPERIMENT_STATUSES, "status")
     check_enum(domain, EXPERIMENT_DOMAINS, "domain")
     rows, total, next_cursor = await ExperimentService(db).list_experiments(
-        status=status, domain=domain, q=q, cursor=cursor, limit=limit,
+        status=status,
+        domain=domain,
+        q=q,
+        cursor=cursor,
+        limit=limit,
         scope_org_ids=scope.org_ids,
     )
     # round 146: data-flow badge — ONE grouped query for the page's running
@@ -141,7 +143,9 @@ async def get_experiment(
     return {"data": await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)}
 
 
-@router.post("/{experiment_id}/versions", response_model=DataResponse[VersionResponse], status_code=201)
+@router.post(
+    "/{experiment_id}/versions", response_model=DataResponse[VersionResponse], status_code=201
+)
 async def create_version(
     experiment_id: str,
     body: CreateVersionRequest,
@@ -215,8 +219,7 @@ async def set_ramp_plan(
     exp = await ExperimentService(db).set_ramp_plan(
         experiment_id,
         plan=(
-            [{"at": step.at.isoformat(), "ramp_bp": step.ramp_bp}
-             for step in body.plan]
+            [{"at": step.at.isoformat(), "ramp_bp": step.ramp_bp} for step in body.plan]
             if body.plan is not None
             else None
         ),
@@ -269,8 +272,6 @@ async def clone_experiment(
 ):
     """Duplicate an experiment: a NEW draft carrying the source's current
     spec as v1 — no layer allocation (slices are claimed deliberately)."""
-    experiment = await ExperimentService(db).clone(
-        experiment_id, new_key=body.key, actor=user
-    )
+    experiment = await ExperimentService(db).clone(experiment_id, new_key=body.key, actor=user)
     await db.commit()
     return {"data": experiment}

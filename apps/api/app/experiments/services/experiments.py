@@ -74,9 +74,7 @@ class ExperimentService:
 
     # ── helpers ──────────────────────────────────────────────────────
 
-    async def add_note(
-        self, experiment_id: str, *, actor_user_id: str | None, text: str
-    ) -> None:
+    async def add_note(self, experiment_id: str, *, actor_user_id: str | None, text: str) -> None:
         """Defect #99 (the round-267 accumulation-bomb law): notes are the
         one event type ANY read-scope member can append — cap them per
         experiment so the append-only events table cannot be spammed
@@ -85,9 +83,7 @@ class ExperimentService:
         experiment row first (the state machine's own FOR-UPDATE idiom)
         so note writers serialize and the cap is exact."""
         await self.db.execute(
-            select(Experiment.id)
-            .where(Experiment.id == experiment_id)
-            .with_for_update()
+            select(Experiment.id).where(Experiment.id == experiment_id).with_for_update()
         )
         n_notes = (
             await self.db.execute(
@@ -129,9 +125,7 @@ class ExperimentService:
             )
         )
 
-    async def get_scoped(
-        self, experiment_id: str, scope_org_ids: list[str] | None
-    ) -> Experiment:
+    async def get_scoped(self, experiment_id: str, scope_org_ids: list[str] | None) -> Experiment:
         """Uniform 404 outside the caller's read scope (R89 — an org admin
         must not be able to probe platform experiments' existence)."""
         exp = await self.get(experiment_id)
@@ -222,9 +216,7 @@ class ExperimentService:
         )
         return exp
 
-    async def clone(
-        self, experiment_id: str, *, new_key: str, actor: User
-    ) -> Experiment:
+    async def clone(self, experiment_id: str, *, new_key: str, actor: User) -> Experiment:
         """Round 92 (industry parity: duplicate an experiment): a NEW draft
         with the source's CURRENT spec as its v1 — same domain/layer/scope/
         risk/holdout knobs, no layer allocation (slices are a scarce,
@@ -260,8 +252,7 @@ class ExperimentService:
             copy.id,
             event_type="cloned_from",
             actor_user_id=actor.id,
-            payload={"source_experiment_id": source.id,
-                     "source_version": source.current_version},
+            payload={"source_experiment_id": source.id, "source_version": source.current_version},
         )
         return copy
 
@@ -287,9 +278,7 @@ class ExperimentService:
             # ILIKE wildcards in user input are escaped so `%` means percent
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             needle = f"%{escaped}%"
-            base = base.where(
-                Experiment.key.ilike(needle) | Experiment.title.ilike(needle)
-            )
+            base = base.where(Experiment.key.ilike(needle) | Experiment.title.ilike(needle))
         if scope_org_ids is not None:
             # org-admin delegation (§18): only experiments scoped to the
             # caller's orgs — platform-wide experiments are NOT theirs to see
@@ -322,9 +311,7 @@ class ExperimentService:
         # surface (the R98 oversized-input class) — 64 KB is generous for any
         # legitimate design
         try:
-            raw_size = len(
-                json.dumps(spec, separators=(",", ":"), ensure_ascii=False, default=str)
-            )
+            raw_size = len(json.dumps(spec, separators=(",", ":"), ensure_ascii=False, default=str))
         except (TypeError, ValueError) as exc:
             raise AppError("EXPERIMENT_SPEC_INVALID", "Spec is not JSON-serializable", 422) from exc
         if raw_size > 64_000:
@@ -404,9 +391,7 @@ class ExperimentService:
 
         # §5 v2 launch checklist: every required item affirmed to schedule
         missing = [
-            key
-            for key in required_checklist_keys(exp.domain)
-            if not (checklist or {}).get(key)
+            key for key in required_checklist_keys(exp.domain) if not (checklist or {}).get(key)
         ]
         if missing:
             raise AppError(
@@ -415,13 +400,10 @@ class ExperimentService:
                 422,
             )
         if exp.current_version < 1:
-            raise AppError(
-                "EXPERIMENT_SPEC_INVALID", "Cannot schedule without a spec version", 422
-            )
+            raise AppError("EXPERIMENT_SPEC_INVALID", "Cannot schedule without a spec version", 422)
         latest = (
             await self.db.execute(
-                select(ExperimentVersion)
-                .where(
+                select(ExperimentVersion).where(
                     ExperimentVersion.experiment_id == exp.id,
                     ExperimentVersion.version == exp.current_version,
                 )
@@ -446,9 +428,7 @@ class ExperimentService:
             key
             for (key,) in (
                 await self.db.execute(
-                    select(MetricDefinition.key).where(
-                        MetricDefinition.key.in_(referenced)
-                    )
+                    select(MetricDefinition.key).where(MetricDefinition.key.in_(referenced))
                 )
             ).all()
         }
@@ -459,9 +439,7 @@ class ExperimentService:
                 f"Spec references undefined metrics: {', '.join(unknown)}",
                 422,
             )
-        needs_guardrails = not (
-            exp.risk_class == "low" and exp.domain in _GUARDRAIL_EXEMPT_DOMAINS
-        )
+        needs_guardrails = not (exp.risk_class == "low" and exp.domain in _GUARDRAIL_EXEMPT_DOMAINS)
         if needs_guardrails and not spec.metrics.guardrails:
             raise AppError(
                 "EXPERIMENT_NO_GUARDRAILS",
@@ -526,9 +504,7 @@ class ExperimentService:
         if to_status == "completed":
             exp.ended_at = exp.ended_at or now
             if exp.analysis_close_at is None:
-                exp.analysis_close_at = exp.ended_at + timedelta(
-                    days=ANALYSIS_CLOSE_DEFAULT_DAYS
-                )
+                exp.analysis_close_at = exp.ended_at + timedelta(days=ANALYSIS_CLOSE_DEFAULT_DAYS)
         await self._record_event(
             exp.id,
             event_type="transition",
@@ -575,9 +551,7 @@ class ExperimentService:
         normalized: list[dict] | None = None
         if plan:
             if len(plan) > 20:
-                raise AppError(
-                    "VALIDATION_ERROR", "Ramp plan holds at most 20 steps", 422
-                )
+                raise AppError("VALIDATION_ERROR", "Ramp plan holds at most 20 steps", 422)
             parsed = []
             for entry in plan:
                 try:
@@ -592,9 +566,7 @@ class ExperimentService:
                 if at.tzinfo is None:  # naive datetimes are UTC here (#56)
                     at = at.replace(tzinfo=UTC)
                 if not 1 <= ramp_bp <= 10_000:
-                    raise AppError(
-                        "VALIDATION_ERROR", "ramp_bp must be 1..10000", 422
-                    )
+                    raise AppError("VALIDATION_ERROR", "ramp_bp must be 1..10000", 422)
                 parsed.append((at, ramp_bp))
             parsed.sort(key=lambda pair: pair[0])
             targets = [bp for _, bp in parsed]
@@ -610,9 +582,7 @@ class ExperimentService:
                     f"First planned target must exceed the live ramp ({exp.ramp_bp})",
                     422,
                 )
-            normalized = [
-                {"at": at.isoformat(), "ramp_bp": bp} for at, bp in parsed
-            ]
+            normalized = [{"at": at.isoformat(), "ramp_bp": bp} for at, bp in parsed]
         exp.ramp_plan = normalized
         await self._record_event(
             exp.id,

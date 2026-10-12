@@ -24,7 +24,13 @@ from app.experiments.services.experiments import _ALLOWED
 
 _LIB = (
     Path(__file__).resolve().parents[2]
-    / "web" / "src" / "app" / "(dashboard)" / "dashboard" / "experiments" / "lib.ts"
+    / "web"
+    / "src"
+    / "app"
+    / "(dashboard)"
+    / "dashboard"
+    / "experiments"
+    / "lib.ts"
 )
 
 
@@ -71,9 +77,7 @@ def test_web_checklist_matches_backend():
 
 def test_web_transition_table_matches_state_machine():
     text = _LIB.read_text(encoding="utf-8")
-    match = re.search(
-        r"export const ALLOWED_TRANSITIONS[^{]*\{(.*?)\n\};", text, re.DOTALL
-    )
+    match = re.search(r"export const ALLOWED_TRANSITIONS[^{]*\{(.*?)\n\};", text, re.DOTALL)
     assert match, "ALLOWED_TRANSITIONS not found in experiments lib.ts"
     web: dict[str, set[str]] = {}
     for status, targets in re.findall(r"(\w+): \[([^\]]*)\]", match.group(1)):

@@ -48,7 +48,9 @@ class Experiment(Base):
     )
     status: Mapped[str] = mapped_column(String(12), default="draft", server_default="draft")
     current_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    owner_user_id: Mapped[str] = mapped_column(String(26), ForeignKey("users.id", ondelete="RESTRICT"))
+    owner_user_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="RESTRICT")
+    )
     risk_class: Mapped[str] = mapped_column(String(8), default="medium", server_default="medium")
     # Percentage ramp in basis points — may only INCREASE while live (ITT)
     ramp_bp: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -66,15 +68,11 @@ class Experiment(Base):
         DateTime(timezone=True), nullable=True
     )
     # exp10: optional scheduled auto-start — NULL = manual start (round 60)
-    start_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # exp14 (round 129): scheduled ramp plan [{at: iso, ramp_bp: int}] —
     # the sweep raises ramp_bp when an entry comes due; NULL = manual ramp
     ramp_plan: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -116,9 +114,7 @@ class ExperimentVersion(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("experiment_id", "version", name="uq_experiment_versions_exp_version"),
@@ -136,9 +132,7 @@ class ExperimentLayer(Base):
     total_slices: Mapped[int] = mapped_column(
         Integer, default=LAYER_TOTAL_SLICES, server_default=str(LAYER_TOTAL_SLICES)
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ExperimentLayerAllocation(Base):
@@ -160,9 +154,7 @@ class ExperimentLayerAllocation(Base):
     )
     slice_start: Mapped[int] = mapped_column(Integer)
     slice_end: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("experiment_id", name="uq_experiment_layer_allocations_experiment"),

@@ -1005,8 +1005,7 @@ async def test_scim_cannot_deprovision_last_owner(ctx):
 
     db, owner, org = ctx["db"], ctx["owner"], ctx["org"]
     # the owner appears in the SCIM directory; find their SCIM id by email
-    lst = await _usvc(ctx).list(filter_expr=f'userName eq "{owner.email}"',
-                                start_index=1, count=10)
+    lst = await _usvc(ctx).list(filter_expr=f'userName eq "{owner.email}"', start_index=1, count=10)
     assert lst["totalResults"] == 1
     owner_scim_id = lst["Resources"][0]["id"]
 
@@ -1022,17 +1021,14 @@ async def test_scim_cannot_deprovision_last_owner(ctx):
     assert e.value.status == 409
     member = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.user_id == owner.id
-            )
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == owner.id)
         )
     ).scalar_one()
     assert member.status == MemberStatus.ACTIVE  # untouched
 
     # add a SECOND active owner -> deprovisioning the first is now allowed
     u2 = await _user(db)
-    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.OWNER,
-                     status=MemberStatus.ACTIVE))
+    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.OWNER, status=MemberStatus.ACTIVE))
     await db.flush()
     await _usvc(ctx).delete(owner_scim_id)
     await db.refresh(member)

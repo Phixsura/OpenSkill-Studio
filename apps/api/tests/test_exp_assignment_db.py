@@ -30,6 +30,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -47,14 +48,16 @@ def _spec(**overrides) -> dict:
         "unit_type": "user",
         "variants": [
             {"key": "control", "name": "Control", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "Treatment", "weight_bp": 5000,
-             "config": {"rubric_template_id": "x"}},
+            {
+                "key": "treatment",
+                "name": "Treatment",
+                "weight_bp": 5000,
+                "config": {"rubric_template_id": "x"},
+            },
         ],
         "metrics": {
             "primary": ["project_approval_rate"],
-            "guardrails": [
-                {"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}
-            ],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
         },
     }
     base.update(overrides)
@@ -154,9 +157,9 @@ async def test_ramp_zero_admits_nobody(db):
     exp, _ = await _mk_running(db, ramp_bp=0)
     svc = AssignmentService(db)
     for i in range(20):
-        assert await svc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=f"r0-{i}"
-        ) is None
+        assert (
+            await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"r0-{i}") is None
+        )
 
 
 async def test_outside_slice_not_admitted(db):
@@ -197,9 +200,12 @@ async def test_unit_type_mismatch_returns_ineligible(db):
         experiment_key=exp.key, unit_type="cohort", unit_id="c" * 26
     )
     assert result["eligible"] is False
-    assert await AssignmentService(db).resolve(
-        experiment_key=exp.key, unit_type="cohort", unit_id="c" * 26
-    ) is None
+    assert (
+        await AssignmentService(db).resolve(
+            experiment_key=exp.key, unit_type="cohort", unit_id="c" * 26
+        )
+        is None
+    )
 
 
 async def test_population_rule_fail_closed(db):
@@ -242,9 +248,7 @@ async def test_preview_writes_nothing(db):
     rows = list(
         (
             await db.execute(
-                select(ExperimentAssignment).where(
-                    ExperimentAssignment.experiment_id == exp.id
-                )
+                select(ExperimentAssignment).where(ExperimentAssignment.experiment_id == exp.id)
             )
         ).scalars()
     )
@@ -272,12 +276,16 @@ async def test_exposure_funnel_and_dedup(db):
     # wave-29: the exposure CONTEXT persists verbatim (a truthy context was
     # droppable by an or->and mutant with nothing pinning the stored value)
     assert await svc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id="e" * 26,
-        dedup_key="k2", context={"surface": "dashboard", "variant_seen": True},
+        experiment_key=exp.key,
+        unit_type="user",
+        unit_id="e" * 26,
+        dedup_key="k2",
+        context={"surface": "dashboard", "variant_seen": True},
     )
     from sqlalchemy import select as _select
 
     from app.experiments.models import ExperimentExposure as _Exposure
+
     stored = (
         await db.execute(
             _select(_Exposure).where(
@@ -358,7 +366,13 @@ async def test_concurrent_resolve_single_row(db):
 async def test_switchback_units_share_the_day_variant(db):
     """All units get the DAY's variant (no per-unit split); the stored row is
     the placeholder (exposure FK + ITT roster), never a served variant."""
-    exp, _ = await _mk_running(db, spec_overrides={"design": "switchback", "switchback": {"switch_unit": "platform_day", "window_minutes": 1440}})
+    exp, _ = await _mk_running(
+        db,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
+    )
     svc = AssignmentService(db)
     resolved = [
         await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"sb-{i}")
@@ -371,22 +385,24 @@ async def test_switchback_units_share_the_day_variant(db):
     rows = list(
         (
             await db.execute(
-                select(ExperimentAssignment).where(
-                    ExperimentAssignment.experiment_id == exp.id
-                )
+                select(ExperimentAssignment).where(ExperimentAssignment.experiment_id == exp.id)
             )
         ).scalars()
     )
     assert len(rows) == 10
     assert {r.variant_key for r in rows} == {"__switchback__"}
     # exposure records attach to the placeholder row
-    assert await svc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id="sb-0"
-    )
+    assert await svc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id="sb-0")
 
 
 async def test_switchback_pause_stops_new_entries_only(db):
-    exp, admin = await _mk_running(db, spec_overrides={"design": "switchback", "switchback": {"switch_unit": "platform_day", "window_minutes": 1440}})
+    exp, admin = await _mk_running(
+        db,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
+    )
     svc = AssignmentService(db)
     before = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id="sb-x")
     assert before is not None
@@ -395,9 +411,7 @@ async def test_switchback_pause_stops_new_entries_only(db):
     still = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id="sb-x")
     assert still is not None
     # a NEW unit is refused
-    assert await svc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="sb-new"
-    ) is None
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id="sb-new") is None
 
 
 async def test_switchback_honors_per_unit_holdout(db):
@@ -407,10 +421,12 @@ async def test_switchback_honors_per_unit_holdout(db):
     from app.experiments.services.assignment import holdout_roll
 
     exp, _ = await _mk_running(
-        db, holdout_bp=2000,
-        spec_overrides={"design": "switchback",
-                        "switchback": {"switch_unit": "platform_day",
-                                       "window_minutes": 1440}},
+        db,
+        holdout_bp=2000,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
     )
     svc = AssignmentService(db)
     held = nonheld = None
@@ -460,17 +476,18 @@ async def test_self_serve_resolve_is_sticky_and_self_scoped(db):
     rows = list(
         (
             await db.execute(
-                select(ExperimentAssignment).where(
-                    ExperimentAssignment.experiment_id == exp.id
-                )
+                select(ExperimentAssignment).where(ExperimentAssignment.experiment_id == exp.id)
             )
         ).scalars()
     )
     assert [r.unit_id for r in rows] == [user_id]
     # unknown surface: default experience, no exception
-    assert await facade.resolve_variant(
-        db, experiment_key="surface-nothing-here", unit_type="user", unit_id=user_id
-    ) is None
+    assert (
+        await facade.resolve_variant(
+            db, experiment_key="surface-nothing-here", unit_type="user", unit_id=user_id
+        )
+        is None
+    )
     # exposure through the facade for the same unit
     assert await facade.record_exposure(
         db, experiment_key=exp.key, unit_type="user", unit_id=user_id, dedup_key="d1"
@@ -515,10 +532,15 @@ async def test_spec_cache_hits_without_queries_and_follows_versions(db):
 
     new_spec = json.loads(json.dumps(spec1.model_dump()))
     new_spec["hypothesis"] = "version two reaches resolution immediately"
-    db.add(ExperimentVersion(
-        experiment_id=exp.id, version=2, spec=new_spec,
-        spec_hash=canonical_spec_hash(new_spec), created_by=admin.id,
-    ))
+    db.add(
+        ExperimentVersion(
+            experiment_id=exp.id,
+            version=2,
+            spec=new_spec,
+            spec_hash=canonical_spec_hash(new_spec),
+            created_by=admin.id,
+        )
+    )
     exp.current_version = 2
     await db.flush()
     spec3, salt3 = await svc._spec_and_salt(exp)  # noqa: SLF001
@@ -535,8 +557,7 @@ def test_experiments_error_status_contract_pinned_by_source():
     from pathlib import Path
 
     src = (
-        Path(__file__).resolve().parents[1]
-        / "app" / "experiments" / "services" / "experiments.py"
+        Path(__file__).resolve().parents[1] / "app" / "experiments" / "services" / "experiments.py"
     )
     found: dict[str, set[int]] = {}
     for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
@@ -611,8 +632,12 @@ async def test_guardrail_exemption_matrix(db):
         layer = await LayerSvc(db).create(key=f"lyr-{str(_ULID()).lower()}", domain=domain)
         svc = ExperimentService(db)
         exp = await svc.create(
-            key=f"exp-{str(_ULID()).lower()}", title="G", domain=domain,
-            layer_key=layer.key, owner_user_id=admin.id, risk_class=risk,
+            key=f"exp-{str(_ULID()).lower()}",
+            title="G",
+            domain=domain,
+            layer_key=layer.key,
+            owner_user_id=admin.id,
+            risk_class=risk,
         )
         spec = _spec()
         spec["metrics"] = {"primary": ["exposure_rate"], "guardrails": []}
@@ -625,20 +650,17 @@ async def test_guardrail_exemption_matrix(db):
 
     # low + operational (exempt): schedules without guardrails
     svc, exp, admin = await _to_review("operational", "low")
-    await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     assert (await svc.get(exp.id)).status == "scheduled"
     # low + learning (NOT exempt): refused
     svc, exp, admin = await _to_review("learning", "low")
     with pytest.raises(AppError) as e:
-        await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                             checklist=_CHECKLIST)
+        await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
     # medium + operational (NOT exempt): refused
     svc, exp, admin = await _to_review("operational", "medium")
     with pytest.raises(AppError) as e:
-        await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                             checklist=_CHECKLIST)
+        await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
 
 
@@ -653,16 +675,22 @@ async def test_high_risk_schedule_needs_platform_admin_even_delegated(db):
 
     admin = await _mk_admin(db)
     operator = User(
-        email=f"hr-{_ULID()}@example.com", display_name="Op",
-        role=UserRole.INSTRUCTOR, status=UserStatus.ACTIVE,
+        email=f"hr-{_ULID()}@example.com",
+        display_name="Op",
+        role=UserRole.INSTRUCTOR,
+        status=UserStatus.ACTIVE,
     )
     db.add(operator)
     await db.flush()
     layer = await LayerSvc(db).create(key=f"lyr-{str(_ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(_ULID()).lower()}", title="HR", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id, risk_class="high",
+        key=f"exp-{str(_ULID()).lower()}",
+        title="HR",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        risk_class="high",
     )
     await svc.create_version(exp.id, spec=_spec(), actor=admin)
     await LayerSvc(db).allocate(
@@ -670,12 +698,10 @@ async def test_high_risk_schedule_needs_platform_admin_even_delegated(db):
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
     with pytest.raises(AppError) as e:
-        await svc.transition(exp.id, to_status="scheduled", actor=operator,
-                             checklist=_CHECKLIST)
+        await svc.transition(exp.id, to_status="scheduled", actor=operator, checklist=_CHECKLIST)
     assert e.value.code == "FORBIDDEN"
     assert e.value.status_code == 403
-    await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     assert (await svc.get(exp.id)).status == "scheduled"
 
 
@@ -711,8 +737,11 @@ async def test_layer_allocation_boundary_matrix(db):
 
     async def _exp():
         e = await svc.create(
-            key=f"exp-{str(_ULID()).lower()}", title="L", domain="learning",
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"exp-{str(_ULID()).lower()}",
+            title="L",
+            domain="learning",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
         return e.id
 
@@ -727,9 +756,7 @@ async def test_layer_allocation_boundary_matrix(db):
         )
     assert e.value.code == "VALIDATION_ERROR"
     # adjacent is legal...
-    await LayerSvc(db).allocate(
-        layer_key=layer.key, experiment_id=b, slice_start=0, slice_end=4999
-    )
+    await LayerSvc(db).allocate(layer_key=layer.key, experiment_id=b, slice_start=0, slice_end=4999)
     # ...but sharing a single point on either edge is an overlap
     for start, end in ((4999, 4999), (9999, 9999), (0, 0)):
         with pytest.raises(AppError) as e:
@@ -739,10 +766,7 @@ async def test_layer_allocation_boundary_matrix(db):
         assert e.value.code == "LAYER_SLICE_OVERLAP"
         assert e.value.status_code == 409
 
-    src = (
-        Path(__file__).resolve().parents[1]
-        / "app" / "experiments" / "services" / "layers.py"
-    )
+    src = Path(__file__).resolve().parents[1] / "app" / "experiments" / "services" / "layers.py"
     found: dict[str, set[int]] = {}
     for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
         if (
@@ -774,8 +798,10 @@ async def test_facade_db_error_does_not_poison_host_session(db):
     exp, admin = await _mk_running(db)
     # host business write BEFORE the experiment touchpoint
     host_row = User(
-        email=f"host-{ULID()}@example.com", display_name="H",
-        role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+        email=f"host-{ULID()}@example.com",
+        display_name="H",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
     )
     db.add(host_row)
     await db.flush()
@@ -805,14 +831,12 @@ async def test_exposure_stats_carries_last_exposure_at(db):
     (the console's data-flow signal) — None before any exposure, ISO after."""
     exp, _ = await _mk_running(db)
     asvc = AssignmentService(db)
-    assert await asvc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="flow-1"
-    ) is not None
+    assert (
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="flow-1") is not None
+    )
     stats = await asvc.exposure_stats(exp.id)
     assert stats["last_exposure_at"] is None
-    assert await asvc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id="flow-1"
-    )
+    assert await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id="flow-1")
     stats = await asvc.exposure_stats(exp.id)
     assert isinstance(stats["last_exposure_at"], str)
 
@@ -829,16 +853,18 @@ async def test_shared_dedup_key_never_swallows_other_units(db):
     exp, _ = await _mk_running(db)
     asvc = AssignmentService(db)
     for uid in ("dd-user-a", "dd-user-b"):
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=uid
-        ) is not None
+        assert await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=uid) is not None
         assert await asvc.record_exposure(
-            experiment_key=exp.key, unit_type="user", unit_id=uid,
+            experiment_key=exp.key,
+            unit_type="user",
+            unit_id=uid,
             dedup_key="todo-2026-10-02",
         )
     # repeat for one unit — absorbed, not duplicated
     assert await asvc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id="dd-user-a",
+        experiment_key=exp.key,
+        unit_type="user",
+        unit_id="dd-user-a",
         dedup_key="todo-2026-10-02",
     )
     n = (
@@ -866,9 +892,12 @@ async def test_facade_record_exposure_exception_arm(db, monkeypatch):
 
     monkeypatch.setattr(_Svc, "record_exposure", _boom)
     exp, _ = await _mk_running(db)
-    assert await facade.record_exposure(
-        db, experiment_key=exp.key, unit_type="user", unit_id="exc-arm"
-    ) is False
+    assert (
+        await facade.record_exposure(
+            db, experiment_key=exp.key, unit_type="user", unit_id="exc-arm"
+        )
+        is False
+    )
     await db.flush()  # session not poisoned
 
 
@@ -881,80 +910,82 @@ async def test_assignment_cold_branches_necropsy(db):
     from app.models.organization import Organization
 
     # org-scoped experiment + WRONG org context -> ineligible with reason
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="scope", slug=f"sc-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="scope", slug=f"sc-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     admin = await _mk_admin(db)
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     scoped = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="S", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id, scope_org_id=org.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="S",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        scope_org_id=org.id,
     )
     await svc.create_version(scoped.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=scoped.id, slice_start=0, slice_end=9999
     )
     await svc.transition(scoped.id, to_status="review", actor=admin)
-    await svc.transition(scoped.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(scoped.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(scoped.id, to_status="running", actor=admin)
     await svc.set_ramp(scoped.id, ramp_bp=10_000, actor=admin)
     asvc = AssignmentService(db)
     wrong = await asvc.compute(
-        experiment=scoped, unit_type="user", unit_id="necro-1",
+        experiment=scoped,
+        unit_type="user",
+        unit_id="necro-1",
         context={"org_id": "x" * 26},
     )
     assert wrong["eligible"] is False
     assert "org scope" in wrong["reason"]
 
     # experiment WITHOUT a layer allocation -> ineligible with reason
-    bare_layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    bare_layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     bare = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="B", domain="learning",
-        layer_key=bare_layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="B",
+        domain="learning",
+        layer_key=bare_layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(bare.id, spec=_spec(), actor=admin)
-    unalloc = await asvc.compute(
-        experiment=bare, unit_type="user", unit_id="necro-2"
-    )
+    unalloc = await asvc.compute(experiment=bare, unit_type="user", unit_id="necro-2")
     assert unalloc["eligible"] is False
     assert "allocation" in unalloc["reason"]
 
     # unknown experiment key on the exposure path -> fail-safe False
-    assert await asvc.record_exposure(
-        experiment_key="no-such-experiment", unit_type="user", unit_id="necro-3"
-    ) is False
+    assert (
+        await asvc.record_exposure(
+            experiment_key="no-such-experiment", unit_type="user", unit_id="necro-3"
+        )
+        is False
+    )
 
     # holdout tally: a per-unit holdout unit lands in the holdout counter
     held_exp, _ = await _mk_running(db, holdout_bp=10_000)
-    r = await asvc.resolve(
-        experiment_key=held_exp.key, unit_type="user", unit_id="necro-4"
-    )
+    r = await asvc.resolve(experiment_key=held_exp.key, unit_type="user", unit_id="necro-4")
     assert r is None  # held out
     stats = await asvc.assignment_stats(held_exp.id)
     assert stats["holdout"] == 1
     assert stats["variants"] == {}
 
     # a non-serving status on the switchback path -> None
-    sb, sb_admin = await _mk_running(db, spec_overrides={
-        "design": "switchback",
-        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
-    })
+    sb, sb_admin = await _mk_running(
+        db,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
+    )
     await svc.transition(sb.id, to_status="completed", actor=sb_admin)
     await svc.transition(sb.id, to_status="archived", actor=sb_admin)
-    assert await asvc.resolve(
-        experiment_key=sb.key, unit_type="user", unit_id="necro-5"
-    ) is None
+    assert await asvc.resolve(experiment_key=sb.key, unit_type="user", unit_id="necro-5") is None
 
 
 async def test_experiments_service_cold_arms_necropsy(db):
@@ -971,27 +1002,44 @@ async def test_experiments_service_cold_arms_necropsy(db):
         await svc.get_versions("0" * 26)  # uniform 404 through get()
 
     with pytest.raises(AppError) as exc:
-        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
-                         domain="galaxy", layer_key="any",
-                         owner_user_id=admin.id)
+        await svc.create(
+            key=f"d-{str(ULID()).lower()}",
+            title="x",
+            domain="galaxy",
+            layer_key="any",
+            owner_user_id=admin.id,
+        )
     assert exc.value.code == "VALIDATION_ERROR"
     with pytest.raises(AppError) as exc:
-        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
-                         domain="learning", layer_key="any",
-                         owner_user_id=admin.id, risk_class="apocalyptic")
+        await svc.create(
+            key=f"d-{str(ULID()).lower()}",
+            title="x",
+            domain="learning",
+            layer_key="any",
+            owner_user_id=admin.id,
+            risk_class="apocalyptic",
+        )
     assert exc.value.code == "VALIDATION_ERROR"
     with pytest.raises(AppError) as exc:
-        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
-                         domain="learning", layer_key="layer-does-not-exist",
-                         owner_user_id=admin.id)
+        await svc.create(
+            key=f"d-{str(ULID()).lower()}",
+            title="x",
+            domain="learning",
+            layer_key="layer-does-not-exist",
+            owner_user_id=admin.id,
+        )
     assert exc.value.status_code == 404
     wrong_domain_layer = await LayerService(db).create(
         key=f"lyr-{str(ULID()).lower()}", domain="matching"
     )
     with pytest.raises(AppError) as exc:
-        await svc.create(key=f"d-{str(ULID()).lower()}", title="x",
-                         domain="learning", layer_key=wrong_domain_layer.key,
-                         owner_user_id=admin.id)
+        await svc.create(
+            key=f"d-{str(ULID()).lower()}",
+            title="x",
+            domain="learning",
+            layer_key=wrong_domain_layer.key,
+            owner_user_id=admin.id,
+        )
     assert exc.value.code == "VALIDATION_ERROR"
 
     exp, _ = await _mk_running(db)
@@ -1006,41 +1054,47 @@ async def test_experiments_service_cold_arms_necropsy(db):
     assert exc.value.code == "EXPERIMENT_INVALID_TRANSITION"
 
     # schedule gates: no version, then incomplete checklist
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    bare = await svc.create(
+        key=f"b-{str(ULID()).lower()}",
+        title="B",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
-    bare = await svc.create(key=f"b-{str(ULID()).lower()}", title="B",
-                            domain="learning", layer_key=layer.key,
-                            owner_user_id=admin.id)
     await svc.transition(bare.id, to_status="review", actor=admin)
     with pytest.raises(AppError) as exc:
-        await svc.transition(bare.id, to_status="scheduled", actor=admin,
-                             checklist=_CHECKLIST)
+        await svc.transition(bare.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
     await svc.transition(bare.id, to_status="draft", actor=admin)
     await svc.create_version(bare.id, spec=_spec(), actor=admin)
-    await LayerService(db).allocate(layer_key=layer.key, experiment_id=bare.id,
-                                    slice_start=0, slice_end=9999)
+    await LayerService(db).allocate(
+        layer_key=layer.key, experiment_id=bare.id, slice_start=0, slice_end=9999
+    )
     await svc.transition(bare.id, to_status="review", actor=admin)
     with pytest.raises(AppError) as exc:
-        await svc.transition(bare.id, to_status="scheduled", actor=admin,
-                             checklist={"hypothesis_peer_checked": True})
+        await svc.transition(
+            bare.id, to_status="scheduled", actor=admin, checklist={"hypothesis_peer_checked": True}
+        )
     assert exc.value.code == "EXPERIMENT_CHECKLIST_INCOMPLETE"
 
     # spec not JSON-serializable -> typed 422
     with pytest.raises(AppError) as exc:
-        await svc.create_version(bare.id, spec={**_spec(),
-                                                "population": {"rules": []},
-                                                "hypothesis": "x" * 20,
-                                                "metrics": {"primary": ["exposure_rate"],
-                                                            "guardrails": []},
-                                                "_bad": float("inf")},
-                                 actor=admin)
+        await svc.create_version(
+            bare.id,
+            spec={
+                **_spec(),
+                "population": {"rules": []},
+                "hypothesis": "x" * 20,
+                "metrics": {"primary": ["exposure_rate"], "guardrails": []},
+                "_bad": float("inf"),
+            },
+            actor=admin,
+        )
     assert exc.value.code in ("EXPERIMENT_SPEC_INVALID", "VALIDATION_ERROR")
 
     # search: filters + delegation scope + keyset cursor + events
-    rows, total, _cursor = await svc.list_experiments(
-        status="completed", domain="learning")
+    rows, total, _cursor = await svc.list_experiments(status="completed", domain="learning")
     assert any(r.id == exp.id for r in rows) and total >= 1
     scoped_rows, _, _ = await svc.list_experiments(scope_org_ids=["z" * 26])
     assert all(r.scope_org_id == "z" * 26 for r in scoped_rows)
@@ -1095,22 +1149,28 @@ async def test_clone_duplicates_spec_as_new_draft(db):
     ).scalar_one_or_none()
     assert alloc is None  # slices are claimed deliberately, never copied
     events = (
-        await db.execute(
-            select(ExperimentEvent).where(
-                ExperimentEvent.experiment_id == copy.id,
-                ExperimentEvent.event_type == "cloned_from",
+        (
+            await db.execute(
+                select(ExperimentEvent).where(
+                    ExperimentEvent.experiment_id == copy.id,
+                    ExperimentEvent.event_type == "cloned_from",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert events and events[0].payload["source_experiment_id"] == exp.id
 
     # a version-less source refuses typed
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
+    bare = await svc.create(
+        key=f"bare-{str(ULID()).lower()}",
+        title="B",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
-    bare = await svc.create(key=f"bare-{str(ULID()).lower()}", title="B",
-                            domain="learning", layer_key=layer.key,
-                            owner_user_id=admin.id)
     with pytest.raises(AppError) as exc:
         await svc.clone(bare.id, new_key=f"c-{str(ULID()).lower()}", actor=admin)
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
@@ -1121,19 +1181,29 @@ async def test_list_experiments_text_search(db):
     wildcards in the user's input are literals (percent means percent)."""
     admin = await _mk_admin(db)
     svc = ExperimentService(db)
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     tag = str(ULID()).lower()[:10]
-    by_key = await svc.create(key=f"needle-{tag}", title="Plain title",
-                              domain="learning", layer_key=layer.key,
-                              owner_user_id=admin.id)
-    by_title = await svc.create(key=f"other-{tag}x", title=f"NEEDLE-{tag} inside",
-                                domain="learning", layer_key=layer.key,
-                                owner_user_id=admin.id)
-    pct = await svc.create(key=f"pct-{tag}", title=f"100% ramp {tag}",
-                           domain="learning", layer_key=layer.key,
-                           owner_user_id=admin.id)
+    by_key = await svc.create(
+        key=f"needle-{tag}",
+        title="Plain title",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+    )
+    by_title = await svc.create(
+        key=f"other-{tag}x",
+        title=f"NEEDLE-{tag} inside",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+    )
+    pct = await svc.create(
+        key=f"pct-{tag}",
+        title=f"100% ramp {tag}",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+    )
 
     rows, total, _ = await svc.list_experiments(q=f"needle-{tag}")
     ids = {r.id for r in rows}
@@ -1166,20 +1236,22 @@ async def test_read_scope_dep_arms(db):
     assert exc.value.status_code == 422 and "galaxy" in exc.value.message
     check_enum(None, frozenset({"learning"}), "domain")  # absent filter: fine
 
-    plain = User(email=f"plain-{ULID()}@example.com", display_name="P",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    plain = User(
+        email=f"plain-{ULID()}@example.com",
+        display_name="P",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(plain)
     await db.flush()
     with pytest.raises(AppError) as exc:
         await experiment_read_scope(user=plain, db=db)
     assert exc.value.status_code == 403
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="dep", slug=f"dep-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="dep", slug=f"dep-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     db.add(OrgMember(org_id=org.id, user_id=plain.id, role=OrgRole.ADMIN))
@@ -1205,21 +1277,26 @@ async def test_identity_link_migrates_anonymous_history(db):
     svc = AssignmentService(db)
     anon_id = str(ULID())
 
-    first = await svc.resolve(experiment_key=exp.key,
-                              unit_type="anonymous", unit_id=anon_id)
+    first = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert first is not None
-    again = await svc.resolve(experiment_key=exp.key,
-                              unit_type="anonymous", unit_id=anon_id)
+    again = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert again is not None and again.variant_key == first.variant_key
 
-    user = User(email=f"idl-{ULID()}@example.com", display_name="L",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idl-{ULID()}@example.com",
+        display_name="L",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
     pre_row = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == anon_id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == anon_id,
+            )
+        )
     ).scalar_one()
     original_assigned_at = pre_row.assigned_at
 
@@ -1227,24 +1304,28 @@ async def test_identity_link_migrates_anonymous_history(db):
     assert out["migrated"] == 1 and out["conflicts"] == 0
 
     migrated_row = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == user.id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == user.id,
+            )
+        )
     ).scalar_one()
     assert migrated_row.variant_key == first.variant_key
     assert migrated_row.assigned_at == original_assigned_at  # ITT intact
     gone = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == anon_id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == anon_id,
+            )
+        )
     ).scalar_one_or_none()
     assert gone is None
 
     # both id forms now serve the user's assignment
-    via_anon = await svc.resolve(experiment_key=exp.key,
-                                 unit_type="anonymous", unit_id=anon_id)
-    via_user = await svc.resolve(experiment_key=exp.key,
-                                 unit_type="user", unit_id=user.id)
+    via_anon = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+    via_user = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
     assert via_anon is not None and via_user is not None
     assert via_anon.variant_key == first.variant_key
     assert via_user.variant_key == first.variant_key
@@ -1252,11 +1333,16 @@ async def test_identity_link_migrates_anonymous_history(db):
     # idempotent re-link; rebinding to a DIFFERENT user refused
     out2 = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
     assert out2["migrated"] == 0 and out2["conflicts"] == 0
-    other = User(email=f"idl2-{ULID()}@example.com", display_name="O",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    other = User(
+        email=f"idl2-{ULID()}@example.com",
+        display_name="O",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(other)
     await db.flush()
     from app.exceptions import AppError as _AppError
+
     with pytest.raises(_AppError) as exc:
         await svc.link_identity(anonymous_id=anon_id, user_id=other.id)
     assert exc.value.code == "EXPERIMENT_IDENTITY_CONFLICT"
@@ -1274,58 +1360,72 @@ async def test_identity_link_conflict_keeps_user_row_and_audits(db):
     exp, admin = await _mk_running(db)
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idc-{ULID()}@example.com", display_name="C",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idc-{ULID()}@example.com",
+        display_name="C",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
 
-    via_anon = await svc.resolve(experiment_key=exp.key,
-                                 unit_type="anonymous", unit_id=anon_id)
-    via_user = await svc.resolve(experiment_key=exp.key,
-                                 unit_type="user", unit_id=user.id)
+    via_anon = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+    via_user = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
     assert via_anon is not None and via_user is not None
     # an exposure recorded under the ANON id before the link (#74 setup)
     recorded = await svc.record_exposure(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
-        dedup_key=f"idc-{anon_id}")
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id, dedup_key=f"idc-{anon_id}"
+    )
     assert recorded is True  # #75: the anon namespace records exposures
 
     out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
     assert out["migrated"] == 0 and out["conflicts"] == 1
 
     kept = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == user.id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == user.id,
+            )
+        )
     ).scalar_one()
     assert kept.variant_key == via_user.variant_key
     event = (
-        await db.execute(_select(ExperimentEvent).where(
-            ExperimentEvent.experiment_id == exp.id,
-            ExperimentEvent.event_type == "experiment_identity_conflict"))
+        await db.execute(
+            _select(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == exp.id,
+                ExperimentEvent.event_type == "experiment_identity_conflict",
+            )
+        )
     ).scalar_one()
     assert event.payload["anon_variant"] == via_anon.variant_key
     assert event.payload["user_variant"] == via_user.variant_key
 
     # the anon id now serves the USER's variant (one person, one
     # experience — even where the histories disagreed)
-    after = await svc.resolve(experiment_key=exp.key,
-                              unit_type="anonymous", unit_id=anon_id)
+    after = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert after is not None and after.variant_key == via_user.variant_key
 
     # #74: the anon row's exposures SURVIVED the conflict deletion,
     # re-pointed at the surviving user assignment (append-only contract)
     from app.experiments.models import ExperimentExposure
+
     exposure_rows = (
-        await db.execute(_select(ExperimentExposure).where(
-            ExperimentExposure.experiment_id == exp.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(exposure_rows) == 1
     assert exposure_rows[0].assignment_id == kept.id
 
     # malformed anonymous ids refuse — status pinned at BOTH raise sites
     # (the two-raise-sites-two-pins law)
     from app.exceptions import AppError as _AppError
+
     with pytest.raises(_AppError) as too_long:
         await svc.link_identity(anonymous_id="x" * 27, user_id=user.id)
     assert too_long.value.status_code == 422
@@ -1348,8 +1448,12 @@ async def test_identity_link_racing_resolve_not_stranded(db, monkeypatch):
     exp, admin = await _mk_running(db)
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idr-{ULID()}@example.com", display_name="R",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idr-{ULID()}@example.com",
+        display_name="R",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
 
@@ -1362,37 +1466,35 @@ async def test_identity_link_racing_resolve_not_stranded(db, monkeypatch):
             fired["done"] = True
             # the link lands in the race window (forward-check already
             # passed, insert not yet written)
-            await AssignmentService(self.db).link_identity(
-                anonymous_id=anon_id, user_id=user.id
-            )
+            await AssignmentService(self.db).link_identity(anonymous_id=anon_id, user_id=user.id)
         return out
 
     monkeypatch.setattr(AssignmentService, "compute", racing_compute)
-    resolved = await svc.resolve(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
-    )
+    resolved = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert resolved is not None
 
     orphan = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == anon_id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == anon_id,
+            )
+        )
     ).scalar_one_or_none()
     assert orphan is None  # the race window closed behind us
     user_row = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == user.id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == user.id,
+            )
+        )
     ).scalar_one()
     assert user_row.variant_key == resolved.variant_key
 
     monkeypatch.setattr(AssignmentService, "compute", original_compute)
-    via_user = await svc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id=user.id
-    )
-    via_anon = await svc.resolve(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
-    )
+    via_user = await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
+    via_anon = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert via_user is not None and via_anon is not None
     assert via_user.variant_key == resolved.variant_key
     assert via_anon.variant_key == resolved.variant_key
@@ -1405,13 +1507,20 @@ async def test_identity_link_racing_switchback_not_stranded(db, monkeypatch):
     from sqlalchemy import select as _select
 
     exp, admin = await _mk_running(
-        db, spec_overrides={"design": "switchback",
-                            "switchback": {"switch_unit": "platform_day",
-                                           "window_minutes": 1440}})
+        db,
+        spec_overrides={
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+        },
+    )
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idsw-{ULID()}@example.com", display_name="S",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idsw-{ULID()}@example.com",
+        display_name="S",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
 
@@ -1422,34 +1531,35 @@ async def test_identity_link_racing_switchback_not_stranded(db, monkeypatch):
         out = await original_compute(self, **kwargs)
         if not fired["done"]:
             fired["done"] = True
-            await AssignmentService(self.db).link_identity(
-                anonymous_id=anon_id, user_id=user.id
-            )
+            await AssignmentService(self.db).link_identity(anonymous_id=anon_id, user_id=user.id)
         return out
 
     monkeypatch.setattr(AssignmentService, "compute", racing_compute)
-    resolved = await svc.resolve(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
-    )
+    resolved = await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
     assert resolved is not None  # the day's variant serves
 
     orphan = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == anon_id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == anon_id,
+            )
+        )
     ).scalar_one_or_none()
     assert orphan is None
     user_row = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id == user.id))
+        await db.execute(
+            _select(ExperimentAssignment).where(
+                ExperimentAssignment.experiment_id == exp.id,
+                ExperimentAssignment.unit_id == user.id,
+            )
+        )
     ).scalar_one()
     assert user_row is not None  # exactly one roster row for the person
 
     # wave-41 killer: the served CONFIG belongs to the day's variant —
     # a flipped lookup serves another variant's payload
-    expected_config = ({"rubric_template_id": "x"}
-                       if resolved.variant_key == "treatment" else {})
+    expected_config = {"rubric_template_id": "x"} if resolved.variant_key == "treatment" else {}
     assert resolved.config == expected_config
 
 
@@ -1461,8 +1571,12 @@ async def test_identity_link_cascades_with_user_deletion(db):
     from app.experiments.models import ExperimentIdentityLink
 
     svc = AssignmentService(db)
-    user = User(email=f"idd-{ULID()}@example.com", display_name="D",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idd-{ULID()}@example.com",
+        display_name="D",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
     anon_id = str(ULID())
@@ -1471,8 +1585,9 @@ async def test_identity_link_cascades_with_user_deletion(db):
     await db.delete(user)
     await db.flush()
     gone = (
-        await db.execute(_select(ExperimentIdentityLink).where(
-            ExperimentIdentityLink.anonymous_id == anon_id))
+        await db.execute(
+            _select(ExperimentIdentityLink).where(ExperimentIdentityLink.anonymous_id == anon_id)
+        )
     ).scalar_one_or_none()
     assert gone is None
 
@@ -1489,15 +1604,17 @@ async def test_exposure_racing_link_conflict_lands_on_survivor(db, monkeypatch):
     exp, admin = await _mk_running(db)
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idx-{ULID()}@example.com", display_name="X",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idx-{ULID()}@example.com",
+        display_name="X",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
     # both ids assigned -> a later link takes the CONFLICT fold
-    assert await svc.resolve(experiment_key=exp.key,
-                             unit_type="anonymous", unit_id=anon_id)
-    assert await svc.resolve(experiment_key=exp.key,
-                             unit_type="user", unit_id=user.id)
+    assert await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
 
     original_existing = AssignmentService._existing
     fired = {"done": False}
@@ -1508,24 +1625,29 @@ async def test_exposure_racing_link_conflict_lands_on_survivor(db, monkeypatch):
             fired["done"] = True
             # the link lands AFTER the exposure's assignment lookup —
             # the conflict fold deletes the row the exposure points at
-            await AssignmentService(self.db).link_identity(
-                anonymous_id=anon_id, user_id=user.id
-            )
+            await AssignmentService(self.db).link_identity(anonymous_id=anon_id, user_id=user.id)
         return row
 
     monkeypatch.setattr(AssignmentService, "_existing", racing_existing)
     recorded = await svc.record_exposure(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
-        dedup_key=f"race-{anon_id}")
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id, dedup_key=f"race-{anon_id}"
+    )
     assert recorded is True  # never silently lost
     monkeypatch.setattr(AssignmentService, "_existing", original_existing)
 
     survivor = await svc._existing(exp.id, "user", user.id)
     rows = (
-        await db.execute(_select(ExperimentExposure).where(
-            ExperimentExposure.experiment_id == exp.id,
-            ExperimentExposure.dedup_key == f"race-{anon_id}"))
-    ).scalars().all()
+        (
+            await db.execute(
+                _select(ExperimentExposure).where(
+                    ExperimentExposure.experiment_id == exp.id,
+                    ExperimentExposure.dedup_key == f"race-{anon_id}",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].assignment_id == survivor.id
 
@@ -1543,43 +1665,66 @@ async def test_link_conflict_survives_dedup_key_collision(db):
     exp, admin = await _mk_running(db)
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idk-{ULID()}@example.com", display_name="K",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idk-{ULID()}@example.com",
+        display_name="K",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
-    assert await svc.resolve(experiment_key=exp.key,
-                             unit_type="anonymous", unit_id=anon_id)
-    assert await svc.resolve(experiment_key=exp.key,
-                             unit_type="user", unit_id=user.id)
+    assert await svc.resolve(experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+    assert await svc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
     # the same client-side natural key lands under BOTH identities
     shared_key = f"day-{anon_id[:8]}"
-    assert await svc.record_exposure(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
-        dedup_key=shared_key) is True
-    assert await svc.record_exposure(
-        experiment_key=exp.key, unit_type="user", unit_id=user.id,
-        dedup_key=shared_key, context={"side": "user"}) is True
+    assert (
+        await svc.record_exposure(
+            experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id, dedup_key=shared_key
+        )
+        is True
+    )
+    assert (
+        await svc.record_exposure(
+            experiment_key=exp.key,
+            unit_type="user",
+            unit_id=user.id,
+            dedup_key=shared_key,
+            context={"side": "user"},
+        )
+        is True
+    )
     # a second anon exposure with a NON-colliding key must survive the fold
-    assert await svc.record_exposure(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id,
-        dedup_key=f"unique-{anon_id[:8]}") is True
+    assert (
+        await svc.record_exposure(
+            experiment_key=exp.key,
+            unit_type="anonymous",
+            unit_id=anon_id,
+            dedup_key=f"unique-{anon_id[:8]}",
+        )
+        is True
+    )
 
     out = await svc.link_identity(anonymous_id=anon_id, user_id=user.id)
     assert out["conflicts"] == 1  # the fold itself succeeded
 
     survivor = await svc._existing(exp.id, "user", user.id)
     rows = (
-        await db.execute(_select(ExperimentExposure).where(
-            ExperimentExposure.experiment_id == exp.id))
-    ).scalars().all()
+        (
+            await db.execute(
+                _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert all(r.assignment_id == survivor.id for r in rows)
     shared = [r for r in rows if r.dedup_key == shared_key]
     unique = [r for r in rows if r.dedup_key == f"unique-{anon_id[:8]}"]
-    assert len(shared) == 1   # the colliding duplicate folded away
+    assert len(shared) == 1  # the colliding duplicate folded away
     # the SURVIVOR's physical row is the one that remains — the fold
     # deletes the anon duplicate, never the user's original
     assert shared[0].context == {"side": "user"}
-    assert len(unique) == 1   # the non-colliding exposure re-pointed
+    assert len(unique) == 1  # the non-colliding exposure re-pointed
 
 
 async def test_link_migration_racing_user_resolve(db, monkeypatch):
@@ -1595,12 +1740,17 @@ async def test_link_migration_racing_user_resolve(db, monkeypatch):
     exp, admin = await _mk_running(db)
     svc = AssignmentService(db)
     anon_id = str(ULID())
-    user = User(email=f"idm-{ULID()}@example.com", display_name="M",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"idm-{ULID()}@example.com",
+        display_name="M",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
     anon_resolved = await svc.resolve(
-        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id)
+        experiment_key=exp.key, unit_type="anonymous", unit_id=anon_id
+    )
     assert anon_resolved is not None
 
     original_existing = AssignmentService._existing
@@ -1613,7 +1763,8 @@ async def test_link_migration_racing_user_resolve(db, monkeypatch):
             # the user resolves themselves INSIDE the race window — their
             # row lands after the migration's existence check
             await AssignmentService(self.db).resolve(
-                experiment_key=exp.key, unit_type="user", unit_id=user.id)
+                experiment_key=exp.key, unit_type="user", unit_id=user.id
+            )
         return row
 
     monkeypatch.setattr(AssignmentService, "_existing", racing_existing)
@@ -1622,15 +1773,25 @@ async def test_link_migration_racing_user_resolve(db, monkeypatch):
     assert out["conflicts"] == 1 and out["migrated"] == 0
 
     rows = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id,
-            ExperimentAssignment.unit_id.in_([anon_id, user.id])))
-    ).scalars().all()
+        (
+            await db.execute(
+                _select(ExperimentAssignment).where(
+                    ExperimentAssignment.experiment_id == exp.id,
+                    ExperimentAssignment.unit_id.in_([anon_id, user.id]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1 and rows[0].unit_id == user.id
     event = (
-        await db.execute(_select(ExperimentEvent).where(
-            ExperimentEvent.experiment_id == exp.id,
-            ExperimentEvent.event_type == "experiment_identity_conflict"))
+        await db.execute(
+            _select(ExperimentEvent).where(
+                ExperimentEvent.experiment_id == exp.id,
+                ExperimentEvent.event_type == "experiment_identity_conflict",
+            )
+        )
     ).scalar_one()
     assert event.payload["anonymous_id"] == anon_id
 
@@ -1661,44 +1822,43 @@ async def test_layer_service_negative_paths(db):
     assert e.value.code == "EXPERIMENT_KEY_TAKEN"
 
     with _pytest.raises(AppError) as e:
-        await svc.allocate(layer_key="layer-that-is-not-" + key,
-                           experiment_id="x" * 26,
-                           slice_start=0, slice_end=1)
+        await svc.allocate(
+            layer_key="layer-that-is-not-" + key, experiment_id="x" * 26, slice_start=0, slice_end=1
+        )
     assert e.value.code == "EXPERIMENT_NOT_FOUND"
 
     admin = await _mk_admin(db)
     from app.experiments.services.experiments import ExperimentService
 
     exp = await ExperimentService(db).create(
-        key=f"neg-exp-{str(ULID()).lower()}", title="N", domain="learning",
-        layer_key=key, owner_user_id=admin.id,
+        key=f"neg-exp-{str(ULID()).lower()}",
+        title="N",
+        domain="learning",
+        layer_key=key,
+        owner_user_id=admin.id,
     )
     with _pytest.raises(AppError) as e:
-        await svc.allocate(layer_key=key, experiment_id=exp.id,
-                           slice_start=5, slice_end=4)
+        await svc.allocate(layer_key=key, experiment_id=exp.id, slice_start=5, slice_end=4)
     assert e.value.code == "VALIDATION_ERROR"
     with _pytest.raises(AppError) as e:
-        await svc.allocate(layer_key=key, experiment_id=exp.id,
-                           slice_start=0, slice_end=10_000)
+        await svc.allocate(layer_key=key, experiment_id=exp.id, slice_start=0, slice_end=10_000)
     assert e.value.code == "VALIDATION_ERROR"
     with _pytest.raises(AppError) as e:
-        await svc.allocate(layer_key=key, experiment_id="x" * 26,
-                           slice_start=0, slice_end=1)
+        await svc.allocate(layer_key=key, experiment_id="x" * 26, slice_start=0, slice_end=1)
     assert e.value.code == "EXPERIMENT_NOT_FOUND"
     other_key = f"neg2-{str(ULID()).lower()}"
     await svc.create(key=other_key, domain="learning")
     with _pytest.raises(AppError) as e:
-        await svc.allocate(layer_key=other_key, experiment_id=exp.id,
-                           slice_start=0, slice_end=1)
+        await svc.allocate(layer_key=other_key, experiment_id=exp.id, slice_start=0, slice_end=1)
     assert e.value.code == "VALIDATION_ERROR"  # belongs to another layer
 
-    await svc.allocate(layer_key=key, experiment_id=exp.id,
-                       slice_start=0, slice_end=99)
+    await svc.allocate(layer_key=key, experiment_id=exp.id, slice_start=0, slice_end=99)
     try:
         async with db.begin_nested():
             with _pytest.raises(AppError) as e:
-                await svc.allocate(layer_key=key, experiment_id=exp.id,
-                                   slice_start=100, slice_end=199)
+                await svc.allocate(
+                    layer_key=key, experiment_id=exp.id, slice_start=100, slice_end=199
+                )
     except Exception:  # noqa: BLE001
         pass
     assert e.value.code == "LAYER_SLICE_OVERLAP"
@@ -1717,8 +1877,12 @@ async def test_identity_link_per_user_cap(db, monkeypatch):
 
     _, admin = await _mk_running(db)
     svc = AssignmentService(db)
-    user = User(email=f"cap98-{ULID()}@example.com", display_name="C",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"cap98-{ULID()}@example.com",
+        display_name="C",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.flush()
 
@@ -1746,8 +1910,12 @@ async def test_identity_link_cap_holds_under_concurrency(db, monkeypatch):
     import app.experiments.services.assignment as asg
     from app.exceptions import AppError as _AppError
 
-    user = User(email=f"c101-{ULID()}@example.com", display_name="R",
-                role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    user = User(
+        email=f"c101-{ULID()}@example.com",
+        display_name="R",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add(user)
     await db.commit()  # writer sessions must SEE the user
     monkeypatch.setattr(asg, "IDENTITY_LINK_CAP_PER_USER", 1, raising=False)
@@ -1787,9 +1955,7 @@ async def test_identity_link_cap_holds_under_concurrency(db, monkeypatch):
     from app.experiments.models import ExperimentIdentityLink as _Lnk
 
     n = (
-        await db.execute(
-            select(_func.count()).select_from(_Lnk).where(_Lnk.user_id == user.id)
-        )
+        await db.execute(select(_func.count()).select_from(_Lnk).where(_Lnk.user_id == user.id))
     ).scalar_one()
     assert n == 1, f"cap must be exact under concurrency, found {n} links"
     # cleanup: this test commits — remove the links it created

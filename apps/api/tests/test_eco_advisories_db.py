@@ -50,14 +50,20 @@ async def test_advisory_registration_emits_security_change_once(db):
     # Duplicate ref rejected, unknown severity rejected
     with pytest.raises(AppError) as exc:
         await svc.create(
-            advisory_ref=ref, title="dup", severity="high",
-            affected_ref="acme-nodes", created_by=admin.id,
+            advisory_ref=ref,
+            title="dup",
+            severity="high",
+            affected_ref="acme-nodes",
+            created_by=admin.id,
         )
     assert exc.value.code == "ECO_ADVISORY_EXISTS"
     with pytest.raises(AppError):
         await svc.create(
-            advisory_ref=f"X-{str(ULID()).lower()[:6]}", title="t",
-            severity="apocalyptic", affected_ref="x", created_by=admin.id,
+            advisory_ref=f"X-{str(ULID()).lower()[:6]}",
+            title="t",
+            severity="apocalyptic",
+            affected_ref="x",
+            created_by=admin.id,
         )
 
     # Status transition
@@ -105,6 +111,7 @@ async def test_affected_entities_respects_range_and_fails_open(db):
     # Package with a different name untouched
     assert pkg.id not in by_id
 
+
 async def test_advisory_notifies_watchers_of_affected_entities(db):
     from app.ecosystem.services.watchlists import WatchlistService
 
@@ -144,6 +151,7 @@ async def test_advisory_notifies_watchers_of_affected_entities(db):
     # Pull view: the watcher sees it in matching_changes
     rows = await WatchlistService(db).matching_changes(watcher.id)
     assert change.id in [c.id for c in rows]
+
 
 async def test_advisory_watcher_push_fanout_enqueued(db):
     """Round-108 killer: each per-entity advisory change must ENQUEUE the

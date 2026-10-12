@@ -90,8 +90,12 @@ async def decide_rollout(
         plan_id, decision=body.decision, actor_id=user.id, note=body.note
     )
     await eco_audit(
-        db, user, action="eco.rollout_decided", target_type="eco_rollout_plan",
-        target_id=plan_id, after={"decision": body.decision, "status": plan.status},
+        db,
+        user,
+        action="eco.rollout_decided",
+        target_type="eco_rollout_plan",
+        target_id=plan_id,
+        after={"decision": body.decision, "status": plan.status},
         reason=body.note,
     )
     await db.commit()

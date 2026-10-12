@@ -102,10 +102,9 @@ async def test_first_run_for_target_has_no_baseline(db):
     db.add(only)
     await db.flush()
     await BenchmarkService(db)._detect_regression(only)  # must not raise
-    change = await db.scalar(
-        select(ChangeEvent).where(ChangeEvent.canonical_entity_id == model.id)
-    )
+    change = await db.scalar(select(ChangeEvent).where(ChangeEvent.canonical_entity_id == model.id))
     assert change is None
+
 
 async def test_score_history_chronological_with_trend(db):
     from app.ecosystem.services.benchmark import BenchmarkService

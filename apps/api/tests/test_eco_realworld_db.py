@@ -91,13 +91,9 @@ async def test_openrouter_adapter_guards():
     with pytest.raises(RuntimeError, match="no API key"):
         await adapter.execute("t", "vendor/model", {"prompt": "x"}, {}, None, "k")
     with pytest.raises(RuntimeError, match="not a valid OpenRouter slug"):
-        await adapter.execute(
-            "t", "no-slash-model", {"prompt": "x"}, {}, {"api_key": "k"}, "k"
-        )
+        await adapter.execute("t", "no-slash-model", {"prompt": "x"}, {}, {"api_key": "k"}, "k")
     with pytest.raises(RuntimeError, match="non-empty 'prompt'"):
-        await adapter.execute(
-            "t", "vendor/model", {}, {}, {"api_key": "k"}, "k"
-        )
+        await adapter.execute("t", "vendor/model", {}, {}, {"api_key": "k"}, "k")
 
 
 async def test_openai_image_adapter(monkeypatch):
@@ -155,9 +151,7 @@ async def test_replicate_adapter(monkeypatch):
     usage = {u["usage_type"]: u["quantity"] for u in out["__usage__"]}
     assert usage["compute_seconds"] == 7
     with pytest.raises(RuntimeError, match="immutable Replicate version"):
-        await adapter.execute(
-            "t", "owner/model", {"prompt": "x"}, {}, {"api_key": "k"}, "k"
-        )
+        await adapter.execute("t", "owner/model", {"prompt": "x"}, {}, {"api_key": "k"}, "k")
 
 
 async def test_adapter_http_error_is_runtime_error(monkeypatch):
@@ -182,8 +176,11 @@ class FakeLLM:
     async def complete(self, system_prompt, user_prompt, max_tokens=4096, temperature=0.1):
         self.calls.append((system_prompt, user_prompt))
         return SimpleNamespace(
-            content=self.content, input_tokens=10, output_tokens=20,
-            model="fake", provider="fake",
+            content=self.content,
+            input_tokens=10,
+            output_tokens=20,
+            model="fake",
+            provider="fake",
         )
 
 
@@ -233,9 +230,7 @@ async def test_llm_suggestion_caps_confidence_and_drops_hallucinated_ids(_reset_
     llm_extraction.set_llm_client(
         FakeLLM(json.dumps({"candidate_id": "real-id", "confidence": 0.99, "reason": "same"}))
     )
-    out = await suggest_resolution(
-        {"name": "X"}, [{"id": "real-id", "name": "X Model"}]
-    )
+    out = await suggest_resolution({"name": "X"}, [{"id": "real-id", "name": "X Model"}])
     assert out["candidate_id"] == "real-id"
     assert out["confidence"] == 0.7  # capped — can never reach auto-merge territory
     llm_extraction.set_llm_client(
@@ -263,9 +258,13 @@ async def test_resolve_conflict_writes_curated_overlay(db):
     for src, license_val, h in ((s1, "commercial", "a"), (s2, "research-only", "b")):
         db.add(
             EcosystemObservation(
-                source_id=src.id, event_type="catalog_snapshot", entity_kind="model",
-                canonical_entity_kind="model", canonical_entity_id=model.id,
-                raw_hash=h * 64, normalized={"license": license_val},
+                source_id=src.id,
+                event_type="catalog_snapshot",
+                entity_kind="model",
+                canonical_entity_kind="model",
+                canonical_entity_id=model.id,
+                raw_hash=h * 64,
+                normalized={"license": license_val},
             )
         )
     await db.flush()
@@ -275,8 +274,12 @@ async def test_resolve_conflict_writes_curated_overlay(db):
             "model", model.id, field="not_a_field", chosen_value="x", actor_id=admin.id
         )
     decision = await svc.resolve_conflict(
-        "model", model.id, field="license", chosen_value="commercial",
-        winning_source_id=s1.id, actor_id=admin.id,
+        "model",
+        model.id,
+        field="license",
+        chosen_value="commercial",
+        winning_source_id=s1.id,
+        actor_id=admin.id,
     )
     assert decision["value"] == "commercial" and decision["source_id"] == s1.id
     conflicts = await svc.conflicting_observations("model", model.id)
@@ -361,9 +364,7 @@ def test_weekly_trend_bucketing():
 async def test_global_search_across_kinds(db):
     unique = str(ULID()).lower()[-6:]
     model = AIModel(canonical_name=f"Searchable Gen {unique}", slug=f"sg-{unique}")
-    provider = AIProvider(
-        canonical_name=f"Searchable Labs {unique}", slug=f"sl-{unique}"
-    )
+    provider = AIProvider(canonical_name=f"Searchable Labs {unique}", slug=f"sl-{unique}")
     db.add_all([model, provider])
     await db.flush()
     results = await CatalogService(db).global_search(f"searchable {unique}")
@@ -375,18 +376,20 @@ async def test_global_search_across_kinds(db):
 
 async def test_corroboration_trust_weighted(db):
     official = await _mk_source(db, name=f"off-{ULID()}", trust_level="official")
-    community = await _mk_source(
-        db, name=f"com-{ULID()}", trust_level="community"
-    )
+    community = await _mk_source(db, name=f"com-{ULID()}", trust_level="community")
     model = AIModel(canonical_name=f"Corro {ULID()}", slug=f"co-{str(ULID()).lower()}")
     db.add(model)
     await db.flush()
     for src, h in ((official, "x"), (community, "y")):
         db.add(
             EcosystemObservation(
-                source_id=src.id, event_type="catalog_snapshot", entity_kind="model",
-                canonical_entity_kind="model", canonical_entity_id=model.id,
-                raw_hash=h * 64, normalized={},
+                source_id=src.id,
+                event_type="catalog_snapshot",
+                entity_kind="model",
+                canonical_entity_kind="model",
+                canonical_entity_id=model.id,
+                raw_hash=h * 64,
+                normalized={},
             )
         )
     await db.flush()
@@ -404,8 +407,12 @@ async def test_eco_audit_writes_immutable_event_and_never_raises(db):
 
     admin = await _mk_user(db, "admin")
     await eco_audit(
-        db, admin, action="eco.entity_merged", target_type="eco_model",
-        target_id="M" * 26, after={"merged_into": "T" * 26},
+        db,
+        admin,
+        action="eco.entity_merged",
+        target_type="eco_model",
+        target_id="M" * 26,
+        after={"merged_into": "T" * 26},
     )
     event = await db.scalar(
         select(CommercialAuditEvent).where(
@@ -415,9 +422,7 @@ async def test_eco_audit_writes_immutable_event_and_never_raises(db):
     )
     assert event is not None
     # Unregistered action: swallowed (audit never blocks the business action)
-    await eco_audit(
-        db, admin, action="eco.not_a_registered_action", target_type="x", target_id="y"
-    )
+    await eco_audit(db, admin, action="eco.not_a_registered_action", target_type="x", target_id="y")
 
 
 # ── Leaderboard (round 5 — LMArena/AA product surface) ──────────────
@@ -440,20 +445,18 @@ async def test_leaderboard_latest_run_per_target_and_ranking(db):
             suite.id, target={"entity_kind": "model_version", "entity_id": target.id}
         )
         await bench.execute_run(run.id)
-    board = await BenchmarkService(db).leaderboard(
-        suite_id=suite.id, dimension="cost_per_case_usd"
-    )
+    board = await BenchmarkService(db).leaderboard(suite_id=suite.id, dimension="cost_per_case_usd")
     rows = board["rows"]
     assert [r["entity_id"] for r in rows] == [cheap.id, pricey.id]  # lower cost first
     pricey_row = rows[1]
     assert pricey_row["dimension_scores"]["cost_per_case_usd"] == 0.30  # latest run only
     assert pricey_row["canonical_name"].startswith("LbPricey")
-    assert "dimension_stats" in pricey_row and "dimension_stats" not in pricey_row["dimension_scores"]
+    assert (
+        "dimension_stats" in pricey_row and "dimension_stats" not in pricey_row["dimension_scores"]
+    )
     # Higher-is-better ranking flips the order
     board2 = await BenchmarkService(db).leaderboard(suite_id=suite.id, dimension="reliability")
-    assert all(
-        r["dimension_scores"].get("reliability") == 1.0 for r in board2["rows"]
-    )
+    assert all(r["dimension_scores"].get("reliability") == 1.0 for r in board2["rows"])
 
 
 async def test_leaderboard_missing_dimension_sorts_last_never_hidden(db):
@@ -471,9 +474,11 @@ async def test_leaderboard_missing_dimension_sorts_last_never_hidden(db):
     )
     await bench.execute_run(run.id)
     board = await BenchmarkService(db).leaderboard(
-        suite_id=suite.id, dimension="human_pref_elo"  # nobody has it yet
+        suite_id=suite.id,
+        dimension="human_pref_elo",  # nobody has it yet
     )
     assert len(board["rows"]) == 1  # missing dimension → still listed, ranked last
+
 
 async def test_admin_actions_are_audited_round115(db):
     """Round-115 killers: previously-unaudited irreversible admin actions now
@@ -485,21 +490,29 @@ async def test_admin_actions_are_audited_round115(db):
 
     admin = await _mk_user(db, "admin")
     actions = [
-        "eco.advisory_registered", "eco.edge_added", "eco.edge_removed",
-        "eco.source_created", "eco.source_updated",
-        "eco.observation_manual_created", "eco.observations_bulk_verified",
-        "eco.suite_imported", "eco.entity_updated",
-        "eco.changes_bulk_acknowledged", "eco.resolutions_bulk_decided",
+        "eco.advisory_registered",
+        "eco.edge_added",
+        "eco.edge_removed",
+        "eco.source_created",
+        "eco.source_updated",
+        "eco.observation_manual_created",
+        "eco.observations_bulk_verified",
+        "eco.suite_imported",
+        "eco.entity_updated",
+        "eco.changes_bulk_acknowledged",
+        "eco.resolutions_bulk_decided",
     ]
     tag = str(ULID()).lower()
     for i, action in enumerate(actions):
         await eco_audit(
-            db, admin, action=action, target_type="eco_test",
-            target_id=f"{tag[:20]}-{i:02d}"[:26], after={"round": 115},
+            db,
+            admin,
+            action=action,
+            target_type="eco_test",
+            target_id=f"{tag[:20]}-{i:02d}"[:26],
+            after={"round": 115},
         )
     rows = await db.scalars(
-        select(CommercialAuditEvent).where(
-            CommercialAuditEvent.target_id.like(f"{tag[:20]}-%")
-        )
+        select(CommercialAuditEvent).where(CommercialAuditEvent.target_id.like(f"{tag[:20]}-%"))
     )
     assert sorted(r.action for r in rows) == sorted(actions)

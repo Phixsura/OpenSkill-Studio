@@ -28,20 +28,26 @@ async def db():
 async def _mk_impact(db, *, deadline_delta_hours, status="open"):
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="lifecycle_changed",
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="lifecycle_changed",
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="lifecycle", field="sunset_at",
+        observation_id=obs.id,
+        change_type="lifecycle",
+        field="sunset_at",
         severity="sunset_risk",
     )
     db.add(change)
     await db.flush()
     analysis = ImpactAnalysis(
-        change_event_id=change.id, root_kind="model_version",
-        root_id="0" * 26, classification="sunset",
+        change_event_id=change.id,
+        root_kind="model_version",
+        root_id="0" * 26,
+        classification="sunset",
         deadline_at=datetime.now(UTC) + timedelta(hours=deadline_delta_hours),
         status=status,
     )
@@ -61,12 +67,14 @@ async def test_overdue_open_impact_escalates_once_to_admins(db):
     await db.refresh(overdue)
     assert overdue.summary.get("escalated_at")
     assert overdue.status == "open"  # escalation never closes it
-    notes = list(await db.scalars(
-        select(Notification).where(
-            Notification.user_id == admin.id,
-            Notification.type == "ecosystem_impact_sla",
+    notes = list(
+        await db.scalars(
+            select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "ecosystem_impact_sla",
+            )
         )
-    ))
+    )
     assert len(notes) == 1
     assert notes[0].data["impact_analysis_id"] == overdue.id
 

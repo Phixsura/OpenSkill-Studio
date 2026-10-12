@@ -57,14 +57,20 @@ ROLLOUT_SCOPES = frozenset(
     {"benchmark_only", "internal_org", "selected_cohort", "selected_installation"}
 )
 
-ROLLOUT_STATUSES = frozenset(
-    {"draft", "running", "evaluating", "promoted", "rejected", "aborted"}
-)
+ROLLOUT_STATUSES = frozenset({"draft", "running", "evaluating", "promoted", "rejected", "aborted"})
 
 WATCH_TARGET_KINDS = frozenset(
     {
-        "provider", "model", "model_version", "tool", "workflow", "agent",
-        "node_package", "github_repo", "capability", "component",
+        "provider",
+        "model",
+        "model_version",
+        "tool",
+        "workflow",
+        "agent",
+        "node_package",
+        "github_repo",
+        "capability",
+        "component",
     }
 )
 
@@ -223,9 +229,7 @@ class FeedTokenState(Base):
         String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     generation: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    rotated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    rotated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Watchlist(Base):
@@ -278,13 +282,17 @@ class WatchItem(Base):
         # composite constraint, hence one partial index per target column)
         Index(
             "uq_eco_watch_item_target",
-            "watchlist_id", "target_kind", "target_id",
+            "watchlist_id",
+            "target_kind",
+            "target_id",
             unique=True,
             postgresql_where=text("target_id IS NOT NULL"),
         ),
         Index(
             "uq_eco_watch_item_ref",
-            "watchlist_id", "target_kind", "target_ref",
+            "watchlist_id",
+            "target_kind",
+            "target_ref",
             unique=True,
             postgresql_where=text("target_ref IS NOT NULL"),
         ),

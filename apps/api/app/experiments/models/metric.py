@@ -55,9 +55,7 @@ class MetricDefinition(Base):
     winsorize_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
     cap_value: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
     percentile: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class MetricSnapshot(Base):
@@ -92,9 +90,7 @@ class MetricSnapshot(Base):
     covariates: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # exp13 (§4.14): base-2 log histogram {bucket: count} for quantile reads;
     # populated only when the definition requests quantiles
-    value_histogram: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default="{}"
-    )
+    value_histogram: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     provenance: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

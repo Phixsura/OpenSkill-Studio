@@ -127,14 +127,11 @@ class HoldoutGroupService:
     # Sources whose aggregation keys off USER units and never requires an
     # experiment row — the only ones a holdout report may use (§4.12 v2)
     REPORT_SOURCES = frozenset(
-        {"projects", "cost_ledger", "evaluations", "learning_paths",
-         "client_briefs", "registry"}
+        {"projects", "cost_ledger", "evaluations", "learning_paths", "client_briefs", "registry"}
     )
     REPORT_SAMPLE_CAP = 20_000
 
-    async def report(
-        self, group_id: str, *, metric_key: str, window_days: int = 28
-    ) -> dict:
+    async def report(self, group_id: str, *, metric_key: str, window_days: int = 28) -> dict:
         """Global holdout measurement (§4.12 v2 — the reason holdout groups
         exist): split a capped user universe by the group's own membership
         roll and compare the metric between held-out and general populations
@@ -148,18 +145,12 @@ class HoldoutGroupService:
         from app.models.user import User
 
         group = (
-            await self.db.execute(
-                select(HoldoutGroup).where(HoldoutGroup.id == group_id)
-            )
+            await self.db.execute(select(HoldoutGroup).where(HoldoutGroup.id == group_id))
         ).scalar_one_or_none()
         if group is None:
             raise AppError("EXPERIMENT_NOT_FOUND", "Holdout group not found", 404)
         definition = next(
-            (
-                d
-                for d in await MetricService(self.db).list_definitions()
-                if d.key == metric_key
-            ),
+            (d for d in await MetricService(self.db).list_definitions() if d.key == metric_key),
             None,
         )
         if definition is None:
@@ -195,9 +186,7 @@ class HoldoutGroupService:
         # the window's upper bound must use the SAME clock — the app clock
         # ran 119ms behind the DB here and silently excluded the freshest
         # rows (the guardrail evaluator learned this same lesson earlier).
-        now = (
-            await self.db.execute(select(func.clock_timestamp()))
-        ).scalar_one()
+        now = (await self.db.execute(select(func.clock_timestamp()))).scalar_one()
         if now.tzinfo is None:  # driver may hand back naive UTC
             now = now.replace(tzinfo=UTC)
         window_start = now - timedelta(days=window_days)
@@ -220,15 +209,21 @@ class HoldoutGroupService:
             ) > 0:
                 # held-out side is the CONTROL (it sees no launches)
                 comparison = stats.analyze_binary(
-                    holdout_arm["numerator"], holdout_arm["denominator"],
-                    general_arm["numerator"], general_arm["denominator"],
+                    holdout_arm["numerator"],
+                    holdout_arm["denominator"],
+                    general_arm["numerator"],
+                    general_arm["denominator"],
                 )
         elif definition.kind == "continuous" and (
             (holdout_arm.get("n") or 0) >= 2 and (general_arm.get("n") or 0) >= 2
         ):
             comparison = stats.welch_from_stats(
-                holdout_arm["n"], holdout_arm["sum_value"], holdout_arm["sum_sq"],
-                general_arm["n"], general_arm["sum_value"], general_arm["sum_sq"],
+                holdout_arm["n"],
+                holdout_arm["sum_value"],
+                holdout_arm["sum_sq"],
+                general_arm["n"],
+                general_arm["sum_value"],
+                general_arm["sum_sq"],
             )
         return {
             "group_id": group.id,
@@ -252,9 +247,7 @@ class HoldoutGroupService:
     async def list_groups(self) -> list[HoldoutGroup]:
         return list(
             (
-                await self.db.execute(
-                    select(HoldoutGroup).order_by(HoldoutGroup.created_at.desc())
-                )
+                await self.db.execute(select(HoldoutGroup).order_by(HoldoutGroup.created_at.desc()))
             ).scalars()
         )
 

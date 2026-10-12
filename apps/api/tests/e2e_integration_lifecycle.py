@@ -396,8 +396,11 @@ async def main() -> int:
         gid = r.json().get("id", "")
         r = await c.patch(
             f"/scim/v2/Groups/{gid}",
-            json={"Operations": [{"op": "replace", "path": "displayName",
-                                   "value": f"Live G2 {uid()}"}]},
+            json={
+                "Operations": [
+                    {"op": "replace", "path": "displayName", "value": f"Live G2 {uid()}"}
+                ]
+            },
             headers=scim_h,
         )
         check("live SCIM group PATCH", r.status_code == 200, r.text[:160])
@@ -436,9 +439,14 @@ async def main() -> int:
         qdb = await db_session()
         async with qdb:
             item = IdentityMatchQueue(
-                org_id=org_id, source="scim", connection_ref="e2e",
-                subject=f"q-{uid()}", email=f"q-{uid()}@q.example.edu",
-                reason="ambiguous", payload={}, status="pending",
+                org_id=org_id,
+                source="scim",
+                connection_ref="e2e",
+                subject=f"q-{uid()}",
+                email=f"q-{uid()}@q.example.edu",
+                reason="ambiguous",
+                payload={},
+                status="pending",
             )
             qdb.add(item)
             await qdb.commit()

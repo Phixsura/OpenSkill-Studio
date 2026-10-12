@@ -40,9 +40,7 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("status = 'verified'"),
     )
-    op.create_index(
-        "uq_intg_domain_org", "intg_org_domains", ["org_id", "domain"], unique=True
-    )
+    op.create_index("uq_intg_domain_org", "intg_org_domains", ["org_id", "domain"], unique=True)
 
     op.create_table(
         "intg_sso_connections",
@@ -145,9 +143,7 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index(
-        "ix_intg_idqueue_org_status", "intg_identity_match_queue", ["org_id", "status"]
-    )
+    op.create_index("ix_intg_idqueue_org_status", "intg_identity_match_queue", ["org_id", "status"])
 
     op.add_column(
         "org_members",

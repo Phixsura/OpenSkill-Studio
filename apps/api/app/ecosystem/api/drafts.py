@@ -136,8 +136,11 @@ async def _transition(draft_id: str, to_status: str, db: AsyncSession, user: Use
     action = {"approved": "eco.draft_approved", "rejected": "eco.draft_rejected"}.get(to_status)
     if action:
         await eco_audit(
-            db, user, action=action,
-            target_type="eco_component_draft", target_id=draft_id,
+            db,
+            user,
+            action=action,
+            target_type="eco_component_draft",
+            target_id=draft_id,
             after={"status": to_status},
         )
     await db.commit()
@@ -180,7 +183,10 @@ async def publish_draft(
     """Second explicit human action — refused unless status is approved."""
     outcome = await _transition(draft_id, "published", db, user)
     await eco_audit(
-        db, user, action="eco.draft_published", target_type="eco_component_draft",
+        db,
+        user,
+        action="eco.draft_published",
+        target_type="eco_component_draft",
         target_id=draft_id,
         after={"published_ref": outcome["data"].published_ref},
     )

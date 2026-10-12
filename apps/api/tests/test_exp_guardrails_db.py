@@ -38,6 +38,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -78,8 +79,7 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db, *, guardrails: list[dict] | None = None,
-                      unit_type: str = "user"):
+async def _mk_running(db, *, guardrails: list[dict] | None = None, unit_type: str = "user"):
     await MetricService(db).ensure_seed_definitions()
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
@@ -91,8 +91,7 @@ async def _mk_running(db, *, guardrails: list[dict] | None = None,
         layer_key=layer.key,
         owner_user_id=admin.id,
     )
-    await svc.create_version(exp.id, spec=_spec(guardrails, unit_type=unit_type),
-                             actor=admin)
+    await svc.create_version(exp.id, spec=_spec(guardrails, unit_type=unit_type), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -171,23 +170,29 @@ async def test_unwired_guardrail_source_skips_not_pauses(db):
     sourceless_key = f"nosrc_{str(_ULID()).lower()[:10]}"
     await MetricSvc(db).ensure_seed_definitions()
     await MetricSvc(db).create_definition(
-        key=probe_key, title="Unwired probe", kind="continuous",
-        domain="operational", source_kind="service",
+        key=probe_key,
+        title="Unwired probe",
+        kind="continuous",
+        domain="operational",
+        source_kind="service",
         spec={"source": "no_such_source"},
     )
     await MetricSvc(db).create_definition(
-        key=sourceless_key, title="Sourceless probe", kind="continuous",
-        domain="operational", source_kind="service", spec={},
+        key=sourceless_key,
+        title="Sourceless probe",
+        kind="continuous",
+        domain="operational",
+        source_kind="service",
+        spec={},
     )
     exp, _ = await _mk_running(
-        db, guardrails=[
+        db,
+        guardrails=[
             {"metric_key": sourceless_key, "op": "lte", "threshold": 1.0},
             {"metric_key": probe_key, "op": "lte", "threshold": 1.0},
-        ]
+        ],
     )
-    await AssignmentService(db).resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="u" * 26
-    )
+    await AssignmentService(db).resolve(experiment_key=exp.key, unit_type="user", unit_id="u" * 26)
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert summary["breaches"] == []
     assert (await db.get(Experiment, exp.id)).status == "running"
@@ -210,33 +215,35 @@ async def test_quantile_enabled_guardrail_evaluates_p95(db):
     from app.experiments.models import MetricDefinition
 
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "run_latency_ms"))
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms"))
     ).scalar_one()
     definition.spec = {**definition.spec, "guardrail_aggregate": "p95"}
     await db.flush()
 
     exp, _ = await _mk_running(
-        db, unit_type="workflow_installation",
-        guardrails=[{"metric_key": "run_latency_ms", "op": "lte",
-                     "threshold": 5_000.0, "window_hours": 24}],
+        db,
+        unit_type="workflow_installation",
+        guardrails=[
+            {"metric_key": "run_latency_ms", "op": "lte", "threshold": 5_000.0, "window_hours": 24}
+        ],
     )
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name=f"o-{str(ULID()).lower()}",
-                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
     db.add(org)
     await db.flush()
     installation = WorkflowPackInstallation(org_id=org.id, installed_version="1.0.0")
     db.add(installation)
     await db.flush()
     await AssignmentService(db).resolve(
-        experiment_key=exp.key, unit_type="workflow_installation",
+        experiment_key=exp.key,
+        unit_type="workflow_installation",
         unit_id=installation.id,
     )
     t0 = datetime.now(UTC) - timedelta(hours=1)
@@ -244,12 +251,17 @@ async def test_quantile_enabled_guardrail_evaluates_p95(db):
     # read would stay low too; the slow run pushes p99. Use 10 fast + 10
     # slow so p95 lands in the slow bucket (rank 19 of 20) and BREACHES.
     for ms in [100] * 10 + [60_000] * 10:
-        db.add(WorkflowRun(
-            org_id=org.id, installation_id=installation.id,
-            definition_snapshot={}, status=RunStatus.COMPLETED,
-            created_at=t0, started_at=t0,
-            finished_at=t0 + timedelta(milliseconds=ms),
-        ))
+        db.add(
+            WorkflowRun(
+                org_id=org.id,
+                installation_id=installation.id,
+                definition_snapshot={},
+                status=RunStatus.COMPLETED,
+                created_at=t0,
+                started_at=t0,
+                finished_at=t0 + timedelta(milliseconds=ms),
+            )
+        )
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert [b["metric_key"] for b in summary["breaches"]] == ["run_latency_ms"]
@@ -259,8 +271,7 @@ async def test_quantile_enabled_guardrail_evaluates_p95(db):
     assert (await db.get(Experiment, exp.id)).status == "paused"
     # cleanup the shared seeded definition
     await svc.update_definition("run_latency_ms", clear_quantiles=True)
-    definition.spec = {k: v for k, v in definition.spec.items()
-                       if k != "guardrail_aggregate"}
+    definition.spec = {k: v for k, v in definition.spec.items() if k != "guardrail_aggregate"}
     await db.flush()
 
 
@@ -275,21 +286,27 @@ async def test_guardrail_fold_and_exact_threshold_boundaries(db):
     from app.experiments.models import Experiment, ExperimentAssignment
 
     exp, _ = await _mk_running(
-        db, guardrails=[
-            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.6,
-             "window_hours": 24},
-        ]
+        db,
+        guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.6, "window_hours": 24},
+        ],
     )
     svc = AssignmentService(db)
     plan = [("control", 3, 2), ("treatment", 2, 1)]
     for arm, assigned, exposed in plan:
         for i in range(assigned):
             unit = f"fb-{arm}-{i}" + "x" * 10
-            db.add(ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=unit,
-                variant_key=arm, assigned_version=1, bucket=0,
-                is_holdout=False,
-            ))
+            db.add(
+                ExperimentAssignment(
+                    experiment_id=exp.id,
+                    unit_type="user",
+                    unit_id=unit,
+                    variant_key=arm,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
+                )
+            )
             await db.flush()
             if i < exposed:
                 assert await svc.record_exposure(
@@ -302,19 +319,25 @@ async def test_guardrail_fold_and_exact_threshold_boundaries(db):
     # nudge the threshold just below: 0.6 > 0.59 -> breach, observed pinned
     # EXACTLY (an inverted fold yields (2-1)/(3-2) == 1.0, not 0.6)
     exp2, _ = await _mk_running(
-        db, guardrails=[
-            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.59,
-             "window_hours": 24},
-        ]
+        db,
+        guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.59, "window_hours": 24},
+        ],
     )
     for arm, assigned, exposed in plan:
         for i in range(assigned):
             unit = f"fb2-{arm}-{i}" + "x" * 9
-            db.add(ExperimentAssignment(
-                experiment_id=exp2.id, unit_type="user", unit_id=unit,
-                variant_key=arm, assigned_version=1, bucket=0,
-                is_holdout=False,
-            ))
+            db.add(
+                ExperimentAssignment(
+                    experiment_id=exp2.id,
+                    unit_type="user",
+                    unit_id=unit,
+                    variant_key=arm,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
+                )
+            )
             await db.flush()
             if i < exposed:
                 assert await svc.record_exposure(
@@ -325,19 +348,25 @@ async def test_guardrail_fold_and_exact_threshold_boundaries(db):
     assert summary2["breaches"][0]["observed"] == _pytest.approx(0.6)
     # gte: observed exactly ON the floor is safe too
     exp3, _ = await _mk_running(
-        db, guardrails=[
-            {"metric_key": "exposure_rate", "op": "gte", "threshold": 0.6,
-             "window_hours": 24},
-        ]
+        db,
+        guardrails=[
+            {"metric_key": "exposure_rate", "op": "gte", "threshold": 0.6, "window_hours": 24},
+        ],
     )
     for arm, assigned, exposed in plan:
         for i in range(assigned):
             unit = f"fb3-{arm}-{i}" + "x" * 9
-            db.add(ExperimentAssignment(
-                experiment_id=exp3.id, unit_type="user", unit_id=unit,
-                variant_key=arm, assigned_version=1, bucket=0,
-                is_holdout=False,
-            ))
+            db.add(
+                ExperimentAssignment(
+                    experiment_id=exp3.id,
+                    unit_type="user",
+                    unit_id=unit,
+                    variant_key=arm,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
+                )
+            )
             await db.flush()
             if i < exposed:
                 assert await svc.record_exposure(
@@ -347,6 +376,7 @@ async def test_guardrail_fold_and_exact_threshold_boundaries(db):
     assert summary3["breaches"] == []
     # unknown experiment -> typed 404 (status pinned)
     from app.exceptions import AppError as _AppError
+
     with _pytest.raises(_AppError) as e:
         await GuardrailService(db).evaluate_experiment("0" * 26)
     assert e.value.status_code == 404
@@ -371,15 +401,16 @@ async def test_cost_ceiling_guards_the_window_total(db):
     from sqlalchemy import select as _select
 
     from app.experiments.models import MetricDefinition
+
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "cost_usd"))
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "cost_usd"))
     ).scalar_one()
     original_spec = dict(definition.spec)
     # #69 family audit: BOTH cost definitions seed the sum aggregate on a
     # fresh deployment (the shared test DB may hold older rows — assert on
     # the seed TEMPLATE, not the row)
     from app.experiments.services.metrics import SEED_METRIC_DEFINITIONS
+
     for seed in SEED_METRIC_DEFINITIONS:
         if seed["key"] in ("cost_usd", "internal_cost_usd"):
             assert seed["spec"].get("guardrail_aggregate") == "sum", seed["key"]
@@ -387,31 +418,36 @@ async def test_cost_ceiling_guards_the_window_total(db):
     await db.flush()
     try:
         exp, _ = await _mk_running(
-            db, unit_type="organization",
-            guardrails=[{"metric_key": "cost_usd", "op": "lte",
-                         "threshold": 100.0, "window_hours": 24}],
+            db,
+            unit_type="organization",
+            guardrails=[
+                {"metric_key": "cost_usd", "op": "lte", "threshold": 100.0, "window_hours": 24}
+            ],
         )
         from app.controlplane.models.tenant import TenantAccount
         from app.models.organization import Organization
 
-        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                               slug=f"t-{str(ULID()).lower()}")
+        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
         db.add(tenant)
         await db.flush()
-        org = Organization(name=f"o-{str(ULID()).lower()}",
-                           slug=f"o-{str(ULID()).lower()}",
-                           tenant_id=tenant.id)
+        org = Organization(
+            name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+        )
         db.add(org)
         await db.flush()
-        db.add(ExperimentAssignment(
-            experiment_id=exp.id, unit_type="organization", unit_id=org.id,
-            variant_key="control", assigned_version=1, bucket=0,
-            is_holdout=False,
-        ))
-        for cost in (Decimal("0.25"), Decimal("0.25"), Decimal("0.25"),
-                     Decimal("99.50")):
-            db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT,
-                                  cost_usd=cost))
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id,
+                unit_type="organization",
+                unit_id=org.id,
+                variant_key="control",
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
+            )
+        )
+        for cost in (Decimal("0.25"), Decimal("0.25"), Decimal("0.25"), Decimal("99.50")):
+            db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT, cost_usd=cost))
         await db.flush()
         summary = await GuardrailService(db).evaluate_experiment(exp.id)
         assert len(summary["breaches"]) == 1
@@ -453,15 +489,23 @@ async def test_srm_alerts_but_never_pauses(db):
     for i in range(150):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"srm-a-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"srm-a-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     for i in range(10):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"srm-b-{i:04d}",
-                variant_key="treatment", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"srm-b-{i:04d}",
+                variant_key="treatment",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -493,8 +537,12 @@ async def test_srm_fires_exactly_at_min_sample_boundary(db):
     for i in range(SRM_MIN_ASSIGNMENTS):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"bnd-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"bnd-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -510,8 +558,11 @@ async def test_srm_runs_at_max_variant_count(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     variants = [
         {"key": f"v{i}", "name": f"V{i}", "weight_bp": 1000, "is_control": i == 0}
@@ -535,15 +586,21 @@ async def test_srm_runs_at_max_variant_count(db):
     )
     for status in ("review", "scheduled", "running"):
         await svc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     # 120 units all in v0: gross mismatch across 10 arms (df = 9)
     for i in range(120):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"ten-{i:04d}",
-                variant_key="v0", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"ten-{i:04d}",
+                variant_key="v0",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -622,49 +679,60 @@ async def test_schedule_refuses_undefined_metric_keys(db):
 
     await MetricService(db).ensure_seed_definitions()
     admin = await _mk_admin(db)
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="matching"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="matching")
     svc = ExperimentService(db)
     checklist = {
-        "hypothesis_peer_checked": True, "power_computed": True,
-        "metrics_reviewed": True, "rollback_owner_named": True,
+        "hypothesis_peer_checked": True,
+        "power_computed": True,
+        "metrics_reviewed": True,
+        "rollback_owner_named": True,
     }
 
     slice_cursor = iter([(0, 9), (10, 19)])
 
     async def _try(spec_patch: dict) -> _AppError:
         exp = await svc.create(
-            key=f"exp-{str(ULID()).lower()}", title="T", domain="matching",
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"exp-{str(ULID()).lower()}",
+            title="T",
+            domain="matching",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
         spec = _spec()
         spec.update(spec_patch)
         await svc.create_version(exp.id, spec=spec, actor=admin)
         lo, hi = next(slice_cursor)
         await LayerService(db).allocate(
-            layer_key=layer.key, experiment_id=exp.id,
-            slice_start=lo, slice_end=hi,
+            layer_key=layer.key,
+            experiment_id=exp.id,
+            slice_start=lo,
+            slice_end=hi,
         )
         await svc.transition(exp.id, to_status="review", actor=admin)
         with _pytest.raises(_AppError) as e:
-            await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                                 checklist=checklist)
+            await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=checklist)
         return e.value
 
-    err = await _try({"metrics": {
-        "primary": ["typo_metric_xyz"],
-        "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                        "threshold": 100.0}],
-    }})
+    err = await _try(
+        {
+            "metrics": {
+                "primary": ["typo_metric_xyz"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            }
+        }
+    )
     assert err.code == "EXPERIMENT_UNKNOWN_METRICS"
     assert "typo_metric_xyz" in err.message
 
-    err = await _try({"variance_reduction": {
-        "method": "cuped",
-        "covariate_metrics": ["revision_count", "typo_covariate_xyz"],
-        "lookback_days": 14,
-    }})
+    err = await _try(
+        {
+            "variance_reduction": {
+                "method": "cuped",
+                "covariate_metrics": ["revision_count", "typo_covariate_xyz"],
+                "lookback_days": 14,
+            }
+        }
+    )
     assert err.code == "EXPERIMENT_UNKNOWN_METRICS"
     assert "typo_covariate_xyz" in err.message
 
@@ -689,30 +757,33 @@ async def test_schedule_gate_matrix_guardrail_exemption_and_risk(db):
     svc = ExperimentService(db)
     slice_cursor = iter([(0, 9), (10, 19), (20, 29), (30, 39), (40, 49)])
 
-    async def _schedule(*, domain: str, risk_class: str, guardrails: bool,
-                        actor=None):
-        layer = await LayerService(db).create(
-            key=f"lyr-{str(ULID()).lower()}", domain=domain
-        )
+    async def _schedule(*, domain: str, risk_class: str, guardrails: bool, actor=None):
+        layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain=domain)
         exp = await svc.create(
-            key=f"exp-{str(ULID()).lower()}", title="G", domain=domain,
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"exp-{str(ULID()).lower()}",
+            title="G",
+            domain=domain,
+            layer_key=layer.key,
+            owner_user_id=admin.id,
             risk_class=risk_class,
         )
         spec = _spec(
-            [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}]
-            if guardrails else []
+            [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}] if guardrails else []
         )
         spec["hypothesis"] = "guardrail exemption matrix pins the gate"
         await svc.create_version(exp.id, spec=spec, actor=admin)
         lo, hi = next(slice_cursor)
         await LayerService(db).allocate(
-            layer_key=layer.key, experiment_id=exp.id,
-            slice_start=lo, slice_end=hi,
+            layer_key=layer.key,
+            experiment_id=exp.id,
+            slice_start=lo,
+            slice_end=hi,
         )
         await svc.transition(exp.id, to_status="review", actor=admin)
         return await svc.transition(
-            exp.id, to_status="scheduled", actor=actor or admin,
+            exp.id,
+            to_status="scheduled",
+            actor=actor or admin,
             checklist=checklist,
         )
 
@@ -729,13 +800,16 @@ async def test_schedule_gate_matrix_guardrail_exemption_and_risk(db):
         await _schedule(domain="operational", risk_class="medium", guardrails=False)
     assert e.value.code == "EXPERIMENT_NO_GUARDRAILS"
     # high risk + non-admin actor -> 403
-    student = _User(email=f"sg-{ULID()}@example.com", display_name="S",
-                    role=_Role.STUDENT, status=_Status.ACTIVE)
+    student = _User(
+        email=f"sg-{ULID()}@example.com",
+        display_name="S",
+        role=_Role.STUDENT,
+        status=_Status.ACTIVE,
+    )
     db.add(student)
     await db.flush()
     with _pytest.raises(_AppError) as e:
-        await _schedule(domain="learning", risk_class="high", guardrails=True,
-                        actor=student)
+        await _schedule(domain="learning", risk_class="high", guardrails=True, actor=student)
     assert e.value.code == "FORBIDDEN"
     assert e.value.status_code == 403
     # high risk + platform admin -> schedules
@@ -752,8 +826,11 @@ async def test_launch_checklist_required_to_schedule(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
@@ -787,9 +864,7 @@ async def test_exposure_srm_alerts_on_trigger_bias(db):
     for i in range(200):
         r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"es-{i}")
         if r is not None and r.variant_key == "treatment" and exposed < 80:
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=f"es-{i}"
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"es-{i}")
             exposed += 1
     assert exposed >= 60
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
@@ -820,8 +895,12 @@ async def test_srm_quiet_below_min_sample(db):
     for i in range(30):  # heavy skew but under SRM_MIN_ASSIGNMENTS
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"small-{i:03d}",
-                variant_key="control", assigned_version=1, bucket=i,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"small-{i:03d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i,
             )
         )
     await db.flush()
@@ -885,9 +964,7 @@ def test_terminal_statuses_match_live_key_partial_index():
     from app.experiments.models.experiment import Experiment as ExpModel
     from app.experiments.security import TERMINAL_STATUSES
 
-    index = next(
-        idx for idx in ExpModel.__table__.indexes if idx.name == "uq_experiments_live_key"
-    )
+    index = next(idx for idx in ExpModel.__table__.indexes if idx.name == "uq_experiments_live_key")
     where_sql = str(index.dialect_options["postgresql"]["where"])
     for status in TERMINAL_STATUSES:
         assert f"'{status}'" in where_sql, f"{status} missing from live-key index WHERE"
@@ -902,9 +979,7 @@ def test_terminal_statuses_match_live_key_partial_index():
 
 async def test_incident_pauses_immediately(db):
     exp, admin = await _mk_running(db)
-    event = await GuardrailService(db).record_incident(
-        exp.id, actor=admin, reason="privacy report"
-    )
+    event = await GuardrailService(db).record_incident(exp.id, actor=admin, reason="privacy report")
     assert event.guardrail_key == INCIDENT_GUARDRAIL_KEY
     assert event.auto is False
     assert (await db.get(Experiment, exp.id)).status == "paused"
@@ -995,8 +1070,7 @@ def test_no_auto_promote_path_in_experiments_package():
     spenders = [
         path.name
         for path in pkg.rglob("*.py")
-        if "_via_decision=True" in path.read_text(encoding="utf-8")
-        and path.name != "decisions.py"
+        if "_via_decision=True" in path.read_text(encoding="utf-8") and path.name != "decisions.py"
     ]
     assert not spenders, f"_via_decision spent outside decisions.py: {spenders}"
 
@@ -1013,8 +1087,11 @@ async def test_switchback_experiment_never_srm_alerts(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="SB", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="SB",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec(None)
     spec["design"] = "switchback"
@@ -1031,16 +1108,15 @@ async def test_switchback_experiment_never_srm_alerts(db):
 
     asvc = AssignmentService(db)
     for i in range(150):  # well past SRM_MIN_ASSIGNMENTS
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=f"sbsrm-{i:04d}"
-        ) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"sbsrm-{i:04d}")
+            is not None
+        )
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "srm" not in summary
     events = list(
         (
-            await db.execute(
-                select(GuardrailEvent).where(GuardrailEvent.experiment_id == exp.id)
-            )
+            await db.execute(select(GuardrailEvent).where(GuardrailEvent.experiment_id == exp.id))
         ).scalars()
     )
     assert events == []
@@ -1060,8 +1136,12 @@ async def test_srm_alert_notifies_owner_once_per_window(db):
     for i in range(150):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"nsrm-{i:03d}",
-                variant_key="control", assigned_version=1, bucket=0,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"nsrm-{i:03d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=0,
             )
         )
     await db.flush()
@@ -1099,17 +1179,14 @@ async def test_pause_survives_notification_db_failure(db, monkeypatch):
     exp, _ = await _mk_running(
         db,
         guardrails=[
-            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.4,
-             "window_hours": 24}
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.4, "window_hours": 24}
         ],
     )
     asvc = AssignmentService(db)
     for i in range(10):
-        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                               unit_id=f"nf-{i}")
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"nf-{i}")
         assert r is not None
-        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
-                                   unit_id=f"nf-{i}")
+        await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"nf-{i}")
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert summary["breaches"], "breach must still be detected"
     # the pause survived the notification failure AND the session is healthy
@@ -1132,15 +1209,23 @@ async def test_alert_notify_failure_never_blocks_the_finding(db, monkeypatch):
     for i in range(150):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"nf-a-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"nf-a-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     for i in range(10):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"nf-b-{i:04d}",
-                variant_key="treatment", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"nf-b-{i:04d}",
+                variant_key="treatment",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -1160,11 +1245,7 @@ async def test_missing_version_row_pauses_like_poison_spec(db):
     from app.experiments.models.experiment import ExperimentVersion
 
     exp, _ = await _mk_running(db)
-    await db.execute(
-        sa_delete(ExperimentVersion).where(
-            ExperimentVersion.experiment_id == exp.id
-        )
-    )
+    await db.execute(sa_delete(ExperimentVersion).where(ExperimentVersion.experiment_id == exp.id))
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert summary["breaches"] == [{"metric_key": "__spec_missing__"}]
@@ -1191,8 +1272,9 @@ async def test_closure_cap_not_squatted_by_long_max_days(db):
 
     v = (
         await db.execute(
-            select(ExpVer).where(ExpVer.experiment_id == squatter.id,
-                                 ExpVer.version == sq.current_version)
+            select(ExpVer).where(
+                ExpVer.experiment_id == squatter.id, ExpVer.version == sq.current_version
+            )
         )
     ).scalar_one()
     spec = dict(v.spec)
@@ -1208,8 +1290,7 @@ async def test_closure_cap_not_squatted_by_long_max_days(db):
 
     await db.execute(
         _update(Experiment)
-        .where(Experiment.status == "running",
-               Experiment.id.notin_([squatter.id, due.id]))
+        .where(Experiment.status == "running", Experiment.id.notin_([squatter.id, due.id]))
         .values(status="paused")
     )
     closed = await sweep_experiment_closures(db, cap=1)
@@ -1234,8 +1315,9 @@ async def test_closure_default_max_days_is_exactly_28(db):
 
     v = (
         await db.execute(
-            select(ExpVer).where(ExpVer.experiment_id == exp.id,
-                                 ExpVer.version == row.current_version)
+            select(ExpVer).where(
+                ExpVer.experiment_id == exp.id, ExpVer.version == row.current_version
+            )
         )
     ).scalar_one()
     spec = dict(v.spec)
@@ -1266,23 +1348,35 @@ async def test_srm_window_catches_late_randomization_break(db):
     for i in range(2500):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"w90-a-{i:05d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"w90-a-{i:05d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
                 assigned_at=week_ago,
             )
         )
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"w90-b-{i:05d}",
-                variant_key="treatment", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"w90-b-{i:05d}",
+                variant_key="treatment",
+                assigned_version=1,
+                bucket=i % 10_000,
                 assigned_at=week_ago,
             )
         )
     for i in range(120):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"w90-c-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"w90-c-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -1314,8 +1408,12 @@ async def test_srm_window_quiet_below_min_sample(db):
     for i in range(99):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"w90t-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"w90t-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -1330,8 +1428,12 @@ async def test_srm_window_fires_exactly_at_min_sample_boundary(db):
     for i in range(100):
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=f"w51m-{i:04d}",
-                variant_key="control", assigned_version=1, bucket=i % 10_000,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"w51m-{i:04d}",
+                variant_key="control",
+                assigned_version=1,
+                bucket=i % 10_000,
             )
         )
     await db.flush()
@@ -1355,9 +1457,13 @@ async def test_exposure_srm_window_catches_late_trigger_bias(db):
     for i in range(528):
         for vk in ("control", "treatment"):
             row = ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user",
-                unit_id=f"x92-{vk[0]}-{i:04d}", variant_key=vk,
-                assigned_version=1, bucket=i % 10_000, assigned_at=week_ago,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=f"x92-{vk[0]}-{i:04d}",
+                variant_key=vk,
+                assigned_version=1,
+                bucket=i % 10_000,
+                assigned_at=week_ago,
             )
             db.add(row)
             rows[vk].append(row)
@@ -1368,15 +1474,14 @@ async def test_exposure_srm_window_catches_late_trigger_bias(db):
         for aid in ids[vk][:472]:
             db.add(
                 ExperimentExposure(
-                    assignment_id=aid, experiment_id=exp.id,
+                    assignment_id=aid,
+                    experiment_id=exp.id,
                     occurred_at=week_ago,
                 )
             )
     # 56 treatment-only exposures inside the window (distinct assignments)
     for aid in ids["treatment"][472:528]:
-        db.add(
-            ExperimentExposure(assignment_id=aid, experiment_id=exp.id)
-        )
+        db.add(ExperimentExposure(assignment_id=aid, experiment_id=exp.id))
     await db.flush()
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert "exposure_srm" not in summary, "cumulative must be diluted here"
@@ -1403,8 +1508,12 @@ async def test_exposure_srm_window_quiet_below_min_exposed(db):
     rows = []
     for i in range(49):
         row = ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=f"x92t-{i:03d}",
-            variant_key="control", assigned_version=1, bucket=i,
+            experiment_id=exp.id,
+            unit_type="user",
+            unit_id=f"x92t-{i:03d}",
+            variant_key="control",
+            assigned_version=1,
+            bucket=i,
         )
         db.add(row)
         rows.append(row)
@@ -1430,8 +1539,12 @@ async def test_record_exposure_refuses_holdout_units(db):
     exp, _ = await _mk_running(db)
     db.add(
         ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id="h94-unit",
-            variant_key="__holdout__", assigned_version=1, bucket=1,
+            experiment_id=exp.id,
+            unit_type="user",
+            unit_id="h94-unit",
+            variant_key="__holdout__",
+            assigned_version=1,
+            bucket=1,
             is_holdout=True,
         )
     )
@@ -1442,9 +1555,9 @@ async def test_record_exposure_refuses_holdout_units(db):
     assert ok is False, "exposure for a never-served holdout unit must be refused"
     n = (
         await db.execute(
-            _sel(_f.count()).select_from(ExperimentExposure).where(
-                ExperimentExposure.experiment_id == exp.id
-            )
+            _sel(_f.count())
+            .select_from(ExperimentExposure)
+            .where(ExperimentExposure.experiment_id == exp.id)
         )
     ).scalar_one()
     assert n == 0, "no exposure row may be written for a holdout unit"
@@ -1537,7 +1650,9 @@ async def test_note_cap_holds_under_concurrency(db, monkeypatch):
     assert sum(results) == 1, f"exactly one writer may land at cap=1, got {results}"
     n = (
         await db.execute(
-            select(_func.count()).select_from(ExperimentEvent).where(
+            select(_func.count())
+            .select_from(ExperimentEvent)
+            .where(
                 ExperimentEvent.experiment_id == exp.id,
                 ExperimentEvent.event_type == "note",
             )

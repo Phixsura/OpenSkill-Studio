@@ -43,16 +43,37 @@ ADMIN_ONLY = [
     ("GET", "/api/v1/ecosystem/audit.csv", None),
     ("GET", "/api/v1/ecosystem/catalog/models/duplicates", None),
     ("GET", "/api/v1/ecosystem/impact/analyses/" + "0" * 26, None),
-    ("POST", "/api/v1/ecosystem/sources", {"name": "x", "source_type": "vendor_api",
-                                           "trust_level": "official", "adapter_key": "manual"}),
-    ("POST", "/api/v1/ecosystem/security/advisories",
-     {"advisory_ref": "CVE-X", "title": "t", "severity": "high", "affected_ref": "y"}),
-    ("POST", "/api/v1/ecosystem/benchmark/suites",
-     {"key": "kx", "name": "n", "family": "image_generation", "capability_key": "c"}),
+    (
+        "POST",
+        "/api/v1/ecosystem/sources",
+        {
+            "name": "x",
+            "source_type": "vendor_api",
+            "trust_level": "official",
+            "adapter_key": "manual",
+        },
+    ),
+    (
+        "POST",
+        "/api/v1/ecosystem/security/advisories",
+        {"advisory_ref": "CVE-X", "title": "t", "severity": "high", "affected_ref": "y"},
+    ),
+    (
+        "POST",
+        "/api/v1/ecosystem/benchmark/suites",
+        {"key": "kx", "name": "n", "family": "image_generation", "capability_key": "c"},
+    ),
     ("POST", "/api/v1/ecosystem/sources/" + "0" * 26 + "/replay", None),
-    ("POST", "/api/v1/ecosystem/benchmark/suites/import",
-     {"format": "openskill.benchmark-suite", "version": 1, "suite": {}, "cases": []}),
-    ("POST", "/api/v1/ecosystem/security/advisories/" + "0" * 26 + "/status?to_status=mitigated", None),
+    (
+        "POST",
+        "/api/v1/ecosystem/benchmark/suites/import",
+        {"format": "openskill.benchmark-suite", "version": 1, "suite": {}, "cases": []},
+    ),
+    (
+        "POST",
+        "/api/v1/ecosystem/security/advisories/" + "0" * 26 + "/status?to_status=mitigated",
+        None,
+    ),
 ]
 
 
@@ -134,10 +155,9 @@ async def test_error_shapes_are_machine_readable(http, tokens):
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
     # Nonexistent entity scorecard → uniform 404, no existence oracle
-    r = await http.get(
-        f"/api/v1/ecosystem/catalog/models/{'0' * 26}/scorecard", headers=headers
-    )
+    r = await http.get(f"/api/v1/ecosystem/catalog/models/{'0' * 26}/scorecard", headers=headers)
     assert r.status_code == 404
+
 
 CORE_ENDPOINTS = {
     # (method, path) pairs that MUST exist — removing one is a breaking change.
@@ -189,6 +209,7 @@ def test_core_ecosystem_api_surface_is_stable():
     missing = CORE_ENDPOINTS - present
     assert not missing, f"Breaking API change — endpoints gone: {sorted(missing)}"
 
+
 async def test_org_scoped_reads_require_membership(http, tokens):
     """Cross-tenant guard (round 79): a member passing an ARBITRARY org_id to
     graph-node or drafts listings must be refused (403/404) — org-scoped
@@ -200,15 +221,14 @@ async def test_org_scoped_reads_require_membership(http, tokens):
         headers=headers,
     )
     assert r.status_code in (403, 404), r.text[:200]
-    r = await http.get(
-        f"/api/v1/ecosystem/drafts?org_id={foreign_org}", headers=headers
-    )
+    r = await http.get(f"/api/v1/ecosystem/drafts?org_id={foreign_org}", headers=headers)
     assert r.status_code in (403, 404), r.text[:200]
     # Without org_id both remain readable (public/global scope)
     r = await http.get(f"/api/v1/ecosystem/graph/node/model/{'1' * 26}", headers=headers)
     assert r.status_code == 200
     r = await http.get("/api/v1/ecosystem/drafts", headers=headers)
     assert r.status_code == 200
+
 
 async def test_org_scoped_draft_single_read_and_watchlist_attach_guarded(http, tokens):
     """Round-80 guards: (a) an org-scoped draft read by id is a UNIFORM 404
@@ -224,9 +244,11 @@ async def test_org_scoped_draft_single_read_and_watchlist_attach_guarded(http, t
         admin = await _mk_user(db, "admin")
         org = await _mk_org(db)
         draft = await DraftService(db).create(
-            draft_type="skill_pack_update", title="tenant-secret",
+            draft_type="skill_pack_update",
+            title="tenant-secret",
             payload={"target_pack_id": "P" * 26, "suggestions": [{"kind": "lesson"}]},
-            created_by=admin.id, org_id=org.id,
+            created_by=admin.id,
+            org_id=org.id,
         )
         await db.commit()
         draft_id, org_id = draft.id, org.id
@@ -256,6 +278,7 @@ async def test_org_scoped_draft_single_read_and_watchlist_attach_guarded(http, t
     )
     assert r.status_code == 201
 
+
 async def test_query_parameter_boundaries(http, tokens):
     """Round-92 boundary contract: malformed/out-of-range query params are
     clean 4xx with the machine envelope — never 500s."""
@@ -263,9 +286,7 @@ async def test_query_parameter_boundaries(http, tokens):
     admin = {"Authorization": f"Bearer {tokens['admin']}"}
 
     # Malformed ISO 'since' → 4xx envelope
-    r = await http.get(
-        "/api/v1/ecosystem/export/changes?since=not-a-date", headers=member
-    )
+    r = await http.get("/api/v1/ecosystem/export/changes?since=not-a-date", headers=member)
     assert 400 <= r.status_code < 500
     assert "error" in r.json()
     # uptime days out of range → 422
@@ -276,10 +297,7 @@ async def test_query_parameter_boundaries(http, tokens):
     )
     assert r.status_code == 422
     # NaN workload quantity → 4xx, never 500
-    raw = (
-        '{"entity_kind":"model","entity_ids":["' + "0" * 26 + '"],'
-        '"workload":{"token_input":NaN}}'
-    )
+    raw = '{"entity_kind":"model","entity_ids":["' + "0" * 26 + '"],"workload":{"token_input":NaN}}'
     r = await http.post(
         "/api/v1/ecosystem/pricing/estimate",
         content=raw,
@@ -289,6 +307,7 @@ async def test_query_parameter_boundaries(http, tokens):
     # audit.csv limit above cap → 422
     r = await http.get("/api/v1/ecosystem/audit.csv?limit=999999", headers=admin)
     assert r.status_code == 422
+
 
 async def test_manual_observation_input_hygiene(http, tokens):
     """Round-102 killers ×4: manual observations validate event_type against
@@ -309,19 +328,32 @@ async def test_manual_observation_input_hygiene(http, tokens):
     source_id = r.json()["data"]["id"]
     base = {"source_id": source_id, "event_type": "price_changed"}
 
-    r = await http.post("/api/v1/ecosystem/observations",
-                        json={**base, "event_type": "totally_made_up"}, headers=admin)
+    r = await http.post(
+        "/api/v1/ecosystem/observations",
+        json={**base, "event_type": "totally_made_up"},
+        headers=admin,
+    )
     assert r.status_code == 422
-    r = await http.post("/api/v1/ecosystem/observations",
-                        json={**base, "provenance_url": "javascript:alert(1)"}, headers=admin)
+    r = await http.post(
+        "/api/v1/ecosystem/observations",
+        json={**base, "provenance_url": "javascript:alert(1)"},
+        headers=admin,
+    )
     assert r.status_code == 422
-    r = await http.post("/api/v1/ecosystem/observations",
-                        json={**base, "normalized": {"blob": "x" * 120_000}}, headers=admin)
+    r = await http.post(
+        "/api/v1/ecosystem/observations",
+        json={**base, "normalized": {"blob": "x" * 120_000}},
+        headers=admin,
+    )
     assert r.status_code == 422
-    r = await http.post("/api/v1/ecosystem/observations",
-                        json={**base, "external_ref": "ref\u0000evil"}, headers=admin)
+    r = await http.post(
+        "/api/v1/ecosystem/observations",
+        json={**base, "external_ref": "ref\u0000evil"},
+        headers=admin,
+    )
     assert r.status_code == 201
     assert "\u0000" not in (r.json()["data"]["external_ref"] or "")
+
 
 async def test_documented_alert_metrics_are_emitted(http, tokens):
     """Round-118 killer: every eco_* metric named in the ops runbook
@@ -333,7 +365,13 @@ async def test_documented_alert_metrics_are_emitted(http, tokens):
     doc = Path(__file__).resolve().parents[3] / "docs" / "ops" / "ecosystem-alerts.md"
     documented = set(re.findall(r"eco_[a-z0-9_]+", doc.read_text()))
     # cron job names mentioned in runbook prose, not metrics
-    documented -= {"eco_impact_sla", "eco_sync_sweep", "eco_retention", "eco_rollout_eval", "eco_stuck_runs"}
+    documented -= {
+        "eco_impact_sla",
+        "eco_sync_sweep",
+        "eco_retention",
+        "eco_rollout_eval",
+        "eco_stuck_runs",
+    }
     assert documented, "runbook lists no metrics — path wrong?"
 
     admin = {"Authorization": f"Bearer {tokens['admin']}"}
@@ -344,6 +382,7 @@ async def test_documented_alert_metrics_are_emitted(http, tokens):
     # trailing-digit windows like eco_discoveries_7d are emitted verbatim
     missing = {m for m in missing if m not in emitted}
     assert not missing, f"runbook metrics not emitted: {sorted(missing)}"
+
 
 def test_all_eco_limit_params_are_bounded():
     """Round-122 systemic guard: every `limit` query parameter on an
@@ -368,6 +407,7 @@ def test_all_eco_limit_params_are_bounded():
                 if not any("maximum" in s for s in schemas if isinstance(s, dict)):
                     offenders.append(f"{path} [{op.get('operationId')}]")
     assert not offenders, f"unbounded limit params: {offenders}"
+
 
 def test_all_mutating_eco_routes_require_a_user():
     """Round-123 systemic guard: EVERY /ecosystem route (reads included) must
@@ -394,6 +434,7 @@ def test_all_mutating_eco_routes_require_a_user():
         if not ({"get_current_user", "require_platform_admin"} & names):
             offenders.append(f"{sorted(methods)} {route.path}")
     assert not offenders, f"eco routes without a user dependency: {offenders}"
+
 
 def test_app_error_code_status_consistency():
     """Round-139 systemic guard: every literal AppError(code, msg, status) in
@@ -427,6 +468,7 @@ def test_app_error_code_status_consistency():
                         bad.append(f"{f.name}:{node.lineno} {code.value} -> {status.value}")
     assert not bad, f"AppError code/status mismatches: {bad}"
 
+
 async def test_bulk_acknowledge_changes(http, tokens):
     """Round-174 killer: bulk-acknowledge drains the triage queue idempotently
     — missing ids reported, second call a no-op, route ordering must not let
@@ -441,6 +483,7 @@ async def test_bulk_acknowledge_changes(http, tokens):
     body = r.json()["data"]
     assert body["acknowledged"] == []
     assert body["missing"] == ["0" * 26]
+
 
 async def test_delta_since_id_is_validated_over_http(http, tokens):
     """Round-197: the composite-cursor params validate at the HTTP boundary —
@@ -486,9 +529,7 @@ async def test_severity_filters_reject_unknown_values(http, tokens):
         headers=member,
     )
     assert r.status_code == 200 and isinstance(r.json()["data"], list)
-    r = await http.get(
-        "/api/v1/ecosystem/security/advisories?severity=critical", headers=member
-    )
+    r = await http.get("/api/v1/ecosystem/security/advisories?severity=critical", headers=member)
     assert r.status_code == 200
     r = await http.get(
         "/api/v1/ecosystem/export/changes.atom?severity=breaking",
@@ -514,16 +555,12 @@ async def test_atom_feed_token_auth(http, tokens):
     assert feed_token
 
     # Feed token in query string: the feed-reader path — must work, no header
-    r = await http.get(
-        f"/api/v1/ecosystem/export/changes.atom?token={feed_token}"
-    )
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={feed_token}")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/atom+xml")
 
     # ACCESS token in query string: refused (wrong type for a URL)
-    r = await http.get(
-        f"/api/v1/ecosystem/export/changes.atom?token={tokens['member']}"
-    )
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={tokens['member']}")
     assert r.status_code == 401
 
     # Garbage token: 401, not 500
@@ -688,14 +725,19 @@ async def test_atom_etag_invalidates_on_new_change(http, tokens):
     async with AsyncSessionLocal() as db:
         source = await _mk_source(db)
         obs = EcosystemObservation(
-            source_id=source.id, event_type="pricing_changed",
-            raw_hash="c" * 64, normalized={},
+            source_id=source.id,
+            event_type="pricing_changed",
+            raw_hash="c" * 64,
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         change = ChangeEvent(
-            observation_id=obs.id, change_type="price",
-            field="etag-flip-marker", old_value={"v": 1}, new_value={"v": 2},
+            observation_id=obs.id,
+            change_type="price",
+            field="etag-flip-marker",
+            old_value={"v": 1},
+            new_value={"v": 2},
             severity="info",
         )
         db.add(change)
@@ -776,9 +818,7 @@ async def test_if_none_match_list_and_star_semantics(http, tokens):
     )
     assert r3.status_code == 304
     # star -> 304 (resource exists)
-    r4 = await http.get(
-        "/api/v1/ecosystem/export", headers={**member, "If-None-Match": "*"}
-    )
+    r4 = await http.get("/api/v1/ecosystem/export", headers={**member, "If-None-Match": "*"})
     assert r4.status_code == 304
     # list of stale validators -> full 200
     r5 = await http.get(
@@ -852,14 +892,11 @@ async def test_atom_subscription_survives_entity_merge(http, tokens):
         try:
             from app.ecosystem.services.catalog import CatalogService
 
-            await CatalogService(db).merge_entities(
-                "model", dup_id, surv_id, actor_id=admin.id
-            )
+            await CatalogService(db).merge_entities("model", dup_id, surv_id, actor_id=admin.id)
             await db.commit()
 
             r = await http.get(
-                f"/api/v1/ecosystem/export/changes.atom?entity_id={dup_id}"
-                "&severity=breaking",
+                f"/api/v1/ecosystem/export/changes.atom?entity_id={dup_id}&severity=breaking",
                 headers=member,
             )
             assert r.status_code == 302
@@ -935,9 +972,7 @@ async def test_atom_self_link_present_and_credential_free(http, tokens):
     root = ET.fromstring(r.text)
     ns = "{http://www.w3.org/2005/Atom}"
     self_links = [
-        link.get("href")
-        for link in root.findall(f"{ns}link")
-        if link.get("rel") == "self"
+        link.get("href") for link in root.findall(f"{ns}link") if link.get("rel") == "self"
     ]
     assert self_links and "severity=breaking" in self_links[0]
     assert "token=" not in self_links[0]
@@ -990,10 +1025,7 @@ async def test_dead_lettered_eco_outbox_is_a_metric(http, tokens):
         try:
             r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
             assert r.status_code == 200
-            line = next(
-                ln for ln in r.text.splitlines()
-                if ln.startswith("eco_outbox_failed ")
-            )
+            line = next(ln for ln in r.text.splitlines() if ln.startswith("eco_outbox_failed "))
             assert float(line.split()[1]) >= 1
         finally:
             await db.delete(row)
@@ -1136,9 +1168,7 @@ async def test_probe_coverage_metrics_emitted(http, tokens):
     r = await http.get("/api/v1/ecosystem/ops/metrics", headers=admin)
     assert r.status_code == 200
     for name in ("eco_availability_never_probed", "eco_availability_oldest_probe_hours"):
-        line = next(
-            (ln for ln in r.text.splitlines() if ln.startswith(f"{name} ")), None
-        )
+        line = next((ln for ln in r.text.splitlines() if ln.startswith(f"{name} ")), None)
         assert line is not None, f"{name} missing from scrape"
         assert float(line.split()[1]) >= 0
         assert f"# TYPE {name} gauge" in r.text
@@ -1166,16 +1196,24 @@ async def test_atom_entries_carry_alternate_links(http, tokens):
         await db.flush()
         source = await _mk_source(db)
         obs = EcosystemObservation(
-            source_id=source.id, event_type="pricing_changed",
-            raw_hash="e" * 64, normalized={},
-            canonical_entity_kind="model", canonical_entity_id=model.id,
+            source_id=source.id,
+            event_type="pricing_changed",
+            raw_hash="e" * 64,
+            normalized={},
+            canonical_entity_kind="model",
+            canonical_entity_id=model.id,
         )
         db.add(obs)
         await db.flush()
         change = ChangeEvent(
-            observation_id=obs.id, change_type="price",
-            field="alt-marker", old_value={"v": 1}, new_value={"v": 2},
-            severity="info", canonical_entity_id=model.id, entity_kind="model",
+            observation_id=obs.id,
+            change_type="price",
+            field="alt-marker",
+            old_value={"v": 1},
+            new_value={"v": 2},
+            severity="info",
+            canonical_entity_id=model.id,
+            entity_kind="model",
         )
         db.add(change)
         await db.commit()
@@ -1197,8 +1235,7 @@ async def test_atom_entries_carry_alternate_links(http, tokens):
             ]
             assert alts, "entries carry no alternate links"
             assert all(
-                a.startswith("http")
-                and f"/dashboard/ecosystem/changes?entity={model_id}" in a
+                a.startswith("http") and f"/dashboard/ecosystem/changes?entity={model_id}" in a
                 for a in alts
             )
         finally:
@@ -1250,9 +1287,7 @@ async def test_rotation_is_per_user(http, tokens):
     assert r.status_code == 200
 
     # member's token survives the admin's rotation
-    r = await http.get(
-        f"/api/v1/ecosystem/export/changes.atom?token={member_token}"
-    )
+    r = await http.get(f"/api/v1/ecosystem/export/changes.atom?token={member_token}")
     assert r.status_code == 200
 
 
@@ -1267,12 +1302,26 @@ async def test_export_schema_v1_baseline_fields_are_stable(http, tokens):
     doc = r.json()["data"]
 
     assert doc["schema"] == "openskill.eco.catalog/v1"
-    top = {"schema", "generated_at", "content_hash", "entity_totals",
-           "truncated", "entities", "capability_mappings", "approved_prices"}
+    top = {
+        "schema",
+        "generated_at",
+        "content_hash",
+        "entity_totals",
+        "truncated",
+        "entities",
+        "capability_mappings",
+        "approved_prices",
+    }
     assert set(doc) >= top, sorted(top - set(doc))
 
-    entity_baseline = {"id", "canonical_name", "lifecycle_status",
-                       "external_ids", "aliases", "created_at"}
+    entity_baseline = {
+        "id",
+        "canonical_name",
+        "lifecycle_status",
+        "external_ids",
+        "aliases",
+        "created_at",
+    }
     for segment, rows in doc["entities"].items():
         for row in rows[:3]:
             missing = entity_baseline - set(row)
@@ -1337,14 +1386,19 @@ async def test_acknowledge_is_reversible(http, tokens):
     async with AsyncSessionLocal() as db:
         source = await _mk_source(db)
         obs = EcosystemObservation(
-            source_id=source.id, event_type="security_advisory",
-            raw_hash="f" * 64, normalized={},
+            source_id=source.id,
+            event_type="security_advisory",
+            raw_hash="f" * 64,
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         change = ChangeEvent(
-            observation_id=obs.id, change_type="security",
-            field="unack-marker", old_value={}, new_value={"cve": "X"},
+            observation_id=obs.id,
+            change_type="security",
+            field="unack-marker",
+            old_value={},
+            new_value={"cve": "X"},
             severity="security_critical",
         )
         db.add(change)
@@ -1352,9 +1406,7 @@ async def test_acknowledge_is_reversible(http, tokens):
         change_id, obs_id = change.id, obs.id
 
         try:
-            r = await http.post(
-                f"/api/v1/ecosystem/changes/{change_id}/acknowledge", headers=admin
-            )
+            r = await http.post(f"/api/v1/ecosystem/changes/{change_id}/acknowledge", headers=admin)
             assert r.status_code == 200 and r.json()["data"]["acknowledged"] is True
 
             r = await http.post(
@@ -1399,17 +1451,23 @@ async def test_bulk_unacknowledge_restores_batch(http, tokens):
     async with AsyncSessionLocal() as db:
         source = await _mk_source(db)
         obs = EcosystemObservation(
-            source_id=source.id, event_type="pricing_changed",
-            raw_hash="9" * 64, normalized={},
+            source_id=source.id,
+            event_type="pricing_changed",
+            raw_hash="9" * 64,
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         ids = []
         for i in range(3):
             c = ChangeEvent(
-                observation_id=obs.id, change_type="price",
-                field=f"bulk-unack-{i}", old_value={}, new_value={"v": i},
-                severity="info", acknowledged=True,
+                observation_id=obs.id,
+                change_type="price",
+                field=f"bulk-unack-{i}",
+                old_value={},
+                new_value={"v": i},
+                severity="info",
+                acknowledged=True,
             )
             db.add(c)
             await db.flush()
@@ -1450,8 +1508,8 @@ async def test_export_is_gzip_compressed_for_accepting_clients(http, tokens):
     )
     assert r.status_code == 200
     # httpx transparently decompresses; the original encoding is recorded
-    assert "gzip" in (r.headers.get("content-encoding", "") or ""), (
-        r.headers.get("content-encoding")
+    assert "gzip" in (r.headers.get("content-encoding", "") or ""), r.headers.get(
+        "content-encoding"
     )
 
 
@@ -1468,8 +1526,9 @@ async def test_dangling_reference_ids_are_422_not_500(http, tokens):
     async with AsyncSessionLocal() as db:
         from ulid import ULID as _ULID
 
-        model = AIModel(canonical_name=f"FkHttp-{str(_ULID()).lower()[:6]}",
-                        slug=f"fh-{str(_ULID()).lower()}")
+        model = AIModel(
+            canonical_name=f"FkHttp-{str(_ULID()).lower()[:6]}", slug=f"fh-{str(_ULID()).lower()}"
+        )
         db.add(model)
         await db.commit()
         model_id = model.id
@@ -1477,7 +1536,8 @@ async def test_dangling_reference_ids_are_422_not_500(http, tokens):
             r = await http.post(
                 "/api/v1/ecosystem/capability-mappings",
                 json={
-                    "entity_kind": "model", "entity_id": model_id,
+                    "entity_kind": "model",
+                    "entity_id": model_id,
                     "capability_key": "image_generation",
                     "source_observation_id": "0" * 26,
                 },
@@ -1504,9 +1564,11 @@ async def test_csv_defuses_tab_and_cr_prefixes(http, tokens):
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
         row = CommercialAuditEvent(
-            actor_user_id=None, actor_type="platform",
+            actor_user_id=None,
+            actor_type="platform",
             action="eco.lifecycle_transitioned",
-            target_type="probe", target_id="csv-tab-probe",
+            target_type="probe",
+            target_id="csv-tab-probe",
             reason="\t=2+5",
         )
         db.add(row)
@@ -1514,9 +1576,7 @@ async def test_csv_defuses_tab_and_cr_prefixes(http, tokens):
         try:
             r = await http.get("/api/v1/ecosystem/audit.csv?limit=50", headers=admin)
             assert r.status_code == 200
-            line = next(
-                ln for ln in r.text.splitlines() if "csv-tab-probe" in ln
-            )
+            line = next(ln for ln in r.text.splitlines() if "csv-tab-probe" in ln)
             assert "'\t" in line, line
         finally:
             await db.delete(row)
@@ -1548,18 +1608,24 @@ async def test_all_enum_filters_reject_unknown_values(http, tokens):
     naming the vocabulary, valid value → 200."""
     member = {"Authorization": f"Bearer {tokens['member']}"}
     cases = [
-        ("/api/v1/ecosystem/benchmark/suites?family=txt_gen",
-         "/api/v1/ecosystem/benchmark/suites?family=ecommerce_hero"),
-        ("/api/v1/ecosystem/benchmark/suites?status=activ",
-         "/api/v1/ecosystem/benchmark/suites?status=active"),
-        ("/api/v1/ecosystem/benchmark/runs?status=don",
-         "/api/v1/ecosystem/benchmark/runs?status=completed"),
-        ("/api/v1/ecosystem/security/advisories?status=opn",
-         "/api/v1/ecosystem/security/advisories?status=open"),
-        ("/api/v1/ecosystem/drafts?status=draf",
-         "/api/v1/ecosystem/drafts?status=draft"),
-        ("/api/v1/ecosystem/rollouts?status=runing",
-         "/api/v1/ecosystem/rollouts?status=running"),
+        (
+            "/api/v1/ecosystem/benchmark/suites?family=txt_gen",
+            "/api/v1/ecosystem/benchmark/suites?family=ecommerce_hero",
+        ),
+        (
+            "/api/v1/ecosystem/benchmark/suites?status=activ",
+            "/api/v1/ecosystem/benchmark/suites?status=active",
+        ),
+        (
+            "/api/v1/ecosystem/benchmark/runs?status=don",
+            "/api/v1/ecosystem/benchmark/runs?status=completed",
+        ),
+        (
+            "/api/v1/ecosystem/security/advisories?status=opn",
+            "/api/v1/ecosystem/security/advisories?status=open",
+        ),
+        ("/api/v1/ecosystem/drafts?status=draf", "/api/v1/ecosystem/drafts?status=draft"),
+        ("/api/v1/ecosystem/rollouts?status=runing", "/api/v1/ecosystem/rollouts?status=running"),
     ]
     for bad, good in cases:
         r = await http.get(bad, headers=member)
@@ -1576,20 +1642,34 @@ async def test_second_sweep_enum_filters_reject_unknown_values(http, tokens):
     values."""
     member = {"Authorization": f"Bearer {tokens['member']}"}
     cases = [
-        ("/api/v1/ecosystem/sources?source_type=githb",
-         "/api/v1/ecosystem/sources?source_type=github_repo"),
-        ("/api/v1/ecosystem/impact/analyses?classification=braking",
-         "/api/v1/ecosystem/impact/analyses?classification=breaking"),
-        ("/api/v1/ecosystem/replacements/candidates?deprecated_kind=modle",
-         "/api/v1/ecosystem/replacements/candidates?deprecated_kind=model_version"),
-        ("/api/v1/ecosystem/observations?event_type=model_release",
-         "/api/v1/ecosystem/observations?event_type=model_released"),
-        ("/api/v1/ecosystem/pricing/observations?entity_kind=modle",
-         "/api/v1/ecosystem/pricing/observations?entity_kind=model_version"),
-        ("/api/v1/ecosystem/pricing/availability?entity_kind=modle",
-         "/api/v1/ecosystem/pricing/availability?entity_kind=model_version"),
-        ("/api/v1/ecosystem/capability-mappings?entity_kind=modle&entity_id=X",
-         "/api/v1/ecosystem/capability-mappings?entity_kind=model_version&entity_id=X"),
+        (
+            "/api/v1/ecosystem/sources?source_type=githb",
+            "/api/v1/ecosystem/sources?source_type=github_repo",
+        ),
+        (
+            "/api/v1/ecosystem/impact/analyses?classification=braking",
+            "/api/v1/ecosystem/impact/analyses?classification=breaking",
+        ),
+        (
+            "/api/v1/ecosystem/replacements/candidates?deprecated_kind=modle",
+            "/api/v1/ecosystem/replacements/candidates?deprecated_kind=model_version",
+        ),
+        (
+            "/api/v1/ecosystem/observations?event_type=model_release",
+            "/api/v1/ecosystem/observations?event_type=model_released",
+        ),
+        (
+            "/api/v1/ecosystem/pricing/observations?entity_kind=modle",
+            "/api/v1/ecosystem/pricing/observations?entity_kind=model_version",
+        ),
+        (
+            "/api/v1/ecosystem/pricing/availability?entity_kind=modle",
+            "/api/v1/ecosystem/pricing/availability?entity_kind=model_version",
+        ),
+        (
+            "/api/v1/ecosystem/capability-mappings?entity_kind=modle&entity_id=X",
+            "/api/v1/ecosystem/capability-mappings?entity_kind=model_version&entity_id=X",
+        ),
     ]
     for bad, good in cases:
         r = await http.get(bad, headers=member)
@@ -1635,9 +1715,7 @@ async def test_run_list_pagination_meta_and_offset(http, tokens):
     assert body["meta"]["limit"] == 2 and body["meta"]["offset"] == 0
     assert len(body["data"]) == min(2, total)
     if total > 2:
-        r2 = await http.get(
-            "/api/v1/ecosystem/benchmark/runs?limit=2&offset=2", headers=member
-        )
+        r2 = await http.get("/api/v1/ecosystem/benchmark/runs?limit=2&offset=2", headers=member)
         ids1 = {x["id"] for x in body["data"]}
         ids2 = {x["id"] for x in r2.json()["data"]}
         assert not (ids1 & ids2), "offset pages must not overlap"
@@ -1666,14 +1744,19 @@ async def test_single_admin_actions_are_audited(http, tokens):
     async with AsyncSessionLocal() as db:
         source = await _mk_source(db)
         obs = EcosystemObservation(
-            source_id=source.id, event_type="security_advisory",
-            raw_hash="a" * 64, normalized={},
+            source_id=source.id,
+            event_type="security_advisory",
+            raw_hash="a" * 64,
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         change = ChangeEvent(
-            observation_id=obs.id, change_type="security",
-            field="audit-marker", old_value={}, new_value={},
+            observation_id=obs.id,
+            change_type="security",
+            field="audit-marker",
+            old_value={},
+            new_value={},
             severity="minor",
         )
         db.add(change)
@@ -1681,12 +1764,17 @@ async def test_single_admin_actions_are_audited(http, tokens):
         change_id, obs_id = change.id, obs.id
 
     for url, action, target in [
-        (f"/api/v1/ecosystem/changes/{change_id}/acknowledge",
-         "eco.change_acknowledged", change_id),
-        (f"/api/v1/ecosystem/changes/{change_id}/unacknowledge",
-         "eco.change_unacknowledged", change_id),
-        (f"/api/v1/ecosystem/observations/{obs_id}/verify",
-         "eco.observation_verified", obs_id),
+        (
+            f"/api/v1/ecosystem/changes/{change_id}/acknowledge",
+            "eco.change_acknowledged",
+            change_id,
+        ),
+        (
+            f"/api/v1/ecosystem/changes/{change_id}/unacknowledge",
+            "eco.change_unacknowledged",
+            change_id,
+        ),
+        (f"/api/v1/ecosystem/observations/{obs_id}/verify", "eco.observation_verified", obs_id),
     ]:
         r = await http.post(url, headers=admin)
         assert r.status_code == 200, (url, r.status_code, r.text[:120])
@@ -1755,20 +1843,22 @@ async def test_hire_generates_private_outcome_event(http):
         employer = await _mk_user(db)
         org = await _mk_org(db, employer)
         opp = Opportunity(
-            employer_org_id=org.id, title=f"Hire target {applicant.id[:8]}",
-            opportunity_type="contract", status="open",
+            employer_org_id=org.id,
+            title=f"Hire target {applicant.id[:8]}",
+            opportunity_type="contract",
+            status="open",
         )
         db.add(opp)
         await db.flush()
         application = Application(
-            opportunity_id=opp.id, user_id=applicant.id, status="accepted",
+            opportunity_id=opp.id,
+            user_id=applicant.id,
+            status="accepted",
         )
         db.add(application)
         await db.commit()
         app_id, applicant_id = application.id, applicant.id
-        employer_token = create_access_token(
-            employer.id, employer.email, employer.role.value
-        )
+        employer_token = create_access_token(employer.id, employer.email, employer.role.value)
 
     r = await http.patch(
         f"/api/v1/talent/applications/{app_id}/status",
@@ -1779,9 +1869,7 @@ async def test_hire_generates_private_outcome_event(http):
 
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
-        placement = await db.scalar(
-            _select(Placement).where(Placement.application_id == app_id)
-        )
+        placement = await db.scalar(_select(Placement).where(Placement.application_id == app_id))
         assert placement is not None, "hire must create the placement"
         event = await db.scalar(
             _select(OutcomeEvent).where(
@@ -1820,13 +1908,17 @@ async def test_concurrent_hire_race_is_serialized(http):
         employer = await _mk_user(db)
         org = await _mk_org(db, employer)
         opp = Opportunity(
-            employer_org_id=org.id, title=f"Race target {applicant.id[:8]}",
-            opportunity_type="contract", status="open",
+            employer_org_id=org.id,
+            title=f"Race target {applicant.id[:8]}",
+            opportunity_type="contract",
+            status="open",
         )
         db.add(opp)
         await db.flush()
         application = Application(
-            opportunity_id=opp.id, user_id=applicant.id, status="accepted",
+            opportunity_id=opp.id,
+            user_id=applicant.id,
+            status="accepted",
         )
         db.add(application)
         await db.commit()
@@ -1835,10 +1927,12 @@ async def test_concurrent_hire_race_is_serialized(http):
 
     hdrs = {"Authorization": f"Bearer {token}"}
     r1, r2 = await asyncio.gather(
-        http.patch(f"/api/v1/talent/applications/{app_id}/status",
-                   json={"status": "hired"}, headers=hdrs),
-        http.patch(f"/api/v1/talent/applications/{app_id}/status",
-                   json={"status": "hired"}, headers=hdrs),
+        http.patch(
+            f"/api/v1/talent/applications/{app_id}/status", json={"status": "hired"}, headers=hdrs
+        ),
+        http.patch(
+            f"/api/v1/talent/applications/{app_id}/status", json={"status": "hired"}, headers=hdrs
+        ),
     )
     codes = sorted([r1.status_code, r2.status_code])
     assert codes == [200, 422], (codes, r1.text[:120], r2.text[:120])
@@ -1846,16 +1940,14 @@ async def test_concurrent_hire_race_is_serialized(http):
     await engine.dispose(close=False)
     async with AsyncSessionLocal() as db:
         n_place = await db.scalar(
-            _select(_func.count()).select_from(Placement).where(
-                Placement.application_id == app_id
-            )
+            _select(_func.count()).select_from(Placement).where(Placement.application_id == app_id)
         )
         assert n_place == 1, "exactly one placement"
-        placement = await db.scalar(
-            _select(Placement).where(Placement.application_id == app_id)
-        )
+        placement = await db.scalar(_select(Placement).where(Placement.application_id == app_id))
         n_events = await db.scalar(
-            _select(_func.count()).select_from(OutcomeEvent).where(
+            _select(_func.count())
+            .select_from(OutcomeEvent)
+            .where(
                 OutcomeEvent.source_type == "placement",
                 OutcomeEvent.source_id == placement.id,
             )
@@ -1870,14 +1962,16 @@ async def test_opportunity_filters_reject_unknown_values(http, tokens):
     now 422 naming the allowed values; the valid twins still 200."""
     member = {"Authorization": f"Bearer {tokens['member']}"}
     cases = [
-        ("/api/v1/talent/opportunities?opportunity_type=fulltime",
-         "/api/v1/talent/opportunities?opportunity_type=full_time"),
-        ("/api/v1/talent/opportunities?location_mode=remot",
-         "/api/v1/talent/opportunities?location_mode=remote"),
-        ("/api/v1/talent/opportunities?status=opn",
-         "/api/v1/talent/opportunities?status=open"),
-        ("/api/v1/talent/opportunities?sort=newst",
-         "/api/v1/talent/opportunities?sort=newest"),
+        (
+            "/api/v1/talent/opportunities?opportunity_type=fulltime",
+            "/api/v1/talent/opportunities?opportunity_type=full_time",
+        ),
+        (
+            "/api/v1/talent/opportunities?location_mode=remot",
+            "/api/v1/talent/opportunities?location_mode=remote",
+        ),
+        ("/api/v1/talent/opportunities?status=opn", "/api/v1/talent/opportunities?status=open"),
+        ("/api/v1/talent/opportunities?sort=newst", "/api/v1/talent/opportunities?sort=newest"),
     ]
     for bad, good in cases:
         r = await http.get(bad, headers=member)

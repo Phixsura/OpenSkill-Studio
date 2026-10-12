@@ -45,9 +45,7 @@ class DecisionRecord(Base):
     approver_user_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="RESTRICT")
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         # One terminal decision per experiment; extend/inconclusive may repeat
@@ -80,10 +78,6 @@ class PromotionDraft(Base):
     # Reference to the draft object created in the target domain
     applied_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     apply_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        Index("ix_experiment_promotion_drafts_status", "status"),
-    )
+    __table_args__ = (Index("ix_experiment_promotion_drafts_status", "status"),)

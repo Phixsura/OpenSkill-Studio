@@ -147,8 +147,11 @@ async def test_normalized_alias_auto_merges_despite_formatting_drift(db):
     await db.flush()
     # Same identifier, different formatting: underscores + case drift
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref="IMAGE_FORGE_V2", raw_hash="f" * 64,
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref="IMAGE_FORGE_V2",
+        raw_hash="f" * 64,
         normalized={"official_id": "IMAGE_FORGE_V2", "name": "ImageForge"},
     )
     db.add(obs)
@@ -165,8 +168,11 @@ async def test_trigram_similarity_finds_near_name(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model",
-        external_ref=f"photon-renderer-{unique}", raw_hash="g" * 64,
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model",
+        external_ref=f"photon-renderer-{unique}",
+        raw_hash="g" * 64,
         normalized={"name": f"Photon Renderer {unique}"},
     )
     db.add(obs)
@@ -186,8 +192,12 @@ async def test_dimension_stats_and_case_weights(db):
     admin = await _mk_user(db, "admin")
     svc = BenchmarkService(db)
     suite = await svc.create_suite(
-        key=f"wsuite-{str(ULID()).lower()}", name="Weighted", family="ecommerce_hero",
-        capability_key="image_generation", repeat_count=2, created_by=admin.id,
+        key=f"wsuite-{str(ULID()).lower()}",
+        name="Weighted",
+        family="ecommerce_hero",
+        capability_key="image_generation",
+        repeat_count=2,
+        created_by=admin.id,
     )
     heavy = await svc.add_case(suite.id, name="heavy", prompt="p1", weight=3.0)
     await svc.add_case(suite.id, name="light", prompt="p2", weight=1.0)
@@ -196,9 +206,15 @@ async def test_dimension_stats_and_case_weights(db):
     class SplitExecutor:
         async def execute_case(self, run, case, repeat):
             score = 1.0 if case.id == heavy.id else 0.0
-            return {"output_assets": [], "latency_ms": 100, "usage": {},
-                    "cost_usd": 0.01, "automated_scores": {"text_accuracy": score},
-                    "failed": False, "retries": 0}
+            return {
+                "output_assets": [],
+                "latency_ms": 100,
+                "usage": {},
+                "cost_usd": 0.01,
+                "automated_scores": {"text_accuracy": score},
+                "failed": False,
+                "retries": 0,
+            }
 
     bench = BenchmarkService(db, executor=SplitExecutor())
     run = await bench.create_run(
@@ -229,18 +245,24 @@ async def test_reveal_computes_preference_elo(db):
         runs.append(await bench.execute_run(run.id))
     blind = BlindReviewService(db)
     batch = await blind.create_batch(
-        suite_id=suite.id, run_ids=[r.id for r in runs],
-        reviewer_ids=[r1.id, r2.id], created_by=admin.id,
+        suite_id=suite.id,
+        run_ids=[r.id for r in runs],
+        reviewer_ids=[r1.id, r2.id],
+        created_by=admin.id,
     )
     # Both reviewers consistently prefer runs[0]
     for reviewer in (r1, r2):
         for a in await blind.assignments_for(batch.id, reviewer.id):
             review = await db.get(
-                __import__("app.ecosystem.models.benchmark", fromlist=["BenchmarkReview"]
-                           ).BenchmarkReview, a["review_id"])
+                __import__(
+                    "app.ecosystem.models.benchmark", fromlist=["BenchmarkReview"]
+                ).BenchmarkReview,
+                a["review_id"],
+            )
             preferred = review.run_id == runs[0].id
             await blind.submit(
-                a["review_id"], reviewer_id=reviewer.id,
+                a["review_id"],
+                reviewer_id=reviewer.id,
                 scores={"quality": 5 if preferred else 2},
             )
     revealed = await blind.reveal(batch.id)
@@ -263,9 +285,15 @@ class ListLatencyExecutor:
     async def execute_case(self, run, case, repeat):
         latency = self.latencies[self.i % len(self.latencies)]
         self.i += 1
-        return {"output_assets": [], "latency_ms": latency, "usage": {},
-                "cost_usd": self.cost, "automated_scores": {},
-                "failed": False, "retries": 0}
+        return {
+            "output_assets": [],
+            "latency_ms": latency,
+            "usage": {},
+            "cost_usd": self.cost,
+            "automated_scores": {},
+            "failed": False,
+            "retries": 0,
+        }
 
 
 async def _rollout_with_latencies(db, admin, *, base_lat, cand_lat, thresholds):
@@ -284,7 +312,8 @@ async def _rollout_with_latencies(db, admin, *, base_lat, cand_lat, thresholds):
     top = next(c for c in ranked if c.candidate_id == candidate.id)
     svc = RolloutService(db)
     plan = await svc.create(
-        replacement_candidate_id=top.id, scope_type="benchmark_only",
+        replacement_candidate_id=top.id,
+        scope_type="benchmark_only",
         guardrails={"min_samples": 2, "thresholds": thresholds},
     )
     await svc.start(plan.id)
@@ -295,7 +324,8 @@ async def test_noisy_latency_difference_is_not_a_regression(db):
     admin = await _mk_user(db, "admin")
     # Slightly slower on average, hugely noisy → not significant → no block
     svc, plan = await _rollout_with_latencies(
-        db, admin,
+        db,
+        admin,
         base_lat=[100, 900, 200, 800, 150, 850],
         cand_lat=[120, 920, 230, 780, 170, 900],
         thresholds={"speed_p50_ms": 0},
@@ -312,7 +342,8 @@ async def test_significant_latency_regression_blocks_promote(db):
 
     admin = await _mk_user(db, "admin")
     svc, plan = await _rollout_with_latencies(
-        db, admin,
+        db,
+        admin,
         base_lat=[100, 102, 98, 101, 99, 100],
         cand_lat=[500, 505, 498, 502, 499, 501],
         thresholds={"speed_p50_ms": 50},
@@ -335,35 +366,56 @@ async def test_impact_prunes_version_pinned_dependents(db):
     db.add(model)
     await db.flush()
     version = ModelVersion(
-        model_id=model.id, version="2.0.0", canonical_name="Pinned 2.0",
+        model_id=model.id,
+        version="2.0.0",
+        canonical_name="Pinned 2.0",
         lifecycle_status="verified",
     )
     db.add(version)
     await db.flush()
     graph = GraphService(db)
     affected_pack, safe_pack, unknown_pack = str(ULID()), str(ULID()), str(ULID())
-    await graph.add_edge(from_kind="workflow_pack", from_id=affected_pack,
-                         to_kind="model_version", to_id=version.id,
-                         constraint_type="requires_model_version",
-                         constraint_spec={"version_range": ">=2.0 <3.0"})
-    await graph.add_edge(from_kind="workflow_pack", from_id=safe_pack,
-                         to_kind="model_version", to_id=version.id,
-                         constraint_type="requires_model_version",
-                         constraint_spec={"version_range": ">=3.0"})
-    await graph.add_edge(from_kind="workflow_pack", from_id=unknown_pack,
-                         to_kind="model_version", to_id=version.id,
-                         constraint_type="requires_model_version",
-                         constraint_spec={"version_range": "not-a-range"})
+    await graph.add_edge(
+        from_kind="workflow_pack",
+        from_id=affected_pack,
+        to_kind="model_version",
+        to_id=version.id,
+        constraint_type="requires_model_version",
+        constraint_spec={"version_range": ">=2.0 <3.0"},
+    )
+    await graph.add_edge(
+        from_kind="workflow_pack",
+        from_id=safe_pack,
+        to_kind="model_version",
+        to_id=version.id,
+        constraint_type="requires_model_version",
+        constraint_spec={"version_range": ">=3.0"},
+    )
+    await graph.add_edge(
+        from_kind="workflow_pack",
+        from_id=unknown_pack,
+        to_kind="model_version",
+        to_id=version.id,
+        constraint_type="requires_model_version",
+        constraint_spec={"version_range": "not-a-range"},
+    )
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_deprecated",
-        entity_kind="model_version", canonical_entity_kind="model_version",
-        canonical_entity_id=version.id, raw_hash="s" * 64, normalized={},
+        source_id=source.id,
+        event_type="model_deprecated",
+        entity_kind="model_version",
+        canonical_entity_kind="model_version",
+        canonical_entity_id=version.id,
+        raw_hash="s" * 64,
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     change = ChangeEvent(
-        observation_id=obs.id, change_type="lifecycle", field="sunset_at",
-        severity="sunset_risk", entity_kind="model_version",
+        observation_id=obs.id,
+        change_type="lifecycle",
+        field="sunset_at",
+        severity="sunset_risk",
+        entity_kind="model_version",
         canonical_entity_id=version.id,
     )
     db.add(change)
@@ -387,8 +439,15 @@ async def test_change_event_fans_out_to_outbox_and_watchers(db):
     db.add(model)
     await db.flush()
     ref = f"fanout-{str(ULID()).lower()}"
-    db.add(EntityAlias(entity_kind="model", entity_id=model.id, alias=ref,
-                       alias_normalized=normalize_name(ref), alias_type="official_id"))
+    db.add(
+        EntityAlias(
+            entity_kind="model",
+            entity_id=model.id,
+            alias=ref,
+            alias_normalized=normalize_name(ref),
+            alias_type="official_id",
+        )
+    )
     await db.flush()
     watcher = await _mk_user(db)
     watchlist = await WatchlistService(db).create(owner_id=watcher.id, name="fanout")
@@ -411,9 +470,7 @@ async def test_change_event_fans_out_to_outbox_and_watchers(db):
     assert change is not None and change.severity == "breaking"
     topics = [
         (m.topic, m.payload)
-        for m in await db.scalars(
-            select(OutboxMessage).where(OutboxMessage.status == "pending")
-        )
+        for m in await db.scalars(select(OutboxMessage).where(OutboxMessage.status == "pending"))
         if m.payload.get("change_event_id") == change.id
     ]
     topic_names = {t for t, _ in topics}
@@ -440,9 +497,7 @@ async def test_change_event_fans_out_to_outbox_and_watchers(db):
     await HANDLERS["eco.compute_impact"](db, {"change_event_id": change.id})
     await HANDLERS["eco.compute_impact"](db, {"change_event_id": change.id})
     analyses = list(
-        await db.scalars(
-            select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change.id)
-        )
+        await db.scalars(select(ImpactAnalysis).where(ImpactAnalysis.change_event_id == change.id))
     )
     assert len(analyses) == 1
 
@@ -451,12 +506,24 @@ async def test_price_change_magnitude_recorded(db):
     source = await _mk_source(db)
     ref = f"mag-{str(ULID()).lower()}"
     v1 = _catalog_payload(
-        [{"id": ref, "name": "Mag", "version": "1",
-          "pricing": [{"unit": "image", "price": 0.02, "currency": "USD"}]}]
+        [
+            {
+                "id": ref,
+                "name": "Mag",
+                "version": "1",
+                "pricing": [{"unit": "image", "price": 0.02, "currency": "USD"}],
+            }
+        ]
     )
     v2 = _catalog_payload(
-        [{"id": ref, "name": "Mag", "version": "1",
-          "pricing": [{"unit": "image", "price": 0.03, "currency": "USD"}]}]
+        [
+            {
+                "id": ref,
+                "name": "Mag",
+                "version": "1",
+                "pricing": [{"unit": "image", "price": 0.03, "currency": "USD"}],
+            }
+        ]
     )
     await SyncService(db, fetcher=_fetcher_for(v1)).run_sync(source.id)
     await SyncService(db, fetcher=_fetcher_for(v2)).run_sync(source.id)
@@ -521,8 +588,11 @@ async def _mk_offering(db, *, active=True, connection_status="active"):
     db.add(connection)
     await db.flush()
     offering = ProviderModelOffering(
-        connection_id=connection.id, capability_key="image_generation",
-        model_name="mock-image-1", cost_per_call_usd=0.0123, is_active=active,
+        connection_id=connection.id,
+        capability_key="image_generation",
+        model_name="mock-image-1",
+        cost_per_call_usd=0.0123,
+        is_active=active,
     )
     db.add(offering)
     await db.flush()
@@ -567,8 +637,7 @@ async def test_offering_executor_inactive_connection_captured_as_failure(db):
     bench = BenchmarkService(db)
     run = await bench.create_run(
         suite.id,
-        target={"entity_kind": "model_version", "entity_id": "X" * 26,
-                "offering_id": offering.id},
+        target={"entity_kind": "model_version", "entity_id": "X" * 26, "offering_id": offering.id},
     )
     run = await bench.execute_run(run.id)
     assert run.status == "completed"  # provider failure is DATA, not a crash

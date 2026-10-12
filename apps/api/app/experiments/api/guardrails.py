@@ -19,8 +19,13 @@ router = APIRouter(prefix="/experiments", tags=["Experiments — Guardrails"])
 
 
 _EVENT_EXPORT_COLUMNS = (
-    "guardrail_key", "metric_key", "observed", "threshold", "action",
-    "auto", "created_at",
+    "guardrail_key",
+    "metric_key",
+    "observed",
+    "threshold",
+    "action",
+    "auto",
+    "created_at",
 )
 
 
@@ -48,8 +53,7 @@ async def export_guardrail_events(
     for row in rows:
         writer.writerow(
             [
-                value.isoformat() if hasattr(value := getattr(row, col), "isoformat")
-                else value
+                value.isoformat() if hasattr(value := getattr(row, col), "isoformat") else value
                 for col in _EVENT_EXPORT_COLUMNS
             ]
         )
@@ -98,9 +102,7 @@ async def record_incident(
     return {"data": event}
 
 
-@router.post(
-    "/{experiment_id}/guardrails/evaluate", response_model=DataResponse[dict]
-)
+@router.post("/{experiment_id}/guardrails/evaluate", response_model=DataResponse[dict])
 async def evaluate_guardrails_now(
     experiment_id: str,
     db: AsyncSession = Depends(get_db),

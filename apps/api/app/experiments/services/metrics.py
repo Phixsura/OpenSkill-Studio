@@ -60,6 +60,7 @@ def register_source(name: str):
 # covariates work for any (main metric, covariate) pair whose covariate
 # source has a provider. k == 1 keeps the legacy in-source path untouched.
 
+
 def value_histogram(values: list[float]) -> dict:
     """§4.14 (round 124): base-2 log histogram {bucket: count} over positive
     values, with "__zero__"/"__neg__" overflow keys. Mergeable across
@@ -83,9 +84,7 @@ def _validate_quantiles(quantiles, kind) -> None:
     if quantiles is None:
         return
     if not isinstance(quantiles, (list, tuple)) or not 1 <= len(quantiles) <= 3:
-        raise AppError(
-            "VALIDATION_ERROR", "quantiles must list 1-3 probabilities", 422
-        )
+        raise AppError("VALIDATION_ERROR", "quantiles must list 1-3 probabilities", 422)
     for value in quantiles:
         if not isinstance(value, (int, float)) or not 0.0 < float(value) < 1.0:
             raise AppError(
@@ -129,8 +128,12 @@ def covariate_provider(source_name: str):
 
 @covariate_provider("projects")
 async def _cov_projects(
-    db: AsyncSession, *, definition, units: list[str],
-    lookback_start, window_start,
+    db: AsyncSession,
+    *,
+    definition,
+    units: list[str],
+    lookback_start,
+    window_start,
 ) -> dict[str, float]:
     from app.models.project import Submission
 
@@ -171,8 +174,12 @@ async def _cov_projects(
 
 @covariate_provider("evaluations")
 async def _cov_evaluations(
-    db: AsyncSession, *, definition, units: list[str],
-    lookback_start, window_start,
+    db: AsyncSession,
+    *,
+    definition,
+    units: list[str],
+    lookback_start,
+    window_start,
 ) -> dict[str, float]:
     """Pre-period review outcomes per user unit (round 117): mirrors the
     evaluations SOURCE semantics (SubmissionReview verdicts, ADR-006/008).
@@ -199,8 +206,12 @@ async def _cov_evaluations(
 
 
 async def assemble_covariates(
-    db: AsyncSession, *, variance_reduction, definitions_by_key: dict,
-    unit_values: dict[str, float], window_start,
+    db: AsyncSession,
+    *,
+    variance_reduction,
+    definitions_by_key: dict,
+    unit_values: dict[str, float],
+    window_start,
 ) -> dict:
     """Build the exp12 covariates map {key: {sum, sum_sq, xy_sum}} from each
     covariate's provider; units with no pre-period data count as zero (ITT).
@@ -209,9 +220,7 @@ async def assemble_covariates(
     from datetime import timedelta
 
     units = list(unit_values.keys())
-    lookback_start = window_start - timedelta(
-        days=variance_reduction.lookback_days
-    )
+    lookback_start = window_start - timedelta(days=variance_reduction.lookback_days)
     out: dict = {}
     x_maps: dict[str, dict[str, float]] = {}
     for cov_key in resolve_covariates(variance_reduction):
@@ -219,9 +228,7 @@ async def assemble_covariates(
         if definition is None:
             # covariates need not appear among the spec's metrics — fetch
             definition = (
-                await db.execute(
-                    select(MetricDefinition).where(MetricDefinition.key == cov_key)
-                )
+                await db.execute(select(MetricDefinition).where(MetricDefinition.key == cov_key))
             ).scalar_one_or_none()
         provider = (
             COVARIATE_PROVIDERS.get((definition.spec or {}).get("source", ""))
@@ -231,8 +238,11 @@ async def assemble_covariates(
         if provider is None:
             continue
         x = await provider(
-            db, definition=definition, units=units,
-            lookback_start=lookback_start, window_start=window_start,
+            db,
+            definition=definition,
+            units=units,
+            lookback_start=lookback_start,
+            window_start=window_start,
         )
         xs = [x.get(u, 0.0) for u in units]
         ys = [unit_values[u] for u in units]
@@ -247,7 +257,7 @@ async def assemble_covariates(
     keys = [k for k in resolve_covariates(variance_reduction) if k in out]
     for i, ki in enumerate(keys):
         xx: dict[str, float] = {}
-        for kj in keys[i + 1:]:
+        for kj in keys[i + 1 :]:
             xi, xj = x_maps[ki], x_maps[kj]
             xx[kj] = sum(xi.get(u, 0.0) * xj.get(u, 0.0) for u in units)
         if xx:
@@ -361,16 +371,13 @@ async def _source_workflow_runs(
             )
         ).all()
         if measure == "latency_ms":
-            if (
-                variance_reduction is not None
-                and definition.key in resolve_covariates(variance_reduction)
+            if variance_reduction is not None and definition.key in resolve_covariates(
+                variance_reduction
             ):
                 # CUPED mode (§4.6 v2, third source on the shared contract):
                 # per-UNIT mean latency — y over the window, x over the
                 # pre-window lookback; ITT zero-fill for silent installations
-                lookback_start = window_start - timedelta(
-                    days=variance_reduction.lookback_days
-                )
+                lookback_start = window_start - timedelta(days=variance_reduction.lookback_days)
 
                 async def _unit_latency(start, end, units=units):
                     period_rows = (
@@ -394,9 +401,7 @@ async def _source_workflow_runs(
                         per_unit.setdefault(installation_id, []).append(
                             (finished - started).total_seconds() * 1000.0
                         )
-                    return {
-                        u: sum(vals) / len(vals) for u, vals in per_unit.items()
-                    }
+                    return {u: sum(vals) / len(vals) for u, vals in per_unit.items()}
 
                 cur = await _unit_latency(window_start, window_end)
                 pre = await _unit_latency(lookback_start, window_start)
@@ -487,10 +492,7 @@ async def _source_projects(
             )
         ).all()
         if measure == "revision_count":
-            if (
-                variance_reduction is not None
-                and len(resolve_covariates(variance_reduction)) > 1
-            ):
+            if variance_reduction is not None and len(resolve_covariates(variance_reduction)) > 1:
                 # §4.6 v3 (round 114): multi-covariate mode — the source
                 # emits per-unit y only; the assembler computes EVERY
                 # covariate's x through its provider (cross-source capable)
@@ -511,9 +513,7 @@ async def _source_projects(
                 # a robustness knob must apply identically on both paths.
                 # The winsorized values flow into BOTH the sums and the
                 # per-unit map the assembler pairs with covariates.
-                ys, winsorized = winsorize(
-                    [y[u] for u in units], definition.winsorize_pct
-                )
+                ys, winsorized = winsorize([y[u] for u in units], definition.winsorize_pct)
                 y = dict(zip(units, ys, strict=True))
                 result[variant] = {
                     "n": len(units),
@@ -524,18 +524,15 @@ async def _source_projects(
                     "_winsorized": winsorized,
                 }
                 continue
-            if (
-                variance_reduction is not None
-                and definition.key in resolve_covariates(variance_reduction)
+            if variance_reduction is not None and definition.key in resolve_covariates(
+                variance_reduction
             ):
                 # CUPED mode (§4.6 v2): per-UNIT aggregation so each unit
                 # contributes one (y, x) pair — y = revisions in the window,
                 # x = revisions in the pre-assignment lookback of the SAME
                 # metric. Every assigned unit counts (ITT, zero when silent);
                 # NOTE the n/unit-of-analysis change vs per-submission mode.
-                lookback_start = window_start - timedelta(
-                    days=variance_reduction.lookback_days
-                )
+                lookback_start = window_start - timedelta(days=variance_reduction.lookback_days)
                 pre_rows = (
                     await db.execute(
                         select(Submission.user_id, Submission.version).where(
@@ -582,9 +579,8 @@ async def _source_projects(
                 "_winsorized": winsorized,
             }
         else:
-            if (
-                variance_reduction is not None
-                and definition.key not in resolve_covariates(variance_reduction)
+            if variance_reduction is not None and definition.key not in resolve_covariates(
+                variance_reduction
             ):
                 # Binary CUPED (round 142, Statsig-parity regression
                 # adjustment on proportions): per-UNIT y — 1 when the unit
@@ -641,16 +637,13 @@ async def _source_cost_ledger(
         if not units or unit_type not in ("organization", "tenant"):
             result[variant] = {"n": 0}
             continue
-        if (
-            variance_reduction is not None
-            and definition.key in resolve_covariates(variance_reduction)
+        if variance_reduction is not None and definition.key in resolve_covariates(
+            variance_reduction
         ):
             # CUPED mode (§4.6 v2, same contract as projects): per-UNIT
             # totals — y = unit's cost in the window, x = its cost in the
             # pre-window lookback; every unit counts (ITT, zero when silent)
-            lookback_start = window_start - timedelta(
-                days=variance_reduction.lookback_days
-            )
+            lookback_start = window_start - timedelta(days=variance_reduction.lookback_days)
 
             async def _unit_costs(start, end, units=units):
                 if unit_type == "organization":
@@ -753,9 +746,7 @@ async def _source_client_briefs(
                 )
             )
         ).all()
-        accepted = sum(
-            1 for (status,) in rows if getattr(status, "value", status) == "completed"
-        )
+        accepted = sum(1 for (status,) in rows if getattr(status, "value", status) == "completed")
         result[variant] = {"n": len(rows), "numerator": accepted, "denominator": len(rows)}
     return result
 
@@ -882,9 +873,9 @@ async def _source_learning_paths(
         LearningPathItem.path_id, LearningPathItem.item_type, LearningPathItem.project_id
     ).where(LearningPathItem.required.is_(True))
     if experiment is not None and experiment.scope_org_id:
-        items_q = items_q.join(
-            LearningPath, LearningPath.id == LearningPathItem.path_id
-        ).where(LearningPath.org_id == experiment.scope_org_id)
+        items_q = items_q.join(LearningPath, LearningPath.id == LearningPathItem.path_id).where(
+            LearningPath.org_id == experiment.scope_org_id
+        )
     path_projects: dict[str, set[str]] = {}
     underivable: set[str] = set()
     for path_id, item_type, project_id in (await db.execute(items_q)).all():
@@ -947,9 +938,7 @@ async def _source_learning_paths(
                 if not window_start <= completion < window_end:
                     continue
                 completed_units.add(user_id)
-                starts = [
-                    first_at[(user_id, pr)] for pr in projects if (user_id, pr) in first_at
-                ]
+                starts = [first_at[(user_id, pr)] for pr in projects if (user_id, pr) in first_at]
                 if starts:
                     durations.append((completion - min(starts)).total_seconds() / 3600.0)
         if measure == "completion_rate":
@@ -1131,11 +1120,11 @@ async def _source_billing(
                     .group_by(Invoice.tenant_id)
                 )
             ).all()
-            converted = sum(
-                1 for _tenant, ts in first_paid if window_start <= ts < window_end
-            )
+            converted = sum(1 for _tenant, ts in first_paid if window_start <= ts < window_end)
             result[variant] = {
-                "n": len(units), "numerator": converted, "denominator": len(units),
+                "n": len(units),
+                "numerator": converted,
+                "denominator": len(units),
             }
         elif measure == "retention_rate":
             subs = (
@@ -1176,23 +1165,25 @@ async def _source_billing(
                 values = [revenue.get(t, 0.0) for t in units]
             else:  # gross_margin_pct — only tenants with in-window revenue
                 cost_rows = (
-                    await db.execute(
-                        select(Organization.tenant_id, func.sum(EvaluationTask.cost_usd))
-                        .join(Organization, Organization.id == EvaluationTask.org_id)
-                        .where(
-                            Organization.tenant_id.in_(list(revenue)),
-                            EvaluationTask.cost_usd.is_not(None),
-                            EvaluationTask.created_at >= window_start,
-                            EvaluationTask.created_at < window_end,
+                    (
+                        await db.execute(
+                            select(Organization.tenant_id, func.sum(EvaluationTask.cost_usd))
+                            .join(Organization, Organization.id == EvaluationTask.org_id)
+                            .where(
+                                Organization.tenant_id.in_(list(revenue)),
+                                EvaluationTask.cost_usd.is_not(None),
+                                EvaluationTask.created_at >= window_start,
+                                EvaluationTask.created_at < window_end,
+                            )
+                            .group_by(Organization.tenant_id)
                         )
-                        .group_by(Organization.tenant_id)
-                    )
-                ).all() if revenue else []
+                    ).all()
+                    if revenue
+                    else []
+                )
                 cost = {t: float(c or 0) for t, c in cost_rows}
                 values = [
-                    (rev - cost.get(t, 0.0)) / rev * 100.0
-                    for t, rev in revenue.items()
-                    if rev > 0
+                    (rev - cost.get(t, 0.0)) / rev * 100.0 for t, rev in revenue.items() if rev > 0
                 ]
             values, winsorized = winsorize(values, definition.winsorize_pct)
             result[variant] = {
@@ -1204,7 +1195,6 @@ async def _source_billing(
         else:
             result[variant] = {"n": 0}
     return result
-
 
 
 @register_source("capabilities")
@@ -1280,72 +1270,186 @@ async def _source_capabilities(
 
 SEED_METRIC_DEFINITIONS: list[dict] = [
     # Internal (always computable)
-    {"key": "exposure_rate", "title": "Exposure rate", "kind": "rate", "domain": "operational",
-     "source_kind": "service", "spec": {"source": "exposures"}},
+    {
+        "key": "exposure_rate",
+        "title": "Exposure rate",
+        "kind": "rate",
+        "domain": "operational",
+        "source_kind": "service",
+        "spec": {"source": "exposures"},
+    },
     # Production (wired via workflow_runs)
-    {"key": "run_success_rate", "title": "Workflow run success rate", "kind": "binary",
-     "domain": "workflow", "source_kind": "service",
-     "spec": {"source": "workflow_runs", "measure": "success_rate"}},
-    {"key": "run_latency_ms", "title": "Workflow run latency (ms)", "kind": "continuous",
-     "domain": "workflow", "source_kind": "service",
-     "spec": {"source": "workflow_runs", "measure": "latency_ms"},
-     "direction": "decrease_good", "winsorize_pct": 99.9},
+    {
+        "key": "run_success_rate",
+        "title": "Workflow run success rate",
+        "kind": "binary",
+        "domain": "workflow",
+        "source_kind": "service",
+        "spec": {"source": "workflow_runs", "measure": "success_rate"},
+    },
+    {
+        "key": "run_latency_ms",
+        "title": "Workflow run latency (ms)",
+        "kind": "continuous",
+        "domain": "workflow",
+        "source_kind": "service",
+        "spec": {"source": "workflow_runs", "measure": "latency_ms"},
+        "direction": "decrease_good",
+        "winsorize_pct": 99.9,
+    },
     # Learning — path progress is DERIVED (no progress table); its
     # aggregation source lands with the exp09 hardening pass
-    {"key": "completion_rate", "title": "Path completion", "kind": "binary", "domain": "learning",
-     "source_kind": "service", "spec": {"source": "learning_paths"}},
-    {"key": "time_to_completion_hours", "title": "Time to completion (h)", "kind": "continuous",
-     "domain": "learning", "source_kind": "service", "spec": {"source": "learning_paths"},
-     "direction": "decrease_good"},
+    {
+        "key": "completion_rate",
+        "title": "Path completion",
+        "kind": "binary",
+        "domain": "learning",
+        "source_kind": "service",
+        "spec": {"source": "learning_paths"},
+    },
+    {
+        "key": "time_to_completion_hours",
+        "title": "Time to completion (h)",
+        "kind": "continuous",
+        "domain": "learning",
+        "source_kind": "service",
+        "spec": {"source": "learning_paths"},
+        "direction": "decrease_good",
+    },
     # Practical pass needs the review pipeline's semantics — exp09
-    {"key": "practical_pass_rate", "title": "Practical assessment pass", "kind": "binary",
-     "domain": "assessment", "source_kind": "service", "spec": {"source": "evaluations"}},
-    {"key": "project_approval_rate", "title": "Project approval", "kind": "binary",
-     "domain": "learning", "source_kind": "service",
-     "spec": {"source": "projects", "measure": "approval_rate"}},
-    {"key": "revision_count", "title": "Revision count", "kind": "continuous",
-     "domain": "learning", "source_kind": "service",
-     "spec": {"source": "projects", "measure": "revision_count"},
-     "direction": "decrease_good"},
-    {"key": "capability_gain", "title": "Capability gain", "kind": "continuous",
-     "domain": "learning", "source_kind": "service", "spec": {"source": "capabilities"}},
-    {"key": "placement_outcome_rate", "title": "Placement outcome", "kind": "time_to_event",
-     "domain": "talent_flow", "source_kind": "service", "spec": {"source": "talent_outcomes"}},
+    {
+        "key": "practical_pass_rate",
+        "title": "Practical assessment pass",
+        "kind": "binary",
+        "domain": "assessment",
+        "source_kind": "service",
+        "spec": {"source": "evaluations"},
+    },
+    {
+        "key": "project_approval_rate",
+        "title": "Project approval",
+        "kind": "binary",
+        "domain": "learning",
+        "source_kind": "service",
+        "spec": {"source": "projects", "measure": "approval_rate"},
+    },
+    {
+        "key": "revision_count",
+        "title": "Revision count",
+        "kind": "continuous",
+        "domain": "learning",
+        "source_kind": "service",
+        "spec": {"source": "projects", "measure": "revision_count"},
+        "direction": "decrease_good",
+    },
+    {
+        "key": "capability_gain",
+        "title": "Capability gain",
+        "kind": "continuous",
+        "domain": "learning",
+        "source_kind": "service",
+        "spec": {"source": "capabilities"},
+    },
+    {
+        "key": "placement_outcome_rate",
+        "title": "Placement outcome",
+        "kind": "time_to_event",
+        "domain": "talent_flow",
+        "source_kind": "service",
+        "spec": {"source": "talent_outcomes"},
+    },
     # Production quality/cost
-    {"key": "client_acceptance_rate", "title": "Client acceptance", "kind": "binary",
-     "domain": "workflow", "source_kind": "service", "spec": {"source": "client_briefs"}},
-    {"key": "internal_cost_usd", "title": "Internal cost (USD)", "kind": "continuous",
-     "domain": "operational", "source_kind": "service",
-     # #69 family: a cost guardrail guards the window TOTAL
-     "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
-     "direction": "decrease_good"},
-    {"key": "provider_reliability", "title": "Provider reliability", "kind": "rate",
-     "domain": "workflow", "source_kind": "service", "spec": {"source": "eco_telemetry"}},
+    {
+        "key": "client_acceptance_rate",
+        "title": "Client acceptance",
+        "kind": "binary",
+        "domain": "workflow",
+        "source_kind": "service",
+        "spec": {"source": "client_briefs"},
+    },
+    {
+        "key": "internal_cost_usd",
+        "title": "Internal cost (USD)",
+        "kind": "continuous",
+        "domain": "operational",
+        "source_kind": "service",
+        # #69 family: a cost guardrail guards the window TOTAL
+        "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
+        "direction": "decrease_good",
+    },
+    {
+        "key": "provider_reliability",
+        "title": "Provider reliability",
+        "kind": "rate",
+        "domain": "workflow",
+        "source_kind": "service",
+        "spec": {"source": "eco_telemetry"},
+    },
     # Commercial
-    {"key": "conversion_rate", "title": "Conversion", "kind": "binary", "domain": "marketplace",
-     "source_kind": "service", "spec": {"source": "billing"}},
-    {"key": "retention_rate", "title": "Retention", "kind": "time_to_event",
-     "domain": "marketplace", "source_kind": "service", "spec": {"source": "billing"}},
-    {"key": "arpu_usd", "title": "ARPU (USD)", "kind": "continuous", "domain": "marketplace",
-     "source_kind": "service", "spec": {"source": "billing"}},
-    {"key": "gross_margin_pct", "title": "Gross margin %", "kind": "continuous",
-     "domain": "marketplace", "source_kind": "service", "spec": {"source": "billing"}},
-    {"key": "pack_adoption_rate", "title": "Pack adoption", "kind": "rate",
-     "domain": "marketplace", "source_kind": "service", "spec": {"source": "registry"}},
+    {
+        "key": "conversion_rate",
+        "title": "Conversion",
+        "kind": "binary",
+        "domain": "marketplace",
+        "source_kind": "service",
+        "spec": {"source": "billing"},
+    },
+    {
+        "key": "retention_rate",
+        "title": "Retention",
+        "kind": "time_to_event",
+        "domain": "marketplace",
+        "source_kind": "service",
+        "spec": {"source": "billing"},
+    },
+    {
+        "key": "arpu_usd",
+        "title": "ARPU (USD)",
+        "kind": "continuous",
+        "domain": "marketplace",
+        "source_kind": "service",
+        "spec": {"source": "billing"},
+    },
+    {
+        "key": "gross_margin_pct",
+        "title": "Gross margin %",
+        "kind": "continuous",
+        "domain": "marketplace",
+        "source_kind": "service",
+        "spec": {"source": "billing"},
+    },
+    {
+        "key": "pack_adoption_rate",
+        "title": "Pack adoption",
+        "kind": "rate",
+        "domain": "marketplace",
+        "source_kind": "service",
+        "spec": {"source": "registry"},
+    },
     # Guardrail staples
-    {"key": "cost_usd", "title": "Cost ceiling (USD)", "kind": "continuous",
-     "domain": "operational", "source_kind": "service",
-     # #69: a cost CEILING guards the window TOTAL — without this the
-     # guardrail silently evaluated the mean per task (the sum branch was
-     # unreachable: no seed set it and definition.spec is immutable).
-     # Seeds are ON CONFLICT DO NOTHING: pre-existing deployments keep the
-     # old spec until the definition row is re-seeded (documented, §18).
-     "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
-     "direction": "decrease_good"},
-    {"key": "run_failure_rate", "title": "Run failure rate", "kind": "rate",
-     "domain": "operational", "source_kind": "service",
-     "spec": {"source": "workflow_runs", "measure": "failure_rate"},
-     "direction": "decrease_good"},
+    {
+        "key": "cost_usd",
+        "title": "Cost ceiling (USD)",
+        "kind": "continuous",
+        "domain": "operational",
+        "source_kind": "service",
+        # #69: a cost CEILING guards the window TOTAL — without this the
+        # guardrail silently evaluated the mean per task (the sum branch was
+        # unreachable: no seed set it and definition.spec is immutable).
+        # Seeds are ON CONFLICT DO NOTHING: pre-existing deployments keep the
+        # old spec until the definition row is re-seeded (documented, §18).
+        "spec": {"source": "cost_ledger", "guardrail_aggregate": "sum"},
+        "direction": "decrease_good",
+    },
+    {
+        "key": "run_failure_rate",
+        "title": "Run failure rate",
+        "kind": "rate",
+        "domain": "operational",
+        "source_kind": "service",
+        "spec": {"source": "workflow_runs", "measure": "failure_rate"},
+        "direction": "decrease_good",
+    },
 ]
 
 
@@ -1380,9 +1484,7 @@ class MetricService:
                 raise AppError(
                     "VALIDATION_ERROR", f"Unknown {name}: {value} (allowed: {sorted(allowed)})", 422
                 )
-        _validate_quantiles(
-            (fields.get("spec") or {}).get("quantiles"), fields.get("kind")
-        )
+        _validate_quantiles((fields.get("spec") or {}).get("quantiles"), fields.get("kind"))
         definition = MetricDefinition(**fields)
         self.db.add(definition)
         try:
@@ -1398,9 +1500,7 @@ class MetricService:
         privacy class, direction, winsorize/cap). kind/source stay immutable
         — they are analysis semantics baked into stored snapshots."""
         definition = (
-            await self.db.execute(
-                select(MetricDefinition).where(MetricDefinition.key == key)
-            )
+            await self.db.execute(select(MetricDefinition).where(MetricDefinition.key == key))
         ).scalar_one_or_none()
         if definition is None:
             raise AppError("EXPERIMENT_NOT_FOUND", "Metric definition not found", 404)
@@ -1415,8 +1515,7 @@ class MetricService:
                     f"Unknown {name}: {value} (allowed: {sorted(allowed)})",
                     422,
                 )
-        for field in ("title", "privacy_class", "direction",
-                      "winsorize_pct", "cap_value"):
+        for field in ("title", "privacy_class", "direction", "winsorize_pct", "cap_value"):
             if changes.get(field) is not None:
                 setattr(definition, field, changes[field])
         if changes.get("km") is not None:
@@ -1426,8 +1525,7 @@ class MetricService:
                     f"km requires a time_to_event metric (kind: {definition.kind})",
                     422,
                 )
-            if (changes["km"]
-                    and (definition.spec or {}).get("source") != "talent_outcomes"):
+            if changes["km"] and (definition.spec or {}).get("source") != "talent_outcomes":
                 raise AppError(
                     "VALIDATION_ERROR",
                     "km requires a talent_outcomes-sourced metric (the KM "
@@ -1440,12 +1538,12 @@ class MetricService:
             definition.spec = spec
         if changes.get("quantiles") is not None:
             _validate_quantiles(changes["quantiles"], definition.kind)
-            definition.spec = {**(definition.spec or {}),
-                               "quantiles": [float(v) for v in changes["quantiles"]]}
-        if changes.get("clear_quantiles"):
             definition.spec = {
-                k: v for k, v in (definition.spec or {}).items() if k != "quantiles"
+                **(definition.spec or {}),
+                "quantiles": [float(v) for v in changes["quantiles"]],
             }
+        if changes.get("clear_quantiles"):
+            definition.spec = {k: v for k, v in (definition.spec or {}).items() if k != "quantiles"}
         if changes.get("clear_winsorize"):
             definition.winsorize_pct = None
         if changes.get("clear_cap"):
@@ -1462,7 +1560,10 @@ class MetricService:
     # ── snapshots ────────────────────────────────────────────────────
 
     async def _variant_units(
-        self, experiment_id: str, *, as_of: datetime | None = None,
+        self,
+        experiment_id: str,
+        *,
+        as_of: datetime | None = None,
         exposed_only: bool = False,
     ) -> dict[str, list[str]]:
         """ITT unit sets: grouped by assigned variant, holdouts excluded.
@@ -1547,9 +1648,7 @@ class MetricService:
         ).scalar_one_or_none()
         if latest is not None:
             try:
-                variance_reduction = ExperimentSpec.model_validate(
-                    latest.spec
-                ).variance_reduction
+                variance_reduction = ExperimentSpec.model_validate(latest.spec).variance_reduction
             except Exception:  # noqa: BLE001 — poison spec must not kill snapshots
                 variance_reduction = None
         # Window-consistent ITT: only units assigned before the window closed.

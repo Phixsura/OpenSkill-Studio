@@ -70,9 +70,7 @@ async def test_run_claim_fencing_blocks_second_worker(db):
         ):
             fenced["done"] = True
             await original_execute(
-                update(BenchmarkRun)
-                .where(BenchmarkRun.id == run.id)
-                .values(status="running")
+                update(BenchmarkRun).where(BenchmarkRun.id == run.id).values(status="running")
             )
         return await original_execute(stmt, *args, **kwargs)
 
@@ -115,9 +113,7 @@ async def test_concurrent_sync_second_session_skips(db):
     try:
         # Session A takes the row lock (a sync in flight)
         await db.execute(
-            sa_select(EcosystemSource.id)
-            .where(EcosystemSource.id == source_id)
-            .with_for_update()
+            sa_select(EcosystemSource.id).where(EcosystemSource.id == source_id).with_for_update()
         )
         # Session B (a second worker) must skip immediately — not block,
         # not duplicate the fetch
@@ -158,18 +154,24 @@ async def test_retention_prunes_old_probes_keeps_latest_and_flip_evidence(db):
     # Three old redundant probes + one fresh
     for i in range(3):
         record = await svc.record(
-            entity_kind="model_version", entity_id=version.id,
-            record_type="status", value={"status": "operational"},
+            entity_kind="model_version",
+            entity_id=version.id,
+            record_type="status",
+            value={"status": "operational"},
         )
         record.observed_at = old + timedelta(hours=i)
     fresh = await svc.record(
-        entity_kind="model_version", entity_id=version.id,
-        record_type="status", value={"status": "operational"},
+        entity_kind="model_version",
+        entity_id=version.id,
+        record_type="status",
+        value={"status": "operational"},
     )
     # An old NON-status record must never be touched
     rate = await svc.record(
-        entity_kind="model_version", entity_id=version.id,
-        record_type="rate_limit", value={"requests_per_minute": 60},
+        entity_kind="model_version",
+        entity_id=version.id,
+        record_type="rate_limit",
+        value={"requests_per_minute": 60},
     )
     rate.observed_at = old
     await db.flush()
@@ -190,7 +192,9 @@ async def test_retention_prunes_old_sync_runs_only(db):
     body = _catalog_payload([{"id": f"rr-{ULID()}", "name": "RR", "version": "1"}])
     run = await SyncService(db, fetcher=_fetcher_for(body)).run_sync(source.id)
     ancient = SourceSyncRun(
-        source_id=source.id, status="success", parser_version="1.0",
+        source_id=source.id,
+        status="success",
+        parser_version="1.0",
     )
     db.add(ancient)
     await db.flush()
@@ -235,6 +239,7 @@ def test_eco_router_uses_redis_backed_limiter():
     assert "rate_limit(120, 60)" in src
     assert "rate_limit_talent" not in src  # in-memory limiter fully replaced
 
+
 async def test_prune_keeps_each_entitys_latest_status_row(db):
     """Mutation-audit killer: an entity last probed BEFORE the cutoff keeps
     exactly its latest status row — pruning it would flip current_status to
@@ -249,16 +254,22 @@ async def test_prune_keeps_each_entitys_latest_status_row(db):
     entity_id = str(ULID())
     old = datetime.now(UTC) - timedelta(days=200)
     for i in range(3):
-        db.add(AvailabilityRecord(
-            entity_kind="model", entity_id=entity_id, record_type="status",
-            value={"status": "operational"},
-            observed_at=old + timedelta(days=i),
-        ))
+        db.add(
+            AvailabilityRecord(
+                entity_kind="model",
+                entity_id=entity_id,
+                record_type="status",
+                value={"status": "operational"},
+                observed_at=old + timedelta(days=i),
+            )
+        )
     await db.flush()
     await prune_ecosystem_history(db)
-    rows = list(await db.scalars(
-        _select(AvailabilityRecord).where(AvailabilityRecord.entity_id == entity_id)
-    ))
+    rows = list(
+        await db.scalars(
+            _select(AvailabilityRecord).where(AvailabilityRecord.entity_id == entity_id)
+        )
+    )
     assert len(rows) == 1  # only redundant older samples pruned
     assert rows[0].observed_at.replace(tzinfo=UTC) == (old + timedelta(days=2))
 
@@ -277,13 +288,19 @@ async def test_prune_keeps_recent_raw_snapshots(db):
 
     source = await _mk_source(db)
     fresh = RawSnapshot(
-        source_id=source.id, raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
-        content=b"{}", content_length=2, parser_version="1.0",
+        source_id=source.id,
+        raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
+        content=b"{}",
+        content_length=2,
+        parser_version="1.0",
         fetched_at=datetime.now(UTC) - timedelta(days=5),
     )
     stale = RawSnapshot(
-        source_id=source.id, raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
-        content=b"{}", content_length=2, parser_version="1.0",
+        source_id=source.id,
+        raw_hash=hashlib.sha256(str(ULID()).encode()).hexdigest(),
+        content=b"{}",
+        content_length=2,
+        parser_version="1.0",
         fetched_at=datetime.now(UTC) - timedelta(days=120),
     )
     db.add_all([fresh, stale])
@@ -291,12 +308,12 @@ async def test_prune_keeps_recent_raw_snapshots(db):
     out = await prune_ecosystem_history(db)
     assert out["raw_snapshots_pruned"] >= 1
     remaining = {
-        r.id for r in await db.scalars(
-            _select(RawSnapshot).where(RawSnapshot.source_id == source.id)
-        )
+        r.id
+        for r in await db.scalars(_select(RawSnapshot).where(RawSnapshot.source_id == source.id))
     }
-    assert fresh.id in remaining     # inside the window: kept
+    assert fresh.id in remaining  # inside the window: kept
     assert stale.id not in remaining  # outside: pruned
+
 
 async def test_sync_scheduler_due_semantics(db):
     """Mutation-audit killers ×4: the continuous-discovery scheduler enqueues
@@ -307,22 +324,22 @@ async def test_sync_scheduler_due_semantics(db):
     from tests.test_eco_services_db import _mk_source
 
     now = datetime.now(UTC)
-    never = await _mk_source(db)                      # active, never synced → due
-    fresh = await _mk_source(db)                      # active, just synced → not due
+    never = await _mk_source(db)  # active, never synced → due
+    fresh = await _mk_source(db)  # active, just synced → not due
     fresh.last_sync_at = now - timedelta(minutes=1)
     fresh.sync_interval_minutes = 60
-    overdue = await _mk_source(db)                    # active, way past interval → due
+    overdue = await _mk_source(db)  # active, way past interval → due
     overdue.last_sync_at = now - timedelta(hours=5)
     overdue.sync_interval_minutes = 60
-    paused = await _mk_source(db)                     # paused → NEVER enqueued
+    paused = await _mk_source(db)  # paused → NEVER enqueued
     paused.status = "paused"
     paused.last_sync_at = now - timedelta(hours=99)
     await db.flush()
 
     n = await sweep_due_sources(db)
-    msgs = list(await db.scalars(
-        select(OutboxMessage).where(OutboxMessage.topic == "eco.sync_source")
-    ))
+    msgs = list(
+        await db.scalars(select(OutboxMessage).where(OutboxMessage.topic == "eco.sync_source"))
+    )
     enqueued = {m.payload.get("source_id") for m in msgs}
     assert never.id in enqueued
     assert overdue.id in enqueued
@@ -330,17 +347,21 @@ async def test_sync_scheduler_due_semantics(db):
     assert paused.id not in enqueued
     assert n >= 2
 
+
 async def test_hotpath_indexes_exist_in_db(db):
     """Round-137 killer: the two per-change-event hot-path indexes exist in
     the actual schema (migration eco08 applied and names match the models)."""
     from sqlalchemy import text
 
-    rows = await db.execute(text(
-        "SELECT indexname FROM pg_indexes WHERE indexname IN "
-        "('ix_eco_watch_items_target', 'ix_eco_changes_canonical')"
-    ))
+    rows = await db.execute(
+        text(
+            "SELECT indexname FROM pg_indexes WHERE indexname IN "
+            "('ix_eco_watch_items_target', 'ix_eco_changes_canonical')"
+        )
+    )
     names = sorted(r[0] for r in rows)
     assert names == ["ix_eco_changes_canonical", "ix_eco_watch_items_target"], names
+
 
 async def test_retention_prunes_stale_unreviewed_prices(db):
     """Round-153 killer: unreviewed price observations older than 180 days are
@@ -355,14 +376,20 @@ async def test_retention_prunes_stale_unreviewed_prices(db):
     rows = {}
     for status in ("unreviewed", "approved"):
         obs = EcosystemObservation(
-            source_id=source.id, event_type="pricing_changed",
-            raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+            source_id=source.id,
+            event_type="pricing_changed",
+            raw_hash=(str(ULID()).lower() * 3)[:64],
+            normalized={},
         )
         db.add(obs)
         await db.flush()
         row = PriceObservation(
-            observation_id=obs.id, entity_kind="model_version", entity_id=version.id,
-            unit="token_input", price="0.01", currency="USD",
+            observation_id=obs.id,
+            entity_kind="model_version",
+            entity_id=version.id,
+            unit="token_input",
+            price="0.01",
+            currency="USD",
             reconciliation_status=status,
             observed_at=datetime.now(UTC) - timedelta(days=200),
         )
@@ -374,6 +401,7 @@ async def test_retention_prunes_stale_unreviewed_prices(db):
     assert out["unreviewed_prices_pruned"] >= 1
     assert await db.get(PriceObservation, rows["unreviewed"]) is None
     assert await db.get(PriceObservation, rows["approved"]) is not None
+
 
 async def test_r198_dead_handler_wiring(db):
     """Round-198 killers ×3: three registered handlers had ZERO production
@@ -393,8 +421,11 @@ async def test_r198_dead_handler_wiring(db):
 
     # (a) verified -> deprecated enqueues candidate generation
     await LifecycleService(db).transition(
-        "model_version", version.id, to_status="deprecated",
-        reason="manual_decision", actor_id=admin.id,
+        "model_version",
+        version.id,
+        to_status="deprecated",
+        reason="manual_decision",
+        actor_id=admin.id,
     )
     msg = await db.scalar(
         select(OutboxMessage).where(
@@ -446,6 +477,7 @@ def test_r198_crons_registered():
     assert 'name="eco_telemetry_sweep"' in src and "minute=58" in src
     assert 'name="eco_availability_sweep"' in src and "minute={14, 44}" in src
 
+
 def test_every_registered_eco_handler_has_an_enqueue_site():
     """Round-199 systemic guard: a registered outbox handler with no enqueue
     site anywhere in app/ is promised automation that never runs (the R198
@@ -471,6 +503,7 @@ def test_every_registered_eco_handler_has_an_enqueue_site():
             orphans.append(topic)
     assert not orphans, f"registered handlers nothing ever enqueues: {orphans}"
 
+
 async def test_handle_check_availability_records_probe(db):
     """Round-201 killer: the availability handler (now cron-driven, R198)
     records a probe for a real entity and skips cleanly for a missing one."""
@@ -478,9 +511,7 @@ async def test_handle_check_availability_records_probe(db):
     from app.ecosystem.worker import handle_check_availability
 
     version = await _mk_model_version(db, "ProbeH")
-    await handle_check_availability(
-        db, {"entity_kind": "model_version", "entity_id": version.id}
-    )
+    await handle_check_availability(db, {"entity_kind": "model_version", "entity_id": version.id})
     rec = await db.scalar(
         select(AvailabilityRecord).where(
             AvailabilityRecord.entity_id == version.id,
@@ -490,9 +521,7 @@ async def test_handle_check_availability_records_probe(db):
     assert rec is not None
     assert rec.value["status"] in ("operational", "degraded", "unreachable")
     # missing entity: clean skip, no raise
-    await handle_check_availability(
-        db, {"entity_kind": "model_version", "entity_id": "0" * 26}
-    )
+    await handle_check_availability(db, {"entity_kind": "model_version", "entity_id": "0" * 26})
 
 
 async def test_handle_telemetry_window_aggregates_idempotently(db):
@@ -508,16 +537,25 @@ async def test_handle_telemetry_window_aggregates_idempotently(db):
     start = end - timedelta(hours=1)
     payload = {"window_start": start.isoformat(), "window_end": end.isoformat()}
     await handle_telemetry_window(db, payload)
-    n1 = len(list(await db.scalars(
-        select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
-    )))
+    n1 = len(
+        list(
+            await db.scalars(
+                select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
+            )
+        )
+    )
     await handle_telemetry_window(db, payload)  # duplicate delivery
-    n2 = len(list(await db.scalars(
-        select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
-    )))
+    n2 = len(
+        list(
+            await db.scalars(
+                select(TelemetrySnapshot).where(TelemetrySnapshot.window_start == start)
+            )
+        )
+    )
     assert n1 == n2
     # malformed: no raise
     await handle_telemetry_window(db, {"window_start": "not-a-date"})
+
 
 async def test_availability_sweep_prefers_least_recently_probed(db):
     """Round-209 killer: with cap=1 and two watched entities — one already
@@ -532,9 +570,7 @@ async def test_availability_sweep_prefers_least_recently_probed(db):
     probed = await _mk_model_version(db, "FairA")
     fresh = await _mk_model_version(db, "FairB")
     for v in (probed, fresh):
-        await WatchlistService(db).quick_watch(
-            user.id, target_kind="model_version", target_id=v.id
-        )
+        await WatchlistService(db).quick_watch(user.id, target_kind="model_version", target_id=v.id)
     await AvailabilityService(db).probe_status("model_version", probed.id)
 
     # R397 (§106.12 law): the never-probed backlog on the shared dev DB grows
@@ -545,11 +581,13 @@ async def test_availability_sweep_prefers_least_recently_probed(db):
     # the ordering property under test without a scheduled failure.
     n = await sweep_watched_availability(db, cap=1_000_000)
     assert n >= 2
-    msgs = list(await db.scalars(
-        select(OutboxMessage)
-        .where(OutboxMessage.topic == "eco.check_availability")
-        .order_by(OutboxMessage.id.asc())
-    ))
+    msgs = list(
+        await db.scalars(
+            select(OutboxMessage)
+            .where(OutboxMessage.topic == "eco.check_availability")
+            .order_by(OutboxMessage.id.asc())
+        )
+    )
     order = [m.payload["entity_id"] for m in msgs]
     assert fresh.id in order and probed.id in order
     assert order.index(fresh.id) < order.index(probed.id), (

@@ -145,9 +145,7 @@ async def apply_promotion_draft(
     with apply_error set (retryable)."""
     svc = PromotionService(db)
     draft = await (
-        svc.apply_async(draft_id, actor=user)
-        if background
-        else svc.apply(draft_id, actor=user)
+        svc.apply_async(draft_id, actor=user) if background else svc.apply(draft_id, actor=user)
     )
     await db.commit()
     return {"data": draft}

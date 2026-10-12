@@ -79,6 +79,7 @@ class TestSearchQuerySanitization:
         assert "capabilities" in params
         assert "sort" in params
 
+
 # ── Round-394 killer (issue #35 hardening): LIKE metacharacters ──────
 
 
@@ -105,12 +106,16 @@ async def test_search_escapes_like_metacharacters(db):
     org = await _mk_org(db, user)
     marker = str(ULID()).lower()
     lit = Opportunity(
-        employer_org_id=org.id, title=f"{marker} 50% off promo build",
-        opportunity_type="contract", status="open",
+        employer_org_id=org.id,
+        title=f"{marker} 50% off promo build",
+        opportunity_type="contract",
+        status="open",
     )
     trap = Opportunity(
-        employer_org_id=org.id, title=f"{marker} 50x off promo build",
-        opportunity_type="contract", status="open",
+        employer_org_id=org.id,
+        title=f"{marker} 50x off promo build",
+        opportunity_type="contract",
+        status="open",
     )
     db.add_all([lit, trap])
     await db.flush()
@@ -124,6 +129,7 @@ async def test_search_escapes_like_metacharacters(db):
     rows, _more, _cur = await svc.search(q=f"{marker} 50_")
     ids = {o.id for o in rows}
     assert trap.id not in ids and lit.id not in ids, "'_' must not match any single char"
+
 
 @pytest.mark.asyncio
 async def test_deadline_cursor_pages_cover_everything(db):
@@ -146,8 +152,10 @@ async def test_deadline_cursor_pages_cover_everything(db):
     opps = []
     for i, deadline in enumerate([now + timedelta(days=30), now + timedelta(days=1), None]):
         o = Opportunity(
-            employer_org_id=org.id, title=f"{marker} opp {i}",
-            opportunity_type="contract", status="open",
+            employer_org_id=org.id,
+            title=f"{marker} opp {i}",
+            opportunity_type="contract",
+            status="open",
             application_deadline=deadline,
         )
         db.add(o)
@@ -182,16 +190,23 @@ async def test_saved_opportunity_search_actually_runs(db):
     user = await _mk_user(db)
     org = await _mk_org(db, user)
     marker = str(ULID()).lower()
-    db.add(Opportunity(
-        employer_org_id=org.id, title=f"{marker} saved-search target",
-        opportunity_type="contract", status="open",
-    ))
+    db.add(
+        Opportunity(
+            employer_org_id=org.id,
+            title=f"{marker} saved-search target",
+            opportunity_type="contract",
+            status="open",
+        )
+    )
     await db.flush()
 
     svc = SavedSearchService(db)
     saved = await svc.create(
-        org_id=org.id, name="find them", search_type="opportunity",
-        search_criteria={"q": marker}, created_by=user.id,
+        org_id=org.id,
+        name="find them",
+        search_type="opportunity",
+        search_criteria={"q": marker},
+        created_by=user.id,
     )
     out = await svc.run_search(saved.id)
     assert out["result_count"] == 1

@@ -39,7 +39,10 @@ async def add_edge(
         org_id=org_id if body.org_scoped else None,
     )
     await eco_audit(
-        db, _user, action="eco.edge_added", target_type="eco_dependency_edge",
+        db,
+        _user,
+        action="eco.edge_added",
+        target_type="eco_dependency_edge",
         target_id=edge.id,
         after={"from": f"{body.from_kind}:{body.from_id}", "to": f"{body.to_kind}:{body.to_id}"},
     )
@@ -55,7 +58,10 @@ async def remove_edge(
 ):
     await GraphService(db).remove_edge(edge_id)
     await eco_audit(
-        db, _user, action="eco.edge_removed", target_type="eco_dependency_edge",
+        db,
+        _user,
+        action="eco.edge_removed",
+        target_type="eco_dependency_edge",
         target_id=edge_id,
     )
     await db.commit()
@@ -78,8 +84,12 @@ async def node_edges(
     edges = await GraphService(db).edges_for_node(kind, node_id, org_id=org_id)
     return {
         "data": {
-            "depends_on": [EdgeResponse.model_validate(e).model_dump() for e in edges["depends_on"]],
-            "dependents": [EdgeResponse.model_validate(e).model_dump() for e in edges["dependents"]],
+            "depends_on": [
+                EdgeResponse.model_validate(e).model_dump() for e in edges["depends_on"]
+            ],
+            "dependents": [
+                EdgeResponse.model_validate(e).model_dump() for e in edges["dependents"]
+            ],
         }
     }
 
@@ -98,7 +108,9 @@ async def sync_release_edges(
 # ── Impact analysis ─────────────────────────────────────────────────
 
 
-@router.post("/impact/analyses", response_model=DataResponse[ImpactAnalysisResponse], status_code=201)
+@router.post(
+    "/impact/analyses", response_model=DataResponse[ImpactAnalysisResponse], status_code=201
+)
 async def compute_impact(
     body: ComputeImpactRequest,
     db: AsyncSession = Depends(get_db),
@@ -150,7 +162,9 @@ async def get_impact(
     }
 
 
-@router.post("/impact/analyses/{analysis_id}/status", response_model=DataResponse[ImpactAnalysisResponse])
+@router.post(
+    "/impact/analyses/{analysis_id}/status", response_model=DataResponse[ImpactAnalysisResponse]
+)
 async def set_impact_status(
     analysis_id: str,
     status: str = Query(...),
@@ -159,8 +173,11 @@ async def set_impact_status(
 ):
     analysis = await ImpactService(db).set_status(analysis_id, status)
     await eco_audit(
-        db, _user, action="eco.impact_status_set",
-        target_type="eco_impact_analysis", target_id=analysis_id,
+        db,
+        _user,
+        action="eco.impact_status_set",
+        target_type="eco_impact_analysis",
+        target_id=analysis_id,
         after={"status": status},
     )
     await db.commit()

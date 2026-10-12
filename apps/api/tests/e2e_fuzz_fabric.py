@@ -106,42 +106,103 @@ async def main() -> None:
 
         targets = [
             ("POST", f"{base}/domains", {"domain": "fuzz.example.edu"}, h),
-            ("POST", f"{base}/sso-connections",
-             {"protocol": "oidc", "oidc_issuer": "https://idp.example.com",
-              "oidc_client_id": "c"}, h),
+            (
+                "POST",
+                f"{base}/sso-connections",
+                {
+                    "protocol": "oidc",
+                    "oidc_issuer": "https://idp.example.com",
+                    "oidc_client_id": "c",
+                },
+                h,
+            ),
             ("POST", f"{base}/scim-tokens", {"name": "t", "group_map": {}}, h),
             ("POST", f"{base}/break-glass", {"user_id": "0" * 26, "enabled": True}, h),
-            ("POST", f"{base}/connections",
-             {"provider_key": "generic_rest", "name": "n", "config": {},
-              "base_url": "https://x.example.com"}, h),
-            ("POST", f"{base}/mapping-profiles",
-             {"name": "m", "direction": "inbound", "model": "roster.class",
-              "document": {"fields": [{"target": "t", "path": "a"}]}}, h),
-            ("POST", f"{base}/sync-profiles",
-             {"connection_id": "0" * 26, "name": "p", "model": "roster.class",
-              "direction": "pull", "mapping_profile_id": None}, h),
+            (
+                "POST",
+                f"{base}/connections",
+                {
+                    "provider_key": "generic_rest",
+                    "name": "n",
+                    "config": {},
+                    "base_url": "https://x.example.com",
+                },
+                h,
+            ),
+            (
+                "POST",
+                f"{base}/mapping-profiles",
+                {
+                    "name": "m",
+                    "direction": "inbound",
+                    "model": "roster.class",
+                    "document": {"fields": [{"target": "t", "path": "a"}]},
+                },
+                h,
+            ),
+            (
+                "POST",
+                f"{base}/sync-profiles",
+                {
+                    "connection_id": "0" * 26,
+                    "name": "p",
+                    "model": "roster.class",
+                    "direction": "pull",
+                    "mapping_profile_id": None,
+                },
+                h,
+            ),
             ("POST", f"{base}/export-streams", {"name": "s", "dataset": "events"}, h),
-            ("POST", f"{API}/orgs/{org}/webhooks",
-             {"url": "https://sink.example.com/h",
-              "events": ["com.openskill.project.approved.v1"]}, h),
-            ("POST", f"{base}/lti/registrations",
-             {"issuer": "https://lms.example.com", "client_id": "c",
-              "auth_login_url": "https://lms.example.com/a",
-              "auth_token_url": "https://lms.example.com/t",
-              "jwks_url": "https://lms.example.com/j",
-              "deployment_ids": ["d1"]}, h),
-            ("POST", f"{API}/scim/v2/Users",
-             {"userName": "u@fuzz.example.edu", "displayName": "U"}, sh),
+            (
+                "POST",
+                f"{API}/orgs/{org}/webhooks",
+                {
+                    "url": "https://sink.example.com/h",
+                    "events": ["com.openskill.project.approved.v1"],
+                },
+                h,
+            ),
+            (
+                "POST",
+                f"{base}/lti/registrations",
+                {
+                    "issuer": "https://lms.example.com",
+                    "client_id": "c",
+                    "auth_login_url": "https://lms.example.com/a",
+                    "auth_token_url": "https://lms.example.com/t",
+                    "jwks_url": "https://lms.example.com/j",
+                    "deployment_ids": ["d1"],
+                },
+                h,
+            ),
+            (
+                "POST",
+                f"{API}/scim/v2/Users",
+                {"userName": "u@fuzz.example.edu", "displayName": "U"},
+                sh,
+            ),
             ("POST", f"{API}/scim/v2/Groups", {"displayName": "G"}, sh),
-            ("POST", f"{API}/scim/v2/Bulk",
-             {"schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
-              "Operations": [{"method": "POST", "path": "/Users",
-                              "data": {"userName": "b@fuzz.example.edu"}}]}, sh),
+            (
+                "POST",
+                f"{API}/scim/v2/Bulk",
+                {
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+                    "Operations": [
+                        {
+                            "method": "POST",
+                            "path": "/Users",
+                            "data": {"userName": "b@fuzz.example.edu"},
+                        }
+                    ],
+                },
+                sh,
+            ),
         ]
 
         n_5xx = 0
         total = 0
         import time as _t
+
         _t0 = _t.monotonic()
         # 1) hostile bodies on every mutating route
         for method, url, good, headers in targets:
@@ -150,8 +211,11 @@ async def main() -> None:
                 try:
                     rr = await c.request(method, url, json=body, headers=headers)
                 except httpx.HTTPError as exc:
-                    check(f"{method} {url.split('/integrations')[-1][:40]}", False,
-                          f"transport {type(exc).__name__} body={json.dumps(body, default=str)[:120]}")
+                    check(
+                        f"{method} {url.split('/integrations')[-1][:40]}",
+                        False,
+                        f"transport {type(exc).__name__} body={json.dumps(body, default=str)[:120]}",
+                    )
                     continue
                 total += 1
                 if rr.status_code >= 500:
@@ -184,7 +248,11 @@ async def main() -> None:
             for junk in JUNK_IDS:
                 url = tmpl.replace("{id}", junk)
                 headers = sh if "/scim/v2/" in url else h
-                body = {"Operations": []} if method == "PATCH" and "/scim/" in url else ({} if method in ("PATCH", "POST") else None)
+                body = (
+                    {"Operations": []}
+                    if method == "PATCH" and "/scim/" in url
+                    else ({} if method in ("PATCH", "POST") else None)
+                )
                 try:
                     rr = await c.request(method, url, json=body, headers=headers)
                 except httpx.HTTPError as exc:
@@ -193,8 +261,11 @@ async def main() -> None:
                 total += 1
                 if rr.status_code >= 500:
                     n_5xx += 1
-                    check(f"5xx: {method} {url[-50:]}", False,
-                          f"{rr.status_code} resp={rr.text[:140]}")
+                    check(
+                        f"5xx: {method} {url[-50:]}",
+                        False,
+                        f"{rr.status_code} resp={rr.text[:140]}",
+                    )
 
         # 3) hostile HEADERS on a representative authed route
         hostile_headers = [
@@ -225,28 +296,55 @@ async def main() -> None:
             ("GET", f"{API}/sso/login", {"params": {"email": "💥@💥"}}),
             ("GET", f"{API}/sso/login", {"params": {"email": "a" * 400 + "@x.com"}}),
             ("GET", f"{API}/sso/login", {"params": {"email": "no-at-sign"}}),
-            ("GET", f"{API}/sso/oidc/authorize",
-             {"params": {"connection": "x" * 26, "return_to": "//evil"}}),
-            ("GET", f"{API}/sso/oidc/callback",
-             {"params": {"state": "junk", "code": "junk"}}),
-            ("GET", f"{API}/sso/oidc/callback",
-             {"params": {"error": "access_denied", "state": "x"}}),
-            ("POST", f"{API}/sso/saml/acs/{'0' * 26}",
-             {"data": {"SAMLResponse": "not-base64!!!", "RelayState": "x"}}),
-            ("POST", f"{API}/sso/saml/acs/{'0' * 26}",
-             {"data": {"SAMLResponse": "aGVsbG8=", "RelayState": "y" * 600}}),
-            ("GET", f"{API}/sso/saml/slo/{'0' * 26}",
-             {"params": {"SAMLRequest": "zzz", "SigAlg": "x", "Signature": "y"}}),
-            ("POST", f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
-             {"data": {"logout_token": "nope.nope.nope"}}),
-            ("POST", f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
-             {"data": {"logout_token": "x" * 5000}}),
+            (
+                "GET",
+                f"{API}/sso/oidc/authorize",
+                {"params": {"connection": "x" * 26, "return_to": "//evil"}},
+            ),
+            ("GET", f"{API}/sso/oidc/callback", {"params": {"state": "junk", "code": "junk"}}),
+            (
+                "GET",
+                f"{API}/sso/oidc/callback",
+                {"params": {"error": "access_denied", "state": "x"}},
+            ),
+            (
+                "POST",
+                f"{API}/sso/saml/acs/{'0' * 26}",
+                {"data": {"SAMLResponse": "not-base64!!!", "RelayState": "x"}},
+            ),
+            (
+                "POST",
+                f"{API}/sso/saml/acs/{'0' * 26}",
+                {"data": {"SAMLResponse": "aGVsbG8=", "RelayState": "y" * 600}},
+            ),
+            (
+                "GET",
+                f"{API}/sso/saml/slo/{'0' * 26}",
+                {"params": {"SAMLRequest": "zzz", "SigAlg": "x", "Signature": "y"}},
+            ),
+            (
+                "POST",
+                f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
+                {"data": {"logout_token": "nope.nope.nope"}},
+            ),
+            (
+                "POST",
+                f"{API}/sso/oidc/backchannel-logout/{'0' * 26}",
+                {"data": {"logout_token": "x" * 5000}},
+            ),
             ("GET", f"{API}/lti/jwks", {}),
-            ("POST", f"{API}/lti/login",
-             {"data": {"iss": "https://nope.example.com", "login_hint": "x" * 2000,
-                        "target_link_uri": "https://x/launch"}}),
-            ("POST", f"{API}/lti/launch",
-             {"data": {"state": "junk", "id_token": "a.b.c"}}),
+            (
+                "POST",
+                f"{API}/lti/login",
+                {
+                    "data": {
+                        "iss": "https://nope.example.com",
+                        "login_hint": "x" * 2000,
+                        "target_link_uri": "https://x/launch",
+                    }
+                },
+            ),
+            ("POST", f"{API}/lti/launch", {"data": {"state": "junk", "id_token": "a.b.c"}}),
         ]
         for method, url, kw in proto_cases:
             try:
@@ -257,16 +355,18 @@ async def main() -> None:
             total += 1
             if rr.status_code >= 500:
                 n_5xx += 1
-                check(f"5xx: {method} {url[-45:]}", False,
-                      f"{rr.status_code} {rr.text[:140]}")
+                check(f"5xx: {method} {url[-45:]}", False, f"{rr.status_code} {rr.text[:140]}")
 
         # 5) SCIM PATCH path-filter bombs (the op-path mini-grammar)
-        rr = await c.post(f"{API}/scim/v2/Groups",
-                          json={"displayName": f"FZ-{uuid.uuid4().hex[:6]}"}, headers=sh)
+        rr = await c.post(
+            f"{API}/scim/v2/Groups", json={"displayName": f"FZ-{uuid.uuid4().hex[:6]}"}, headers=sh
+        )
         gid = rr.json().get("id", "x")
-        rr = await c.post(f"{API}/scim/v2/Users",
-                          json={"userName": f"fz-{uuid.uuid4().hex[:6]}@fz.example.edu"},
-                          headers=sh)
+        rr = await c.post(
+            f"{API}/scim/v2/Users",
+            json={"userName": f"fz-{uuid.uuid4().hex[:6]}@fz.example.edu"},
+            headers=sh,
+        )
         uid2 = rr.json().get("id", "x")
         path_bombs = [
             'members[value eq "unclosed',
@@ -275,37 +375,57 @@ async def main() -> None:
             "members[[[[",
             'members[value eq "' + "x" * 3000 + '"]',
             "members[value ne null]",
-            "", None, 123,
+            "",
+            None,
+            123,
             "displayName[sub]",
         ]
         for pb in path_bombs:
             ops = [{"op": "remove", "path": pb}]
-            rr = await c.patch(f"{API}/scim/v2/Groups/{gid}",
-                               json={"Operations": ops}, headers=sh)
+            rr = await c.patch(f"{API}/scim/v2/Groups/{gid}", json={"Operations": ops}, headers=sh)
             total += 1
             if rr.status_code >= 500:
                 n_5xx += 1
-                check("5xx: scim path bomb", False, f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}")
-            rr = await c.patch(f"{API}/scim/v2/Users/{uid2}",
-                               json={"Operations": [{"op": "replace", "path": pb,
-                                                     "value": False}]}, headers=sh)
+                check(
+                    "5xx: scim path bomb",
+                    False,
+                    f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}",
+                )
+            rr = await c.patch(
+                f"{API}/scim/v2/Users/{uid2}",
+                json={"Operations": [{"op": "replace", "path": pb, "value": False}]},
+                headers=sh,
+            )
             total += 1
             if rr.status_code >= 500:
                 n_5xx += 1
-                check("5xx: user path bomb", False, f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}")
+                check(
+                    "5xx: user path bomb",
+                    False,
+                    f"{rr.status_code} path={str(pb)[:60]} {rr.text[:100]}",
+                )
         # giant Operations array (over the 100-op bulk cap analogue in PATCH)
-        rr = await c.patch(f"{API}/scim/v2/Groups/{gid}",
-                           json={"Operations": [{"op": "remove",
-                                                 "path": 'members[value eq "x"]'}] * 2000},
-                           headers=sh)
+        rr = await c.patch(
+            f"{API}/scim/v2/Groups/{gid}",
+            json={"Operations": [{"op": "remove", "path": 'members[value eq "x"]'}] * 2000},
+            headers=sh,
+        )
         total += 1
         if rr.status_code >= 500:
             n_5xx += 1
             check("5xx: 2000-op PATCH", False, f"{rr.status_code} {rr.text[:100]}")
 
         # 6) hostile QUERY params on list endpoints
-        q_bombs = ["💥", "x" * 299, "' OR 1=1 --", "%00", "null", "-1", "1e308",
-                   '"; DROP TABLE users; --']
+        q_bombs = [
+            "💥",
+            "x" * 299,
+            "' OR 1=1 --",
+            "%00",
+            "null",
+            "-1",
+            "1e308",
+            '"; DROP TABLE users; --',
+        ]
         list_routes = [
             (f"{base}/deliveries", "status"),
             (f"{base}/events", "type_prefix"),
@@ -316,16 +436,18 @@ async def main() -> None:
         for url, param in list_routes:
             for qb in q_bombs:
                 headers = sh if "/scim/" in url else h
-                rr = await c.get(url, params={param: qb, "count": 5, "limit": 5},
-                                 headers=headers)
+                rr = await c.get(url, params={param: qb, "count": 5, "limit": 5}, headers=headers)
                 total += 1
                 if rr.status_code >= 500:
                     n_5xx += 1
-                    check(f"5xx: GET {url[-35:]}?{param}", False,
-                          f"{rr.status_code} q={qb[:30]} {rr.text[:100]}")
+                    check(
+                        f"5xx: GET {url[-35:]}?{param}",
+                        False,
+                        f"{rr.status_code} q={qb[:30]} {rr.text[:100]}",
+                    )
 
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
-        print(f"elapsed={_t.monotonic()-_t0:.1f}s")
+        print(f"elapsed={_t.monotonic() - _t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")
         raise SystemExit(0 if FAIL == 0 else 1)
 

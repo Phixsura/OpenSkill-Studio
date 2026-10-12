@@ -31,9 +31,7 @@ class DashboardService:
         stale = 0
         for source in rows:
             anchor = source.last_success_at or source.created_at
-            if anchor and (now - anchor) > timedelta(
-                minutes=3 * source.sync_interval_minutes
-            ):
+            if anchor and (now - anchor) > timedelta(minutes=3 * source.sync_interval_minutes):
                 stale += 1
         return stale
 
@@ -104,7 +102,9 @@ class DashboardService:
                     "distinct_sources": int(sources),
                     "previous_window": int(prev),
                     "velocity": (
-                        round(int(count) / int(prev), 2) if prev else None  # None = new, not infinite
+                        round(int(count) / int(prev), 2)
+                        if prev
+                        else None  # None = new, not infinite
                     ),
                 }
             )
@@ -126,14 +126,10 @@ class DashboardService:
 
         # entity_ids present in each evidence dimension (one query each)
         mapped_ids = {
-            row for row in await self.db.scalars(
-                sa_select(distinct(CapabilityMapping.entity_id))
-            )
+            row for row in await self.db.scalars(sa_select(distinct(CapabilityMapping.entity_id)))
         }
         priced_ids = {
-            row for row in await self.db.scalars(
-                sa_select(distinct(PriceObservation.entity_id))
-            )
+            row for row in await self.db.scalars(sa_select(distinct(PriceObservation.entity_id)))
         }
         benched_ids = set()
         for run in await self.db.scalars(
@@ -159,8 +155,9 @@ class DashboardService:
         the probes are cron-driven now (R198), so this is a live alarm."""
         from sqlalchemy import text as sql_text
 
-        row = await self.db.execute(sql_text(
-            """
+        row = await self.db.execute(
+            sql_text(
+                """
             SELECT count(*) FROM (
               SELECT DISTINCT ON (entity_kind, entity_id)
                      value->>'status' AS status
@@ -169,12 +166,14 @@ class DashboardService:
               ORDER BY entity_kind, entity_id, observed_at DESC, id DESC
             ) latest WHERE latest.status = 'unreachable'
             """
-        ))
+            )
+        )
         return int(row.scalar() or 0)
 
     async def overview(self) -> dict:
         """Ecosystem health snapshot for the operator workspace."""
         from app.ecosystem.models.advisory import SecurityAdvisory as _SecurityAdvisory
+
         week_ago = datetime.now(UTC) - timedelta(days=7)
         from sqlalchemy import func as _f
 
@@ -205,9 +204,7 @@ class DashboardService:
                 ),
             },
             "discoveries_7d": await self._count(
-                select(EcosystemObservation.id).where(
-                    EcosystemObservation.observed_at >= week_ago
-                )
+                select(EcosystemObservation.id).where(EcosystemObservation.observed_at >= week_ago)
             ),
             # §11.1: review-queue visibility so curation debt can't rot silently
             "observations_unverified": await self._count(
@@ -249,17 +246,13 @@ class DashboardService:
                 select(ImpactAnalysis.id).where(ImpactAnalysis.status == "open")
             ),
             "replacements_proposed": await self._count(
-                select(ReplacementCandidate.id).where(
-                    ReplacementCandidate.status == "proposed"
-                )
+                select(ReplacementCandidate.id).where(ReplacementCandidate.status == "proposed")
             ),
             "drafts_in_review": await self._count(
                 select(ComponentDraft.id).where(ComponentDraft.status == "in_review")
             ),
             "rollouts_active": await self._count(
-                select(RolloutPlan.id).where(
-                    RolloutPlan.status.in_(("running", "evaluating"))
-                )
+                select(RolloutPlan.id).where(RolloutPlan.status.in_(("running", "evaluating")))
             ),
         }
 

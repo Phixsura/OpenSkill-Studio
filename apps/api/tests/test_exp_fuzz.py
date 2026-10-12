@@ -156,8 +156,10 @@ def test_observed_total(kind, aggregate, combined):
 
 
 @_FUZZ
-@given(z=st.floats(allow_nan=False, allow_infinity=False, min_value=-40, max_value=40),
-       tau=st.floats(min_value=0.05, max_value=10))
+@given(
+    z=st.floats(allow_nan=False, allow_infinity=False, min_value=-40, max_value=40),
+    tau=st.floats(min_value=0.05, max_value=10),
+)
 def test_msprt_p_in_unit_interval(z, tau):
     p = msprt_always_valid_p(z, tau=tau)
     assert 0.0 <= p <= 1.0
@@ -264,19 +266,22 @@ def test_switchback_variant_total_and_stable(key, salt, minutes, window):
     from app.experiments.schemas import ExperimentSpec
     from app.experiments.services.assignment import switchback_variant
 
-    spec = ExperimentSpec.model_validate({
-        "hypothesis": "switchback fuzz totality",
-        "unit_type": "user",
-        "design": "switchback",
-        "switchback": {"switch_unit": "x", "window_minutes": window},
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 5000},
-        ],
-        "metrics": {"primary": ["exposure_rate"],
-                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                    "threshold": 100.0}]},
-    })
+    spec = ExperimentSpec.model_validate(
+        {
+            "hypothesis": "switchback fuzz totality",
+            "unit_type": "user",
+            "design": "switchback",
+            "switchback": {"switch_unit": "x", "window_minutes": window},
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
+        }
+    )
     at = datetime(2020, 1, 1, tzinfo=UTC) + timedelta(minutes=minutes)
     v = switchback_variant(key, salt, spec, at)
     assert v in ("control", "treatment")
@@ -287,18 +292,26 @@ _arm_floats = st.floats(min_value=-1e12, max_value=1e12)
 
 
 @given(
-    control=st.fixed_dictionaries({
-        "n": st.integers(min_value=0, max_value=1000),
-        "sum": _arm_floats, "sum_sq": _arm_floats,
-        "cov_sum": _arm_floats, "cov_sum_sq": _arm_floats,
-        "cov_xy_sum": _arm_floats,
-    }),
-    treatment=st.fixed_dictionaries({
-        "n": st.integers(min_value=0, max_value=1000),
-        "sum": _arm_floats, "sum_sq": _arm_floats,
-        "cov_sum": _arm_floats, "cov_sum_sq": _arm_floats,
-        "cov_xy_sum": _arm_floats,
-    }),
+    control=st.fixed_dictionaries(
+        {
+            "n": st.integers(min_value=0, max_value=1000),
+            "sum": _arm_floats,
+            "sum_sq": _arm_floats,
+            "cov_sum": _arm_floats,
+            "cov_sum_sq": _arm_floats,
+            "cov_xy_sum": _arm_floats,
+        }
+    ),
+    treatment=st.fixed_dictionaries(
+        {
+            "n": st.integers(min_value=0, max_value=1000),
+            "sum": _arm_floats,
+            "sum_sq": _arm_floats,
+            "cov_sum": _arm_floats,
+            "cov_sum_sq": _arm_floats,
+            "cov_xy_sum": _arm_floats,
+        }
+    ),
 )
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_did_estimate_total(control, treatment):
@@ -317,7 +330,8 @@ def test_did_estimate_total(control, treatment):
 @given(
     hist=st.dictionaries(
         st.one_of(
-            st.just("__zero__"), st.just("__neg__"),
+            st.just("__zero__"),
+            st.just("__neg__"),
             st.integers(min_value=-25, max_value=50).map(str),
             st.text(max_size=6),
         ),
@@ -349,14 +363,20 @@ def test_fuzz_histogram_quantile_total(hist, p):
 
 
 @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
-@given(quantiles=st.one_of(
-    st.none(),
-    st.text(max_size=6),
-    st.integers(),
-    st.lists(st.one_of(st.floats(allow_nan=True, allow_infinity=True),
-                       st.text(max_size=3), st.none()), max_size=6),
-    st.dictionaries(st.text(max_size=3), st.integers(), max_size=3),
-))
+@given(
+    quantiles=st.one_of(
+        st.none(),
+        st.text(max_size=6),
+        st.integers(),
+        st.lists(
+            st.one_of(
+                st.floats(allow_nan=True, allow_infinity=True), st.text(max_size=3), st.none()
+            ),
+            max_size=6,
+        ),
+        st.dictionaries(st.text(max_size=3), st.integers(), max_size=3),
+    )
+)
 def test_fuzz_validate_quantiles_total(quantiles):
     """The quantiles knob validator is TOTAL over arbitrary garbage: it
     returns None (accept) or raises the typed 422 — nothing else."""
@@ -376,8 +396,7 @@ def test_fuzz_validate_quantiles_total(quantiles):
     pre=st.lists(st.floats(min_value=-1e9, max_value=1e9), max_size=20),
     post=st.lists(st.floats(min_value=-1e9, max_value=1e9), max_size=20),
 )
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
-          deadline=None)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_its_estimate_total(pre, post):
     from app.experiments.services.analysis import its_estimate
 
@@ -402,8 +421,7 @@ def test_its_estimate_total(pre, post):
     ),
     n0=st.integers(min_value=-2, max_value=60),
 )
-@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow],
-          deadline=None)
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_km_curve_and_compare_total(events, censored, n0):
     from app.experiments.services.analysis import km_compare, km_curve
 
@@ -419,10 +437,8 @@ def test_km_curve_and_compare_total(events, censored, n0):
 
 
 @given(
-    pre_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6),
-                         max_size=10),
-    post_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6),
-                          max_size=6),
+    pre_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6), max_size=10),
+    post_treated=st.lists(st.floats(min_value=-1e6, max_value=1e6), max_size=6),
     donors_pre=st.lists(
         st.lists(st.floats(min_value=-1e6, max_value=1e6), max_size=10),
         max_size=5,
@@ -432,14 +448,11 @@ def test_km_curve_and_compare_total(events, censored, n0):
         max_size=5,
     ),
 )
-@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow],
-          deadline=None)
-def test_synthetic_control_total(pre_treated, post_treated,
-                                 donors_pre, donors_post):
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+def test_synthetic_control_total(pre_treated, post_treated, donors_pre, donors_post):
     from app.experiments.services.analysis import synthetic_control
 
-    out = synthetic_control(pre_treated, post_treated,
-                            donors_pre, donors_post)
+    out = synthetic_control(pre_treated, post_treated, donors_pre, donors_post)
     if out is not None:
         assert abs(sum(out["weights"]) - 1.0) < 1e-6
         assert all(w >= 0.0 for w in out["weights"])
@@ -451,29 +464,32 @@ def test_synthetic_control_total(pre_treated, post_treated,
 
 @given(
     arms=st.lists(
-        st.fixed_dictionaries({
-            "n": st.floats(min_value=-5, max_value=1e6),
-            "sum": st.floats(min_value=-1e9, max_value=1e9),
-            "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
-            "covariates": st.one_of(
-                st.none(),
-                st.dictionaries(
-                    st.text(min_size=1, max_size=6),
-                    st.fixed_dictionaries({
-                        "sum": st.floats(min_value=-1e9, max_value=1e9),
-                        "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
-                        "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
-                    }),
-                    max_size=4,
+        st.fixed_dictionaries(
+            {
+                "n": st.floats(min_value=-5, max_value=1e6),
+                "sum": st.floats(min_value=-1e9, max_value=1e9),
+                "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                "covariates": st.one_of(
+                    st.none(),
+                    st.dictionaries(
+                        st.text(min_size=1, max_size=6),
+                        st.fixed_dictionaries(
+                            {
+                                "sum": st.floats(min_value=-1e9, max_value=1e9),
+                                "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                                "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
+                            }
+                        ),
+                        max_size=4,
+                    ),
                 ),
-            ),
-        }),
+            }
+        ),
         max_size=4,
     ),
     candidates=st.lists(st.text(min_size=1, max_size=6), max_size=6),
 )
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
-          deadline=None)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_auto_select_covariates_total(arms, candidates):
     from app.experiments.services.analysis import auto_select_covariates
 
@@ -527,33 +543,35 @@ def test_histogram_quantile_extreme_bucket_regression():
 
 @given(
     arms=st.lists(
-        st.fixed_dictionaries({
-            "n": st.floats(min_value=-5, max_value=1e6),
-            "sum": st.floats(min_value=-1e9, max_value=1e9),
-            "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
-            "covariates": st.dictionaries(
-                st.sampled_from(["a", "b", "c"]),
-                st.fixed_dictionaries({
-                    "sum": st.floats(min_value=-1e9, max_value=1e9),
-                    "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
-                    "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
-                    "xx": st.dictionaries(
-                        st.sampled_from(["a", "b", "c"]),
-                        st.floats(min_value=-1e9, max_value=1e9),
-                        max_size=3,
+        st.fixed_dictionaries(
+            {
+                "n": st.floats(min_value=-5, max_value=1e6),
+                "sum": st.floats(min_value=-1e9, max_value=1e9),
+                "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                "covariates": st.dictionaries(
+                    st.sampled_from(["a", "b", "c"]),
+                    st.fixed_dictionaries(
+                        {
+                            "sum": st.floats(min_value=-1e9, max_value=1e9),
+                            "sum_sq": st.floats(min_value=-1e3, max_value=1e12),
+                            "xy_sum": st.floats(min_value=-1e9, max_value=1e9),
+                            "xx": st.dictionaries(
+                                st.sampled_from(["a", "b", "c"]),
+                                st.floats(min_value=-1e9, max_value=1e9),
+                                max_size=3,
+                            ),
+                        }
                     ),
-                }),
-                max_size=3,
-            ),
-        }),
+                    max_size=3,
+                ),
+            }
+        ),
         min_size=2,
         max_size=2,
     ),
-    keys=st.lists(st.sampled_from(["a", "b", "c"]), min_size=0, max_size=3,
-                  unique=True),
+    keys=st.lists(st.sampled_from(["a", "b", "c"]), min_size=0, max_size=3, unique=True),
 )
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow],
-          deadline=None)
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 def test_multi_cuped_adjusted_welch_total(arms, keys):
     """Totality fuzz (round 1694 gap-fill): the joint multi-covariate CUPED
     path — the only analysis entry point that was missing a hypothesis
@@ -596,9 +614,7 @@ def test_auto_select_covariates_denormal_variance_regression():
             "n": 2.0,
             "sum": 0.0,
             "sum_sq": 2.5776549880298586e-267,
-            "covariates": {
-                "00": {"sum": 0.0, "sum_sq": 2.5776549880298586e-267, "xy_sum": 0.0}
-            },
+            "covariates": {"00": {"sum": 0.0, "sum_sq": 2.5776549880298586e-267, "xy_sum": 0.0}},
         }
     ]
     out = auto_select_covariates(arms, ["00"])

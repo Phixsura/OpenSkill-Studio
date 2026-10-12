@@ -29,6 +29,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -76,8 +77,11 @@ async def _mk_analyzed(db, **spec_overrides):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp.id, spec=_spec(**spec_overrides), actor=admin)
     await LayerService(db).allocate(
@@ -85,7 +89,9 @@ async def _mk_analyzed(db, **spec_overrides):
     )
     for status in ("review", "scheduled", "running"):
         await svc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
@@ -100,7 +106,9 @@ async def _mk_analyzed(db, **spec_overrides):
     )
     for status in ("completed", "analyzed"):
         await svc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     analysis = await AnalysisService(db).run(exp.id, actor=admin)
@@ -109,8 +117,11 @@ async def _mk_analyzed(db, **spec_overrides):
 
 async def _promote(db, exp, admin, result_hash):
     return await DecisionService(db).create(
-        exp.id, decision="promote", summary="treatment wins with adequate power",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="promote",
+        summary="treatment wins with adequate power",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
 
 
@@ -131,8 +142,11 @@ async def test_decision_requires_recorded_analysis_hash(db):
     exp, admin, _ = await _mk_analyzed(db)
     with pytest.raises(AppError) as e:
         await DecisionService(db).create(
-            exp.id, decision="promote", summary="hash forged from thin air x",
-            analysis_result_hash="f" * 64, actor=admin,
+            exp.id,
+            decision="promote",
+            summary="hash forged from thin air x",
+            analysis_result_hash="f" * 64,
+            actor=admin,
         )
     assert e.value.code == "DECISION_HASH_MISMATCH"
 
@@ -142,13 +156,19 @@ async def test_decision_requires_analyzed_status(db):
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     exp = await ExperimentService(db).create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     with pytest.raises(AppError) as e:
         await DecisionService(db).create(
-            exp.id, decision="promote", summary="way too early to decide this",
-            analysis_result_hash="a" * 64, actor=admin,
+            exp.id,
+            decision="promote",
+            summary="way too early to decide this",
+            analysis_result_hash="a" * 64,
+            actor=admin,
         )
     assert e.value.code == "DECISION_STATE_INVALID"
 
@@ -159,8 +179,11 @@ async def test_terminal_decision_unique(db):
     # promoted is terminal — a second decision fails on status already
     with pytest.raises(AppError):
         await DecisionService(db).create(
-            exp.id, decision="reject", summary="contradictory second decision",
-            analysis_result_hash=result_hash, actor=admin,
+            exp.id,
+            decision="reject",
+            summary="contradictory second decision",
+            analysis_result_hash=result_hash,
+            actor=admin,
         )
 
 
@@ -168,16 +191,23 @@ async def test_extend_pushes_close_date_and_stays_analyzed(db):
     exp, admin, result_hash = await _mk_analyzed(db)
     before = (await ExperimentService(db).get(exp.id)).analysis_close_at
     await DecisionService(db).create(
-        exp.id, decision="extend", summary="long-term outcomes still maturing",
-        analysis_result_hash=result_hash, actor=admin, extend_days=45,
+        exp.id,
+        decision="extend",
+        summary="long-term outcomes still maturing",
+        analysis_result_hash=result_hash,
+        actor=admin,
+        extend_days=45,
     )
     exp_row = await ExperimentService(db).get(exp.id)
     assert exp_row.status == "analyzed"
     assert exp_row.analysis_close_at == before + timedelta(days=45)
     # extend may repeat
     await DecisionService(db).create(
-        exp.id, decision="inconclusive", summary="still not enough signal here",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="inconclusive",
+        summary="still not enough signal here",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
 
 
@@ -190,9 +220,11 @@ async def test_direct_transition_to_promoted_refused(db):
     for status in ("promoted", "rejected"):
         with pytest.raises(AppError) as e:
             await svc.transition(
-            exp.id, to_status=status, actor=admin,
-            checklist=_CHECKLIST if status == "scheduled" else None,
-        )
+                exp.id,
+                to_status=status,
+                actor=admin,
+                checklist=_CHECKLIST if status == "scheduled" else None,
+            )
         assert e.value.code == "EXPERIMENT_DECISION_REQUIRED"
     # the decision path still works
     await _promote(db, exp, admin, result_hash)
@@ -210,8 +242,11 @@ async def test_surface_key_reusable_after_terminal(db):
     svc = ExperimentService(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     second = await svc.create(
-        key=key, title="second run on the surface", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=key,
+        title="second run on the surface",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     assert second.id != exp.id
     await svc.create_version(second.id, spec=_spec(), actor=admin)
@@ -220,7 +255,9 @@ async def test_surface_key_reusable_after_terminal(db):
     )
     for status in ("review", "scheduled", "running"):
         await svc.transition(
-            second.id, to_status=status, actor=admin,
+            second.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await svc.set_ramp(second.id, ramp_bp=10_000, actor=admin)
@@ -232,8 +269,11 @@ async def test_surface_key_reusable_after_terminal(db):
     # ...but a second LIVE experiment on the key is still refused
     with pytest.raises(AppError) as e:
         await svc.create(
-            key=key, title="third", domain="learning",
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=key,
+            title="third",
+            domain="learning",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
     assert e.value.code == "EXPERIMENT_KEY_TAKEN"
 
@@ -251,8 +291,11 @@ async def test_observational_cannot_promote(db):
 async def test_search_escapes_like_metacharacters(db):
     exp, admin, result_hash = await _mk_analyzed(db)
     await DecisionService(db).create(
-        exp.id, decision="inconclusive", summary="lift was 100% exactly as absurd",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="inconclusive",
+        summary="lift was 100% exactly as absurd",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     svc = DecisionService(db)
     hit, _, _ = await svc.search(q="100%")
@@ -276,7 +319,8 @@ async def test_meta_counts_and_win_rate(db):
 async def _mk_matching_config(db) -> MatchingConfig:
     config = MatchingConfig(
         # target_entity_type is String(30) — keep the random suffix short
-        version=1, target_entity_type=f"exp-{str(ULID()).lower()[-10:]}",
+        version=1,
+        target_entity_type=f"exp-{str(ULID()).lower()[-10:]}",
         weights={"skill_fit": 0.6, "history": 0.4},
         thresholds={"reason_min": 0.7},
     )
@@ -291,8 +335,11 @@ async def test_promotion_full_lifecycle_matching_config(db):
     base = await _mk_matching_config(db)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="matching_config", target_ref=base.id,
-        draft_payload={"weights": {"skill_fit": 0.7, "history": 0.3}}, actor=admin,
+        decision.id,
+        target_type="matching_config",
+        target_ref=base.id,
+        draft_payload={"weights": {"skill_fit": 0.7, "history": 0.3}},
+        actor=admin,
     )
     assert draft.status == "draft"
     # apply before approve refused
@@ -308,7 +355,8 @@ async def test_promotion_full_lifecycle_matching_config(db):
     assert new_config.version == base.version + 1
     assert new_config.weights == {"skill_fit": 0.7, "history": 0.3}
     assert (await db.get(MatchingConfig, base.id)).weights == {
-        "skill_fit": 0.6, "history": 0.4,
+        "skill_fit": 0.6,
+        "history": 0.4,
     }  # base row never mutated
     # idempotency
     with pytest.raises(AppError) as e:
@@ -319,13 +367,19 @@ async def test_promotion_full_lifecycle_matching_config(db):
 async def test_promotion_draft_requires_promote_decision(db):
     exp, admin, result_hash = await _mk_analyzed(db)
     record = await DecisionService(db).create(
-        exp.id, decision="inconclusive", summary="not enough evidence to ship",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="inconclusive",
+        summary="not enough evidence to ship",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     with pytest.raises(AppError) as e:
         await PromotionService(db).create_draft(
-            record.id, target_type="matching_config", target_ref="a" * 26,
-            draft_payload={}, actor=admin,
+            record.id,
+            target_type="matching_config",
+            target_ref="a" * 26,
+            draft_payload={},
+            actor=admin,
         )
     assert e.value.code == "DECISION_STATE_INVALID"
 
@@ -336,8 +390,11 @@ async def test_promotion_rejects_unknown_and_employment_targets(db):
     for target in ("offer", "hire", "auto_reject", "talent_ranking"):
         with pytest.raises(AppError) as e:
             await PromotionService(db).create_draft(
-                decision.id, target_type=target, target_ref="a" * 26,
-                draft_payload={}, actor=admin,
+                decision.id,
+                target_type=target,
+                target_ref="a" * 26,
+                draft_payload={},
+                actor=admin,
             )
         assert e.value.code == "VALIDATION_ERROR", target
 
@@ -348,8 +405,11 @@ async def test_matching_weights_must_sum_to_one(db):
     base = await _mk_matching_config(db)
     with pytest.raises(AppError) as e:
         await PromotionService(db).create_draft(
-            decision.id, target_type="matching_config", target_ref=base.id,
-            draft_payload={"weights": {"skill_fit": 0.9, "history": 0.3}}, actor=admin,
+            decision.id,
+            target_type="matching_config",
+            target_ref=base.id,
+            draft_payload={"weights": {"skill_fit": 0.9, "history": 0.3}},
+            actor=admin,
         )
     assert "sum to 1.0" in e.value.message
 
@@ -359,8 +419,11 @@ async def test_unwired_target_refuses_apply_explicitly(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="pack_recommendation", target_ref="a" * 26,
-        draft_payload={}, actor=admin,
+        decision.id,
+        target_type="pack_recommendation",
+        target_ref="a" * 26,
+        draft_payload={},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     with pytest.raises(AppError) as e:
@@ -388,15 +451,20 @@ async def test_learning_path_apply_creates_draft_path(db):
     db.add(org)
     await db.flush()
     base = LearningPath(
-        org_id=org.id, name="Base path", slug=f"base-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="Base path",
+        slug=f"base-{str(ULID()).lower()}",
         status=ContentStatus.PUBLISHED,
     )
     db.add(base)
     await db.flush()
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="learning_path", target_ref=base.id,
-        draft_payload={"name": "Improved ordering"}, actor=admin,
+        decision.id,
+        target_type="learning_path",
+        target_ref=base.id,
+        draft_payload={"name": "Improved ordering"},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     applied = await psvc.apply(draft.id, actor=admin)
@@ -438,8 +506,11 @@ async def test_workflow_binding_apply_creates_unconfirmed_suggestion(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="workflow_binding", target_ref=installation.id,
-        draft_payload={"step_id": "step-1", "offering_id": offering.id}, actor=admin,
+        decision.id,
+        target_type="workflow_binding",
+        target_ref=installation.id,
+        draft_payload={"step_id": "step-1", "offering_id": offering.id},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     applied = await psvc.apply(draft.id, actor=admin)
@@ -478,8 +549,11 @@ async def test_workflow_binding_apply_never_overwrites_existing(db):
     await db.flush()
     db.add(
         WorkflowStepBinding(
-            org_id=org.id, installation_id=installation.id, step_id="step-1",
-            binding_mode="confirmed", offering_id=offering.id,
+            org_id=org.id,
+            installation_id=installation.id,
+            step_id="step-1",
+            binding_mode="confirmed",
+            offering_id=offering.id,
         )
     )
     await db.flush()
@@ -488,8 +562,11 @@ async def test_workflow_binding_apply_never_overwrites_existing(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="workflow_binding", target_ref=installation.id,
-        draft_payload={"step_id": "step-1", "offering_id": offering.id}, actor=admin,
+        decision.id,
+        target_type="workflow_binding",
+        target_ref=installation.id,
+        draft_payload={"step_id": "step-1", "offering_id": offering.id},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     with pytest.raises(AppError) as e:
@@ -506,8 +583,10 @@ async def test_eco_rollout_apply_creates_draft_plan(db):
     db.add(entity)
     await db.flush()
     candidate = ReplacementCandidate(
-        deprecated_kind="model", deprecated_id="d" * 26,
-        candidate_kind="model", candidate_id=entity.id,
+        deprecated_kind="model",
+        deprecated_id="d" * 26,
+        candidate_kind="model",
+        candidate_id=entity.id,
         hard_compatible=True,
     )
     db.add(candidate)
@@ -517,8 +596,11 @@ async def test_eco_rollout_apply_creates_draft_plan(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="eco_rollout_policy", target_ref=candidate.id,
-        draft_payload={"scope_type": "benchmark_only"}, actor=admin,
+        decision.id,
+        target_type="eco_rollout_policy",
+        target_ref=candidate.id,
+        draft_payload={"scope_type": "benchmark_only"},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     applied = await psvc.apply(draft.id, actor=admin)
@@ -537,8 +619,10 @@ async def test_eco_rollout_apply_refuses_hard_incompatible(db):
     db.add(entity)
     await db.flush()
     candidate = ReplacementCandidate(
-        deprecated_kind="model", deprecated_id="d" * 26,
-        candidate_kind="model", candidate_id=entity.id,
+        deprecated_kind="model",
+        deprecated_id="d" * 26,
+        candidate_kind="model",
+        candidate_id=entity.id,
         hard_compatible=False,
     )
     db.add(candidate)
@@ -548,8 +632,11 @@ async def test_eco_rollout_apply_refuses_hard_incompatible(db):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="eco_rollout_policy", target_ref=candidate.id,
-        draft_payload={"scope_type": "benchmark_only"}, actor=admin,
+        decision.id,
+        target_type="eco_rollout_policy",
+        target_ref=candidate.id,
+        draft_payload={"scope_type": "benchmark_only"},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     with pytest.raises(AppError) as e:
@@ -573,7 +660,9 @@ async def test_validate_target_error_contract(db):
         with pytest.raises(AppError) as e:
             await svc._validate_target(target_type, target_ref, payload)
         assert (e.value.code, e.value.status_code) == (code, status), (
-            target_type, e.value.code, e.value.status_code,
+            target_type,
+            e.value.code,
+            e.value.status_code,
         )
 
     # unknown target type
@@ -584,7 +673,10 @@ async def test_validate_target_error_contract(db):
     await expect("VALIDATION_ERROR", 422, "matching_config", base.id, {"weights": {}})
     await expect("VALIDATION_ERROR", 422, "matching_config", base.id, {"weights": "nope"})
     await expect(
-        "VALIDATION_ERROR", 422, "matching_config", base.id,
+        "VALIDATION_ERROR",
+        422,
+        "matching_config",
+        base.id,
         {"weights": {"a": 0.5, "b": 0.6}},
     )
     # learning_path: missing row
@@ -615,15 +707,19 @@ async def test_validate_target_error_contract(db):
     )
     db.add(offering_b)
     await db.flush()
+    await expect("VALIDATION_ERROR", 422, "workflow_binding", installation.id, {"step_id": "s"})
     await expect(
-        "VALIDATION_ERROR", 422, "workflow_binding", installation.id, {"step_id": "s"}
-    )
-    await expect(
-        "EXPERIMENT_NOT_FOUND", 404, "workflow_binding", installation.id,
+        "EXPERIMENT_NOT_FOUND",
+        404,
+        "workflow_binding",
+        installation.id,
         {"step_id": "s", "offering_id": "o" * 26},
     )
     await expect(  # offering belongs to org_b, installation to org_a (R3)
-        "VALIDATION_ERROR", 422, "workflow_binding", installation.id,
+        "VALIDATION_ERROR",
+        422,
+        "workflow_binding",
+        installation.id,
         {"step_id": "s", "offering_id": offering_b.id},
     )
     # eco_rollout_policy: missing candidate
@@ -665,15 +761,28 @@ async def test_decide_after_repeated_identical_looks(db):
 
     # neighbor experiment's guardrail event must NOT leak into the outcome
     neighbor, _n_admin, _n_hash = await _mk_analyzed(db)
-    db.add(GuardrailEvent(experiment_id=neighbor.id, guardrail_key="cost_usd",
-                          action="paused", auto=True, detail={}))
-    db.add(GuardrailEvent(experiment_id=exp.id, guardrail_key="cost_usd",
-                          action="alerted", auto=True, detail={}))
+    db.add(
+        GuardrailEvent(
+            experiment_id=neighbor.id,
+            guardrail_key="cost_usd",
+            action="paused",
+            auto=True,
+            detail={},
+        )
+    )
+    db.add(
+        GuardrailEvent(
+            experiment_id=exp.id, guardrail_key="cost_usd", action="alerted", auto=True, detail={}
+        )
+    )
     await db.flush()
 
     record = await DecisionService(db).create(
-        exp.id, decision="promote", summary="repeated looks are legal",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="promote",
+        summary="repeated looks are legal",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     outcome = record.guardrail_outcome
     assert outcome["clean"] is False
@@ -688,9 +797,11 @@ async def test_decide_after_repeated_identical_looks(db):
     # OVERWRITTEN by the look's real warnings — the frozen audit cannot be
     # spoofed through the evidence payload
     forged = await DecisionService(db).create(
-        neighbor.id, decision="extend",
+        neighbor.id,
+        decision="extend",
         summary="forgery attempt rides the evidence payload",
-        analysis_result_hash=_n_hash, actor=_n_admin,
+        analysis_result_hash=_n_hash,
+        actor=_n_admin,
         evidence={"cited_warnings": ["FORGED_CLEAN"], "note": "kept"},
     )
     assert forged.evidence["cited_warnings"] != ["FORGED_CLEAN"]
@@ -717,8 +828,11 @@ async def test_concurrent_decides_single_terminal_record(db):
             actor = await session.get(User, admin_id)
             try:
                 await DecisionService(session).create(
-                    exp_id, decision="promote", summary="race",
-                    analysis_result_hash=result_hash, actor=actor,
+                    exp_id,
+                    decision="promote",
+                    summary="race",
+                    analysis_result_hash=result_hash,
+                    actor=actor,
                 )
                 await session.commit()
                 return "decided"
@@ -734,7 +848,9 @@ async def test_concurrent_decides_single_terminal_record(db):
 
             count = (
                 await session.execute(
-                    _select(_func.count()).select_from(DecisionRec).where(
+                    _select(_func.count())
+                    .select_from(DecisionRec)
+                    .where(
                         DecisionRec.experiment_id == exp_id,
                         DecisionRec.decision.in_(("promote", "reject")),
                     )
@@ -756,9 +872,7 @@ async def test_concurrent_decides_single_terminal_record(db):
             layer_key = exp_row.layer_key if exp_row else None
             await session.execute(_delete(ExpModel).where(ExpModel.id == exp_id))
             if layer_key:
-                await session.execute(
-                    _delete(LayerModel).where(LayerModel.key == layer_key)
-                )
+                await session.execute(_delete(LayerModel).where(LayerModel.key == layer_key))
             await session.execute(_delete(User).where(User.id == admin_id))
             await session.commit()
 
@@ -777,8 +891,11 @@ async def test_concurrent_apply_single_target_draft(db):
     base = await _mk_matching_config(db)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type="matching_config", target_ref=base.id,
-        draft_payload={"weights": {"skill_fit": 0.7, "history": 0.3}}, actor=admin,
+        decision.id,
+        target_type="matching_config",
+        target_ref=base.id,
+        draft_payload={"weights": {"skill_fit": 0.7, "history": 0.3}},
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     draft_id, admin_id, entity_type = draft.id, admin.id, base.target_entity_type
@@ -800,9 +917,7 @@ async def test_concurrent_apply_single_target_draft(db):
         async with AsyncSessionLocal() as session:
             versions = (
                 await session.execute(
-                    _select(_func.count()).where(
-                        MatchingConfig.target_entity_type == entity_type
-                    )
+                    _select(_func.count()).where(MatchingConfig.target_entity_type == entity_type)
                 )
             ).scalar_one()
             assert versions == 2  # base + exactly ONE new draft version
@@ -820,9 +935,7 @@ async def test_concurrent_apply_single_target_draft(db):
                     _delete(ExperimentLayer).where(ExperimentLayer.key == layer_key)
                 )
             await session.execute(
-                _delete(MatchingConfig).where(
-                    MatchingConfig.target_entity_type == entity_type
-                )
+                _delete(MatchingConfig).where(MatchingConfig.target_entity_type == entity_type)
             )
             await session.execute(_delete(User).where(User.id == admin_id))
             await session.commit()
@@ -836,8 +949,12 @@ async def test_scope_org_missing_is_404_not_key_taken(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     with pytest.raises(AppError) as e:
         await ExperimentService(db).create(
-            key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-            layer_key=layer.key, owner_user_id=admin.id, scope_org_id="x" * 26,
+            key=f"exp-{str(ULID()).lower()}",
+            title="T",
+            domain="learning",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
+            scope_org_id="x" * 26,
         )
     assert e.value.code == "EXPERIMENT_NOT_FOUND"
     assert e.value.status_code == 404
@@ -848,8 +965,11 @@ async def test_oversized_spec_rejected(db):
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     exp = await ExperimentService(db).create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["population"] = {
@@ -867,8 +987,11 @@ async def test_draft_registry_status_filter(db):
     base = await _mk_matching_config(db)
     psvc = PromotionService(db)
     await psvc.create_draft(
-        decision.id, target_type="matching_config", target_ref=base.id,
-        draft_payload={}, actor=admin,
+        decision.id,
+        target_type="matching_config",
+        target_ref=base.id,
+        draft_payload={},
+        actor=admin,
     )
     drafts = await psvc.list_drafts(status="draft")
     assert any(d.decision_record_id == decision.id for d in drafts)
@@ -883,9 +1006,11 @@ async def _approved_draft(db, target_type="pack_recommendation", **kwargs):
     decision = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        decision.id, target_type=target_type,
+        decision.id,
+        target_type=target_type,
         target_ref=kwargs.pop("target_ref", "a" * 26),
-        draft_payload=kwargs.pop("draft_payload", {}), actor=admin,
+        draft_payload=kwargs.pop("draft_payload", {}),
+        actor=admin,
     )
     await psvc.approve(draft.id, actor=admin)
     return draft, admin, psvc
@@ -906,10 +1031,13 @@ async def test_async_apply_parks_then_handler_lands_failure_in_apply_error(db):
     assert parked.apply_error is None
     message = (
         await db.execute(
-            _select(OutboxMessage).where(
+            _select(OutboxMessage)
+            .where(
                 OutboxMessage.topic == "exp.apply_promotion",
                 OutboxMessage.status == "pending",
-            ).order_by(OutboxMessage.id.desc()).limit(1)
+            )
+            .order_by(OutboxMessage.id.desc())
+            .limit(1)
         )
     ).scalar_one()
     assert message.payload["draft_id"] == draft.id
@@ -948,13 +1076,17 @@ async def test_async_apply_success_lands_applied_ref(db):
     db.add(org)
     await db.flush()
     base = LearningPath(
-        org_id=org.id, name="Base path", slug=f"base-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="Base path",
+        slug=f"base-{str(ULID()).lower()}",
         status=ContentStatus.PUBLISHED,
     )
     db.add(base)
     await db.flush()
     draft, admin, psvc = await _approved_draft(
-        db, target_type="learning_path", target_ref=base.id,
+        db,
+        target_type="learning_path",
+        target_ref=base.id,
         draft_payload={"name": "Async ordering"},
     )
     await psvc.apply_async(draft.id, actor=admin)
@@ -984,8 +1116,9 @@ async def test_typed_apply_failure_discards_partial_adapter_writes(db, monkeypat
     marker_email = f"partial-{_ULID()}@example.com"
 
     async def _write_then_fail(self, draft, actor):
-        self.db.add(_User(email=marker_email, display_name="P",
-                          role=_Role.STUDENT, status=_Status.ACTIVE))
+        self.db.add(
+            _User(email=marker_email, display_name="P", role=_Role.STUDENT, status=_Status.ACTIVE)
+        )
         await self.db.flush()
         raise _AppError("EXPERIMENT_PROMOTION_UNWIRED", "typed failure after write", 422)
 
@@ -1060,8 +1193,11 @@ async def test_decision_optional_fields_default_to_empty_dicts(db):
     (an Or→And flip would hand None to non-null JSONB columns)."""
     exp, admin, result_hash = await _mk_analyzed(db)
     record = await DecisionService(db).create(
-        exp.id, decision="inconclusive", summary="defaults pinned",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="inconclusive",
+        summary="defaults pinned",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     assert record.uncertainty == {}
     assert record.segments == {}
@@ -1079,15 +1215,22 @@ async def test_inconclusive_never_extends_the_close(db):
     exp.analysis_close_at = close_at
     await db.flush()
     await DecisionService(db).create(
-        exp.id, decision="inconclusive", summary="no extension",
-        analysis_result_hash=result_hash, actor=admin,
+        exp.id,
+        decision="inconclusive",
+        summary="no extension",
+        analysis_result_hash=result_hash,
+        actor=admin,
     )
     await db.refresh(exp)
     assert exp.analysis_close_at == close_at
     # and extend DOES move it, by exactly the requested days
     await DecisionService(db).create(
-        exp.id, decision="extend", summary="two more weeks",
-        analysis_result_hash=result_hash, actor=admin, extend_days=14,
+        exp.id,
+        decision="extend",
+        summary="two more weeks",
+        analysis_result_hash=result_hash,
+        actor=admin,
+        extend_days=14,
     )
     await db.refresh(exp)
     assert exp.analysis_close_at == close_at + timedelta(days=14)
@@ -1098,19 +1241,23 @@ async def test_meta_distinguishes_randomized_terminal_and_promoted(db):
     analysis_type AND by decision (promote vs reject)."""
     svc = DecisionService(db)
     exp1, admin, h1 = await _mk_analyzed(db)
-    await svc.create(exp1.id, decision="promote", summary="win",
-                     analysis_result_hash=h1, actor=admin)
+    await svc.create(
+        exp1.id, decision="promote", summary="win", analysis_result_hash=h1, actor=admin
+    )
     exp2, admin2, h2 = await _mk_analyzed(db)
-    await svc.create(exp2.id, decision="reject", summary="loss",
-                     analysis_result_hash=h2, actor=admin2)
+    await svc.create(
+        exp2.id, decision="reject", summary="loss", analysis_result_hash=h2, actor=admin2
+    )
     # asymmetric promote count (2:1) — a promote==/!= flip must move win_rate
     exp2b, admin2b, h2b = await _mk_analyzed(db)
-    await svc.create(exp2b.id, decision="promote", summary="second win",
-                     analysis_result_hash=h2b, actor=admin2b)
+    await svc.create(
+        exp2b.id, decision="promote", summary="second win", analysis_result_hash=h2b, actor=admin2b
+    )
     # an OBSERVATIONAL reject must not enter the randomized win-rate pool
     exp3, admin3, h3 = await _mk_analyzed(db, analysis_type="observational")
-    await svc.create(exp3.id, decision="reject", summary="assoc only",
-                     analysis_result_hash=h3, actor=admin3)
+    await svc.create(
+        exp3.id, decision="reject", summary="assoc only", analysis_result_hash=h3, actor=admin3
+    )
     meta = await svc.meta(domain="learning")
     assert meta["by_decision"]["promote"] == 2
     assert meta["by_decision"]["reject"] == 2
@@ -1133,8 +1280,13 @@ async def test_decision_cold_arms_necropsy(db):
     svc = DecisionService(db)
 
     with pytest.raises(AppError) as exc:
-        await svc.create(exp.id, decision="banana", summary="x" * 12,
-                         analysis_result_hash=result_hash, actor=admin)
+        await svc.create(
+            exp.id,
+            decision="banana",
+            summary="x" * 12,
+            analysis_result_hash=result_hash,
+            actor=admin,
+        )
     assert exc.value.code == "VALIDATION_ERROR" and exc.value.status_code == 422
 
     # a second analyzed experiment with a CORRUPTED stored spec
@@ -1145,19 +1297,25 @@ async def test_decision_cold_arms_necropsy(db):
         .values(spec={"hypothesis": "bad"})
     )
     with pytest.raises(AppError) as exc:
-        await svc.create(exp2.id, decision="promote", summary="y" * 12,
-                         analysis_result_hash=hash2, actor=admin2)
+        await svc.create(
+            exp2.id, decision="promote", summary="y" * 12, analysis_result_hash=hash2, actor=admin2
+        )
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
 
     # duplicate decision on the same experiment -> typed, never raw 500
-    first = await svc.create(exp.id, decision="reject", summary="z" * 12,
-                             analysis_result_hash=result_hash, actor=admin)
+    first = await svc.create(
+        exp.id, decision="reject", summary="z" * 12, analysis_result_hash=result_hash, actor=admin
+    )
     assert first.decision == "reject"
     with pytest.raises(AppError) as exc:
-        await svc.create(exp.id, decision="reject", summary="w" * 12,
-                         analysis_result_hash=result_hash, actor=admin)
-    assert exc.value.code in ("DECISION_STATE_INVALID",
-                              "EXPERIMENT_INVALID_TRANSITION")
+        await svc.create(
+            exp.id,
+            decision="reject",
+            summary="w" * 12,
+            analysis_result_hash=result_hash,
+            actor=admin,
+        )
+    assert exc.value.code in ("DECISION_STATE_INVALID", "EXPERIMENT_INVALID_TRANSITION")
 
     with pytest.raises(AppError) as exc:
         await svc.get("0" * 26)
@@ -1184,8 +1342,11 @@ async def test_promotion_cold_arms_necropsy(db):
     record = await _promote(db, exp, admin, result_hash)
     psvc = PromotionService(db)
     draft = await psvc.create_draft(
-        record.id, target_type="pack_recommendation", target_ref="a" * 26,
-        draft_payload={}, actor=admin,
+        record.id,
+        target_type="pack_recommendation",
+        target_ref="a" * 26,
+        draft_payload={},
+        actor=admin,
     )
 
     with pytest.raises(AppError) as exc:

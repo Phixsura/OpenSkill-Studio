@@ -43,8 +43,15 @@ log = structlog.get_logger()
 # Chi-square critical values at alpha = 0.001 for df 1..9 (variants <= 10).
 # Table constants beat a hand-rolled sf() here — no numeric risk, exact gate.
 _CHI2_CRIT_P001 = {
-    1: 10.828, 2: 13.816, 3: 16.266, 4: 18.467, 5: 20.515,
-    6: 22.458, 7: 24.322, 8: 26.124, 9: 27.877,
+    1: 10.828,
+    2: 13.816,
+    3: 16.266,
+    4: 18.467,
+    5: 20.515,
+    6: 22.458,
+    7: 24.322,
+    8: 26.124,
+    9: 27.877,
 }
 
 # SRM needs a sample before the ratio test means anything
@@ -105,12 +112,9 @@ class GuardrailService:
             # a chi-square against the spec weights would ALWAYS fire. The
             # design randomizes TIME, not units; SRM does not apply.
             return None
-        counts_q = (
-            select(ExperimentAssignment.variant_key, ExperimentAssignment.id)
-            .where(
-                ExperimentAssignment.experiment_id == exp.id,
-                ExperimentAssignment.is_holdout.is_(False),
-            )
+        counts_q = select(ExperimentAssignment.variant_key, ExperimentAssignment.id).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.is_holdout.is_(False),
         )
         counts: dict[str, int] = {}
         for variant_key, _id in (await self.db.execute(counts_q)).all():
@@ -156,9 +160,7 @@ class GuardrailService:
                 )
             )
             log.warning("experiment_srm_alert", experiment_id=exp.id, **detail)
-            await self._notify_alert(
-                exp, title=f"SRM alert on '{exp.title}'", detail=detail
-            )
+            await self._notify_alert(exp, title=f"SRM alert on '{exp.title}'", detail=detail)
         return detail
 
     async def check_exposure_srm_window(
@@ -240,9 +242,7 @@ class GuardrailService:
                     detail=detail,
                 )
             )
-            log.warning(
-                "experiment_exposure_srm_window_alert", experiment_id=exp.id, **detail
-            )
+            log.warning("experiment_exposure_srm_window_alert", experiment_id=exp.id, **detail)
             if notify:
                 await self._notify_alert(
                     exp,
@@ -262,13 +262,10 @@ class GuardrailService:
         if spec.design == "switchback":
             return None  # defect #28: the design randomizes TIME, not units
         window_start = datetime.now(UTC) - timedelta(hours=SRM_WINDOW_HOURS)
-        counts_q = (
-            select(ExperimentAssignment.variant_key, ExperimentAssignment.id)
-            .where(
-                ExperimentAssignment.experiment_id == exp.id,
-                ExperimentAssignment.is_holdout.is_(False),
-                ExperimentAssignment.assigned_at >= window_start,
-            )
+        counts_q = select(ExperimentAssignment.variant_key, ExperimentAssignment.id).where(
+            ExperimentAssignment.experiment_id == exp.id,
+            ExperimentAssignment.is_holdout.is_(False),
+            ExperimentAssignment.assigned_at >= window_start,
         )
         counts: dict[str, int] = {}
         for variant_key, _id in (await self.db.execute(counts_q)).all():
@@ -429,9 +426,7 @@ class GuardrailService:
             observed = float(combined.get("sum_value") or 0) / float(n)
         return observed if math.isfinite(observed) else None
 
-    async def evaluate_experiment(
-        self, experiment_id: str, *, now: datetime | None = None
-    ) -> dict:
+    async def evaluate_experiment(self, experiment_id: str, *, now: datetime | None = None) -> dict:
         """Evaluate every guardrail + SRM for one running experiment.
         Stamps last_guardrail_check_at even when nothing fires (sweep
         fairness — §106.26). Returns a summary dict.
@@ -522,9 +517,7 @@ class GuardrailService:
         exposure_srm = await self.check_exposure_srm(exp)
         if exposure_srm is not None:
             summary["exposure_srm"] = exposure_srm
-        exposure_srm_window = await self.check_exposure_srm_window(
-            exp, notify=exposure_srm is None
-        )
+        exposure_srm_window = await self.check_exposure_srm_window(exp, notify=exposure_srm is None)
         if exposure_srm_window is not None:
             summary["exposure_srm_window"] = exposure_srm_window
 
@@ -595,16 +588,21 @@ class GuardrailService:
                     window_end=now,
                     action="paused",
                     auto=True,
-                    detail={"op": guardrail.op, "combined": {
-                        k: (v if isinstance(v, dict) else float(v))
-                        for k, v in combined.items()
-                    }},
+                    detail={
+                        "op": guardrail.op,
+                        "combined": {
+                            k: (v if isinstance(v, dict) else float(v)) for k, v in combined.items()
+                        },
+                    },
                 )
                 self.db.add(event)
                 breaches.append(event)
                 summary["breaches"].append(
-                    {"metric_key": guardrail.metric_key, "observed": observed,
-                     "threshold": guardrail.threshold}
+                    {
+                        "metric_key": guardrail.metric_key,
+                        "observed": observed,
+                        "threshold": guardrail.threshold,
+                    }
                 )
 
         if breaches:
@@ -663,8 +661,7 @@ class GuardrailService:
                             f"{summary['breaches'][0]['metric_key']} breached its "
                             "threshold — review the guardrail dashboard."
                         ),
-                        data={"experiment_id": experiment_id,
-                              "breaches": summary["breaches"]},
+                        data={"experiment_id": experiment_id, "breaches": summary["breaches"]},
                     )
             except Exception:  # noqa: BLE001 — additive, never blocking
                 log.warning("experiment_pause_notify_failed", experiment_id=experiment_id)

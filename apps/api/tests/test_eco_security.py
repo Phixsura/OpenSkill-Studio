@@ -124,9 +124,7 @@ def test_malformed_json_rejected():
 
 
 def test_valid_json_passes():
-    assert bounded_json_loads(b'{"models": [{"name": "m1"}]}') == {
-        "models": [{"name": "m1"}]
-    }
+    assert bounded_json_loads(b'{"models": [{"name": "m1"}]}') == {"models": [{"name": "m1"}]}
 
 
 # ── Text sanitization (R87 class) ───────────────────────────────────
@@ -185,6 +183,7 @@ def test_injection_detected(text):
 def test_benign_text_not_flagged():
     assert looks_like_prompt_injection("A fast image model with great quality") is False
     assert looks_like_prompt_injection(None) is False
+
 
 def test_default_json_byte_cap_is_5mb():
     """Mutation-audit killer: the DEFAULT cap must reject a payload just over

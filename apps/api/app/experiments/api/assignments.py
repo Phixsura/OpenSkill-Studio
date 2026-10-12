@@ -55,8 +55,15 @@ async def export_assignments(
 
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
     rows = await AssignmentService(db).list_assignments(experiment_id, limit=limit)
-    columns = ("unit_type", "unit_id", "variant_key", "assigned_version",
-               "bucket", "is_holdout", "assigned_at")
+    columns = (
+        "unit_type",
+        "unit_id",
+        "variant_key",
+        "assigned_version",
+        "bucket",
+        "is_holdout",
+        "assigned_at",
+    )
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(columns)
@@ -64,9 +71,7 @@ async def export_assignments(
         writer.writerow(
             [
                 _csv_cell_safe(
-                    value.isoformat()
-                    if hasattr(value := getattr(row, col), "isoformat")
-                    else value
+                    value.isoformat() if hasattr(value := getattr(row, col), "isoformat") else value
                 )
                 for col in columns
             ]

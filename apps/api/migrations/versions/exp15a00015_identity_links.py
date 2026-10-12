@@ -34,6 +34,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_experiment_identity_links_user",
-                  table_name="experiment_identity_links")
+    op.drop_index("ix_experiment_identity_links_user", table_name="experiment_identity_links")
     op.drop_table("experiment_identity_links")

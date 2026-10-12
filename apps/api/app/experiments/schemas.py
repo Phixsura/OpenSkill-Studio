@@ -128,15 +128,12 @@ class VarianceReductionSpec(_StrictReq):
     def _exactly_one_form(self) -> "VarianceReductionSpec":
         if bool(self.covariate_metric) == bool(self.covariate_metrics):
             raise ValueError(
-                "variance_reduction takes exactly one of covariate_metric "
-                "or covariate_metrics"
+                "variance_reduction takes exactly one of covariate_metric or covariate_metrics"
             )
         if self.covariate_metrics:
-            if ("auto" in self.covariate_metrics
-                    and self.covariate_metrics != ["auto"]):
+            if "auto" in self.covariate_metrics and self.covariate_metrics != ["auto"]:
                 raise ValueError(
-                    '"auto" covariate selection cannot be combined with '
-                    "explicit covariates"
+                    '"auto" covariate selection cannot be combined with explicit covariates'
                 )
             if len(set(self.covariate_metrics)) != len(self.covariate_metrics):
                 raise ValueError("covariate_metrics must be unique")
@@ -481,8 +478,7 @@ class AnonResolveRequest(_StrictReq):
     law)."""
 
     experiment_key: str = Field(min_length=1, max_length=64)
-    anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[A-Za-z0-9_-]+$")
+    anonymous_id: str = Field(min_length=1, max_length=26, pattern=r"^[A-Za-z0-9_-]+$")
 
     _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
 
@@ -492,8 +488,7 @@ class AnonExposureRequest(_StrictReq):
     (#36 write-boundary law)."""
 
     experiment_key: str = Field(min_length=1, max_length=64)
-    anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[A-Za-z0-9_-]+$")
+    anonymous_id: str = Field(min_length=1, max_length=26, pattern=r"^[A-Za-z0-9_-]+$")
     dedup_key: str | None = Field(default=None, max_length=64)
 
     _key_ctrl = field_validator("experiment_key")(_reject_ctrl_key)
@@ -531,8 +526,7 @@ class IdentityLinkRequest(_StrictReq):
     user_id (round 232) is the platform-admin support override — anyone
     else passing someone ELSE's id is 403."""
 
-    anonymous_id: str = Field(min_length=1, max_length=26,
-                              pattern=r"^[A-Za-z0-9_-]+$")
+    anonymous_id: str = Field(min_length=1, max_length=26, pattern=r"^[A-Za-z0-9_-]+$")
     user_id: str | None = Field(default=None, min_length=1, max_length=26)
 
 

@@ -26,6 +26,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -50,7 +51,12 @@ async def _mk_admin(db) -> User:
 
 
 async def _mk_surface_experiment(
-    db, *, key: str, domain: str, unit_type: str, treatment_config: dict,
+    db,
+    *,
+    key: str,
+    domain: str,
+    unit_type: str,
+    treatment_config: dict,
     control_weight_bp: int = 1,
 ):
     """Running experiment on a well-known surface key: control weight 1bp by
@@ -71,17 +77,24 @@ async def _mk_surface_experiment(
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain=domain)
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=key, title=f"surface {key}", domain=domain,
-        layer_key=layer.key, owner_user_id=admin.id, risk_class="low",
+        key=key,
+        title=f"surface {key}",
+        domain=domain,
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        risk_class="low",
     )
     spec = {
         "hypothesis": f"surface hook {key} applies overrides safely enough",
         "unit_type": unit_type,
         "variants": [
-            {"key": "control", "name": "C", "weight_bp": control_weight_bp,
-             "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 10_000 - control_weight_bp,
-             "config": treatment_config},
+            {"key": "control", "name": "C", "weight_bp": control_weight_bp, "is_control": True},
+            {
+                "key": "treatment",
+                "name": "T",
+                "weight_bp": 10_000 - control_weight_bp,
+                "config": treatment_config,
+            },
         ],
         "metrics": {
             "primary": ["exposure_rate"],
@@ -94,7 +107,9 @@ async def _mk_surface_experiment(
     )
     for status in ("review", "scheduled", "running"):
         await svc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
@@ -120,8 +135,6 @@ async def _exposures(db, experiment_id: str) -> int:
     ).scalar_one()
 
 
-
-
 async def _commit_fixtures(db):
     """Defect #40 made the read-path hooks run in their OWN sessions — they
     can only see COMMITTED experiments. Tests touching those hooks commit
@@ -130,8 +143,7 @@ async def _commit_fixtures(db):
     await db.commit()
 
 
-async def _purge_committed(db, *, experiment_id: str, layer_key: str,
-                           tenant_id: str | None = None):
+async def _purge_committed(db, *, experiment_id: str, layer_key: str, tenant_id: str | None = None):
     from sqlalchemy import delete
 
     from app.controlplane.models.tenant import TenantAccount
@@ -142,9 +154,7 @@ async def _purge_committed(db, *, experiment_id: str, layer_key: str,
     if tenant_id:
         from app.models.organization import Organization
 
-        await db.execute(
-            delete(Organization).where(Organization.tenant_id == tenant_id)
-        )
+        await db.execute(delete(Organization).where(Organization.tenant_id == tenant_id))
         await db.execute(delete(TenantAccount).where(TenantAccount.id == tenant_id))
     await db.commit()
 
@@ -155,12 +165,18 @@ async def _purge_committed(db, *, experiment_id: str, layer_key: str,
 async def _mk_matching_pair(db):
     entity_type = f"exp-{str(ULID()).lower()[-10:]}"
     active = MatchingConfig(
-        version=1, target_entity_type=entity_type,
-        weights={"skill_fit": 1.0}, thresholds={}, is_active=True,
+        version=1,
+        target_entity_type=entity_type,
+        weights={"skill_fit": 1.0},
+        thresholds={},
+        is_active=True,
     )
     candidate = MatchingConfig(
-        version=2, target_entity_type=entity_type,
-        weights={"skill_fit": 0.5, "history": 0.5}, thresholds={}, is_active=False,
+        version=2,
+        target_entity_type=entity_type,
+        weights={"skill_fit": 0.5, "history": 0.5},
+        thresholds={},
+        is_active=False,
     )
     db.add_all([active, candidate])
     await db.flush()
@@ -170,7 +186,9 @@ async def _mk_matching_pair(db):
 async def test_matching_override_serves_candidate_config(db):
     entity_type, _active, candidate = await _mk_matching_pair(db)
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        db,
+        key=hooks.SURFACE_MATCHING_CONFIG,
+        domain="matching",
         unit_type="organization",
         treatment_config={"matching_config_id": candidate.id},
     )
@@ -185,7 +203,9 @@ async def test_matching_override_serves_candidate_config(db):
 async def test_matching_override_wrong_entity_type_falls_back(db):
     _entity_type, _active, candidate = await _mk_matching_pair(db)
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        db,
+        key=hooks.SURFACE_MATCHING_CONFIG,
+        domain="matching",
         unit_type="organization",
         treatment_config={"matching_config_id": candidate.id},
     )
@@ -222,8 +242,11 @@ async def _mk_offering(db, *, capability="text.generate", features=None, active=
     db.add(conn)
     await db.flush()
     offering = ProviderModelOffering(
-        connection_id=conn.id, capability_key=capability, model_name="m",
-        features=features or ["json_mode"], is_active=active,
+        connection_id=conn.id,
+        capability_key=capability,
+        model_name="m",
+        features=features or ["json_mode"],
+        is_active=active,
     )
     db.add(offering)
     await db.flush()
@@ -233,14 +256,19 @@ async def _mk_offering(db, *, capability="text.generate", features=None, active=
 async def test_binding_override_passes_capability_recheck(db):
     org, offering = await _mk_offering(db)
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_WORKFLOW_BINDING, domain="workflow",
+        db,
+        key=hooks.SURFACE_WORKFLOW_BINDING,
+        domain="workflow",
         unit_type="workflow_installation",
         treatment_config={"offering_id": offering.id},
     )
     install_unit = await _treatment_unit(db, exp, "workflow_installation", "inst")
     result = await hooks.workflow_binding_override(
-        db, installation_id=install_unit, org_id=org.id,
-        capability="text.generate", required_features={"json_mode"},
+        db,
+        installation_id=install_unit,
+        org_id=org.id,
+        capability="text.generate",
+        required_features={"json_mode"},
     )
     assert result is not None and result.id == offering.id
     assert await _exposures(db, exp.id) == 1
@@ -249,36 +277,62 @@ async def test_binding_override_passes_capability_recheck(db):
 async def test_binding_override_capability_mismatch_refused(db):
     org, offering = await _mk_offering(db, capability="text.generate")
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_WORKFLOW_BINDING, domain="workflow",
+        db,
+        key=hooks.SURFACE_WORKFLOW_BINDING,
+        domain="workflow",
         unit_type="workflow_installation",
         treatment_config={"offering_id": offering.id},
     )
     install_unit = await _treatment_unit(db, exp, "workflow_installation", "instc")
     # The step's CURRENT capability differs (R82) — the experiment never
     # exempts the credential path
-    assert await hooks.workflow_binding_override(
-        db, installation_id=install_unit, org_id=org.id,
-        capability="image.generate", required_features=set(),
-    ) is None
+    assert (
+        await hooks.workflow_binding_override(
+            db,
+            installation_id=install_unit,
+            org_id=org.id,
+            capability="image.generate",
+            required_features=set(),
+        )
+        is None
+    )
     # Cross-org offering refused too
-    assert await hooks.workflow_binding_override(
-        db, installation_id=install_unit, org_id="x" * 26,
-        capability="text.generate", required_features=set(),
-    ) is None
+    assert (
+        await hooks.workflow_binding_override(
+            db,
+            installation_id=install_unit,
+            org_id="x" * 26,
+            capability="text.generate",
+            required_features=set(),
+        )
+        is None
+    )
     # Missing required feature refused
-    assert await hooks.workflow_binding_override(
-        db, installation_id=install_unit, org_id=org.id,
-        capability="text.generate", required_features={"vision"},
-    ) is None
+    assert (
+        await hooks.workflow_binding_override(
+            db,
+            installation_id=install_unit,
+            org_id=org.id,
+            capability="text.generate",
+            required_features={"vision"},
+        )
+        is None
+    )
     # defect #37: the fallback IS this unit's exposure (arm recorded)
     assert await _exposures(db, exp.id) == 1
 
 
 async def test_binding_override_no_installation_skips(db):
-    assert await hooks.workflow_binding_override(
-        db, installation_id=None, org_id="o" * 26,
-        capability="text.generate", required_features=set(),
-    ) is None
+    assert (
+        await hooks.workflow_binding_override(
+            db,
+            installation_id=None,
+            org_id="o" * 26,
+            capability="text.generate",
+            required_features=set(),
+        )
+        is None
+    )
 
 
 # ── Registry ordering (marketplace presentation) ─────────────────────
@@ -286,8 +340,11 @@ async def test_binding_override_no_installation_skips(db):
 
 async def test_registry_sort_override_end_to_end(db):
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_REGISTRY_ORDERING, domain="marketplace",
-        unit_type="user", treatment_config={"sort": "most_installed"},
+        db,
+        key=hooks.SURFACE_REGISTRY_ORDERING,
+        domain="marketplace",
+        unit_type="user",
+        treatment_config={"sort": "most_installed"},
     )
     user_unit = await _treatment_unit(db, exp, "user", "viewer")
     await _commit_fixtures(db)
@@ -305,8 +362,11 @@ async def test_registry_sort_override_end_to_end(db):
 
 async def test_registry_sort_override_rejects_unknown_sort(db):
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_REGISTRY_ORDERING, domain="marketplace",
-        unit_type="user", treatment_config={"sort": "totally-bogus"},
+        db,
+        key=hooks.SURFACE_REGISTRY_ORDERING,
+        domain="marketplace",
+        unit_type="user",
+        treatment_config={"sort": "totally-bogus"},
     )
     user_unit = await _treatment_unit(db, exp, "user", "viewerx")
     await _commit_fixtures(db)
@@ -334,31 +394,33 @@ async def test_cohort_path_override_same_org_only(db):
     db.add(org)
     await db.flush()
     alt = LearningPath(
-        org_id=org.id, name="Alt ordering", slug=f"alt-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="Alt ordering",
+        slug=f"alt-{str(ULID()).lower()}",
         status=ContentStatus.DRAFT,
     )
     db.add(alt)
     await db.flush()
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_COHORT_PATH, domain="learning",
-        unit_type="cohort", treatment_config={"alternative_path_id": alt.id},
+        db,
+        key=hooks.SURFACE_COHORT_PATH,
+        domain="learning",
+        unit_type="cohort",
+        treatment_config={"alternative_path_id": alt.id},
     )
     cohort_unit = await _treatment_unit(db, exp, "cohort", "coh")
     tenant_id = tenant.id
     await _commit_fixtures(db)
     try:
-        assert await hooks.cohort_path_override(
-            db, cohort_id=cohort_unit, org_id=org.id
-        ) == alt.id
+        assert await hooks.cohort_path_override(db, cohort_id=cohort_unit, org_id=org.id) == alt.id
         # Cross-org read refused — curricula never leak across orgs
-        assert await hooks.cohort_path_override(
-            db, cohort_id=cohort_unit, org_id="x" * 26
-        ) is None
+        assert await hooks.cohort_path_override(db, cohort_id=cohort_unit, org_id="x" * 26) is None
         # the second (fallback) call hits the per-unit-per-day dedup
         assert await _exposures(db, exp.id) == 1
     finally:
-        await _purge_committed(db, experiment_id=exp.id, layer_key=exp.layer_key,
-                               tenant_id=tenant_id)
+        await _purge_committed(
+            db, experiment_id=exp.id, layer_key=exp.layer_key, tenant_id=tenant_id
+        )
 
 
 # ── Rubric wording (Part F) ──────────────────────────────────────────
@@ -367,8 +429,11 @@ async def test_cohort_path_override_same_org_only(db):
 async def test_rubric_override_shape_validated(db):
     good = [{"criterion": "clarity", "max_score": 5}]
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_RUBRIC_WORDING, domain="assessment",
-        unit_type="project", treatment_config={"rubric": good},
+        db,
+        key=hooks.SURFACE_RUBRIC_WORDING,
+        domain="assessment",
+        unit_type="project",
+        treatment_config={"rubric": good},
     )
     project_unit = await _treatment_unit(db, exp, "project", "proj")
     assert await hooks.rubric_override(db, project_id=project_unit) == good
@@ -377,8 +442,11 @@ async def test_rubric_override_shape_validated(db):
 
 async def test_rubric_override_rejects_malformed(db):
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_RUBRIC_WORDING, domain="assessment",
-        unit_type="project", treatment_config={"rubric": [{"no_criterion": 1}]},
+        db,
+        key=hooks.SURFACE_RUBRIC_WORDING,
+        domain="assessment",
+        unit_type="project",
+        treatment_config={"rubric": [{"no_criterion": 1}]},
     )
     project_unit = await _treatment_unit(db, exp, "project", "projm")
     assert await hooks.rubric_override(db, project_id=project_unit) is None
@@ -391,8 +459,11 @@ async def test_rubric_override_rejects_malformed(db):
 
 async def test_retry_policy_override_clamped(db):
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_RETRY_POLICY, domain="operational",
-        unit_type="tenant", treatment_config={"max_attempts": 99},
+        db,
+        key=hooks.SURFACE_RETRY_POLICY,
+        domain="operational",
+        unit_type="tenant",
+        treatment_config={"max_attempts": 99},
     )
     tenant_unit = await _treatment_unit(db, exp, "tenant", "ten")
     assert await hooks.retry_policy_override(db, tenant_id=tenant_unit) == 10  # clamped
@@ -401,8 +472,11 @@ async def test_retry_policy_override_clamped(db):
 
 async def test_retry_policy_non_int_refused(db):
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_RETRY_POLICY, domain="operational",
-        unit_type="tenant", treatment_config={"max_attempts": "five"},
+        db,
+        key=hooks.SURFACE_RETRY_POLICY,
+        domain="operational",
+        unit_type="tenant",
+        treatment_config={"max_attempts": "five"},
     )
     tenant_unit = await _treatment_unit(db, exp, "tenant", "tenx")
     assert await hooks.retry_policy_override(db, tenant_id=tenant_unit) is None
@@ -416,7 +490,9 @@ async def test_control_arm_records_exposure_too(db):
     entity_type, _active, candidate = await _mk_matching_pair(db)
     # control-heavy: resolved units are control with p=.9999
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        db,
+        key=hooks.SURFACE_MATCHING_CONFIG,
+        domain="matching",
         unit_type="organization",
         treatment_config={"matching_config_id": candidate.id},
         control_weight_bp=9999,
@@ -424,9 +500,7 @@ async def test_control_arm_records_exposure_too(db):
     asvc = AssignmentService(db)
     control_unit = None
     for i in range(20):
-        r = await asvc.resolve(
-            experiment_key=exp.key, unit_type="organization", unit_id=f"ctl-{i}"
-        )
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="organization", unit_id=f"ctl-{i}")
         if r is not None and r.variant_key == "control":
             control_unit = f"ctl-{i}"
             break
@@ -444,8 +518,11 @@ async def test_exposures_dedup_per_unit_per_day(db):
     ONE exposure row (table-growth bomb class) — and the exposure_rate source
     counts DISTINCT units, so the rate can never exceed 1.0."""
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_RETRY_POLICY, domain="operational",
-        unit_type="tenant", treatment_config={"max_attempts": 5},
+        db,
+        key=hooks.SURFACE_RETRY_POLICY,
+        domain="operational",
+        unit_type="tenant",
+        treatment_config={"max_attempts": 5},
     )
     tenant_unit = await _treatment_unit(db, exp, "tenant", "dedup")
     for _ in range(4):
@@ -477,7 +554,10 @@ async def test_negative_cache_invalidated_on_create(db):
     assert await asvc.resolve(experiment_key=key, unit_type="user", unit_id="u1") is None
     # key now negative-cached; creating the experiment must invalidate it
     exp, _ = await _mk_surface_experiment(
-        db, key=key, domain="marketplace", unit_type="user",
+        db,
+        key=key,
+        domain="marketplace",
+        unit_type="user",
         treatment_config={"sort": "most_installed"},
     )
     resolved = await asvc.resolve(experiment_key=key, unit_type="user", unit_id="u1")
@@ -488,9 +568,12 @@ async def test_negative_cache_invalidated_on_create(db):
 
 
 async def test_hooks_are_noops_without_experiments(db):
-    assert await hooks.matching_config_override(
-        db, org_id="o" * 26, target_entity_type="workflow_pack"
-    ) is None
+    assert (
+        await hooks.matching_config_override(
+            db, org_id="o" * 26, target_entity_type="workflow_pack"
+        )
+        is None
+    )
     assert await hooks.registry_sort_override(db, user_id="u" * 26) is None
     assert await hooks.cohort_path_override(db, cohort_id="c" * 26, org_id="o" * 26) is None
     assert await hooks.rubric_override(db, project_id="p" * 26) is None
@@ -504,8 +587,11 @@ async def test_fallback_exposure_context_pins_the_arm(db):
     from sqlalchemy import select as _select
 
     exp, _admin = await _mk_surface_experiment(
-        db, key="surface-registry-ordering", domain="marketplace",
-        unit_type="user", treatment_config={"sort": "no-such-sort-strategy"},
+        db,
+        key="surface-registry-ordering",
+        domain="marketplace",
+        unit_type="user",
+        treatment_config={"sort": "no-such-sort-strategy"},
     )
     from app.experiments.hooks import registry_sort_override
 
@@ -516,9 +602,7 @@ async def test_fallback_exposure_context_pins_the_arm(db):
         assert result is None
         row = (
             await db.execute(
-                _select(ExperimentExposure).where(
-                    ExperimentExposure.experiment_id == exp.id
-                )
+                _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
             )
         ).scalar_one()
         assert row.context["arm"] == "fallback"
@@ -532,15 +616,23 @@ async def test_binding_override_inactive_offering_falls_back(db):
     credentialed offering keep serving an experiment override."""
     org, offering = await _mk_offering(db, capability="text.generate", active=False)
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_WORKFLOW_BINDING, domain="workflow",
+        db,
+        key=hooks.SURFACE_WORKFLOW_BINDING,
+        domain="workflow",
         unit_type="workflow_installation",
         treatment_config={"offering_id": offering.id},
     )
     install_unit = await _treatment_unit(db, exp, "workflow_installation", "instx")
-    assert await hooks.workflow_binding_override(
-        db, installation_id=install_unit, org_id=org.id,
-        capability="text.generate", required_features=set(),
-    ) is None
+    assert (
+        await hooks.workflow_binding_override(
+            db,
+            installation_id=install_unit,
+            org_id=org.id,
+            capability="text.generate",
+            required_features=set(),
+        )
+        is None
+    )
     assert await _exposures(db, exp.id) == 1  # arm=fallback recorded
 
 
@@ -550,7 +642,9 @@ async def test_hooks_are_total_even_when_validation_queries_raise(db):
     default experience, never abort the host transaction."""
     entity_type, _active, candidate = await _mk_matching_pair(db)
     exp, _ = await _mk_surface_experiment(
-        db, key=hooks.SURFACE_MATCHING_CONFIG, domain="matching",
+        db,
+        key=hooks.SURFACE_MATCHING_CONFIG,
+        domain="matching",
         unit_type="organization",
         treatment_config={"matching_config_id": candidate.id},
     )
@@ -596,15 +690,18 @@ async def test_shield_savepoint_keeps_host_session_healthy(db, monkeypatch):
 
     # host business write BEFORE the hook touchpoint
     host_row = _User(
-        email=f"shield-{_ULID()}@example.com", display_name="S",
-        role=_Role.STUDENT, status=_Status.ACTIVE,
+        email=f"shield-{_ULID()}@example.com",
+        display_name="S",
+        role=_Role.STUDENT,
+        status=_Status.ACTIVE,
     )
     db.add(host_row)
     await db.flush()
 
-    assert await hooks.matching_config_override(
-        db, org_id="o" * 26, target_entity_type="project"
-    ) is None
+    assert (
+        await hooks.matching_config_override(db, org_id="o" * 26, target_entity_type="project")
+        is None
+    )
     assert await hooks.rubric_override(db, project_id="p" * 26) is None
 
     # the host session is NOT poisoned and the prior write is intact.
@@ -630,28 +727,48 @@ async def test_write_path_control_arms_expose(db):
     from sqlalchemy import select as _select
 
     cases = [
-        (hooks.SURFACE_WORKFLOW_BINDING, "workflow", "workflow_installation",
-         lambda u: hooks.workflow_binding_override(
-             db, installation_id=u, org_id="o" * 26,
-             capability="text.generate", required_features=set(),
-         )),
-        (hooks.SURFACE_RUBRIC_WORDING, "assessment", "project",
-         lambda u: hooks.rubric_override(db, project_id=u)),
-        (hooks.SURFACE_RETRY_POLICY, "operational", "tenant",
-         lambda u: hooks.retry_policy_override(db, tenant_id=u)),
+        (
+            hooks.SURFACE_WORKFLOW_BINDING,
+            "workflow",
+            "workflow_installation",
+            lambda u: hooks.workflow_binding_override(
+                db,
+                installation_id=u,
+                org_id="o" * 26,
+                capability="text.generate",
+                required_features=set(),
+            ),
+        ),
+        (
+            hooks.SURFACE_RUBRIC_WORDING,
+            "assessment",
+            "project",
+            lambda u: hooks.rubric_override(db, project_id=u),
+        ),
+        (
+            hooks.SURFACE_RETRY_POLICY,
+            "operational",
+            "tenant",
+            lambda u: hooks.retry_policy_override(db, tenant_id=u),
+        ),
     ]
     for key, domain, unit_type, call in cases:
         exp, _ = await _mk_surface_experiment(
-            db, key=key, domain=domain, unit_type=unit_type,
+            db,
+            key=key,
+            domain=domain,
+            unit_type=unit_type,
             treatment_config={},
         )
         unit = await _treatment_unit(db, exp, unit_type, f"ctrl-{domain}")
         assert await call(unit) is None, key
         rows = (
-            await db.execute(
-                _select(ExperimentExposure).where(
-                    ExperimentExposure.experiment_id == exp.id
+            (
+                await db.execute(
+                    _select(ExperimentExposure).where(ExperimentExposure.experiment_id == exp.id)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert rows and rows[-1].context.get("arm") == "control", key

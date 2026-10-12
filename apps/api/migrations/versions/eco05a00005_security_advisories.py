@@ -46,9 +46,7 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
     )
-    op.create_index(
-        "ix_eco_advisories_status", "eco_security_advisories", ["status", "severity"]
-    )
+    op.create_index("ix_eco_advisories_status", "eco_security_advisories", ["status", "severity"])
 
 
 def downgrade() -> None:

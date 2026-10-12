@@ -48,7 +48,6 @@ async def latest_dimension_scores(db: AsyncSession, entity_kind: str, entity_id:
     return dict(run.dimension_scores or {}) if run else {}
 
 
-
 def _cases_fingerprint(cases: list) -> str:
     """Deterministic hash over the case set (id, prompt, weight, constraints) —
     HELM-style suite versioning: a run is bound to the exact case set it saw."""
@@ -219,7 +218,8 @@ class BenchmarkService:
             capability_key=capability_key,
             description=sanitize_text(description, 2000),
             rubric=rubric or [],
-            human_review_policy=human_review_policy or {"required": True, "blind": True, "min_reviewers": 2},
+            human_review_policy=human_review_policy
+            or {"required": True, "blind": True, "min_reviewers": 2},
             automated_metrics=automated_metrics or [],
             budget_usd_cap=budget_usd_cap,
             repeat_count=repeat_count,
@@ -259,8 +259,14 @@ class BenchmarkService:
     async def update_suite(self, suite_id: str, updates: dict) -> BenchmarkSuite:
         suite = await self.get_suite(suite_id)
         allowed = {
-            "name", "description", "rubric", "human_review_policy",
-            "automated_metrics", "budget_usd_cap", "repeat_count", "status",
+            "name",
+            "description",
+            "rubric",
+            "human_review_policy",
+            "automated_metrics",
+            "budget_usd_cap",
+            "repeat_count",
+            "status",
         }
         for key, value in updates.items():
             if key not in allowed:
@@ -307,9 +313,9 @@ class BenchmarkService:
         from sqlalchemy import func as _func
 
         n_cases = await self.db.scalar(
-            select(_func.count()).select_from(BenchmarkCase).where(
-                BenchmarkCase.suite_id == suite_id
-            )
+            select(_func.count())
+            .select_from(BenchmarkCase)
+            .where(BenchmarkCase.suite_id == suite_id)
         )
         if (n_cases or 0) >= 500:
             raise AppError("VALIDATION_ERROR", "Suite already has 500 cases (max)", 422)
@@ -383,11 +389,19 @@ class BenchmarkService:
 
         try:
             suite_req = CreateSuiteRequest(
-                **{k: spec.get(k) for k in CreateSuiteRequest.model_fields if spec.get(k) is not None}
+                **{
+                    k: spec.get(k)
+                    for k in CreateSuiteRequest.model_fields
+                    if spec.get(k) is not None
+                }
             )
             case_reqs = [
                 CreateCaseRequest(
-                    **{k: c.get(k) for k in CreateCaseRequest.model_fields if isinstance(c, dict) and c.get(k) is not None}
+                    **{
+                        k: c.get(k)
+                        for k in CreateCaseRequest.model_fields
+                        if isinstance(c, dict) and c.get(k) is not None
+                    }
                 )
                 for c in cases
             ]
@@ -472,9 +486,7 @@ class BenchmarkService:
             .values(status="running", started_at=datetime.now(UTC))
         )
         if not claim.rowcount:
-            raise AppError(
-                "ECO_INVALID_TRANSITION", "Run was claimed by another worker", 409
-            )
+            raise AppError("ECO_INVALID_TRANSITION", "Run was claimed by another worker", 409)
         await self.db.flush()
         suite = await self.get_suite(run.suite_id)
         cases = await self.list_cases(run.suite_id)
@@ -610,8 +622,12 @@ class BenchmarkService:
                 continue
             try:
                 p_value = welch_t_from_stats(
-                    float(ns["mean"]), float(ns.get("std", 0)), int(ns.get("n", 0)),
-                    float(os_["mean"]), float(os_.get("std", 0)), int(os_.get("n", 0)),
+                    float(ns["mean"]),
+                    float(ns.get("std", 0)),
+                    int(ns.get("n", 0)),
+                    float(os_["mean"]),
+                    float(os_.get("std", 0)),
+                    int(os_.get("n", 0)),
                 )
             except (KeyError, TypeError, ValueError):
                 continue
@@ -665,8 +681,11 @@ class BenchmarkService:
             canonical_entity_kind=target.get("entity_kind"),
             canonical_entity_id=entity_id,
             raw_hash=hashlib.sha256(f"regression:{run.id}".encode()).hexdigest(),
-            normalized={"run_id": run.id, "previous_run_id": previous.id,
-                        "regressions": regressions},
+            normalized={
+                "run_id": run.id,
+                "previous_run_id": previous.id,
+                "regressions": regressions,
+            },
             extraction_method="structured",
         )
         self.db.add(obs)
@@ -915,9 +934,7 @@ class BenchmarkService:
                 and r["total_cost_usd"] > 0
             ]
             for i, quality, cost in scored:
-                dominated = any(
-                    q2 > quality and c2 < cost for j, q2, c2 in scored if j != i
-                )
+                dominated = any(q2 > quality and c2 < cost for j, q2, c2 in scored if j != i)
                 rows[i]["on_frontier"] = not dominated
         return {"dimension": dimension, "rows": rows}
 
@@ -946,10 +963,7 @@ class BenchmarkService:
         points = []
         for run in await self.db.scalars(query):
             target = run.target or {}
-            if (
-                target.get("entity_kind") != entity_kind
-                or target.get("entity_id") != entity_id
-            ):
+            if target.get("entity_kind") != entity_kind or target.get("entity_id") != entity_id:
                 continue
             value = (run.dimension_scores or {}).get(dimension)
             if not isinstance(value, (int, float)):
@@ -968,8 +982,7 @@ class BenchmarkService:
             base = datetime.fromisoformat(usable[0]["finished_at"])
             xy = [
                 (
-                    (datetime.fromisoformat(p2["finished_at"]) - base).total_seconds()
-                    / 86400.0,
+                    (datetime.fromisoformat(p2["finished_at"]) - base).total_seconds() / 86400.0,
                     p2["value"],
                 )
                 for p2 in usable

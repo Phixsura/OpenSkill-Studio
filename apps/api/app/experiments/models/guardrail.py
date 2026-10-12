@@ -48,9 +48,7 @@ class GuardrailEvent(Base):
     action: Mapped[str] = mapped_column(String(10))
     auto: Mapped[bool] = mapped_column(default=True, server_default="true")
     detail: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_experiment_guardrail_events_exp_created", "experiment_id", "created_at"),

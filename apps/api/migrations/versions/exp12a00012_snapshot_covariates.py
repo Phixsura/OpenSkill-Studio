@@ -26,8 +26,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "experiment_metric_snapshots",
-        sa.Column("covariates", JSONB(), nullable=False,
-                  server_default=sa.text("'{}'::jsonb")),
+        sa.Column("covariates", JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
     )
 
 

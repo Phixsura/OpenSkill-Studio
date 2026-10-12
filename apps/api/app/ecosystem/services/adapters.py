@@ -31,9 +31,9 @@ class NormalizedItem:
 
     @property
     def raw_hash(self) -> str:
-        basis = self.raw_fragment or json.dumps(
-            self.normalized, sort_keys=True, default=str
-        ).encode()
+        basis = (
+            self.raw_fragment or json.dumps(self.normalized, sort_keys=True, default=str).encode()
+        )
         return hashlib.sha256(basis).hexdigest()
 
 
@@ -68,8 +68,12 @@ def _sanitized_model_entry(entry: dict, provenance: str | None) -> dict:
     modalities = entry.get("modalities")
     if isinstance(modalities, dict):
         out["modalities"] = {
-            "inputs": [sanitize_text(x, 30) for x in modalities.get("inputs", []) if isinstance(x, str)][:10],
-            "outputs": [sanitize_text(x, 30) for x in modalities.get("outputs", []) if isinstance(x, str)][:10],
+            "inputs": [
+                sanitize_text(x, 30) for x in modalities.get("inputs", []) if isinstance(x, str)
+            ][:10],
+            "outputs": [
+                sanitize_text(x, 30) for x in modalities.get("outputs", []) if isinstance(x, str)
+            ][:10],
         }
     caps = entry.get("capabilities")
     if isinstance(caps, list):
@@ -231,10 +235,14 @@ def parse_huggingface(raw: bytes, config: dict) -> list[NormalizedItem]:
         clean = {
             "official_id": model_id,
             "name": model_id.split("/")[-1],
-            "tags": [sanitize_text(t, 60) for t in entry.get("tags", []) if isinstance(t, str)][:30],
+            "tags": [sanitize_text(t, 60) for t in entry.get("tags", []) if isinstance(t, str)][
+                :30
+            ],
             "pipeline_tag": sanitize_text(entry.get("pipeline_tag"), 60),
             "license": sanitize_text(entry.get("license"), 100),
-            "downloads": entry.get("downloads") if isinstance(entry.get("downloads"), int) else None,
+            "downloads": entry.get("downloads")
+            if isinstance(entry.get("downloads"), int)
+            else None,
         }
         clean = {k: v for k, v in clean.items() if v is not None}
         items.append(
@@ -287,9 +295,7 @@ def parse_comfyui_repo(raw: bytes, config: dict) -> list[NormalizedItem]:
             "node_types": node_types,
             "node_count": len(graph),
             "graph_hash": graph_hash,
-            "injection_flag": looks_like_prompt_injection(
-                (entry.get("description") or "")[:5000]
-            ),
+            "injection_flag": looks_like_prompt_injection((entry.get("description") or "")[:5000]),
         }
         clean = {k: v for k, v in clean.items() if v is not None}
         items.append(

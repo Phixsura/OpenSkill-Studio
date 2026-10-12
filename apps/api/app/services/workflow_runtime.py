@@ -581,9 +581,7 @@ class WorkflowRuntimeService:
         # default stays 3.
         from app.experiments import hooks as exp_hooks
 
-        step_max_attempts = (
-            await exp_hooks.retry_policy_override(self.db, tenant_id=tenant.id) or 3
-        )
+        step_max_attempts = await exp_hooks.retry_policy_override(self.db, tenant_id=tenant.id) or 3
         for step in definition.get("steps", []):
             self.db.add(
                 WorkflowStepRun(

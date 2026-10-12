@@ -82,9 +82,7 @@ async def handle_apply_promotion(db: AsyncSession, payload: dict) -> None:
 GUARDRAIL_SWEEP_CAP = 50
 
 
-async def sweep_experiment_guardrails(
-    db: AsyncSession, *, cap: int = GUARDRAIL_SWEEP_CAP
-) -> int:
+async def sweep_experiment_guardrails(db: AsyncSession, *, cap: int = GUARDRAIL_SWEEP_CAP) -> int:
     """Enqueue guardrail evaluation for running experiments, oldest-checked
     first (nulls first) up to cap — the handler stamps last_guardrail_check_at
     so a backlog can never starve any experiment (§106.26 fairness law)."""
@@ -141,8 +139,11 @@ async def sweep_experiment_interactions(
     running = (
         await db.execute(
             select(
-                Experiment.id, Experiment.key, Experiment.layer_key,
-                Experiment.owner_user_id, Experiment.title,
+                Experiment.id,
+                Experiment.key,
+                Experiment.layer_key,
+                Experiment.owner_user_id,
+                Experiment.title,
             )
             .where(Experiment.status == "running")
             .order_by(Experiment.id.asc())
@@ -230,16 +231,15 @@ async def sweep_experiment_interactions(
             )
         )
         alerts += 1
-        log.warning(
-            "exp_interaction_alert", experiment_a=key1, experiment_b=key2, **base
-        )
+        log.warning("exp_interaction_alert", experiment_a=key1, experiment_b=key2, **base)
         # defect #38: both owners hear about it once per dedup window
         try:
             from app.services.notification import NotificationService
 
             notify_svc = NotificationService(db)
             for owner_id, title, other_key in (
-                (owner1, title1, key2), (owner2, title2, key1),
+                (owner1, title1, key2),
+                (owner2, title2, key1),
             ):
                 # Defect #42: savepoint keeps a notify flush error from
                 # poisoning the sweep's session (see guardrails._notify_alert)
@@ -319,8 +319,7 @@ async def sweep_experiment_windows(
     # Rolling re-enqueue (defect #46): most recent day LAST so that, under a
     # backlog, the freshest window is the one closest to its data.
     windows = [
-        (yesterday_start - timedelta(days=offset),
-         yesterday_start - timedelta(days=offset - 1))
+        (yesterday_start - timedelta(days=offset), yesterday_start - timedelta(days=offset - 1))
         for offset in range(SNAPSHOT_BACKFILL_DAYS - 1, -1, -1)
     ]
     # The analysis-close filter lives in SQL, BEFORE the cap: a backlog of
@@ -358,9 +357,7 @@ ANALYSIS_SWEEP_CAP = 100
 SIGNIFICANCE_ALPHA = 0.05
 
 
-async def sweep_experiment_analyses(
-    db: AsyncSession, *, cap: int = ANALYSIS_SWEEP_CAP
-) -> int:
+async def sweep_experiment_analyses(db: AsyncSession, *, cap: int = ANALYSIS_SWEEP_CAP) -> int:
     """Automated monitoring (round 69, industry parity): run a daily analysis
     over RUNNING mSPRT experiments — the always-valid engine pays no peeking
     cost, so automation is statistically free; O'Brien-Fleming experiments
@@ -381,8 +378,12 @@ async def sweep_experiment_analyses(
     # the mSPRT tail starves. The in-loop check stays as belt-and-braces.
     rows = (
         await db.execute(
-            select(Experiment.id, Experiment.owner_user_id, Experiment.title,
-                   Experiment.current_version)
+            select(
+                Experiment.id,
+                Experiment.owner_user_id,
+                Experiment.title,
+                Experiment.current_version,
+            )
             .join(
                 ExperimentVersion,
                 and_(
@@ -419,9 +420,7 @@ async def sweep_experiment_analyses(
             continue  # OF looks are a human budget — never spent by a robot
         try:
             async with db.begin_nested():
-                result = await AnalysisService(db).run(
-                    experiment_id, actor=_system_actor()
-                )
+                result = await AnalysisService(db).run(experiment_id, actor=_system_actor())
         except Exception:  # noqa: BLE001 — poison analysis: skip, never stall
             log.error("exp_auto_analysis_failed", experiment_id=experiment_id)
             continue
@@ -467,12 +466,10 @@ async def sweep_experiment_analyses(
                         "— review the analysis before acting; mSPRT stays "
                         "valid under continuous monitoring."
                     ),
-                    data={"experiment_id": experiment_id,
-                          "metric_key": metric_key, "p": p},
+                    data={"experiment_id": experiment_id, "metric_key": metric_key, "p": p},
                 )
         except Exception:  # noqa: BLE001 — additive, never blocking
-            log.warning("exp_significance_notify_failed",
-                        experiment_id=experiment_id)
+            log.warning("exp_significance_notify_failed", experiment_id=experiment_id)
     return analyzed
 
 
@@ -515,8 +512,7 @@ async def sweep_experiment_starts(
             # #67: when the human wins the race (manual start/archive between
             # our read and this write) the state machine rightly refuses —
             # one experiment's race must never abort the rest of the batch
-            log.info("exp_start_sweep_skipped",
-                     experiment_id=experiment_id, code=exc.code)
+            log.info("exp_start_sweep_skipped", experiment_id=experiment_id, code=exc.code)
             continue
         started += 1
     return started
@@ -544,8 +540,7 @@ async def sweep_weekly_digest(
     week_ago = now - timedelta(days=7)
     all_rows = (
         await db.execute(
-            select(Experiment.id, Experiment.title, Experiment.owner_user_id,
-                   Experiment.status)
+            select(Experiment.id, Experiment.title, Experiment.owner_user_id, Experiment.status)
             # analyzed experiments are WAITING ON A DECISION — the digest is
             # exactly the place to keep that from going stale (round 141)
             .where(Experiment.status.in_(("running", "analyzed")))
@@ -592,15 +587,13 @@ async def sweep_weekly_digest(
                 )
                 # same-transaction looks share created_at — the ULID id is
                 # the deterministic tiebreak (round 236)
-                .order_by(ExperimentEvent.created_at.desc(),
-                          ExperimentEvent.id.desc())
+                .order_by(ExperimentEvent.created_at.desc(), ExperimentEvent.id.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
         warning_count = len((latest_look or {}).get("warnings", []))
         by_owner.setdefault(owner_user_id, []).append(
-            (experiment_id, title, int(exposures), int(events), status,
-             warning_count)
+            (experiment_id, title, int(exposures), int(events), status, warning_count)
         )
     sent = 0
     cutoff = now - timedelta(days=DIGEST_DEDUP_DAYS)
@@ -621,13 +614,11 @@ async def sweep_weekly_digest(
         lines = [
             (
                 f"{title}: AWAITING DECISION"
-                + (f" ({warning_count} analysis warnings)" if warning_count
-                   else "")
+                + (f" ({warning_count} analysis warnings)" if warning_count else "")
                 if status == "analyzed"
                 else f"{title}: {exposures} exposures, "
-                     f"{events} guardrail events (7d)"
-                     + (f", {warning_count} analysis warnings"
-                        if warning_count else "")
+                f"{events} guardrail events (7d)"
+                + (f", {warning_count} analysis warnings" if warning_count else "")
             )
             for _id, title, exposures, events, status, warning_count in items
         ]
@@ -763,8 +754,7 @@ async def sweep_experiment_closures(
             .where(
                 Experiment.status == "running",
                 Experiment.started_at.is_not(None),
-                Experiment.started_at
-                + func.make_interval(0, 0, 0, max_days_sql) <= now,
+                Experiment.started_at + func.make_interval(0, 0, 0, max_days_sql) <= now,
             )
             .order_by(Experiment.started_at.asc())
             .limit(cap)
@@ -798,8 +788,7 @@ async def sweep_experiment_closures(
             )
         except AppError as exc:
             # #67: a racing manual complete/pause wins; skip, never abort
-            log.info("exp_closure_sweep_skipped",
-                     experiment_id=experiment_id, code=exc.code)
+            log.info("exp_closure_sweep_skipped", experiment_id=experiment_id, code=exc.code)
             continue
         closed += 1
         log.info("exp_auto_completed", experiment_id=experiment_id, max_days=max_days)

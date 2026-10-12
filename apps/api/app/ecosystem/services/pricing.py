@@ -100,12 +100,12 @@ class PricingService:
         if entity_id:
             query = query.where(PriceObservation.entity_id == entity_id)
         if reconciliation_status:
-            query = query.where(
-                PriceObservation.reconciliation_status == reconciliation_status
-            )
+            query = query.where(PriceObservation.reconciliation_status == reconciliation_status)
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(PriceObservation.observed_at.desc(), PriceObservation.id.desc()).limit(limit).offset(offset)
+            query.order_by(PriceObservation.observed_at.desc(), PriceObservation.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), int(total or 0)
 
@@ -137,9 +137,7 @@ class PricingService:
                 best[row.unit] = candidate
         return best
 
-    async def history(
-        self, *, entity_kind: str, entity_id: str, unit: str | None = None
-    ) -> dict:
+    async def history(self, *, entity_kind: str, entity_id: str, unit: str | None = None) -> dict:
         """AA price-over-time bar: per-unit time series of non-rejected price
         observations (oldest first) + linear trend per unit (slope in
         price/day, projected next). Projection is advisory, never a rate."""
@@ -172,9 +170,7 @@ class PricingService:
             )
         trends: dict[str, dict | None] = {}
         for u, points in series.items():
-            usable = [
-                p2 for p2 in points if p2["observed_at"] is not None
-            ]
+            usable = [p2 for p2 in points if p2["observed_at"] is not None]
             if len(usable) >= 2:
                 base = datetime.fromisoformat(usable[0]["observed_at"])
                 xy = [
@@ -264,7 +260,10 @@ class PricingService:
             )
         # Fully-priced first, then cheapest
         results.sort(
-            key=lambda r: (not r["fully_priced"], r["estimated_total"] if r["estimated_total"] is not None else float("inf"))
+            key=lambda r: (
+                not r["fully_priced"],
+                r["estimated_total"] if r["estimated_total"] is not None else float("inf"),
+            )
         )
         return results
 
@@ -303,9 +302,7 @@ class PricingService:
         if decision != "approve":
             raise AppError("VALIDATION_ERROR", f"Unknown decision: {decision}", 422)
         if not provider_key:
-            raise AppError(
-                "VALIDATION_ERROR", "provider_key required to approve into billing", 422
-            )
+            raise AppError("VALIDATION_ERROR", "provider_key required to approve into billing", 422)
 
         # Mint the approved rate in the control-plane catalog (new row,
         # effective from now — historical rated usage is untouched).
@@ -335,7 +332,8 @@ class PricingService:
                 PriceObservation.entity_kind == row.entity_kind,
                 PriceObservation.entity_id == row.entity_id,
                 PriceObservation.unit == row.unit,
-                PriceObservation.region.is_(row.region) if row.region is None
+                PriceObservation.region.is_(row.region)
+                if row.region is None
                 else PriceObservation.region == row.region,
                 PriceObservation.reconciliation_status == "approved",
                 PriceObservation.id != row.id,
@@ -431,9 +429,7 @@ class AvailabilityService:
             {"key": "eco-source:internal:availability-probes"},
         )
         source = await self.db.scalar(
-            select(EcosystemSource).where(
-                EcosystemSource.name == "internal:availability-probes"
-            )
+            select(EcosystemSource).where(EcosystemSource.name == "internal:availability-probes")
         )
         if source is None:
             source = EcosystemSource(
@@ -446,7 +442,9 @@ class AvailabilityService:
             )
             self.db.add(source)
             await self.db.flush()
-        raw = f"{entity_kind}:{entity_id}:{old_status}->{new_status}:{datetime.now(UTC).isoformat()}"
+        raw = (
+            f"{entity_kind}:{entity_id}:{old_status}->{new_status}:{datetime.now(UTC).isoformat()}"
+        )
         obs = EcosystemObservation(
             source_id=source.id,
             event_type="availability_changed",
@@ -475,9 +473,7 @@ class AvailabilityService:
         _fanout(self.db, change)
         await self.db.flush()
 
-    async def uptime(
-        self, *, entity_kind: str, entity_id: str, days: int = 30
-    ) -> dict:
+    async def uptime(self, *, entity_kind: str, entity_id: str, days: int = 30) -> dict:
         """StatusGator-style SLO summary over trailing `days`: time-weighted
         uptime %, incident count, current status, per-day worst status. Built
         purely from our own probe history — honest 'unknown' before the first
@@ -499,8 +495,10 @@ class AvailabilityService:
         now = datetime.now(UTC)
         # Status intervals: each probe's status holds until the next probe
         points = [
-            ((r.observed_at if r.observed_at.tzinfo else r.observed_at.replace(tzinfo=UTC)),
-             (r.value or {}).get("status") or "unknown")
+            (
+                (r.observed_at if r.observed_at.tzinfo else r.observed_at.replace(tzinfo=UTC)),
+                (r.value or {}).get("status") or "unknown",
+            )
             for r in rows
         ]
         up_seconds = 0.0
@@ -531,9 +529,9 @@ class AvailabilityService:
                 key = cursor.date().isoformat()
                 if rank.get(status, 1) > rank.get(day_worst.get(key, "operational"), 0):
                     day_worst[key] = status
-                cursor = datetime(
-                    cursor.year, cursor.month, cursor.day, tzinfo=UTC
-                ) + timedelta(days=1)
+                cursor = datetime(cursor.year, cursor.month, cursor.day, tzinfo=UTC) + timedelta(
+                    days=1
+                )
         observed = up_seconds + down_seconds
         return {
             "entity_kind": entity_kind,
@@ -544,9 +542,7 @@ class AvailabilityService:
             "observed_seconds": round(observed, 1),
             "coverage_pct": round(100.0 * observed / (days * 86400), 3),
             "incidents": incidents,
-            "daily": [
-                {"date": d, "worst_status": day_worst[d]} for d in sorted(day_worst)
-            ],
+            "daily": [{"date": d, "worst_status": day_worst[d]} for d in sorted(day_worst)],
         }
 
     async def record(
@@ -589,6 +585,8 @@ class AvailabilityService:
         if record_type:
             query = query.where(AvailabilityRecord.record_type == record_type)
         rows = await self.db.scalars(
-            query.order_by(AvailabilityRecord.observed_at.desc(), AvailabilityRecord.id.desc()).limit(limit)
+            query.order_by(
+                AvailabilityRecord.observed_at.desc(), AvailabilityRecord.id.desc()
+            ).limit(limit)
         )
         return list(rows)

@@ -26,8 +26,7 @@ def _spec(weights: list[tuple[str, int, bool]]) -> ExperimentSpec:
             "hypothesis": "x" * 10,
             "unit_type": "user",
             "variants": [
-                {"key": k, "name": k, "weight_bp": w, "is_control": c}
-                for k, w, c in weights
+                {"key": k, "name": k, "weight_bp": w, "is_control": c} for k, w, c in weights
             ],
             "metrics": {"primary": ["m"]},
         }
@@ -155,9 +154,7 @@ def test_hash_stability_property(key, unit):
 
 
 def _pop(rules=None, exclusions=None) -> PopulationSpec:
-    return PopulationSpec.model_validate(
-        {"rules": rules or [], "exclusions": exclusions or []}
-    )
+    return PopulationSpec.model_validate({"rules": rules or [], "exclusions": exclusions or []})
 
 
 def test_population_empty_is_everyone():
@@ -167,19 +164,23 @@ def test_population_empty_is_everyone():
 def test_population_ops():
     ctx = {"cohort_id": "c1", "plan_tier": "pro", "signup_after": 5}
     assert evaluate_population(_pop([{"field": "cohort_id", "op": "eq", "values": ["c1"]}]), ctx)
-    assert evaluate_population(_pop([{"field": "plan_tier", "op": "in", "values": ["pro", "max"]}]), ctx)
-    assert evaluate_population(_pop([{"field": "plan_tier", "op": "not_in", "values": ["free"]}]), ctx)
+    assert evaluate_population(
+        _pop([{"field": "plan_tier", "op": "in", "values": ["pro", "max"]}]), ctx
+    )
+    assert evaluate_population(
+        _pop([{"field": "plan_tier", "op": "not_in", "values": ["free"]}]), ctx
+    )
     assert evaluate_population(_pop([{"field": "signup_after", "op": "gte", "values": [5]}]), ctx)
-    assert not evaluate_population(_pop([{"field": "signup_after", "op": "gte", "values": [6]}]), ctx)
+    assert not evaluate_population(
+        _pop([{"field": "signup_after", "op": "gte", "values": [6]}]), ctx
+    )
     assert evaluate_population(_pop([{"field": "signup_after", "op": "lte", "values": [5]}]), ctx)
     assert evaluate_population(_pop([{"field": "cohort_id", "op": "exists", "values": []}]), ctx)
 
 
 def test_population_missing_field_fails_closed():
     """No accidental enrollment of units we cannot evaluate."""
-    assert not evaluate_population(
-        _pop([{"field": "cohort_id", "op": "eq", "values": ["c1"]}]), {}
-    )
+    assert not evaluate_population(_pop([{"field": "cohort_id", "op": "eq", "values": ["c1"]}]), {})
     assert not evaluate_population(
         _pop([{"field": "signup_after", "op": "gte", "values": ["not-a-number"]}]),
         {"signup_after": "also-bad"},
@@ -206,24 +207,26 @@ def test_switchback_variant_deterministic_per_day_and_rotates():
     from app.experiments.schemas import ExperimentSpec
     from app.experiments.services.assignment import switchback_variant
 
-    spec = ExperimentSpec.model_validate({
-        "hypothesis": "switchback determinism",
-        "unit_type": "user",
-        "design": "switchback",
-        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 5000},
-        ],
-        "metrics": {"primary": ["exposure_rate"],
-                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                    "threshold": 100.0}]},
-    })
+    spec = ExperimentSpec.model_validate(
+        {
+            "hypothesis": "switchback determinism",
+            "unit_type": "user",
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
+        }
+    )
     base_at = datetime(2026, 9, 1, 0, 30, tzinfo=UTC)
     # same 1440-minute window (epoch-aligned) → same variant
     a = switchback_variant("sb-exp", "saltgold", spec, base_at)
-    assert a == switchback_variant("sb-exp", "saltgold", spec,
-                                   base_at + timedelta(hours=11))
+    assert a == switchback_variant("sb-exp", "saltgold", spec, base_at + timedelta(hours=11))
     assert a in ("control", "treatment")
     # across 30 days both variants appear (weights 50/50)
     seen = {
@@ -275,9 +278,10 @@ def test_switchback_window_grid_and_default():
                 {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
                 {"key": "treatment", "name": "T", "weight_bp": 5000},
             ],
-            "metrics": {"primary": ["exposure_rate"],
-                        "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                        "threshold": 100.0}]},
+            "metrics": {
+                "primary": ["exposure_rate"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
         }
         if switchback is not None:
             body["switchback"] = switchback
@@ -303,9 +307,9 @@ def test_switchback_window_grid_and_default():
         a = switchback_variant("grid-exp", "saltgold", pspec, at)
         b = switchback_variant("grid-exp", "saltgold", pspec, at + timedelta(days=1))
         if a != b:
-            assert switchback_variant(
-                "grid-exp", "saltgold", pspec, at + timedelta(minutes=1439)
-            ) == a
+            assert (
+                switchback_variant("grid-exp", "saltgold", pspec, at + timedelta(minutes=1439)) == a
+            )
             break
     else:  # pragma: no cover — 30 fair coin flips all equal
         raise AssertionError("no rotation in 30 days")
@@ -361,9 +365,7 @@ def test_strictreq_blanket_control_char_wall():
     )
 
     with _pytest.raises(ValidationError):
-        CreateExperimentRequest(
-            key="k97-exp", title="a\x00b", domain="learning", layer_key="lyr-x"
-        )
+        CreateExperimentRequest(key="k97-exp", title="a\x00b", domain="learning", layer_key="lyr-x")
     with _pytest.raises(ValidationError):
         TransitionRequest(to_status="paused", reason="x\x1by")
     with _pytest.raises(ValidationError):

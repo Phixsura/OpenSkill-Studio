@@ -17,8 +17,6 @@ from app.schemas.base import DataResponse
 router = APIRouter(prefix="/ecosystem", tags=["Ecosystem — Dashboard & Signals"])
 
 
-
-
 def _self_url(request) -> str:
     """Feed self-URL without the credential query param."""
     url = request.url.remove_query_params("token")
@@ -33,10 +31,7 @@ def _etag_matches(header: str | None, etag: str) -> bool:
         return False
     if header.strip() == "*":
         return True
-    return any(
-        candidate.strip().removeprefix("W/") == etag
-        for candidate in header.split(",")
-    )
+    return any(candidate.strip().removeprefix("W/") == etag for candidate in header.split(","))
 
 
 def _check_severity(value: str | None, allowed: frozenset[str]) -> None:
@@ -238,8 +233,11 @@ async def rotate_feed_token(
     from app.ecosystem.api.deps import eco_audit
 
     await eco_audit(
-        db, user, action="eco.feed_token_rotated",
-        target_type="eco_feed_token", target_id=user.id,
+        db,
+        user,
+        action="eco.feed_token_rotated",
+        target_type="eco_feed_token",
+        target_id=user.id,
         after={"generation": gen},
     )
     await db.commit()
@@ -295,8 +293,7 @@ async def export_changes_atom(
 
         raise AppError(
             "VALIDATION_ERROR",
-            f"Unknown change_type {change_type!r}; allowed: "
-            f"{', '.join(sorted(CHANGE_TYPES))}",
+            f"Unknown change_type {change_type!r}; allowed: {', '.join(sorted(CHANGE_TYPES))}",
             422,
         )
     rows = await DashboardService(db).change_feed(
@@ -328,9 +325,7 @@ async def export_changes_atom(
         if successor:
             # replace ONLY the query-param value — a bare str.replace could
             # corrupt a token that happens to contain the 26-char id
-            location = str(request.url).replace(
-                f"entity_id={entity_id}", f"entity_id={successor}"
-            )
+            location = str(request.url).replace(f"entity_id={entity_id}", f"entity_id={successor}")
             return Response(
                 status_code=302,
                 headers={"Location": location, "Cache-Control": "private, max-age=0"},
@@ -349,9 +344,7 @@ async def export_changes_atom(
     from email.utils import format_datetime, parsedate_to_datetime
 
     last_modified = (
-        format_datetime(rows[0].detected_at, usegmt=True)
-        if rows and rows[0].detected_at
-        else None
+        format_datetime(rows[0].detected_at, usegmt=True) if rows and rows[0].detected_at else None
     )
     # R271: query-token requests carry no Authorization header, so shared
     # caches (CDN, corporate proxies) would happily store and replay these
@@ -419,9 +412,7 @@ async def export_changes_atom(
         + "".join(entries)
         + "</feed>"
     )
-    return Response(
-        content=xml, media_type="application/atom+xml", headers=cond_headers
-    )
+    return Response(content=xml, media_type="application/atom+xml", headers=cond_headers)
 
 
 @router.get("/export/changes", response_model=dict)
@@ -495,16 +486,12 @@ async def eco_audit_trail(
 
     from app.controlplane.models.audit import CommercialAuditEvent
 
-    query = select(CommercialAuditEvent).where(
-        CommercialAuditEvent.action.like("eco.%")
-    )
+    query = select(CommercialAuditEvent).where(CommercialAuditEvent.action.like("eco.%"))
     if action:
         query = query.where(CommercialAuditEvent.action == action)
     if target_id:
         query = query.where(CommercialAuditEvent.target_id == target_id)
-    rows = list(
-        await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit))
-    )
+    rows = list(await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit)))
     return {
         "data": [
             {
@@ -543,19 +530,17 @@ async def eco_audit_trail_csv(
 
     from app.controlplane.models.audit import CommercialAuditEvent
 
-    query = select(CommercialAuditEvent).where(
-        CommercialAuditEvent.action.like("eco.%")
-    )
+    query = select(CommercialAuditEvent).where(CommercialAuditEvent.action.like("eco.%"))
     if action:
         query = query.where(CommercialAuditEvent.action == action)
     if target_id:
         query = query.where(CommercialAuditEvent.target_id == target_id)
-    rows = list(
-        await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit))
-    )
+    rows = list(await db.scalars(query.order_by(CommercialAuditEvent.id.desc()).limit(limit)))
 
     def _cell(value) -> str:
-        text = _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value or "")
+        text = (
+            _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value or "")
+        )
         # R370: OWASP's full trigger set includes tab and CR — some
         # spreadsheets strip leading whitespace before interpreting
         return f"'{text}" if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
@@ -566,10 +551,18 @@ async def eco_audit_trail_csv(
         ["id", "actor_user_id", "action", "target_type", "target_id", "before", "after", "reason"]
     )
     for e in rows:
-        writer.writerow([
-            _cell(e.id), _cell(e.actor_user_id), _cell(e.action), _cell(e.target_type),
-            _cell(e.target_id), _cell(e.before), _cell(e.after), _cell(e.reason),
-        ])
+        writer.writerow(
+            [
+                _cell(e.id),
+                _cell(e.actor_user_id),
+                _cell(e.action),
+                _cell(e.target_type),
+                _cell(e.target_id),
+                _cell(e.before),
+                _cell(e.after),
+                _cell(e.reason),
+            ]
+        )
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

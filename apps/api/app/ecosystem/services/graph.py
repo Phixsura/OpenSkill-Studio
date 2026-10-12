@@ -44,9 +44,7 @@ class GraphService:
             raise AppError("VALIDATION_ERROR", "Self-edges are not allowed", 422)
         # Depth guard (R103, same class as io_spec): the spec is stored
         # verbatim in JSONB and replayed on every impact traversal
-        if constraint_spec is not None and len(
-            json.dumps(constraint_spec, default=str)
-        ) > 20_000:
+        if constraint_spec is not None and len(json.dumps(constraint_spec, default=str)) > 20_000:
             raise AppError("VALIDATION_ERROR", "constraint_spec too large (20k max)", 422)
         stmt = (
             pg_insert(DependencyEdge)
@@ -86,9 +84,7 @@ class GraphService:
         await self.db.delete(edge)
         await self.db.flush()
 
-    async def edges_for_node(
-        self, kind: str, node_id: str, *, org_id: str | None = None
-    ) -> dict:
+    async def edges_for_node(self, kind: str, node_id: str, *, org_id: str | None = None) -> dict:
         """Both directions for one node, private edges filtered by org."""
         visibility = or_(DependencyEdge.org_id.is_(None), DependencyEdge.org_id == org_id)
         outgoing = await self.db.scalars(

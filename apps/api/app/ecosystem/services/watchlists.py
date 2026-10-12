@@ -16,17 +16,13 @@ class WatchlistService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(
-        self, *, owner_id: str, name: str, org_id: str | None = None
-    ) -> Watchlist:
+    async def create(self, *, owner_id: str, name: str, org_id: str | None = None) -> Watchlist:
         # R172: per-owner cap — every list joins the matching_changes
         # aggregation; 100 is far beyond real use, but unbounded is a lever
         from sqlalchemy import func as _func
 
         n = await self.db.scalar(
-            select(_func.count()).select_from(Watchlist).where(
-                Watchlist.owner_id == owner_id
-            )
+            select(_func.count()).select_from(Watchlist).where(Watchlist.owner_id == owner_id)
         )
         if (n or 0) >= 100:
             raise AppError("VALIDATION_ERROR", "Watchlist limit reached (100)", 422)
@@ -88,7 +84,9 @@ class WatchlistService:
 
     async def list_for_owner(self, owner_id: str) -> list[Watchlist]:
         rows = await self.db.scalars(
-            select(Watchlist).where(Watchlist.owner_id == owner_id).order_by(Watchlist.created_at, Watchlist.id)
+            select(Watchlist)
+            .where(Watchlist.owner_id == owner_id)
+            .order_by(Watchlist.created_at, Watchlist.id)
         )
         return list(rows)
 
@@ -184,9 +182,7 @@ class WatchlistService:
         )
         return list(rows)
 
-    async def quick_watch(
-        self, owner_id: str, *, target_kind: str, target_id: str
-    ) -> tuple:
+    async def quick_watch(self, owner_id: str, *, target_kind: str, target_id: str) -> tuple:
         """GitHub watch-button bar: one click watches an entity. Gets or
         creates the user's "Default" watchlist and adds the item idempotently.
         Returns (watchlist, item)."""
@@ -199,9 +195,7 @@ class WatchlistService:
             {"key": f"eco-quick-watch:{owner_id}"},
         )
         default = await self.db.scalar(
-            select(Watchlist).where(
-                Watchlist.owner_id == owner_id, Watchlist.name == "Default"
-            )
+            select(Watchlist).where(Watchlist.owner_id == owner_id, Watchlist.name == "Default")
         )
         if default is None:
             default = await self.create(owner_id=owner_id, name="Default")
@@ -210,9 +204,7 @@ class WatchlistService:
         )
         return default, item
 
-    async def matching_changes(
-        self, owner_id: str, *, limit: int = 50
-    ) -> list[ChangeEvent]:
+    async def matching_changes(self, owner_id: str, *, limit: int = 50) -> list[ChangeEvent]:
         """Recent change events touching any watched entity for this user —
         their own lists PLUS org-attached lists of orgs they belong to
         (R186: an org watchlist is a shared radar, not the creator's feed)."""
@@ -238,9 +230,7 @@ class WatchlistService:
         if not watchlists:
             return []
         items = await self.db.scalars(
-            select(WatchItem).where(
-                WatchItem.watchlist_id.in_([w.id for w in watchlists])
-            )
+            select(WatchItem).where(WatchItem.watchlist_id.in_([w.id for w in watchlists]))
         )
         # Per-target severity floor: the LOWEST min_severity of any list
         # watching that target wins (most interested list decides)

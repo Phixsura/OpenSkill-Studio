@@ -103,9 +103,7 @@ async def handle_telemetry_window(db: AsyncSession, payload: dict) -> None:
     except (KeyError, ValueError):
         return
     svc = TelemetryService(db)
-    snapshots = await svc.aggregate_workflow_runs(
-        window_start=window_start, window_end=window_end
-    )
+    snapshots = await svc.aggregate_workflow_runs(window_start=window_start, window_end=window_end)
     # §3.7 other direction: fresh cross-tenant production numbers are compared
     # against the latest completed benchmark for the same target
     from app.ecosystem.services.benchmark import latest_dimension_scores
@@ -116,9 +114,7 @@ async def handle_telemetry_window(db: AsyncSession, payload: dict) -> None:
         scores = await latest_dimension_scores(db, snap.entity_kind, snap.entity_id)
         if scores:
             scores.pop("dimension_stats", None)
-            await svc.detect_divergence(
-                snap.entity_kind, snap.entity_id, benchmark_scores=scores
-            )
+            await svc.detect_divergence(snap.entity_kind, snap.entity_id, benchmark_scores=scores)
 
 
 @register_handler("eco.notify_watchers")
@@ -250,9 +246,7 @@ async def sweep_due_sources(db: AsyncSession) -> int:
     from app.ecosystem.models.source import EcosystemSource
 
     now = datetime.now(UTC)
-    rows = await db.scalars(
-        select(EcosystemSource).where(EcosystemSource.status == "active")
-    )
+    rows = await db.scalars(select(EcosystemSource).where(EcosystemSource.status == "active"))
     enqueued = 0
     for source in rows:
         due_at = (
@@ -339,9 +333,7 @@ async def sweep_rollout_evaluations(db: AsyncSession) -> dict:
         regressions = (plan.comparison or {}).get("regressions") or []
         if not regressions:
             continue
-        fingerprint = hashlib.sha256(
-            json.dumps(sorted(regressions)).encode()
-        ).hexdigest()[:16]
+        fingerprint = hashlib.sha256(json.dumps(sorted(regressions)).encode()).hexdigest()[:16]
         comparison = dict(plan.comparison or {})
         if prior_stamp == fingerprint:
             comparison["alerted_fingerprint"] = fingerprint  # keep it sticky
@@ -469,9 +461,7 @@ async def prune_ecosystem_history(db: AsyncSession, *, now=None) -> dict:
         )
     )
     sync_cutoff = now - timedelta(days=180)
-    old_runs = await db.execute(
-        delete(SourceSyncRun).where(SourceSyncRun.started_at < sync_cutoff)
-    )
+    old_runs = await db.execute(delete(SourceSyncRun).where(SourceSyncRun.started_at < sync_cutoff))
     await db.flush()
     from sqlalchemy import delete as sa_delete
 
@@ -518,10 +508,14 @@ async def sweep_telemetry_window(db: AsyncSession) -> int:
     n = 0
     for back in range(1, 7):
         window_start = now - timedelta(hours=back)
-        enqueue(db, "eco.telemetry_window", {
-            "window_start": window_start.isoformat(),
-            "window_end": (window_start + timedelta(hours=1)).isoformat(),
-        })
+        enqueue(
+            db,
+            "eco.telemetry_window",
+            {
+                "window_start": window_start.isoformat(),
+                "window_end": (window_start + timedelta(hours=1)).isoformat(),
+            },
+        )
         n += 1
     return n
 
@@ -558,9 +552,14 @@ async def sweep_watched_availability(db: AsyncSession, *, cap: int = 200) -> int
     )
     n = 0
     for target_kind, target_id in rows:
-        enqueue(db, "eco.check_availability", {
-            "entity_kind": target_kind, "entity_id": target_id,
-        })
+        enqueue(
+            db,
+            "eco.check_availability",
+            {
+                "entity_kind": target_kind,
+                "entity_id": target_id,
+            },
+        )
         n += 1
     return n
 

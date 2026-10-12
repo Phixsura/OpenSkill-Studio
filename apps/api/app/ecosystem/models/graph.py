@@ -119,7 +119,9 @@ class ImpactAnalysis(Base):
     # {"workflow_pack": 12, "learning_path": 4, "cohort": 8, "truncated": false}
     summary: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     # open | acknowledged | resolved
     status: Mapped[str] = mapped_column(String(20), default="open", server_default="open")
 

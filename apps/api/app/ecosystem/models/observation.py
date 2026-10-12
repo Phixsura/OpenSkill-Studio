@@ -46,7 +46,17 @@ ENTITY_KINDS = frozenset(
 EXTRACTION_METHODS = frozenset({"structured", "llm", "manual"})
 
 CHANGE_TYPES = frozenset(
-    {"price", "limits", "license", "api", "model_version", "lifecycle", "region", "security", "benchmark"}
+    {
+        "price",
+        "limits",
+        "license",
+        "api",
+        "model_version",
+        "lifecycle",
+        "region",
+        "security",
+        "benchmark",
+    }
 )
 
 CHANGE_SEVERITIES = frozenset(
@@ -84,7 +94,9 @@ class EcosystemObservation(Base):
     # Set after entity resolution — loose ref into the canonical catalog
     canonical_entity_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
     canonical_entity_kind: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     # When the change takes effect (future for announced sunsets)
     effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # SHA-256 of the raw payload — idempotency key together with source/event_type
@@ -134,7 +146,9 @@ class ChangeEvent(Base):
     severity: Mapped[str] = mapped_column(String(30), default="info", server_default="info")
     entity_kind: Mapped[str | None] = mapped_column(String(30), nullable=True)
     canonical_entity_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     acknowledged_by: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

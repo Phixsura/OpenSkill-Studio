@@ -220,7 +220,9 @@ class DraftService:
         )
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(ComponentDraft.created_at.desc(), ComponentDraft.id.desc()).limit(limit).offset(offset)
+            query.order_by(ComponentDraft.created_at.desc(), ComponentDraft.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), int(total or 0)
 
@@ -234,9 +236,7 @@ class DraftService:
         await self.db.refresh(draft, with_for_update=True)
         if to_status not in _STATUS_FLOW.get(draft.status, set()):
             code = (
-                "ECO_DRAFT_NOT_APPROVED"
-                if to_status == "published"
-                else "ECO_INVALID_TRANSITION"
+                "ECO_DRAFT_NOT_APPROVED" if to_status == "published" else "ECO_INVALID_TRANSITION"
             )
             raise AppError(code, f"Cannot move draft {draft.status} -> {to_status}", 409)
         # §17 four-eyes (checked AFTER transition validity — the state machine
@@ -293,9 +293,7 @@ class DraftService:
             from app.models.workflow_pack import WorkflowPack
 
             if not draft.org_id:
-                raise AppError(
-                    "VALIDATION_ERROR", "workflow_pack drafts need an owning org", 422
-                )
+                raise AppError("VALIDATION_ERROR", "workflow_pack drafts need an owning org", 422)
             payload = draft.payload or {}
             name = (payload.get("name") or draft.title)[:200]
             slug = "".join(c.lower() if c.isalnum() else "-" for c in name).strip("-")[:180]

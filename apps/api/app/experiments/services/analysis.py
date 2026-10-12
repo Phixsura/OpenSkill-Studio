@@ -155,14 +155,30 @@ def norm_ppf(p: float) -> float:
     one Halley step against erfc for full double precision."""
     if not 0.0 < p < 1.0:
         raise ValueError("p must be in (0, 1)")
-    a = (-3.969683028665376e01, 2.209460984245205e02, -2.759285104469687e02,
-         1.383577518672690e02, -3.066479806614716e01, 2.506628277459239e00)
-    b = (-5.447609879822406e01, 1.615858368580409e02, -1.556989798598866e02,
-         6.680131188771972e01, -1.328068155288572e01)
-    c = (-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e00,
-         -2.549732539343734e00, 4.374664141464968e00, 2.938163982698783e00)
-    d = (7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e00,
-         3.754408661907416e00)
+    a = (
+        -3.969683028665376e01,
+        2.209460984245205e02,
+        -2.759285104469687e02,
+        1.383577518672690e02,
+        -3.066479806614716e01,
+        2.506628277459239e00,
+    )
+    b = (
+        -5.447609879822406e01,
+        1.615858368580409e02,
+        -1.556989798598866e02,
+        6.680131188771972e01,
+        -1.328068155288572e01,
+    )
+    c = (
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e00,
+        -2.549732539343734e00,
+        4.374664141464968e00,
+        2.938163982698783e00,
+    )
+    d = (7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e00, 3.754408661907416e00)
     p_low, p_high = 0.02425, 1 - 0.02425
     if p < p_low:
         q = math.sqrt(-2 * math.log(p))
@@ -172,8 +188,10 @@ def norm_ppf(p: float) -> float:
     elif p <= p_high:
         q = p - 0.5
         r = q * q
-        x = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (
-            ((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1
+        x = (
+            (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5])
+            * q
+            / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
         )
     else:
         q = math.sqrt(-2 * math.log(1 - p))
@@ -232,8 +250,11 @@ def betainc(a: float, b: float, x: float) -> float:
     if x >= 1.0:
         return 1.0
     ln_front = (
-        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
-        + a * math.log(x) + b * math.log(1.0 - x)
+        math.lgamma(a + b)
+        - math.lgamma(a)
+        - math.lgamma(b)
+        + a * math.log(x)
+        + b * math.log(1.0 - x)
     )
     front = math.exp(ln_front)
     if x < (a + 1.0) / (a + b + 2.0):
@@ -291,8 +312,10 @@ def wilson_ci(successes: float, n: float, z: float = Z_975) -> tuple[float, floa
 
 
 def analyze_binary(
-    control_successes: float, control_n: float,
-    treatment_successes: float, treatment_n: float,
+    control_successes: float,
+    control_n: float,
+    treatment_successes: float,
+    treatment_n: float,
 ) -> dict:
     """Two-proportion comparison: absolute + relative effect, Newcombe score
     CI on the difference, two-sided pooled-z p-value."""
@@ -336,8 +359,12 @@ def moments_from_stats(n: float, total: float, total_sq: float) -> tuple[float, 
 
 
 def welch_from_stats(
-    n1: float, sum1: float, sumsq1: float,
-    n2: float, sum2: float, sumsq2: float,
+    n1: float,
+    sum1: float,
+    sumsq1: float,
+    n2: float,
+    sum2: float,
+    sumsq2: float,
 ) -> dict:
     """Welch t on (control=1, treatment=2) from sufficient statistics."""
     if n1 <= 1 or n2 <= 1:
@@ -348,8 +375,12 @@ def welch_from_stats(
     effect = m2 - m1
     if se2 <= 0:
         return {
-            "effect": effect, "relative": (effect / m1) if m1 else None,
-            "ci": [effect, effect], "t": 0.0, "df": n1 + n2 - 2, "p": 1.0 if effect == 0 else 0.0,
+            "effect": effect,
+            "relative": (effect / m1) if m1 else None,
+            "ci": [effect, effect],
+            "t": 0.0,
+            "df": n1 + n2 - 2,
+            "p": 1.0 if effect == 0 else 0.0,
             "control": {"mean": m1, "var": v1, "n": n1},
             "treatment": {"mean": m2, "var": v2, "n": n2},
         }
@@ -380,8 +411,12 @@ def welch_from_values(control: list[float], treatment: list[float]) -> dict:
     """Cluster-level analysis: each value is one cluster mean; n = cluster
     count — no pseudo-independence (§10 clustered)."""
     return welch_from_stats(
-        len(control), sum(control), sum(v * v for v in control),
-        len(treatment), sum(treatment), sum(v * v for v in treatment),
+        len(control),
+        sum(control),
+        sum(v * v for v in control),
+        len(treatment),
+        sum(treatment),
+        sum(v * v for v in treatment),
     )
 
 
@@ -389,8 +424,10 @@ def welch_from_values(control: list[float], treatment: list[float]) -> dict:
 
 
 def analyze_rate(
-    control_events: float, control_exposure: float,
-    treatment_events: float, treatment_exposure: float,
+    control_events: float,
+    control_exposure: float,
+    treatment_events: float,
+    treatment_exposure: float,
 ) -> dict:
     """Poisson-rate difference; var(rate) ≈ events / exposure² (delta)."""
     if control_exposure <= 0 or treatment_exposure <= 0:
@@ -436,8 +473,10 @@ def _solve_spd(a: list[list[float]], b: list[float]) -> list[float] | None:
 
 
 def auto_select_covariates(
-    arms: list[dict], candidates: list[str],
-    min_abs_r: float = 0.1, max_k: int = 3,
+    arms: list[dict],
+    candidates: list[str],
+    min_abs_r: float = 0.1,
+    max_k: int = 3,
 ) -> list[dict]:
     """§4.6b (round 202): data-driven covariate selection from STORED
     aggregates alone. Each arm dict carries n, sum, sum_sq and the
@@ -504,17 +543,14 @@ def multi_cuped_adjusted_welch(
         cov = arm.get("covariates") or {}
         for key in covariate_keys:
             entry = cov.get(key)
-            if entry is None or any(
-                entry.get(f) is None for f in ("sum", "sum_sq", "xy_sum")
-            ):
+            if entry is None or any(entry.get(f) is None for f in ("sum", "sum_sq", "xy_sum")):
                 return None
     n = control["n"] + treatment["n"]
     if control["n"] <= 1 or treatment["n"] <= 1:
         return None
 
     def pooled_cov(key: str, field: str) -> float:
-        return (control["covariates"][key][field]
-                + treatment["covariates"][key][field])
+        return control["covariates"][key][field] + treatment["covariates"][key][field]
 
     def pooled_xx(ki: str, kj: str) -> float:
         # upper-triangle storage: the earlier key holds the cross sum
@@ -557,8 +593,7 @@ def multi_cuped_adjusted_welch(
         cov = arm["covariates"]
         # ΣZ = Σy − Σ_i θi (Σxi − n·x̄i)
         sz = asy - sum(
-            theta[i] * (cov[ki]["sum"] - an * x_mean[ki])
-            for i, ki in enumerate(covariate_keys)
+            theta[i] * (cov[ki]["sum"] - an * x_mean[ki]) for i, ki in enumerate(covariate_keys)
         )
         # ΣZ² = Σy² − 2Σθi(Σxiy − x̄iΣy) + ΣΣ θiθj (Σxixj − x̄jΣxi − x̄iΣxj + n·x̄i·x̄j)
         szz = asyy
@@ -572,11 +607,15 @@ def multi_cuped_adjusted_welch(
                     s_ij = (cov[ki].get("xx") or {}).get(kj, 0.0)
                 else:
                     s_ij = (cov[kj].get("xx") or {}).get(ki, 0.0)
-                szz += theta[i] * theta[j] * (
-                    s_ij
-                    - x_mean[kj] * cov[ki]["sum"]
-                    - x_mean[ki] * cov[kj]["sum"]
-                    + an * x_mean[ki] * x_mean[kj]
+                szz += (
+                    theta[i]
+                    * theta[j]
+                    * (
+                        s_ij
+                        - x_mean[kj] * cov[ki]["sum"]
+                        - x_mean[ki] * cov[kj]["sum"]
+                        + an * x_mean[ki] * x_mean[kj]
+                    )
                 )
         return an, sz, szz
 
@@ -588,14 +627,16 @@ def multi_cuped_adjusted_welch(
     # same honesty readout as the single-covariate path: achieved variance
     # reduction vs the unadjusted Welch
     raw = welch_from_stats(
-        control["n"], control["sum"], control["sum_sq"],
-        treatment["n"], treatment["sum"], treatment["sum_sq"],
+        control["n"],
+        control["sum"],
+        control["sum_sq"],
+        treatment["n"],
+        treatment["sum"],
+        treatment["sum_sq"],
     )
     var_raw = raw.get("control", {}).get("var", 0) + raw.get("treatment", {}).get("var", 0)
     var_adj = result.get("control", {}).get("var", 0) + result.get("treatment", {}).get("var", 0)
-    result["variance_reduction_pct"] = (
-        100.0 * (1.0 - var_adj / var_raw) if var_raw > 0 else 0.0
-    )
+    result["variance_reduction_pct"] = 100.0 * (1.0 - var_adj / var_raw) if var_raw > 0 else 0.0
     result["theta"] = {key: theta[i] for i, key in enumerate(covariate_keys)}
     result["cuped"] = "multi"
     return result
@@ -641,24 +682,24 @@ def cuped_adjusted_welch(control: dict, treatment: dict) -> dict | None:
     if result.get("insufficient_data"):
         return None
     raw = welch_from_stats(
-        control["n"], control["sum"], control["sum_sq"],
-        treatment["n"], treatment["sum"], treatment["sum_sq"],
+        control["n"],
+        control["sum"],
+        control["sum_sq"],
+        treatment["n"],
+        treatment["sum"],
+        treatment["sum_sq"],
     )
     var_raw = raw.get("control", {}).get("var", 0) + raw.get("treatment", {}).get("var", 0)
     var_adj = result.get("control", {}).get("var", 0) + result.get("treatment", {}).get("var", 0)
     result["theta"] = theta
-    result["variance_reduction_pct"] = (
-        100.0 * (1.0 - var_adj / var_raw) if var_raw > 0 else 0.0
-    )
+    result["variance_reduction_pct"] = 100.0 * (1.0 - var_adj / var_raw) if var_raw > 0 else 0.0
     return result
 
 
 # ── Sequential monitoring ────────────────────────────────────────────
 
 
-def km_curve(
-    events: dict[int, int], censored: dict[int, int], n0: int
-) -> dict | None:
+def km_curve(events: dict[int, int], censored: dict[int, int], n0: int) -> dict | None:
     """§4.15 (round 181): product-limit survival over DAY-granular counts —
     S(t) = prod over event days (1 - d_i/n_i) with the risk set shrunk by
     both events and censorings; Greenwood variance for the SE at the
@@ -722,7 +763,7 @@ def km_compare(control: dict | None, treatment: dict | None) -> dict | None:
         "p": p,
         "ci": ci,
         "caveat": "Kaplan-Meier at the horizon — censoring-correct; "
-                  "the binary-at-horizon engine read stays authoritative",
+        "the binary-at-horizon engine read stays authoritative",
     }
 
 
@@ -756,16 +797,12 @@ def _sc_fit(target: list[float], donors: list[list[float]]) -> list[float]:
     for _ in range(1000):
         synth = [sum(w[i] * donors[i][t] for i in range(k)) for t in range(n)]
         resid = [target[t] - synth[t] for t in range(n)]
-        grad = [
-            -2.0 * sum(resid[t] * donors[j][t] for t in range(n))
-            for j in range(k)
-        ]
+        grad = [-2.0 * sum(resid[t] * donors[j][t] for t in range(n)) for j in range(k)]
         w = _project_simplex([w[j] - step * grad[j] for j in range(k)])
     return w
 
 
-def _sc_rmspe(target: list[float], donors: list[list[float]],
-              w: list[float]) -> float:
+def _sc_rmspe(target: list[float], donors: list[list[float]], w: list[float]) -> float:
     k = len(donors)
     n = len(target)
     sq = 0.0
@@ -804,9 +841,7 @@ def synthetic_control(
     w = _sc_fit(pre_treated, donors_pre)
     pre_rmspe = _sc_rmspe(pre_treated, donors_pre, w)
     post_rmspe = _sc_rmspe(post_treated, donors_post, w)
-    synth_post = [
-        sum(w[i] * donors_post[i][t] for i in range(k)) for t in range(n_post)
-    ]
+    synth_post = [sum(w[i] * donors_post[i][t] for i in range(k)) for t in range(n_post)]
     gap = sum(post_treated[t] - synth_post[t] for t in range(n_post)) / n_post
     ratio = post_rmspe / max(pre_rmspe, 1e-9)
     p = None
@@ -830,7 +865,7 @@ def synthetic_control(
         "placebo_p": p,
         "donors": k,
         "caveat": "synthetic control — association only; donor-weighted "
-                  "counterfactual, placebo permutation inference",
+        "counterfactual, placebo permutation inference",
     }
 
 
@@ -848,19 +883,16 @@ def its_estimate(pre: list[float], post: list[float]) -> dict | None:
     n = len(ys)
     t0 = n_pre  # the interruption sits between pre[-1] and post[0]
     xs = [
-        [1.0, float(t), 1.0 if t >= t0 else 0.0,
-         float(t - t0) if t >= t0 else 0.0]
+        [1.0, float(t), 1.0 if t >= t0 else 0.0, float(t - t0) if t >= t0 else 0.0]
         for t in range(n)
     ]
     k = 4
-    xtx = [[sum(xs[r][i] * xs[r][j] for r in range(n)) for j in range(k)]
-           for i in range(k)]
+    xtx = [[sum(xs[r][i] * xs[r][j] for r in range(n)) for j in range(k)] for i in range(k)]
     xty = [sum(xs[r][i] * ys[r] for r in range(n)) for i in range(k)]
     beta = _solve_spd(xtx, xty)
     if beta is None:
         return None
-    residuals = [ys[r] - sum(xs[r][i] * beta[i] for i in range(k))
-                 for r in range(n)]
+    residuals = [ys[r] - sum(xs[r][i] * beta[i] for i in range(k)) for r in range(n)]
     dof = n - k
     if dof <= 0:
         return None
@@ -885,8 +917,7 @@ def its_estimate(pre: list[float], post: list[float]) -> dict | None:
     out["n_pre"], out["n_post"] = n_pre, n_post
     out["dof"] = dof  # honest readout: the t-tests' degrees of freedom
     out["caveat"] = (
-        "interrupted time series — association only; "
-        "no concurrent control, seasonality not modeled"
+        "interrupted time series — association only; no concurrent control, seasonality not modeled"
     )
     return out
 
@@ -933,9 +964,7 @@ def histogram_quantile(hist: dict, p: float) -> dict | None:
         return None
     zeros = int(hist.get("__zero__", 0) or 0)
     entries = sorted(
-        (int(k), int(v))
-        for k, v in hist.items()
-        if k not in ("__zero__", "__neg__") and int(v) > 0
+        (int(k), int(v)) for k, v in hist.items() if k not in ("__zero__", "__neg__") and int(v) > 0
     )
     n = zeros + sum(c for _, c in entries)
     if n < 2:
@@ -960,9 +989,7 @@ def histogram_quantile(hist: dict, p: float) -> dict | None:
     }
 
 
-def quantile_comparison(
-    control_hist: dict, treatment_hist: dict, p: float
-) -> dict | None:
+def quantile_comparison(control_hist: dict, treatment_hist: dict, p: float) -> dict | None:
     """Control-vs-treatment quantile difference. The combined CI subtracts
     opposite CI ends (conservative — wider than an exact two-sample
     interval, never narrower). Never a decision basis on its own."""
@@ -1041,8 +1068,10 @@ def benjamini_hochberg(p_values: dict[str, float], q: float = 0.05) -> dict[str,
 
 
 def bayes_binary(
-    control_successes: float, control_n: float,
-    treatment_successes: float, treatment_n: float,
+    control_successes: float,
+    control_n: float,
+    treatment_successes: float,
+    treatment_n: float,
     prior: tuple[float, float] = (1.0, 1.0),
     grid_points: int = 2001,
 ) -> dict:
@@ -1077,13 +1106,20 @@ def bayes_binary(
         "effect": diff,
         "credible_interval": [diff - Z_975 * se, diff + Z_975 * se],
         "control": {"posterior_mean": m1, "ci": [beta_ppf(0.025, a1, b1), beta_ppf(0.975, a1, b1)]},
-        "treatment": {"posterior_mean": m2, "ci": [beta_ppf(0.025, a2, b2), beta_ppf(0.975, a2, b2)]},
+        "treatment": {
+            "posterior_mean": m2,
+            "ci": [beta_ppf(0.025, a2, b2), beta_ppf(0.975, a2, b2)],
+        },
     }
 
 
 def bayes_continuous(
-    n1: float, sum1: float, sumsq1: float,
-    n2: float, sum2: float, sumsq2: float,
+    n1: float,
+    sum1: float,
+    sumsq1: float,
+    n2: float,
+    sum2: float,
+    sumsq2: float,
 ) -> dict:
     """Normal-approximation posterior over the mean difference (documented:
     a full NIG posterior is a v-next refinement; for n ≥ ~20 the normal
@@ -1097,8 +1133,12 @@ def bayes_continuous(
     diff = m2 - m1
     if se == 0:
         p_beat = 1.0 if diff > 0 else (0.0 if diff < 0 else 0.5)
-        return {"p_beat_control": p_beat, "expected_loss": 0.0, "effect": diff,
-                "credible_interval": [diff, diff]}
+        return {
+            "p_beat_control": p_beat,
+            "expected_loss": 0.0,
+            "effect": diff,
+            "credible_interval": [diff, diff],
+        }
     z0 = diff / se
     expected_loss = se * math.exp(-z0 * z0 / 2.0) / math.sqrt(2 * math.pi) - diff * norm_sf(z0)
     return {

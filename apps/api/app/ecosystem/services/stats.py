@@ -179,8 +179,7 @@ def bradley_terry(
         if max_delta < tol:
             break
     return {
-        item: round(elo_base + elo_scale * math.log10(strength), 2)
-        for item, strength in p.items()
+        item: round(elo_base + elo_scale * math.log10(strength), 2) for item, strength in p.items()
     }
 
 
@@ -353,8 +352,7 @@ def reviewer_agreement(rows: list[dict]) -> dict:
             labels_b = [prefs[judges[j]][c] for c in shared]
             pairs += 1
             agreements.append(
-                sum(1 for a, b in zip(labels_a, labels_b, strict=True) if a == b)
-                / len(shared)
+                sum(1 for a, b in zip(labels_a, labels_b, strict=True) if a == b) / len(shared)
             )
             kappa = cohen_kappa(labels_a, labels_b)
             if kappa is not None:

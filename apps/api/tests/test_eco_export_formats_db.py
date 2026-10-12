@@ -59,16 +59,13 @@ async def test_ops_metrics_every_sample_has_matching_type_line(db):
     text = resp.body.decode()
     lines = [ln for ln in text.splitlines() if ln.strip()]
     samples = [ln.split(" ")[0] for ln in lines if not ln.startswith("#")]
-    types = {
-        ln.split(" ")[2]
-        for ln in lines
-        if ln.startswith("# TYPE") and ln.endswith("gauge")
-    }
+    types = {ln.split(" ")[2] for ln in lines if ln.startswith("# TYPE") and ln.endswith("gauge")}
     assert samples, "no metrics emitted"
     for name in samples:
         assert name in types, f"sample {name} lacks a matching TYPE line"
     # And no orphan TYPE lines for names that never appear
     assert types == set(samples)
+
 
 async def test_catalog_export_is_complete_beyond_100_entities(db):
     """Round-168 killer: the export is the integration currency — a catalog

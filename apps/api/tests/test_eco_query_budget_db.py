@@ -52,15 +52,22 @@ async def test_trending_has_constant_query_count(db):
     now = datetime.now(UTC)
     # 12 distinct trending entities — a per-row prev-window query would blow the budget
     for i in range(12):
-        model = AIModel(canonical_name=f"QB-{i}-{str(ULID()).lower()[:6]}", slug=f"qb{i}-{str(ULID()).lower()}")
+        model = AIModel(
+            canonical_name=f"QB-{i}-{str(ULID()).lower()[:6]}", slug=f"qb{i}-{str(ULID()).lower()}"
+        )
         db.add(model)
         await db.flush()
-        db.add(EcosystemObservation(
-            source_id=source.id, event_type="model_released",
-            canonical_entity_kind="model", canonical_entity_id=model.id,
-            raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
-            observed_at=now - timedelta(days=1),
-        ))
+        db.add(
+            EcosystemObservation(
+                source_id=source.id,
+                event_type="model_released",
+                canonical_entity_kind="model",
+                canonical_entity_id=model.id,
+                raw_hash=(str(ULID()).lower() * 3)[:64],
+                normalized={},
+                observed_at=now - timedelta(days=1),
+            )
+        )
     await db.flush()
 
     svc = DashboardService(db)

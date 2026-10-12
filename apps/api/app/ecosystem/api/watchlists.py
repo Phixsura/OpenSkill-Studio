@@ -75,7 +75,9 @@ async def delete_watchlist(
     await db.commit()
 
 
-@router.post("/{watchlist_id}/items", response_model=DataResponse[WatchItemResponse], status_code=201)
+@router.post(
+    "/{watchlist_id}/items", response_model=DataResponse[WatchItemResponse], status_code=201
+)
 async def add_watch_item(
     watchlist_id: str,
     body: AddWatchItemRequest,

@@ -40,8 +40,7 @@ class PromotionService:
         if target_type not in PROMOTION_TARGET_TYPES:
             raise AppError(
                 "VALIDATION_ERROR",
-                f"Unknown target_type: {target_type} "
-                f"(allowed: {sorted(PROMOTION_TARGET_TYPES)})",
+                f"Unknown target_type: {target_type} (allowed: {sorted(PROMOTION_TARGET_TYPES)})",
                 422,
             )
         if target_type == "matching_config":
@@ -143,8 +142,7 @@ class PromotionService:
             decision.experiment_id,
             event_type="promotion_drafted",
             actor_user_id=actor.id,
-            payload={"draft_id": draft.id, "target_type": target_type,
-                     "target_ref": target_ref},
+            payload={"draft_id": draft.id, "target_type": target_type, "target_ref": target_ref},
         )
         return draft
 
@@ -196,9 +194,7 @@ class PromotionService:
         if draft.status == "applied":
             raise AppError("PROMOTION_ALREADY_APPLIED", "Draft already applied", 409)
         if draft.status == "applying":
-            raise AppError(
-                "PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409
-            )
+            raise AppError("PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409)
         if draft.status != "approved":
             raise AppError(
                 "DECISION_STATE_INVALID",
@@ -234,9 +230,7 @@ class PromotionService:
         if draft.status == "applied":
             raise AppError("PROMOTION_ALREADY_APPLIED", "Draft already applied", 409)
         if draft.status == "applying":
-            raise AppError(
-                "PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409
-            )
+            raise AppError("PROMOTION_APPLY_IN_FLIGHT", "An async apply is already queued", 409)
         if draft.status != "approved":
             raise AppError(
                 "DECISION_STATE_INVALID",
@@ -308,8 +302,7 @@ class PromotionService:
         # store exists yet — refusing explicitly beats applying into nothing
         raise AppError(
             "EXPERIMENT_PROMOTION_UNWIRED",
-            f"No target-domain draft store for {draft.target_type} yet — "
-            "the draft stays approved",
+            f"No target-domain draft store for {draft.target_type} yet — the draft stays approved",
             422,
         )
 

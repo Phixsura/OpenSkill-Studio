@@ -556,6 +556,7 @@ class LifecycleTransitionResponse(_Orm):
 class GenericData(BaseModel):
     data: Any
 
+
 class EstimateRequest(_StrictReq):
     """Workload cost estimate across entities (advisory, never a quote)."""
 
@@ -575,9 +576,7 @@ class EstimateRequest(_StrictReq):
 
         for unit, qty in v.items():
             if not math.isfinite(qty) or qty < 0:
-                raise ValueError(
-                    f"workload[{unit!r}] must be a finite non-negative number"
-                )
+                raise ValueError(f"workload[{unit!r}] must be a finite non-negative number")
         return v
 
 
@@ -590,7 +589,6 @@ class UpdateWatchlistRequest(_StrictReq):
 
 
 class QuickWatchRequest(_StrictReq):
-
     target_kind: str = Field(max_length=30)
     target_id: str = Field(min_length=26, max_length=26)
 

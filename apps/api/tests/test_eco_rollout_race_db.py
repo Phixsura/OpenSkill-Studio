@@ -35,9 +35,7 @@ async def test_concurrent_promote_records_edge_once(db):
         deprecated_kind="model_version", deprecated_id=deprecated.id
     )
     svc = RolloutService(db)
-    plan = await svc.create(
-        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only"
-    )
+    plan = await svc.create(replacement_candidate_id=ranked[0].id, scope_type="benchmark_only")
     await svc.start(plan.id)
     await svc.evaluate(plan.id)
     await db.commit()
@@ -46,9 +44,7 @@ async def test_concurrent_promote_records_edge_once(db):
     async def promote():
         async with AsyncSessionLocal() as session:
             try:
-                await RolloutService(session).decide(
-                    plan_id, decision="promote", actor_id=actor
-                )
+                await RolloutService(session).decide(plan_id, decision="promote", actor_id=actor)
                 await session.commit()
                 return "promoted"
             except AppError as exc:
@@ -59,12 +55,14 @@ async def test_concurrent_promote_records_edge_once(db):
         results = await asyncio.gather(promote(), promote())
         assert sorted(results) == ["ECO_INVALID_TRANSITION", "promoted"], results
         async with AsyncSessionLocal() as session:
-            edges = list(await session.scalars(
-                select(ReplacementEdge).where(
-                    ReplacementEdge.from_id == dep_id,
-                    ReplacementEdge.edge_type == "recommended_replacement",
+            edges = list(
+                await session.scalars(
+                    select(ReplacementEdge).where(
+                        ReplacementEdge.from_id == dep_id,
+                        ReplacementEdge.edge_type == "recommended_replacement",
+                    )
                 )
-            ))
+            )
             assert len(edges) == 1  # side effect recorded exactly once
     finally:
         # Committed rows must not pollute other tests' candidate pools:
@@ -73,9 +71,7 @@ async def test_concurrent_promote_records_edge_once(db):
 
         async with AsyncSessionLocal() as session:
             for mv in await session.scalars(
-                select(ModelVersion).where(
-                    ModelVersion.canonical_name.like("Race%")
-                )
+                select(ModelVersion).where(ModelVersion.canonical_name.like("Race%"))
             ):
                 mv.lifecycle_status = "retired"
             # Parent models too — identical committed names otherwise flood
@@ -91,12 +87,14 @@ async def test_stuck_running_runs_are_closed_not_zombied(db):
     admin = await _mk_user(db, "admin")
     suite = await _mk_suite_with_cases(db, admin)
     stuck = BenchmarkRun(
-        suite_id=suite.id, status="running",
+        suite_id=suite.id,
+        status="running",
         target={"entity_kind": "model", "entity_id": "0" * 26},
         started_at=datetime.now(UTC) - timedelta(hours=6),
     )
     fresh = BenchmarkRun(
-        suite_id=suite.id, status="running",
+        suite_id=suite.id,
+        status="running",
         target={"entity_kind": "model", "entity_id": "1" * 26},
         started_at=datetime.now(UTC) - timedelta(minutes=10),
     )

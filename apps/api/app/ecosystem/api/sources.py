@@ -30,7 +30,10 @@ async def create_source(
 ):
     source = await SourceService(db).create(created_by=user.id, **body.model_dump())
     await eco_audit(
-        db, user, action="eco.source_created", target_type="eco_source",
+        db,
+        user,
+        action="eco.source_created",
+        target_type="eco_source",
         target_id=source.id,
         after={"name": source.name, "trust_level": source.trust_level},
     )
@@ -82,8 +85,12 @@ async def update_source(
     updates = body.model_dump(exclude_unset=True)
     source = await SourceService(db).update(source_id, updates)
     await eco_audit(
-        db, _user, action="eco.source_updated", target_type="eco_source",
-        target_id=source.id, after={k: str(v)[:200] for k, v in updates.items()},
+        db,
+        _user,
+        action="eco.source_updated",
+        target_type="eco_source",
+        target_id=source.id,
+        after={k: str(v)[:200] for k, v in updates.items()},
     )
     await db.commit()
     return {"data": source}

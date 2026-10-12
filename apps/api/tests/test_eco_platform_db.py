@@ -84,11 +84,14 @@ async def test_observation_cursor_pagination(db):
     for i in range(5):
         db.add(
             EcosystemObservation(
-                source_id=source.id, event_type="catalog_snapshot",
-                raw_hash=f"{i}" * 64, normalized={"i": i},
+                source_id=source.id,
+                event_type="catalog_snapshot",
+                raw_hash=f"{i}" * 64,
+                normalized={"i": i},
             )
         )
     await db.flush()
+
     # Emulate the endpoint's cursor walk at page size 2
     async def page(cursor):
         query = select(EcosystemObservation).where(EcosystemObservation.source_id == source.id)
@@ -122,18 +125,34 @@ async def test_merge_entities_repoints_everything_and_audits(db):
     survivor = await _mk_model_version(db, f"Srv{str(ULID())[-4:]}")
     # Observation, alias, dependency edge, price obs pointing at the duplicate
     obs = EcosystemObservation(
-        source_id=source.id, event_type="model_released", entity_kind="model_version",
-        canonical_entity_kind="model_version", canonical_entity_id=dup.id,
-        raw_hash="m" * 64, normalized={},
+        source_id=source.id,
+        event_type="model_released",
+        entity_kind="model_version",
+        canonical_entity_kind="model_version",
+        canonical_entity_id=dup.id,
+        raw_hash="m" * 64,
+        normalized={},
     )
     db.add(obs)
-    db.add(EntityAlias(entity_kind="model_version", entity_id=dup.id,
-                       alias=f"dup-alias-{ULID()}", alias_normalized="dup alias",
-                       alias_type="official_id"))
+    db.add(
+        EntityAlias(
+            entity_kind="model_version",
+            entity_id=dup.id,
+            alias=f"dup-alias-{ULID()}",
+            alias_normalized="dup alias",
+            alias_type="official_id",
+        )
+    )
     pack_id = str(ULID())
-    db.add(DependencyEdge(from_kind="workflow_pack", from_id=pack_id,
-                          to_kind="model_version", to_id=dup.id,
-                          constraint_type="requires_model_version"))
+    db.add(
+        DependencyEdge(
+            from_kind="workflow_pack",
+            from_id=pack_id,
+            to_kind="model_version",
+            to_id=dup.id,
+            constraint_type="requires_model_version",
+        )
+    )
     await db.flush()
 
     svc = CatalogService(db)
@@ -168,9 +187,7 @@ async def test_merge_entities_repoints_everything_and_audits(db):
     )
     assert len(mappings) == 1
     dup_mappings = list(
-        await db.scalars(
-            select(CapabilityMapping).where(CapabilityMapping.entity_id == dup.id)
-        )
+        await db.scalars(select(CapabilityMapping).where(CapabilityMapping.entity_id == dup.id))
     )
     assert dup_mappings == []
 
@@ -243,8 +260,15 @@ async def test_org_watchlist_triggers_ecosystem_webhook(db, monkeypatch):
     db.add(model)
     await db.flush()
     ref = f"wh-{str(ULID()).lower()}"
-    db.add(EntityAlias(entity_kind="model", entity_id=model.id, alias=ref,
-                       alias_normalized=normalize_name(ref), alias_type="official_id"))
+    db.add(
+        EntityAlias(
+            entity_kind="model",
+            entity_id=model.id,
+            alias=ref,
+            alias_normalized=normalize_name(ref),
+            alias_type="official_id",
+        )
+    )
     await db.flush()
     wl_svc = WatchlistService(db)
     watchlist = await wl_svc.create(owner_id=watcher.id, name="org-watch", org_id=org.id)
@@ -288,6 +312,7 @@ async def test_upcoming_sunsets_feed_ical_source(db):
     ours = [s for s in sunsets if s["entity_id"] == model_version.id]
     assert ours and ours[0]["sunset_at"] is not None
 
+
 async def test_muted_org_watchlist_suppresses_webhook(db, monkeypatch):
     """Round-119 killer: §24 noise controls apply to ORG webhook fan-out too —
     a muted (or below-threshold) org watchlist must not fire the webhook."""
@@ -311,14 +336,22 @@ async def test_muted_org_watchlist_suppresses_webhook(db, monkeypatch):
     db.add(model)
     await db.flush()
     ref = f"whm-{str(ULID()).lower()}"
-    db.add(EntityAlias(entity_kind="model", entity_id=model.id, alias=ref,
-                       alias_normalized=normalize_name(ref), alias_type="official_id"))
+    db.add(
+        EntityAlias(
+            entity_kind="model",
+            entity_id=model.id,
+            alias=ref,
+            alias_normalized=normalize_name(ref),
+            alias_type="official_id",
+        )
+    )
     await db.flush()
     wl_svc = WatchlistService(db)
     muted_wl = await wl_svc.create(owner_id=watcher.id, name="muted-org", org_id=muted_org.id)
     await wl_svc.add_item(muted_wl.id, watcher.id, target_kind="model", target_id=model.id)
     await wl_svc.update_settings(
-        muted_wl.id, watcher.id,
+        muted_wl.id,
+        watcher.id,
         muted_until=datetime.now(UTC) + timedelta(days=1),
     )
     strict_wl = await wl_svc.create(owner_id=watcher.id, name="strict-org", org_id=strict_org.id)
@@ -342,6 +375,7 @@ async def test_muted_org_watchlist_suppresses_webhook(db, monkeypatch):
     assert muted_org.id not in fired_orgs
     assert strict_org.id not in fired_orgs
 
+
 async def test_changes_cursor_pagination_is_complete_and_duplicate_free(db):
     """Round-193 killer: walking the change feed by cursor yields every row
     exactly once (no skips at page boundaries, no repeats) — the property
@@ -354,18 +388,26 @@ async def test_changes_cursor_pagination_is_complete_and_duplicate_free(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     created = []
     for i in range(7):
         change = ChangeEvent(
-            observation_id=obs.id, change_type="license", field=f"f{i}",
-            old_value=None, new_value={"i": i},
-            severity="info", entity_kind="model", canonical_entity_id=model.id,
+            observation_id=obs.id,
+            change_type="license",
+            field=f"f{i}",
+            old_value=None,
+            new_value={"i": i},
+            severity="info",
+            entity_kind="model",
+            canonical_entity_id=model.id,
         )
         db.add(change)
         await db.flush()
@@ -377,9 +419,15 @@ async def test_changes_cursor_pagination_is_complete_and_duplicate_free(db):
     cursor = None
     for _ in range(10):
         out = await list_changes(
-            change_type=None, severity=None, acknowledged=None,
-            canonical_entity_id=model.id, cursor=cursor, limit=3, offset=0,
-            db=db, _user=None,
+            change_type=None,
+            severity=None,
+            acknowledged=None,
+            canonical_entity_id=model.id,
+            cursor=cursor,
+            limit=3,
+            offset=0,
+            db=db,
+            _user=None,
         )
         seen.extend(r["id"] for r in out["data"])
         if not out["meta"]["has_more"]:
@@ -387,6 +435,7 @@ async def test_changes_cursor_pagination_is_complete_and_duplicate_free(db):
         cursor = out["meta"]["next_cursor"]
     assert sorted(seen) == sorted(created), (len(seen), len(created))
     assert len(seen) == len(set(seen)), "duplicates across pages"
+
 
 async def test_delta_export_does_not_skip_same_timestamp_rows(db):
     """Round-194 killer: three changes sharing one detected_at (a batch
@@ -403,9 +452,12 @@ async def test_delta_export_does_not_skip_same_timestamp_rows(db):
     db.add(model)
     await db.flush()
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
@@ -413,9 +465,14 @@ async def test_delta_export_does_not_skip_same_timestamp_rows(db):
     created = []
     for i in range(3):
         change = ChangeEvent(
-            observation_id=obs.id, change_type="license", field=f"tie{i}",
-            old_value=None, new_value={"i": i}, severity="info",
-            entity_kind="model", canonical_entity_id=model.id,
+            observation_id=obs.id,
+            change_type="license",
+            field=f"tie{i}",
+            old_value=None,
+            new_value={"i": i},
+            severity="info",
+            entity_kind="model",
+            canonical_entity_id=model.id,
             detected_at=stamp,
         )
         db.add(change)
@@ -426,9 +483,7 @@ async def test_delta_export_does_not_skip_same_timestamp_rows(db):
     since = "2026-09-25T11:59:59Z"
     since_id = None
     for _ in range(5):
-        out = await export_changes_delta(
-            since=since, since_id=since_id, limit=2, db=db, _user=None
-        )
+        out = await export_changes_delta(since=since, since_id=since_id, limit=2, db=db, _user=None)
         seen.extend(r["id"] for r in out["data"] if r["id"] in created)
         if not out["meta"]["has_more"]:
             break

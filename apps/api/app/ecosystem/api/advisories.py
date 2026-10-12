@@ -23,7 +23,10 @@ async def create_advisory(
     rides the normal fan-out. Never blocks or migrates anything by itself."""
     advisory = await AdvisoryService(db).create(created_by=user.id, **body.model_dump())
     await eco_audit(
-        db, user, action="eco.advisory_registered", target_type="eco_security_advisory",
+        db,
+        user,
+        action="eco.advisory_registered",
+        target_type="eco_security_advisory",
         target_id=advisory.id,
         after={"ref": advisory.advisory_ref, "severity": advisory.severity},
     )
@@ -45,9 +48,7 @@ async def list_advisories(
 
     _check_severity(severity, ADVISORY_SEVERITIES)
     check_enum(status, ADVISORY_STATUSES, "status")
-    return {
-        "data": await AdvisoryService(db).list(status=status, severity=severity, limit=limit)
-    }
+    return {"data": await AdvisoryService(db).list(status=status, severity=severity, limit=limit)}
 
 
 @router.get("/advisories/{advisory_id}/affected", response_model=DataResponse[list])
@@ -72,8 +73,12 @@ async def transition_advisory(
         advisory_id, to_status=to_status, actor_id=user.id
     )
     await eco_audit(
-        db, user, action="eco.advisory_status", target_type="eco_security_advisory",
-        target_id=advisory_id, after={"status": to_status},
+        db,
+        user,
+        action="eco.advisory_status",
+        target_type="eco_security_advisory",
+        target_id=advisory_id,
+        after={"status": to_status},
     )
     await db.commit()
     return {"data": advisory}

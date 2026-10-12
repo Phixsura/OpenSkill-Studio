@@ -37,6 +37,7 @@ async def client():
     # Restore original lifespan
     app.router.lifespan_context = original_lifespan
 
+
 @pytest.fixture(autouse=True)
 def _pin_example_dns(monkeypatch):
     """R243 anti-flake: eco test sources use example.com, and the SSRF guard
@@ -55,4 +56,3 @@ def _pin_example_dns(monkeypatch):
         return real(host, *args, **kwargs)
 
     monkeypatch.setattr(_socket, "getaddrinfo", pinned)
-

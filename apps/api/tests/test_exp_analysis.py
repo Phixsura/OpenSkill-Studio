@@ -98,9 +98,7 @@ def test_wilson_endpoints_satisfy_defining_quadratic():
         for c in wilson_ci(s, n):
             if c in (0.0, 1.0):
                 continue
-            assert (phat - c) ** 2 == pytest.approx(
-                Z_975**2 * c * (1 - c) / n, rel=1e-9
-            )
+            assert (phat - c) ** 2 == pytest.approx(Z_975**2 * c * (1 - c) / n, rel=1e-9)
 
 
 def test_wilson_zero_n():
@@ -181,8 +179,11 @@ def test_rate_golden():
 
 def _arm_stats(xs: list[float], ys: list[float]) -> dict:
     return {
-        "n": len(ys), "sum": sum(ys), "sum_sq": sum(y * y for y in ys),
-        "cov_sum": sum(xs), "cov_sum_sq": sum(x * x for x in xs),
+        "n": len(ys),
+        "sum": sum(ys),
+        "sum_sq": sum(y * y for y in ys),
+        "cov_sum": sum(xs),
+        "cov_sum_sq": sum(x * x for x in xs),
         "cov_xy_sum": sum(x * y for x, y in zip(xs, ys, strict=True)),
     }
 
@@ -208,8 +209,14 @@ def test_cuped_uncorrelated_covariate_no_gain():
 
 
 def test_cuped_missing_covariate_returns_none():
-    arm = {"n": 10, "sum": 5.0, "sum_sq": 4.0,
-           "cov_sum": None, "cov_sum_sq": None, "cov_xy_sum": None}
+    arm = {
+        "n": 10,
+        "sum": 5.0,
+        "sum_sq": 4.0,
+        "cov_sum": None,
+        "cov_sum_sq": None,
+        "cov_xy_sum": None,
+    }
     assert cuped_adjusted_welch(arm, arm) is None
 
 
@@ -415,9 +422,7 @@ def test_cuped_matches_explicit_adjusted_values():
 def test_cuped_constant_outcome_reports_zero_reduction():
     yc = [5.0, 5.0, 5.0]
     yt = [5.0, 5.0, 5.0]
-    r = cuped_adjusted_welch(
-        _arm_stats([1.0, 2.0, 3.0], yc), _arm_stats([1.5, 2.5, 3.5], yt)
-    )
+    r = cuped_adjusted_welch(_arm_stats([1.0, 2.0, 3.0], yc), _arm_stats([1.5, 2.5, 3.5], yt))
     assert r is not None
     assert r["variance_reduction_pct"] == 0.0
 
@@ -489,9 +494,7 @@ def test_t_sf_negative_symmetry():
 
 
 def test_cuped_two_element_arms_allowed():
-    r = cuped_adjusted_welch(
-        _arm_stats([1.0, 2.0], [2.0, 4.0]), _arm_stats([1.5, 2.5], [3.0, 5.0])
-    )
+    r = cuped_adjusted_welch(_arm_stats([1.0, 2.0], [2.0, 4.0]), _arm_stats([1.5, 2.5], [3.0, 5.0]))
     assert r is not None
 
 
@@ -649,13 +652,15 @@ def test_thompson_weights_filter_exact():
     negative successes, successes > n — each boundary pinned."""
     from app.experiments.services.analysis import thompson_weights
 
-    result = thompson_weights({
-        "zero_n": (0, 0),
-        "neg_s": (-1, 10),
-        "over_s": (11, 10),
-        "ok1": (2, 10),
-        "ok2": (5, 10),
-    })
+    result = thompson_weights(
+        {
+            "zero_n": (0, 0),
+            "neg_s": (-1, 10),
+            "over_s": (11, 10),
+            "ok1": (2, 10),
+            "ok2": (5, 10),
+        }
+    )
     assert set(result["p_best"]) == {"ok1", "ok2"}
     # boundary inclusions: s == 0 and s == n are both legal
     edge = thompson_weights({"all_fail": (0, 10), "all_pass": (10, 10)})
@@ -694,8 +699,11 @@ def test_did_estimate_change_score_math():
     def _arm(pre: list[float], post: list[float]) -> dict:
         n = len(pre)
         return {
-            "n": n, "sum": sum(post), "sum_sq": sum(v * v for v in post),
-            "cov_sum": sum(pre), "cov_sum_sq": sum(v * v for v in pre),
+            "n": n,
+            "sum": sum(post),
+            "sum_sq": sum(v * v for v in post),
+            "cov_sum": sum(pre),
+            "cov_sum_sq": sum(v * v for v in pre),
             "cov_xy_sum": sum(a * b for a, b in zip(pre, post, strict=True)),
         }
 
@@ -711,12 +719,17 @@ def test_did_estimate_totality():
     from app.experiments.services.analysis import did_estimate
 
     assert did_estimate({}, {}) is None  # missing sufficient stats
-    tiny = {"n": 1, "sum": 1.0, "sum_sq": 1.0, "cov_sum": 1.0,
-            "cov_sum_sq": 1.0, "cov_xy_sum": 1.0}
+    tiny = {"n": 1, "sum": 1.0, "sum_sq": 1.0, "cov_sum": 1.0, "cov_sum_sq": 1.0, "cov_xy_sum": 1.0}
     assert did_estimate(tiny, tiny) is None  # n < 2
     # zero-variance arms: exact effect, degenerate CI, p None (not a crash)
-    flat = {"n": 3, "sum": 6.0, "sum_sq": 12.0, "cov_sum": 3.0,
-            "cov_sum_sq": 3.0, "cov_xy_sum": 6.0}
+    flat = {
+        "n": 3,
+        "sum": 6.0,
+        "sum_sq": 12.0,
+        "cov_sum": 3.0,
+        "cov_sum_sq": 3.0,
+        "cov_xy_sum": 6.0,
+    }
     result = did_estimate(flat, flat)
     assert result["effect"] == 0.0
     assert result["p"] is None
@@ -738,11 +751,11 @@ def test_required_n_per_arm_known_value_and_monotonicity():
     assert required_n_per_arm(0.10, 0.20, alpha=0.01) > n
     # degenerate inputs refuse instead of lying
     assert required_n_per_arm(0.0, 0.2) is None
-    assert required_n_per_arm(0.9, 0.2) is None   # lifted rate >= 1
-    assert required_n_per_arm(0.5, 0.0) is None   # no difference to detect
+    assert required_n_per_arm(0.9, 0.2) is None  # lifted rate >= 1
+    assert required_n_per_arm(0.5, 0.0) is None  # no difference to detect
     # exact boundaries (wave-12 survivors): the OPEN interval ends refuse
     assert required_n_per_arm(1.0, -0.5) is None  # p1 == 1 exactly
-    assert required_n_per_arm(0.5, 1.0) is None   # p2 == 1 exactly
+    assert required_n_per_arm(0.5, 1.0) is None  # p2 == 1 exactly
     # exact value pin (kills the sqrt-argument and exponent mutants) — the
     # formula's own output at the textbook point, ledgered as a constant
     assert required_n_per_arm(0.10, 0.20) == 3841
@@ -758,14 +771,13 @@ def _mc_arm_stats(ys, xs_by_key, keys):
             "xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
         }
         xx = {}
-        for k2 in keys[i + 1:]:
+        for k2 in keys[i + 1 :]:
             xs2 = xs_by_key[k2]
             xx[k2] = sum(a * b for a, b in zip(xs, xs2, strict=True))
         if xx:
             entry["xx"] = xx
         cov[k] = entry
-    return {"n": len(ys), "sum": sum(ys),
-            "sum_sq": sum(v * v for v in ys), "covariates": cov}
+    return {"n": len(ys), "sum": sum(ys), "sum_sq": sum(v * v for v in ys), "covariates": cov}
 
 
 def test_multi_cuped_matches_per_unit_oracle():
@@ -800,12 +812,11 @@ def test_multi_cuped_matches_per_unit_oracle():
     # centered normal equations solved by hand (2x2)
     a11 = sum((v - xbar["c1"]) ** 2 for v in allx["c1"])
     a22 = sum((v - xbar["c2"]) ** 2 for v in allx["c2"])
-    a12 = sum((p - xbar["c1"]) * (q - xbar["c2"])
-              for p, q in zip(allx["c1"], allx["c2"], strict=True))
-    b1 = sum((p - xbar["c1"]) * (y - ybar)
-             for p, y in zip(allx["c1"], ally, strict=True))
-    b2 = sum((q - xbar["c2"]) * (y - ybar)
-             for q, y in zip(allx["c2"], ally, strict=True))
+    a12 = sum(
+        (p - xbar["c1"]) * (q - xbar["c2"]) for p, q in zip(allx["c1"], allx["c2"], strict=True)
+    )
+    b1 = sum((p - xbar["c1"]) * (y - ybar) for p, y in zip(allx["c1"], ally, strict=True))
+    b2 = sum((q - xbar["c2"]) * (y - ybar) for q, y in zip(allx["c2"], ally, strict=True))
     det = a11 * a22 - a12 * a12
     th1 = (b1 * a22 - b2 * a12) / det
     th2 = (b2 * a11 - b1 * a12) / det
@@ -821,8 +832,12 @@ def test_multi_cuped_matches_per_unit_oracle():
     zc = residuals(cy, cx1, cx2)
     zt = residuals(ty, tx1, tx2)
     oracle = welch_from_stats(
-        len(zc), sum(zc), sum(v * v for v in zc),
-        len(zt), sum(zt), sum(v * v for v in zt),
+        len(zc),
+        sum(zc),
+        sum(v * v for v in zc),
+        len(zt),
+        sum(zt),
+        sum(v * v for v in zt),
     )
     assert result["effect"] == pytest.approx(oracle["effect"], rel=1e-9)
     assert result["t"] == pytest.approx(oracle["t"], rel=1e-9)
@@ -830,8 +845,12 @@ def test_multi_cuped_matches_per_unit_oracle():
     # round 123: the honesty readout mirrors the single path — achieved
     # variance reduction vs the UNADJUSTED Welch, from the same residuals
     raw = welch_from_stats(
-        len(cy), sum(cy), sum(v * v for v in cy),
-        len(ty), sum(ty), sum(v * v for v in ty),
+        len(cy),
+        sum(cy),
+        sum(v * v for v in cy),
+        len(ty),
+        sum(ty),
+        sum(v * v for v in ty),
     )
     expected_pct = 100.0 * (
         1.0
@@ -857,12 +876,22 @@ def test_multi_cuped_k1_reduces_to_single_cuped():
     treatment = _mc_arm_stats(ty, {"c1": tx}, ["c1"])
     multi = multi_cuped_adjusted_welch(control, treatment, ["c1"])
     single = cuped_adjusted_welch(
-        {"n": 4, "sum": sum(cy), "sum_sq": sum(v * v for v in cy),
-         "cov_sum": sum(cx), "cov_sum_sq": sum(v * v for v in cx),
-         "cov_xy_sum": sum(a * b for a, b in zip(cy, cx, strict=True))},
-        {"n": 4, "sum": sum(ty), "sum_sq": sum(v * v for v in ty),
-         "cov_sum": sum(tx), "cov_sum_sq": sum(v * v for v in tx),
-         "cov_xy_sum": sum(a * b for a, b in zip(ty, tx, strict=True))},
+        {
+            "n": 4,
+            "sum": sum(cy),
+            "sum_sq": sum(v * v for v in cy),
+            "cov_sum": sum(cx),
+            "cov_sum_sq": sum(v * v for v in cx),
+            "cov_xy_sum": sum(a * b for a, b in zip(cy, cx, strict=True)),
+        },
+        {
+            "n": 4,
+            "sum": sum(ty),
+            "sum_sq": sum(v * v for v in ty),
+            "cov_sum": sum(tx),
+            "cov_sum_sq": sum(v * v for v in tx),
+            "cov_xy_sum": sum(a * b for a, b in zip(ty, tx, strict=True)),
+        },
     )
     assert multi is not None and single is not None
     assert multi["effect"] == pytest.approx(single["effect"], rel=1e-9)
@@ -897,8 +926,26 @@ def test_histogram_quantile_brackets_the_true_sample_quantile():
 
     from app.experiments.services.analysis import histogram_quantile
 
-    values = sorted([0.7, 1.3, 2.9, 3.3, 5.1, 9.8, 17.0, 33.0, 64.5, 130.0,
-                     250.0, 400.0, 700.0, 1500.0, 2900.0, 6000.0])
+    values = sorted(
+        [
+            0.7,
+            1.3,
+            2.9,
+            3.3,
+            5.1,
+            9.8,
+            17.0,
+            33.0,
+            64.5,
+            130.0,
+            250.0,
+            400.0,
+            700.0,
+            1500.0,
+            2900.0,
+            6000.0,
+        ]
+    )
     hist = _hist_of(values)
     for p in (0.1, 0.25, 0.5, 0.75, 0.9, 0.95):
         out = histogram_quantile(hist, p)
@@ -993,8 +1040,8 @@ def test_quantile_comparison_exact_ci_combination():
     c_hi = 8.0 * 2.0 ** ((50.0 + half) / 100.0)
     t_lo = 64.0 * 2.0 ** ((50.0 - half) / 100.0)
     t_hi = 64.0 * 2.0 ** ((50.0 + half) / 100.0)
-    mid_c = 8.0 * 2.0 ** 0.5
-    mid_t = 64.0 * 2.0 ** 0.5
+    mid_c = 8.0 * 2.0**0.5
+    mid_t = 64.0 * 2.0**0.5
     assert out["diff"] == pytest.approx(mid_t - mid_c, rel=1e-12)
     assert out["ci"][0] == pytest.approx(t_lo - c_hi, rel=1e-12)
     assert out["ci"][1] == pytest.approx(t_hi - c_lo, rel=1e-12)
@@ -1015,9 +1062,10 @@ def test_quantile_comparison_diff_and_conservative_ci():
     assert out["diff"] == pytest.approx(t["estimate"] - c["estimate"])
     # conservative combine: subtracting opposite ends can only widen
     assert out["ci"][0] <= out["diff"] <= out["ci"][1]
-    assert out["ci"][1] - out["ci"][0] >= (
-        (t["ci"][1] - t["ci"][0]) + (c["ci"][1] - c["ci"][0])
-    ) - 1e-12
+    assert (
+        out["ci"][1] - out["ci"][0]
+        >= ((t["ci"][1] - t["ci"][0]) + (c["ci"][1] - c["ci"][0])) - 1e-12
+    )
     # either side refusing refuses the comparison
     assert quantile_comparison({"__neg__": 2}, treatment, 0.5) is None
 
@@ -1037,8 +1085,7 @@ def test_multi_cuped_degenerate_refusals():
     # an arm missing a WHOLE covariate entry refuses cleanly (never crashes)
     whole_missing_c = _mc_arm_stats(cy, {"c1": cx, "c2": [0.0, 1.0, 2.0]}, keys)
     del whole_missing_c["covariates"]["c2"]
-    whole_missing_t = _mc_arm_stats([7.0, 9.0, 8.0],
-                                    {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
+    whole_missing_t = _mc_arm_stats([7.0, 9.0, 8.0], {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
     assert multi_cuped_adjusted_welch(whole_missing_c, whole_missing_t, keys) is None
 
     # n == 2 per arm is the exact admissible floor (> 1)
@@ -1047,8 +1094,7 @@ def test_multi_cuped_degenerate_refusals():
     assert multi_cuped_adjusted_welch(tiny_c, tiny_t, keys) is not None
 
     good_c = _mc_arm_stats(cy, {"c1": cx, "c2": [0.0, 1.0, 2.0]}, keys)
-    good_t = _mc_arm_stats([7.0, 9.0, 8.0],
-                        {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
+    good_t = _mc_arm_stats([7.0, 9.0, 8.0], {"c1": cx, "c2": [1.0, 0.0, 2.0]}, keys)
     del good_c["covariates"]["c1"]["xx"]  # missing cross term
     assert multi_cuped_adjusted_welch(good_c, good_t, keys) is None
 
@@ -1077,8 +1123,12 @@ def test_aa_calibration_monte_carlo():
         a = [rng.gauss(10.0, 2.0) for _ in range(n)]
         b = [rng.gauss(10.0, 2.0) for _ in range(n)]
         w = welch_from_stats(
-            n, sum(a), sum(v * v for v in a),
-            n, sum(b), sum(v * v for v in b),
+            n,
+            sum(a),
+            sum(v * v for v in a),
+            n,
+            sum(b),
+            sum(v * v for v in b),
         )
         if w["p"] < 0.05:
             welch_fp += 1
@@ -1094,14 +1144,19 @@ def test_aa_calibration_monte_carlo():
 
     cuped_fp = 0
     for _ in range(reps):
+
         def arm():
             xs = [rng.gauss(5.0, 1.0) for _ in range(n)]
             ys = [x + rng.gauss(0.0, 1.0) for x in xs]
             return {
-                "n": n, "sum": sum(ys), "sum_sq": sum(v * v for v in ys),
-                "cov_sum": sum(xs), "cov_sum_sq": sum(v * v for v in xs),
+                "n": n,
+                "sum": sum(ys),
+                "sum_sq": sum(v * v for v in ys),
+                "cov_sum": sum(xs),
+                "cov_sum_sq": sum(v * v for v in xs),
                 "cov_xy_sum": sum(a * b for a, b in zip(ys, xs, strict=True)),
             }
+
         out = cuped_adjusted_welch(arm(), arm())
         if out is not None and out["p"] < 0.05:
             cuped_fp += 1
@@ -1175,8 +1230,12 @@ def test_msprt_anytime_validity_under_continuous_peeking():
             a.extend(rng.gauss(0.0, 1.0) for _ in range(batch))
             b.extend(rng.gauss(0.0, 1.0) for _ in range(batch))
             w = welch_from_stats(
-                len(a), sum(a), sum(v * v for v in a),
-                len(b), sum(b), sum(v * v for v in b),
+                len(a),
+                sum(a),
+                sum(v * v for v in a),
+                len(b),
+                sum(b),
+                sum(v * v for v in b),
             )
             if msprt_always_valid_p(w["t"]) < 0.05:
                 msprt_hit = True
@@ -1363,7 +1422,8 @@ def test_synthetic_control_exact_mixture_oracle():
     from app.experiments.services.analysis import synthetic_control
 
     out = synthetic_control(
-        [2.0, 2.0, 2.0, 2.0], [4.0],
+        [2.0, 2.0, 2.0, 2.0],
+        [4.0],
         [[1.0, 2.0, 3.0, 4.0], [3.0, 2.0, 1.0, 0.0]],
         [[5.0], [1.0]],
     )
@@ -1377,7 +1437,8 @@ def test_synthetic_control_exact_mixture_oracle():
     assert "association only" in out["caveat"]
     # deterministic: identical calls give identical dicts
     assert out == synthetic_control(
-        [2.0, 2.0, 2.0, 2.0], [4.0],
+        [2.0, 2.0, 2.0, 2.0],
+        [4.0],
         [[1.0, 2.0, 3.0, 4.0], [3.0, 2.0, 1.0, 0.0]],
         [[5.0], [1.0]],
     )
@@ -1387,7 +1448,8 @@ def test_synthetic_control_placebo_and_refusals():
     from app.experiments.services.analysis import synthetic_control
 
     out = synthetic_control(
-        [1.0, 2.0, 3.0], [4.0],
+        [1.0, 2.0, 3.0],
+        [4.0],
         [[1.0, 2.0, 3.0], [5.0, 5.0, 4.0], [0.0, 1.0, 1.0]],
         [[4.0], [6.0], [1.0]],
     )
@@ -1399,19 +1461,21 @@ def test_synthetic_control_placebo_and_refusals():
 
     # refusals: short pre, lone donor, all-constant donor matrix,
     # ragged shapes
-    assert synthetic_control([1.0, 2.0], [1.0],
-                             [[1.0, 2.0], [2.0, 1.0]], [[1.0], [1.0]]) is None
-    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
-                             [[1.0, 2.0, 3.0]], [[1.0]]) is None
-    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
-                             [[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]],
-                             [[1.0], [1.0]]) is None
-    assert synthetic_control([1.0, 2.0, 3.0], [1.0],
-                             [[1.0, 2.0], [2.0, 1.0, 0.0]],
-                             [[1.0], [1.0]]) is None
-    assert synthetic_control([1.0, 2.0, 3.0], [],
-                             [[1.0, 2.0, 3.0], [2.0, 1.0, 0.0]],
-                             [[], []]) is None
+    assert synthetic_control([1.0, 2.0], [1.0], [[1.0, 2.0], [2.0, 1.0]], [[1.0], [1.0]]) is None
+    assert synthetic_control([1.0, 2.0, 3.0], [1.0], [[1.0, 2.0, 3.0]], [[1.0]]) is None
+    assert (
+        synthetic_control(
+            [1.0, 2.0, 3.0], [1.0], [[2.0, 2.0, 2.0], [2.0, 2.0, 2.0]], [[1.0], [1.0]]
+        )
+        is None
+    )
+    assert (
+        synthetic_control([1.0, 2.0, 3.0], [1.0], [[1.0, 2.0], [2.0, 1.0, 0.0]], [[1.0], [1.0]])
+        is None
+    )
+    assert (
+        synthetic_control([1.0, 2.0, 3.0], [], [[1.0, 2.0, 3.0], [2.0, 1.0, 0.0]], [[], []]) is None
+    )
 
 
 def test_project_simplex_hand_oracles():
@@ -1422,8 +1486,7 @@ def test_project_simplex_hand_oracles():
     assert _project_simplex([2.0, 0.0]) == pytest.approx([1.0, 0.0])
     # v = [0.3, 0.1, -0.2]: theta = (0.2 - 1)/3 = -0.2667 by hand
     out = _project_simplex([0.3, 0.1, -0.2])
-    assert out == pytest.approx([0.3 + 4.0 / 15.0, 0.1 + 4.0 / 15.0,
-                                 -0.2 + 4.0 / 15.0], abs=1e-12)
+    assert out == pytest.approx([0.3 + 4.0 / 15.0, 0.1 + 4.0 / 15.0, -0.2 + 4.0 / 15.0], abs=1e-12)
     assert sum(out) == pytest.approx(1.0, abs=1e-12)
     # already-on-simplex input is a fixed point
     assert _project_simplex([0.25, 0.75]) == pytest.approx([0.25, 0.75])
@@ -1438,7 +1501,8 @@ def test_synthetic_control_placebo_p_is_one_when_fit_is_perfect():
     from app.experiments.services.analysis import synthetic_control
 
     out = synthetic_control(
-        [1.0, 2.0, 3.0], [10.0],
+        [1.0, 2.0, 3.0],
+        [10.0],
         [[1.0, 2.0, 3.0], [9.0, 8.0, 7.0], [5.0, 5.0, 5.0]],
         [[10.0], [1.0], [5.0]],
     )
@@ -1460,16 +1524,26 @@ def test_auto_select_covariates_hand_oracle():
 
     # strong positive (r ~ 0.976), perfect negative, near-zero, constant
     arms = [
-        arm(4, 52.0, 696.0, {
-            "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0},
-            "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -140.0},
-            "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 104.0},
-        }),
-        arm(4, 56.0, 804.0, {
-            "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 150.0},
-            "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -150.0},
-            "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 112.0},
-        }),
+        arm(
+            4,
+            52.0,
+            696.0,
+            {
+                "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0},
+                "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -140.0},
+                "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 104.0},
+            },
+        ),
+        arm(
+            4,
+            56.0,
+            804.0,
+            {
+                "strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 150.0},
+                "anti": {"sum": -10.0, "sum_sq": 30.0, "xy_sum": -150.0},
+                "flat": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 112.0},
+            },
+        ),
     ]
     out = auto_select_covariates(arms, ["strong", "anti", "flat"])
     # |r| equal for strong/anti (same magnitude) -> tie-break by key:
@@ -1478,23 +1552,21 @@ def test_auto_select_covariates_hand_oracle():
     # the correlation is an EXPOSED readout, pinned exactly:
     # pooled cov 20 (or -20), var_x 10, var_y 42 -> r = 20/sqrt(420)
     import math as _m
+
     assert out[0]["r"] == pytest.approx(-20.0 / _m.sqrt(420.0), abs=1e-12)
     assert out[1]["r"] == pytest.approx(20.0 / _m.sqrt(420.0), abs=1e-12)
 
     # threshold: an |r| below 0.1 is excluded
     weak_arms = [
-        arm(4, 52.0, 696.0,
-            {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 130.4}}),
-        arm(4, 56.0, 804.0,
-            {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.4}}),
+        arm(4, 52.0, 696.0, {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 130.4}}),
+        arm(4, 56.0, 804.0, {"weak": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.4}}),
     ]
     # pooled cov = 270.8 - 270 = 0.8 -> r = 0.8/sqrt(420) ~ 0.039 < 0.1
     assert auto_select_covariates(weak_arms, ["weak"]) == []
 
     # a candidate missing from ANY arm is never guessed at
     partial = [
-        arm(4, 52.0, 696.0,
-            {"strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0}}),
+        arm(4, 52.0, 696.0, {"strong": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0}}),
         arm(4, 56.0, 804.0, {}),
     ]
     assert auto_select_covariates(partial, ["strong"]) == []
@@ -1503,13 +1575,11 @@ def test_auto_select_covariates_hand_oracle():
     capped = auto_select_covariates(arms, ["strong", "anti"], max_k=1)
     assert [c["key"] for c in capped] == ["anti"]
     four = {
-        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0,
-                  "xy_sum": 140.0 * sign}
+        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0, "xy_sum": 140.0 * sign}
         for i, sign in enumerate((1, -1, 1, -1))
     }
     four2 = {
-        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0,
-                  "xy_sum": 150.0 * sign}
+        f"c{i}": {"sum": 10.0 * sign, "sum_sq": 30.0, "xy_sum": 150.0 * sign}
         for i, sign in enumerate((1, -1, 1, -1))
     }
     out4 = auto_select_covariates(
@@ -1519,21 +1589,18 @@ def test_auto_select_covariates_hand_oracle():
     assert len(out4) == 3  # the DEFAULT cap
 
     # pooled n == 2 is ADMISSIBLE (the floor is < 2)
-    two = [arm(2, 10.0, 100.0,
-               {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 20.0}})]
+    two = [arm(2, 10.0, 100.0, {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 20.0}})]
     assert [c["key"] for c in auto_select_covariates(two, ["k"])] == ["k"]
 
     # |r| == 0.1 EXACTLY is selected (>= is the contract): var_x 2,
     # var_y 50, cov 1 -> r = 1/10
-    edge = [arm(2, 10.0, 100.0,
-                {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 11.0}})]
+    edge = [arm(2, 10.0, 100.0, {"k": {"sum": 2.0, "sum_sq": 4.0, "xy_sum": 11.0}})]
     out_edge = auto_select_covariates(edge, ["k"])
     assert [c["key"] for c in out_edge] == ["k"]
     assert out_edge[0]["r"] == pytest.approx(0.1, abs=1e-12)
 
     # a CONSTANT OUTCOME (var_y == 0) skips the candidate, never divides
-    y_const = [arm(4, 8.0, 16.0,
-                   {"k": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 20.0}})]
+    y_const = [arm(4, 8.0, 16.0, {"k": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 20.0}})]
     assert auto_select_covariates(y_const, ["k"]) == []
 
 
@@ -1544,12 +1611,11 @@ def test_variance_reduction_auto_literal_validation():
     spec = VarianceReductionSpec(method="cuped", covariate_metrics=["auto"])
     assert spec.covariates() == ["auto"]
     with pytest.raises(ValueError):
-        VarianceReductionSpec(
-            method="cuped", covariate_metrics=["auto", "revision_count"])
+        VarianceReductionSpec(method="cuped", covariate_metrics=["auto", "revision_count"])
 
     from app.experiments.services.metrics import resolve_covariates
-    assert resolve_covariates(spec) == ["practical_pass_rate",
-                                        "revision_count"]
+
+    assert resolve_covariates(spec) == ["practical_pass_rate", "revision_count"]
 
 
 def test_required_n_boundary_rates_are_none():

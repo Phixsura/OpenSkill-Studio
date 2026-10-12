@@ -11,9 +11,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def get_registry_badges(
-    db: AsyncSession, entity_refs: list[tuple[str, str]]
-) -> dict:
+async def get_registry_badges(db: AsyncSession, entity_refs: list[tuple[str, str]]) -> dict:
     """Evidence-backed registry badges: benchmark_verified, production_verified,
     dependency_update_available, provider_sunset_risk."""
     from app.ecosystem.services.signals import SignalsService

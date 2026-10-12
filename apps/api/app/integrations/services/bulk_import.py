@@ -275,11 +275,13 @@ def parse_users(
     # memory and (on commit) a savepoint per row. Bound the ROW count as a
     # file-level error; MAX_ROW_ERRORS already bounds stored error rows.
     if len(rows) + len(errors) > MAX_IMPORT_ROWS:
-        return [], [{
-            "row_number": 1,
-            "code": "row_limit",
-            "message": f"File exceeds {MAX_IMPORT_ROWS} rows — split the import",
-        }]
+        return [], [
+            {
+                "row_number": 1,
+                "code": "row_limit",
+                "message": f"File exceeds {MAX_IMPORT_ROWS} rows — split the import",
+            }
+        ]
     return rows, errors
 
 

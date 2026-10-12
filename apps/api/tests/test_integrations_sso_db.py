@@ -1536,7 +1536,8 @@ async def test_jwks_kid_miss_refetch_floor(db, monkeypatch):
     owner = await _user(db)
     org = await _org(db, owner)
     conn = await SsoAdminService(db).create(
-        org.id, protocol="oidc",
+        org.id,
+        protocol="oidc",
         oidc_issuer=f"https://jwks-{uuid.uuid4().hex[:6]}.example.com",
         oidc_client_id="c",
     )
@@ -1549,6 +1550,7 @@ async def test_jwks_kid_miss_refetch_floor(db, monkeypatch):
 
     def _b64u(i, length):
         import base64 as _b
+
         return _b.urlsafe_b64encode(i.to_bytes(length, "big")).rstrip(b"=").decode()
 
     class _Egress:
@@ -1556,10 +1558,17 @@ async def test_jwks_kid_miss_refetch_floor(db, monkeypatch):
             calls["n"] += 1
             return httpx.Response(
                 200,
-                json={"keys": [{
-                    "kty": "RSA", "kid": f"kid-{calls['n']}", "use": "sig",
-                    "n": _b64u(pub.n, 256), "e": _b64u(pub.e, 3),
-                }]},
+                json={
+                    "keys": [
+                        {
+                            "kty": "RSA",
+                            "kid": f"kid-{calls['n']}",
+                            "use": "sig",
+                            "n": _b64u(pub.n, 256),
+                            "e": _b64u(pub.e, 3),
+                        }
+                    ]
+                },
                 request=httpx.Request(method, url),
             )
 
@@ -1599,7 +1608,10 @@ async def test_last_break_glass_cannot_be_removed_under_enforced_sso(db):
     org = await _org(db, owner)
     svc = SsoAdminService(db)
     conn = await svc.create(
-        org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="c",
+        org.id,
+        protocol="oidc",
+        oidc_issuer=ISSUER,
+        oidc_client_id="c",
     )
     conn.status = "active"
     from app.models.organization import OrgRole as _Role
@@ -1613,17 +1625,14 @@ async def test_last_break_glass_cannot_be_removed_under_enforced_sso(db):
     assert e.value.code == "BREAK_GLASS_REQUIRED"
     member = (
         await db.execute(
-            select(OrgMember).where(
-                OrgMember.org_id == org.id, OrgMember.user_id == owner.id
-            )
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == owner.id)
         )
     ).scalar_one()
     assert member.is_break_glass is True
 
     # a second designee makes removal of the first fine
     u2 = await _user(db)
-    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.ADMIN,
-                     status=MemberStatus.ACTIVE))
+    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.ADMIN, status=MemberStatus.ACTIVE))
     await db.flush()
     await svc.set_break_glass(org.id, u2.id, enabled=True, actor_role=_Role.OWNER)
     await svc.set_break_glass(org.id, owner.id, enabled=False, actor_role=_Role.OWNER)

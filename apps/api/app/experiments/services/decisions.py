@@ -32,9 +32,7 @@ class DecisionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _cited_look_payload(
-        self, experiment_id: str, result_hash: str
-    ) -> dict | None:
+    async def _cited_look_payload(self, experiment_id: str, result_hash: str) -> dict | None:
         """The analysis_look this hash cites — None when no such look
         exists (the no-decide-before-analyze gate reads this)."""
         return (
@@ -80,7 +78,9 @@ class DecisionService:
     ) -> DecisionRecord:
         if decision not in DECISIONS:
             raise AppError(
-                "VALIDATION_ERROR", f"Unknown decision: {decision} (allowed: {sorted(DECISIONS)})", 422
+                "VALIDATION_ERROR",
+                f"Unknown decision: {decision} (allowed: {sorted(DECISIONS)})",
+                422,
             )
         esvc = ExperimentService(self.db)
         exp = await esvc._get_locked(experiment_id)  # noqa: SLF001 — same package
@@ -90,9 +90,7 @@ class DecisionService:
                 f"Decisions require status analyzed (got {exp.status})",
                 422,
             )
-        cited_look = await self._cited_look_payload(
-            experiment_id, analysis_result_hash
-        )
+        cited_look = await self._cited_look_payload(experiment_id, analysis_result_hash)
         if cited_look is None:
             raise AppError(
                 "DECISION_HASH_MISMATCH",
@@ -110,9 +108,7 @@ class DecisionService:
         try:
             spec = ExperimentSpec.model_validate(latest.spec)
         except Exception as exc:  # noqa: BLE001 — typed 422 beats a raw 500
-            raise AppError(
-                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
-            ) from exc
+            raise AppError("EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422) from exc
         if decision == "promote" and spec.analysis_type != "randomized":
             # Stricter than the draft-time gate on purpose (§2 posture)
             raise AppError(
@@ -133,8 +129,7 @@ class DecisionService:
             guardrail_outcome=await self._guardrail_outcome(experiment_id),
             # round 239: the cited look's WARNINGS freeze into the decision
             # record — the audit outlives event retention and history limits
-            evidence={**(evidence or {}),
-                      "cited_warnings": cited_look.get("warnings", [])},
+            evidence={**(evidence or {}), "cited_warnings": cited_look.get("warnings", [])},
             approver_user_id=actor.id,
         )
         self.db.add(record)
@@ -160,8 +155,11 @@ class DecisionService:
             experiment_id,
             event_type="decision_recorded",
             actor_user_id=actor.id,
-            payload={"decision": decision, "record_id": record.id,
-                     "analysis_result_hash": analysis_result_hash},
+            payload={
+                "decision": decision,
+                "record_id": record.id,
+                "analysis_result_hash": analysis_result_hash,
+            },
         )
         # §4.18: tenant webhook (fail-safe; after the event row so the
         # in-DB audit is never conditioned on delivery)
@@ -223,9 +221,11 @@ class DecisionService:
         base = select(DecisionRecord.decision, DecisionRecord.analysis_type, func.count())
         if domain:
             base = base.where(DecisionRecord.domain == domain)
-        rows = (await self.db.execute(base.group_by(
-            DecisionRecord.decision, DecisionRecord.analysis_type
-        ))).all()
+        rows = (
+            await self.db.execute(
+                base.group_by(DecisionRecord.decision, DecisionRecord.analysis_type)
+            )
+        ).all()
         by_decision: dict[str, int] = {}
         randomized_terminal = 0
         randomized_promoted = 0

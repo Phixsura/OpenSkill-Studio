@@ -70,8 +70,6 @@ async def _run_sweep(name: str) -> None:
     await engine.dispose()
 
 
-
-
 # ── Ecosystem: curated starter sources (Issue #35, ADR-016 §17) ──
 
 # Well-known public feeds an operator would otherwise hand-enter on day 1.

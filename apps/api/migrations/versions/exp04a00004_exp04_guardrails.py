@@ -36,7 +36,10 @@ def upgrade() -> None:
             "detail", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),

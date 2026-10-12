@@ -214,8 +214,10 @@ class RolloutService:
             tests["cost_per_case_usd"] = welch_t_test(cand_samples["cost"], base_samples["cost"])
         if cand_samples["n"] and base_samples["n"]:
             tests["reliability"] = two_proportion_z_test(
-                cand_samples["successes"], cand_samples["n"],
-                base_samples["successes"], base_samples["n"],
+                cand_samples["successes"],
+                cand_samples["n"],
+                base_samples["successes"],
+                base_samples["n"],
             )
 
         guardrails = plan.guardrails or {}
@@ -293,9 +295,7 @@ class RolloutService:
                     f"Guarded dimensions regressed beyond threshold: {regressions}",
                     409,
                 )
-            candidate = await self.db.get(
-                ReplacementCandidate, plan.replacement_candidate_id
-            )
+            candidate = await self.db.get(ReplacementCandidate, plan.replacement_candidate_id)
             # Promotion records the recommendation — never rewrites bindings
             from app.ecosystem.services.replacement import ReplacementService
 

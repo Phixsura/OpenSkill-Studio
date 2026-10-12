@@ -29,8 +29,16 @@ from app.models.user import User, UserRole
 
 _ANALYZABLE_STATUSES = frozenset({"running", "paused", "completed", "analyzed"})
 
-_SUM_FIELDS = ("n", "numerator", "denominator", "sum_value", "sum_sq",
-               "cov_sum", "cov_sum_sq", "cov_xy_sum")
+_SUM_FIELDS = (
+    "n",
+    "numerator",
+    "denominator",
+    "sum_value",
+    "sum_sq",
+    "cov_sum",
+    "cov_sum_sq",
+    "cov_xy_sum",
+)
 
 
 def result_hash(payload: dict) -> str:
@@ -60,9 +68,7 @@ class AnalysisService:
         try:
             return ExperimentSpec.model_validate(latest.spec)
         except Exception as exc:  # noqa: BLE001 — typed 422 beats a raw 500
-            raise AppError(
-                "EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422
-            ) from exc
+            raise AppError("EXPERIMENT_SPEC_INVALID", "Stored spec failed to parse", 422) from exc
 
     async def _aggregate_metric(
         self, experiment_id: str, metric_key: str, segment: str = ""
@@ -107,9 +113,7 @@ class AnalysisService:
             if row.covariates:
                 acc = arm.setdefault("covariates", {})
                 for cov_key, entry in row.covariates.items():
-                    slot = acc.setdefault(
-                        cov_key, {"sum": 0.0, "sum_sq": 0.0, "xy_sum": 0.0}
-                    )
+                    slot = acc.setdefault(cov_key, {"sum": 0.0, "sum_sq": 0.0, "xy_sum": 0.0})
                     for f in ("sum", "sum_sq", "xy_sum"):
                         slot[f] += float(entry.get(f) or 0.0)
                     for other, xx in (entry.get("xx") or {}).items():
@@ -156,14 +160,18 @@ class AnalysisService:
                     continue
                 if control.denominator and row.denominator:
                     result = stats.analyze_binary(
-                        float(control.numerator or 0), float(control.denominator),
-                        float(row.numerator or 0), float(row.denominator),
+                        float(control.numerator or 0),
+                        float(control.denominator),
+                        float(row.numerator or 0),
+                        float(row.denominator),
                     )
                 elif (control.n or 0) >= 2 and (row.n or 0) >= 2:
                     result = stats.welch_from_stats(
-                        float(control.n), float(control.sum_value or 0),
+                        float(control.n),
+                        float(control.sum_value or 0),
                         float(control.sum_sq or 0),
-                        float(row.n), float(row.sum_value or 0),
+                        float(row.n),
+                        float(row.sum_value or 0),
                         float(row.sum_sq or 0),
                     )
                 else:
@@ -176,9 +184,7 @@ class AnalysisService:
                 strata.setdefault(variant_key, []).append((effect, se))
         return strata
 
-    async def _corpus_prior(
-        self, exp, metric_key: str, exclude_experiment_id: str
-    ) -> dict | None:
+    async def _corpus_prior(self, exp, metric_key: str, exclude_experiment_id: str) -> dict | None:
         """Empirical prior over a metric's effect within a domain: the latest
         analysis_look effect of every OTHER experiment in the domain that
         reached a terminal decision (decided = the analysis was trusted
@@ -218,9 +224,7 @@ class AnalysisService:
             per_metric = (event.payload or {}).get("primary_effects", {}).get(metric_key)
             if not per_metric:
                 continue
-            arm_effects = [
-                v["effect"] for v in per_metric.values() if v.get("effect") is not None
-            ]
+            arm_effects = [v["effect"] for v in per_metric.values() if v.get("effect") is not None]
             if arm_effects:
                 effects.append(sum(arm_effects) / len(arm_effects))
         if len(effects) < 3:
@@ -233,9 +237,7 @@ class AnalysisService:
             "sd": math.sqrt(var),
         }
 
-    async def _novelty_suspect(
-        self, experiment_id: str, metric_key: str, control_key: str
-    ) -> bool:
+    async def _novelty_suspect(self, experiment_id: str, metric_key: str, control_key: str) -> bool:
         """Novelty / effect-decay health check (§4.6 v2): split the metric's
         snapshot windows at their midpoint and compare the pooled effect of
         the early half against the late half. A strong early effect
@@ -279,14 +281,18 @@ class AnalysisService:
                 if control["denominator"] < 30 or arm["denominator"] < 30:
                     return None
                 result = stats.analyze_binary(
-                    control.get("numerator") or 0.0, control["denominator"],
-                    arm.get("numerator") or 0.0, arm["denominator"],
+                    control.get("numerator") or 0.0,
+                    control["denominator"],
+                    arm.get("numerator") or 0.0,
+                    arm["denominator"],
                 )
             elif (control.get("n") or 0) >= 30 and (arm.get("n") or 0) >= 30:
                 result = stats.welch_from_stats(
-                    control["n"], control.get("sum_value") or 0.0,
+                    control["n"],
+                    control.get("sum_value") or 0.0,
                     control.get("sum_sq") or 0.0,
-                    arm["n"], arm.get("sum_value") or 0.0,
+                    arm["n"],
+                    arm.get("sum_value") or 0.0,
                     arm.get("sum_sq") or 0.0,
                 )
             else:
@@ -311,15 +317,16 @@ class AnalysisService:
             return False
         if early_effect == 0.0:
             return False
-        return (
-            early_effect * late_effect < 0
-            or abs(late_effect) < abs(early_effect) / 3.0
-        )
+        return early_effect * late_effect < 0 or abs(late_effect) < abs(early_effect) / 3.0
 
     @staticmethod
     def _compare(
-        kind: str, engine: str, control: dict, treatment: dict,
-        covariate_keys: list[str] | None = None, auto: bool = False,
+        kind: str,
+        engine: str,
+        control: dict,
+        treatment: dict,
+        covariate_keys: list[str] | None = None,
+        auto: bool = False,
     ) -> dict:
         if kind in ("binary", "time_to_event"):
             x1 = control.get("numerator") or 0.0
@@ -331,30 +338,40 @@ class AnalysisService:
             else:
                 result = stats.analyze_binary(x1, n1, x2, n2)
             if kind == "time_to_event":
-                result["caveat"] = "time_to_event analyzed as binary-at-horizon (full KM deferred, ADR-017 §16)"
+                result["caveat"] = (
+                    "time_to_event analyzed as binary-at-horizon (full KM deferred, ADR-017 §16)"
+                )
             # Round 142: regression adjustment on proportions — a 0/1 y has
             # sum == sum_sq == numerator, so the Welch CUPED cores apply
             # verbatim (Deng et al.'s linear adjustment; caveat attached)
             if covariate_keys and kind == "binary":
-                y_control = {"n": n1, "sum": x1, "sum_sq": x1,
-                             "covariates": control.get("covariates"),
-                             "cov_sum": control.get("cov_sum"),
-                             "cov_sum_sq": control.get("cov_sum_sq"),
-                             "cov_xy_sum": control.get("cov_xy_sum")}
-                y_treatment = {"n": n2, "sum": x2, "sum_sq": x2,
-                               "covariates": treatment.get("covariates"),
-                               "cov_sum": treatment.get("cov_sum"),
-                               "cov_sum_sq": treatment.get("cov_sum_sq"),
-                               "cov_xy_sum": treatment.get("cov_xy_sum")}
+                y_control = {
+                    "n": n1,
+                    "sum": x1,
+                    "sum_sq": x1,
+                    "covariates": control.get("covariates"),
+                    "cov_sum": control.get("cov_sum"),
+                    "cov_sum_sq": control.get("cov_sum_sq"),
+                    "cov_xy_sum": control.get("cov_xy_sum"),
+                }
+                y_treatment = {
+                    "n": n2,
+                    "sum": x2,
+                    "sum_sq": x2,
+                    "covariates": treatment.get("covariates"),
+                    "cov_sum": treatment.get("cov_sum"),
+                    "cov_sum_sq": treatment.get("cov_sum_sq"),
+                    "cov_xy_sum": treatment.get("cov_xy_sum"),
+                }
                 adjusted = None
                 if len(covariate_keys) > 1 or auto:
-                    multi = stats.multi_cuped_adjusted_welch(
-                        y_control, y_treatment, covariate_keys
-                    )
+                    multi = stats.multi_cuped_adjusted_welch(y_control, y_treatment, covariate_keys)
                     if multi is not None:
                         adjusted = {
-                            "effect": multi["effect"], "ci": multi["ci"],
-                            "p": multi["p"], "theta": multi["theta"],
+                            "effect": multi["effect"],
+                            "ci": multi["ci"],
+                            "p": multi["p"],
+                            "theta": multi["theta"],
                             "variance_reduction_pct": multi["variance_reduction_pct"],
                             "covariates": covariate_keys,
                             "mode": "multi",
@@ -363,38 +380,46 @@ class AnalysisService:
                     single = stats.cuped_adjusted_welch(y_control, y_treatment)
                     if single is not None:
                         adjusted = {
-                            "effect": single["effect"], "ci": single["ci"],
-                            "p": single["p"], "theta": single["theta"],
+                            "effect": single["effect"],
+                            "ci": single["ci"],
+                            "p": single["p"],
+                            "theta": single["theta"],
                             "variance_reduction_pct": single["variance_reduction_pct"],
                         }
                 if adjusted is not None:
-                    adjusted["caveat"] = (
-                        "linear adjustment on a per-unit 0/1 outcome"
-                    )
+                    adjusted["caveat"] = "linear adjustment on a per-unit 0/1 outcome"
                     result["cuped"] = adjusted
             return result
         if kind == "rate":
             result = stats.analyze_rate(
-                control.get("numerator") or 0.0, control.get("denominator") or 0.0,
-                treatment.get("numerator") or 0.0, treatment.get("denominator") or 0.0,
+                control.get("numerator") or 0.0,
+                control.get("denominator") or 0.0,
+                treatment.get("numerator") or 0.0,
+                treatment.get("denominator") or 0.0,
             )
             if engine == "bayesian" and not result.get("insufficient_data"):
                 # Normal-approximation posterior over the rate difference
                 se, effect = result["se"], result["effect"]
                 z0 = effect / se if se > 0 else 0.0
                 result["p_beat_control"] = stats.norm_cdf(z0)
-                result["expected_loss"] = max(
-                    0.0,
-                    se * math.exp(-z0 * z0 / 2.0) / math.sqrt(2 * math.pi)
-                    - effect * stats.norm_sf(z0),
-                ) if se > 0 else 0.0
+                result["expected_loss"] = (
+                    max(
+                        0.0,
+                        se * math.exp(-z0 * z0 / 2.0) / math.sqrt(2 * math.pi)
+                        - effect * stats.norm_sf(z0),
+                    )
+                    if se > 0
+                    else 0.0
+                )
                 result["credible_interval"] = result["ci"]
             return result
         # continuous
         args = (
-            control.get("n") or 0.0, control.get("sum_value") or 0.0,
+            control.get("n") or 0.0,
+            control.get("sum_value") or 0.0,
             control.get("sum_sq") or 0.0,
-            treatment.get("n") or 0.0, treatment.get("sum_value") or 0.0,
+            treatment.get("n") or 0.0,
+            treatment.get("sum_value") or 0.0,
             treatment.get("sum_sq") or 0.0,
         )
         if engine == "bayesian":
@@ -403,34 +428,54 @@ class AnalysisService:
             result = stats.welch_from_stats(*args)
         if covariate_keys and (len(covariate_keys) > 1 or auto):
             multi = stats.multi_cuped_adjusted_welch(
-                {"n": control.get("n"), "sum": control.get("sum_value"),
-                 "sum_sq": control.get("sum_sq"),
-                 "covariates": control.get("covariates")},
-                {"n": treatment.get("n"), "sum": treatment.get("sum_value"),
-                 "sum_sq": treatment.get("sum_sq"),
-                 "covariates": treatment.get("covariates")},
+                {
+                    "n": control.get("n"),
+                    "sum": control.get("sum_value"),
+                    "sum_sq": control.get("sum_sq"),
+                    "covariates": control.get("covariates"),
+                },
+                {
+                    "n": treatment.get("n"),
+                    "sum": treatment.get("sum_value"),
+                    "sum_sq": treatment.get("sum_sq"),
+                    "covariates": treatment.get("covariates"),
+                },
                 covariate_keys,
             )
             if multi is not None:
                 result["cuped"] = {
-                    "effect": multi["effect"], "ci": multi["ci"],
-                    "p": multi["p"], "theta": multi["theta"],
+                    "effect": multi["effect"],
+                    "ci": multi["ci"],
+                    "p": multi["p"],
+                    "theta": multi["theta"],
                     "variance_reduction_pct": multi["variance_reduction_pct"],
                     "covariates": covariate_keys,
                     "mode": "multi",
                 }
                 return result
         cuped = stats.cuped_adjusted_welch(
-            {"n": control.get("n"), "sum": control.get("sum_value"),
-             "sum_sq": control.get("sum_sq"), "cov_sum": control.get("cov_sum"),
-             "cov_sum_sq": control.get("cov_sum_sq"), "cov_xy_sum": control.get("cov_xy_sum")},
-            {"n": treatment.get("n"), "sum": treatment.get("sum_value"),
-             "sum_sq": treatment.get("sum_sq"), "cov_sum": treatment.get("cov_sum"),
-             "cov_sum_sq": treatment.get("cov_sum_sq"), "cov_xy_sum": treatment.get("cov_xy_sum")},
+            {
+                "n": control.get("n"),
+                "sum": control.get("sum_value"),
+                "sum_sq": control.get("sum_sq"),
+                "cov_sum": control.get("cov_sum"),
+                "cov_sum_sq": control.get("cov_sum_sq"),
+                "cov_xy_sum": control.get("cov_xy_sum"),
+            },
+            {
+                "n": treatment.get("n"),
+                "sum": treatment.get("sum_value"),
+                "sum_sq": treatment.get("sum_sq"),
+                "cov_sum": treatment.get("cov_sum"),
+                "cov_sum_sq": treatment.get("cov_sum_sq"),
+                "cov_xy_sum": treatment.get("cov_xy_sum"),
+            },
         )
         if cuped is not None:
             result["cuped"] = {
-                "effect": cuped["effect"], "ci": cuped["ci"], "p": cuped["p"],
+                "effect": cuped["effect"],
+                "ci": cuped["ci"],
+                "p": cuped["p"],
                 "theta": cuped["theta"],
                 "variance_reduction_pct": cuped["variance_reduction_pct"],
             }
@@ -447,8 +492,7 @@ class AnalysisService:
                     ExperimentEvent.experiment_id == experiment_id,
                     ExperimentEvent.event_type == "analysis_look",
                 )
-                .order_by(ExperimentEvent.created_at.desc(),
-                          ExperimentEvent.id.desc())
+                .order_by(ExperimentEvent.created_at.desc(), ExperimentEvent.id.desc())
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -465,9 +509,7 @@ class AnalysisService:
             "automated": event.actor_user_id is None,
         }
 
-    async def look_history(
-        self, experiment_id: str, *, limit: int = 50
-    ) -> list[dict]:
+    async def look_history(self, experiment_id: str, *, limit: int = 50) -> list[dict]:
         """Round 137: every recorded look, newest first — the audit-trail
         view the scorecard's latest row summarizes. Same shape as
         latest_look per entry."""
@@ -479,8 +521,7 @@ class AnalysisService:
                         ExperimentEvent.experiment_id == experiment_id,
                         ExperimentEvent.event_type == "analysis_look",
                     )
-                    .order_by(ExperimentEvent.created_at.desc(),
-                              ExperimentEvent.id.desc())
+                    .order_by(ExperimentEvent.created_at.desc(), ExperimentEvent.id.desc())
                     .limit(limit)
                 )
             ).scalars()
@@ -498,9 +539,7 @@ class AnalysisService:
             for event in events
         ]
 
-    async def run(
-        self, experiment_id: str, *, actor: User, segment: str | None = None
-    ) -> dict:
+    async def run(self, experiment_id: str, *, actor: User, segment: str | None = None) -> dict:
         """segment (§4.8): analyze one breakdown slice ('org:<id>'). Segment
         analyses are informational — they consume NO sequential look budget,
         record NO analysis_look event (so a decision can never reference
@@ -549,9 +588,7 @@ class AnalysisService:
                     422,
                 )
             look_number = used + 1
-            boundary_z = stats.obrien_fleming_boundary(
-                look_number, spec.stop_policy.max_looks
-            )
+            boundary_z = stats.obrien_fleming_boundary(look_number, spec.stop_policy.max_looks)
 
         control_key = next(v.key for v in spec.variants if v.is_control)
         definitions = {
@@ -559,9 +596,7 @@ class AnalysisService:
             for d in (
                 await self.db.execute(
                     select(MetricDefinition).where(
-                        MetricDefinition.key.in_(
-                            [*spec.metrics.primary, *spec.metrics.secondary]
-                        )
+                        MetricDefinition.key.in_([*spec.metrics.primary, *spec.metrics.secondary])
                     )
                 )
             ).scalars()
@@ -589,10 +624,12 @@ class AnalysisService:
                 warnings.append("TRIGGERED_SNAPSHOTS_MIXED_POPULATION")
             warnings.append("TRIGGERED_DILUTION_UNCORRECTED")
 
-
         metrics_out: dict[str, dict] = {}
         secondary_ps: dict[str, float] = {}
-        for role, keys in (("primary", spec.metrics.primary), ("secondary", spec.metrics.secondary)):
+        for role, keys in (
+            ("primary", spec.metrics.primary),
+            ("secondary", spec.metrics.secondary),
+        ):
             for key in keys:
                 definition = definitions.get(key)
                 aggregated, mixed = await self._aggregate_metric(
@@ -605,8 +642,10 @@ class AnalysisService:
                     entry["insufficient_data"] = True
                     metrics_out[key] = entry
                     continue
-                kind = definition.kind if definition else (
-                    "binary" if aggregated[control_key].get("denominator") else "continuous"
+                kind = (
+                    definition.kind
+                    if definition
+                    else ("binary" if aggregated[control_key].get("denominator") else "continuous")
                 )
                 entry["kind"] = kind
                 # §4.6b (round 202): the "auto" spec selects covariates per
@@ -627,29 +666,29 @@ class AnalysisService:
                     def _y_arm(a: dict, kind: str = kind) -> dict:
                         if kind in ("binary", "time_to_event"):
                             y = a.get("numerator") or 0.0
-                            return {"n": a.get("denominator") or 0.0,
-                                    "sum": y, "sum_sq": y,
-                                    "covariates": a.get("covariates")}
-                        return {"n": a.get("n") or 0.0,
-                                "sum": a.get("sum_value") or 0.0,
-                                "sum_sq": a.get("sum_sq") or 0.0,
-                                "covariates": a.get("covariates")}
+                            return {
+                                "n": a.get("denominator") or 0.0,
+                                "sum": y,
+                                "sum_sq": y,
+                                "covariates": a.get("covariates"),
+                            }
+                        return {
+                            "n": a.get("n") or 0.0,
+                            "sum": a.get("sum_value") or 0.0,
+                            "sum_sq": a.get("sum_sq") or 0.0,
+                            "covariates": a.get("covariates"),
+                        }
 
                     chosen = stats.auto_select_covariates(
                         [_y_arm(a) for a in aggregated.values()],
                         resolve_covariates(spec.variance_reduction),
                     )
-                    metric_covariate_keys = (
-                        [c["key"] for c in chosen] or None
-                    )
+                    metric_covariate_keys = [c["key"] for c in chosen] or None
                     if chosen:
                         # the selection's evidence is part of the result —
                         # operators see WHY each covariate was chosen
-                        entry["cuped_auto"] = {
-                            c["key"]: c["r"] for c in chosen
-                        }
-                    flag = ("CUPED_AUTO_SELECTED" if metric_covariate_keys
-                            else "CUPED_AUTO_NONE")
+                        entry["cuped_auto"] = {c["key"]: c["r"] for c in chosen}
+                    flag = "CUPED_AUTO_SELECTED" if metric_covariate_keys else "CUPED_AUTO_NONE"
                     if flag not in warnings:
                         warnings.append(flag)
                 else:
@@ -670,25 +709,28 @@ class AnalysisService:
                     # randomization (or the data feed) is broken, and every
                     # downstream effect estimate is suspect.
                     control_arm = aggregated[control_key]
-                    if (
-                        "PRE_BALANCE_SUSPECT" not in warnings
-                        and all(
-                            a.get("cov_sum") is not None
-                            and a.get("cov_sum_sq") is not None
-                            and (a.get("n") or 0) >= 2
-                            for a in (control_arm, arm)
-                        )
+                    if "PRE_BALANCE_SUSPECT" not in warnings and all(
+                        a.get("cov_sum") is not None
+                        and a.get("cov_sum_sq") is not None
+                        and (a.get("n") or 0) >= 2
+                        for a in (control_arm, arm)
                     ):
                         balance = stats.welch_from_stats(
-                            control_arm["n"], control_arm["cov_sum"],
+                            control_arm["n"],
+                            control_arm["cov_sum"],
                             control_arm["cov_sum_sq"],
-                            arm["n"], arm["cov_sum"], arm["cov_sum_sq"],
+                            arm["n"],
+                            arm["cov_sum"],
+                            arm["cov_sum_sq"],
                         )
                         p_balance = balance.get("p")
                         if p_balance is not None and p_balance < 0.001:
                             warnings.append("PRE_BALANCE_SUSPECT")
                     comparison = self._compare(
-                        kind, spec.stats_engine, aggregated[control_key], arm,
+                        kind,
+                        spec.stats_engine,
+                        aggregated[control_key],
+                        arm,
                         covariate_keys=metric_covariate_keys,
                         auto=cuped_auto,
                     )
@@ -812,8 +854,12 @@ class AnalysisService:
             ).scalar_one_or_none()
             stale_cutoff = datetime.now(UTC) - timedelta(hours=48)
             if last_exposure is None or (
-                (last_exposure.replace(tzinfo=UTC) if last_exposure.tzinfo is None
-                 else last_exposure) < stale_cutoff
+                (
+                    last_exposure.replace(tzinfo=UTC)
+                    if last_exposure.tzinfo is None
+                    else last_exposure
+                )
+                < stale_cutoff
             ):
                 warnings.append("NO_RECENT_EXPOSURES")
 
@@ -839,14 +885,14 @@ class AnalysisService:
                     continue
                 baseline = control_arm["numerator"] / control_arm["denominator"]
                 required = stats.required_n_per_arm(
-                    baseline, spec.power.mde,
-                    alpha=spec.power.alpha, power=spec.power.power,
+                    baseline,
+                    spec.power.mde,
+                    alpha=spec.power.alpha,
+                    power=spec.power.power,
                 )
                 if required is None:
                     continue
-                min_arm_n = min(
-                    int(arm.get("denominator") or 0) for arm in aggregated.values()
-                )
+                min_arm_n = min(int(arm.get("denominator") or 0) for arm in aggregated.values())
                 power_block = {
                     "metric_key": key,
                     "baseline_rate": baseline,
@@ -873,8 +919,11 @@ class AnalysisService:
         km_keys = []
         for key in spec.metrics.primary:
             definition = definitions.get(key)
-            if (definition is None or definition.kind != "time_to_event"
-                    or not (definition.spec or {}).get("km")):
+            if (
+                definition is None
+                or definition.kind != "time_to_event"
+                or not (definition.spec or {}).get("km")
+            ):
                 continue
             if (definition.spec or {}).get("source") != "talent_outcomes":
                 if "KM_SOURCE_UNSUPPORTED" not in warnings:
@@ -887,9 +936,7 @@ class AnalysisService:
             from app.experiments.models import ExperimentAssignment
             from app.talent.models.application import Placement
 
-            horizon = (
-                await self.db.execute(select(_func.clock_timestamp()))
-            ).scalar_one()
+            horizon = (await self.db.execute(select(_func.clock_timestamp()))).scalar_one()
             if horizon.tzinfo is None:
                 horizon = horizon.replace(tzinfo=UTC)
             rows = (
@@ -941,13 +988,10 @@ class AnalysisService:
                         else:
                             day = max((horizon - assigned_at).days, 0)
                             censored[day] = censored.get(day, 0) + 1
-                    curves[variant_key] = stats.km_curve(
-                        events, censored, len(members)
-                    )
+                    curves[variant_key] = stats.km_curve(events, censored, len(members))
                 km_cmp = stats.km_compare(
                     curves.get(control_key),
-                    next((c for v, c in curves.items() if v != control_key),
-                         None),
+                    next((c for v, c in curves.items() if v != control_key), None),
                 )
                 if km_cmp is not None and key in metrics_out:
                     metrics_out[key]["km"] = km_cmp
@@ -967,9 +1011,7 @@ class AnalysisService:
             if all_units:
                 from app.experiments.services.metrics import SOURCE_REGISTRY
 
-                start_day = exp.started_at.replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
+                start_day = exp.started_at.replace(hour=0, minute=0, second=0, microsecond=0)
                 for key in spec.metrics.primary[:1]:
                     definition = definitions.get(key)
                     source = (
@@ -992,26 +1034,18 @@ class AnalysisService:
                         )
                         arm = stats_out.get("all") or {}
                         if arm.get("denominator"):
-                            return float(arm.get("numerator") or 0.0) / float(
-                                arm["denominator"]
-                            )
+                            return float(arm.get("numerator") or 0.0) / float(arm["denominator"])
                         if arm.get("n"):
-                            return float(arm.get("sum_value") or 0.0) / float(
-                                arm["n"]
-                            )
+                            return float(arm.get("sum_value") or 0.0) / float(arm["n"])
                         return None
 
                     pre_series: list[float] = []
                     post_series: list[float] = []
                     for offset in range(ITS_DAYS, 0, -1):
-                        value = await _daily_mean(
-                            start_day - timedelta(days=offset)
-                        )
+                        value = await _daily_mean(start_day - timedelta(days=offset))
                         pre_series.append(0.0 if value is None else value)
                     for offset in range(ITS_DAYS):
-                        value = await _daily_mean(
-                            start_day + timedelta(days=offset)
-                        )
+                        value = await _daily_mean(start_day + timedelta(days=offset))
                         post_series.append(0.0 if value is None else value)
                     its = stats.its_estimate(pre_series, post_series)
                     if its is not None and key in metrics_out:
@@ -1022,21 +1056,16 @@ class AnalysisService:
                     # sorted for determinism), treated series = mean over the
                     # other arms' units, one source call per day with the
                     # per-unit variant_units fan-out.
-                    donor_units = sorted(
-                        its_roster.get(control_key, [])
-                    )[:SC_MAX_DONORS]
+                    donor_units = sorted(its_roster.get(control_key, []))[:SC_MAX_DONORS]
                     treated_units = sorted(
-                        u for v, us in its_roster.items()
-                        if v != control_key for u in us
+                        u for v, us in its_roster.items() if v != control_key for u in us
                     )
                     if len(donor_units) < 2 or not treated_units:
                         if "SC_DONOR_POOL_SMALL" not in warnings:
                             warnings.append("SC_DONOR_POOL_SMALL")
                         continue
                     sc_units = [*donor_units, *treated_units]
-                    per_unit: dict[str, tuple[list, list]] = {
-                        u: ([], []) for u in sc_units
-                    }
+                    per_unit: dict[str, tuple[list, list]] = {u: ([], []) for u in sc_units}
 
                     async def _daily_per_unit(day_start, side):
                         stats_out = await source(  # noqa: B023
@@ -1051,34 +1080,27 @@ class AnalysisService:
                         for u, series in per_unit.items():  # noqa: B023
                             arm = stats_out.get(u) or {}
                             if arm.get("denominator"):
-                                val = (float(arm.get("numerator") or 0.0)
-                                       / float(arm["denominator"]))
+                                val = float(arm.get("numerator") or 0.0) / float(arm["denominator"])
                             elif arm.get("n"):
-                                val = (float(arm.get("sum_value") or 0.0)
-                                       / float(arm["n"]))
+                                val = float(arm.get("sum_value") or 0.0) / float(arm["n"])
                             else:
                                 val = 0.0
                             series[side].append(val)
 
                     for offset in range(ITS_DAYS, 0, -1):
-                        await _daily_per_unit(
-                            start_day - timedelta(days=offset), 0
-                        )
+                        await _daily_per_unit(start_day - timedelta(days=offset), 0)
                     for offset in range(ITS_DAYS):
-                        await _daily_per_unit(
-                            start_day + timedelta(days=offset), 1
-                        )
+                        await _daily_per_unit(start_day + timedelta(days=offset), 1)
                     n_t = len(treated_units)
                     pre_treated = [
-                        sum(per_unit[u][0][t] for u in treated_units) / n_t
-                        for t in range(ITS_DAYS)
+                        sum(per_unit[u][0][t] for u in treated_units) / n_t for t in range(ITS_DAYS)
                     ]
                     post_treated = [
-                        sum(per_unit[u][1][t] for u in treated_units) / n_t
-                        for t in range(ITS_DAYS)
+                        sum(per_unit[u][1][t] for u in treated_units) / n_t for t in range(ITS_DAYS)
                     ]
                     sc = stats.synthetic_control(
-                        pre_treated, post_treated,
+                        pre_treated,
+                        post_treated,
                         [per_unit[u][0] for u in donor_units],
                         [per_unit[u][1] for u in donor_units],
                     )
@@ -1106,15 +1128,22 @@ class AnalysisService:
                     if not arm:
                         continue
                     did = stats.did_estimate(
-                        {"n": control_arm.get("n"), "sum": control_arm.get("sum_value"),
-                         "sum_sq": control_arm.get("sum_sq"),
-                         "cov_sum": control_arm.get("cov_sum"),
-                         "cov_sum_sq": control_arm.get("cov_sum_sq"),
-                         "cov_xy_sum": control_arm.get("cov_xy_sum")},
-                        {"n": arm.get("n"), "sum": arm.get("sum_value"),
-                         "sum_sq": arm.get("sum_sq"), "cov_sum": arm.get("cov_sum"),
-                         "cov_sum_sq": arm.get("cov_sum_sq"),
-                         "cov_xy_sum": arm.get("cov_xy_sum")},
+                        {
+                            "n": control_arm.get("n"),
+                            "sum": control_arm.get("sum_value"),
+                            "sum_sq": control_arm.get("sum_sq"),
+                            "cov_sum": control_arm.get("cov_sum"),
+                            "cov_sum_sq": control_arm.get("cov_sum_sq"),
+                            "cov_xy_sum": control_arm.get("cov_xy_sum"),
+                        },
+                        {
+                            "n": arm.get("n"),
+                            "sum": arm.get("sum_value"),
+                            "sum_sq": arm.get("sum_sq"),
+                            "cov_sum": arm.get("cov_sum"),
+                            "cov_sum_sq": arm.get("cov_sum_sq"),
+                            "cov_xy_sum": arm.get("cov_xy_sum"),
+                        },
                     )
                     if did is not None:
                         comparison["did"] = {

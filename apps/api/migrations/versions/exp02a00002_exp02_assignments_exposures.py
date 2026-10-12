@@ -31,7 +31,10 @@ def upgrade() -> None:
         sa.Column("bucket", sa.Integer(), nullable=False),
         sa.Column("is_holdout", sa.Boolean(), server_default="false", nullable=False),
         sa.Column(
-            "assigned_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "assigned_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -54,7 +57,10 @@ def upgrade() -> None:
         sa.Column("assignment_id", sa.String(length=26), nullable=False),
         sa.Column("experiment_id", sa.String(length=26), nullable=False),
         sa.Column(
-            "occurred_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "occurred_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
             "context", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False

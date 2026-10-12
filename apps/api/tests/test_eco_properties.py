@@ -30,9 +30,7 @@ from app.ecosystem.services.stats import (
 
 _FAST = settings(max_examples=60, suppress_health_check=[HealthCheck.too_slow], deadline=None)
 
-finite_floats = st.floats(
-    min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False
-)
+finite_floats = st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False)
 
 
 # ── Statistics kernel properties ────────────────────────────────────
@@ -48,7 +46,11 @@ def test_mean_ci95_contains_mean_and_is_ordered(values):
 
 
 @_FAST
-@given(st.lists(st.tuples(finite_floats, st.floats(min_value=0.01, max_value=100)), min_size=1, max_size=30))
+@given(
+    st.lists(
+        st.tuples(finite_floats, st.floats(min_value=0.01, max_value=100)), min_size=1, max_size=30
+    )
+)
 def test_weighted_mean_bounded_by_extremes(pairs):
     out = weighted_mean(pairs)
     lo = min(v for v, _ in pairs)
@@ -57,7 +59,10 @@ def test_weighted_mean_bounded_by_extremes(pairs):
 
 
 @_FAST
-@given(st.lists(finite_floats, min_size=2, max_size=30), st.lists(finite_floats, min_size=2, max_size=30))
+@given(
+    st.lists(finite_floats, min_size=2, max_size=30),
+    st.lists(finite_floats, min_size=2, max_size=30),
+)
 def test_welch_p_value_in_unit_interval_and_symmetric(a, b):
     p_ab = welch_t_test(a, b)["p_value"]
     p_ba = welch_t_test(b, a)["p_value"]
@@ -67,8 +72,10 @@ def test_welch_p_value_in_unit_interval_and_symmetric(a, b):
 
 @_FAST
 @given(
-    st.integers(min_value=0, max_value=200), st.integers(min_value=1, max_value=200),
-    st.integers(min_value=0, max_value=200), st.integers(min_value=1, max_value=200),
+    st.integers(min_value=0, max_value=200),
+    st.integers(min_value=1, max_value=200),
+    st.integers(min_value=0, max_value=200),
+    st.integers(min_value=1, max_value=200),
 )
 def test_two_proportion_p_in_unit_interval(sa, na, sb, nb):
     sa, sb = min(sa, na), min(sb, nb)
@@ -128,10 +135,7 @@ def test_pairwise_wins_conservation(rows):
         members = [r for r in rows if (r["context"], r["judge"]) == (context, judge)]
         n = len(members)
         expected += sum(
-            1
-            for i in range(n)
-            for j in range(i + 1, n)
-            if members[i]["item"] != members[j]["item"]
+            1 for i in range(n) for j in range(i + 1, n) if members[i]["item"] != members[j]["item"]
         )
     assert math.isclose(sum(wins.values()), expected, abs_tol=1e-9)
 
@@ -143,7 +147,9 @@ def test_linear_trend_flat_series_projects_constant(values):
     trend = linear_trend([(float(i), constant) for i in range(len(values))])
     assert trend is not None
     assert math.isclose(trend["slope"], 0.0, abs_tol=1e-9)
-    assert math.isclose(trend["projected_next"], max(constant, 0.0), abs_tol=0.006)  # impl rounds to 2dp
+    assert math.isclose(
+        trend["projected_next"], max(constant, 0.0), abs_tol=0.006
+    )  # impl rounds to 2dp
 
 
 @_FAST
@@ -187,14 +193,20 @@ def test_all_adapters_survive_arbitrary_bytes(raw):
 
 
 @_FAST
-@given(st.recursive(
-    st.none() | st.booleans() | st.integers(min_value=-10**6, max_value=10**6)
-    | st.floats(allow_nan=False, allow_infinity=False, width=32)
-    | st.text(max_size=50),
-    lambda children: st.lists(children, max_size=5)
-    | st.dictionaries(st.text(max_size=15), children, max_size=5),
-    max_leaves=25,
-))
+@given(
+    st.recursive(
+        st.none()
+        | st.booleans()
+        | st.integers(min_value=-(10**6), max_value=10**6)
+        | st.floats(allow_nan=False, allow_infinity=False, width=32)
+        | st.text(max_size=50),
+        lambda children: (
+            st.lists(children, max_size=5)
+            | st.dictionaries(st.text(max_size=15), children, max_size=5)
+        ),
+        max_leaves=25,
+    )
+)
 def test_all_adapters_survive_arbitrary_json(doc):
     raw = json.dumps(doc).encode()
     for adapter in ADAPTERS.values():
@@ -220,6 +232,7 @@ def test_sanitize_text_idempotent_and_control_free(text):
     assert sanitize_text(once, 200) == once  # idempotent
     assert not any(ord(c) < 32 and c not in "\t\n\r" for c in once)
 
+
 # ── Mutation-audit killers (ADR-016 §53): exact-value assertions ─────
 
 
@@ -242,6 +255,7 @@ def test_welch_single_sample_side_is_inconclusive():
     assert welch_t_test([5.0], [1.0, 1.1, 0.9, 1.05])["p_value"] == 1.0
     assert welch_t_test([1.0, 1.1, 0.9], [42.0])["p_value"] == 1.0
 
+
 def test_unicode_digit_versions_are_rejected_not_crashed():
     """R254 Hypothesis counterexample: superscript digits pass str.isdigit()
     but crash int() — parse_version must return None, never raise."""
@@ -250,6 +264,7 @@ def test_unicode_digit_versions_are_rejected_not_crashed():
     assert parse_version("¹.2.3") is None
     assert parse_version("1.².3") is None
     assert version_in_range("¹", ">=1.0") is None  # fail-open contract intact
+
 
 @given(
     st.integers(min_value=0, max_value=99),
@@ -292,7 +307,6 @@ def test_escape_like_neutralizes_every_wildcard(text):
             continue
         assert ch not in ("%", "_"), (text, out)
         i += 1
-
 
 
 @given(st.text(max_size=400))

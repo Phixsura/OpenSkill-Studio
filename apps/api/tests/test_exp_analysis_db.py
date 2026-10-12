@@ -25,6 +25,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -73,8 +74,11 @@ async def _mk_running(db, **spec_overrides):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp.id, spec=_spec(**spec_overrides), actor=admin)
     await LayerService(db).allocate(
@@ -93,9 +97,7 @@ async def _populate(db, exp, *, units: int = 40, expose_every: int = 2):
         r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"an-{i}")
         assert r is not None
         if i % expose_every == 0:
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=f"an-{i}"
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"an-{i}")
     start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=start, window_end=start + timedelta(days=1)
@@ -168,9 +170,14 @@ async def test_mixed_query_version_warns(db):
     start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     db.add(
         MetricSnapshot(
-            experiment_id=exp.id, metric_key="exposure_rate", variant_key="control",
-            window_start=start - timedelta(days=1), window_end=start,
-            n=5, numerator=1, denominator=5,
+            experiment_id=exp.id,
+            metric_key="exposure_rate",
+            variant_key="control",
+            window_start=start - timedelta(days=1),
+            window_end=start,
+            n=5,
+            numerator=1,
+            denominator=5,
             provenance={"query_version": 0, "source": "exposures"},
         )
     )
@@ -205,9 +212,17 @@ async def test_honesty_warnings_for_triggered_and_cuped(db):
     assert "CUPED_COVARIATES_UNAVAILABLE" not in result["warnings"]
 
     # a legacy snapshot without the marker flips the mixed warning on
-    db.add(_snapshot(exp.id, "exposure_rate", "control",
-                     datetime(2026, 8, 1, tzinfo=UTC),
-                     n=10, numerator=1, denominator=10))
+    db.add(
+        _snapshot(
+            exp.id,
+            "exposure_rate",
+            "control",
+            datetime(2026, 8, 1, tzinfo=UTC),
+            n=10,
+            numerator=1,
+            denominator=10,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "TRIGGERED_SNAPSHOTS_MIXED_POPULATION" in result["warnings"]
@@ -247,8 +262,11 @@ async def test_draft_experiment_cannot_analyze(db):
     admin = await _mk_admin(db)
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     exp = await ExperimentService(db).create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     with pytest.raises(AppError):
         await AnalysisService(db).run(exp.id, actor=admin)
@@ -279,9 +297,13 @@ async def test_secondary_metric_gets_fdr_flag_when_data_exists(db):
 
 def _snapshot(exp_id, metric_key, variant, ws, **cols):
     return MetricSnapshot(
-        experiment_id=exp_id, metric_key=metric_key, variant_key=variant,
-        window_start=ws, window_end=ws + timedelta(days=1),
-        provenance={"query_version": 1}, **cols,
+        experiment_id=exp_id,
+        metric_key=metric_key,
+        variant_key=variant,
+        window_start=ws,
+        window_end=ws + timedelta(days=1),
+        provenance={"query_version": 1},
+        **cols,
     )
 
 
@@ -292,31 +314,54 @@ async def test_multi_degrade_to_single_cuped_warns(db):
     and heard nothing. The fallback must warn CUPED_MULTI_DEGRADED; the
     honest multi path (e2e test below) must NOT."""
     exp, admin = await _mk_running(
-        db, variance_reduction={
+        db,
+        variance_reduction={
             "method": "cuped",
             # cost_usd IS defined (passes the #63 schedule gate) but its
             # source has no covariate provider -> honest degrade
             "covariate_metrics": ["revision_count", "cost_usd"],
             "lookback_days": 14,
         },
-        metrics={"primary": ["revision_count"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     # only the FIRST covariate assembled: cov_* mirror filled, covariates map
     # carries one key — the multi core refuses (whole entry missing) and the
     # legacy single path engages
-    db.add(_snapshot(exp.id, "revision_count", "control", ws,
-                     n=200, sum_value=200.0, sum_sq=260.0,
-                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=230.0,
-                     covariates={"revision_count": {
-                         "sum": 200.0, "sum_sq": 260.0, "xy_sum": 230.0}}))
-    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
-                     n=200, sum_value=220.0, sum_sq=300.0,
-                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=235.0,
-                     covariates={"revision_count": {
-                         "sum": 201.0, "sum_sq": 263.0, "xy_sum": 235.0}}))
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "control",
+            ws,
+            n=200,
+            sum_value=200.0,
+            sum_sq=260.0,
+            cov_sum=200.0,
+            cov_sum_sq=260.0,
+            cov_xy_sum=230.0,
+            covariates={"revision_count": {"sum": 200.0, "sum_sq": 260.0, "xy_sum": 230.0}},
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=200,
+            sum_value=220.0,
+            sum_sq=300.0,
+            cov_sum=201.0,
+            cov_sum_sq=263.0,
+            cov_xy_sum=235.0,
+            covariates={"revision_count": {"sum": 201.0, "sum_sq": 263.0, "xy_sum": 235.0}},
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["revision_count"]["comparisons"]["treatment"]
@@ -330,17 +375,42 @@ async def test_pre_balance_suspect_on_covariate_imbalance(db):
     """Covariates are pre-experiment by construction — arm means that differ
     (p < 0.001) mean broken randomization, and analysis must say so."""
     exp, admin = await _mk_running(
-        db, metrics={"primary": ["revision_count"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "revision_count", "control", ws,
-                     n=200, sum_value=200.0, sum_sq=260.0,
-                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=500.0))
-    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
-                     n=200, sum_value=220.0, sum_sq=300.0,
-                     cov_sum=1200.0, cov_sum_sq=7500.0, cov_xy_sum=500.0))
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "control",
+            ws,
+            n=200,
+            sum_value=200.0,
+            sum_sq=260.0,
+            cov_sum=200.0,
+            cov_sum_sq=260.0,
+            cov_xy_sum=500.0,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=200,
+            sum_value=220.0,
+            sum_sq=300.0,
+            cov_sum=1200.0,
+            cov_sum_sq=7500.0,
+            cov_xy_sum=500.0,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "PRE_BALANCE_SUSPECT" in result["warnings"]
@@ -348,17 +418,42 @@ async def test_pre_balance_suspect_on_covariate_imbalance(db):
 
 async def test_pre_balance_quiet_when_covariates_match(db):
     exp, admin = await _mk_running(
-        db, metrics={"primary": ["revision_count"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "revision_count", "control", ws,
-                     n=200, sum_value=200.0, sum_sq=260.0,
-                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=500.0))
-    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
-                     n=200, sum_value=220.0, sum_sq=300.0,
-                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=500.0))
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "control",
+            ws,
+            n=200,
+            sum_value=200.0,
+            sum_sq=260.0,
+            cov_sum=200.0,
+            cov_sum_sq=260.0,
+            cov_xy_sum=500.0,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=200,
+            sum_value=220.0,
+            sum_sq=300.0,
+            cov_sum=201.0,
+            cov_sum_sq=263.0,
+            cov_xy_sum=500.0,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "PRE_BALANCE_SUSPECT" not in result["warnings"]
@@ -390,11 +485,20 @@ async def test_novelty_decay_flags_early_effect_that_vanishes(db):
                 if variant == "control":
                     numerator = 50
                 elif early:
-                    numerator = 90            # huge early lift
+                    numerator = 90  # huge early lift
                 else:
                     numerator = 50 if decaying else 90
-                db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
-                                 n=200, numerator=numerator, denominator=200))
+                db.add(
+                    _snapshot(
+                        exp.id,
+                        "exposure_rate",
+                        variant,
+                        ws,
+                        n=200,
+                        numerator=numerator,
+                        denominator=200,
+                    )
+                )
         await db.flush()
 
     await _seed(decaying=True)
@@ -411,8 +515,11 @@ async def test_novelty_needs_enough_windows(db):
     exp, admin = await _mk_running(db)
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     for variant, numerator in (("control", 50), ("treatment", 90)):
-        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
-                         n=200, numerator=numerator, denominator=200))
+        db.add(
+            _snapshot(
+                exp.id, "exposure_rate", variant, ws, n=200, numerator=numerator, denominator=200
+            )
+        )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
@@ -444,21 +551,37 @@ async def _mk_decided_history(db, domain: str, metric_key: str, effects: list[fl
     svc = ExperimentService(db)
     for effect in effects:
         exp = await svc.create(
-            key=f"hist-{str(ULID()).lower()}", title="H", domain=domain,
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"hist-{str(ULID()).lower()}",
+            title="H",
+            domain=domain,
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
-        db.add(ExperimentEvent(
-            experiment_id=exp.id, actor_user_id=admin.id,
-            event_type="analysis_look",
-            payload={"result_hash": "0" * 64, "primary_effects": {
-                metric_key: {"treatment": {"effect": effect, "se": 0.01}},
-            }},
-        ))
-        db.add(DecisionRecord(
-            experiment_id=exp.id, experiment_version=1, decision="promote",
-            summary="hist", domain=domain, analysis_type="randomized",
-            analysis_result_hash="0" * 64, approver_user_id=admin.id,
-        ))
+        db.add(
+            ExperimentEvent(
+                experiment_id=exp.id,
+                actor_user_id=admin.id,
+                event_type="analysis_look",
+                payload={
+                    "result_hash": "0" * 64,
+                    "primary_effects": {
+                        metric_key: {"treatment": {"effect": effect, "se": 0.01}},
+                    },
+                },
+            )
+        )
+        db.add(
+            DecisionRecord(
+                experiment_id=exp.id,
+                experiment_version=1,
+                decision="promote",
+                summary="hist",
+                domain=domain,
+                analysis_type="randomized",
+                analysis_result_hash="0" * 64,
+                approver_user_id=admin.id,
+            )
+        )
     await db.flush()
 
 
@@ -478,9 +601,9 @@ async def test_corpus_prior_shrinks_primary_effect(db):
     effect, shrunk = comparison["effect"], comparison["shrunk_effect"]
     # wave-34: the normal-normal precision-weighted formula pinned exactly
     se = comparison["se"]
-    expected_shrunk = (
-        effect / (se * se) + prior["mean"] / (prior["sd"] * prior["sd"])
-    ) / (1.0 / (se * se) + 1.0 / (prior["sd"] * prior["sd"]))
+    expected_shrunk = (effect / (se * se) + prior["mean"] / (prior["sd"] * prior["sd"])) / (
+        1.0 / (se * se) + 1.0 / (prior["sd"] * prior["sd"])
+    )
     assert shrunk == pytest.approx(expected_shrunk, rel=1e-9)
     # shrunk lies strictly between the raw effect and the corpus mean
     low, high = sorted((effect, prior["mean"]))
@@ -510,10 +633,13 @@ async def test_analysis_look_records_primary_effects(db):
     await AnalysisService(db).run(exp.id, actor=admin)
     event = (
         await db.execute(
-            _select(ExperimentEvent).where(
+            _select(ExperimentEvent)
+            .where(
                 ExperimentEvent.experiment_id == exp.id,
                 ExperimentEvent.event_type == "analysis_look",
-            ).order_by(ExperimentEvent.created_at.desc()).limit(1)
+            )
+            .order_by(ExperimentEvent.created_at.desc())
+            .limit(1)
         )
     ).scalar_one()
     recorded = event.payload["primary_effects"]["exposure_rate"]["treatment"]
@@ -532,10 +658,14 @@ async def test_time_stratified_estimate_on_primary(db):
     base_ws = datetime(2026, 9, 1, tzinfo=UTC)
     for day in range(2):
         ws = base_ws + timedelta(days=day)
-        db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
-                         n=200, numerator=50, denominator=200))
-        db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
-                         n=200, numerator=70, denominator=200))
+        db.add(
+            _snapshot(exp.id, "exposure_rate", "control", ws, n=200, numerator=50, denominator=200)
+        )
+        db.add(
+            _snapshot(
+                exp.id, "exposure_rate", "treatment", ws, n=200, numerator=70, denominator=200
+            )
+        )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
@@ -548,10 +678,10 @@ async def test_time_stratified_estimate_on_primary(db):
 async def test_time_stratified_absent_with_one_window(db):
     exp, admin = await _mk_running(db)
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
-                     n=200, numerator=50, denominator=200))
-    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
-                     n=200, numerator=70, denominator=200))
+    db.add(_snapshot(exp.id, "exposure_rate", "control", ws, n=200, numerator=50, denominator=200))
+    db.add(
+        _snapshot(exp.id, "exposure_rate", "treatment", ws, n=200, numerator=70, denominator=200)
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
@@ -568,12 +698,14 @@ async def test_bandit_allocation_gets_thompson_suggestion(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="marketplace")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="B", domain="marketplace",
-        layer_key=layer.key, owner_user_id=admin.id, risk_class="low",
+        key=f"exp-{str(ULID()).lower()}",
+        title="B",
+        domain="marketplace",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        risk_class="low",
     )
-    await svc.create_version(
-        exp.id, spec=_spec(allocation_mode="bandit"), actor=admin
-    )
+    await svc.create_version(exp.id, spec=_spec(allocation_mode="bandit"), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
@@ -581,10 +713,10 @@ async def test_bandit_allocation_gets_thompson_suggestion(db):
     await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "exposure_rate", "control", ws,
-                     n=500, numerator=50, denominator=500))
-    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
-                     n=500, numerator=120, denominator=500))
+    db.add(_snapshot(exp.id, "exposure_rate", "control", ws, n=500, numerator=50, denominator=500))
+    db.add(
+        _snapshot(exp.id, "exposure_rate", "treatment", ws, n=500, numerator=120, denominator=500)
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     bandit = result["bandit"]
@@ -610,17 +742,41 @@ async def test_observational_analysis_attaches_did(db):
     exp, admin = await _mk_running(
         db,
         analysis_type="observational",
-        metrics={"primary": ["revision_count"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "revision_count", "control", ws,
-                     n=50, sum_value=100.0, sum_sq=220.0,
-                     cov_sum=50.0, cov_sum_sq=60.0, cov_xy_sum=105.0))
-    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
-                     n=50, sum_value=200.0, sum_sq=830.0,
-                     cov_sum=50.0, cov_sum_sq=60.0, cov_xy_sum=205.0))
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "control",
+            ws,
+            n=50,
+            sum_value=100.0,
+            sum_sq=220.0,
+            cov_sum=50.0,
+            cov_sum_sq=60.0,
+            cov_xy_sum=105.0,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=50,
+            sum_value=200.0,
+            sum_sq=830.0,
+            cov_sum=50.0,
+            cov_sum_sq=60.0,
+            cov_xy_sum=205.0,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert result["causal_claim"] is False
@@ -641,21 +797,28 @@ async def test_segment_analysis_is_informational_slice(db):
     exp, admin = await _mk_running(db, sequential="obrien_fleming")
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     for segment, control_num, treatment_num in (
-        ("", 50, 70), ("org:AAAA", 10, 30), ("org:BBBB", 40, 40),
+        ("", 50, 70),
+        ("org:AAAA", 10, 30),
+        ("org:BBBB", 40, 40),
     ):
         for variant, numerator in (("control", control_num), ("treatment", treatment_num)):
-            db.add(MetricSnapshot(
-                experiment_id=exp.id, metric_key="exposure_rate",
-                variant_key=variant, segment=segment, window_start=ws,
-                window_end=ws + timedelta(days=1),
-                n=200, numerator=numerator, denominator=200,
-                provenance={"query_version": 1},
-            ))
+            db.add(
+                MetricSnapshot(
+                    experiment_id=exp.id,
+                    metric_key="exposure_rate",
+                    variant_key=variant,
+                    segment=segment,
+                    window_start=ws,
+                    window_end=ws + timedelta(days=1),
+                    n=200,
+                    numerator=numerator,
+                    denominator=200,
+                    provenance={"query_version": 1},
+                )
+            )
     await db.flush()
 
-    slice_result = await AnalysisService(db).run(
-        exp.id, actor=admin, segment="org:AAAA"
-    )
+    slice_result = await AnalysisService(db).run(exp.id, actor=admin, segment="org:AAAA")
     assert slice_result["segment"] == "org:AAAA"
     assert slice_result["causal_claim"] is False
     comparison = slice_result["metrics"]["exposure_rate"]["comparisons"]["treatment"]
@@ -690,8 +853,12 @@ async def test_three_arm_experiment_end_to_end(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="marketplace")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="3arm", domain="marketplace",
-        layer_key=layer.key, owner_user_id=admin.id, risk_class="low",
+        key=f"exp-{str(ULID()).lower()}",
+        title="3arm",
+        domain="marketplace",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        risk_class="low",
     )
     spec = _spec(allocation_mode="bandit")
     spec["variants"] = [
@@ -715,9 +882,7 @@ async def test_three_arm_experiment_end_to_end(db):
         assert r is not None
         seen.add(r.variant_key)
         if i % 2 == 0:
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=f"3a-{i}"
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"3a-{i}")
     assert seen == {"control", "t1", "t2"}
 
     start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
@@ -749,8 +914,10 @@ async def test_corpus_prior_is_platform_admin_only(db):
     assert "corpus_prior" in with_prior["metrics"]["exposure_rate"]["comparisons"]["treatment"]
 
     org_operator = _User(
-        email=f"op-{ULID()}@example.com", display_name="Op",
-        role=_Role.INSTRUCTOR, status=_Status.ACTIVE,
+        email=f"op-{ULID()}@example.com",
+        display_name="Op",
+        role=_Role.INSTRUCTOR,
+        status=_Status.ACTIVE,
     )
     db.add(org_operator)
     await db.flush()
@@ -773,8 +940,13 @@ def test_compare_matrix_pins_none_coalescing_and_engines():
 
     compare = AnalysisService._compare  # noqa: SLF001 — direct unit pin
 
-    none_arm = {"numerator": None, "denominator": None, "n": None,
-                "sum_value": None, "sum_sq": None}
+    none_arm = {
+        "numerator": None,
+        "denominator": None,
+        "n": None,
+        "sum_value": None,
+        "sum_sq": None,
+    }
     good_bin = {"numerator": 60.0, "denominator": 200.0}
     # None-laden arms = zeros = insufficient, for every kind/engine
     for kind in ("binary", "rate", "time_to_event", "continuous"):
@@ -788,12 +960,12 @@ def test_compare_matrix_pins_none_coalescing_and_engines():
     bayes = compare("binary", "bayesian", {"numerator": 50.0, "denominator": 200.0}, good_bin)
     assert "p_beat_control" in bayes
     # time_to_event carries the binary-at-horizon caveat
-    tte = compare("time_to_event", "frequentist",
-                  {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    tte = compare(
+        "time_to_event", "frequentist", {"numerator": 50.0, "denominator": 200.0}, good_bin
+    )
     assert "caveat" in tte
     # rate bayesian extras ride on sufficient data
-    rate = compare("rate", "bayesian",
-                   {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    rate = compare("rate", "bayesian", {"numerator": 50.0, "denominator": 200.0}, good_bin)
     assert "p_beat_control" in rate and "expected_loss" in rate
     assert rate["expected_loss"] >= 0.0
     # continuous engines
@@ -816,44 +988,58 @@ def test_compare_matrix_pins_none_coalescing_and_engines():
     assert freq_c["effect"] == _pytest.approx(150.0 / 50.0 - 100.0 / 50.0, rel=1e-12)
     # the rate-bayesian extras, formulas spelled by hand against the
     # frequentist read of the same arms
-    base = compare("rate", "frequentist",
-                   {"numerator": 50.0, "denominator": 200.0}, good_bin)
+    base = compare("rate", "frequentist", {"numerator": 50.0, "denominator": 200.0}, good_bin)
     se, effect = base["se"], base["effect"]
     z0 = effect / se
     assert rate["p_beat_control"] == _pytest.approx(_stats.norm_cdf(z0), rel=1e-12)
     assert rate["expected_loss"] == _pytest.approx(
-        max(0.0,
-            se * _m.exp(-z0 * z0 / 2.0) / _m.sqrt(2.0 * _m.pi)
-            - effect * _stats.norm_sf(z0)),
+        max(0.0, se * _m.exp(-z0 * z0 / 2.0) / _m.sqrt(2.0 * _m.pi) - effect * _stats.norm_sf(z0)),
         rel=1e-12,
     )
     assert rate["credible_interval"] == base["ci"]
     # se == 0 is REACHABLE (0/200 vs 0/200 is sufficient data, zero
     # variance): the guards must take the else-0 branches, never divide
-    zero_rate = compare("rate", "bayesian",
-                        {"numerator": 0.0, "denominator": 200.0},
-                        {"numerator": 0.0, "denominator": 200.0})
+    zero_rate = compare(
+        "rate",
+        "bayesian",
+        {"numerator": 0.0, "denominator": 200.0},
+        {"numerator": 0.0, "denominator": 200.0},
+    )
     assert zero_rate["p_beat_control"] == _pytest.approx(0.5)
     assert zero_rate["expected_loss"] == 0.0
     # binary CUPED gates (round 142): k == 1 via the cov_* mirror has NO
     # mode key; k == 2 with a covariates map runs the multi core
-    bin_c = {"numerator": 80.0, "denominator": 200.0,
-             "cov_sum": 200.0, "cov_sum_sq": 420.0, "cov_xy_sum": 95.0}
-    bin_t = {"numerator": 110.0, "denominator": 200.0,
-             "cov_sum": 205.0, "cov_sum_sq": 440.0, "cov_xy_sum": 130.0}
-    single = compare("binary", "frequentist", bin_c, bin_t,
-                     covariate_keys=["c1"])
+    bin_c = {
+        "numerator": 80.0,
+        "denominator": 200.0,
+        "cov_sum": 200.0,
+        "cov_sum_sq": 420.0,
+        "cov_xy_sum": 95.0,
+    }
+    bin_t = {
+        "numerator": 110.0,
+        "denominator": 200.0,
+        "cov_sum": 205.0,
+        "cov_sum_sq": 440.0,
+        "cov_xy_sum": 130.0,
+    }
+    single = compare("binary", "frequentist", bin_c, bin_t, covariate_keys=["c1"])
     assert single["cuped"] is not None and "mode" not in single["cuped"]
-    cov_c = {"c1": {"sum": 200.0, "sum_sq": 420.0, "xy_sum": 95.0,
-                    "xx": {"c2": 210.0}},
-             "c2": {"sum": 180.0, "sum_sq": 400.0, "xy_sum": 88.0}}
-    cov_t = {"c1": {"sum": 205.0, "sum_sq": 440.0, "xy_sum": 130.0,
-                    "xx": {"c2": 215.0}},
-             "c2": {"sum": 190.0, "sum_sq": 430.0, "xy_sum": 120.0}}
-    multi = compare("binary", "frequentist",
-                    {**bin_c, "covariates": cov_c},
-                    {**bin_t, "covariates": cov_t},
-                    covariate_keys=["c1", "c2"])
+    cov_c = {
+        "c1": {"sum": 200.0, "sum_sq": 420.0, "xy_sum": 95.0, "xx": {"c2": 210.0}},
+        "c2": {"sum": 180.0, "sum_sq": 400.0, "xy_sum": 88.0},
+    }
+    cov_t = {
+        "c1": {"sum": 205.0, "sum_sq": 440.0, "xy_sum": 130.0, "xx": {"c2": 215.0}},
+        "c2": {"sum": 190.0, "sum_sq": 430.0, "xy_sum": 120.0},
+    }
+    multi = compare(
+        "binary",
+        "frequentist",
+        {**bin_c, "covariates": cov_c},
+        {**bin_t, "covariates": cov_t},
+        covariate_keys=["c1", "c2"],
+    )
     assert multi["cuped"]["mode"] == "multi"
     assert set(multi["cuped"]["theta"]) == {"c1", "c2"}
     # k == 1 WITH a covariates map (the real compute path stores one even
@@ -861,19 +1047,37 @@ def test_compare_matrix_pins_none_coalescing_and_engines():
     # the strict > 1 gate, pinned on binary AND continuous
     k1_map = {"c1": {"sum": 200.0, "sum_sq": 420.0, "xy_sum": 95.0}}
     k1_map_t = {"c1": {"sum": 205.0, "sum_sq": 440.0, "xy_sum": 130.0}}
-    bin_k1 = compare("binary", "frequentist",
-                     {**bin_c, "covariates": k1_map},
-                     {**bin_t, "covariates": k1_map_t},
-                     covariate_keys=["c1"])
+    bin_k1 = compare(
+        "binary",
+        "frequentist",
+        {**bin_c, "covariates": k1_map},
+        {**bin_t, "covariates": k1_map_t},
+        covariate_keys=["c1"],
+    )
     assert bin_k1["cuped"] is not None and "mode" not in bin_k1["cuped"]
-    cont_k1 = compare("continuous", "frequentist",
-                      {"n": 200.0, "sum_value": 80.0, "sum_sq": 80.0,
-                       "cov_sum": 200.0, "cov_sum_sq": 420.0,
-                       "cov_xy_sum": 95.0, "covariates": k1_map},
-                      {"n": 200.0, "sum_value": 110.0, "sum_sq": 110.0,
-                       "cov_sum": 205.0, "cov_sum_sq": 440.0,
-                       "cov_xy_sum": 130.0, "covariates": k1_map_t},
-                      covariate_keys=["c1"])
+    cont_k1 = compare(
+        "continuous",
+        "frequentist",
+        {
+            "n": 200.0,
+            "sum_value": 80.0,
+            "sum_sq": 80.0,
+            "cov_sum": 200.0,
+            "cov_sum_sq": 420.0,
+            "cov_xy_sum": 95.0,
+            "covariates": k1_map,
+        },
+        {
+            "n": 200.0,
+            "sum_value": 110.0,
+            "sum_sq": 110.0,
+            "cov_sum": 205.0,
+            "cov_sum_sq": 440.0,
+            "cov_xy_sum": 130.0,
+            "covariates": k1_map_t,
+        },
+        covariate_keys=["c1"],
+    )
     assert cont_k1["cuped"] is not None and "mode" not in cont_k1["cuped"]
     # the continuous t depends on sum_sq — pins the or-coalesce there
     assert freq_c["t"] == _pytest.approx(
@@ -890,13 +1094,19 @@ async def test_aggregate_uses_only_the_highest_query_version_values(db):
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     for version, numerator in ((1, 500), (2, 30)):
         for variant in ("control", "treatment"):
-            db.add(MetricSnapshot(
-                experiment_id=exp.id, metric_key="exposure_rate",
-                variant_key=variant, window_start=ws + timedelta(days=version),
-                window_end=ws + timedelta(days=version + 1),
-                n=100, numerator=numerator, denominator=100,
-                provenance={"query_version": version},
-            ))
+            db.add(
+                MetricSnapshot(
+                    experiment_id=exp.id,
+                    metric_key="exposure_rate",
+                    variant_key=variant,
+                    window_start=ws + timedelta(days=version),
+                    window_end=ws + timedelta(days=version + 1),
+                    n=100,
+                    numerator=numerator,
+                    denominator=100,
+                    provenance={"query_version": version},
+                )
+            )
     await db.flush()
     aggregated, mixed = await AnalysisService(db)._aggregate_metric(  # noqa: SLF001
         exp.id, "exposure_rate"
@@ -915,9 +1125,11 @@ async def test_novelty_thresholds_boundaries(db):
     base = datetime(2026, 9, 1, tzinfo=UTC)
 
     async def _seed(denominator: int, early_num: int, late_num: int, control_num: int):
-        await db.execute(delete(MetricSnapshot).where(
-            MetricSnapshot.experiment_id == exp.id,
-        ))
+        await db.execute(
+            delete(MetricSnapshot).where(
+                MetricSnapshot.experiment_id == exp.id,
+            )
+        )
         for day in range(4):
             ws = base + timedelta(days=day)
             for variant in ("control", "treatment"):
@@ -925,13 +1137,19 @@ async def test_novelty_thresholds_boundaries(db):
                     numerator = control_num
                 else:
                     numerator = early_num if day < 2 else late_num
-                db.add(MetricSnapshot(
-                    experiment_id=exp.id, metric_key="exposure_rate",
-                    variant_key=variant, window_start=ws,
-                    window_end=ws + timedelta(days=1),
-                    n=denominator, numerator=numerator, denominator=denominator,
-                    provenance={"query_version": 1},
-                ))
+                db.add(
+                    MetricSnapshot(
+                        experiment_id=exp.id,
+                        metric_key="exposure_rate",
+                        variant_key=variant,
+                        window_start=ws,
+                        window_end=ws + timedelta(days=1),
+                        n=denominator,
+                        numerator=numerator,
+                        denominator=denominator,
+                        provenance={"query_version": 1},
+                    )
+                )
         await db.flush()
 
     # 28 per arm per HALF (14 per window × 2): below the 30 minimum —
@@ -943,10 +1161,10 @@ async def test_novelty_thresholds_boundaries(db):
     # the one-third ratio from clearly ABOVE (no decay) and clearly BELOW
     # (decay) — the exact ==1/3 instant is float-unstable and ledgered as a
     # float-exact boundary (the round-6 class)
-    await _seed(200, 100, 65, 40)   # late 0.125 > 0.30/3 → quiet
+    await _seed(200, 100, 65, 40)  # late 0.125 > 0.30/3 → quiet
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "NOVELTY_EFFECT_DECAY_SUSPECT" not in result["warnings"]
-    await _seed(200, 100, 50, 40)   # late 0.05 < 0.10 → flagged
+    await _seed(200, 100, 50, 40)  # late 0.05 < 0.10 → flagged
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "NOVELTY_EFFECT_DECAY_SUSPECT" in result["warnings"]
 
@@ -974,38 +1192,60 @@ async def test_corpus_prior_uses_latest_look_and_exact_sd(db):
     effects = [0.02, 0.03, 0.04]
     for i, effect in enumerate(effects):
         hist = await svc.create(
-            key=f"hist-{str(_ULID()).lower()}", title="H", domain="learning",
-            layer_key=exp.layer_key, owner_user_id=layer_admin.id,
+            key=f"hist-{str(_ULID()).lower()}",
+            title="H",
+            domain="learning",
+            layer_key=exp.layer_key,
+            owner_user_id=layer_admin.id,
         )
         # an OLD look with a wild effect, then the current one — latest wins
-        db.add(ExperimentEvent(
-            experiment_id=hist.id, actor_user_id=layer_admin.id,
-            event_type="analysis_look",
-            payload={"result_hash": "0" * 64, "primary_effects": {
-                "exposure_rate": {"treatment": {"effect": 9.9, "se": 0.01}},
-            }},
-            created_at=datetime(2026, 8, 1, tzinfo=UTC),
-        ))
-        db.add(ExperimentEvent(
-            experiment_id=hist.id, actor_user_id=layer_admin.id,
-            event_type="analysis_look",
-            payload={"result_hash": "1" * 64, "primary_effects": {
-                "exposure_rate": {"treatment": {"effect": effect, "se": 0.01}},
-            }},
-            created_at=datetime(2026, 9, 1 + i, tzinfo=UTC),
-        ))
-        db.add(DecisionRecord(
-            experiment_id=hist.id, experiment_version=1, decision="promote",
-            summary="hist", domain="learning", analysis_type="randomized",
-            analysis_result_hash="1" * 64, approver_user_id=layer_admin.id,
-        ))
+        db.add(
+            ExperimentEvent(
+                experiment_id=hist.id,
+                actor_user_id=layer_admin.id,
+                event_type="analysis_look",
+                payload={
+                    "result_hash": "0" * 64,
+                    "primary_effects": {
+                        "exposure_rate": {"treatment": {"effect": 9.9, "se": 0.01}},
+                    },
+                },
+                created_at=datetime(2026, 8, 1, tzinfo=UTC),
+            )
+        )
+        db.add(
+            ExperimentEvent(
+                experiment_id=hist.id,
+                actor_user_id=layer_admin.id,
+                event_type="analysis_look",
+                payload={
+                    "result_hash": "1" * 64,
+                    "primary_effects": {
+                        "exposure_rate": {"treatment": {"effect": effect, "se": 0.01}},
+                    },
+                },
+                created_at=datetime(2026, 9, 1 + i, tzinfo=UTC),
+            )
+        )
+        db.add(
+            DecisionRecord(
+                experiment_id=hist.id,
+                experiment_version=1,
+                decision="promote",
+                summary="hist",
+                domain="learning",
+                analysis_type="randomized",
+                analysis_result_hash="1" * 64,
+                approver_user_id=layer_admin.id,
+            )
+        )
     await db.flush()
     await _populate(db, exp)
     result = await AnalysisService(db).run(exp.id, actor=admin)
     prior = result["metrics"]["exposure_rate"]["comparisons"]["treatment"]["corpus_prior"]
     assert prior["n_experiments"] == 3
-    assert abs(prior["mean"] - 0.03) < 1e-12          # 9.9 never leaked in
-    assert abs(prior["sd"] - 0.01) < 1e-12            # exact sample sd
+    assert abs(prior["mean"] - 0.03) < 1e-12  # 9.9 never leaked in
+    assert abs(prior["sd"] - 0.01) < 1e-12  # exact sample sd
 
 
 # Wave-10 survivor ledger: the query_version .get(..., 1) defaults are
@@ -1071,9 +1311,7 @@ async def test_concurrent_of_analyses_cannot_overspend_looks(db):
     finally:
         async with AsyncSessionLocal() as session:
             await session.execute(delete(Experiment).where(Experiment.id == exp_id))
-            await session.execute(
-                delete(ExperimentLayer).where(ExperimentLayer.key == layer_key)
-            )
+            await session.execute(delete(ExperimentLayer).where(ExperimentLayer.key == layer_key))
             from app.models.user import User as _User
 
             await session.execute(delete(_User).where(_User.id == admin_id))
@@ -1085,9 +1323,7 @@ async def test_power_block_and_underpowered_warning(db):
     the OBSERVED control baseline — a 40-unit experiment against a 20%% MDE
     target is deeply underpowered, so SAMPLE_BELOW_POWER_TARGET must fire
     and powered must be False. A spec without power declares nothing."""
-    exp, admin = await _mk_running(
-        db, power={"mde": 0.20, "alpha": 0.05, "power": 0.8}
-    )
+    exp, admin = await _mk_running(db, power={"mde": 0.20, "alpha": 0.05, "power": 0.8})
     await _populate(db, exp)
     result = await AnalysisService(db).run(exp.id, actor=admin)
     block = result["power"]
@@ -1112,9 +1348,10 @@ async def test_no_recent_exposures_warning(db):
     # assignments but ZERO exposures
     asvc = AssignmentService(db)
     for i in range(4):
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=f"noexp-{i}"
-        ) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"noexp-{i}")
+            is not None
+        )
     start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=start, window_end=start + timedelta(days=1)
@@ -1145,9 +1382,7 @@ async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
     exp, admin = await _mk_running(db)
     asvc = AssignmentService(db)
     for i in range(80):
-        r = await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=f"auto-{i}"
-        )
+        r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"auto-{i}")
         assert r is not None
         if r.variant_key == "treatment":
             await asvc.record_exposure(
@@ -1187,13 +1422,17 @@ async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
     assert of_looks == 0  # the OF budget is untouched
 
     notes = (
-        await db.execute(
-            _select(Notification).where(
-                Notification.user_id == admin.id,
-                Notification.type == "experiment_significance",
+        (
+            await db.execute(
+                _select(Notification).where(
+                    Notification.user_id == admin.id,
+                    Notification.type == "experiment_significance",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(notes) == 1
     assert notes[0].data["experiment_id"] == exp.id
 
@@ -1213,8 +1452,7 @@ async def test_auto_analysis_sweep_msprt_only_and_notifies_once(db):
     # longer suppresses — backdate it and the sweep notifies again
     await db.execute(
         _update(Notification)
-        .where(Notification.user_id == admin.id,
-               Notification.type == "experiment_significance")
+        .where(Notification.user_id == admin.id, Notification.type == "experiment_significance")
         .values(created_at=datetime.now(UTC) - timedelta(hours=24, minutes=30))
     )
     await sweep_experiment_analyses(db)
@@ -1245,9 +1483,7 @@ async def test_auto_analysis_balanced_experiment_never_notifies(db):
     exp, admin = await _mk_running(db)
     await _populate(db, exp)  # balanced: every other unit exposed, both arms
     await db.execute(
-        _update(_Exp)
-        .where(_Exp.status == "running", _Exp.id != exp.id)
-        .values(status="paused")
+        _update(_Exp).where(_Exp.status == "running", _Exp.id != exp.id).values(status="paused")
     )
     analyzed = await sweep_experiment_analyses(db)
     assert analyzed == 1
@@ -1301,8 +1537,7 @@ async def test_auto_analysis_poison_arms_never_stall_the_batch(db, monkeypatch):
 
     await db.execute(
         _update(_Exp)
-        .where(_Exp.status == "running",
-               _Exp.id.notin_([poison_spec.id, crasher.id, healthy.id]))
+        .where(_Exp.status == "running", _Exp.id.notin_([poison_spec.id, crasher.id, healthy.id]))
         .values(status="paused")
     )
     analyzed = await sweep_experiment_analyses(db)
@@ -1322,17 +1557,13 @@ async def test_analysis_spec_arms_necropsy(db):
     exp, admin = await _mk_running(db)
     await _populate(db, exp, units=6)
 
-    await db.execute(
-        _update(_Exp).where(_Exp.id == exp.id).values(current_version=99)
-    )
+    await db.execute(_update(_Exp).where(_Exp.id == exp.id).values(current_version=99))
     with pytest.raises(AppError) as exc:
         await AnalysisService(db).run(exp.id, actor=admin)
     assert exc.value.code == "EXPERIMENT_SPEC_INVALID"
     assert "no spec version" in exc.value.message
 
-    await db.execute(
-        _update(_Exp).where(_Exp.id == exp.id).values(current_version=1)
-    )
+    await db.execute(_update(_Exp).where(_Exp.id == exp.id).values(current_version=1))
     await db.execute(
         _update(VersionModel)
         .where(VersionModel.experiment_id == exp.id, VersionModel.version == 1)
@@ -1378,28 +1609,35 @@ async def test_multi_covariate_analysis_end_to_end(db):
     from app.models.project import Project, Submission, SubmissionStatus
     from app.models.user import User as _User
 
-    exp, admin = await _mk_running(db, variance_reduction={
-        "method": "cuped",
-        "covariate_metrics": ["revision_count", "project_approval_rate"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["revision_count"],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
+    exp, admin = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["revision_count", "project_approval_rate"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["revision_count"],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
-    project = Project(org_id=org.id, title="MP",
-                      slug=f"mp-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="MP",
+        slug=f"mp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
 
@@ -1422,23 +1660,48 @@ async def test_multi_covariate_analysis_end_to_end(db):
     from app.models.user import UserStatus as _Status
 
     for i, (pv, pstat, wv) in enumerate(rng_rows):
-        u = _User(email=f"mca-{i}-{ULID()}@example.com", display_name=f"A{i}",
-                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        u = _User(
+            email=f"mca-{i}-{ULID()}@example.com",
+            display_name=f"A{i}",
+            role=_Role.STUDENT,
+            status=_Status.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         # #60: resolve() hash-buckets random ULIDs — ~7% of runs land an
         # arm with n <= 1 and BOTH adjustments rightly refuse (cert-92 flake).
         # Deterministic 4/4 split keeps the test about the covariate flow.
-        db.add(ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=u.id,
-            variant_key="control" if i % 2 == 0 else "treatment",
-            assigned_version=1, bucket=0, is_holdout=False,
-        ))
-        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
-                          status=pstat, version=pv, created_at=pre))
-        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
-                          status=SubmissionStatus.REJECTED, version=wv,
-                          created_at=window_start + _td(hours=2)))
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=u.id,
+                variant_key="control" if i % 2 == 0 else "treatment",
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
+            )
+        )
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=u.id,
+                status=pstat,
+                version=pv,
+                created_at=pre,
+            )
+        )
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=u.id,
+                status=SubmissionStatus.REJECTED,
+                version=wv,
+                created_at=window_start + _td(hours=2),
+            )
+        )
     await db.flush()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_start + _td(days=1)
@@ -1463,28 +1726,35 @@ async def test_auto_covariates_fold_to_analysis_end_to_end(db):
     from app.models.project import Project, Submission, SubmissionStatus
     from app.models.user import User as _User
 
-    exp, admin = await _mk_running(db, variance_reduction={
-        "method": "cuped",
-        "covariate_metrics": ["auto"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["revision_count"],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
+    exp, admin = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["auto"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["revision_count"],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="mcv", slug=f"mcv-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
-    project = Project(org_id=org.id, title="MP",
-                      slug=f"mp-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="MP",
+        slug=f"mp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
 
@@ -1507,23 +1777,48 @@ async def test_auto_covariates_fold_to_analysis_end_to_end(db):
     from app.models.user import UserStatus as _Status
 
     for i, (pv, pstat, wv) in enumerate(rng_rows):
-        u = _User(email=f"mca-{i}-{ULID()}@example.com", display_name=f"A{i}",
-                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        u = _User(
+            email=f"mca-{i}-{ULID()}@example.com",
+            display_name=f"A{i}",
+            role=_Role.STUDENT,
+            status=_Status.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         # #60: resolve() hash-buckets random ULIDs — ~7% of runs land an
         # arm with n <= 1 and BOTH adjustments rightly refuse (cert-92 flake).
         # Deterministic 4/4 split keeps the test about the covariate flow.
-        db.add(ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=u.id,
-            variant_key="control" if i % 2 == 0 else "treatment",
-            assigned_version=1, bucket=0, is_holdout=False,
-        ))
-        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
-                          status=pstat, version=pv, created_at=pre))
-        db.add(Submission(org_id=org.id, project_id=project.id, user_id=u.id,
-                          status=SubmissionStatus.REJECTED, version=wv,
-                          created_at=window_start + _td(hours=2)))
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=u.id,
+                variant_key="control" if i % 2 == 0 else "treatment",
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
+            )
+        )
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=u.id,
+                status=pstat,
+                version=pv,
+                created_at=pre,
+            )
+        )
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=u.id,
+                status=SubmissionStatus.REJECTED,
+                version=wv,
+                created_at=window_start + _td(hours=2),
+            )
+        )
     await db.flush()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_start + _td(days=1)
@@ -1532,15 +1827,21 @@ async def test_auto_covariates_fold_to_analysis_end_to_end(db):
     from sqlalchemy import select as _select
 
     from app.experiments.models.metric import MetricSnapshot as _Snap77
+
     snap_rows = (
-        await db.execute(_select(_Snap77).where(
-            _Snap77.experiment_id == exp.id,
-            _Snap77.metric_key == "revision_count"))
-    ).scalars().all()
+        (
+            await db.execute(
+                _select(_Snap77).where(
+                    _Snap77.experiment_id == exp.id, _Snap77.metric_key == "revision_count"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert snap_rows and all(r.cov_sum is not None for r in snap_rows)
     assert all(
-        set(r.covariates or {}) >= {"practical_pass_rate", "revision_count"}
-        for r in snap_rows
+        set(r.covariates or {}) >= {"practical_pass_rate", "revision_count"} for r in snap_rows
     )
 
     result = await AnalysisService(db).run(exp.id, actor=admin)
@@ -1562,14 +1863,16 @@ async def test_quantile_comparison_rides_the_analysis(db):
     from app.experiments.models import MetricDefinition
 
     exp, admin = await _mk_running(
-        db, metrics={"primary": ["run_latency_ms"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["run_latency_ms"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
         unit_type="workflow_installation",
     )
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "run_latency_ms"))
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms"))
     ).scalar_one()
     definition.spec = {**definition.spec, "quantiles": [0.5]}
     await db.flush()
@@ -1578,12 +1881,30 @@ async def test_quantile_comparison_rides_the_analysis(db):
     # control ~100ms (bucket 6), treatment ~300ms (bucket 8); two windows
     # each so the fold is observable (counts double)
     for ws in (ws1, ws2):
-        db.add(_snapshot(exp.id, "run_latency_ms", "control", ws,
-                         n=10, sum_value=1000.0, sum_sq=110_000.0,
-                         value_histogram={"6": 10}))
-        db.add(_snapshot(exp.id, "run_latency_ms", "treatment", ws,
-                         n=10, sum_value=3000.0, sum_sq=950_000.0,
-                         value_histogram={"8": 10}))
+        db.add(
+            _snapshot(
+                exp.id,
+                "run_latency_ms",
+                "control",
+                ws,
+                n=10,
+                sum_value=1000.0,
+                sum_sq=110_000.0,
+                value_histogram={"6": 10},
+            )
+        )
+        db.add(
+            _snapshot(
+                exp.id,
+                "run_latency_ms",
+                "treatment",
+                ws,
+                n=10,
+                sum_value=3000.0,
+                sum_sq=950_000.0,
+                value_histogram={"8": 10},
+            )
+        )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["run_latency_ms"]["comparisons"]["treatment"]
@@ -1628,21 +1949,48 @@ async def test_binary_cuped_rides_the_comparison(db):
     block (single covariate via the cov_* mirror) with the 0/1 caveat; the
     unadjusted engine result stays authoritative alongside."""
     exp, admin = await _mk_running(
-        db, variance_reduction={"method": "cuped",
-                                "covariate_metric": "revision_count",
-                                "lookback_days": 14},
-        metrics={"primary": ["project_approval_rate"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metric": "revision_count",
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["project_approval_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     # per-unit binary snapshots: sum==sum_sq==numerator by construction
-    db.add(_snapshot(exp.id, "project_approval_rate", "control", ws,
-                     n=200, numerator=80.0, denominator=200.0,
-                     cov_sum=200.0, cov_sum_sq=420.0, cov_xy_sum=95.0))
-    db.add(_snapshot(exp.id, "project_approval_rate", "treatment", ws,
-                     n=200, numerator=110.0, denominator=200.0,
-                     cov_sum=205.0, cov_sum_sq=440.0, cov_xy_sum=130.0))
+    db.add(
+        _snapshot(
+            exp.id,
+            "project_approval_rate",
+            "control",
+            ws,
+            n=200,
+            numerator=80.0,
+            denominator=200.0,
+            cov_sum=200.0,
+            cov_sum_sq=420.0,
+            cov_xy_sum=95.0,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "project_approval_rate",
+            "treatment",
+            ws,
+            n=200,
+            numerator=110.0,
+            denominator=200.0,
+            cov_sum=205.0,
+            cov_sum_sq=440.0,
+            cov_xy_sum=130.0,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     comparison = result["metrics"]["project_approval_rate"]["comparisons"]["treatment"]
@@ -1665,14 +2013,11 @@ async def test_aggregate_default_version_and_cross_window_covariate_fold(db):
     svc = AnalysisService(db)
 
     # (B) versionless (defaults to 1) + explicit v2 -> v2 wins, mixed trips
-    legacy = _snapshot(exp.id, "revision_count", "control", ws1,
-                       n=10, sum_value=10.0, sum_sq=20.0)
+    legacy = _snapshot(exp.id, "revision_count", "control", ws1, n=10, sum_value=10.0, sum_sq=20.0)
     legacy.provenance = {}  # no query_version at all
     db.add(legacy)
-    db.add(_snapshot(exp.id, "revision_count", "control", ws2,
-                     n=7, sum_value=7.0, sum_sq=9.0))
-    v2 = _snapshot(exp.id, "revision_count", "treatment", ws2,
-                   n=5, sum_value=9.0, sum_sq=21.0)
+    db.add(_snapshot(exp.id, "revision_count", "control", ws2, n=7, sum_value=7.0, sum_sq=9.0))
+    v2 = _snapshot(exp.id, "revision_count", "treatment", ws2, n=5, sum_value=9.0, sum_sq=21.0)
     v2.provenance = {"query_version": 2}
     db.add(v2)
     await db.flush()
@@ -1686,8 +2031,9 @@ async def test_aggregate_default_version_and_cross_window_covariate_fold(db):
     # (B2) a LEGACY-ONLY metric (no query_version anywhere) must still
     # aggregate — the default constant pins itself when it is the only
     # version in play (a mutated default empties the aggregation)
-    solo = _snapshot(exp.id, "run_success_rate", "control", ws1,
-                     n=4, numerator=2.0, denominator=4.0)
+    solo = _snapshot(
+        exp.id, "run_success_rate", "control", ws1, n=4, numerator=2.0, denominator=4.0
+    )
     solo.provenance = {}
     db.add(solo)
     await db.flush()
@@ -1699,15 +2045,24 @@ async def test_aggregate_default_version_and_cross_window_covariate_fold(db):
 
     # (C) two windows of covariates on a separate metric fold by addition
     for ws, scale in ((ws1, 1.0), (ws2, 2.0)):
-        snap = _snapshot(exp.id, "exposure_rate", "control", ws,
-                         n=10, sum_value=scale, sum_sq=scale,
-                         covariates={
-                             "c1": {"sum": 1.0 * scale, "sum_sq": 2.0 * scale,
-                                    "xy_sum": 3.0 * scale,
-                                    "xx": {"c2": 4.0 * scale}},
-                             "c2": {"sum": 5.0 * scale, "sum_sq": 6.0 * scale,
-                                    "xy_sum": 7.0 * scale},
-                         })
+        snap = _snapshot(
+            exp.id,
+            "exposure_rate",
+            "control",
+            ws,
+            n=10,
+            sum_value=scale,
+            sum_sq=scale,
+            covariates={
+                "c1": {
+                    "sum": 1.0 * scale,
+                    "sum_sq": 2.0 * scale,
+                    "xy_sum": 3.0 * scale,
+                    "xx": {"c2": 4.0 * scale},
+                },
+                "c2": {"sum": 5.0 * scale, "sum_sq": 6.0 * scale, "xy_sum": 7.0 * scale},
+            },
+        )
         db.add(snap)
     await db.flush()
     aggregated, _mixed = await svc._aggregate_metric(  # noqa: SLF001
@@ -1727,33 +2082,55 @@ async def test_power_boundary_and_recent_exposure_edge(db):
     from app.experiments.models import ExperimentAssignment, ExperimentExposure
 
     exp, admin = await _mk_running(
-        db, metrics={"primary": ["exposure_rate"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["exposure_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
         power={"mde": 0.20},
     )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     # baseline EXACTLY 0.5 (num = den/2) -> required_n_per_arm(0.5, 0.2)
     # == 388, and each arm sits EXACTLY on that boundary
     for variant in ("control", "treatment"):
-        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
-                         n=388, numerator=194.0, denominator=388.0))
+        db.add(
+            _snapshot(
+                exp.id, "exposure_rate", variant, ws, n=388, numerator=194.0, denominator=388.0
+            )
+        )
     # a FRESH exposure (47.5h is inside the 48h window)
     unit = "pw-" + "u" * 23
-    db.add(ExperimentAssignment(
-        experiment_id=exp.id, unit_type="user", unit_id=unit,
-        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
-    ))
+    db.add(
+        ExperimentAssignment(
+            experiment_id=exp.id,
+            unit_type="user",
+            unit_id=unit,
+            variant_key="control",
+            assigned_version=1,
+            bucket=0,
+            is_holdout=False,
+        )
+    )
     await db.flush()
     exposure = ExperimentExposure(
-        assignment_id=None, experiment_id=exp.id, context={}, dedup_key=None,
+        assignment_id=None,
+        experiment_id=exp.id,
+        context={},
+        dedup_key=None,
     )
     # the exposure model needs the assignment id — fetch it
     from sqlalchemy import select as _select
+
     assignment = (
-        await db.execute(_select(ExperimentAssignment).where(
-            ExperimentAssignment.experiment_id == exp.id))
-    ).scalars().first()
+        (
+            await db.execute(
+                _select(ExperimentAssignment).where(ExperimentAssignment.experiment_id == exp.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
     exposure.assignment_id = assignment.id
     db.add(exposure)
     await db.flush()
@@ -1782,28 +2159,53 @@ async def test_one_armed_metric_is_insufficient_and_n2_prebalance_runs(db):
     flagrant covariate imbalance at n=2 still trips PRE_BALANCE_SUSPECT."""
     exp, admin = await _mk_running(db, power={"mde": 0.2})
     ws = datetime(2026, 9, 1, tzinfo=UTC)
-    db.add(_snapshot(exp.id, "exposure_rate", "treatment", ws,
-                     n=10, numerator=5.0, denominator=10.0))
+    db.add(
+        _snapshot(exp.id, "exposure_rate", "treatment", ws, n=10, numerator=5.0, denominator=10.0)
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
     assert "power" not in result  # nothing computable without a control arm
 
     exp2, admin2 = await _mk_running(
-        db, power={"mde": 0.2},  # a denominator-less continuous primary
-        metrics={"primary": ["revision_count"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        power={"mde": 0.2},  # a denominator-less continuous primary
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
-    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
-                     n=2, sum_value=2.0, sum_sq=2.5,
-                     cov_sum=2.0, cov_sum_sq=2.5, cov_xy_sum=2.0))
+    db.add(
+        _snapshot(
+            exp2.id,
+            "revision_count",
+            "control",
+            ws,
+            n=2,
+            sum_value=2.0,
+            sum_sq=2.5,
+            cov_sum=2.0,
+            cov_sum_sq=2.5,
+            cov_xy_sum=2.0,
+        )
+    )
     # near-zero within-arm variance makes t ~ 2000 at df ~ 1: even the
     # heavy df-1 tail puts p well under 0.001
-    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
-                     n=2, sum_value=2.2, sum_sq=2.9,
-                     cov_sum=2000.0, cov_sum_sq=2000000.0002,
-                     cov_xy_sum=2.0))
+    db.add(
+        _snapshot(
+            exp2.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=2,
+            sum_value=2.2,
+            sum_sq=2.9,
+            cov_sum=2000.0,
+            cov_sum_sq=2000000.0002,
+            cov_xy_sum=2.0,
+        )
+    )
     await db.flush()
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     assert "PRE_BALANCE_SUSPECT" in result2["warnings"]
@@ -1818,7 +2220,10 @@ def test_analysis_service_error_status_contract_pinned():
 
     src = (
         Path(__file__).resolve().parents[1]
-        / "app" / "experiments" / "services" / "analysis_service.py"
+        / "app"
+        / "experiments"
+        / "services"
+        / "analysis_service.py"
     )
     found: dict[str, set[int]] = {}
     for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
@@ -1850,8 +2255,9 @@ async def test_corpus_and_did_guards_tolerate_degenerate_entries(db):
     ws = datetime(2026, 9, 1, tzinfo=UTC)
 
     # (a) insufficient primary in a corpus-bearing domain: no crash, no prior
-    db.add(_snapshot(exp0.id, "exposure_rate", "treatment", ws,
-                     n=10, numerator=5.0, denominator=10.0))
+    db.add(
+        _snapshot(exp0.id, "exposure_rate", "treatment", ws, n=10, numerator=5.0, denominator=10.0)
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp0.id, actor=admin)
     assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
@@ -1859,13 +2265,17 @@ async def test_corpus_and_did_guards_tolerate_degenerate_entries(db):
     # (b) zero-variance continuous primary: comparisons exist but se == 0 —
     # the corpus shrink must skip (division by zero otherwise)
     exp1, admin1 = await _mk_running(
-        db, metrics={"primary": ["revision_count"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     for variant in ("control", "treatment"):
-        db.add(_snapshot(exp1.id, "revision_count", variant, ws,
-                         n=50, sum_value=100.0, sum_sq=200.0))  # var == 0
+        db.add(
+            _snapshot(exp1.id, "revision_count", variant, ws, n=50, sum_value=100.0, sum_sq=200.0)
+        )  # var == 0
     await db.flush()
     result1 = await AnalysisService(db).run(exp1.id, actor=admin1)
     comparison = result1["metrics"]["revision_count"]["comparisons"]["treatment"]
@@ -1873,8 +2283,9 @@ async def test_corpus_and_did_guards_tolerate_degenerate_entries(db):
 
     # (c) observational run with a one-armed primary: the DiD block skips
     exp2, admin2 = await _mk_running(db, analysis_type="observational")
-    db.add(_snapshot(exp2.id, "exposure_rate", "treatment", ws,
-                     n=10, numerator=5.0, denominator=10.0))
+    db.add(
+        _snapshot(exp2.id, "exposure_rate", "treatment", ws, n=10, numerator=5.0, denominator=10.0)
+    )
     await db.flush()
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     assert result2["causal_claim"] is False
@@ -1892,22 +2303,27 @@ async def test_corpus_guards_with_standing_prior(db):
     # (a) insufficient primary + standing prior -> guard skips
     exp_a, admin_a = await _mk_running(db)
     await _mk_decided_history(db, "learning", "exposure_rate", [0.02, 0.03, 0.04])
-    db.add(_snapshot(exp_a.id, "exposure_rate", "treatment", ws,
-                     n=10, numerator=5.0, denominator=10.0))
+    db.add(
+        _snapshot(exp_a.id, "exposure_rate", "treatment", ws, n=10, numerator=5.0, denominator=10.0)
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp_a.id, actor=admin_a)
     assert result["metrics"]["exposure_rate"].get("insufficient_data") is True
 
     # (b) zero-variance continuous primary (se == 0) with a prior standing
     exp_b, admin_b = await _mk_running(
-        db, metrics={"primary": ["revision_count"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     await _mk_decided_history(db, "learning", "revision_count", [0.1, 0.2, 0.3])
     for variant in ("control", "treatment"):
-        db.add(_snapshot(exp_b.id, "revision_count", variant, ws,
-                         n=50, sum_value=100.0, sum_sq=200.0))  # var == 0
+        db.add(
+            _snapshot(exp_b.id, "revision_count", variant, ws, n=50, sum_value=100.0, sum_sq=200.0)
+        )  # var == 0
     await db.flush()
     result_b = await AnalysisService(db).run(exp_b.id, actor=admin_b)
     comp_b = result_b["metrics"]["revision_count"]["comparisons"]["treatment"]
@@ -1917,15 +2333,20 @@ async def test_corpus_guards_with_standing_prior(db):
     # zero (discovered here — the sd <= 0 guard is defense-in-depth), so the
     # shrink still runs and pulls fully toward the degenerate corpus mean
     exp_c, admin_c = await _mk_running(
-        db, metrics={"primary": ["run_success_rate"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["run_success_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
-    await _mk_decided_history(db, "learning", "run_success_rate",
-                              [0.05, 0.05, 0.05])
+    await _mk_decided_history(db, "learning", "run_success_rate", [0.05, 0.05, 0.05])
     for variant, num in (("control", 20.0), ("treatment", 30.0)):
-        db.add(_snapshot(exp_c.id, "run_success_rate", variant, ws,
-                         n=100, numerator=num, denominator=100.0))
+        db.add(
+            _snapshot(
+                exp_c.id, "run_success_rate", variant, ws, n=100, numerator=num, denominator=100.0
+            )
+        )
     await db.flush()
     result_c = await AnalysisService(db).run(exp_c.id, actor=admin_c)
     comp_c = result_c["metrics"]["run_success_rate"]["comparisons"]["treatment"]
@@ -1941,26 +2362,52 @@ async def test_power_block_skips_zero_denominator_and_k1_not_degraded(db):
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     exp, admin = await _mk_running(db, power={"mde": 0.2})
     for variant in ("control", "treatment"):
-        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
-                         n=0, numerator=0.0, denominator=0.0))
+        db.add(_snapshot(exp.id, "exposure_rate", variant, ws, n=0, numerator=0.0, denominator=0.0))
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "power" not in result  # not evaluable, not crashed
 
     exp2, admin2 = await _mk_running(
-        db, variance_reduction={"method": "cuped",
-                                "covariate_metric": "revision_count",
-                                "lookback_days": 14},
-        metrics={"primary": ["revision_count"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metric": "revision_count",
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
-    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
-                     n=200, sum_value=200.0, sum_sq=260.0,
-                     cov_sum=200.0, cov_sum_sq=260.0, cov_xy_sum=230.0))
-    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
-                     n=200, sum_value=220.0, sum_sq=300.0,
-                     cov_sum=201.0, cov_sum_sq=263.0, cov_xy_sum=235.0))
+    db.add(
+        _snapshot(
+            exp2.id,
+            "revision_count",
+            "control",
+            ws,
+            n=200,
+            sum_value=200.0,
+            sum_sq=260.0,
+            cov_sum=200.0,
+            cov_sum_sq=260.0,
+            cov_xy_sum=230.0,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp2.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=200,
+            sum_value=220.0,
+            sum_sq=300.0,
+            cov_sum=201.0,
+            cov_sum_sq=263.0,
+            cov_xy_sum=235.0,
+        )
+    )
     await db.flush()
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     comparison = result2["metrics"]["revision_count"]["comparisons"]["treatment"]
@@ -1979,40 +2426,56 @@ async def test_its_rides_observational_analysis(db):
     from app.models.user import UserStatus as _Status
 
     exp, admin = await _mk_running(
-        db, analysis_type="observational",
-        metrics={"primary": ["revision_count", "project_approval_rate"],
-                 "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        analysis_type="observational",
+        metrics={
+            "primary": ["revision_count", "project_approval_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name=f"o-{str(ULID()).lower()}",
-                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
     db.add(org)
     await db.flush()
-    project = Project(org_id=org.id, title="IP",
-                      slug=f"ip-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="IP",
+        slug=f"ip-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
-    unit = _User(email=f"its-{ULID()}@example.com", display_name="I",
-                 role=_Role.STUDENT, status=_Status.ACTIVE)
+    unit = _User(
+        email=f"its-{ULID()}@example.com",
+        display_name="I",
+        role=_Role.STUDENT,
+        status=_Status.ACTIVE,
+    )
     db.add(unit)
     await db.flush()
     from app.experiments.models import Experiment, ExperimentAssignment
 
-    db.add(ExperimentAssignment(
-        experiment_id=exp.id, unit_type="user", unit_id=unit.id,
-        variant_key="treatment", assigned_version=1, bucket=0,
-        is_holdout=False,
-    ))
+    db.add(
+        ExperimentAssignment(
+            experiment_id=exp.id,
+            unit_type="user",
+            unit_id=unit.id,
+            variant_key="treatment",
+            assigned_version=1,
+            bucket=0,
+            is_holdout=False,
+        )
+    )
     exp_row = await db.get(Experiment, exp.id)
     start_day = (datetime.now(UTC) - timedelta(days=3)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -2021,24 +2484,46 @@ async def test_its_rides_observational_analysis(db):
     await db.flush()
     # pre: one v2 submission per day (1 revision); post: v4 (3 revisions)
     for offset in range(14, 0, -1):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=unit.id, status=SubmissionStatus.APPROVED,
-                          version=2,
-                          created_at=start_day - timedelta(days=offset,
-                                                           hours=-6)))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=unit.id,
+                status=SubmissionStatus.APPROVED,
+                version=2,
+                created_at=start_day - timedelta(days=offset, hours=-6),
+            )
+        )
     for offset in range(3):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=unit.id, status=SubmissionStatus.APPROVED,
-                          version=4,
-                          created_at=start_day + timedelta(days=offset,
-                                                           hours=6)))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=unit.id,
+                status=SubmissionStatus.APPROVED,
+                version=4,
+                created_at=start_day + timedelta(days=offset, hours=6),
+            )
+        )
     # snapshots so the primaries themselves are computable
     ws = start_day + timedelta(days=1)
     for variant, total in (("control", 10.0), ("treatment", 14.0)):
-        db.add(_snapshot(exp.id, "revision_count", variant, ws,
-                         n=10, sum_value=total, sum_sq=total * 2.5))
-        db.add(_snapshot(exp.id, "project_approval_rate", variant, ws,
-                         n=10, numerator=total / 2.0, denominator=10.0))
+        db.add(
+            _snapshot(
+                exp.id, "revision_count", variant, ws, n=10, sum_value=total, sum_sq=total * 2.5
+            )
+        )
+        db.add(
+            _snapshot(
+                exp.id,
+                "project_approval_rate",
+                variant,
+                ws,
+                n=10,
+                numerator=total / 2.0,
+                denominator=10.0,
+            )
+        )
     await db.flush()
 
     result = await AnalysisService(db).run(exp.id, actor=admin)
@@ -2050,13 +2535,15 @@ async def test_its_rides_observational_analysis(db):
     # pre steady 1.0/day, post [3,3,3] then silence-as-zero — so the block
     # must equal the pure core's answer on that series bit-for-bit
     from app.experiments.services.analysis import its_estimate
+
     expected = its_estimate([1.0] * 14, [3.0, 3.0, 3.0] + [0.0] * 11)
     assert its["level_change"]["estimate"] == pytest.approx(
-        expected["level_change"]["estimate"], abs=1e-9)
+        expected["level_change"]["estimate"], abs=1e-9
+    )
     assert its["trend_change"]["estimate"] == pytest.approx(
-        expected["trend_change"]["estimate"], abs=1e-9)
-    assert its["level_change"]["p"] == pytest.approx(
-        expected["level_change"]["p"], abs=1e-9)
+        expected["trend_change"]["estimate"], abs=1e-9
+    )
+    assert its["level_change"]["p"] == pytest.approx(expected["level_change"]["p"], abs=1e-9)
     assert "association only" in its["caveat"]
     # ITS rides the FIRST primary only ([:1] is the design, not a slice bug)
     assert "its" not in result["metrics"]["project_approval_rate"]
@@ -2068,52 +2555,79 @@ async def test_its_rides_observational_analysis(db):
     # a rate-kind primary exercises the numerator/denominator daily branch:
     # all submissions are approved -> pre 1.0 steady, post [1,1,1] then 0
     exp2, admin2 = await _mk_running(
-        db, analysis_type="observational",
-        metrics={"primary": ["project_approval_rate"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        analysis_type="observational",
+        metrics={
+            "primary": ["project_approval_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
-    db.add(ExperimentAssignment(
-        experiment_id=exp2.id, unit_type="user", unit_id=unit.id,
-        variant_key="treatment", assigned_version=1, bucket=0,
-        is_holdout=False,
-    ))
+    db.add(
+        ExperimentAssignment(
+            experiment_id=exp2.id,
+            unit_type="user",
+            unit_id=unit.id,
+            variant_key="treatment",
+            assigned_version=1,
+            bucket=0,
+            is_holdout=False,
+        )
+    )
     exp2_row = await db.get(Experiment, exp2.id)
     exp2_row.started_at = start_day
     for variant, num in (("control", 5.0), ("treatment", 6.0)):
-        db.add(_snapshot(exp2.id, "project_approval_rate", variant, ws,
-                         n=10, numerator=num, denominator=10.0))
+        db.add(
+            _snapshot(
+                exp2.id, "project_approval_rate", variant, ws, n=10, numerator=num, denominator=10.0
+            )
+        )
     await db.flush()
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     its2 = result2["metrics"]["project_approval_rate"].get("its")
     assert its2 is not None
     expected2 = its_estimate([1.0] * 14, [1.0, 1.0, 1.0] + [0.0] * 11)
     assert its2["level_change"]["estimate"] == pytest.approx(
-        expected2["level_change"]["estimate"], abs=1e-9)
+        expected2["level_change"]["estimate"], abs=1e-9
+    )
     assert its2["trend_change"]["estimate"] == pytest.approx(
-        expected2["trend_change"]["estimate"], abs=1e-9)
+        expected2["trend_change"]["estimate"], abs=1e-9
+    )
 
     # segment-sliced runs never carry the block either (round 191 pin:
     # the segment early-return precedes the ITS block)
     result_seg = await AnalysisService(db).run(
-        exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz")
+        exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz"
+    )
     assert "its" not in result_seg["metrics"]["revision_count"]
 
     # randomized runs never carry the block — even with a SOURCED primary,
     # an assigned roster and a started_at (the gate is the conjunction)
     exp_r, admin_r = await _mk_running(
-        db, metrics={"primary": ["revision_count"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+        db,
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
-    db.add(ExperimentAssignment(
-        experiment_id=exp_r.id, unit_type="user", unit_id=unit.id,
-        variant_key="treatment", assigned_version=1, bucket=0,
-        is_holdout=False,
-    ))
+    db.add(
+        ExperimentAssignment(
+            experiment_id=exp_r.id,
+            unit_type="user",
+            unit_id=unit.id,
+            variant_key="treatment",
+            assigned_version=1,
+            bucket=0,
+            is_holdout=False,
+        )
+    )
     for variant, total in (("control", 10.0), ("treatment", 14.0)):
-        db.add(_snapshot(exp_r.id, "revision_count", variant, ws,
-                         n=10, sum_value=total, sum_sq=total * 2.5))
+        db.add(
+            _snapshot(
+                exp_r.id, "revision_count", variant, ws, n=10, sum_value=total, sum_sq=total * 2.5
+            )
+        )
     await db.flush()
     result_r = await AnalysisService(db).run(exp_r.id, actor=admin_r)
     assert "its" not in result_r["metrics"]["revision_count"]
@@ -2130,26 +2644,33 @@ async def test_synthetic_control_rides_observational_analysis(db):
     from app.models.user import UserStatus as _Status
 
     exp, admin = await _mk_running(
-        db, analysis_type="observational",
-        metrics={"primary": ["revision_count"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        analysis_type="observational",
+        metrics={
+            "primary": ["revision_count"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name=f"o-{str(ULID()).lower()}",
-                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
     db.add(org)
     await db.flush()
-    project = Project(org_id=org.id, title="SC",
-                      slug=f"sc-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="SC",
+        slug=f"sc-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     from app.experiments.models import Experiment, ExperimentAssignment
@@ -2162,29 +2683,48 @@ async def test_synthetic_control_rides_observational_analysis(db):
     await db.flush()
 
     def _user(tag):
-        u = _User(email=f"sc-{tag}-{ULID()}@example.com", display_name=tag,
-                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        u = _User(
+            email=f"sc-{tag}-{ULID()}@example.com",
+            display_name=tag,
+            role=_Role.STUDENT,
+            status=_Status.ACTIVE,
+        )
         db.add(u)
         return u
 
     treated = _user("t")
     d_match, d_hi1, d_hi2 = _user("d0"), _user("d1"), _user("d2")
     await db.flush()
-    for u, variant in ((treated, "treatment"), (d_match, "control"),
-                       (d_hi1, "control"), (d_hi2, "control")):
-        db.add(ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=u.id,
-            variant_key=variant, assigned_version=1, bucket=0,
-            is_holdout=False,
-        ))
+    for u, variant in (
+        (treated, "treatment"),
+        (d_match, "control"),
+        (d_hi1, "control"),
+        (d_hi2, "control"),
+    ):
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=u.id,
+                variant_key=variant,
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
+            )
+        )
     await db.flush()
 
     def _sub(user, day_offset, version):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=user.id, status=SubmissionStatus.APPROVED,
-                          version=version,
-                          created_at=start_day + timedelta(days=day_offset,
-                                                           hours=6)))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=SubmissionStatus.APPROVED,
+                version=version,
+                created_at=start_day + timedelta(days=day_offset, hours=6),
+            )
+        )
 
     # treated: 1.0/day pre, then [3,3,3] and silence post
     for off in range(-14, 0):
@@ -2200,8 +2740,11 @@ async def test_synthetic_control_rides_observational_analysis(db):
         _sub(d_hi2, off, 4)
     ws = start_day + timedelta(days=1)
     for variant, total in (("control", 10.0), ("treatment", 14.0)):
-        db.add(_snapshot(exp.id, "revision_count", variant, ws,
-                         n=10, sum_value=total, sum_sq=total * 2.5))
+        db.add(
+            _snapshot(
+                exp.id, "revision_count", variant, ws, n=10, sum_value=total, sum_sq=total * 2.5
+            )
+        )
     await db.flush()
 
     result = await AnalysisService(db).run(exp.id, actor=admin)
@@ -2212,10 +2755,12 @@ async def test_synthetic_control_rides_observational_analysis(db):
     # oracle-via-pure-core: the fixture fully determines every series;
     # donor order is sorted unit id
     from app.experiments.services.analysis import synthetic_control
+
     series = {d_match.id: 1.0, d_hi1.id: 3.0, d_hi2.id: 3.0}
     donor_ids = sorted(series)
     expected = synthetic_control(
-        [1.0] * 14, [3.0, 3.0, 3.0] + [0.0] * 11,
+        [1.0] * 14,
+        [3.0, 3.0, 3.0] + [0.0] * 11,
         [[series[u]] * 14 for u in donor_ids],
         [[series[u]] * 14 for u in donor_ids],
     )
@@ -2243,18 +2788,22 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
     from app.models.user import UserRole as _Role
     from app.models.user import UserStatus as _Status
 
-    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                           slug=f"t-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name=f"o-{str(ULID()).lower()}",
-                       slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id)
+    org = Organization(
+        name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+    )
     db.add(org)
     await db.flush()
-    project = Project(org_id=org.id, title="SC2",
-                      slug=f"sc2-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="SC2",
+        slug=f"sc2-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     start_day = (datetime.now(UTC) - timedelta(days=3)).replace(
@@ -2262,37 +2811,64 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
     )
 
     def _user(tag):
-        u = _User(email=f"sc2-{tag}-{ULID()}@example.com", display_name=tag,
-                  role=_Role.STUDENT, status=_Status.ACTIVE)
+        u = _User(
+            email=f"sc2-{tag}-{ULID()}@example.com",
+            display_name=tag,
+            role=_Role.STUDENT,
+            status=_Status.ACTIVE,
+        )
         db.add(u)
         return u
 
     def _sub(user, day_offset, status):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=user.id, status=status,
-                          version=2,
-                          created_at=start_day + timedelta(days=day_offset,
-                                                           hours=6)))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=status,
+                version=2,
+                created_at=start_day + timedelta(days=day_offset, hours=6),
+            )
+        )
 
     async def _mk_sc_exp(units_by_variant):
         exp, admin = await _mk_running(
-            db, analysis_type="observational",
-            metrics={"primary": ["project_approval_rate"], "secondary": [],
-                     "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                     "threshold": 100.0}]},
+            db,
+            analysis_type="observational",
+            metrics={
+                "primary": ["project_approval_rate"],
+                "secondary": [],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
         )
         exp_row = await db.get(Experiment, exp.id)
         exp_row.started_at = start_day
         for u, variant in units_by_variant:
-            db.add(ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=u.id,
-                variant_key=variant, assigned_version=1, bucket=0,
-                is_holdout=False,
-            ))
+            db.add(
+                ExperimentAssignment(
+                    experiment_id=exp.id,
+                    unit_type="user",
+                    unit_id=u.id,
+                    variant_key=variant,
+                    assigned_version=1,
+                    bucket=0,
+                    is_holdout=False,
+                )
+            )
         ws = start_day + timedelta(days=1)
         for variant, num in (("control", 5.0), ("treatment", 6.0)):
-            db.add(_snapshot(exp.id, "project_approval_rate", variant, ws,
-                             n=10, numerator=num, denominator=10.0))
+            db.add(
+                _snapshot(
+                    exp.id,
+                    "project_approval_rate",
+                    variant,
+                    ws,
+                    n=10,
+                    numerator=num,
+                    denominator=10.0,
+                )
+            )
         await db.flush()
         return exp, admin
 
@@ -2308,18 +2884,19 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
         _sub(d_hi, off, SubmissionStatus.APPROVED)
         _sub(d_lo, off, SubmissionStatus.REJECTED)
     await db.flush()
-    exp, admin = await _mk_sc_exp(
-        [(treated, "treatment"), (d_hi, "control"), (d_lo, "control")])
+    exp, admin = await _mk_sc_exp([(treated, "treatment"), (d_hi, "control"), (d_lo, "control")])
     result = await AnalysisService(db).run(exp.id, actor=admin)
     sc = result["metrics"]["project_approval_rate"].get("synthetic_control")
     assert sc is not None
     assert sc["donors"] == 2 and sc["placebo_p"] is None
     assert "SC_DONOR_POOL_SMALL" not in result["warnings"]
     from app.experiments.services.analysis import synthetic_control
+
     series = {d_hi.id: 1.0, d_lo.id: 0.0}
     donor_ids = sorted(series)
     expected = synthetic_control(
-        [1.0] * 14, [1.0, 1.0, 1.0] + [0.0] * 11,
+        [1.0] * 14,
+        [1.0, 1.0, 1.0] + [0.0] * 11,
         [[series[u]] * 14 for u in donor_ids],
         [[series[u]] * 14 for u in donor_ids],
     )
@@ -2338,8 +2915,7 @@ async def test_sc_two_donor_boundary_rate_branch_and_constant_refusal(db):
         _sub(c1, off, SubmissionStatus.APPROVED)
         _sub(c2, off, SubmissionStatus.APPROVED)
     await db.flush()
-    exp2, admin2 = await _mk_sc_exp(
-        [(t2, "treatment"), (c1, "control"), (c2, "control")])
+    exp2, admin2 = await _mk_sc_exp([(t2, "treatment"), (c1, "control"), (c2, "control")])
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     assert "synthetic_control" not in result2["metrics"]["project_approval_rate"]
     assert "SC_DONOR_POOL_SMALL" not in result2["warnings"]
@@ -2352,12 +2928,18 @@ async def test_auto_covariate_selection_rides_analysis(db):
     writes), the constant one skipped, the run warns CUPED_AUTO_SELECTED;
     aggregates without covariates warn CUPED_AUTO_NONE (and never the
     generic UNAVAILABLE double-bark)."""
-    exp, admin = await _mk_running(db, variance_reduction={
-        "method": "cuped", "covariate_metrics": ["auto"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["revision_count"],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
+    exp, admin = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["auto"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["revision_count"],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     covs_control = {
         "revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 140.0},
@@ -2367,12 +2949,30 @@ async def test_auto_covariate_selection_rides_analysis(db):
         "revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 150.0},
         "practical_pass_rate": {"sum": 8.0, "sum_sq": 16.0, "xy_sum": 112.0},
     }
-    db.add(_snapshot(exp.id, "revision_count", "control", ws,
-                     n=4, sum_value=52.0, sum_sq=696.0,
-                     covariates=covs_control))
-    db.add(_snapshot(exp.id, "revision_count", "treatment", ws,
-                     n=4, sum_value=56.0, sum_sq=804.0,
-                     covariates=covs_treatment))
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "control",
+            ws,
+            n=4,
+            sum_value=52.0,
+            sum_sq=696.0,
+            covariates=covs_control,
+        )
+    )
+    db.add(
+        _snapshot(
+            exp.id,
+            "revision_count",
+            "treatment",
+            ws,
+            n=4,
+            sum_value=56.0,
+            sum_sq=804.0,
+            covariates=covs_treatment,
+        )
+    )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "CUPED_AUTO_SELECTED" in result["warnings"]
@@ -2387,49 +2987,73 @@ async def test_auto_covariate_selection_rides_analysis(db):
     # round 204: the selection's evidence is exposed and exact — pooled
     # cov 20, var_x 10, var_y 42 -> r = 20/sqrt(420)
     import math as _m
+
     auto_evidence = result["metrics"]["revision_count"].get("cuped_auto")
     assert auto_evidence is not None
-    assert auto_evidence["revision_count"] == pytest.approx(
-        20.0 / _m.sqrt(420.0), abs=1e-9)
+    assert auto_evidence["revision_count"] == pytest.approx(20.0 / _m.sqrt(420.0), abs=1e-9)
 
     # round 204: a BINARY primary drives the numerator/denominator branch
     # of the selection's y-mapping (sum == sum_sq == numerator)
-    exp_b, admin_b = await _mk_running(db, variance_reduction={
-        "method": "cuped", "covariate_metrics": ["auto"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["project_approval_rate"], "secondary": [],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
-    db.add(_snapshot(exp_b.id, "project_approval_rate", "control", ws,
-                     n=4, numerator=1.0, denominator=4.0,
-                     covariates={"revision_count":
-                                 {"sum": 10.0, "sum_sq": 30.0,
-                                  "xy_sum": 4.0}}))
-    db.add(_snapshot(exp_b.id, "project_approval_rate", "treatment", ws,
-                     n=4, numerator=3.0, denominator=4.0,
-                     covariates={"revision_count":
-                                 {"sum": 10.0, "sum_sq": 30.0,
-                                  "xy_sum": 12.0}}))
+    exp_b, admin_b = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["auto"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["project_approval_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
+    db.add(
+        _snapshot(
+            exp_b.id,
+            "project_approval_rate",
+            "control",
+            ws,
+            n=4,
+            numerator=1.0,
+            denominator=4.0,
+            covariates={"revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 4.0}},
+        )
+    )
+    db.add(
+        _snapshot(
+            exp_b.id,
+            "project_approval_rate",
+            "treatment",
+            ws,
+            n=4,
+            numerator=3.0,
+            denominator=4.0,
+            covariates={"revision_count": {"sum": 10.0, "sum_sq": 30.0, "xy_sum": 12.0}},
+        )
+    )
     await db.flush()
     result_b = await AnalysisService(db).run(exp_b.id, actor=admin_b)
     assert "CUPED_AUTO_SELECTED" in result_b["warnings"]
     evidence_b = result_b["metrics"]["project_approval_rate"]["cuped_auto"]
     # pooled: n 8, sx 20, sxx 60 (var_x 10); y: sy 4, syy 4 (var_y 2);
     # sxy 16 -> cov 16 - 20*4/8 = 6 -> r = 6/sqrt(20)
-    assert evidence_b["revision_count"] == pytest.approx(
-        6.0 / _m.sqrt(20.0), abs=1e-9)
+    assert evidence_b["revision_count"] == pytest.approx(6.0 / _m.sqrt(20.0), abs=1e-9)
 
     # auto with NO covariate aggregates: honest refusal, single bark
-    exp2, admin2 = await _mk_running(db, variance_reduction={
-        "method": "cuped", "covariate_metrics": ["auto"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["revision_count"],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
-    db.add(_snapshot(exp2.id, "revision_count", "control", ws,
-                     n=4, sum_value=52.0, sum_sq=696.0))
-    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws,
-                     n=4, sum_value=56.0, sum_sq=804.0))
+    exp2, admin2 = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["auto"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["revision_count"],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
+    db.add(_snapshot(exp2.id, "revision_count", "control", ws, n=4, sum_value=52.0, sum_sq=696.0))
+    db.add(_snapshot(exp2.id, "revision_count", "treatment", ws, n=4, sum_value=56.0, sum_sq=804.0))
     await db.flush()
     result2 = await AnalysisService(db).run(exp2.id, actor=admin2)
     assert "CUPED_AUTO_NONE" in result2["warnings"]
@@ -2447,14 +3071,16 @@ async def test_km_refuses_non_talent_sources_with_warning(db):
     from app.experiments.models import MetricDefinition
 
     exp, admin = await _mk_running(
-        db, analysis_type="observational",
-        metrics={"primary": ["retention_rate"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        analysis_type="observational",
+        metrics={
+            "primary": ["retention_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "retention_rate"))
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "retention_rate"))
     ).scalar_one()
     original_spec = dict(definition.spec)
     definition.spec = {**definition.spec, "km": True}
@@ -2462,8 +3088,11 @@ async def test_km_refuses_non_talent_sources_with_warning(db):
     try:
         ws = datetime(2026, 9, 1, tzinfo=UTC)
         for variant, num in (("control", 5.0), ("treatment", 6.0)):
-            db.add(_snapshot(exp.id, "retention_rate", variant, ws,
-                             n=10, numerator=num, denominator=10.0))
+            db.add(
+                _snapshot(
+                    exp.id, "retention_rate", variant, ws, n=10, numerator=num, denominator=10.0
+                )
+            )
         await db.flush()
         result = await AnalysisService(db).run(exp.id, actor=admin)
         assert "km" not in result["metrics"]["retention_rate"]
@@ -2488,14 +3117,18 @@ async def test_km_block_rides_time_to_event_primary(db):
     from app.talent.models.employer import Opportunity
 
     exp, admin = await _mk_running(
-        db, analysis_type="observational",
-        metrics={"primary": ["placement_outcome_rate"], "secondary": [],
-                 "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                 "threshold": 100.0}]},
+        db,
+        analysis_type="observational",
+        metrics={
+            "primary": ["placement_outcome_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
     )
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "placement_outcome_rate"))
+        await db.execute(
+            _select(MetricDefinition).where(MetricDefinition.key == "placement_outcome_rate")
+        )
     ).scalar_one()
     original_spec = dict(definition.spec)
     definition.spec = {**definition.spec, "km": True}
@@ -2504,52 +3137,61 @@ async def test_km_block_rides_time_to_event_primary(db):
         from app.controlplane.models.tenant import TenantAccount
         from app.models.organization import Organization
 
-        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}",
-                               slug=f"t-{str(ULID()).lower()}")
+        tenant = TenantAccount(name=f"t-{str(ULID()).lower()}", slug=f"t-{str(ULID()).lower()}")
         db.add(tenant)
         await db.flush()
-        org = Organization(name=f"o-{str(ULID()).lower()}",
-                           slug=f"o-{str(ULID()).lower()}",
-                           tenant_id=tenant.id)
+        org = Organization(
+            name=f"o-{str(ULID()).lower()}", slug=f"o-{str(ULID()).lower()}", tenant_id=tenant.id
+        )
         db.add(org)
         await db.flush()
-        opp = Opportunity(employer_org_id=org.id, title="Role",
-                          opportunity_type="contract", status="open")
+        opp = Opportunity(
+            employer_org_id=org.id, title="Role", opportunity_type="contract", status="open"
+        )
         db.add(opp)
         await db.flush()
         assigned_day = datetime.now(UTC) - timedelta(days=10)
         units = []
         for i in range(6):
-            u = _User(email=f"km-{i}-{ULID()}@example.com", display_name=f"K{i}",
-                      role=_Role.STUDENT, status=_Status.ACTIVE)
+            u = _User(
+                email=f"km-{i}-{ULID()}@example.com",
+                display_name=f"K{i}",
+                role=_Role.STUDENT,
+                status=_Status.ACTIVE,
+            )
             db.add(u)
             await db.flush()
             arm = "control" if i % 2 == 0 else "treatment"
             a = ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=u.id,
-                variant_key=arm, assigned_version=1, bucket=0,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=u.id,
+                variant_key=arm,
+                assigned_version=1,
+                bucket=0,
                 is_holdout=False,
             )
             db.add(a)
             await db.flush()
             # unit 2 (control) joined only yesterday -> censors at day 1,
             # BEFORE the control event day, shaping the risk set (round 184)
-            a.assigned_at = (datetime.now(UTC) - timedelta(days=1)
-                             if i == 2 else assigned_day)
+            a.assigned_at = datetime.now(UTC) - timedelta(days=1) if i == 2 else assigned_day
             units.append((u.id, arm))
         # treatment: events day 0 (exactly at assigned_at) and day 2;
         # control: one event day 5; everyone else censors
         placements = {}
         for unit_idx, day in ((1, 2), (3, 0), (0, 5)):
             placed_unit = units[unit_idx][0]
-            application = Application(opportunity_id=opp.id,
-                                      user_id=placed_unit, status="hired")
+            application = Application(opportunity_id=opp.id, user_id=placed_unit, status="hired")
             db.add(application)
             await db.flush()
-            placement = Placement(application_id=application.id,
-                                  opportunity_id=opp.id,
-                                  employer_org_id=org.id,
-                                  user_id=placed_unit, status="active")
+            placement = Placement(
+                application_id=application.id,
+                opportunity_id=opp.id,
+                employer_org_id=org.id,
+                user_id=placed_unit,
+                status="active",
+            )
             db.add(placement)
             await db.flush()
             placement.created_at = assigned_day + timedelta(days=day)
@@ -2557,8 +3199,17 @@ async def test_km_block_rides_time_to_event_primary(db):
         # snapshots so the primary itself computes
         ws = datetime(2026, 9, 1, tzinfo=UTC)
         for variant, num in (("control", 0.0), ("treatment", 1.0)):
-            db.add(_snapshot(exp.id, "placement_outcome_rate", variant, ws,
-                             n=3, numerator=num, denominator=3.0))
+            db.add(
+                _snapshot(
+                    exp.id,
+                    "placement_outcome_rate",
+                    variant,
+                    ws,
+                    n=3,
+                    numerator=num,
+                    denominator=3.0,
+                )
+            )
         await db.flush()
 
         result = await AnalysisService(db).run(exp.id, actor=admin)
@@ -2579,7 +3230,8 @@ async def test_km_block_rides_time_to_event_primary(db):
         # caption whole-population curves — pinned here so a future
         # refactor that moves the early return re-fails this
         result_seg = await AnalysisService(db).run(
-            exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz")
+            exp.id, actor=admin, segment="org:zzzzzzzzzzzzzzzzzzzzzzzzzz"
+        )
         assert "km" not in result_seg["metrics"]["placement_outcome_rate"]
 
         # a cancelled placement is NOT an event: cancelling the only
@@ -2593,8 +3245,7 @@ async def test_km_block_rides_time_to_event_primary(db):
         await db.flush()
 
         # knob OFF -> no block
-        definition.spec = {k: v for k, v in definition.spec.items()
-                           if k != "km"}
+        definition.spec = {k: v for k, v in definition.spec.items() if k != "km"}
         await db.flush()
         result_off = await AnalysisService(db).run(exp.id, actor=admin)
         assert "km" not in result_off["metrics"]["placement_outcome_rate"]
@@ -2609,16 +3260,24 @@ async def test_rate_primary_with_cuped_warns_typed_not_misleading(db):
     UNAVAILABLE would mislead (the sources computed fine; the ratio kind is
     the deliberate boundary, delta-method CUPED being the documented
     deferral)."""
-    exp, admin = await _mk_running(db, variance_reduction={
-        "method": "cuped", "covariate_metrics": ["revision_count"],
-        "lookback_days": 14,
-    }, metrics={"primary": ["exposure_rate"], "secondary": [],
-                "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                "threshold": 100.0}]})
+    exp, admin = await _mk_running(
+        db,
+        variance_reduction={
+            "method": "cuped",
+            "covariate_metrics": ["revision_count"],
+            "lookback_days": 14,
+        },
+        metrics={
+            "primary": ["exposure_rate"],
+            "secondary": [],
+            "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+        },
+    )
     ws = datetime(2026, 9, 1, tzinfo=UTC)
     for variant, num in (("control", 5.0), ("treatment", 7.0)):
-        db.add(_snapshot(exp.id, "exposure_rate", variant, ws,
-                         n=10, numerator=num, denominator=20.0))
+        db.add(
+            _snapshot(exp.id, "exposure_rate", variant, ws, n=10, numerator=num, denominator=20.0)
+        )
     await db.flush()
     result = await AnalysisService(db).run(exp.id, actor=admin)
     assert "CUPED_RATE_UNSUPPORTED" in result["warnings"]

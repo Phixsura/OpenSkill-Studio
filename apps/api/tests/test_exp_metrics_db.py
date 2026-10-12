@@ -31,6 +31,7 @@ from app.models.user import User, UserRole, UserStatus
 
 _CHECKLIST = {key: True for key in (*LAUNCH_CHECKLIST_KEYS, ETHICS_CHECKLIST_KEY)}
 
+
 @pytest.fixture
 async def db():
     from app.core.database import engine
@@ -117,8 +118,11 @@ async def test_create_definition_validates_enums(db):
     svc = MetricService(db)
     with pytest.raises(AppError) as e:
         await svc.create_definition(
-            key=f"m_{str(ULID()).lower()}", title="x", kind="bogus",
-            domain="learning", source_kind="service",
+            key=f"m_{str(ULID()).lower()}",
+            title="x",
+            kind="bogus",
+            domain="learning",
+            source_kind="service",
         )
     assert "kind" in e.value.message
 
@@ -148,9 +152,7 @@ async def test_exposures_source_end_to_end_with_provenance(db):
         r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=f"m-{i}")
         assert r is not None
         if i % 2 == 0:
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=f"m-{i}"
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=f"m-{i}")
             exposed_variants.add(r.variant_key)
 
     window_start, window_end = _today_window()
@@ -161,9 +163,7 @@ async def test_exposures_source_end_to_end_with_provenance(db):
     # + cost_usd guardrail (zero-sample for user units), per variant
     assert written == 6
     snapshots = await MetricService(db).list_snapshots(exp.id)
-    assert {s.metric_key for s in snapshots} == {
-        "exposure_rate", "completion_rate", "cost_usd"
-    }
+    assert {s.metric_key for s in snapshots} == {"exposure_rate", "completion_rate", "cost_usd"}
     exposure_rows = [s for s in snapshots if s.metric_key == "exposure_rate"]
     total_exposed = sum(int(s.numerator or 0) for s in exposure_rows)
     assert total_exposed == 15
@@ -246,8 +246,12 @@ async def test_holdout_units_excluded_from_itt_sets(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id, holdout_bp=1000,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        holdout_bp=1000,
     )
     await svc.create_version(exp.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
@@ -285,8 +289,12 @@ async def test_every_seed_source_is_wired_and_unwired_skips(db):
     svc = MetricService(db)
     await svc.ensure_seed_definitions()
     await svc.create_definition(
-        key="ghost_metric", title="Ghost", kind="binary", domain="learning",
-        source_kind="service", spec={"source": "no_such_source"},
+        key="ghost_metric",
+        title="Ghost",
+        kind="binary",
+        domain="learning",
+        source_kind="service",
+        spec={"source": "no_such_source"},
     )
     exp, _ = await _mk_running(db, extra_secondary=["ghost_metric"])
     asvc = AssignmentService(db)
@@ -330,8 +338,7 @@ async def test_sweep_enqueues_yesterday_window_for_live_experiments(db):
     ws, we = previous_utc_day()
     got = [(m.payload["window_start"], m.payload["window_end"]) for m in mine]
     expect = [
-        ((ws - timedelta(days=o)).isoformat(),
-         (we - timedelta(days=o)).isoformat())
+        ((ws - timedelta(days=o)).isoformat(), (we - timedelta(days=o)).isoformat())
         for o in range(SNAPSHOT_BACKFILL_DAYS - 1, -1, -1)
     ]
     assert got == expect
@@ -503,8 +510,13 @@ async def _run_source(db, source_name: str, *, definition_key: str, units, unit_
     ).scalar_one()
     window_start, window_end = _today_window()
     return await SOURCE_REGISTRY[source_name](
-        db, experiment=None, definition=definition, variant_units=_units(units),
-        window_start=window_start, window_end=window_end, unit_type=unit_type,
+        db,
+        experiment=None,
+        definition=definition,
+        variant_units=_units(units),
+        window_start=window_start,
+        window_end=window_end,
+        unit_type=unit_type,
     )
 
 
@@ -517,8 +529,12 @@ async def test_projects_source_approval_and_revisions(db):
     _tenant, org = await _mk_org(db)
     user = await _mk_admin(db)
     project = Project(
-        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
-        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+        org_id=org.id,
+        title="P",
+        slug=f"p-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
     )
     db.add(project)
     await db.flush()
@@ -528,24 +544,39 @@ async def test_projects_source_approval_and_revisions(db):
         (SubmissionStatus.REJECTED, 2),  # 1 revision
     ):
         db.add(
-            Submission(org_id=org.id, project_id=project.id, user_id=user.id,
-                       status=status, version=version)
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=status,
+                version=version,
+            )
         )
     await db.flush()
     approval = await _run_source(
-        db, "projects", definition_key="project_approval_rate",
-        units=[user.id], unit_type="user",
+        db,
+        "projects",
+        definition_key="project_approval_rate",
+        units=[user.id],
+        unit_type="user",
     )
     assert approval["treatment"] == {"n": 3, "numerator": 2, "denominator": 3}
     revisions = await _run_source(
-        db, "projects", definition_key="revision_count", units=[user.id], unit_type="user",
+        db,
+        "projects",
+        definition_key="revision_count",
+        units=[user.id],
+        unit_type="user",
     )
     assert revisions["treatment"]["n"] == 3
     assert revisions["treatment"]["sum_value"] == 3  # (3-1)+(1-1)+(2-1)
     # Wrong unit type → zero-sample, never a bogus join
     empty = await _run_source(
-        db, "projects", definition_key="project_approval_rate",
-        units=[org.id], unit_type="organization",
+        db,
+        "projects",
+        definition_key="project_approval_rate",
+        units=[org.id],
+        unit_type="organization",
     )
     assert empty["treatment"] == {"n": 0}
 
@@ -560,18 +591,29 @@ async def test_cost_ledger_source_org_and_tenant_units(db):
         db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT, cost_usd=cost))
     await db.flush()
     by_org = await _run_source(
-        db, "cost_ledger", definition_key="cost_usd", units=[org.id],
+        db,
+        "cost_ledger",
+        definition_key="cost_usd",
+        units=[org.id],
         unit_type="organization",
     )
     assert by_org["treatment"]["n"] == 2
     assert by_org["treatment"]["sum_value"] == pytest.approx(0.75)
     by_tenant = await _run_source(
-        db, "cost_ledger", definition_key="cost_usd", units=[tenant.id], unit_type="tenant",
+        db,
+        "cost_ledger",
+        definition_key="cost_usd",
+        units=[tenant.id],
+        unit_type="tenant",
     )
     assert by_tenant["treatment"]["sum_value"] == pytest.approx(0.75)
     # wrong unit type: exactly the zero-sample shape, never a bogus query
     wrong = await _run_source(
-        db, "cost_ledger", definition_key="cost_usd", units=[org.id], unit_type="user",
+        db,
+        "cost_ledger",
+        definition_key="cost_usd",
+        units=[org.id],
+        unit_type="user",
     )
     assert wrong["treatment"] == {"n": 0}
 
@@ -585,7 +627,10 @@ async def test_registry_source_pack_adoption(db):
     db.add(SkillPackInstallation(org_id=org.id, installed_version="1.1.0", installed_by=user.id))
     await db.flush()
     result = await _run_source(
-        db, "registry", definition_key="pack_adoption_rate", units=[org.id],
+        db,
+        "registry",
+        definition_key="pack_adoption_rate",
+        units=[org.id],
         unit_type="organization",
     )
     assert result["treatment"] == {"n": 1, "numerator": 2, "denominator": 1}
@@ -624,26 +669,39 @@ async def test_workflow_runs_source_all_measures(db):
     for status, started, finished in runs:
         db.add(
             WorkflowRun(
-                org_id=org.id, installation_id=installation.id,
-                definition_snapshot={}, status=status,
-                created_at=t0, started_at=started, finished_at=finished,
+                org_id=org.id,
+                installation_id=installation.id,
+                definition_snapshot={},
+                status=status,
+                created_at=t0,
+                started_at=started,
+                finished_at=finished,
             )
         )
     await db.flush()
     units = [installation.id]
     success = await _run_source(
-        db, "workflow_runs", definition_key="run_success_rate",
-        units=units, unit_type="workflow_installation",
+        db,
+        "workflow_runs",
+        definition_key="run_success_rate",
+        units=units,
+        unit_type="workflow_installation",
     )
     assert success["treatment"] == {"n": 4, "numerator": 3, "denominator": 4}
     failure = await _run_source(
-        db, "workflow_runs", definition_key="run_failure_rate",
-        units=units, unit_type="workflow_installation",
+        db,
+        "workflow_runs",
+        definition_key="run_failure_rate",
+        units=units,
+        unit_type="workflow_installation",
     )
     assert failure["treatment"] == {"n": 4, "numerator": 1, "denominator": 4}
     latency = await _run_source(
-        db, "workflow_runs", definition_key="run_latency_ms",
-        units=units, unit_type="workflow_installation",
+        db,
+        "workflow_runs",
+        definition_key="run_latency_ms",
+        units=units,
+        unit_type="workflow_installation",
     )
     # run_latency_ms seeds winsorize_pct=99.9: with three samples the
     # empirical 99.9th percentile IS the max → values unchanged, but the
@@ -678,9 +736,7 @@ async def test_winsorized_provenance_is_truthful(db):
     from app.experiments.models import MetricDefinition
 
     definition = (
-        await db.execute(
-            select(MetricDefinition).where(MetricDefinition.key == "revision_count")
-        )
+        await db.execute(select(MetricDefinition).where(MetricDefinition.key == "revision_count"))
     ).scalar_one()
     definition.winsorize_pct = 99
     await db.flush()
@@ -692,19 +748,32 @@ async def test_winsorized_provenance_is_truthful(db):
     _tenant, org = await _mk_org(db)
     user = await _mk_admin(db)
     project = Project(
-        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
-        description="d", instructions="i", rubric=[{"criterion": "c"}],
+        org_id=org.id,
+        title="P",
+        slug=f"p-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c"}],
     )
     db.add(project)
     await db.flush()
     for version in (1, 2, 9):
         db.add(
-            Submission(org_id=org.id, project_id=project.id, user_id=user.id,
-                       status=SubmissionStatus.APPROVED, version=version)
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=SubmissionStatus.APPROVED,
+                version=version,
+            )
         )
     await db.flush()
     out = await _run_source(
-        db, "projects", definition_key="revision_count", units=[user.id], unit_type="user",
+        db,
+        "projects",
+        definition_key="revision_count",
+        units=[user.id],
+        unit_type="user",
     )
     assert out["treatment"]["_winsorized"] is True
 
@@ -724,37 +793,34 @@ async def test_source_window_boundaries_half_open(db):
     rows = list(
         (
             await db.execute(
-                select(ExperimentAssignment).where(
-                    ExperimentAssignment.experiment_id == exp.id
-                )
+                select(ExperimentAssignment).where(ExperimentAssignment.experiment_id == exp.id)
             )
         ).scalars()
     )
     db.add(
-        ExperimentExposure(
-            assignment_id=rows[0].id, experiment_id=exp.id, occurred_at=window_start
-        )
+        ExperimentExposure(assignment_id=rows[0].id, experiment_id=exp.id, occurred_at=window_start)
     )
     db.add(
-        ExperimentExposure(
-            assignment_id=rows[1].id, experiment_id=exp.id, occurred_at=window_end
-        )
+        ExperimentExposure(assignment_id=rows[1].id, experiment_id=exp.id, occurred_at=window_end)
     )
     await db.flush()
     from app.experiments.models import MetricDefinition
     from app.experiments.services.metrics import SOURCE_REGISTRY
 
     definition = (
-        await db.execute(
-            select(MetricDefinition).where(MetricDefinition.key == "exposure_rate")
-        )
+        await db.execute(select(MetricDefinition).where(MetricDefinition.key == "exposure_rate"))
     ).scalar_one()
     variant_units: dict[str, list[str]] = {}
     for row in rows:
         variant_units.setdefault(row.variant_key, []).append(row.unit_id)
     out = await SOURCE_REGISTRY["exposures"](
-        db, experiment=exp, definition=definition, variant_units=variant_units,
-        window_start=window_start, window_end=window_end, unit_type="user",
+        db,
+        experiment=exp,
+        definition=definition,
+        variant_units=variant_units,
+        window_start=window_start,
+        window_end=window_end,
+        unit_type="user",
     )
     # Only the window_start exposure counts; window_end belongs to the NEXT day
     total = sum(int(v.get("numerator") or 0) for v in out.values())
@@ -768,32 +834,42 @@ async def test_eco_telemetry_source_weighted_success(db):
     offering_id = str(ULID())
     db.add(
         TelemetrySnapshot(
-            entity_kind="provider_offering", entity_id=offering_id,
-            window_start=window_start, window_end=window_start + timedelta(hours=1),
-            sample_size=100, metrics={"success_rate": 0.9},
+            entity_kind="provider_offering",
+            entity_id=offering_id,
+            window_start=window_start,
+            window_end=window_start + timedelta(hours=1),
+            sample_size=100,
+            metrics={"success_rate": 0.9},
         )
     )
     db.add(
         TelemetrySnapshot(
-            entity_kind="provider_offering", entity_id=offering_id,
+            entity_kind="provider_offering",
+            entity_id=offering_id,
             window_start=window_start + timedelta(hours=1),
             window_end=window_start + timedelta(hours=2),
-            sample_size=300, metrics={"success_rate": 0.5},
+            sample_size=300,
+            metrics={"success_rate": 0.5},
         )
     )
     # rows without a success_rate (or zero samples) are skipped, not crashed
     db.add(
         TelemetrySnapshot(
-            entity_kind="provider_offering", entity_id=offering_id,
+            entity_kind="provider_offering",
+            entity_id=offering_id,
             window_start=window_start + timedelta(hours=2),
             window_end=window_start + timedelta(hours=3),
-            sample_size=999, metrics={"latency_p50_ms": 12},
+            sample_size=999,
+            metrics={"latency_p50_ms": 12},
         )
     )
     await db.flush()
     result = await _run_source(
-        db, "eco_telemetry", definition_key="provider_reliability",
-        units=[offering_id], unit_type="provider_offering",
+        db,
+        "eco_telemetry",
+        definition_key="provider_reliability",
+        units=[offering_id],
+        unit_type="provider_offering",
     )
     # weighted: (0.9·100 + 0.5·300) / 400 = 0.6
     stats = result["treatment"]
@@ -809,24 +885,37 @@ async def test_client_briefs_source_acceptance(db):
     for status in (BriefStatus.COMPLETED, BriefStatus.REVIEW):
         db.add(
             ClientBrief(
-                org_id=org.id, title="B", slug=f"b-{str(ULID()).lower()}",
-                client_name="Client", project_type="image_set",
-                objective="deliver assets", status=status, created_by=user.id,
+                org_id=org.id,
+                title="B",
+                slug=f"b-{str(ULID()).lower()}",
+                client_name="Client",
+                project_type="image_set",
+                objective="deliver assets",
+                status=status,
+                created_by=user.id,
             )
         )
     await db.flush()
     # asymmetric counts so status==completed vs != is distinguishable
     db.add(
         ClientBrief(
-            org_id=org.id, title="B2", slug=f"b2-{str(ULID()).lower()}",
-            client_name="Client", project_type="image_set",
-            objective="deliver assets", status=BriefStatus.COMPLETED, created_by=user.id,
+            org_id=org.id,
+            title="B2",
+            slug=f"b2-{str(ULID()).lower()}",
+            client_name="Client",
+            project_type="image_set",
+            objective="deliver assets",
+            status=BriefStatus.COMPLETED,
+            created_by=user.id,
         )
     )
     await db.flush()
     result = await _run_source(
-        db, "client_briefs", definition_key="client_acceptance_rate",
-        units=[org.id], unit_type="organization",
+        db,
+        "client_briefs",
+        definition_key="client_acceptance_rate",
+        units=[org.id],
+        unit_type="organization",
     )
     assert result["treatment"]["denominator"] == 3
     assert result["treatment"]["numerator"] == 2
@@ -856,13 +945,18 @@ async def test_cuped_covariates_end_to_end(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["metrics"]["primary"] = ["revision_count"]
     spec["variance_reduction"] = {
-        "method": "cuped", "covariate_metric": "revision_count", "lookback_days": 28,
+        "method": "cuped",
+        "covariate_metric": "revision_count",
+        "lookback_days": 28,
     }
     await svc.create_version(exp.id, spec=spec, actor=admin)
     await LayerService(db).allocate(
@@ -874,8 +968,12 @@ async def test_cuped_covariates_end_to_end(db):
     await MetricService(db).ensure_seed_definitions()
 
     project = Project(
-        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
-        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+        org_id=org.id,
+        title="P",
+        slug=f"p-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
     )
     db.add(project)
     window_start, window_end = _today_window()
@@ -885,8 +983,10 @@ async def test_cuped_covariates_end_to_end(db):
     for i in range(8):
         arm = "control" if i % 2 == 0 else "treatment"
         user = User(
-            email=f"cuped-{ULID()}@example.com", display_name="U",
-            role=UserRole.STUDENT, status=UserStatus.ACTIVE,
+            email=f"cuped-{ULID()}@example.com",
+            display_name="U",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
         )
         db.add(user)
         users.append((user, arm, i // 2))
@@ -894,15 +994,23 @@ async def test_cuped_covariates_end_to_end(db):
     for user, arm, level in users:
         db.add(
             ExperimentAssignment(
-                experiment_id=exp.id, unit_type="user", unit_id=user.id,
-                variant_key=arm, assigned_version=1, bucket=0, is_holdout=False,
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=user.id,
+                variant_key=arm,
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
             )
         )
         # pre-period: `level` revisions at window_start - 7d
         db.add(
             Submission(
-                org_id=org.id, project_id=project.id, user_id=user.id,
-                status=SubmissionStatus.APPROVED, version=level + 1,
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=SubmissionStatus.APPROVED,
+                version=level + 1,
                 created_at=window_start - timedelta(days=7),
             )
         )
@@ -910,25 +1018,49 @@ async def test_cuped_covariates_end_to_end(db):
         y = level + (1 if arm == "treatment" else 0)
         db.add(
             Submission(
-                org_id=org.id, project_id=project.id, user_id=user.id,
-                status=SubmissionStatus.APPROVED, version=y + 1,
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=SubmissionStatus.APPROVED,
+                version=y + 1,
             )
         )
     # wave-24 boundary rows on control unit0 (level 0, x=0, y=0 so far):
     # exactly ON lookback_start -> IN the pre window (x += 1)
     unit0 = next(u for u, arm, level in users if arm == "control" and level == 0)
     lookback_start = window_start - timedelta(days=28)
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
-                      status=SubmissionStatus.APPROVED, version=2,
-                      created_at=lookback_start))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=unit0.id,
+            status=SubmissionStatus.APPROVED,
+            version=2,
+            created_at=lookback_start,
+        )
+    )
     # exactly ON window_start -> OUT of pre (strict <), IN the window (y += 1)
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
-                      status=SubmissionStatus.APPROVED, version=2,
-                      created_at=window_start))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=unit0.id,
+            status=SubmissionStatus.APPROVED,
+            version=2,
+            created_at=window_start,
+        )
+    )
     # exactly ON window_end -> OUT of the window entirely
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=unit0.id,
-                      status=SubmissionStatus.APPROVED, version=5,
-                      created_at=window_end))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=unit0.id,
+            status=SubmissionStatus.APPROVED,
+            version=5,
+            created_at=window_end,
+        )
+    )
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
@@ -978,8 +1110,12 @@ async def _mk_project(db, org):
     from app.models.project import Project
 
     project = Project(
-        org_id=org.id, title="P", slug=f"p-{str(ULID()).lower()}",
-        description="d", instructions="i", rubric=[{"criterion": "c", "max_score": 5}],
+        org_id=org.id,
+        title="P",
+        slug=f"p-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
     )
     db.add(project)
     await db.flush()
@@ -1003,65 +1139,131 @@ async def test_learning_paths_source_completion_and_duration(db):
     p1 = await _mk_project(db, org)
     p2 = await _mk_project(db, org)
     path = LearningPath(
-        org_id=org.id, name="Path", slug=f"lp-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="Path",
+        slug=f"lp-{str(ULID()).lower()}",
         status=ContentStatus.PUBLISHED,
     )
     db.add(path)
     await db.flush()
-    db.add(LearningPathItem(
-        path_id=path.id, item_type=PathItemType.PROJECT, project_id=p1.id,
-        sort_order=0, required=True))
-    db.add(LearningPathItem(
-        path_id=path.id, item_type=PathItemType.PROJECT, project_id=p2.id,
-        sort_order=1, required=True))
+    db.add(
+        LearningPathItem(
+            path_id=path.id,
+            item_type=PathItemType.PROJECT,
+            project_id=p1.id,
+            sort_order=0,
+            required=True,
+        )
+    )
+    db.add(
+        LearningPathItem(
+            path_id=path.id,
+            item_type=PathItemType.PROJECT,
+            project_id=p2.id,
+            sort_order=1,
+            required=True,
+        )
+    )
     # A path with a required non-project item is not derivable — completing
     # its project must NOT count
     p3 = await _mk_project(db, org)
     path2 = LearningPath(
-        org_id=org.id, name="Mixed", slug=f"lp-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="Mixed",
+        slug=f"lp-{str(ULID()).lower()}",
         status=ContentStatus.PUBLISHED,
     )
     db.add(path2)
     await db.flush()
-    db.add(LearningPathItem(
-        path_id=path2.id, item_type=PathItemType.PROJECT, project_id=p3.id,
-        sort_order=0, required=True))
-    db.add(LearningPathItem(
-        path_id=path2.id, item_type=PathItemType.SECTION, section_title="Theory",
-        sort_order=1, required=True))
+    db.add(
+        LearningPathItem(
+            path_id=path2.id,
+            item_type=PathItemType.PROJECT,
+            project_id=p3.id,
+            sort_order=0,
+            required=True,
+        )
+    )
+    db.add(
+        LearningPathItem(
+            path_id=path2.id,
+            item_type=PathItemType.SECTION,
+            section_title="Theory",
+            sort_order=1,
+            required=True,
+        )
+    )
 
     window_start, window_end = _today_window()
     early = window_start - timedelta(days=2)
     # finisher: both required projects approved — first days ago, second now
-    db.add(Submission(org_id=org.id, project_id=p1.id, user_id=finisher.id,
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=early, updated_at=early))
-    db.add(Submission(org_id=org.id, project_id=p2.id, user_id=finisher.id,
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=early))  # updated_at defaults to now → in-window
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=p1.id,
+            user_id=finisher.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=early,
+            updated_at=early,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=p2.id,
+            user_id=finisher.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=early,
+        )
+    )  # updated_at defaults to now → in-window
     # partial: only one of two approved → NOT complete
-    db.add(Submission(org_id=org.id, project_id=p1.id, user_id=partial.id,
-                      status=SubmissionStatus.APPROVED, version=1))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=p1.id,
+            user_id=partial.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+        )
+    )
     # partial completes the MIXED path's project — must not count
-    db.add(Submission(org_id=org.id, project_id=p3.id, user_id=partial.id,
-                      status=SubmissionStatus.APPROVED, version=1))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=p3.id,
+            user_id=partial.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+        )
+    )
     await db.flush()
 
     completion = await _run_source(
-        db, "learning_paths", definition_key="completion_rate",
-        units=[finisher.id, partial.id], unit_type="user",
+        db,
+        "learning_paths",
+        definition_key="completion_rate",
+        units=[finisher.id, partial.id],
+        unit_type="user",
     )
     assert completion["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
     duration = await _run_source(
-        db, "learning_paths", definition_key="time_to_completion_hours",
-        units=[finisher.id, partial.id], unit_type="user",
+        db,
+        "learning_paths",
+        definition_key="time_to_completion_hours",
+        units=[finisher.id, partial.id],
+        unit_type="user",
     )
     assert duration["treatment"]["n"] == 1
     assert duration["treatment"]["sum_value"] >= 40  # ≥ ~2 days in hours
     # wrong unit type → zero-sample
     empty = await _run_source(
-        db, "learning_paths", definition_key="completion_rate",
-        units=[org.id], unit_type="organization",
+        db,
+        "learning_paths",
+        definition_key="completion_rate",
+        units=[org.id],
+        unit_type="organization",
     )
     assert empty["treatment"] == {"n": 0}
 
@@ -1078,34 +1280,78 @@ async def test_evaluations_source_review_pass_rate(db):
     _tenant, org = await _mk_org(db)
     user = await _mk_admin(db)
     project = await _mk_project(db, org)
-    sub = Submission(org_id=org.id, project_id=project.id, user_id=user.id,
-                     status=SubmissionStatus.APPROVED, version=1)
+    sub = Submission(
+        org_id=org.id,
+        project_id=project.id,
+        user_id=user.id,
+        status=SubmissionStatus.APPROVED,
+        version=1,
+    )
     db.add(sub)
     await db.flush()
-    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=90))
-    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=88))
-    db.add(SubmissionReview(submission_id=sub.id,
-                            reviewer_type=ReviewerType.INSTRUCTOR,
-                            status=ReviewStatus.REVISION_REQUESTED, score=40))
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=90,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=88,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.INSTRUCTOR,
+            status=ReviewStatus.REVISION_REQUESTED,
+            score=40,
+        )
+    )
     # out-of-window review must not count
     old = datetime.now(UTC) - timedelta(days=3)
-    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=95, created_at=old))
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=95,
+            created_at=old,
+        )
+    )
     # wave-24 edges: exactly ON window_start counts; exactly ON window_end
     # does not (the half-open [start, end) window)
     window_start, window_end = _today_window()
-    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=77,
-                            created_at=window_start))
-    db.add(SubmissionReview(submission_id=sub.id, reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=78,
-                            created_at=window_end))
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=77,
+            created_at=window_start,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=sub.id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=78,
+            created_at=window_end,
+        )
+    )
     await db.flush()
     stats = await _run_source(
-        db, "evaluations", definition_key="practical_pass_rate",
-        units=[user.id], unit_type="user",
+        db,
+        "evaluations",
+        definition_key="practical_pass_rate",
+        units=[user.id],
+        unit_type="user",
     )
     assert stats["treatment"] == {"n": 4, "numerator": 3, "denominator": 4}
 
@@ -1119,26 +1365,36 @@ async def test_talent_outcomes_source_placements(db):
     placed2 = await _mk_admin(db)
     cancelled = await _mk_admin(db)
     silent = await _mk_admin(db)
-    opp = Opportunity(employer_org_id=org.id, title="Role",
-                      opportunity_type="contract", status="open")
+    opp = Opportunity(
+        employer_org_id=org.id, title="Role", opportunity_type="contract", status="open"
+    )
     db.add(opp)
     await db.flush()
 
     async def _placement(user, status):
-        application = Application(opportunity_id=opp.id, user_id=user.id,
-                                  status="hired")
+        application = Application(opportunity_id=opp.id, user_id=user.id, status="hired")
         db.add(application)
         await db.flush()
-        db.add(Placement(application_id=application.id, opportunity_id=opp.id,
-                         user_id=user.id, employer_org_id=org.id, status=status))
+        db.add(
+            Placement(
+                application_id=application.id,
+                opportunity_id=opp.id,
+                user_id=user.id,
+                employer_org_id=org.id,
+                status=status,
+            )
+        )
 
     await _placement(placed, "active")
     await _placement(placed2, "completed")
     await _placement(cancelled, "cancelled")
     await db.flush()
     stats = await _run_source(
-        db, "talent_outcomes", definition_key="placement_outcome_rate",
-        units=[placed.id, placed2.id, cancelled.id, silent.id], unit_type="user",
+        db,
+        "talent_outcomes",
+        definition_key="placement_outcome_rate",
+        units=[placed.id, placed2.id, cancelled.id, silent.id],
+        unit_type="user",
     )
     assert stats["treatment"] == {"n": 4, "numerator": 2, "denominator": 4}
 
@@ -1157,31 +1413,39 @@ async def test_billing_source_tenant_measures(db):
     plan = ProductPlan(key=f"exp-{str(ULID()).lower()[:8]}", name="Exp")
     db.add(plan)
     await db.flush()
-    pv = PlanVersion(plan_id=plan.id, version=1, status="active",
-                     entitlements={}, activated_at=now)
+    pv = PlanVersion(plan_id=plan.id, version=1, status="active", entitlements={}, activated_at=now)
     db.add(pv)
     await db.flush()
 
     def _invoice(tenant_id, total, paid_at):
-        return Invoice(tenant_id=tenant_id, currency="USD", status="paid",
-                       total_minor=total, paid_at=paid_at)
+        return Invoice(
+            tenant_id=tenant_id, currency="USD", status="paid", total_minor=total, paid_at=paid_at
+        )
 
     # tenant_new: FIRST paid invoice lands in-window → converts
     db.add(_invoice(tenant_new.id, 5000, now))
     # an OPEN invoice never counts anywhere
-    db.add(Invoice(tenant_id=tenant_new.id, currency="USD", status="open",
-                   total_minor=99999, paid_at=None))
+    db.add(
+        Invoice(
+            tenant_id=tenant_new.id, currency="USD", status="open", total_minor=99999, paid_at=None
+        )
+    )
     # tenant_old: paid before the window AND in it → no conversion, has ARPU
     db.add(_invoice(tenant_old.id, 10000, window_start - timedelta(days=30)))
     db.add(_invoice(tenant_old.id, 20000, now))
 
     def _sub(tenant_id, cancelled_at=None):
         return Subscription(
-            tenant_id=tenant_id, plan_version_id=pv.id, status="active",
-            currency="USD", interval="month", seat_quantity=0,
+            tenant_id=tenant_id,
+            plan_version_id=pv.id,
+            status="active",
+            currency="USD",
+            interval="month",
+            seat_quantity=0,
             current_period_start=window_start - timedelta(days=15),
             current_period_end=window_start + timedelta(days=15),
-            provider="manual", created_by=user.id,
+            provider="manual",
+            created_by=user.id,
             created_at=window_start - timedelta(days=15),
             cancelled_at=cancelled_at,
         )
@@ -1194,19 +1458,31 @@ async def test_billing_source_tenant_measures(db):
     units = [tenant_new.id, tenant_old.id, tenant_churn.id, tenant_gone.id]
 
     conversion = await _run_source(
-        db, "billing", definition_key="conversion_rate", units=units, unit_type="tenant",
+        db,
+        "billing",
+        definition_key="conversion_rate",
+        units=units,
+        unit_type="tenant",
     )
     assert conversion["treatment"] == {"n": 4, "numerator": 1, "denominator": 4}
 
     arpu = await _run_source(
-        db, "billing", definition_key="arpu_usd", units=units, unit_type="tenant",
+        db,
+        "billing",
+        definition_key="arpu_usd",
+        units=units,
+        unit_type="tenant",
     )
     # 50.00 + 200.00 + 0.00 + 0.00 (ITT zero for silent tenants)
     assert arpu["treatment"]["n"] == 4
     assert arpu["treatment"]["sum_value"] == 250.0
 
     retention = await _run_source(
-        db, "billing", definition_key="retention_rate", units=units, unit_type="tenant",
+        db,
+        "billing",
+        definition_key="retention_rate",
+        units=units,
+        unit_type="tenant",
     )
     # at risk: tenant_old (retained) + tenant_churn (cancelled mid-window);
     # tenant_new had no subscription at window start and tenant_gone churned
@@ -1218,11 +1494,21 @@ async def test_billing_source_tenant_measures(db):
 
     from app.models.evaluation import EvalStatus, EvalType, EvaluationTask
 
-    db.add(EvaluationTask(org_id=org2.id, type=EvalType.SUBMISSION_REVIEW,
-                          status=EvalStatus.COMPLETED, cost_usd=Decimal("50.0")))
+    db.add(
+        EvaluationTask(
+            org_id=org2.id,
+            type=EvalType.SUBMISSION_REVIEW,
+            status=EvalStatus.COMPLETED,
+            cost_usd=Decimal("50.0"),
+        )
+    )
     await db.flush()
     margin = await _run_source(
-        db, "billing", definition_key="gross_margin_pct", units=units, unit_type="tenant",
+        db,
+        "billing",
+        definition_key="gross_margin_pct",
+        units=units,
+        unit_type="tenant",
     )
     # tenant_new: (50-0)/50 = 100%; tenant_old: (200-50)/200 = 75%
     assert margin["treatment"]["n"] == 2
@@ -1230,7 +1516,10 @@ async def test_billing_source_tenant_measures(db):
 
     # org units refused (would double-count tenant revenue)
     empty = await _run_source(
-        db, "billing", definition_key="arpu_usd", units=[_org1.id],
+        db,
+        "billing",
+        definition_key="arpu_usd",
+        units=[_org1.id],
         unit_type="organization",
     )
     assert empty["treatment"] == {"n": 0}
@@ -1243,17 +1532,26 @@ async def test_capabilities_source_gain_needs_baseline(db):
     _tenant, _org = await _mk_org(db)
     grower = await _mk_admin(db)
     newcomer = await _mk_admin(db)
-    cap = Capability(canonical_name=f"Cap {ULID()}", slug=f"cap-{str(ULID()).lower()}",
-                     category="technical")
+    cap = Capability(
+        canonical_name=f"Cap {ULID()}", slug=f"cap-{str(ULID()).lower()}", category="technical"
+    )
     db.add(cap)
     await db.flush()
     window_start, _window_end = _today_window()
 
     def _snap(user, score, computed_at):
         return CapabilityScoreSnapshot(
-            user_id=user.id, capability_id=cap.id, score=score, depth=score,
-            breadth=score, recency=score, velocity=score, confidence=score,
-            level=1, evidence_count=1, scoring_version="v1",
+            user_id=user.id,
+            capability_id=cap.id,
+            score=score,
+            depth=score,
+            breadth=score,
+            recency=score,
+            velocity=score,
+            confidence=score,
+            level=1,
+            evidence_count=1,
+            scoring_version="v1",
             computed_at=computed_at,
         )
 
@@ -1264,8 +1562,11 @@ async def test_capabilities_source_gain_needs_baseline(db):
     db.add(_snap(newcomer, 0.90, window_start + timedelta(hours=1)))
     await db.flush()
     stats = await _run_source(
-        db, "capabilities", definition_key="capability_gain",
-        units=[grower.id, newcomer.id], unit_type="user",
+        db,
+        "capabilities",
+        definition_key="capability_gain",
+        units=[grower.id, newcomer.id],
+        unit_type="user",
     )
     assert stats["treatment"]["n"] == 1
     assert abs(stats["treatment"]["sum_value"] - 0.25) < 1e-9
@@ -1284,8 +1585,11 @@ async def test_switchback_window_snapshots_land_on_day_variant(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="SB", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="SB",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["design"] = "switchback"
@@ -1340,13 +1644,18 @@ async def test_switchback_washout_excludes_head_of_window(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="WB", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="WB",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["design"] = "switchback"
     spec["switchback"] = {
-        "switch_unit": "platform_day", "window_minutes": 1440, "washout_minutes": 120,
+        "switch_unit": "platform_day",
+        "window_minutes": 1440,
+        "washout_minutes": 120,
     }
     await svc.create_version(exp.id, spec=spec, actor=admin)
     await LayerService(db).allocate(
@@ -1425,8 +1734,10 @@ async def test_cost_ledger_cuped_per_unit_covariates(db):
 
     def _task(org_id, cost, created_at):
         return EvaluationTask(
-            org_id=org_id, type=EvalType.SUBMISSION_REVIEW,
-            status=EvalStatus.COMPLETED, cost_usd=Decimal(str(cost)),
+            org_id=org_id,
+            type=EvalType.SUBMISSION_REVIEW,
+            status=EvalStatus.COMPLETED,
+            cost_usd=Decimal(str(cost)),
             created_at=created_at,
         )
 
@@ -1439,10 +1750,14 @@ async def test_cost_ledger_cuped_per_unit_covariates(db):
         method="cuped", covariate_metric="internal_cost_usd", lookback_days=28
     )
     stats = await SOURCE_REGISTRY["cost_ledger"](
-        db, experiment=None, definition=definition,
+        db,
+        experiment=None,
+        definition=definition,
         variant_units={"treatment": [org1.id, org2.id]},
-        window_start=window_start, window_end=window_end,
-        unit_type="organization", variance_reduction=vr,
+        window_start=window_start,
+        window_end=window_end,
+        unit_type="organization",
+        variance_reduction=vr,
     )
     arm = stats["treatment"]
     assert arm["n"] == 2
@@ -1469,27 +1784,52 @@ async def test_learning_paths_completion_window_boundaries(db):
     at_end = await _mk_admin(db)
     project = await _mk_project(db, org)
     path = LearningPath(
-        org_id=org.id, name="B", slug=f"lp-{str(ULID()).lower()}",
+        org_id=org.id,
+        name="B",
+        slug=f"lp-{str(ULID()).lower()}",
         status=ContentStatus.PUBLISHED,
     )
     db.add(path)
     await db.flush()
-    db.add(LearningPathItem(
-        path_id=path.id, item_type=PathItemType.PROJECT, project_id=project.id,
-        sort_order=0, required=True))
+    db.add(
+        LearningPathItem(
+            path_id=path.id,
+            item_type=PathItemType.PROJECT,
+            project_id=project.id,
+            sort_order=0,
+            required=True,
+        )
+    )
     window_start, window_end = _today_window()
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=at_start.id,
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=window_start - timedelta(days=1),
-                      updated_at=window_start))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=at_end.id,
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=window_start - timedelta(days=1),
-                      updated_at=window_end))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=at_start.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=window_start - timedelta(days=1),
+            updated_at=window_start,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=at_end.id,
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=window_start - timedelta(days=1),
+            updated_at=window_end,
+        )
+    )
     await db.flush()
     stats = await _run_source(
-        db, "learning_paths", definition_key="completion_rate",
-        units=[at_start.id, at_end.id], unit_type="user",
+        db,
+        "learning_paths",
+        definition_key="completion_rate",
+        units=[at_start.id, at_end.id],
+        unit_type="user",
     )
     assert stats["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
 
@@ -1517,8 +1857,11 @@ async def test_segment_breakdown_org_rows_and_whole_population_intact(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="SEG", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="SEG",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["segments"] = ["org"]
@@ -1543,9 +1886,7 @@ async def test_segment_breakdown_org_rows_and_whole_population_intact(db):
         r = await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
         assert r is not None
         if i % 2 == 0:
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=user.id
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=user.id)
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -1585,13 +1926,23 @@ async def test_variant_units_boundaries_and_isolation(db):
     other, _ = await _mk_running(db)
     cutoff = datetime(2026, 9, 2, tzinfo=UTC)
     before = ExperimentAssignment(
-        experiment_id=exp.id, unit_type="user", unit_id="b" * 26,
-        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+        experiment_id=exp.id,
+        unit_type="user",
+        unit_id="b" * 26,
+        variant_key="control",
+        assigned_version=1,
+        bucket=0,
+        is_holdout=False,
         assigned_at=cutoff - timedelta(seconds=1),
     )
     at = ExperimentAssignment(
-        experiment_id=exp.id, unit_type="user", unit_id="a" * 26,
-        variant_key="control", assigned_version=1, bucket=0, is_holdout=False,
+        experiment_id=exp.id,
+        unit_type="user",
+        unit_id="a" * 26,
+        variant_key="control",
+        assigned_version=1,
+        bucket=0,
+        is_holdout=False,
         assigned_at=cutoff,
     )
     db.add_all([before, at])
@@ -1601,19 +1952,27 @@ async def test_variant_units_boundaries_and_isolation(db):
     assert units == {"control": ["b" * 26]}
 
     # exposed_only: an exposure on ANOTHER experiment must not qualify
-    db.add(ExperimentExposure(
-        assignment_id=before.id, experiment_id=other.id, context={},
-        occurred_at=cutoff - timedelta(seconds=1),
-    ))
+    db.add(
+        ExperimentExposure(
+            assignment_id=before.id,
+            experiment_id=other.id,
+            context={},
+            occurred_at=cutoff - timedelta(seconds=1),
+        )
+    )
     await db.flush()
     exposed = await svc._variant_units(  # noqa: SLF001
         exp.id, as_of=cutoff, exposed_only=True
     )
     assert exposed == {}
-    db.add(ExperimentExposure(
-        assignment_id=before.id, experiment_id=exp.id, context={},
-        occurred_at=cutoff - timedelta(seconds=1),
-    ))
+    db.add(
+        ExperimentExposure(
+            assignment_id=before.id,
+            experiment_id=exp.id,
+            context={},
+            occurred_at=cutoff - timedelta(seconds=1),
+        )
+    )
     await db.flush()
     exposed = await svc._variant_units(  # noqa: SLF001
         exp.id, as_of=cutoff, exposed_only=True
@@ -1644,9 +2003,10 @@ async def test_segment_rows_only_when_opted_in(db):
         user = await _mk_admin(db)
         db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
         await db.flush()
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=user.id
-        ) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
+            is not None
+        )
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -1674,13 +2034,18 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="WZ", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="WZ",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec["design"] = "switchback"
     spec["switchback"] = {
-        "switch_unit": "platform_day", "window_minutes": 1440, "washout_minutes": 0,
+        "switch_unit": "platform_day",
+        "window_minutes": 1440,
+        "washout_minutes": 0,
     }
     await svc.create_version(exp.id, spec=spec, actor=admin)
     await LayerService(db).allocate(
@@ -1691,9 +2056,10 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
     asvc = AssignmentService(db)
-    assert await asvc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="wz" + "0" * 24
-    ) is not None
+    assert (
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="wz" + "0" * 24)
+        is not None
+    )
     window_start, window_end = _today_window()
     written = await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -1701,9 +2067,7 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
     assert written > 0
     rows = list(
         (
-            await db.execute(
-                select(MetricSnapshot).where(MetricSnapshot.experiment_id == exp.id)
-            )
+            await db.execute(select(MetricSnapshot).where(MetricSnapshot.experiment_id == exp.id))
         ).scalars()
     )
     assert all("washout_minutes" not in r.provenance for r in rows)
@@ -1718,15 +2082,17 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
     # it would fold EVERY window to zero forever.
     spec2 = dict(spec)
     spec2["switchback"] = {
-        "switch_unit": "platform_day", "window_minutes": 1440,
+        "switch_unit": "platform_day",
+        "window_minutes": 1440,
         "washout_minutes": 1440,
     }
-    layer2 = await LayerService(db).create(
-        key=f"l2-{str(ULID()).lower()}", domain="learning"
-    )
+    layer2 = await LayerService(db).create(key=f"l2-{str(ULID()).lower()}", domain="learning")
     exp2 = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="WZ2", domain="learning",
-        layer_key=layer2.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="WZ2",
+        domain="learning",
+        layer_key=layer2.key,
+        owner_user_id=admin.id,
     )
     with pytest.raises(AppError):
         await svc.create_version(exp2.id, spec=spec2, actor=admin)
@@ -1738,28 +2104,30 @@ async def test_switchback_washout_exact_window_and_zero_washout(db):
     # the whole computed span.
     spec3 = dict(spec)
     spec3["switchback"] = {
-        "switch_unit": "platform_week", "window_minutes": 10_080,
+        "switch_unit": "platform_week",
+        "window_minutes": 10_080,
         "washout_minutes": 1440,
     }
-    layer3 = await LayerService(db).create(
-        key=f"l3-{str(ULID()).lower()}", domain="learning"
-    )
+    layer3 = await LayerService(db).create(key=f"l3-{str(ULID()).lower()}", domain="learning")
     exp3 = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="WZ3", domain="learning",
-        layer_key=layer3.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="WZ3",
+        domain="learning",
+        layer_key=layer3.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp3.id, spec=spec3, actor=admin)
     await LayerService(db).allocate(
         layer_key=layer3.key, experiment_id=exp3.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp3.id, to_status="review", actor=admin)
-    await svc.transition(exp3.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp3.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp3.id, to_status="running", actor=admin)
     await svc.set_ramp(exp3.id, ramp_bp=10_000, actor=admin)
-    assert await asvc.resolve(
-        experiment_key=exp3.key, unit_type="user", unit_id="wz" + "2" * 24
-    ) is not None
+    assert (
+        await asvc.resolve(experiment_key=exp3.key, unit_type="user", unit_id="wz" + "2" * 24)
+        is not None
+    )
     swallowed = await MetricService(db).compute_experiment_window(
         exp3.id,
         window_start=window_start,
@@ -1782,8 +2150,11 @@ async def _mk_running_spec(db, spec_overrides: dict):
     layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="CMB", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="CMB",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
     spec.update(spec_overrides)
@@ -1806,20 +2177,24 @@ async def test_segments_compose_with_switchback(db):
     from app.models.organization import OrgMember, OrgRole
 
     _tenant, org = await _mk_org(db)
-    exp, admin = await _mk_running_spec(db, {
-        "design": "switchback",
-        "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
-        "segments": ["org"],
-    })
+    exp, admin = await _mk_running_spec(
+        db,
+        {
+            "design": "switchback",
+            "switchback": {"switch_unit": "platform_day", "window_minutes": 1440},
+            "segments": ["org"],
+        },
+    )
     del admin
     asvc = AssignmentService(db)
     for _i in range(4):
         user = await _mk_admin(db)
         db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
         await db.flush()
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=user.id
-        ) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
+            is not None
+        )
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -1851,22 +2226,24 @@ async def test_segments_compose_with_triggered(db):
     from app.models.organization import OrgMember, OrgRole
 
     _tenant, org = await _mk_org(db)
-    exp, _ = await _mk_running_spec(db, {
-        "trigger": {"analysis_population": "exposed"},
-        "segments": ["org"],
-    })
+    exp, _ = await _mk_running_spec(
+        db,
+        {
+            "trigger": {"analysis_population": "exposed"},
+            "segments": ["org"],
+        },
+    )
     asvc = AssignmentService(db)
     for i in range(6):
         user = await _mk_admin(db)
         db.add(OrgMember(org_id=org.id, user_id=user.id, role=OrgRole.STUDENT))
         await db.flush()
-        assert await asvc.resolve(
-            experiment_key=exp.key, unit_type="user", unit_id=user.id
-        ) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id)
+            is not None
+        )
         if i < 2:  # only two units ever exposed
-            await asvc.record_exposure(
-                experiment_key=exp.key, unit_type="user", unit_id=user.id
-            )
+            await asvc.record_exposure(experiment_key=exp.key, unit_type="user", unit_id=user.id)
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -1883,7 +2260,7 @@ async def test_segments_compose_with_triggered(db):
     )
     whole = [r for r in rows if r.segment == ""]
     slices = [r for r in rows if r.segment == f"org:{org.id}"]
-    assert sum(int(r.denominator or 0) for r in whole) == 2   # exposed roster
+    assert sum(int(r.denominator or 0) for r in whole) == 2  # exposed roster
     assert sum(int(r.denominator or 0) for r in slices) == 2  # exposed ∩ org
     for row in rows:
         assert row.provenance["analysis_population"] == "exposed"
@@ -1905,18 +2282,20 @@ async def test_workflow_runs_latency_cuped_per_unit(db):
     await db.flush()
     await MetricService(db).ensure_seed_definitions()
     definition = (
-        await db.execute(
-            select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms")
-        )
+        await db.execute(select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms"))
     ).scalar_one()
     window_start, window_end = _today_window()
     pre_at = window_start - timedelta(days=3)
 
     def _run(created_at, ms):
         return WorkflowRun(
-            org_id=org.id, installation_id=active.id, definition_snapshot={},
-            status=RunStatus.COMPLETED, created_at=created_at,
-            started_at=created_at, finished_at=created_at + timedelta(milliseconds=ms),
+            org_id=org.id,
+            installation_id=active.id,
+            definition_snapshot={},
+            status=RunStatus.COMPLETED,
+            created_at=created_at,
+            started_at=created_at,
+            finished_at=created_at + timedelta(milliseconds=ms),
         )
 
     # pre: mean (100+300)/2 = 200ms; window: mean (400+600)/2 = 500ms
@@ -1924,25 +2303,30 @@ async def test_workflow_runs_latency_cuped_per_unit(db):
     # by the per-unit guard, never crash the latency arithmetic
     inflight = _run(window_start + timedelta(hours=1), 0)
     inflight.finished_at = None
-    db.add_all([
-        _run(pre_at, 100), _run(pre_at, 300),
-        _run(window_start + timedelta(hours=1), 400),
-        _run(window_start + timedelta(hours=1), 600),
-        inflight,
-    ])
-    await db.flush()
-    vr = VarianceReductionSpec(
-        method="cuped", covariate_metric="run_latency_ms", lookback_days=28
+    db.add_all(
+        [
+            _run(pre_at, 100),
+            _run(pre_at, 300),
+            _run(window_start + timedelta(hours=1), 400),
+            _run(window_start + timedelta(hours=1), 600),
+            inflight,
+        ]
     )
+    await db.flush()
+    vr = VarianceReductionSpec(method="cuped", covariate_metric="run_latency_ms", lookback_days=28)
     stats = await SOURCE_REGISTRY["workflow_runs"](
-        db, experiment=None, definition=definition,
+        db,
+        experiment=None,
+        definition=definition,
         variant_units={"treatment": [active.id, silent.id]},
-        window_start=window_start, window_end=window_end,
-        unit_type="workflow_installation", variance_reduction=vr,
+        window_start=window_start,
+        window_end=window_end,
+        unit_type="workflow_installation",
+        variance_reduction=vr,
     )
     arm = stats["treatment"]
     assert arm["n"] == 2
-    assert arm["sum_value"] == pytest.approx(500.0)   # active 500 + silent 0
+    assert arm["sum_value"] == pytest.approx(500.0)  # active 500 + silent 0
     assert arm["cov_sum"] == pytest.approx(200.0)
     assert arm["cov_xy_sum"] == pytest.approx(500.0 * 200.0)
     assert arm["_aggregation"] == "per_unit"
@@ -1963,9 +2347,7 @@ async def test_segment_multi_org_user_attributed_deterministically(db):
     db.add(OrgMember(org_id=org1.id, user_id=user.id, role=OrgRole.STUDENT))
     db.add(OrgMember(org_id=org2.id, user_id=user.id, role=OrgRole.STUDENT))
     await db.flush()
-    assert await asvc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id=user.id
-    ) is not None
+    assert await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=user.id) is not None
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -2045,19 +2427,25 @@ async def test_prune_retention_boundary(db):
     now = datetime.now(UTC)
     assignment_id = (
         await db.execute(
-            select(ExperimentAssignment.id).where(
-                ExperimentAssignment.experiment_id == exp.id
-            )
+            select(ExperimentAssignment.id).where(ExperimentAssignment.experiment_id == exp.id)
         )
     ).scalar_one()
-    db.add(ExperimentExposure(
-        assignment_id=assignment_id, experiment_id=exp.id, context={},
-        occurred_at=now - timedelta(days=399),
-    ))
-    db.add(ExperimentExposure(
-        assignment_id=assignment_id, experiment_id=exp.id, context={},
-        occurred_at=now - timedelta(days=401),
-    ))
+    db.add(
+        ExperimentExposure(
+            assignment_id=assignment_id,
+            experiment_id=exp.id,
+            context={},
+            occurred_at=now - timedelta(days=399),
+        )
+    )
+    db.add(
+        ExperimentExposure(
+            assignment_id=assignment_id,
+            experiment_id=exp.id,
+            context={},
+            occurred_at=now - timedelta(days=401),
+        )
+    )
     for status in ("completed", "archived"):
         await svc.transition(exp.id, to_status=status, actor=admin)
     await db.flush()
@@ -2066,9 +2454,7 @@ async def test_prune_retention_boundary(db):
     from sqlalchemy import func as _func
 
     remaining = (
-        await db.execute(
-            select(_func.count()).where(ExperimentExposure.experiment_id == exp.id)
-        )
+        await db.execute(select(_func.count()).where(ExperimentExposure.experiment_id == exp.id))
     ).scalar_one()
     assert remaining == 1  # the 399-day row survives
 
@@ -2096,9 +2482,10 @@ async def test_snapshot_response_serializes_segment(db):
     await MetricService(db).ensure_seed_definitions()
     exp, _ = await _mk_running(db)
     asvc = AssignmentService(db)
-    assert await asvc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="seg" + "0" * 23
-    ) is not None
+    assert (
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="seg" + "0" * 23)
+        is not None
+    )
     window_start, window_end = _today_window()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
@@ -2120,13 +2507,14 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
     admin = await _mk_admin(db)
 
     async def _scheduled(start_at):
-        layer = await LayerService(db).create(
-            key=f"lyr-{str(ULID()).lower()}", domain="learning"
-        )
+        layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
         svc = ExperimentService(db)
         exp = await svc.create(
-            key=f"exp-{str(ULID()).lower()}", title="S", domain="learning",
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"exp-{str(ULID()).lower()}",
+            title="S",
+            domain="learning",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
         await svc.create_version(exp.id, spec=_spec(), actor=admin)
         await LayerService(db).allocate(
@@ -2134,8 +2522,11 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
         )
         await svc.transition(exp.id, to_status="review", actor=admin)
         await svc.transition(
-            exp.id, to_status="scheduled", actor=admin,
-            checklist=_CHECKLIST, start_at=start_at,
+            exp.id,
+            to_status="scheduled",
+            actor=admin,
+            checklist=_CHECKLIST,
+            start_at=start_at,
         )
         return exp
 
@@ -2165,13 +2556,17 @@ async def test_start_sweep_launches_due_scheduled_experiments(db):
     assert (await db.get(Experiment, manual.id)).status == "scheduled"
     # the launch is audited as a system transition
     events = (
-        await db.execute(
-            select(ExperimentEvent).where(
-                ExperimentEvent.experiment_id == due.id,
-                ExperimentEvent.event_type == "transition",
+        (
+            await db.execute(
+                select(ExperimentEvent).where(
+                    ExperimentEvent.experiment_id == due.id,
+                    ExperimentEvent.event_type == "transition",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert any("start_at" in ((e.payload or {}).get("reason") or "") for e in events)
 
 
@@ -2184,23 +2579,35 @@ async def test_every_source_degrades_on_type_mismatch_and_empty_units(db):
 
     await MetricService(db).ensure_seed_definitions()
     expected_types = {
-        "exposures": "user", "workflow_runs": "workflow_installation",
-        "projects": "user", "cost_ledger": "tenant",
-        "client_briefs": "organization", "registry": "organization",
-        "eco_telemetry": "provider_offering", "learning_paths": "user",
-        "evaluations": "user", "talent_outcomes": "user",
-        "billing": "tenant", "capabilities": "user",
+        "exposures": "user",
+        "workflow_runs": "workflow_installation",
+        "projects": "user",
+        "cost_ledger": "tenant",
+        "client_briefs": "organization",
+        "registry": "organization",
+        "eco_telemetry": "provider_offering",
+        "learning_paths": "user",
+        "evaluations": "user",
+        "talent_outcomes": "user",
+        "billing": "tenant",
+        "capabilities": "user",
     }
     assert set(expected_types) == set(SOURCE_REGISTRY)
     # exposures needs a real experiment (internal source, exercised across
     # every suite); workflow_runs and cost_ledger have no type gate by design
-    gated = {"projects", "client_briefs", "registry", "eco_telemetry",
-             "learning_paths", "evaluations", "talent_outcomes", "billing",
-             "capabilities"}
-    # a definition per source (seeds cover most; synthesize the rest)
-    definitions = {
-        d.spec.get("source"): d for d in await MetricService(db).list_definitions()
+    gated = {
+        "projects",
+        "client_briefs",
+        "registry",
+        "eco_telemetry",
+        "learning_paths",
+        "evaluations",
+        "talent_outcomes",
+        "billing",
+        "capabilities",
     }
+    # a definition per source (seeds cover most; synthesize the rest)
+    definitions = {d.spec.get("source"): d for d in await MetricService(db).list_definitions()}
     window_start, window_end = _today_window()
     for name, fn in SOURCE_REGISTRY.items():
         if name == "exposures":
@@ -2208,22 +2615,31 @@ async def test_every_source_degrades_on_type_mismatch_and_empty_units(db):
         definition = definitions.get(name)
         if definition is None:
             definition = await MetricService(db).create_definition(
-                key=f"probe_{name}"[:40], title=f"probe {name}",
-                kind="continuous", domain="operational", source_kind="service",
+                key=f"probe_{name}"[:40],
+                title=f"probe {name}",
+                kind="continuous",
+                domain="operational",
+                source_kind="service",
                 spec={"source": name},
             )
         if name in gated:
             mismatch = await fn(
-                db, experiment=None, definition=definition,
+                db,
+                experiment=None,
+                definition=definition,
                 variant_units={"v": ["u1"]},
-                window_start=window_start, window_end=window_end,
+                window_start=window_start,
+                window_end=window_end,
                 unit_type="zzz_not_a_unit",
             )
             assert mismatch == {"v": {"n": 0}}, name
         empty = await fn(
-            db, experiment=None, definition=definition,
+            db,
+            experiment=None,
+            definition=definition,
             variant_units={"v": []},
-            window_start=window_start, window_end=window_end,
+            window_start=window_start,
+            window_end=window_end,
             unit_type=expected_types[name],
         )
         assert empty.get("v", {}).get("n", 0) == 0, name
@@ -2242,17 +2658,17 @@ async def test_cost_ledger_cuped_tenant_arm(db):
 
     await MetricService(db).ensure_seed_definitions()
     tenant, org = await _mk_org(db)
-    db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT,
-                          cost_usd=Decimal("0.40")))
+    db.add(EvaluationTask(org_id=org.id, type=EvalType.EXERCISE_TEXT, cost_usd=Decimal("0.40")))
     await db.flush()
-    definition = next(
-        d for d in await MetricService(db).list_definitions() if d.key == "cost_usd"
-    )
+    definition = next(d for d in await MetricService(db).list_definitions() if d.key == "cost_usd")
     window_start, window_end = _today_window()
     out = await SOURCE_REGISTRY["cost_ledger"](
-        db, experiment=None, definition=definition,
+        db,
+        experiment=None,
+        definition=definition,
         variant_units={"treatment": [tenant.id]},
-        window_start=window_start, window_end=window_end,
+        window_start=window_start,
+        window_end=window_end,
         unit_type="tenant",
         variance_reduction=VarianceReductionSpec(
             method="cuped", covariate_metric="cost_usd", lookback_days=7
@@ -2277,9 +2693,9 @@ async def test_snapshot_compute_poison_spec_arms(db):
 
     exp, _ = await _mk_running(db)
     asvc = AssignmentService(db)
-    assert await asvc.resolve(
-        experiment_key=exp.key, unit_type="user", unit_id="poison-0"
-    ) is not None
+    assert (
+        await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id="poison-0") is not None
+    )
     await db.execute(
         _update(VersionModel)
         .where(VersionModel.experiment_id == exp.id, VersionModel.version == 1)
@@ -2318,12 +2734,17 @@ async def test_latency_cap_and_scoped_learning_paths_arms(db):
     await db.flush()
     t0 = datetime.now(UTC) - timedelta(hours=1)
     for ms in (100, 300, 10_000):
-        db.add(WorkflowRun(
-            org_id=org.id, installation_id=pack_install.id,
-            definition_snapshot={}, status=RunStatus.COMPLETED,
-            created_at=t0, started_at=t0,
-            finished_at=t0 + timedelta(milliseconds=ms),
-        ))
+        db.add(
+            WorkflowRun(
+                org_id=org.id,
+                installation_id=pack_install.id,
+                definition_snapshot={},
+                status=RunStatus.COMPLETED,
+                created_at=t0,
+                started_at=t0,
+                finished_at=t0 + timedelta(milliseconds=ms),
+            )
+        )
     await db.flush()
     await db.execute(
         _update(MetricDefinition)
@@ -2331,29 +2752,34 @@ async def test_latency_cap_and_scoped_learning_paths_arms(db):
         .values(cap_value=500)
     )
     definition = (
-        await db.execute(
-            _select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms")
-        )
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "run_latency_ms"))
     ).scalar_one()
     window_start, window_end = _today_window()
     capped = await SOURCE_REGISTRY["workflow_runs"](
-        db, experiment=None, definition=definition,
+        db,
+        experiment=None,
+        definition=definition,
         variant_units={"t": [pack_install.id]},
-        window_start=t0 - timedelta(hours=1), window_end=window_end,
+        window_start=t0 - timedelta(hours=1),
+        window_end=window_end,
         unit_type="workflow_installation",
     )
     assert capped["t"]["sum_value"] == pytest.approx(100 + 300 + 500)
 
     # (2) scope_org narrowing on learning_paths
     lp_def = next(
-        d for d in await MetricService(db).list_definitions()
+        d
+        for d in await MetricService(db).list_definitions()
         if (d.spec or {}).get("source") == "learning_paths"
     )
     scoped = SimpleNamespace(scope_org_id=org.id)
     out = await SOURCE_REGISTRY["learning_paths"](
-        db, experiment=scoped, definition=lp_def,
+        db,
+        experiment=scoped,
+        definition=lp_def,
         variant_units={"t": ["u" * 26]},
-        window_start=window_start, window_end=window_end,
+        window_start=window_start,
+        window_end=window_end,
         unit_type="user",
     )
     # ITT shape: the unit is counted even with zero scoped items; the point
@@ -2369,15 +2795,16 @@ async def test_update_definition_operational_knobs_only(db):
     svc = MetricService(db)
     await svc.ensure_seed_definitions()
     updated = await svc.update_definition(
-        "run_latency_ms", title="Run latency (edited)",
-        direction="decrease_good", winsorize_pct=99.0, cap_value=60_000,
+        "run_latency_ms",
+        title="Run latency (edited)",
+        direction="decrease_good",
+        winsorize_pct=99.0,
+        cap_value=60_000,
     )
     assert updated.title == "Run latency (edited)"
     assert float(updated.winsorize_pct) == 99.0
     assert float(updated.cap_value) == 60_000
-    cleared = await svc.update_definition(
-        "run_latency_ms", clear_winsorize=True, clear_cap=True
-    )
+    cleared = await svc.update_definition("run_latency_ms", clear_winsorize=True, clear_cap=True)
     assert cleared.winsorize_pct is None and cleared.cap_value is None
     with pytest.raises(AppError) as exc:
         await svc.update_definition("run_latency_ms", direction="sideways")
@@ -2404,53 +2831,72 @@ async def test_multi_covariate_snapshot_assembly(db):
     await MetricService(db).ensure_seed_definitions()
     _tenant, org = await _mk_org(db)
     admin = await _mk_admin(db)
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"mcv-{str(ULID()).lower()}", title="MCV", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"mcv-{str(ULID()).lower()}",
+        title="MCV",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
-    await svc.create_version(exp.id, spec={
-        "hypothesis": "multi-covariate adjustment tightens the estimate",
-        "unit_type": "user",
-        "variants": [
-            {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
-            {"key": "treatment", "name": "T", "weight_bp": 5000},
-        ],
-        "metrics": {"primary": ["revision_count"],
-                    "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                    "threshold": 100.0}]},
-        "variance_reduction": {
-            "method": "cuped",
-            "covariate_metrics": ["revision_count", "project_approval_rate"],
-            "lookback_days": 14,
+    await svc.create_version(
+        exp.id,
+        spec={
+            "hypothesis": "multi-covariate adjustment tightens the estimate",
+            "unit_type": "user",
+            "variants": [
+                {"key": "control", "name": "C", "weight_bp": 5000, "is_control": True},
+                {"key": "treatment", "name": "T", "weight_bp": 5000},
+            ],
+            "metrics": {
+                "primary": ["revision_count"],
+                "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+            },
+            "variance_reduction": {
+                "method": "cuped",
+                "covariate_metrics": ["revision_count", "project_approval_rate"],
+                "lookback_days": 14,
+            },
         },
-    }, actor=admin)
+        actor=admin,
+    )
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     for status in ("review", "scheduled", "running"):
-        await svc.transition(exp.id, to_status=status, actor=admin,
-                             checklist=_CHECKLIST if status == "scheduled" else None)
+        await svc.transition(
+            exp.id,
+            to_status=status,
+            actor=admin,
+            checklist=_CHECKLIST if status == "scheduled" else None,
+        )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
 
     asvc = AssignmentService(db)
     units = []
     for i in range(6):
-        u = User(email=f"mcv-{i}-{ULID()}@example.com", display_name=f"M{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"mcv-{i}-{ULID()}@example.com",
+            display_name=f"M{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
-        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                                  unit_id=u.id) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=u.id) is not None
+        )
         units.append(u.id)
 
-    project = Project(org_id=org.id, title="MP",
-                      slug=f"mp-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="MP",
+        slug=f"mp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     window_start, window_end = _today_window()
@@ -2460,29 +2906,71 @@ async def test_multi_covariate_snapshot_assembly(db):
     # EXACTLY on lookback_start (revision-branch >= boundary: +1 revision)
     # and the window row sits EXACTLY on window_start (the pre query's
     # strict < must exclude it; the window query's >= must include it)
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
-                      status=SubmissionStatus.APPROVED, version=3,
-                      created_at=pre))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
-                      status=SubmissionStatus.REJECTED, version=2,
-                      created_at=lookback_edge))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
-                      status=SubmissionStatus.REJECTED, version=2,
-                      created_at=window_start))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[0],
+            status=SubmissionStatus.APPROVED,
+            version=3,
+            created_at=pre,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[0],
+            status=SubmissionStatus.REJECTED,
+            version=2,
+            created_at=lookback_edge,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[0],
+            status=SubmissionStatus.REJECTED,
+            version=2,
+            created_at=window_start,
+        )
+    )
     # unit 1: pre 1 approval (0 revisions) exactly ON lookback_start, plus
     # an APPROVED row exactly ON window_start — the approval pre query's
     # strict < must exclude the latter
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=lookback_edge))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=window_start))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[1],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=lookback_edge,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[1],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=window_start,
+        )
+    )
     # wave-24: a row exactly ON window_end stays OUT of the window (the
     # strict < upper edge of the per-unit y query) — y totals unchanged
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
-                      status=SubmissionStatus.APPROVED, version=9,
-                      created_at=window_end))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[0],
+            status=SubmissionStatus.APPROVED,
+            version=9,
+            created_at=window_end,
+        )
+    )
     await db.flush()
 
     written = await MetricService(db).compute_experiment_window(
@@ -2545,24 +3033,37 @@ async def test_cov_evaluations_provider_boundaries_and_measures(db):
     )
 
     _tenant, org = await _mk_org(db)
-    project = Project(org_id=org.id, title="EvP",
-                      slug=f"evp-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="EvP",
+        slug=f"evp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     users = []
     for i in range(2):
-        u = User(email=f"cev-{i}-{ULID()}@example.com", display_name=f"E{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"cev-{i}-{ULID()}@example.com",
+            display_name=f"E{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         users.append(u.id)
     window_start = datetime.now(UTC).replace(microsecond=0)
     lookback_start = window_start - _td(days=14)
-    sub = Submission(org_id=org.id, project_id=project.id, user_id=users[0],
-                     status=SubmissionStatus.APPROVED, version=1,
-                     created_at=lookback_start)
+    sub = Submission(
+        org_id=org.id,
+        project_id=project.id,
+        user_id=users[0],
+        status=SubmissionStatus.APPROVED,
+        version=1,
+        created_at=lookback_start,
+    )
     db.add(sub)
     await db.flush()
     for status, at in (
@@ -2576,19 +3077,31 @@ async def test_cov_evaluations_provider_boundaries_and_measures(db):
         # exactly ON window_start -- the strict-< edge excludes it
         (ReviewStatus.APPROVED, window_start),
     ):
-        db.add(SubmissionReview(submission_id=sub.id,
-                                reviewer_type=ReviewerType.AI,
-                                status=status, score=80, created_at=at))
+        db.add(
+            SubmissionReview(
+                submission_id=sub.id,
+                reviewer_type=ReviewerType.AI,
+                status=status,
+                score=80,
+                created_at=at,
+            )
+        )
     await db.flush()
 
     x = await _cov_evaluations(
-        db, definition=SimpleNamespace(spec={}), units=users,
-        lookback_start=lookback_start, window_start=window_start,
+        db,
+        definition=SimpleNamespace(spec={}),
+        units=users,
+        lookback_start=lookback_start,
+        window_start=window_start,
     )
     assert x == {users[0]: 2.0, users[1]: 0.0}
     x = await _cov_evaluations(
-        db, definition=SimpleNamespace(spec={"measure": "review_count"}),
-        units=users, lookback_start=lookback_start, window_start=window_start,
+        db,
+        definition=SimpleNamespace(spec={"measure": "review_count"}),
+        units=users,
+        lookback_start=lookback_start,
+        window_start=window_start,
     )
     assert x == {users[0]: 3.0, users[1]: 0.0}
 
@@ -2608,38 +3121,49 @@ async def test_latency_quantile_histogram_and_knob(db):
     window_start, _ = _today_window()
     t0 = window_start + timedelta(hours=1)
     for ms in (100, 300, 10_000):
-        db.add(WorkflowRun(
-            org_id=org.id, installation_id=installation.id,
-            definition_snapshot={}, status=RunStatus.COMPLETED,
-            created_at=t0, started_at=t0,
-            finished_at=t0 + timedelta(milliseconds=ms),
-        ))
+        db.add(
+            WorkflowRun(
+                org_id=org.id,
+                installation_id=installation.id,
+                definition_snapshot={},
+                status=RunStatus.COMPLETED,
+                created_at=t0,
+                started_at=t0,
+                finished_at=t0 + timedelta(milliseconds=ms),
+            )
+        )
     await db.flush()
     svc = MetricService(db)
     await svc.ensure_seed_definitions()
     await svc.update_definition("run_latency_ms", quantiles=[0.5, 0.95])
     out = await _run_source(
-        db, "workflow_runs", definition_key="run_latency_ms",
-        units=[installation.id], unit_type="workflow_installation",
+        db,
+        "workflow_runs",
+        definition_key="run_latency_ms",
+        units=[installation.id],
+        unit_type="workflow_installation",
     )
     # 100 -> bucket 6 ([64,128)), 300 -> 8 ([256,512)), 10000 -> 13
     assert out["treatment"]["value_histogram"] == {"6": 1, "8": 1, "13": 1}
 
-    cleared_def = await svc.update_definition("run_latency_ms",
-                                               clear_quantiles=True)
+    cleared_def = await svc.update_definition("run_latency_ms", clear_quantiles=True)
     # the strip removes ONLY the quantiles key — the rest of the spec
     # (source/measure) must survive (round 187 wave-38 killer)
     assert "quantiles" not in cleared_def.spec
     assert cleared_def.spec.get("source") == "workflow_runs"
     assert cleared_def.spec.get("measure") == "latency_ms"
     out = await _run_source(
-        db, "workflow_runs", definition_key="run_latency_ms",
-        units=[installation.id], unit_type="workflow_installation",
+        db,
+        "workflow_runs",
+        definition_key="run_latency_ms",
+        units=[installation.id],
+        unit_type="workflow_installation",
     )
     assert "value_histogram" not in out["treatment"]
 
     # knob validation: binary kind, out-of-range, too many
     from app.exceptions import AppError as _AppError
+
     with pytest.raises(_AppError):
         await svc.update_definition("run_success_rate", quantiles=[0.5])
     with pytest.raises(_AppError):
@@ -2668,6 +3192,7 @@ async def test_update_definition_km_knob(db):
 
     # kind gate: km is meaningless off time_to_event -> VALIDATION_ERROR 422
     from app.exceptions import AppError as _AppError
+
     with pytest.raises(_AppError) as exc:
         await svc.update_definition("run_latency_ms", km=True)
     assert exc.value.code == "VALIDATION_ERROR"
@@ -2695,14 +3220,17 @@ def test_value_histogram_and_validator_exact_pins():
         value_histogram,
     )
 
-    assert value_histogram([0.0, -1.0, 1.0, 1.5, 2.0 ** -25, 2.0 ** 50]) == {
-        "__zero__": 1, "__neg__": 1, "0": 2, "-20": 1, "43": 1,
+    assert value_histogram([0.0, -1.0, 1.0, 1.5, 2.0**-25, 2.0**50]) == {
+        "__zero__": 1,
+        "__neg__": 1,
+        "0": 2,
+        "-20": 1,
+        "43": 1,
     }
     _validate_quantiles(None, "binary")  # no quantiles -> no check
     _validate_quantiles([0.5], "continuous")
     _validate_quantiles((0.1, 0.5, 0.9), "continuous")  # tuple, len 3 OK
-    for bad in ([], [0.1, 0.2, 0.3, 0.4], [1.0], [0.0], {0.5}, "0.5",
-                [float("nan")]):
+    for bad in ([], [0.1, 0.2, 0.3, 0.4], [1.0], [0.0], {0.5}, "0.5", [float("nan")]):
         with pytest.raises(_AppError) as e:
             _validate_quantiles(bad, "continuous")
         assert e.value.status_code == 422, bad
@@ -2715,21 +3243,21 @@ async def _mk_running_low_ramp(db):
     """A running experiment held at ramp 1000 so plan targets have room."""
     admin = await _mk_admin(db)
     await MetricService(db).ensure_seed_definitions()
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=1000, actor=admin)
     return exp, admin
@@ -2746,28 +3274,42 @@ async def test_ramp_plan_validation(db):
     future = datetime.now(UTC) + timedelta(hours=1)
 
     with pytest.raises(_AppError) as e:
-        await svc.set_ramp_plan(exp.id, plan=[
-            {"at": future.isoformat(), "ramp_bp": 5000},
-            {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000},
-        ], actor=admin)
+        await svc.set_ramp_plan(
+            exp.id,
+            plan=[
+                {"at": future.isoformat(), "ramp_bp": 5000},
+                {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000},
+            ],
+            actor=admin,
+        )
     assert e.value.code == "EXPERIMENT_RAMP_DECREASE"
 
     with pytest.raises(_AppError) as e:
-        await svc.set_ramp_plan(exp.id, plan=[
-            {"at": future.isoformat(), "ramp_bp": 1000},  # == live ramp
-        ], actor=admin)
+        await svc.set_ramp_plan(
+            exp.id,
+            plan=[
+                {"at": future.isoformat(), "ramp_bp": 1000},  # == live ramp
+            ],
+            actor=admin,
+        )
     assert e.value.code == "EXPERIMENT_RAMP_DECREASE"
 
     with pytest.raises(_AppError) as e:
-        await svc.set_ramp_plan(exp.id, plan=[
-            {"at": future.isoformat(), "ramp_bp": 99999},
-        ], actor=admin)
+        await svc.set_ramp_plan(
+            exp.id,
+            plan=[
+                {"at": future.isoformat(), "ramp_bp": 99999},
+            ],
+            actor=admin,
+        )
     assert e.value.code == "VALIDATION_ERROR"
 
     # every refusal is a 422 (status pins)
     for bad_plan in (
-        [{"at": future.isoformat(), "ramp_bp": 5000},
-         {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000}],
+        [
+            {"at": future.isoformat(), "ramp_bp": 5000},
+            {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 5000},
+        ],
         [{"at": future.isoformat(), "ramp_bp": 1000}],
         [{"at": future.isoformat(), "ramp_bp": 99999}],
         [{"at": "garbage", "ramp_bp": 5000}],
@@ -2780,8 +3322,7 @@ async def test_ramp_plan_validation(db):
     # the constant)
     def _steps(count: int) -> list[dict]:
         return [
-            {"at": (future + timedelta(hours=i)).isoformat(),
-             "ramp_bp": 1100 + i * 100}
+            {"at": (future + timedelta(hours=i)).isoformat(), "ramp_bp": 1100 + i * 100}
             for i in range(count)
         ]
 
@@ -2795,26 +3336,36 @@ async def test_ramp_plan_validation(db):
     from sqlalchemy import select as _select
 
     from app.experiments.models import ExperimentEvent
-    events = list((await db.execute(
-        _select(ExperimentEvent).where(
-            ExperimentEvent.experiment_id == exp.id,
-            ExperimentEvent.event_type == "ramp_plan_set",
-        ).order_by(ExperimentEvent.created_at.desc())
-    )).scalars())
+
+    events = list(
+        (
+            await db.execute(
+                _select(ExperimentEvent)
+                .where(
+                    ExperimentEvent.experiment_id == exp.id,
+                    ExperimentEvent.event_type == "ramp_plan_set",
+                )
+                .order_by(ExperimentEvent.created_at.desc())
+            )
+        ).scalars()
+    )
     assert events and len(events[0].payload["steps"]) == 20
 
     # a naive at is UTC (#56 law) and the plan stores it aware
     naive = (datetime.now(UTC) + timedelta(hours=2)).replace(tzinfo=None)
-    exp = await svc.set_ramp_plan(exp.id, plan=[
-        {"at": naive.isoformat(), "ramp_bp": 4000},
-    ], actor=admin)
+    exp = await svc.set_ramp_plan(
+        exp.id,
+        plan=[
+            {"at": naive.isoformat(), "ramp_bp": 4000},
+        ],
+        actor=admin,
+    )
     assert exp.ramp_plan[0]["at"].endswith("+00:00")
     exp = await svc.set_ramp_plan(exp.id, plan=None, actor=admin)
     assert exp.ramp_plan is None
 
     # a transition-walled status refuses with 422
-    await ExperimentService(db).transition(exp.id, to_status="paused",
-                                           actor=admin)
+    await ExperimentService(db).transition(exp.id, to_status="paused", actor=admin)
     with pytest.raises(_AppError) as e:
         await svc.set_ramp_plan(exp.id, plan=None, actor=admin)
     assert e.value.status_code == 422
@@ -2822,17 +3373,22 @@ async def test_ramp_plan_validation(db):
     # ramp_bp bounds 1 and 10000 are BOTH admissible on a draft (no live
     # ramp floor there)
     draft_admin = await _mk_admin(db)
-    layer2 = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer2 = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     draft = await ExperimentService(db).create(
-        key=f"exp-{str(ULID()).lower()}", title="D", domain="learning",
-        layer_key=layer2.key, owner_user_id=draft_admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="D",
+        domain="learning",
+        layer_key=layer2.key,
+        owner_user_id=draft_admin.id,
     )
-    out = await svc.set_ramp_plan(draft.id, plan=[
-        {"at": future.isoformat(), "ramp_bp": 1},
-        {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 10_000},
-    ], actor=draft_admin)
+    out = await svc.set_ramp_plan(
+        draft.id,
+        plan=[
+            {"at": future.isoformat(), "ramp_bp": 1},
+            {"at": (future + timedelta(hours=1)).isoformat(), "ramp_bp": 10_000},
+        ],
+        actor=draft_admin,
+    )
     assert [step["ramp_bp"] for step in out.ramp_plan] == [1, 10_000]
 
 
@@ -2848,11 +3404,15 @@ async def test_ramp_plan_sweep_applies_highest_due(db):
     exp, admin = await _mk_running_low_ramp(db)
     svc = ExperimentService(db)
     now = datetime.now(UTC)
-    await svc.set_ramp_plan(exp.id, plan=[
-        {"at": (now + timedelta(minutes=5)).isoformat(), "ramp_bp": 2000},
-        {"at": (now + timedelta(minutes=10)).isoformat(), "ramp_bp": 5000},
-        {"at": (now + timedelta(days=2)).isoformat(), "ramp_bp": 8000},
-    ], actor=admin)
+    await svc.set_ramp_plan(
+        exp.id,
+        plan=[
+            {"at": (now + timedelta(minutes=5)).isoformat(), "ramp_bp": 2000},
+            {"at": (now + timedelta(minutes=10)).isoformat(), "ramp_bp": 5000},
+            {"at": (now + timedelta(days=2)).isoformat(), "ramp_bp": 8000},
+        ],
+        actor=admin,
+    )
     # poison entry must never block the sweep
     exp_row = await db.get(Experiment, exp.id)
     exp_row.ramp_plan = [*exp_row.ramp_plan, {"at": "garbage", "ramp_bp": "x"}]
@@ -2867,12 +3427,16 @@ async def test_ramp_plan_sweep_applies_highest_due(db):
     assert await sweep_ramp_plans(db, now=sweep_now) == 1
     exp_row = await db.get(Experiment, exp.id)
     assert exp_row.ramp_bp == 5000
-    events = list((await db.execute(
-        _select(ExperimentEvent).where(
-            ExperimentEvent.experiment_id == exp.id,
-            ExperimentEvent.event_type == "ramp_changed",
-        )
-    )).scalars())
+    events = list(
+        (
+            await db.execute(
+                _select(ExperimentEvent).where(
+                    ExperimentEvent.experiment_id == exp.id,
+                    ExperimentEvent.event_type == "ramp_changed",
+                )
+            )
+        ).scalars()
+    )
     assert any(e.payload.get("to_bp") == 5000 for e in events)
     # idempotent: both due targets now <= current ramp
     assert await sweep_ramp_plans(db, now=sweep_now) == 0
@@ -2896,9 +3460,13 @@ async def test_ramp_plan_sweep_tolerates_a_racing_refusal(db, monkeypatch):
     now = datetime.now(UTC)
     svc = ExperimentService(db)
     for exp, admin in ((exp_a, admin_a), (exp_b, admin_b)):
-        await svc.set_ramp_plan(exp.id, plan=[
-            {"at": (now - timedelta(minutes=1)).isoformat(), "ramp_bp": 5000},
-        ], actor=admin)
+        await svc.set_ramp_plan(
+            exp.id,
+            plan=[
+                {"at": (now - timedelta(minutes=1)).isoformat(), "ramp_bp": 5000},
+            ],
+            actor=admin,
+        )
 
     real_set_ramp = _Svc.set_ramp
     first = min(exp_a.id, exp_b.id)  # the sweep walks in id order
@@ -2944,12 +3512,17 @@ async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
     # round 235: a look with warnings surfaces its count in the digest line
     from app.experiments.models import ExperimentEvent as _Event235
 
-    db.add(_Event235(
-        experiment_id=exp.id, actor_user_id=admin.id,
-        event_type="analysis_look",
-        payload={"warnings": ["PRE_BALANCE_SUSPECT", "CUPED_AUTO_NONE"],
-                 "result_hash": "x" * 64},
-    ))
+    db.add(
+        _Event235(
+            experiment_id=exp.id,
+            actor_user_id=admin.id,
+            event_type="analysis_look",
+            payload={
+                "warnings": ["PRE_BALANCE_SUSPECT", "CUPED_AUTO_NONE"],
+                "result_hash": "x" * 64,
+            },
+        )
+    )
     await db.flush()
     await db.execute(_delete_notif_235(admin.id))
     await db.flush()
@@ -2968,11 +3541,14 @@ async def test_weekly_digest_flags_analyzed_awaiting_decision(db):
     # (limit(1) + desc — a widened limit crashes scalar_one_or_none, a
     # flipped order shows the stale count), and sent counts notifications
     # EXACTLY
-    db.add(_Event235(
-        experiment_id=exp.id, actor_user_id=admin.id,
-        event_type="analysis_look",
-        payload={"warnings": ["ONLY_ONE"], "result_hash": "y" * 64},
-    ))
+    db.add(
+        _Event235(
+            experiment_id=exp.id,
+            actor_user_id=admin.id,
+            event_type="analysis_look",
+            payload={"warnings": ["ONLY_ONE"], "result_hash": "y" * 64},
+        )
+    )
     await db.flush()
     await db.execute(_delete_notif_235(admin.id))
     await db.flush()
@@ -3000,19 +3576,20 @@ async def test_digest_body_caps_at_twenty_lines(db):
     svc = ExperimentService(db)
     layer_svc = LayerService(db)
     for i in range(20):
-        layer = await layer_svc.create(
-            key=f"dcap-{i}-{str(ULID()).lower()}", domain="learning")
+        layer = await layer_svc.create(key=f"dcap-{i}-{str(ULID()).lower()}", domain="learning")
         extra = await svc.create(
-            key=f"dcap-{i}-{str(ULID()).lower()}", title=f"D{i}",
-            domain="learning", layer_key=layer.key,
+            key=f"dcap-{i}-{str(ULID()).lower()}",
+            title=f"D{i}",
+            domain="learning",
+            layer_key=layer.key,
             owner_user_id=admin.id,
         )
         await svc.create_version(extra.id, spec=_spec(), actor=admin)
-        await layer_svc.allocate(layer_key=layer.key, experiment_id=extra.id,
-                                 slice_start=0, slice_end=9999)
+        await layer_svc.allocate(
+            layer_key=layer.key, experiment_id=extra.id, slice_start=0, slice_end=9999
+        )
         await svc.transition(extra.id, to_status="review", actor=admin)
-        await svc.transition(extra.id, to_status="scheduled", actor=admin,
-                             checklist=_CHECKLIST)
+        await svc.transition(extra.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
         await svc.transition(extra.id, to_status="running", actor=admin)
     from app.experiments.worker import sweep_weekly_digest
 
@@ -3026,8 +3603,6 @@ async def test_digest_body_caps_at_twenty_lines(db):
         )
     ).scalar_one()
     assert len(notif.body.splitlines()) == 20  # the 21st line drops
-
-
 
 
 def _delete_notif_235(user_id):
@@ -3055,21 +3630,27 @@ async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypa
     svc = ExperimentService(db)
     exps = []
     for _ in range(2):
-        layer = await LayerService(db).create(
-            key=f"lyr-{str(ULID()).lower()}", domain="learning"
-        )
+        layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
         exp = await svc.create(
-            key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-            layer_key=layer.key, owner_user_id=admin.id,
+            key=f"exp-{str(ULID()).lower()}",
+            title="T",
+            domain="learning",
+            layer_key=layer.key,
+            owner_user_id=admin.id,
         )
         await svc.create_version(exp.id, spec=_spec(), actor=admin)
         await LayerService(db).allocate(
-            layer_key=layer.key, experiment_id=exp.id,
-            slice_start=0, slice_end=9999,
+            layer_key=layer.key,
+            experiment_id=exp.id,
+            slice_start=0,
+            slice_end=9999,
         )
         await svc.transition(exp.id, to_status="review", actor=admin)
         await svc.transition(
-            exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST,
+            exp.id,
+            to_status="scheduled",
+            actor=admin,
+            checklist=_CHECKLIST,
             start_at=datetime.now(UTC) - timedelta(minutes=5),
         )
         exps.append(exp)
@@ -3086,6 +3667,7 @@ async def test_start_and_closure_sweeps_tolerate_racing_transitions(db, monkeypa
     assert await sweep_experiment_starts(db) == 1  # the other one started
     monkeypatch.undo()
     from app.experiments.models import Experiment
+
     second = next(e.id for e in exps if e.id != first)
     assert (await db.get(Experiment, second)).status == "running"
     assert (await db.get(Experiment, first)).status == "scheduled"
@@ -3103,9 +3685,13 @@ async def test_list_assignments_order_and_cap(db):
     ids = []
     for i in range(3):
         a = ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=f"u{i}" + "x" * 24,
+            experiment_id=exp.id,
+            unit_type="user",
+            unit_id=f"u{i}" + "x" * 24,
             variant_key="control" if i % 2 == 0 else "treatment",
-            assigned_version=1, bucket=i, is_holdout=False,
+            assigned_version=1,
+            bucket=i,
+            is_holdout=False,
         )
         db.add(a)
         await db.flush()
@@ -3131,34 +3717,36 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
 
     exp_a, admin = await _mk_running_low_ramp(db)
     # second experiment, SAME owner (reuse the admin through the service)
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp_b = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="B", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="B",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     await svc.create_version(exp_b.id, spec=_spec(), actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp_b.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp_b.id, to_status="review", actor=admin)
-    await svc.transition(exp_b.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp_b.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp_b.id, to_status="running", actor=admin)
 
     await svc.set_ramp(exp_a.id, ramp_bp=10_000, actor=admin)  # full eligibility
     asvc = AssignmentService(db)
-    await asvc.resolve(experiment_key=exp_a.key, unit_type="user",
-                       unit_id="dg-" + "u" * 23)
-    await asvc.record_exposure(experiment_key=exp_a.key, unit_type="user",
-                               unit_id="dg-" + "u" * 23)
-    db.add(GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
-                          action="alerted", auto=True, detail={}))
+    await asvc.resolve(experiment_key=exp_a.key, unit_type="user", unit_id="dg-" + "u" * 23)
+    await asvc.record_exposure(experiment_key=exp_a.key, unit_type="user", unit_id="dg-" + "u" * 23)
+    db.add(
+        GuardrailEvent(
+            experiment_id=exp_b.id, guardrail_key="cost_usd", action="alerted", auto=True, detail={}
+        )
+    )
     # out-of-window debris must not count
-    old_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
-                               action="alerted", auto=True, detail={})
+    old_event = GuardrailEvent(
+        experiment_id=exp_b.id, guardrail_key="cost_usd", action="alerted", auto=True, detail={}
+    )
     db.add(old_event)
     await db.flush()
     old_event.created_at = datetime.now(UTC) - timedelta(days=30)
@@ -3169,21 +3757,22 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     # boundary row: an event exactly ON the 7-day edge counts (>=), and the
     # 7-day constant itself is pinned by a 7.5-day-old event staying out
     now = datetime.now(UTC)
-    edge_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
-                                action="alerted", auto=True, detail={})
+    edge_event = GuardrailEvent(
+        experiment_id=exp_b.id, guardrail_key="cost_usd", action="alerted", auto=True, detail={}
+    )
     db.add(edge_event)
-    stale_event = GuardrailEvent(experiment_id=exp_b.id, guardrail_key="cost_usd",
-                                 action="alerted", auto=True, detail={})
+    stale_event = GuardrailEvent(
+        experiment_id=exp_b.id, guardrail_key="cost_usd", action="alerted", auto=True, detail={}
+    )
     db.add(stale_event)
     await db.flush()
     edge_event.created_at = now - timedelta(days=7)
     stale_event.created_at = now - timedelta(days=7, hours=12)
     # the exposure sits exactly ON the 7-day edge too (its own >= filter)
     from app.experiments.models import ExperimentExposure as _Exposure
+
     exposure_row = (
-        await db.execute(
-            _select(_Exposure).where(_Exposure.experiment_id == exp_a.id)
-        )
+        await db.execute(_select(_Exposure).where(_Exposure.experiment_id == exp_a.id))
     ).scalar_one()
     exposure_row.occurred_at = now - timedelta(days=7)
     await db.flush()
@@ -3200,9 +3789,7 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     ).scalar_one()
     # EXACT per-experiment lines: counts must come from the RIGHT experiment
     # (an inverted id filter would swap or pollute them)
-    lines = dict(
-        line.split(": ", 1) for line in notif.body.splitlines()
-    )
+    lines = dict(line.split(": ", 1) for line in notif.body.splitlines())
     assert lines["T"] == "1 exposures, 0 guardrail events (7d)"
     assert lines["B"] == "0 exposures, 2 guardrail events (7d)"
     assert set(notif.data["experiment_ids"]) == {exp_a.id, exp_b.id}
@@ -3211,9 +3798,7 @@ async def test_weekly_digest_one_per_owner_with_dedup(db):
     # exact cutoff instant (the >= edge); debris owners got theirs in the
     # first pass, so the global rerun count is 0 either way
     assert await sweep_weekly_digest(db, now=now) == 0
-    assert await sweep_weekly_digest(
-        db, now=notif.created_at + timedelta(days=6)
-    ) == 0
+    assert await sweep_weekly_digest(db, now=notif.created_at + timedelta(days=6)) == 0
 
 
 async def test_binary_cuped_per_unit_snapshot(db):
@@ -3231,36 +3816,43 @@ async def test_binary_cuped_per_unit_snapshot(db):
     exp, admin = await _mk_running_low_ramp(db)
     # re-version is impossible (running) — build a fresh experiment with the
     # right spec instead
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"bcu-{str(ULID()).lower()}", title="BC", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id,
+        key=f"bcu-{str(ULID()).lower()}",
+        title="BC",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
     )
     spec = _spec()
-    spec["metrics"] = {"primary": ["project_approval_rate"],
-                       "guardrails": [{"metric_key": "cost_usd", "op": "lte",
-                                       "threshold": 100.0}]}
-    spec["variance_reduction"] = {"method": "cuped",
-                                  "covariate_metrics": ["revision_count"],
-                                  "lookback_days": 14}
+    spec["metrics"] = {
+        "primary": ["project_approval_rate"],
+        "guardrails": [{"metric_key": "cost_usd", "op": "lte", "threshold": 100.0}],
+    }
+    spec["variance_reduction"] = {
+        "method": "cuped",
+        "covariate_metrics": ["revision_count"],
+        "lookback_days": 14,
+    }
     await svc.create_version(exp.id, spec=spec, actor=admin)
     await LayerService(db).allocate(
         layer_key=layer.key, experiment_id=exp.id, slice_start=0, slice_end=9999
     )
     await svc.transition(exp.id, to_status="review", actor=admin)
-    await svc.transition(exp.id, to_status="scheduled", actor=admin,
-                         checklist=_CHECKLIST)
+    await svc.transition(exp.id, to_status="scheduled", actor=admin, checklist=_CHECKLIST)
     await svc.transition(exp.id, to_status="running", actor=admin)
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
 
     _tenant, org = await _mk_org(db)
-    project = Project(org_id=org.id, title="BP",
-                      slug=f"bp-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="BP",
+        slug=f"bp-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     asvc = AssignmentService(db)
@@ -3268,43 +3860,83 @@ async def test_binary_cuped_per_unit_snapshot(db):
     t0 = window_start + timedelta(hours=1)
     units = []
     for i in range(3):
-        u = User(email=f"bcu-{i}-{ULID()}@example.com", display_name=f"B{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"bcu-{i}-{ULID()}@example.com",
+            display_name=f"B{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
-        assert await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                                  unit_id=u.id) is not None
+        assert (
+            await asvc.resolve(experiment_key=exp.key, unit_type="user", unit_id=u.id) is not None
+        )
         units.append(u.id)
     # unit0: one APPROVED + one REJECTED (y=1); unit1: REJECTED only (y=0);
     # unit2: silent (y=0, ITT)
     # unit0 has ONLY approved rows and unit2 only a rejected one — an
     # inverted status predicate flips their y and the xy_sum below catches it
-    for user_id, status in ((units[0], SubmissionStatus.APPROVED),
-                            (units[2], SubmissionStatus.REJECTED),
-                            (units[1], SubmissionStatus.REJECTED)):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=user_id, status=status, version=2,
-                          created_at=t0))
+    for user_id, status in (
+        (units[0], SubmissionStatus.APPROVED),
+        (units[2], SubmissionStatus.REJECTED),
+        (units[1], SubmissionStatus.REJECTED),
+    ):
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user_id,
+                status=status,
+                version=2,
+                created_at=t0,
+            )
+        )
     # pre-period revisions for unit0 (x=2): xy_sum = y0*2 pins y0 exactly
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[0],
-                      status=SubmissionStatus.APPROVED, version=3,
-                      created_at=window_start - timedelta(days=3)))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[0],
+            status=SubmissionStatus.APPROVED,
+            version=3,
+            created_at=window_start - timedelta(days=3),
+        )
+    )
     # wave-24 edges: unit1 approves exactly ON window_start (IN -> y=1);
     # unit2 approves exactly ON window_end (OUT -> stays y=0)
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[1],
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=window_start))
-    db.add(Submission(org_id=org.id, project_id=project.id, user_id=units[2],
-                      status=SubmissionStatus.APPROVED, version=1,
-                      created_at=window_end))
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[1],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=window_start,
+        )
+    )
+    db.add(
+        Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=units[2],
+            status=SubmissionStatus.APPROVED,
+            version=1,
+            created_at=window_end,
+        )
+    )
     await db.flush()
     await MetricService(db).compute_experiment_window(
         exp.id, window_start=window_start, window_end=window_end
     )
-    snaps = list((await db.execute(
-        _select(_Snap).where(_Snap.experiment_id == exp.id,
-                             _Snap.metric_key == "project_approval_rate")
-    )).scalars())
+    snaps = list(
+        (
+            await db.execute(
+                _select(_Snap).where(
+                    _Snap.experiment_id == exp.id, _Snap.metric_key == "project_approval_rate"
+                )
+            )
+        ).scalars()
+    )
     assert snaps
     total_units = sum(int(s.n) for s in snaps)
     total_num = sum(float(s.numerator) for s in snaps)
@@ -3345,16 +3977,24 @@ async def test_evaluations_source_per_unit_under_variance_reduction(db):
     )
 
     _tenant, org = await _mk_org(db)
-    project = Project(org_id=org.id, title="EvB",
-                      slug=f"evb-{str(ULID()).lower()}", description="d",
-                      instructions="i",
-                      rubric=[{"criterion": "c", "max_score": 5}])
+    project = Project(
+        org_id=org.id,
+        title="EvB",
+        slug=f"evb-{str(ULID()).lower()}",
+        description="d",
+        instructions="i",
+        rubric=[{"criterion": "c", "max_score": 5}],
+    )
     db.add(project)
     await db.flush()
     users = []
     for i in range(3):
-        u = User(email=f"evb-{i}-{ULID()}@example.com", display_name=f"V{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"evb-{i}-{ULID()}@example.com",
+            display_name=f"V{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         users.append(u.id)
@@ -3366,9 +4006,14 @@ async def test_evaluations_source_per_unit_under_variance_reduction(db):
     # the per-unit map visibly.
     subs = {}
     for user_id in users:
-        sub = Submission(org_id=org.id, project_id=project.id, user_id=user_id,
-                         status=SubmissionStatus.SUBMITTED, version=1,
-                         created_at=t0)
+        sub = Submission(
+            org_id=org.id,
+            project_id=project.id,
+            user_id=user_id,
+            status=SubmissionStatus.SUBMITTED,
+            version=1,
+            created_at=t0,
+        )
         db.add(sub)
         await db.flush()
         subs[user_id] = sub
@@ -3376,41 +4021,71 @@ async def test_evaluations_source_per_unit_under_variance_reduction(db):
     # mid-window + APPROVED exactly ON window_end (OUT: y=0, and the <=
     # mutant flips it); users[2]: APPROVED exactly ON window_start (IN: the
     # >= edge, y=1)
-    db.add(SubmissionReview(submission_id=subs[users[0]].id,
-                            reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=90,
-                            created_at=t0))
-    db.add(SubmissionReview(submission_id=subs[users[1]].id,
-                            reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.REVISION_REQUESTED, score=40,
-                            created_at=t0))
-    db.add(SubmissionReview(submission_id=subs[users[1]].id,
-                            reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=80,
-                            created_at=window_end))
-    db.add(SubmissionReview(submission_id=subs[users[2]].id,
-                            reviewer_type=ReviewerType.AI,
-                            status=ReviewStatus.APPROVED, score=81,
-                            created_at=window_start))
+    db.add(
+        SubmissionReview(
+            submission_id=subs[users[0]].id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=90,
+            created_at=t0,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=subs[users[1]].id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.REVISION_REQUESTED,
+            score=40,
+            created_at=t0,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=subs[users[1]].id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=80,
+            created_at=window_end,
+        )
+    )
+    db.add(
+        SubmissionReview(
+            submission_id=subs[users[2]].id,
+            reviewer_type=ReviewerType.AI,
+            status=ReviewStatus.APPROVED,
+            score=81,
+            created_at=window_start,
+        )
+    )
     await db.flush()
 
     await MetricService(db).ensure_seed_definitions()
     from sqlalchemy import select as _select
 
     from app.experiments.models import MetricDefinition
+
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.spec["source"].astext == "evaluations"))
-    ).scalars().first()
-    assert definition is not None
-    vr = SimpleNamespace(
-        covariates=lambda: ["revision_count"], lookback_days=14
+        (
+            await db.execute(
+                _select(MetricDefinition).where(
+                    MetricDefinition.spec["source"].astext == "evaluations"
+                )
+            )
+        )
+        .scalars()
+        .first()
     )
+    assert definition is not None
+    vr = SimpleNamespace(covariates=lambda: ["revision_count"], lookback_days=14)
     out = await SOURCE_REGISTRY["evaluations"](
-        db, experiment=None, definition=definition,
+        db,
+        experiment=None,
+        definition=definition,
         variant_units={"treatment": users},
-        window_start=window_start, window_end=window_end,
-        unit_type="user", variance_reduction=vr,
+        window_start=window_start,
+        window_end=window_end,
+        unit_type="user",
+        variance_reduction=vr,
     )
     arm = out["treatment"]
     assert arm["n"] == 3 and arm["denominator"] == 3
@@ -3430,18 +4105,28 @@ async def test_projects_per_submission_window_boundaries(db):
     project = await _mk_project(db, org)
     window_start, window_end = _today_window()
     for created_at, status in (
-        (window_start, SubmissionStatus.APPROVED),            # IN (>= edge)
+        (window_start, SubmissionStatus.APPROVED),  # IN (>= edge)
         (window_start + timedelta(hours=2), SubmissionStatus.REJECTED),
-        (window_end, SubmissionStatus.APPROVED),              # OUT (< edge)
+        (window_end, SubmissionStatus.APPROVED),  # OUT (< edge)
         (window_start - timedelta(seconds=1), SubmissionStatus.APPROVED),
     ):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=user.id, status=status, version=1,
-                          created_at=created_at))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user.id,
+                status=status,
+                version=1,
+                created_at=created_at,
+            )
+        )
     await db.flush()
     out = await _run_source(
-        db, "projects", definition_key="project_approval_rate",
-        units=[user.id], unit_type="user",
+        db,
+        "projects",
+        definition_key="project_approval_rate",
+        units=[user.id],
+        unit_type="user",
     )
     assert out["treatment"] == {"n": 2, "numerator": 1, "denominator": 2}
 
@@ -3461,8 +4146,12 @@ async def test_multi_branch_winsorizes_like_single(db):
     project = await _mk_project(db, org)
     users = []
     for i in range(4):
-        u = User(email=f"wz-{i}-{ULID()}@example.com", display_name=f"W{i}",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+        u = User(
+            email=f"wz-{i}-{ULID()}@example.com",
+            display_name=f"W{i}",
+            role=UserRole.STUDENT,
+            status=UserStatus.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         users.append(u.id)
@@ -3470,17 +4159,24 @@ async def test_multi_branch_winsorizes_like_single(db):
     t0 = window_start + timedelta(hours=1)
     # revisions per unit: 0, 1, 2, 40 — the outlier gets clamped
     for user_id, version in ((users[1], 2), (users[2], 3), (users[3], 41)):
-        db.add(Submission(org_id=org.id, project_id=project.id,
-                          user_id=user_id, status=SubmissionStatus.APPROVED,
-                          version=version, created_at=t0))
+        db.add(
+            Submission(
+                org_id=org.id,
+                project_id=project.id,
+                user_id=user_id,
+                status=SubmissionStatus.APPROVED,
+                version=version,
+                created_at=t0,
+            )
+        )
     await db.flush()
     await MetricService(db).ensure_seed_definitions()
     from sqlalchemy import select as _select
 
     from app.experiments.models import MetricDefinition
+
     definition = (
-        await db.execute(_select(MetricDefinition).where(
-            MetricDefinition.key == "revision_count"))
+        await db.execute(_select(MetricDefinition).where(MetricDefinition.key == "revision_count"))
     ).scalar_one()
     definition.winsorize_pct = 75.0
     await db.flush()
@@ -3490,10 +4186,14 @@ async def test_multi_branch_winsorizes_like_single(db):
     )
     try:
         out = await SOURCE_REGISTRY["projects"](
-            db, experiment=None, definition=definition,
+            db,
+            experiment=None,
+            definition=definition,
             variant_units={"treatment": users},
-            window_start=window_start, window_end=window_end,
-            unit_type="user", variance_reduction=vr,
+            window_start=window_start,
+            window_end=window_end,
+            unit_type="user",
+            variance_reduction=vr,
         )
         arm = out["treatment"]
         assert arm["_winsorized"] is True
@@ -3521,28 +4221,38 @@ async def test_segment_org_cap_takes_twenty(db):
     from app.models.user import UserStatus as _Status
 
     exp, admin = await _mk_running_spec(db, {"segments": ["org"]})
-    tenant = TenantAccount(name=f"segcap-{str(ULID()).lower()}",
-                           slug=f"segcap-{str(ULID()).lower()}")
+    tenant = TenantAccount(
+        name=f"segcap-{str(ULID()).lower()}", slug=f"segcap-{str(ULID()).lower()}"
+    )
     db.add(tenant)
     await db.flush()
     org_ids = []
     for i in range(21):
-        org = Organization(name=f"segcap-{i}",
-                           slug=f"segcap-{i}-{str(ULID()).lower()}",
-                           tenant_id=tenant.id)
+        org = Organization(
+            name=f"segcap-{i}", slug=f"segcap-{i}-{str(ULID()).lower()}", tenant_id=tenant.id
+        )
         db.add(org)
         await db.flush()
-        u = _User(email=f"segcap-{i}-{ULID()}@example.com",
-                  display_name=f"S{i}", role=_Role.STUDENT,
-                  status=_Status.ACTIVE)
+        u = _User(
+            email=f"segcap-{i}-{ULID()}@example.com",
+            display_name=f"S{i}",
+            role=_Role.STUDENT,
+            status=_Status.ACTIVE,
+        )
         db.add(u)
         await db.flush()
         db.add(OrgMember(org_id=org.id, user_id=u.id, role=OrgRole.STUDENT))
-        db.add(ExperimentAssignment(
-            experiment_id=exp.id, unit_type="user", unit_id=u.id,
-            variant_key="control" if i % 2 == 0 else "treatment",
-            assigned_version=1, bucket=0, is_holdout=False,
-        ))
+        db.add(
+            ExperimentAssignment(
+                experiment_id=exp.id,
+                unit_type="user",
+                unit_id=u.id,
+                variant_key="control" if i % 2 == 0 else "treatment",
+                assigned_version=1,
+                bucket=0,
+                is_holdout=False,
+            )
+        )
         org_ids.append(org.id)
     await db.flush()
     window_start, window_end = _today_window()
@@ -3552,9 +4262,11 @@ async def test_segment_org_cap_takes_twenty(db):
     segs = {
         r.segment
         for r in (
-            await db.execute(_select(MetricSnapshot).where(
-                MetricSnapshot.experiment_id == exp.id,
-                MetricSnapshot.segment != ""))
+            await db.execute(
+                _select(MetricSnapshot).where(
+                    MetricSnapshot.experiment_id == exp.id, MetricSnapshot.segment != ""
+                )
+            )
         ).scalars()
     }
     assert len(segs) == 20
@@ -3589,8 +4301,7 @@ async def test_ramp_sweep_cap_not_squatted_by_exhausted_plans(db):
 
     await db.execute(
         _update(_Exp)
-        .where(_Exp.status == "running",
-               _Exp.id.notin_([squatter.id, due.id]))
+        .where(_Exp.status == "running", _Exp.id.notin_([squatter.id, due.id]))
         .values(status="paused")
     )
     applied = await sweep_ramp_plans(db, cap=1)
@@ -3611,8 +4322,7 @@ async def test_digest_sent_count_is_exact_when_residue_paused(db):
 
     await db.execute(
         _update(_Exp)
-        .where(_Exp.status.in_(("running", "analyzed")),
-               _Exp.id != exp.id)
+        .where(_Exp.status.in_(("running", "analyzed")), _Exp.id != exp.id)
         .values(status="paused")
     )
     assert await sweep_weekly_digest(db) == 1

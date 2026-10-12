@@ -28,12 +28,14 @@ async def test_concurrent_publish_materializes_exactly_once(db):
     org = await _mk_org(db)
     svc = DraftService(db)
     draft = await svc.create(
-        draft_type="workflow_pack", title="race-pack",
+        draft_type="workflow_pack",
+        title="race-pack",
         payload={
             "name": "RacePack",
             "definition": {"steps": [{"id": "s1", "capability": "image_generation"}]},
         },
-        created_by=creator.id, org_id=org.id,
+        created_by=creator.id,
+        org_id=org.id,
     )
     await svc.transition(draft.id, to_status="in_review", actor_id=creator.id, org_id=org.id)
     await svc.transition(draft.id, to_status="approved", actor_id=approver.id, org_id=org.id)
@@ -59,14 +61,15 @@ async def test_concurrent_publish_materializes_exactly_once(db):
     from app.models.workflow_pack import WorkflowPack
 
     async with AsyncSessionLocal() as session:
-        packs = list(await session.scalars(
-            select(WorkflowPack).where(WorkflowPack.owner_org_id == org_id,
-                                       WorkflowPack.name == "RacePack")
-        ))
-        # cleanup so repeated local runs stay green
-        draft_row = await session.get(
-            (await _draft_model()), draft_id
+        packs = list(
+            await session.scalars(
+                select(WorkflowPack).where(
+                    WorkflowPack.owner_org_id == org_id, WorkflowPack.name == "RacePack"
+                )
+            )
         )
+        # cleanup so repeated local runs stay green
+        draft_row = await session.get((await _draft_model()), draft_id)
         assert len(packs) == 1
         assert draft_row.published_ref == packs[0].id
 

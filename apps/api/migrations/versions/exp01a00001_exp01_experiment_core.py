@@ -27,7 +27,10 @@ def upgrade() -> None:
         sa.Column("domain", sa.String(length=20), nullable=False),
         sa.Column("total_slices", sa.Integer(), server_default="10000", nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("key"),
@@ -51,10 +54,16 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("analysis_close_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["scope_org_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["layer_key"], ["experiment_layers.key"], ondelete="RESTRICT"),
@@ -77,7 +86,10 @@ def upgrade() -> None:
         sa.Column("spec_hash", sa.String(length=64), nullable=False),
         sa.Column("created_by", sa.String(length=26), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
@@ -93,7 +105,10 @@ def upgrade() -> None:
         sa.Column("slice_start", sa.Integer(), nullable=False),
         sa.Column("slice_end", sa.Integer(), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["layer_key"], ["experiment_layers.key"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
@@ -114,7 +129,10 @@ def upgrade() -> None:
             "payload", postgresql.JSONB(astext_type=sa.Text()), server_default="{}", nullable=False
         ),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),

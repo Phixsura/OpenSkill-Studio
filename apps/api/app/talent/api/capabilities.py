@@ -572,6 +572,7 @@ async def submit_match_feedback(
         raise HTTPException(422, errors[0])
     return DataResponse(data={"submitted": True, "rating": body["rating"]})
 
+
 # NOTE (issue #35 R383): this catch-all MUST register after every static
 # single-segment GET above (/mappings, /autocomplete, /frequency,
 # /cooccurrence, /industries, /version, /edge-strength, /search-analytics) —
@@ -594,4 +595,3 @@ async def get_capability(
     if not cap:
         raise HTTPException(404, "Capability not found")
     return DataResponse(data=CapabilityResponse.model_validate(cap))
-

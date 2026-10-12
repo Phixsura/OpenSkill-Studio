@@ -33,8 +33,7 @@ async def c():
         yield
 
     app.router.lifespan_context = _noop
-    async with AsyncClient(transport=ASGITransport(app=app),
-                           base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.router.lifespan_context = orig
     await engine.dispose()
@@ -43,8 +42,7 @@ async def c():
 async def _auth(c, name="IdApi"):
     r = await c.post(
         "/api/v1/auth/register",
-        json={"email": _email(), "password": "TestPass123!",
-              "display_name": name},
+        json={"email": _email(), "password": "TestPass123!", "display_name": name},
     )
     d = r.json()
     return {"Authorization": f"Bearer {d['access_token']}"}, d["user"]
@@ -59,38 +57,44 @@ async def test_identity_link_endpoint_contract(c):
     h2, u2 = await _auth(c, "Intruder")
 
     anon = _anon_id()
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h1, json={"anonymous_id": anon})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h1, json={"anonymous_id": anon}
+    )
     assert r.status_code == 200
     assert r.json()["data"]["user_id"] == u1["id"]
     # idempotent re-claim
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h1, json={"anonymous_id": anon})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h1, json={"anonymous_id": anon}
+    )
     assert r.status_code == 200
 
     # rebinding by another identity: typed 422
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h2, json={"anonymous_id": anon})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h2, json={"anonymous_id": anon}
+    )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "EXPERIMENT_IDENTITY_CONFLICT"
 
     # the support override is PLATFORM-ADMIN only (round 232)
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h2,
-                     json={"anonymous_id": _anon_id(), "user_id": u1["id"]})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link",
+        headers=h2,
+        json={"anonymous_id": _anon_id(), "user_id": u1["id"]},
+    )
     assert r.status_code == 403
 
     # schema wall: colon and overlength refuse before any service work
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h1, json={"anonymous_id": "a:b"})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h1, json={"anonymous_id": "a:b"}
+    )
     assert r.status_code == 422
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h1, json={"anonymous_id": "x" * 27})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h1, json={"anonymous_id": "x" * 27}
+    )
     assert r.status_code == 422
 
     # unauthenticated link refused
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     json={"anonymous_id": _anon_id()})
+    r = await c.post("/api/v1/experiments/self/identity-link", json={"anonymous_id": _anon_id()})
     assert r.status_code == 401
 
 
@@ -101,17 +105,18 @@ async def test_anon_surfaces_fail_safe_without_auth(c):
     exposure for an unassigned unit reports recorded=false — product
     paths never break on experiment plumbing."""
     anon = _anon_id()
-    r = await c.post("/api/v1/experiments/anon/resolve",
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "anonymous_id": anon})
+    r = await c.post(
+        "/api/v1/experiments/anon/resolve",
+        json={"experiment_key": "idapi-no-such-exp", "anonymous_id": anon},
+    )
     assert r.status_code == 200
     assert r.json()["data"]["variant_key"] is None
     assert r.json()["data"]["config"] == {}
 
-    r = await c.post("/api/v1/experiments/anon/exposures",
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "anonymous_id": anon,
-                           "dedup_key": "idapi-x"})
+    r = await c.post(
+        "/api/v1/experiments/anon/exposures",
+        json={"experiment_key": "idapi-no-such-exp", "anonymous_id": anon, "dedup_key": "idapi-x"},
+    )
     assert r.status_code == 201
     assert r.json()["data"]["recorded"] is False
 
@@ -126,8 +131,9 @@ async def test_identity_links_listing_is_own_rows_only(c):
 
     a1, a2 = _anon_id(), _anon_id()
     for anon in (a1, a2):
-        r = await c.post("/api/v1/experiments/self/identity-link",
-                         headers=h1, json={"anonymous_id": anon})
+        r = await c.post(
+            "/api/v1/experiments/self/identity-link", headers=h1, json={"anonymous_id": anon}
+        )
         assert r.status_code == 200
 
     r = await c.get("/api/v1/experiments/self/identity-links", headers=h1)
@@ -150,9 +156,11 @@ async def test_self_exposure_status_code_pin(c):
     """Wave-45 killer: the self exposure endpoint answers 201 (created-ish
     append semantics) even for the fail-safe recorded=false shape."""
     h, _u = await _auth(c, "ExpPin")
-    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "dedup_key": "idapi-pin"})
+    r = await c.post(
+        "/api/v1/experiments/self/exposures",
+        headers=h,
+        json={"experiment_key": "idapi-no-such-exp", "dedup_key": "idapi-pin"},
+    )
     assert r.status_code == 201
     assert r.json()["data"]["recorded"] is False
 
@@ -166,17 +174,20 @@ async def test_identity_links_listing_caps_at_hundred(c):
     h, _u = await _auth(c, "Capped")
     ids = [_anon_id() for _ in range(100)]
     for anon in ids:
-        r = await c.post("/api/v1/experiments/self/identity-link",
-                         headers=h, json={"anonymous_id": anon})
+        r = await c.post(
+            "/api/v1/experiments/self/identity-link", headers=h, json={"anonymous_id": anon}
+        )
         assert r.status_code == 200
     # #98: the 101st NEW link hits the write cap
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h, json={"anonymous_id": _anon_id()})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h, json={"anonymous_id": _anon_id()}
+    )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "EXPERIMENT_IDENTITY_LINK_CAP"
     # idempotent re-link of an existing pair still succeeds at the cap
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h, json={"anonymous_id": ids[0]})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h, json={"anonymous_id": ids[0]}
+    )
     assert r.status_code == 200
     r = await c.get("/api/v1/experiments/self/identity-links", headers=h)
     assert r.status_code == 200
@@ -192,21 +203,26 @@ async def test_formula_shaped_anonymous_ids_are_422(c):
     assignments CSV export. The write boundary pins [A-Za-z0-9_-]."""
     payloads = ["=1+2", "+cmd|calc", "@SUM(A1)", "-2+3", "a b", "a:b"]
     for bad in payloads:
-        r = await c.post("/api/v1/experiments/anon/resolve",
-                         json={"experiment_key": "any", "anonymous_id": bad})
+        r = await c.post(
+            "/api/v1/experiments/anon/resolve", json={"experiment_key": "any", "anonymous_id": bad}
+        )
         assert r.status_code == 422, (bad, r.status_code, r.text[:200])
-        r = await c.post("/api/v1/experiments/anon/exposures",
-                         json={"experiment_key": "any", "anonymous_id": bad})
+        r = await c.post(
+            "/api/v1/experiments/anon/exposures",
+            json={"experiment_key": "any", "anonymous_id": bad},
+        )
         assert r.status_code == 422, (bad, r.status_code)
     h, _u = await _auth(c, "CsvWall")
-    r = await c.post("/api/v1/experiments/self/identity-link",
-                     headers=h, json={"anonymous_id": "=HYPERLINK(1)"})
+    r = await c.post(
+        "/api/v1/experiments/self/identity-link", headers=h, json={"anonymous_id": "=HYPERLINK(1)"}
+    )
     assert r.status_code == 422
     # the SDK's Crockford shape still passes the wall (resolve may 404 the
     # unknown experiment or fail-safe — anything but a validation error)
-    r = await c.post("/api/v1/experiments/anon/resolve",
-                     json={"experiment_key": "any",
-                           "anonymous_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"})
+    r = await c.post(
+        "/api/v1/experiments/anon/resolve",
+        json={"experiment_key": "any", "anonymous_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+    )
     assert r.status_code != 422
 
 
@@ -220,8 +236,7 @@ async def test_timeline_note_wall_and_boundary(c):
     from app.experiments.schemas import ExperimentNoteRequest
 
     h, _u = await _auth(c, "Noter")
-    r = await c.post(f"/api/v1/experiments/{'x' * 26}/notes",
-                     headers=h, json={"text": "hello"})
+    r = await c.post(f"/api/v1/experiments/{'x' * 26}/notes", headers=h, json={"text": "hello"})
     assert r.status_code == 403  # read-scope wall holds for writes too
     with pytest.raises(pydantic.ValidationError):
         ExperimentNoteRequest(text="bad\x00ctrl")
@@ -238,22 +253,30 @@ async def test_exposure_dedup_key_rejects_control_chars(c):
     sqlstate the global backstop can map (R88). The wall belongs at the
     boundary: 422 on both exposure surfaces."""
     bad = "a\x00b"
-    r = await c.post("/api/v1/experiments/anon/exposures",
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "anonymous_id": "ctrl95anon",
-                           "dedup_key": bad})
+    r = await c.post(
+        "/api/v1/experiments/anon/exposures",
+        json={
+            "experiment_key": "idapi-no-such-exp",
+            "anonymous_id": "ctrl95anon",
+            "dedup_key": bad,
+        },
+    )
     assert r.status_code == 422, r.text
 
     h, _u = await _auth(c, "Ctrl95")
-    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "dedup_key": bad})
+    r = await c.post(
+        "/api/v1/experiments/self/exposures",
+        headers=h,
+        json={"experiment_key": "idapi-no-such-exp", "dedup_key": bad},
+    )
     assert r.status_code == 422, r.text
 
     # Esc / DEL are control chars too
-    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
-                     json={"experiment_key": "idapi-no-such-exp",
-                           "dedup_key": "x\x1by"})
+    r = await c.post(
+        "/api/v1/experiments/self/exposures",
+        headers=h,
+        json={"experiment_key": "idapi-no-such-exp", "dedup_key": "x\x1by"},
+    )
     assert r.status_code == 422, r.text
 
 
@@ -264,16 +287,17 @@ async def test_experiment_key_rejects_control_chars(c):
     unmappable DataError (R88 class). Wall at the boundary on every
     key-taking self-serve surface: 422."""
     bad = "a\x00b"
-    r = await c.post("/api/v1/experiments/anon/resolve",
-                     json={"experiment_key": bad, "anonymous_id": "k96anon"})
+    r = await c.post(
+        "/api/v1/experiments/anon/resolve", json={"experiment_key": bad, "anonymous_id": "k96anon"}
+    )
     assert r.status_code == 422, r.text
-    r = await c.post("/api/v1/experiments/anon/exposures",
-                     json={"experiment_key": bad, "anonymous_id": "k96anon"})
+    r = await c.post(
+        "/api/v1/experiments/anon/exposures",
+        json={"experiment_key": bad, "anonymous_id": "k96anon"},
+    )
     assert r.status_code == 422, r.text
     h, _u = await _auth(c, "Key96")
-    r = await c.post("/api/v1/experiments/self/resolve", headers=h,
-                     json={"experiment_key": bad})
+    r = await c.post("/api/v1/experiments/self/resolve", headers=h, json={"experiment_key": bad})
     assert r.status_code == 422, r.text
-    r = await c.post("/api/v1/experiments/self/exposures", headers=h,
-                     json={"experiment_key": bad})
+    r = await c.post("/api/v1/experiments/self/exposures", headers=h, json={"experiment_key": bad})
     assert r.status_code == 422, r.text

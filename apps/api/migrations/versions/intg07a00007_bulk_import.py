@@ -66,9 +66,7 @@ def upgrade() -> None:
         sa.Column("raw_row", JSONB, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index(
-        "ix_intg_import_errors", "intg_import_row_errors", ["job_id", "row_number"]
-    )
+    op.create_index("ix_intg_import_errors", "intg_import_row_errors", ["job_id", "row_number"])
 
 
 def downgrade() -> None:

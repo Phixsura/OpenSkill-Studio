@@ -68,8 +68,12 @@ async def import_suite(
     """Import a portable suite export (draft status; key collisions rejected)."""
     suite = await BenchmarkService(db).import_suite(document, created_by=user.id)
     await eco_audit(
-        db, user, action="eco.suite_imported", target_type="eco_benchmark_suite",
-        target_id=suite.id, after={"name": suite.name},
+        db,
+        user,
+        action="eco.suite_imported",
+        target_type="eco_benchmark_suite",
+        target_id=suite.id,
+        after={"name": suite.name},
     )
     await db.commit()
     return {"data": suite}
@@ -186,8 +190,10 @@ async def benchmark_score_history(
 ):
     """Score-over-time for one entity + advisory linear trend."""
     out = await BenchmarkService(db).score_history(
-        entity_kind=entity_kind, entity_id=entity_id,
-        dimension=dimension, suite_id=suite_id,
+        entity_kind=entity_kind,
+        entity_id=entity_id,
+        dimension=dimension,
+        suite_id=suite_id,
     )
     return {"data": out}
 

@@ -104,13 +104,26 @@ def test_washout_must_be_shorter_than_window():
     washout leaves a zero-length effective window)."""
     for washout in (60, 61, 1440):
         with pytest.raises(AppError):
-            _validate(_spec(design="switchback", switchback={
-                "switch_unit": "org", "window_minutes": 60,
-                "washout_minutes": washout,
-            }))
-    ok = _validate(_spec(design="switchback", switchback={
-        "switch_unit": "org", "window_minutes": 60, "washout_minutes": 59,
-    }))
+            _validate(
+                _spec(
+                    design="switchback",
+                    switchback={
+                        "switch_unit": "org",
+                        "window_minutes": 60,
+                        "washout_minutes": washout,
+                    },
+                )
+            )
+    ok = _validate(
+        _spec(
+            design="switchback",
+            switchback={
+                "switch_unit": "org",
+                "window_minutes": 60,
+                "washout_minutes": 59,
+            },
+        )
+    )
     assert ok.switchback.washout_minutes == 59
 
 
@@ -165,9 +178,7 @@ def test_unknown_population_field_rejected():
 
 
 def test_population_rule_targeting_enforced_via_spec():
-    bad = _spec(
-        population={"rules": [{"field": "gender", "op": "eq", "values": ["x"]}]}
-    )
+    bad = _spec(population={"rules": [{"field": "gender", "op": "eq", "values": ["x"]}]})
     with pytest.raises(AppError) as e:
         _validate(bad)
     assert e.value.code == "EXPERIMENT_FORBIDDEN_TARGETING"
@@ -256,28 +267,51 @@ def test_variance_reduction_multi_covariate_forms():
     """§4.6 v3 (round 113): exactly one of covariate_metric /
     covariate_metrics; the list is deduped and capped at 3; covariates()
     normalizes both forms."""
-    single = _validate(_spec(variance_reduction={
-        "method": "cuped", "covariate_metric": "cost_usd",
-    }))
+    single = _validate(
+        _spec(
+            variance_reduction={
+                "method": "cuped",
+                "covariate_metric": "cost_usd",
+            }
+        )
+    )
     assert single.variance_reduction.covariates() == ["cost_usd"]
-    multi = _validate(_spec(variance_reduction={
-        "method": "cuped",
-        "covariate_metrics": ["cost_usd", "run_latency_ms"],
-    }))
+    multi = _validate(
+        _spec(
+            variance_reduction={
+                "method": "cuped",
+                "covariate_metrics": ["cost_usd", "run_latency_ms"],
+            }
+        )
+    )
     assert multi.variance_reduction.covariates() == ["cost_usd", "run_latency_ms"]
     with pytest.raises(AppError):
         _validate(_spec(variance_reduction={"method": "cuped"}))  # neither
     with pytest.raises(AppError):
-        _validate(_spec(variance_reduction={
-            "method": "cuped", "covariate_metric": "a" * 10,
-            "covariate_metrics": ["cost_usd"],
-        }))  # both
+        _validate(
+            _spec(
+                variance_reduction={
+                    "method": "cuped",
+                    "covariate_metric": "a" * 10,
+                    "covariate_metrics": ["cost_usd"],
+                }
+            )
+        )  # both
     with pytest.raises(AppError):
-        _validate(_spec(variance_reduction={
-            "method": "cuped", "covariate_metrics": ["cost_usd", "cost_usd"],
-        }))  # dupes
+        _validate(
+            _spec(
+                variance_reduction={
+                    "method": "cuped",
+                    "covariate_metrics": ["cost_usd", "cost_usd"],
+                }
+            )
+        )  # dupes
     with pytest.raises(AppError):
-        _validate(_spec(variance_reduction={
-            "method": "cuped",
-            "covariate_metrics": ["a", "b", "c", "d"],
-        }))  # > 3
+        _validate(
+            _spec(
+                variance_reduction={
+                    "method": "cuped",
+                    "covariate_metrics": ["a", "b", "c", "d"],
+                }
+            )
+        )  # > 3

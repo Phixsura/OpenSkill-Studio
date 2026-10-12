@@ -30,9 +30,7 @@ async def test_sweep_evaluates_running_plans_and_stays_hands_off(db):
         deprecated_kind="model_version", deprecated_id=deprecated.id
     )
     svc = RolloutService(db)
-    plan = await svc.create(
-        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only"
-    )
+    plan = await svc.create(replacement_candidate_id=ranked[0].id, scope_type="benchmark_only")
     await svc.start(plan.id)
 
     out = await sweep_rollout_evaluations(db)
@@ -43,18 +41,21 @@ async def test_sweep_evaluates_running_plans_and_stays_hands_off(db):
     assert plan.comparison is not None
     # No regressions here (no guardrails set) → no admin alert
     assert out["alerted"] == 0
-    notes = list(await db.scalars(
-        select(Notification).where(
-            Notification.user_id == admin.id,
-            Notification.type == "ecosystem_rollout_guardrail",
+    notes = list(
+        await db.scalars(
+            select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "ecosystem_rollout_guardrail",
+            )
         )
-    ))
+    )
     assert notes == []
 
     # Sweep is re-runnable; terminal plans are ignored
     await svc.decide(plan.id, decision="reject", actor_id=admin.id)
     out2 = await sweep_rollout_evaluations(db)
     assert out2["evaluated"] == 0
+
 
 async def test_guardrail_alert_fires_once_per_regression_set(db, monkeypatch):
     """Mutation-audit killer: the same regression set alerts admins ONCE —
@@ -72,9 +73,7 @@ async def test_guardrail_alert_fires_once_per_regression_set(db, monkeypatch):
         deprecated_kind="model_version", deprecated_id=deprecated.id
     )
     svc = RolloutService(db)
-    plan = await svc.create(
-        replacement_candidate_id=ranked[0].id, scope_type="benchmark_only"
-    )
+    plan = await svc.create(replacement_candidate_id=ranked[0].id, scope_type="benchmark_only")
     await svc.start(plan.id)
 
     real_evaluate = rollout_mod.RolloutService.evaluate
@@ -89,10 +88,12 @@ async def test_guardrail_alert_fires_once_per_regression_set(db, monkeypatch):
     assert out1["alerted"] == 1
     out2 = await sweep_rollout_evaluations(db)
     assert out2["alerted"] == 0  # same regression set never re-alerts
-    notes = list(await db.scalars(
-        _select(Notification).where(
-            Notification.user_id == admin.id,
-            Notification.type == "ecosystem_rollout_guardrail",
+    notes = list(
+        await db.scalars(
+            _select(Notification).where(
+                Notification.user_id == admin.id,
+                Notification.type == "ecosystem_rollout_guardrail",
+            )
         )
-    ))
+    )
     assert len(notes) == 1

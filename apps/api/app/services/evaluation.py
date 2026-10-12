@@ -373,8 +373,7 @@ class EvaluationService:
             from app.experiments import hooks as exp_hooks
 
             effective_rubric = (
-                await exp_hooks.rubric_override(self.db, project_id=project.id)
-                or project.rubric
+                await exp_hooks.rubric_override(self.db, project_id=project.id) or project.rubric
             )
 
             if task.type in _MULTIMODAL_EVAL_TYPES:

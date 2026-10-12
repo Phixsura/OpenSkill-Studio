@@ -16,9 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "experiments", sa.Column("ramp_plan", JSONB(), nullable=True)
-    )
+    op.add_column("experiments", sa.Column("ramp_plan", JSONB(), nullable=True))
 
 
 def downgrade() -> None:

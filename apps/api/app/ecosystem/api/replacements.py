@@ -89,8 +89,11 @@ async def decide_candidate(
     from app.ecosystem.api.deps import eco_audit
 
     await eco_audit(
-        db, user, action="eco.candidate_decided",
-        target_type="eco_replacement_candidate", target_id=candidate_id,
+        db,
+        user,
+        action="eco.candidate_decided",
+        target_type="eco_replacement_candidate",
+        target_id=candidate_id,
         after={"decision": body.decision},
     )
     await db.commit()

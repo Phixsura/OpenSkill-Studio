@@ -56,9 +56,13 @@ def check_hard_compatibility(
         cand_map = cand_by_cap.get(dep_map.capability_key)
         if cand_map is None:
             continue  # already covered by CAPABILITY_MISSING
-        dep_in, cand_in = _io_types(dep_map.io_spec, "inputs"), _io_types(cand_map.io_spec, "inputs")
-        dep_out, cand_out = _io_types(dep_map.io_spec, "outputs"), _io_types(
-            cand_map.io_spec, "outputs"
+        dep_in, cand_in = (
+            _io_types(dep_map.io_spec, "inputs"),
+            _io_types(cand_map.io_spec, "inputs"),
+        )
+        dep_out, cand_out = (
+            _io_types(dep_map.io_spec, "outputs"),
+            _io_types(cand_map.io_spec, "outputs"),
         )
         if dep_in and cand_in and not dep_in <= cand_in:
             failures.append(
@@ -77,14 +81,10 @@ def check_hard_compatibility(
     # Lifecycle: blocked/retired/deprecated candidates are never compatible
     lifecycle = getattr(candidate_entity, "lifecycle_status", None)
     if lifecycle in ("blocked", "retired", "deprecated"):
-        failures.append(
-            {"code": "LIFECYCLE_INCOMPATIBLE", "detail": f"Candidate is {lifecycle}"}
-        )
+        failures.append({"code": "LIFECYCLE_INCOMPATIBLE", "detail": f"Candidate is {lifecycle}"})
     # License: commercial use must not be explicitly disallowed
     if getattr(candidate_entity, "commercial_use_allowed", None) is False:
-        failures.append(
-            {"code": "LICENSE_INCOMPATIBLE", "detail": "Commercial use disallowed"}
-        )
+        failures.append({"code": "LICENSE_INCOMPATIBLE", "detail": "Commercial use disallowed"})
     return failures
 
 
@@ -203,7 +203,10 @@ class ReplacementService:
         coverage = len(dep_caps & cand_caps) / len(dep_caps) if dep_caps else 0.0
         breakdown["capability"] = round(coverage, 4)
         lines.append(
-            {"factor": "capability", "text": f"Covers {len(dep_caps & cand_caps)}/{len(dep_caps)} required capabilities"}
+            {
+                "factor": "capability",
+                "text": f"Covers {len(dep_caps & cand_caps)}/{len(dep_caps)} required capabilities",
+            }
         )
 
         # I/O: fraction of shared capabilities with fully compatible typed I/O
@@ -215,21 +218,32 @@ class ReplacementService:
                 continue
             cand_map = cand_by_cap[dep_map.capability_key]
             din, cin = _io_types(dep_map.io_spec, "inputs"), _io_types(cand_map.io_spec, "inputs")
-            dout, cout = _io_types(dep_map.io_spec, "outputs"), _io_types(cand_map.io_spec, "outputs")
+            dout, cout = (
+                _io_types(dep_map.io_spec, "outputs"),
+                _io_types(cand_map.io_spec, "outputs"),
+            )
             if (not din or din <= cin) and (not dout or dout <= cout):
                 compat_io += 1
         breakdown["io"] = round(compat_io / len(shared), 4) if shared else 0.0
-        lines.append({"factor": "io", "text": f"Typed I/O compatible on {compat_io}/{len(shared) or 0} shared capabilities"})
+        lines.append(
+            {
+                "factor": "io",
+                "text": f"Typed I/O compatible on {compat_io}/{len(shared) or 0} shared capabilities",
+            }
+        )
 
         # Evidence strength of the candidate's mappings
         max_rank = max(EVIDENCE_RANK.values())
-        evidence = (
-            max((EVIDENCE_RANK[m.evidence_level] for m in cand_maps), default=0) / max_rank
-        )
+        evidence = max((EVIDENCE_RANK[m.evidence_level] for m in cand_maps), default=0) / max_rank
         # Benchmark: mean of quality-ish dimensions relative to the deprecated entity
         cand_scores = await latest_dimension_scores(self.db, kind, cand_id)
         breakdown["benchmark"] = self._benchmark_ratio(dep_scores, cand_scores, evidence)
-        lines.append({"factor": "benchmark", "text": f"Benchmark evidence score {breakdown['benchmark']:.2f}"})
+        lines.append(
+            {
+                "factor": "benchmark",
+                "text": f"Benchmark evidence score {breakdown['benchmark']:.2f}",
+            }
+        )
 
         # Production reliability from telemetry
         snap = await self.db.scalar(
@@ -244,17 +258,38 @@ class ReplacementService:
         )
         reliability = float((snap.metrics or {}).get("success_rate", 0.5)) if snap else 0.5
         breakdown["reliability"] = round(min(max(reliability, 0.0), 1.0), 4)
-        lines.append({"factor": "reliability", "text": f"Production success rate {'%.0f%%' % (breakdown['reliability']*100) if snap else 'unknown (neutral 0.5)'}"})
+        lines.append(
+            {
+                "factor": "reliability",
+                "text": f"Production success rate {'%.0f%%' % (breakdown['reliability'] * 100) if snap else 'unknown (neutral 0.5)'}",
+            }
+        )
 
         # Cost/latency from benchmark dimensions when present (lower is better)
         breakdown["cost"] = self._inverse_ratio(dep_scores, cand_scores, "cost_per_case_usd")
         breakdown["latency"] = self._inverse_ratio(dep_scores, cand_scores, "speed_p50_ms")
-        lines.append({"factor": "cost", "text": f"Cost score {breakdown['cost']:.2f} (vs incumbent)"})
-        lines.append({"factor": "latency", "text": f"Latency score {breakdown['latency']:.2f} (vs incumbent)"})
+        lines.append(
+            {"factor": "cost", "text": f"Cost score {breakdown['cost']:.2f} (vs incumbent)"}
+        )
+        lines.append(
+            {
+                "factor": "latency",
+                "text": f"Latency score {breakdown['latency']:.2f} (vs incumbent)",
+            }
+        )
 
-        breakdown["license"] = 1.0 if getattr(entity, "commercial_use_allowed", None) is not False else 0.0
-        breakdown["availability"] = 1.0 if getattr(entity, "lifecycle_status", "") in ("verified", "recommended") else 0.5
-        lines.append({"factor": "availability", "text": f"Lifecycle status: {getattr(entity, 'lifecycle_status', 'unknown')}"})
+        breakdown["license"] = (
+            1.0 if getattr(entity, "commercial_use_allowed", None) is not False else 0.0
+        )
+        breakdown["availability"] = (
+            1.0 if getattr(entity, "lifecycle_status", "") in ("verified", "recommended") else 0.5
+        )
+        lines.append(
+            {
+                "factor": "availability",
+                "text": f"Lifecycle status: {getattr(entity, 'lifecycle_status', 'unknown')}",
+            }
+        )
 
         # Binding compatibility & migration effort: heuristic on api_identifier
         same_family = False
@@ -264,7 +299,12 @@ class ReplacementService:
         breakdown["bindings"] = 1.0 if same_family else 0.6
         breakdown["migration"] = 1.0 if same_family else 0.5
         lines.append(
-            {"factor": "migration", "text": "Same model family — drop-in upgrade" if same_family else "Cross-family migration — bindings must be re-verified"}
+            {
+                "factor": "migration",
+                "text": "Same model family — drop-in upgrade"
+                if same_family
+                else "Cross-family migration — bindings must be re-verified",
+            }
         )
         return breakdown, lines
 

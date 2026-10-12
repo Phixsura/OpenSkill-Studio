@@ -24,9 +24,13 @@ async def db():
 
 async def _obs(db, source, ref, normalized, entity_id=None):
     obs = EcosystemObservation(
-        source_id=source.id, event_type="catalog_snapshot", entity_kind="model",
-        external_ref=ref, raw_hash=(str(ULID()).lower() * 3)[:64],
-        normalized=normalized, canonical_entity_kind="model" if entity_id else None,
+        source_id=source.id,
+        event_type="catalog_snapshot",
+        entity_kind="model",
+        external_ref=ref,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized=normalized,
+        canonical_entity_kind="model" if entity_id else None,
         canonical_entity_id=entity_id,
     )
     db.add(obs)
@@ -57,7 +61,9 @@ async def test_high_severity_changes_auto_enqueue_impact(db):
     auto-enqueue impact analysis (Dependabot lesson: new advisory → rescan
     dependents, always) — an emptied fan-out set silently disables this."""
     source = await _mk_source(db)
-    model = AIModel(canonical_name=f"FanGen-{str(ULID()).lower()[:6]}", slug=f"fg-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"FanGen-{str(ULID()).lower()[:6]}", slug=f"fg-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     ref = f"fan-{str(ULID()).lower()[:8]}"
@@ -100,6 +106,7 @@ async def test_price_magnitude_sign_matches_direction(db):
     assert magnitude is not None
     assert magnitude["change_pct"] == 50.0  # +50%, positive sign
 
+
 async def test_impact_depth_cap_truncates_at_six(db):
     """Mutation-audit killer: the blast-radius walk stops at IMPACT_MAX_DEPTH
     — an unbounded cap would let one sunset event walk the entire graph."""
@@ -110,18 +117,23 @@ async def test_impact_depth_cap_truncates_at_six(db):
     # chain: n0 <- n1 <- ... <- n8 (each depends on the previous)
     ids = [f"{i:02d}" + "c" * 22 + tag[:2] for i in range(9)]
     for i in range(1, 9):
-        db.add(DependencyEdge(
-            from_kind="component", from_id=ids[i],
-            to_kind="component", to_id=ids[i - 1],
-            constraint_type="uses",
-        ))
+        db.add(
+            DependencyEdge(
+                from_kind="component",
+                from_id=ids[i],
+                to_kind="component",
+                to_id=ids[i - 1],
+                constraint_type="uses",
+            )
+        )
     await db.flush()
     items, _truncated = await ImpactService(db)._traverse("component", ids[0])
     depths = {node_id: depth for (_k, node_id), (depth, _p) in items.items()}
     assert max(depths.values()) <= 6
-    assert ids[6] in depths          # depth 6 still reached
-    assert ids[7] not in depths      # depth 7 pruned by the cap
+    assert ids[6] in depths  # depth 6 still reached
+    assert ids[7] not in depths  # depth 7 pruned by the cap
     assert ids[8] not in depths
+
 
 def test_version_range_unparseable_bound_fails_open():
     """Round-110 killer: an unparseable BOUND in a comparison token must
@@ -135,21 +147,22 @@ def test_version_range_unparseable_bound_fails_open():
     assert version_in_range("1.5.0", ">=1.0 <2.0") is True
     assert version_in_range("2.5.0", ">=1.0 <2.0") is False
 
+
 def test_version_range_operator_semantics():
     """Round-110b killers ×6: pin every operator's boundary semantics —
     advisories and impact analyses depend on these being exact."""
     from app.ecosystem.services.stats import version_in_range
 
     # caret: >=lower (inclusive) <next-major (exclusive)
-    assert version_in_range("1.2.3", "^1.2.3") is True   # lower bound inclusive
+    assert version_in_range("1.2.3", "^1.2.3") is True  # lower bound inclusive
     assert version_in_range("1.9.9", "^1.2.3") is True
     assert version_in_range("2.0.0", "^1.2.3") is False  # upper bound exclusive
     # tilde: >=lower <next-minor
     assert version_in_range("1.2.9", "~1.2.3") is True
     assert version_in_range("1.3.0", "~1.2.3") is False
     # comparison boundaries
-    assert version_in_range("1.0.0", ">=1.0.0") is True   # >= includes equal
-    assert version_in_range("2.0.0", "<2.0.0") is False   # < excludes equal
+    assert version_in_range("1.0.0", ">=1.0.0") is True  # >= includes equal
+    assert version_in_range("2.0.0", "<2.0.0") is False  # < excludes equal
     assert version_in_range("2.0.0", "<=2.0.0") is True
     assert version_in_range("1.0.0", ">1.0.0") is False
     # short versions pad with ZEROS: '1.2' == '1.2.0'

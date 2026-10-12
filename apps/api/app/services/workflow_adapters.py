@@ -170,8 +170,7 @@ class _HttpProviderAdapter(ProviderAdapterBase):
     def _require_key(self, credentials: dict[str, str] | None) -> str:
         if not credentials or not credentials.get("api_key"):
             raise RuntimeError(
-                f"{self.key} connection has no API key credential — "
-                "the org must supply its own key"
+                f"{self.key} connection has no API key credential — the org must supply its own key"
             )
         return credentials["api_key"]
 
@@ -182,17 +181,13 @@ class _HttpProviderAdapter(ProviderAdapterBase):
             requested = 60.0
         return max(1.0, min(requested, self.timeout_cap))
 
-    async def _post_json(
-        self, url: str, *, headers: dict, body: dict, timeout: float
-    ) -> dict:
+    async def _post_json(self, url: str, *, headers: dict, body: dict, timeout: float) -> dict:
         import httpx
 
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             resp = await client.post(url, headers=headers, json=body)
         if resp.status_code >= 400:
-            raise RuntimeError(
-                f"{self.key} returned HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            raise RuntimeError(f"{self.key} returned HTTP {resp.status_code}: {resp.text[:300]}")
         try:
             return resp.json()
         except ValueError as exc:
@@ -233,9 +228,9 @@ class OpenRouterChatAdapter(_HttpProviderAdapter):
             body={
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": int(config.get("max_tokens", 1024)) if str(
-                    config.get("max_tokens", 1024)
-                ).isdigit() else 1024,
+                "max_tokens": int(config.get("max_tokens", 1024))
+                if str(config.get("max_tokens", 1024)).isdigit()
+                else 1024,
                 "user": idempotency_key,  # abuse-correlation handle, not identity
             },
             timeout=self._timeout(config),
@@ -371,9 +366,7 @@ class ReplicateAdapter(_HttpProviderAdapter):
         )
         status = data.get("status")
         if status not in ("succeeded", "processing", "starting"):
-            raise RuntimeError(
-                f"replicate prediction {status}: {str(data.get('error'))[:300]}"
-            )
+            raise RuntimeError(f"replicate prediction {status}: {str(data.get('error'))[:300]}")
         output = data.get("output")
         refs: list[str] = []
         if isinstance(output, str):
@@ -383,9 +376,7 @@ class ReplicateAdapter(_HttpProviderAdapter):
         predict_time = (data.get("metrics") or {}).get("predict_time")
         usage = [{"usage_type": "api_request", "quantity": 1}]
         if isinstance(predict_time, (int, float)) and predict_time == predict_time:
-            usage.append(
-                {"usage_type": "compute_seconds", "quantity": max(int(predict_time), 0)}
-            )
+            usage.append({"usage_type": "compute_seconds", "quantity": max(int(predict_time), 0)})
         return {
             "result": refs[0] if refs else f"replicate:{data.get('id', '')}",
             "outputs": refs,

@@ -91,8 +91,11 @@ async def list_catalog(
 
     check_enum(lifecycle_status, LIFECYCLE_STATUSES, "lifecycle_status")
     rows, total = await CatalogService(db).list_entities(
-        _kind(segment), lifecycle_status=lifecycle_status, search=search,
-        limit=limit, offset=offset,
+        _kind(segment),
+        lifecycle_status=lifecycle_status,
+        search=search,
+        limit=limit,
+        offset=offset,
     )
     return {
         "data": [CatalogEntityResponse.model_validate(r).model_dump() for r in rows],
@@ -139,8 +142,12 @@ async def update_catalog_entity(
     updates = body.model_dump(exclude_unset=True)
     entity = await CatalogService(db).update(_kind(segment), entity_id, updates)
     await eco_audit(
-        db, _user, action="eco.entity_updated", target_type=f"eco_{_kind(segment)}",
-        target_id=entity_id, after={k: str(v)[:200] for k, v in updates.items()},
+        db,
+        _user,
+        action="eco.entity_updated",
+        target_type=f"eco_{_kind(segment)}",
+        target_id=entity_id,
+        after={k: str(v)[:200] for k, v in updates.items()},
     )
     await db.commit()
     return {"data": entity}
@@ -161,12 +168,14 @@ async def merge_catalog_entity(
     survivor — re-points all references, retires the duplicate with a
     supersedes audit edge. Nothing historical is lost."""
     kind = _kind(segment)
-    outcome = await CatalogService(db).merge_entities(
-        kind, entity_id, target_id, actor_id=user.id
-    )
+    outcome = await CatalogService(db).merge_entities(kind, entity_id, target_id, actor_id=user.id)
     await eco_audit(
-        db, user, action="eco.entity_merged", target_type=f"eco_{kind}",
-        target_id=entity_id, after=outcome,
+        db,
+        user,
+        action="eco.entity_merged",
+        target_type=f"eco_{kind}",
+        target_id=entity_id,
+        after=outcome,
     )
     await db.commit()
     return {"data": outcome}
@@ -218,9 +227,14 @@ async def lifecycle_transition(
         actor_id=user.id,
     )
     await eco_audit(
-        db, user, action="eco.lifecycle_transitioned", target_type=f"eco_{kind}",
-        target_id=entity_id, before={"status": from_status},
-        after={"status": body.to_status}, reason=body.reason,
+        db,
+        user,
+        action="eco.lifecycle_transitioned",
+        target_type=f"eco_{kind}",
+        target_id=entity_id,
+        before={"status": from_status},
+        after={"status": body.to_status},
+        reason=body.reason,
     )
     await db.commit()
     return {"data": entity}
@@ -340,16 +354,18 @@ async def resolve_conflict(
         actor_id=user.id,
     )
     await eco_audit(
-        db, user, action="eco.conflict_resolved", target_type=f"eco_{kind}",
-        target_id=entity_id, after={"field": body.field, "decision": decision},
+        db,
+        user,
+        action="eco.conflict_resolved",
+        target_type=f"eco_{kind}",
+        target_id=entity_id,
+        after={"field": body.field, "decision": decision},
     )
     await db.commit()
     return {"data": decision}
 
 
-@router.get(
-    "/catalog/{segment}/{entity_id}/corroboration", response_model=DataResponse[dict]
-)
+@router.get("/catalog/{segment}/{entity_id}/corroboration", response_model=DataResponse[dict])
 async def entity_corroboration(
     segment: str,
     entity_id: str,
@@ -404,9 +420,7 @@ async def catalog_export(
         rows_all = []
         offset = 0
         while True:
-            rows, total = await svc.list_entities(
-                kind, limit=500, offset=offset, stable_order=True
-            )
+            rows, total = await svc.list_entities(kind, limit=500, offset=offset, stable_order=True)
             rows_all.extend(rows)
             offset += len(rows)
             if offset >= total or not rows or offset >= 10_000:
@@ -423,9 +437,7 @@ async def catalog_export(
     if len(mapping_rows) > 10_000:
         truncated = True
         mapping_rows = mapping_rows[:10_000]
-    mappings = [
-        MappingResponse.model_validate(m).model_dump(mode="json") for m in mapping_rows
-    ]
+    mappings = [MappingResponse.model_validate(m).model_dump(mode="json") for m in mapping_rows]
     price_rows = list(
         await db.scalars(
             select(PriceObservation)
@@ -476,9 +488,7 @@ async def catalog_export(
 # ── Entity resolution ───────────────────────────────────────────────
 
 
-@router.get(
-    "/resolution-candidates", response_model=dict
-)
+@router.get("/resolution-candidates", response_model=dict)
 async def list_resolution_candidates(
     entity_kind: str | None = None,
     limit: int = Query(50, ge=1, le=100),
@@ -558,11 +568,16 @@ async def bulk_decide_resolution(
     # R176: bulk resolution decisions are irreversible HITL actions — audited
     # like every other admin decision (single confirms audit via merge path)
     await eco_audit(
-        db, user, action="eco.resolutions_bulk_decided",
+        db,
+        user,
+        action="eco.resolutions_bulk_decided",
         target_type="eco_resolution_candidate",
         target_id=decided[0]["id"] if decided else "none",
-        after={"decision": body.decision, "decided_count": len(decided),
-               "failed_count": len(failed)},
+        after={
+            "decision": body.decision,
+            "decided_count": len(decided),
+            "failed_count": len(failed),
+        },
     )
     await db.commit()
     return {"data": {"decision": body.decision, "decided": decided, "failed": failed}}
@@ -581,8 +596,11 @@ async def confirm_resolution(
         target_entity_id=body.target_entity_id if body else None,
     )
     await eco_audit(
-        db, user, action="eco.resolution_confirmed",
-        target_type="eco_resolution_candidate", target_id=candidate_id,
+        db,
+        user,
+        action="eco.resolution_confirmed",
+        target_type="eco_resolution_candidate",
+        target_id=candidate_id,
         after={"entity_id": entity_id},
     )
     await db.commit()
@@ -605,8 +623,11 @@ async def reject_resolution(
 ):
     candidate = await ResolutionService(db).reject(candidate_id, actor_id=user.id)
     await eco_audit(
-        db, user, action="eco.resolution_rejected",
-        target_type="eco_resolution_candidate", target_id=candidate_id,
+        db,
+        user,
+        action="eco.resolution_rejected",
+        target_type="eco_resolution_candidate",
+        target_id=candidate_id,
     )
     await db.commit()
     return {"data": candidate}
@@ -630,14 +651,10 @@ async def list_mappings(
     check_enum(entity_kind, frozenset(CATALOG_KIND_TO_MODEL), "entity_kind")
     svc = CapabilityMappingService(db)
     if capability_key:
-        return {
-            "data": await svc.list_for_capability(capability_key, min_evidence=min_evidence)
-        }
+        return {"data": await svc.list_for_capability(capability_key, min_evidence=min_evidence)}
     if entity_kind and entity_id:
         return {"data": await svc.list_for_entity(entity_kind, entity_id)}
-    raise AppError(
-        "VALIDATION_ERROR", "Filter by capability_key or entity_kind+entity_id", 422
-    )
+    raise AppError("VALIDATION_ERROR", "Filter by capability_key or entity_kind+entity_id", 422)
 
 
 @router.post("/capability-mappings", response_model=DataResponse[MappingResponse])

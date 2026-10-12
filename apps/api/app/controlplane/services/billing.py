@@ -1715,8 +1715,10 @@ async def finalize_invoice(db: AsyncSession, invoice: Invoice, *, actor: Actor) 
         from app.models.organization import Organization as _Org
 
         org_ids = (
-            await db.execute(_select(_Org.id).where(_Org.tenant_id == invoice.tenant_id))
-        ).scalars().all()
+            (await db.execute(_select(_Org.id).where(_Org.tenant_id == invoice.tenant_id)))
+            .scalars()
+            .all()
+        )
         for org_id in org_ids:
             await emit_event(
                 db,

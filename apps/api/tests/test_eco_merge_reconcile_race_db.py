@@ -28,8 +28,12 @@ async def db():
 
 async def test_opposite_direction_merges_have_one_winner(db):
     admin = await _mk_user(db, "admin")
-    a = AIModel(canonical_name=f"MergeA-{str(ULID()).lower()[:6]}", slug=f"ma-{str(ULID()).lower()}")
-    b = AIModel(canonical_name=f"MergeB-{str(ULID()).lower()[:6]}", slug=f"mb-{str(ULID()).lower()}")
+    a = AIModel(
+        canonical_name=f"MergeA-{str(ULID()).lower()[:6]}", slug=f"ma-{str(ULID()).lower()}"
+    )
+    b = AIModel(
+        canonical_name=f"MergeB-{str(ULID()).lower()[:6]}", slug=f"mb-{str(ULID()).lower()}"
+    )
     db.add_all([a, b])
     await db.commit()
     a_id, b_id, actor = a.id, b.id, admin.id
@@ -63,20 +67,29 @@ async def test_opposite_direction_merges_have_one_winner(db):
 
 async def test_concurrent_price_approval_mints_once(db):
     admin = await _mk_user(db, "admin")
-    model = AIModel(canonical_name=f"PriceRace-{str(ULID()).lower()[:6]}", slug=f"pr-{str(ULID()).lower()}")
+    model = AIModel(
+        canonical_name=f"PriceRace-{str(ULID()).lower()[:6]}", slug=f"pr-{str(ULID()).lower()}"
+    )
     db.add(model)
     await db.flush()
     source = await _mk_source(db)
     obs = EcosystemObservation(
-        source_id=source.id, event_type="pricing_changed",
-        canonical_entity_kind="model", canonical_entity_id=model.id,
-        raw_hash=(str(ULID()).lower() * 3)[:64], normalized={},
+        source_id=source.id,
+        event_type="pricing_changed",
+        canonical_entity_kind="model",
+        canonical_entity_id=model.id,
+        raw_hash=(str(ULID()).lower() * 3)[:64],
+        normalized={},
     )
     db.add(obs)
     await db.flush()
     row = PriceObservation(
-        observation_id=obs.id, entity_kind="model", entity_id=model.id,
-        unit="image", price=0.05, currency="USD",
+        observation_id=obs.id,
+        entity_kind="model",
+        entity_id=model.id,
+        unit="image",
+        price=0.05,
+        currency="USD",
     )
     db.add(row)
     await db.commit()
@@ -86,8 +99,11 @@ async def test_concurrent_price_approval_mints_once(db):
         async with AsyncSessionLocal() as session:
             try:
                 await PricingService(session).reconcile(
-                    row_id, decision="approve", actor_id=actor,
-                    provider_key="test-provider", model_or_service="m",
+                    row_id,
+                    decision="approve",
+                    actor_id=actor,
+                    provider_key="test-provider",
+                    model_or_service="m",
                 )
                 await session.commit()
                 return "approved"
@@ -100,6 +116,7 @@ async def test_concurrent_price_approval_mints_once(db):
         assert sorted(results) == ["ECO_INVALID_TRANSITION", "approved"], results
     finally:
         await _retire_models(["PriceRace-"])
+
 
 async def _retire_models(prefixes):
     """Committed fixture models must not pollute other tests (duplicates scan,

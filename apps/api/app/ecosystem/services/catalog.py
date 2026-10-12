@@ -86,9 +86,7 @@ class CatalogService:
             )
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(
-                model.id.asc() if stable_order else model.created_at.desc()
-            )
+            query.order_by(model.id.asc() if stable_order else model.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -105,9 +103,7 @@ class CatalogService:
             if key in ("canonical_name", "description") and value is not None:
                 value = sanitize_text(str(value), 5000 if key == "description" else 200)
             if key == "aliases" and value is not None:
-                value = [
-                    a for a in (sanitize_text(str(v), 300) for v in value[:50]) if a
-                ]
+                value = [a for a in (sanitize_text(str(v), 300) for v in value[:50]) if a]
             if key == "external_ids" and value is not None:
                 value = {
                     (sanitize_text(str(k2), 60) or "")[:60]: sanitize_text(str(v2), 300)
@@ -136,9 +132,7 @@ class CatalogService:
         """
         allowed_fields = set(CONFLICT_ARBITRABLE_FIELDS)
         if field not in allowed_fields:
-            raise AppError(
-                "VALIDATION_ERROR", f"Field {field!r} is not conflict-arbitrable", 422
-            )
+            raise AppError("VALIDATION_ERROR", f"Field {field!r} is not conflict-arbitrable", 422)
         entity = await self.get(kind, entity_id)
         if winning_source_id is not None:
             # R366: the curated overlay records provenance — a bogus source
@@ -241,16 +235,22 @@ class CatalogService:
         lc = entity.lifecycle_status
         check(
             "lifecycle",
-            "pass" if lc in ("verified", "active") else
-            "fail" if lc in ("deprecated", "sunset", "blocked") else "warn",
+            "pass"
+            if lc in ("verified", "active")
+            else "fail"
+            if lc in ("deprecated", "sunset", "blocked")
+            else "warn",
             {"lifecycle_status": lc},
         )
         # 2. Corroboration: >=2 distinct sources or human verification
         corr = await self.corroboration(kind, entity_id)
         check(
             "corroboration",
-            "pass" if corr["distinct_sources"] >= 2 or corr["human_verified_any"] else
-            "warn" if corr["distinct_sources"] == 1 else "fail",
+            "pass"
+            if corr["distinct_sources"] >= 2 or corr["human_verified_any"]
+            else "warn"
+            if corr["distinct_sources"] == 1
+            else "fail",
             {
                 "distinct_sources": corr["distinct_sources"],
                 "trust_weighted_score": corr["trust_weighted_score"],
@@ -267,10 +267,11 @@ class CatalogService:
         age_days = (now - last_seen).days if last_seen else None
         check(
             "freshness",
-            "fail" if age_days is None or age_days > 90 else
-            "warn" if age_days > 30 else "pass",
-            {"last_observed_at": last_seen.isoformat() if last_seen else None,
-             "age_days": age_days},
+            "fail" if age_days is None or age_days > 90 else "warn" if age_days > 30 else "pass",
+            {
+                "last_observed_at": last_seen.isoformat() if last_seen else None,
+                "age_days": age_days,
+            },
         )
         # 4. Availability: recent operational probe passes; degraded fails;
         #    never probed = not-applicable (honest unknown, not a failure)
@@ -283,9 +284,11 @@ class CatalogService:
             check(
                 "availability",
                 "pass" if uptime["current_status"] == "operational" else "fail",
-                {"current_status": uptime["current_status"],
-                 "uptime_pct": uptime["uptime_pct"],
-                 "incidents_30d": uptime["incidents"]},
+                {
+                    "current_status": uptime["current_status"],
+                    "uptime_pct": uptime["uptime_pct"],
+                    "incidents_30d": uptime["incidents"],
+                },
             )
         # 5. Benchmark coverage: a completed run in 90d passes; ever = warn
         run = await latest_completed_run(self.db, kind, entity_id)
@@ -299,8 +302,7 @@ class CatalogService:
             check(
                 "benchmark",
                 "warn" if stale else "pass",
-                {"run_id": run.id,
-                 "finished_at": fin.isoformat() if fin else None},
+                {"run_id": run.id, "finished_at": fin.isoformat() if fin else None},
             )
         # 6. Pricing: any non-rejected price known; approved passes
         prices = await PricingService(self.db).latest_prices(kind, entity_id)
@@ -310,8 +312,10 @@ class CatalogService:
             check(
                 "pricing",
                 "pass" if any(p2["approved"] for p2 in prices.values()) else "warn",
-                {"units": sorted(prices),
-                 "any_approved": any(p2["approved"] for p2 in prices.values())},
+                {
+                    "units": sorted(prices),
+                    "any_approved": any(p2["approved"] for p2 in prices.values()),
+                },
             )
         applicable = [c for c in checks if c["status"] != "n/a"]
         passing = sum(1 for c in applicable if c["status"] == "pass")
@@ -320,8 +324,11 @@ class CatalogService:
             "entity_kind": kind,
             "entity_id": entity_id,
             "canonical_name": entity.canonical_name,
-            "grade": "healthy" if failing == 0 and passing == len(applicable)
-            else "failing" if failing > 0 else "attention",
+            "grade": "healthy"
+            if failing == 0 and passing == len(applicable)
+            else "failing"
+            if failing > 0
+            else "attention",
             "passing": passing,
             "applicable": len(applicable),
             "checks": checks,
@@ -367,14 +374,8 @@ class CatalogService:
                 model = CATALOG_KIND_TO_MODEL[kind]
                 rows = await self.db.scalars(
                     select(model)
-                    .where(
-                        model.canonical_name.ilike(
-                            f"%{escape_like(cleaned)}%", escape="\\"
-                        )
-                    )
-                    .limit(
-                        limit_per_kind
-                    )
+                    .where(model.canonical_name.ilike(f"%{escape_like(cleaned)}%", escape="\\"))
+                    .limit(limit_per_kind)
                 )
                 for entity in rows:
                     results.append(
@@ -510,9 +511,7 @@ class CatalogService:
         for entity in sorted((source, target), key=lambda e: e.id):
             await self.db.refresh(entity, with_for_update=True)
         if source.lifecycle_status == "retired" or target.lifecycle_status == "retired":
-            raise AppError(
-                "ECO_INVALID_TRANSITION", "Entity already merged/retired", 409
-            )
+            raise AppError("ECO_INVALID_TRANSITION", "Entity already merged/retired", 409)
         from sqlalchemy import update
 
         from app.ecosystem.models.catalog import EntityAlias
@@ -841,9 +840,14 @@ class LifecycleService:
             # generation (the handler existed; nothing ever enqueued it)
             from app.controlplane.models.outbox import enqueue
 
-            enqueue(self.db, "eco.generate_candidates", {
-                "entity_kind": kind, "entity_id": entity_id,
-            })
+            enqueue(
+                self.db,
+                "eco.generate_candidates",
+                {
+                    "entity_kind": kind,
+                    "entity_id": entity_id,
+                },
+            )
         self.db.add(
             LifecycleTransition(
                 entity_kind=kind,

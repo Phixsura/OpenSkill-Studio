@@ -42,7 +42,10 @@ def upgrade() -> None:
         sa.Column("cap_value", sa.Numeric(24, 6), nullable=True),
         sa.Column("percentile", sa.Numeric(6, 3), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("key"),
@@ -71,7 +74,10 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
-            "computed_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "computed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),

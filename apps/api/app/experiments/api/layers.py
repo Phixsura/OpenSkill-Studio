@@ -38,7 +38,9 @@ async def list_layers(
     return {"data": [LayerResponse.model_validate(x).model_dump() for x in rows]}
 
 
-@router.post("/{layer_key}/allocations", response_model=DataResponse[AllocationResponse], status_code=201)
+@router.post(
+    "/{layer_key}/allocations", response_model=DataResponse[AllocationResponse], status_code=201
+)
 async def allocate_slices(
     layer_key: str,
     body: CreateAllocationRequest,

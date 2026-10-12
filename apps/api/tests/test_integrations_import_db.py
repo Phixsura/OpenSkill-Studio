@@ -1318,9 +1318,10 @@ def test_import_row_count_capped():
     from app.integrations.services.bulk_import import parse_users
 
     over = MAX_IMPORT_ROWS + 1
-    csv_body = ("email,display_name,role\n" + "\n".join(
-        f"u{i}@x.example.edu,U {i},student" for i in range(over)
-    )).encode()
+    csv_body = (
+        "email,display_name,role\n"
+        + "\n".join(f"u{i}@x.example.edu,U {i},student" for i in range(over))
+    ).encode()
     rows, errors = parse_users(csv_body, "csv")
     assert rows == []
     assert len(errors) == 1 and errors[0]["code"] == "row_limit"
@@ -1333,8 +1334,6 @@ def test_import_row_count_capped():
     assert len(errors) == 1 and errors[0]["code"] == "row_limit"
 
     # at the cap exactly: parses normally
-    ok_body = ("email\n" + "\n".join(
-        f"k{i}@x.example.edu" for i in range(1000)
-    )).encode()
+    ok_body = ("email\n" + "\n".join(f"k{i}@x.example.edu" for i in range(1000))).encode()
     rows, errors = parse_users(ok_body, "csv")
     assert len(rows) == 1000 and errors == []

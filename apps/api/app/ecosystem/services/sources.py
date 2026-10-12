@@ -74,9 +74,7 @@ class SourceService:
         name = _sanitize(name, 200) or ""
         if not name:
             raise AppError("VALIDATION_ERROR", "Source name required", 422)
-        existing = await self.db.scalar(
-            select(EcosystemSource).where(EcosystemSource.name == name)
-        )
+        existing = await self.db.scalar(select(EcosystemSource).where(EcosystemSource.name == name))
         if existing:
             raise AppError("ECO_SOURCE_EXISTS", "A source with this name already exists", 409)
         source = EcosystemSource(
@@ -103,19 +101,23 @@ class SourceService:
         return source
 
     async def list_sources(
-        self, *, status: str | None = None, source_type: str | None = None,
-        limit: int = 50, offset: int = 0,
+        self,
+        *,
+        status: str | None = None,
+        source_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> tuple[list[EcosystemSource], int]:
         query = select(EcosystemSource)
         if status:
             query = query.where(EcosystemSource.status == status)
         if source_type:
             query = query.where(EcosystemSource.source_type == source_type)
-        total = await self.db.scalar(
-            select(func.count()).select_from(query.subquery())
-        )
+        total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(EcosystemSource.created_at.desc(), EcosystemSource.id.desc()).limit(limit).offset(offset)
+            query.order_by(EcosystemSource.created_at.desc(), EcosystemSource.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), total or 0
 
@@ -196,9 +198,7 @@ class SourceService:
             "last_error": last_error_run.error if last_error_run else None,
         }
 
-    async def list_sync_runs(
-        self, source_id: str, *, limit: int = 50
-    ) -> list[SourceSyncRun]:
+    async def list_sync_runs(self, source_id: str, *, limit: int = 50) -> list[SourceSyncRun]:
         await self.get(source_id)
         rows = await self.db.scalars(
             select(SourceSyncRun)

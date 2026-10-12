@@ -111,7 +111,9 @@ class PriceObservation(Base):
     # Volume tier details: {"min_volume": 1000000, "max_volume": null}
     tier: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     # unreviewed | under_review | approved | rejected | superseded
     reconciliation_status: Mapped[str] = mapped_column(
         String(20), default="unreviewed", server_default="unreviewed"
@@ -143,7 +145,9 @@ class AvailabilityRecord(Base):
     record_type: Mapped[str] = mapped_column(String(20))
     # e.g. {"requests_per_minute": 60} / {"p50_ms": 3400} / {"sunset_at": "..."}
     value: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     source_observation_id: Mapped[str | None] = mapped_column(
         String(26), ForeignKey("eco_observations.id", ondelete="SET NULL"), nullable=True
     )

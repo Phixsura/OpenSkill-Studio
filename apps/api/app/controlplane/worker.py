@@ -645,14 +645,18 @@ async def _intg_metadata_refresh(ctx: dict) -> None:
 
     async with AsyncSessionLocal() as db:
         conns = (
-            await db.execute(
-                _select(SsoConnection).where(
-                    SsoConnection.protocol == "saml",
-                    SsoConnection.status.in_(("testing", "active")),
-                    SsoConnection.idp_metadata_url.is_not(None),
+            (
+                await db.execute(
+                    _select(SsoConnection).where(
+                        SsoConnection.protocol == "saml",
+                        SsoConnection.status.in_(("testing", "active")),
+                        SsoConnection.idp_metadata_url.is_not(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         refreshed = 0
         for conn in conns:
             try:
@@ -744,8 +748,9 @@ def _cron_jobs() -> list:
         # Trial expiry: hourly at :12 (off-minute by design)
         cron(_expire_trials, minute=12, name="cp_trial_expiry"),
         # ADR-018 integration fabric sweeps (off-minute by convention)
-        cron(_intg_domain_sweep, minute={7, 22, 37, 52}, timeout=1800,
-             name="intg_domain_sweep"),  # R228: 200 DNS lookups x ~5s worst case
+        cron(
+            _intg_domain_sweep, minute={7, 22, 37, 52}, timeout=1800, name="intg_domain_sweep"
+        ),  # R228: 200 DNS lookups x ~5s worst case
         cron(_intg_scheduled_syncs, minute={3, 33}, name="intg_scheduled_syncs"),
         cron(_intg_stale_run_reaper, minute={9, 39}, name="intg_stale_run_reaper"),
         # R185: run EVERY hour (minute 47) so an `hourly` export stream (R183)
@@ -754,11 +759,13 @@ def _cron_jobs() -> list:
         # one run/day regardless.
         cron(_intg_scheduled_exports, minute=47, timeout=1800, name="intg_exports"),
         cron(_intg_cert_expiry_sweep, hour=6, minute=18, name="intg_cert_expiry"),
-        cron(_intg_connection_health_sweep, minute={14, 44}, timeout=1800,
-             name="intg_conn_health"),  # R226: 100 pings x ~20s worst case
+        cron(
+            _intg_connection_health_sweep, minute={14, 44}, timeout=1800, name="intg_conn_health"
+        ),  # R226: 100 pings x ~20s worst case
         cron(_intg_retention_sweep, hour=3, minute=52, timeout=3600, name="intg_retention"),
-        cron(_intg_metadata_refresh, hour=5, minute=37, timeout=1800,
-             name="intg_metadata_refresh"),  # R227: slow serial fetches
+        cron(
+            _intg_metadata_refresh, hour=5, minute=37, timeout=1800, name="intg_metadata_refresh"
+        ),  # R227: slow serial fetches
         # P3 sweeps: storage daily 03:23; seats monthly (1st, 04:17);
         # api-counter flush hourly at :05
         # R258: both sweeps emit one event per org-with-usage inside a single
@@ -785,11 +792,9 @@ def _cron_jobs() -> list:
         cron(_exp_closure_sweep, minute=21, name="exp_closure_sweep"),
         cron(_exp_start_sweep, minute={9, 39}, name="exp_start_sweep"),
         cron(_exp_ramp_plan_sweep, minute={14, 44}, name="exp_ramp_plan_sweep"),
-        cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800,
-             name="exp_analysis_sweep"),
+        cron(_exp_analysis_sweep, hour=7, minute=13, timeout=1800, name="exp_analysis_sweep"),
         cron(_exp_retention, hour=3, minute=49, timeout=1800, name="exp_retention"),
-        cron(_exp_weekly_digest, weekday=2, hour=8, minute=23,
-             name="exp_weekly_digest"),
+        cron(_exp_weekly_digest, weekday=2, hour=8, minute=23, name="exp_weekly_digest"),
         # Cross-experiment interaction scan: weekly (Tue 04:37 UTC)
         cron(
             _exp_interaction_sweep,

@@ -74,9 +74,7 @@ async def list_observations(
         query = query.where(EcosystemObservation.id < cursor)
         query = query.order_by(EcosystemObservation.id.desc()).limit(limit + 1)
     else:
-        query = (
-            query.order_by(EcosystemObservation.id.desc()).limit(limit + 1).offset(offset)
-        )
+        query = query.order_by(EcosystemObservation.id.desc()).limit(limit + 1).offset(offset)
     rows = list(await db.scalars(query))
     has_more = len(rows) > limit
     rows = rows[:limit]
@@ -132,8 +130,11 @@ async def create_manual_observation(
     await detect_changes(db, obs)
     await propose_resolution(db, obs, trust_level=source.trust_level)
     await eco_audit(
-        db, _user, action="eco.observation_manual_created",
-        target_type="eco_observation", target_id=obs.id,
+        db,
+        _user,
+        action="eco.observation_manual_created",
+        target_type="eco_observation",
+        target_id=obs.id,
         after={"event_type": obs.event_type, "source_id": source.id},
     )
     await db.commit()
@@ -162,8 +163,11 @@ async def bulk_verify_observations(
             obs.verified_at = now
         verified.append(obs_id)
     await eco_audit(
-        db, user, action="eco.observations_bulk_verified",
-        target_type="eco_observation", target_id=verified[0] if verified else "none",
+        db,
+        user,
+        action="eco.observations_bulk_verified",
+        target_type="eco_observation",
+        target_id=verified[0] if verified else "none",
         after={"verified_count": len(verified), "missing_count": len(missing)},
     )
     await db.commit()
@@ -246,8 +250,11 @@ async def verify_observation(
     obs.verified_by = user.id
     obs.verified_at = datetime.now(UTC)
     await eco_audit(
-        db, user, action="eco.observation_verified",
-        target_type="eco_observation", target_id=obs_id,
+        db,
+        user,
+        action="eco.observation_verified",
+        target_type="eco_observation",
+        target_id=obs_id,
     )
     await db.commit()
     return {"data": obs}
@@ -319,7 +326,9 @@ async def bulk_acknowledge_changes(
             change.acknowledged_by = user.id
         acknowledged.append(change_id)
     await eco_audit(
-        db, user, action="eco.changes_bulk_acknowledged",
+        db,
+        user,
+        action="eco.changes_bulk_acknowledged",
         target_type="eco_change_event",
         target_id=acknowledged[0] if acknowledged else "none",
         after={"acknowledged_count": len(acknowledged), "missing_count": len(missing)},
@@ -348,7 +357,9 @@ async def bulk_unacknowledge_changes(
             change.acknowledged_by = None
         restored.append(change_id)
     await eco_audit(
-        db, user, action="eco.changes_bulk_unacknowledged",
+        db,
+        user,
+        action="eco.changes_bulk_unacknowledged",
         target_type="eco_change_event",
         target_id=restored[0] if restored else "none",
         after={"restored_count": len(restored), "missing_count": len(missing)},
@@ -369,8 +380,11 @@ async def acknowledge_change(
     change.acknowledged = True
     change.acknowledged_by = user.id
     await eco_audit(
-        db, user, action="eco.change_acknowledged",
-        target_type="eco_change_event", target_id=change_id,
+        db,
+        user,
+        action="eco.change_acknowledged",
+        target_type="eco_change_event",
+        target_id=change_id,
     )
     await db.commit()
     return {"data": change}
@@ -395,8 +409,11 @@ async def unacknowledge_change(
     change.acknowledged = False
     change.acknowledged_by = None
     await eco_audit(
-        db, user, action="eco.change_unacknowledged",
-        target_type="eco_change_event", target_id=change_id,
+        db,
+        user,
+        action="eco.change_unacknowledged",
+        target_type="eco_change_event",
+        target_id=change_id,
     )
     await db.commit()
     return {"data": change}

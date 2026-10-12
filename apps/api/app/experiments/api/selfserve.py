@@ -39,9 +39,7 @@ async def self_resolve(
     from app.models.organization import OrgMember
 
     primary_org = (
-        await db.execute(
-            select(func.min(OrgMember.org_id)).where(OrgMember.user_id == user.id)
-        )
+        await db.execute(select(func.min(OrgMember.org_id)).where(OrgMember.user_id == user.id))
     ).scalar_one_or_none()
     resolved = await facade.resolve_variant(
         db,
@@ -80,8 +78,7 @@ async def self_exposure(
 
 
 # ── §4.17: pre-login surface (round 211) ──────────────────────────────
-anon_router = APIRouter(prefix="/experiments/anon",
-                        tags=["Experiments — Anonymous"])
+anon_router = APIRouter(prefix="/experiments/anon", tags=["Experiments — Anonymous"])
 
 
 @anon_router.post(
@@ -182,21 +179,26 @@ async def list_identity_links(
     from app.experiments.models import ExperimentIdentityLink
 
     rows = (
-        await db.execute(
-            select(ExperimentIdentityLink)
-            .where(ExperimentIdentityLink.user_id == user.id)
-            .order_by(ExperimentIdentityLink.created_at.desc(),
-                      ExperimentIdentityLink.anonymous_id.desc())
-            # round 267 (accumulation-bomb law): a client minting ids and
-            # claiming them could grow this unbounded — newest 100 suffice
-            # for transparency
-            .limit(100)
+        (
+            await db.execute(
+                select(ExperimentIdentityLink)
+                .where(ExperimentIdentityLink.user_id == user.id)
+                .order_by(
+                    ExperimentIdentityLink.created_at.desc(),
+                    ExperimentIdentityLink.anonymous_id.desc(),
+                )
+                # round 267 (accumulation-bomb law): a client minting ids and
+                # claiming them could grow this unbounded — newest 100 suffice
+                # for transparency
+                .limit(100)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         "data": [
-            {"anonymous_id": row.anonymous_id,
-             "created_at": row.created_at.isoformat()}
+            {"anonymous_id": row.anonymous_id, "created_at": row.created_at.isoformat()}
             for row in rows
         ]
     }

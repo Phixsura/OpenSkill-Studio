@@ -144,9 +144,7 @@ def test_github_releases_shape():
 
 
 def test_huggingface_shape():
-    raw = json.dumps(
-        [{"modelId": "org/model-x", "tags": ["diffusion"], "downloads": 100}]
-    ).encode()
+    raw = json.dumps([{"modelId": "org/model-x", "tags": ["diffusion"], "downloads": 100}]).encode()
     items = parse_huggingface(raw, {})
     assert items[0].external_ref == "org/model-x"
     assert items[0].provenance_url == "https://huggingface.co/org/model-x"

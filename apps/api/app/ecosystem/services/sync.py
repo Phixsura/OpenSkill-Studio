@@ -41,8 +41,12 @@ class FetchResult:
 
 
 async def _default_fetcher(
-    url: str, *, etag: str | None, last_modified: str | None,
-    timeout: int, max_bytes: int,
+    url: str,
+    *,
+    etag: str | None,
+    last_modified: str | None,
+    timeout: int,
+    max_bytes: int,
 ) -> FetchResult:
     """httpx fetch with conditional-GET headers and a streaming size cap."""
     import httpx
@@ -108,9 +112,7 @@ class SyncService:
         if (count or 0) >= source.rate_limit_per_hour:
             raise AppError("ECO_RATE_LIMITED", "Source sync rate limit exceeded", 429)
 
-    async def run_sync(
-        self, source_id: str, *, raw_payload: bytes | None = None
-    ) -> SourceSyncRun:
+    async def run_sync(self, source_id: str, *, raw_payload: bytes | None = None) -> SourceSyncRun:
         """Sync one source. raw_payload bypasses fetch for manual sources."""
         source = await self.db.get(EcosystemSource, source_id)
         if not source:
@@ -375,9 +377,7 @@ class SyncService:
                     confidence=item.confidence,
                     provenance_url=item.provenance_url,
                     effective_at=_parse_iso(item.effective_at),
-                    extraction_method="manual"
-                    if source.adapter_key == "manual"
-                    else "structured",
+                    extraction_method="manual" if source.adapter_key == "manual" else "structured",
                 )
                 .on_conflict_do_nothing(constraint="uq_eco_obs_idem")
                 .returning(EcosystemObservation.id)

@@ -138,9 +138,13 @@ async def _similarity_candidate(
             best_id, best_score = name_row.id, float(name_row.sim)
         if alias_row is not None and float(alias_row.sim) > best_score:
             best_id, best_score = alias_row.entity_id, float(alias_row.sim)
-        return (best_id, round(best_score, 3)) if best_score >= SIMILARITY_THRESHOLD else (
-            None,
-            round(best_score, 3),
+        return (
+            (best_id, round(best_score, 3))
+            if best_score >= SIMILARITY_THRESHOLD
+            else (
+                None,
+                round(best_score, 3),
+            )
         )
     except Exception:  # noqa: BLE001 — pg_trgm unavailable (non-PG test DB)
         best_id, best_score = None, 0.0
@@ -227,7 +231,9 @@ class ResolutionService:
             query = query.where(ResolutionCandidate.entity_kind == entity_kind)
         total = await self.db.scalar(select(func.count()).select_from(query.subquery()))
         rows = await self.db.scalars(
-            query.order_by(ResolutionCandidate.created_at, ResolutionCandidate.id).limit(limit).offset(offset)
+            query.order_by(ResolutionCandidate.created_at, ResolutionCandidate.id)
+            .limit(limit)
+            .offset(offset)
         )
         return list(rows), int(total or 0)
 

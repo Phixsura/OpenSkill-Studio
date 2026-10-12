@@ -693,8 +693,7 @@ async def test_review_gated_reservation_extends_past_bounded_limit():
 
             await db.execute(
                 _resupd(_ResGuard)
-                .where(_ResGuard.status == "held",
-                       _ResGuard.expires_at < datetime.now(UTC))
+                .where(_ResGuard.status == "held", _ResGuard.expires_at < datetime.now(UTC))
                 .values(expires_at=datetime.now(UTC) + timedelta(days=30))
             )
             user = await _mk_user(db)
@@ -2294,8 +2293,7 @@ async def test_expire_stale_reservations_isolates_one_bad_reservation(db, monkey
 
     await db.execute(
         _resupd(_ResGuard)
-        .where(_ResGuard.status == "held",
-               _ResGuard.expires_at < datetime.now(UTC))
+        .where(_ResGuard.status == "held", _ResGuard.expires_at < datetime.now(UTC))
         .values(expires_at=datetime.now(UTC) + timedelta(days=30))
     )
     user = await _mk_user(db)
@@ -2580,8 +2578,7 @@ async def test_expiry_crons_bounded_batches(db):
 
     await db.execute(
         _resupd(_ResGuard)
-        .where(_ResGuard.status == "held",
-               _ResGuard.expires_at < datetime.now(UTC))
+        .where(_ResGuard.status == "held", _ResGuard.expires_at < datetime.now(UTC))
         .values(expires_at=datetime.now(UTC) + timedelta(days=30))
     )
     user = await _mk_user(db)

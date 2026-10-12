@@ -98,9 +98,7 @@ async def test_trigger_event_mirrors_into_mesh(db):
 
     user = await _user(db)
     org = await _org(db, user)
-    await WebhookService(db).trigger_event(
-        org.id, "credential.issued", {"credential_id": "c1"}
-    )
+    await WebhookService(db).trigger_event(org.id, "credential.issued", {"credential_id": "c1"})
     rows = await _mesh_events(db, org.id, "com.openskill.credential.issued.v1")
     assert len(rows) == 1
     assert rows[0].data == {"credential_id": "c1"}
@@ -204,15 +202,22 @@ async def test_invoice_finalized_routes_to_every_tenant_org_ids_only(db):
     tenant_id = org.tenant_id
     # Second org under the SAME tenant.
     org2 = Organization(
-        name=f"Org2 {ULID()}", slug=f"o2-{str(ULID()).lower()}",
-        status=OrgStatus.ACTIVE, tenant_id=tenant_id, created_by=owner.id,
+        name=f"Org2 {ULID()}",
+        slug=f"o2-{str(ULID()).lower()}",
+        status=OrgStatus.ACTIVE,
+        tenant_id=tenant_id,
+        created_by=owner.id,
     )
     db.add(org2)
     await db.flush()
 
     inv = Invoice(
-        tenant_id=tenant_id, status="draft", currency="USD",
-        subtotal_minor=12345, total_minor=12345, amount_due_minor=12345,
+        tenant_id=tenant_id,
+        status="draft",
+        currency="USD",
+        subtotal_minor=12345,
+        total_minor=12345,
+        amount_due_minor=12345,
     )
     db.add(inv)
     await db.flush()
@@ -220,13 +225,17 @@ async def test_invoice_finalized_routes_to_every_tenant_org_ids_only(db):
     await db.flush()
 
     events = (
-        await db.execute(
-            _select(IntegrationEvent).where(
-                IntegrationEvent.subject == inv.id,
-                IntegrationEvent.type == "com.openskill.invoice.finalized.v1",
+        (
+            await db.execute(
+                _select(IntegrationEvent).where(
+                    IntegrationEvent.subject == inv.id,
+                    IntegrationEvent.type == "com.openskill.invoice.finalized.v1",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert {e.org_id for e in events} == {org.id, org2.id}
     for e in events:
         assert e.data == {"invoice_id": inv.id, "tenant_id": tenant_id}

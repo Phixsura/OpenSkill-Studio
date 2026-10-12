@@ -74,30 +74,29 @@ async def _mk_admin(db) -> User:
     return user
 
 
-async def _mk_running(db, *, org_scoped: bool,
-                      guardrails: list[dict] | None = None):
+async def _mk_running(db, *, org_scoped: bool, guardrails: list[dict] | None = None):
     from app.controlplane.models.tenant import TenantAccount
     from app.models.organization import Organization
 
     admin = await _mk_admin(db)
     scope_org_id = None
     if org_scoped:
-        tenant = TenantAccount(name=f"wh-{str(ULID()).lower()}",
-                               slug=f"wh-{str(ULID()).lower()}")
+        tenant = TenantAccount(name=f"wh-{str(ULID()).lower()}", slug=f"wh-{str(ULID()).lower()}")
         db.add(tenant)
         await db.flush()
-        org = Organization(name="wh", slug=f"wh-{str(ULID()).lower()}",
-                           tenant_id=tenant.id)
+        org = Organization(name="wh", slug=f"wh-{str(ULID()).lower()}", tenant_id=tenant.id)
         db.add(org)
         await db.flush()
         scope_org_id = org.id
-    layer = await LayerService(db).create(
-        key=f"lyr-{str(ULID()).lower()}", domain="learning"
-    )
+    layer = await LayerService(db).create(key=f"lyr-{str(ULID()).lower()}", domain="learning")
     svc = ExperimentService(db)
     exp = await svc.create(
-        key=f"exp-{str(ULID()).lower()}", title="T", domain="learning",
-        layer_key=layer.key, owner_user_id=admin.id, scope_org_id=scope_org_id,
+        key=f"exp-{str(ULID()).lower()}",
+        title="T",
+        domain="learning",
+        layer_key=layer.key,
+        owner_user_id=admin.id,
+        scope_org_id=scope_org_id,
     )
     await svc.create_version(exp.id, spec=_spec(guardrails), actor=admin)
     await LayerService(db).allocate(
@@ -105,7 +104,9 @@ async def _mk_running(db, *, org_scoped: bool,
     )
     for status in ("review", "scheduled", "running"):
         await svc.transition(
-            exp.id, to_status=status, actor=admin,
+            exp.id,
+            to_status=status,
+            actor=admin,
             checklist=_CHECKLIST if status == "scheduled" else None,
         )
     await svc.set_ramp(exp.id, ramp_bp=10_000, actor=admin)
@@ -148,19 +149,23 @@ async def test_guardrail_breach_emits_detail_then_pause(db, captured):
 
     await MetricService(db).ensure_seed_definitions()
     exp, _admin, org_id = await _mk_running(
-        db, org_scoped=True,
-        guardrails=[{"metric_key": "exposure_rate", "op": "lte",
-                     "threshold": 0.4, "window_hours": 24}],
+        db,
+        org_scoped=True,
+        guardrails=[
+            {"metric_key": "exposure_rate", "op": "lte", "threshold": 0.4, "window_hours": 24}
+        ],
     )
     captured.clear()  # drop the lifecycle transitions; the breach is under test
     asvc = AssignmentService(db)
     for i in range(10):
         ctx = {"org_id": org_id}  # org-scoped eligibility needs org context
-        r = await asvc.resolve(experiment_key=exp.key, unit_type="user",
-                               unit_id=f"wh-{i}", context=ctx)
+        r = await asvc.resolve(
+            experiment_key=exp.key, unit_type="user", unit_id=f"wh-{i}", context=ctx
+        )
         assert r is not None
-        await asvc.record_exposure(experiment_key=exp.key, unit_type="user",
-                                   unit_id=f"wh-{i}", context=ctx)
+        await asvc.record_exposure(
+            experiment_key=exp.key, unit_type="user", unit_id=f"wh-{i}", context=ctx
+        )
     summary = await GuardrailService(db).evaluate_experiment(exp.id)
     assert summary["breaches"]
     kinds = [c[1] for c in captured]
@@ -188,8 +193,10 @@ async def test_unmocked_trigger_path_subscribes_filters_delivers(db, monkeypatch
 
     admin = await _mk_admin(db)
     org = await OrgService(db).create(
-        name=f"WHX {ULID()}", slug=f"whx-{str(ULID()).lower()}",
-        description=None, created_by=admin.id,
+        name=f"WHX {ULID()}",
+        slug=f"whx-{str(ULID()).lower()}",
+        description=None,
+        created_by=admin.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
@@ -199,11 +206,13 @@ async def test_unmocked_trigger_path_subscribes_filters_delivers(db, monkeypatch
     svc = WebhookService(db)
     # subscription CREATE must accept the new experiment.* types (whitelist)
     sub_decisions = await svc.create(
-        org_id=org.id, url="https://example.com/exp-hook",
+        org_id=org.id,
+        url="https://example.com/exp-hook",
         events=["experiment.decision_recorded"],
     )
     sub_status = await svc.create(
-        org_id=org.id, url="https://example.com/status-hook",
+        org_id=org.id,
+        url="https://example.com/status-hook",
         events=["experiment.status_changed"],
     )
 
@@ -212,11 +221,10 @@ async def test_unmocked_trigger_path_subscribes_filters_delivers(db, monkeypatch
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append((webhook_id, event_type))
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     await emit_experiment_event(
-        db, scope_org_id=org.id,
+        db,
+        scope_org_id=org.id,
         event_type="experiment.decision_recorded",
         payload={"experiment_id": "x", "decision": "promote"},
     )
@@ -262,27 +270,29 @@ async def test_rollback_leaks_no_phantom_webhook(db, monkeypatch):
 
     admin = await _mk_admin(db)
     org = await OrgService(db).create(
-        name=f"WHR {ULID()}", slug=f"whr-{str(ULID()).lower()}",
-        description=None, created_by=admin.id,
+        name=f"WHR {ULID()}",
+        slug=f"whr-{str(ULID()).lower()}",
+        description=None,
+        created_by=admin.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     await db.flush()
     await invalidate_cache(tenant.id)
     svc = WebhookService(db)
-    await svc.create(org_id=org.id, url="https://example.com/ghost",
-                     events=["experiment.decision_recorded"])
+    await svc.create(
+        org_id=org.id, url="https://example.com/ghost", events=["experiment.decision_recorded"]
+    )
 
     scheduled: list = []
 
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append(webhook_id)
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     await emit_experiment_event(
-        db, scope_org_id=org.id,
+        db,
+        scope_org_id=org.id,
         event_type="experiment.decision_recorded",
         payload={"experiment_id": "ghost", "decision": "promote"},
     )
@@ -306,32 +316,34 @@ async def test_rollback_then_later_commit_fires_no_stale_webhook(db, monkeypatch
 
     admin = await _mk_admin(db)
     org = await OrgService(db).create(
-        name=f"WHS {ULID()}", slug=f"whs-{str(ULID()).lower()}",
-        description=None, created_by=admin.id,
+        name=f"WHS {ULID()}",
+        slug=f"whs-{str(ULID()).lower()}",
+        description=None,
+        created_by=admin.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     await db.flush()
     await invalidate_cache(tenant.id)
     svc = WebhookService(db)
-    await svc.create(org_id=org.id, url="https://example.com/stale",
-                     events=["experiment.decision_recorded"])
+    await svc.create(
+        org_id=org.id, url="https://example.com/stale", events=["experiment.decision_recorded"]
+    )
 
     scheduled: list = []
 
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append(event_type)
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     # capture plain ids BEFORE commit — expired ORM attrs would lazy-load
     org_id_s, tenant_id_s, admin_id_s = org.id, org.tenant_id, admin.id
     # commit the fixture FIRST so the rollback below only drops the emit's txn
     await db.commit()
     try:
         await emit_experiment_event(
-            db, scope_org_id=org_id_s,
+            db,
+            scope_org_id=org_id_s,
             event_type="experiment.decision_recorded",
             payload={"experiment_id": "stale", "decision": "promote"},
         )
@@ -343,9 +355,7 @@ async def test_rollback_then_later_commit_fires_no_stale_webhook(db, monkeypatch
         await db.flush()
         await db.commit()
         await asyncio.sleep(0.05)
-        assert scheduled == [], (
-            "a rolled-back emission must not ride a LATER commit"
-        )
+        assert scheduled == [], "a rolled-back emission must not ride a LATER commit"
     finally:
         from app.models.organization import Organization as OrgModel2
 
@@ -375,15 +385,18 @@ async def test_emit_inside_savepoint_warns_loudly(db, monkeypatch):
 
     admin = await _mk_admin(db)
     org = await OrgService(db).create(
-        name=f"WHN {ULID()}", slug=f"whn-{str(ULID()).lower()}",
-        description=None, created_by=admin.id,
+        name=f"WHN {ULID()}",
+        slug=f"whn-{str(ULID()).lower()}",
+        description=None,
+        created_by=admin.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     await db.flush()
     await invalidate_cache(tenant.id)
     await WebhookService(db).create(
-        org_id=org.id, url="https://example.com/sp",
+        org_id=org.id,
+        url="https://example.com/sp",
         events=["experiment.decision_recorded"],
     )
 
@@ -392,7 +405,8 @@ async def test_emit_inside_savepoint_warns_loudly(db, monkeypatch):
     with capture_logs() as cap:
         async with db.begin_nested():
             await emit_experiment_event(
-                db, scope_org_id=org.id,
+                db,
+                scope_org_id=org.id,
                 event_type="experiment.decision_recorded",
                 payload={"experiment_id": "sp"},
             )
@@ -408,15 +422,18 @@ async def _wh_fixture(db):
 
     admin = await _mk_admin(db)
     org = await OrgService(db).create(
-        name=f"WSP {ULID()}", slug=f"wsp-{str(ULID()).lower()}",
-        description=None, created_by=admin.id,
+        name=f"WSP {ULID()}",
+        slug=f"wsp-{str(ULID()).lower()}",
+        description=None,
+        created_by=admin.id,
     )
     tenant = await db.get(TenantAccount, org.tenant_id)
     tenant.status = TenantStatus.ACTIVE
     await db.flush()
     await invalidate_cache(tenant.id)
     await WebhookService(db).create(
-        org_id=org.id, url="https://example.com/sp",
+        org_id=org.id,
+        url="https://example.com/sp",
         events=["experiment.decision_recorded"],
     )
     return org.id, org.tenant_id, admin.id
@@ -457,16 +474,15 @@ async def test_savepoint_rollback_cancels_the_emit(db, monkeypatch):
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append(event_type)
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     await db.commit()  # fixture committed; ids are plain strings
     try:
         # the outbox-runner shape: handler inside a savepoint, raising
         try:
             async with db.begin_nested():
                 await emit_experiment_event(
-                    db, scope_org_id=org_id,
+                    db,
+                    scope_org_id=org_id,
                     event_type="experiment.decision_recorded",
                     payload={"experiment_id": "sp-phantom"},
                 )
@@ -475,9 +491,7 @@ async def test_savepoint_rollback_cancels_the_emit(db, monkeypatch):
             pass
         await db.commit()  # the runner's per-message batch commit
         await asyncio.sleep(0.05)
-        assert scheduled == [], (
-            "a savepoint-rolled-back emit must not ride the outer commit"
-        )
+        assert scheduled == [], "a savepoint-rolled-back emit must not ride the outer commit"
     finally:
         await _wh_sweep(db, org_id, tenant_id, admin_id)
 
@@ -496,14 +510,13 @@ async def test_savepoint_release_still_delivers(db, monkeypatch):
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append(event_type)
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     await db.commit()
     try:
         async with db.begin_nested():
             await emit_experiment_event(
-                db, scope_org_id=org_id,
+                db,
+                scope_org_id=org_id,
                 event_type="experiment.decision_recorded",
                 payload={"experiment_id": "sp-ok"},
             )
@@ -530,15 +543,14 @@ async def test_unrelated_savepoint_rollback_must_not_cancel(db, monkeypatch):
     async def counting_deliver(url, secret, webhook_id, event_type, payload):
         scheduled.append(event_type)
 
-    monkeypatch.setattr(
-        WebhookService, "_deliver_background", staticmethod(counting_deliver)
-    )
+    monkeypatch.setattr(WebhookService, "_deliver_background", staticmethod(counting_deliver))
     await db.commit()
     try:
         # message 1: handler succeeds, savepoint releases
         async with db.begin_nested():
             await emit_experiment_event(
-                db, scope_org_id=org_id,
+                db,
+                scope_org_id=org_id,
                 event_type="experiment.decision_recorded",
                 payload={"experiment_id": "msg-1"},
             )
@@ -571,12 +583,10 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
     from app.models.organization import Organization
     from app.services.webhook import WebhookService
 
-    tenant = TenantAccount(name=f"whc-{str(ULID()).lower()}",
-                           slug=f"whc-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"whc-{str(ULID()).lower()}", slug=f"whc-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="whcap", slug=f"whc-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="whcap", slug=f"whc-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.commit()  # writer sessions must SEE the org
     monkeypatch.setattr(wh, "MAX_WEBHOOKS_PER_ORG", 1, raising=False)
@@ -614,9 +624,7 @@ async def test_webhook_org_cap_holds_under_concurrency(db, monkeypatch):
     from app.models.webhook import WebhookSubscription as _Sub
 
     n = (
-        await db.execute(
-            _select(_func.count()).select_from(_Sub).where(_Sub.org_id == org.id)
-        )
+        await db.execute(_select(_func.count()).select_from(_Sub).where(_Sub.org_id == org.id))
     ).scalar_one()
     # cleanup first (this test commits), then assert
     await db.execute(_delete(_Sub).where(_Sub.org_id == org.id))
@@ -656,17 +664,14 @@ async def test_webhook_secret_rotation(db):
     from app.models.organization import Organization
     from app.services.webhook import WebhookService
 
-    tenant = TenantAccount(name=f"rot-{str(ULID()).lower()}",
-                           slug=f"rot-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"rot-{str(ULID()).lower()}", slug=f"rot-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="rot", slug=f"rot-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
+    org = Organization(name="rot", slug=f"rot-{str(ULID()).lower()}", tenant_id=tenant.id)
     db.add(org)
     await db.flush()
     svc = WebhookService(db)
-    sub = await svc.create(org.id, "https://hooks.example.com/rot",
-                           ["pack.published"])
+    sub = await svc.create(org.id, "https://hooks.example.com/rot", ["pack.published"])
     old_secret = sub.secret
     rotated = await svc.rotate_secret(sub.id, org.id)
     assert rotated.id == sub.id
@@ -688,9 +693,14 @@ async def test_webhook_mask_secret_boundary(db):
 
     from app.api.v1.endpoints.webhooks import WebhookResponse
 
-    base = dict(id="W" * 26, org_id="O" * 26, url="https://x.example.com",
-                events=["pack.published"], active=True,
-                created_at=_dt.now(_UTC))
+    base = dict(
+        id="W" * 26,
+        org_id="O" * 26,
+        url="https://x.example.com",
+        events=["pack.published"],
+        active=True,
+        created_at=_dt.now(_UTC),
+    )
     assert WebhookResponse(secret="12345678", **base).secret == "****"
     assert WebhookResponse(secret="123456789", **base).secret == "1234****6789"
 
@@ -718,12 +728,14 @@ def test_webhook_events_cap_boundary():
     from app.services.webhook import MAX_EVENTS_PER_WEBHOOK, VALID_EVENT_TYPES
 
     kinds = sorted(VALID_EVENT_TYPES)
-    ok = CreateWebhookRequest(url="https://hooks.example.com/cap",
-                              events=kinds[:MAX_EVENTS_PER_WEBHOOK])
+    ok = CreateWebhookRequest(
+        url="https://hooks.example.com/cap", events=kinds[:MAX_EVENTS_PER_WEBHOOK]
+    )
     assert len(ok.events) == MAX_EVENTS_PER_WEBHOOK
     with _pytest.raises(ValidationError):
-        CreateWebhookRequest(url="https://hooks.example.com/cap",
-                             events=kinds[:MAX_EVENTS_PER_WEBHOOK + 1])
+        CreateWebhookRequest(
+            url="https://hooks.example.com/cap", events=kinds[: MAX_EVENTS_PER_WEBHOOK + 1]
+        )
 
 
 async def test_webhook_ops_write_audit_trail(db):
@@ -739,37 +751,45 @@ async def test_webhook_ops_write_audit_trail(db):
     from app.models.user import User, UserRole, UserStatus
     from app.services.webhook import WebhookService
 
-    tenant = TenantAccount(name=f"aud-{str(ULID()).lower()}",
-                           slug=f"aud-{str(ULID()).lower()}")
+    tenant = TenantAccount(name=f"aud-{str(ULID()).lower()}", slug=f"aud-{str(ULID()).lower()}")
     db.add(tenant)
     await db.flush()
-    org = Organization(name="aud", slug=f"aud-{str(ULID()).lower()}",
-                       tenant_id=tenant.id)
-    actor = User(email=f"aud-{ULID()}@example.com", display_name="A",
-                 role=UserRole.STUDENT, status=UserStatus.ACTIVE)
+    org = Organization(name="aud", slug=f"aud-{str(ULID()).lower()}", tenant_id=tenant.id)
+    actor = User(
+        email=f"aud-{ULID()}@example.com",
+        display_name="A",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
     db.add_all([org, actor])
     await db.flush()
     svc = WebhookService(db)
-    sub = await svc.create(org.id, "https://hooks.example.com/aud",
-                           ["pack.published"], actor_user_id=actor.id)
+    sub = await svc.create(
+        org.id, "https://hooks.example.com/aud", ["pack.published"], actor_user_id=actor.id
+    )
     await svc.rotate_secret(sub.id, org.id, actor_user_id=actor.id)
     sub_id = sub.id
     await svc.delete(sub.id, org.id, actor_user_id=actor.id)
     rows = (
-        await db.execute(
-            _select(CommercialAuditEvent).where(
-                CommercialAuditEvent.target_type == "webhook",
-                CommercialAuditEvent.target_id == sub_id,
-            ).order_by(CommercialAuditEvent.created_at)
+        (
+            await db.execute(
+                _select(CommercialAuditEvent)
+                .where(
+                    CommercialAuditEvent.target_type == "webhook",
+                    CommercialAuditEvent.target_id == sub_id,
+                )
+                .order_by(CommercialAuditEvent.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     actions = [r.action for r in rows]
     assert actions == ["webhook.created", "webhook.secret_rotated", "webhook.deleted"]
     for r in rows:
         assert r.actor_user_id == actor.id
         assert r.tenant_id == tenant.id
         # wave 55: pin the payload content, not just secret-absence
-        assert r.after == {"url": "https://hooks.example.com/aud",
-                           "events": ["pack.published"]}
+        assert r.after == {"url": "https://hooks.example.com/aud", "events": ["pack.published"]}
         blob = str(r.before) + str(r.after)
         assert "secret" not in blob.lower(), "audit must never carry the secret"

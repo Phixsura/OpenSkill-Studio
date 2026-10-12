@@ -832,8 +832,14 @@ def test_review_discussion_webhook_schemas_reject_control_chars():
         (ReplyRequest, {"reply_text": "r" + nul}),
         (CreateCommentRequest, {"body": "c" + nul}),
         (CreateCommentRequest, {"body": "c" + soh + "x"}),
-        (CreateWebhookRequest, {"url": "http://example.com/a" + nul + "b", "events": ["pack.published"]}),
-        (CreateWebhookRequest, {"url": "http://example.com/a" + soh + "b", "events": ["pack.published"]}),
+        (
+            CreateWebhookRequest,
+            {"url": "http://example.com/a" + nul + "b", "events": ["pack.published"]},
+        ),
+        (
+            CreateWebhookRequest,
+            {"url": "http://example.com/a" + soh + "b", "events": ["pack.published"]},
+        ),
     ]
     for model, payload in cases:
         with pytest.raises(pydantic.ValidationError):

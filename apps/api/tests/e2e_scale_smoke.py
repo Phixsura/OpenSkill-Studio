@@ -148,8 +148,11 @@ async def main() -> None:
         rr = await c.post(
             f"{base}/imports",
             headers=h,
-            data={"kind": "users", "mode": "partial",
-                  "idempotency_key": f"scale-{uuid.uuid4().hex[:10]}"},
+            data={
+                "kind": "users",
+                "mode": "partial",
+                "idempotency_key": f"scale-{uuid.uuid4().hex[:10]}",
+            },
             files={"file": ("users.csv", csv_body.encode(), "text/csv")},
         )
         dt_prev = time.monotonic() - t0
@@ -160,22 +163,30 @@ async def main() -> None:
             job_id = rr.json()["data"]["id"]
             t0 = time.monotonic()
             rr = await c.post(
-                f"{base}/imports/{job_id}/commit", headers=h,
+                f"{base}/imports/{job_id}/commit",
+                headers=h,
                 timeout=httpx.Timeout(180.0),
             )
             dt_commit = time.monotonic() - t0
             applied = rr.json().get("data", {}).get("stats", {}).get("applied", 0)
-            check("500 rows committed", rr.status_code == 200 and applied == 500,
-                  f"{rr.status_code} {rr.text[:140]}")
+            check(
+                "500 rows committed",
+                rr.status_code == 200 and applied == 500,
+                f"{rr.status_code} {rr.text[:140]}",
+            )
             check("commit wall-clock bound (<60s)", dt_commit < 60, f"{dt_commit:.1f}s")
             rr = await c.get(f"{API}/orgs/{org}/members", params={"limit": 1}, headers=h)
             total_members = rr.json().get("meta", {}).get("total", 0)
-            check("member count reflects the import", total_members >= 500,
-                  f"total={total_members} {rr.text[:100]}")
+            check(
+                "member count reflects the import",
+                total_members >= 500,
+                f"total={total_members} {rr.text[:100]}",
+            )
 
         # ── roster at size: enroll the 500 imported users into one cohort ──
         rr = await c.post(
-            f"{API}/orgs/{org}/cohorts", headers=h,
+            f"{API}/orgs/{org}/cohorts",
+            headers=h,
             json={"name": f"Scale Cohort {uuid.uuid4().hex[:6]}"},
         )
         cohort_slug = rr.json()["data"]["slug"]
@@ -183,9 +194,13 @@ async def main() -> None:
             f"{e},{cohort_slug},learner" for e in imported_emails
         )
         rr = await c.post(
-            f"{base}/imports", headers=h,
-            data={"kind": "roster", "mode": "partial",
-                  "idempotency_key": f"ros-{uuid.uuid4().hex[:10]}"},
+            f"{base}/imports",
+            headers=h,
+            data={
+                "kind": "roster",
+                "mode": "partial",
+                "idempotency_key": f"ros-{uuid.uuid4().hex[:10]}",
+            },
             files={"file": ("roster.csv", roster_csv.encode(), "text/csv")},
         )
         ok_ros = rr.status_code in (200, 201) and rr.json()["data"]["dry_stats"]["valid"] == 500
@@ -193,13 +208,15 @@ async def main() -> None:
         if ok_ros:
             t0 = time.monotonic()
             rr = await c.post(
-                f"{base}/imports/{rr.json()['data']['id']}/commit", headers=h,
+                f"{base}/imports/{rr.json()['data']['id']}/commit",
+                headers=h,
                 timeout=httpx.Timeout(180.0),
             )
             dt_r = time.monotonic() - t0
             applied_r = rr.json().get("data", {}).get("stats", {}).get("applied", 0)
-            check("500 enrollments committed", applied_r == 500,
-                  f"{rr.status_code} {rr.text[:140]}")
+            check(
+                "500 enrollments committed", applied_r == 500, f"{rr.status_code} {rr.text[:140]}"
+            )
             check("roster commit bound (<60s)", dt_r < 60, f"{dt_r:.1f}s")
 
         # ── mesh at size: 200 events fan out to 2 subscriptions ──
@@ -220,8 +237,10 @@ async def main() -> None:
             for name in ("a", "b"):
                 rr = await c.post(
                     f"{API}/orgs/{org}/webhooks",
-                    json={"url": f"http://127.0.0.1:8080/scale-{name}",
-                          "events": ["com.openskill.project.approved.v1"]},
+                    json={
+                        "url": f"http://127.0.0.1:8080/scale-{name}",
+                        "events": ["com.openskill.project.approved.v1"],
+                    },
                     headers=h,
                 )
                 check(f"sub {name} created", rr.status_code == 201, rr.text[:120])
@@ -234,8 +253,9 @@ async def main() -> None:
             t0 = time.monotonic()
             async with AsyncSessionLocal() as db:
                 for i in range(200):
-                    await emit_event(db, org, "project.approved",
-                                     subject=f"scale-{i}", data={"i": i})
+                    await emit_event(
+                        db, org, "project.approved", subject=f"scale-{i}", data={"i": i}
+                    )
                 await db.commit()
             dt_emit = time.monotonic() - t0
             check("200 events emitted (<30s)", dt_emit < 30, f"{dt_emit:.1f}s")
@@ -258,7 +278,9 @@ async def main() -> None:
             rr = await c.get(f"{API}/orgs/{org}/integrations/subscription-stats", headers=h)
             stats = rr.json().get("data") if rr.status_code == 200 else None
             total_ok = (
-                sum(v.get("succeeded", 0) for v in stats.values()) if isinstance(stats, dict) else -1
+                sum(v.get("succeeded", 0) for v in stats.values())
+                if isinstance(stats, dict)
+                else -1
             )
             check(
                 "stats report >=400 succeeded",
@@ -297,9 +319,12 @@ async def main() -> None:
         # ── sync pull at size: 1,000 connector records staged ──
         rr = await c.post(
             f"{base}/connections",
-            json={"provider_key": "oneroster", "name": f"scale-sis-{uuid.uuid4().hex[:6]}",
-                  "config": {"token_url": "https://idp.example.com/token"},
-                  "base_url": "https://sis.example.com/ims/oneroster"},
+            json={
+                "provider_key": "oneroster",
+                "name": f"scale-sis-{uuid.uuid4().hex[:6]}",
+                "config": {"token_url": "https://idp.example.com/token"},
+                "base_url": "https://sis.example.com/ims/oneroster",
+            },
             headers=h,
         )
         check("sync connection created", rr.status_code == 201, rr.text[:120])
@@ -322,9 +347,13 @@ async def main() -> None:
 
         rr = await c.post(
             f"{base}/sync-profiles",
-            json={"connection_id": conn_id, "name": f"scale-pull-{uuid.uuid4().hex[:6]}",
-                  "model": "roster.class", "direction": "pull",
-                  "mapping_profile_id": None},
+            json={
+                "connection_id": conn_id,
+                "name": f"scale-pull-{uuid.uuid4().hex[:6]}",
+                "model": "roster.class",
+                "direction": "pull",
+                "mapping_profile_id": None,
+            },
             headers=h,
         )
         check("pull profile created", rr.status_code == 201, rr.text[:120])
@@ -369,9 +398,11 @@ async def main() -> None:
         check("sync pull bound (<60s)", dt_s < 60, f"{dt_s:.1f}s")
         rr = await c.get(f"{base}/sync-runs", headers=h)
         run_rows = [x for x in rr.json()["data"] if x["id"] == run_id]
-        check("run reported succeeded",
-              run_rows and run_rows[0]["status"] == "succeeded",
-              str(run_rows)[:120])
+        check(
+            "run reported succeeded",
+            run_rows and run_rows[0]["status"] == "succeeded",
+            str(run_rows)[:120],
+        )
 
         # 7b: provision the 1,000 staged classes into cohorts (auto-create)
         t0 = time.monotonic()
@@ -395,14 +426,17 @@ async def main() -> None:
         # pinging its fake URL) and disable the export stream.
         t0 = time.monotonic()
         rr = await c.patch(
-            f"{base}/connections/{conn_id}", json={"status": "disabled"}, headers=h,
+            f"{base}/connections/{conn_id}",
+            json={"status": "disabled"},
+            headers=h,
             timeout=httpx.Timeout(120.0),
         )
-        check("tidy: connection parked", rr.status_code == 200,
-              f"{rr.status_code} in {time.monotonic()-t0:.1f}s {rr.text[:80]}")
-        rr = await c.patch(
-            f"{base}/export-streams/{stream_id}", json={"enabled": False}, headers=h
+        check(
+            "tidy: connection parked",
+            rr.status_code == 200,
+            f"{rr.status_code} in {time.monotonic() - t0:.1f}s {rr.text[:80]}",
         )
+        rr = await c.patch(f"{base}/export-streams/{stream_id}", json={"enabled": False}, headers=h)
         check("tidy: stream disabled", rr.status_code == 200, rr.text[:100])
 
     print(f"\nPASS={PASS} FAIL={FAIL}")

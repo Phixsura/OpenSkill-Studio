@@ -44,9 +44,7 @@ async def test_concurrent_add_item_inserts_exactly_once(db):
         assert ids[0] == ids[1], f"race inserted two rows: {ids}"
         async with AsyncSessionLocal() as session:
             rows = list(
-                await session.scalars(
-                    select(WatchItem).where(WatchItem.watchlist_id == wl_id)
-                )
+                await session.scalars(select(WatchItem).where(WatchItem.watchlist_id == wl_id))
             )
             assert len(rows) == 1
     finally:

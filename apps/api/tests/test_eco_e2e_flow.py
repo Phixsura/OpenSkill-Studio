@@ -129,9 +129,7 @@ async def test_full_discovery_to_rollout_e2e(db):
 
         return fetch
 
-    run = await SyncService(db, fetcher=fetcher(json.dumps(catalog).encode())).run_sync(
-        source.id
-    )
+    run = await SyncService(db, fetcher=fetcher(json.dumps(catalog).encode())).run_sync(source.id)
     assert run.status == "success" and run.observations_created == 2
 
     # 3. Observations + resolution candidates created; human confirms both
@@ -187,7 +185,10 @@ async def test_full_discovery_to_rollout_e2e(db):
     )
     run_new = await bench_new.execute_run(run_new.id)
     assert run_old.status == run_new.status == "completed"
-    assert run_new.dimension_scores["cost_per_case_usd"] < run_old.dimension_scores["cost_per_case_usd"]
+    assert (
+        run_new.dimension_scores["cost_per_case_usd"]
+        < run_old.dimension_scores["cost_per_case_usd"]
+    )
     assert run_new.dimension_scores["text_accuracy"] >= 0.85  # acceptable quality
     comparison = await bench_new.compare_runs([run_old.id, run_new.id])
     assert len(comparison["runs"]) == 2
@@ -205,44 +206,49 @@ async def test_full_discovery_to_rollout_e2e(db):
     # 6. Lifecycle: verify both; new becomes verified, old will sunset
     lifecycle = LifecycleService(db)
     for entity_id in (old_id, new_id):
-        await lifecycle.transition("model_version", entity_id, to_status="under_review",
-                                   actor_id=admin.id)
-        await lifecycle.transition("model_version", entity_id, to_status="verified",
-                                   actor_id=admin.id)
+        await lifecycle.transition(
+            "model_version", entity_id, to_status="under_review", actor_id=admin.id
+        )
+        await lifecycle.transition(
+            "model_version", entity_id, to_status="verified", actor_id=admin.id
+        )
 
     # 7. A Workflow Pack depends on the OLD model version
     pack_id = str(ULID())
     graph = GraphService(db)
     await graph.add_edge(
-        from_kind="workflow_pack", from_id=pack_id,
-        to_kind="model_version", to_id=old_id,
+        from_kind="workflow_pack",
+        from_id=pack_id,
+        to_kind="model_version",
+        to_id=old_id,
         constraint_type="requires_model_version",
     )
     await graph.add_edge(
-        from_kind="learning_path", from_id=str(ULID()),
-        to_kind="workflow_pack", to_id=pack_id,
+        from_kind="learning_path",
+        from_id=str(ULID()),
+        to_kind="workflow_pack",
+        to_id=pack_id,
     )
 
     # 8. Vendor announces the sunset of the old version → typed change event
     sunset_catalog = {
         "models": [
-            dict(catalog["models"][0], lifecycle="deprecated",
-                 sunset_at="2026-12-31T00:00:00Z"),
+            dict(catalog["models"][0], lifecycle="deprecated", sunset_at="2026-12-31T00:00:00Z"),
             catalog["models"][1],
         ]
     }
-    run2 = await SyncService(
-        db, fetcher=fetcher(json.dumps(sunset_catalog).encode())
-    ).run_sync(source.id)
+    run2 = await SyncService(db, fetcher=fetcher(json.dumps(sunset_catalog).encode())).run_sync(
+        source.id
+    )
     assert run2.changes_detected >= 1
     change = await db.scalar(
         select(ChangeEvent)
-        .where(ChangeEvent.severity == "sunset_risk",
-               ChangeEvent.observation_id.in_(
-                   select(EcosystemObservation.id).where(
-                       EcosystemObservation.source_id == source.id
-                   )
-               ))
+        .where(
+            ChangeEvent.severity == "sunset_risk",
+            ChangeEvent.observation_id.in_(
+                select(EcosystemObservation.id).where(EcosystemObservation.source_id == source.id)
+            ),
+        )
         .order_by(ChangeEvent.detected_at.desc())
     )
     assert change is not None
@@ -257,8 +263,9 @@ async def test_full_discovery_to_rollout_e2e(db):
     assert analysis.summary.get("learning_path") == 1
 
     # 10. Deprecate old; replacement candidates generated and ranked
-    await lifecycle.transition("model_version", old_id, to_status="deprecated",
-                               reason="official_sunset", actor_id=admin.id)
+    await lifecycle.transition(
+        "model_version", old_id, to_status="deprecated", reason="official_sunset", actor_id=admin.id
+    )
     ranked, incompatible = await ReplacementService(db).generate_candidates(
         deprecated_kind="model_version", deprecated_id=old_id
     )
@@ -301,8 +308,7 @@ async def test_full_discovery_to_rollout_e2e(db):
     assert plan.status == "promoted"
 
     # 13. Registry reflects the updated, verified component
-    await lifecycle.transition("model_version", new_id, to_status="recommended",
-                               actor_id=admin.id)
+    await lifecycle.transition("model_version", new_id, to_status="recommended", actor_id=admin.id)
     badges = await SignalsService(db).registry_badges(
         entity_refs=[("model_version", old_id), ("model_version", new_id)]
     )

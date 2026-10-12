@@ -62,6 +62,8 @@ async def holdout_group_report(
 ):
     """Cross-experiment holdout measurement (§4.12 v2): held-out vs general
     population on one metric over the window. Read-only."""
-    return {"data": await HoldoutGroupService(db).report(
-        group_id, metric_key=metric_key, window_days=window_days
-    )}
+    return {
+        "data": await HoldoutGroupService(db).report(
+            group_id, metric_key=metric_key, window_days=window_days
+        )
+    }

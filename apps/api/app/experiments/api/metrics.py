@@ -65,9 +65,7 @@ async def update_metric_definition(
     _user: User = Depends(require_platform_admin),
 ):
     """Edit a definition's operational knobs; kind/source stay immutable."""
-    definition = await MetricService(db).update_definition(
-        key, **body.model_dump()
-    )
+    definition = await MetricService(db).update_definition(key, **body.model_dump())
     await db.commit()
     return {"data": definition}
 
@@ -92,16 +90,25 @@ async def list_metric_snapshots(
     scope: ReadScope = Depends(experiment_read_scope),
 ):
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
-    rows = await MetricService(db).list_snapshots(
-        experiment_id, metric_key=metric_key, limit=limit
-    )
+    rows = await MetricService(db).list_snapshots(experiment_id, metric_key=metric_key, limit=limit)
     return {"data": [MetricSnapshotResponse.model_validate(x).model_dump() for x in rows]}
 
 
 _EXPORT_COLUMNS = (
-    "metric_key", "variant_key", "segment", "window_start", "window_end",
-    "n", "numerator", "denominator", "sum_value", "sum_sq",
-    "cov_sum", "cov_sum_sq", "cov_xy_sum", "computed_at",
+    "metric_key",
+    "variant_key",
+    "segment",
+    "window_start",
+    "window_end",
+    "n",
+    "numerator",
+    "denominator",
+    "sum_value",
+    "sum_sq",
+    "cov_sum",
+    "cov_sum_sq",
+    "cov_xy_sum",
+    "computed_at",
 )
 
 
@@ -123,17 +130,14 @@ async def export_metric_snapshots(
     from fastapi.responses import Response
 
     await ExperimentService(db).get_scoped(experiment_id, scope.org_ids)
-    rows = await MetricService(db).list_snapshots(
-        experiment_id, metric_key=metric_key, limit=limit
-    )
+    rows = await MetricService(db).list_snapshots(experiment_id, metric_key=metric_key, limit=limit)
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(_EXPORT_COLUMNS)
     for row in rows:
         writer.writerow(
             [
-                value.isoformat() if hasattr(value := getattr(row, col), "isoformat")
-                else value
+                value.isoformat() if hasattr(value := getattr(row, col), "isoformat") else value
                 for col in _EXPORT_COLUMNS
             ]
         )
