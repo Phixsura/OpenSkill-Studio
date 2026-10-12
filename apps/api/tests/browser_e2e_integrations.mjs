@@ -196,6 +196,43 @@ try {
   const tmplBtn = await page.$('button:has-text("template"), a:has-text("template"), button:has-text("Template"), a:has-text("Template")');
   check("import template download present", tmplBtn !== null);
 
+  // ── 6b. Full import journey: upload CSV -> preview -> commit -> member ──
+  const importedEmail = `imported-${Date.now()}@corp.example.edu`;
+  const csv = `email,display_name,role\n${importedEmail},Imported One,student\n`;
+  const fileInput = await page.$('input[type="file"]');
+  check("import file input present", fileInput !== null);
+  if (fileInput) {
+    await fileInput.setInputFiles({
+      name: "users.csv", mimeType: "text/csv", buffer: Buffer.from(csv),
+    });
+    const uploadBtn = await page.$('button:has-text("Upload & preview")');
+    check("upload button present", uploadBtn !== null);
+    if (uploadBtn) {
+      await uploadBtn.click();
+      await page.waitForTimeout(3500);
+      const afterPrev = await page.textContent("body");
+      check(
+        "dry-run preview rendered",
+        /previewed|dry-run|create/i.test(afterPrev),
+        afterPrev.slice(0, 160),
+      );
+      const commitBtn = await page.$('button:has-text("Commit")');
+      check("commit button present", commitBtn !== null);
+      if (commitBtn) {
+        await commitBtn.click();
+        await page.waitForTimeout(3500);
+        const afterCommit = await page.textContent("body");
+        check("job shows committed", /committed/i.test(afterCommit), afterCommit.slice(0, 160));
+        // the imported user lands on the members page
+        await page.goto(`${BASE}/dashboard/orgs/${orgId}/members`, {
+          waitUntil: "networkidle", timeout: 30000,
+        });
+        const memText = await page.textContent("body");
+        check("imported member visible on members page", memText.includes(importedEmail));
+      }
+    }
+  }
+
   // ── 7. No console errors across the whole journey ──
   section("7. Console hygiene");
   // The app probes /auth/me (and refresh) before login — those 401s are

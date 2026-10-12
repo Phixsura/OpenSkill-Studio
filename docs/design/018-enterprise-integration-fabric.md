@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R282 (ninth window, browser walk — import journey)**: extended the
+  walk with the full Part-K admin journey IN the browser: synthesize a
+  users CSV, attach via the real file input, Upload & preview (dry-run
+  stats render), Commit (job row flips to committed), then the imported
+  member is visible on the org Members page. 30/30 PASS — the whole
+  upload->preview->commit->membership chain now has browser-level proof,
+  not just API-level.
 - **R281 (ninth window, fabric BROWSER E2E + walk-caught UI bug)**: built
   `tests/browser_e2e_integrations.mjs` — a Playwright walk of the whole
   fabric admin journey (register -> org -> hub catalog+health -> identity:
