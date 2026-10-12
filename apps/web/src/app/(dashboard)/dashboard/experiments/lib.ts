@@ -206,3 +206,13 @@ export function fmtNum(value: number | null | undefined, digits = 4): string {
   if (value === null || value === undefined) return "—";
   return Number(value).toFixed(digits);
 }
+
+/** Poll every 5s while an async promotion apply is in flight; otherwise
+ * rest. Lives here (not in the page) because Next.js rejects unknown
+ * exports from a page module at BUILD time — dev and vitest both let it
+ * slide, so the drift only fired in `next build`. */
+export function promotionsRefetchInterval(
+  drafts: { status: string }[] | undefined,
+): number | false {
+  return drafts?.some((d) => d.status === "applying") ? 5000 : false;
+}

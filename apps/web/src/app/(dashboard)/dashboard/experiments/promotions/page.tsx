@@ -7,14 +7,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiWithAuth } from "@/lib/api";
 import { EmptyState, ErrorBanner, ExperimentsNav, Pill, SectionCard } from "../components";
-import { PROMOTION_STATUSES, STATUS_STYLES, fmtDate, type PromotionDraft } from "../lib";
-
-/** Poll every 5s while an async apply is in flight; otherwise rest. */
-export function promotionsRefetchInterval(
-  drafts: { status: string }[] | undefined,
-): number | false {
-  return drafts?.some((d) => d.status === "applying") ? 5000 : false;
-}
+import {
+  PROMOTION_STATUSES,
+  STATUS_STYLES,
+  fmtDate,
+  promotionsRefetchInterval,
+  type PromotionDraft,
+} from "../lib";
 
 export default function PromotionsPage() {
   return (

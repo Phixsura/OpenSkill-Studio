@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R296 (ninth window, PRODUCTION-BUILD fix)**: `pnpm --filter web
+build` had never been run in the marathons — and it FAILED: the
+  experiments promotions page exported a test-only helper
+  (`promotionsRefetchInterval`), which Next.js rejects as an unknown page
+  export at BUILD time while dev and vitest both let it slide. Minimal
+  cross-epic fix (no behavior change): moved the helper to the
+  experiments lib module; page and test import from there. Build now
+  compiles; web 764 + tsc green. Lesson: add `next build` to the
+  regression cadence — dev-mode green does not imply deployable.
 - **R295 (ninth window, R294 class — update-twin sweep)**: swept every
   fabric update twin. Webhook PATCH URL screen and the enforce/break-glass
   arm were covered; TWO more unpinned twins found and pinned — mapping

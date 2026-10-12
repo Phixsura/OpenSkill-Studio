@@ -204,7 +204,7 @@ describe("Promotions board", () => {
 describe("Promotions polling (round 111)", () => {
   it("polls only while an async apply is in flight", async () => {
     const { promotionsRefetchInterval } =
-      await import("@/app/(dashboard)/dashboard/experiments/promotions/page");
+      await import("@/app/(dashboard)/dashboard/experiments/lib");
     expect(promotionsRefetchInterval([{ status: "applying" }])).toBe(5000);
     expect(promotionsRefetchInterval([{ status: "approved" }])).toBe(false);
     expect(promotionsRefetchInterval(undefined)).toBe(false);
