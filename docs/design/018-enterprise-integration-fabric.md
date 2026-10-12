@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R303 (ninth window, SECURITY fix — legacy dispatch client flags)**:
+  the R302 sweep found a SECOND outbound client: the legacy webhook
+  dispatcher built a bare `httpx.AsyncClient(timeout=10.0)` — httpx
+  defaults trust_env=True, so HTTP(S)_PROXY env vars would reroute every
+  legacy delivery through an attacker-influenced proxy (redirects were
+  safe by default but are now explicit). Fixed + pinned with the same
+  **init**-spy test; revert-probed KILLED. Heuristic: grep EVERY
+  `AsyncClient(` construction, not just the blessed wrapper.
 - **R302 (ninth window, proxy-env pin)**: trust_env=False was the second
   unpinned hardening flag on the same constructor — with trust_env=True,
   an HTTP(S)_PROXY environment variable would silently reroute ALL pinned

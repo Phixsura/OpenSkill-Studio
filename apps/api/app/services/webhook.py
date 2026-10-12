@@ -580,7 +580,12 @@ class WebhookService:
                     return
             status: int | None = None
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                # R303: trust_env=False — HTTP(S)_PROXY env vars must never
+                # reroute deliveries through an attacker-influenced proxy;
+                # follow_redirects=False made explicit (R301 class).
+                async with httpx.AsyncClient(
+                    timeout=10.0, trust_env=False, follow_redirects=False
+                ) as client:
                     # R171: stream and discard the response — a plain .post()
                     # buffers the receiver's ENTIRE body into memory. The
                     # receiver is an org-controlled server: one returning

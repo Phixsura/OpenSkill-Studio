@@ -1212,3 +1212,46 @@ async def test_retention_sweep_covers_export_runs_and_resolved_queue(db):
     await db.delete(await db.get(ExportRun, ids[1]))
     await db.delete(await db.get(IdentityMatchQueue, ids[3]))
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_legacy_webhook_dispatch_client_flags(db, monkeypatch):
+    """R303 (R302 class): the LEGACY webhook dispatch client is constructed
+    with trust_env=False and follow_redirects=False too — the fabric's
+    EgressClient was pinned (R301/R302) but this second outbound client
+    would still have honored HTTP(S)_PROXY env vars."""
+    import httpx
+
+    from app.services.webhook import WebhookService
+
+    seen = {}
+    real_init = httpx.AsyncClient.__init__
+
+    def spy_init(self, *args, **kwargs):
+        seen.update(kwargs)
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", spy_init)
+
+    class _Resp:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aclose(self):
+            return None
+
+    def fake_stream(self, method, url, **kw):
+        return _Resp()
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    await WebhookService._deliver_background(
+        url="https://receiver.example.com/hook", secret="s" * 64,
+        webhook_id="w1", event_type="project.approved", payload={},
+    )
+    assert seen.get("trust_env") is False
+    assert seen.get("follow_redirects") is False
