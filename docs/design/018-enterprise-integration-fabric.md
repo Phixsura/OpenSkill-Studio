@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R365 (eleventh window, storm latency SLO)**: the concurrency storm
+  now records every request's wall time and asserts a latency SLO on top
+  of zero-5xx: p50 < 1 s, p95 < 5 s under 20 workers of mixed CRUD on a
+  loaded dev box. Measured: p50=125 ms, p95=740 ms, p99=1020 ms,
+  max=1046 ms (n=195, seed 17). A p95 regression here is a lock-contention
+  or N+1 smell even when nothing errors. R364: one-time ruff-format sweep
+  (153 files) — `gh run list` showed zero Actions runs on the branch, so
+  the `ruff format --check` CI gate added earlier had never actually
+  executed and was unsatisfiable; battery 368/368 after the sweep.
 - **R363 (eleventh window, walk de-flaked — cold-compile/networkidle class)**:
   the 65-check browser walk crept from ~3 min to ~11 min and started
   blowing runner budgets. Two independent causes: (1) cold next-dev

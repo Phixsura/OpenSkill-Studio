@@ -53,6 +53,7 @@ async def main() -> None:
 
         status_5xx: list[str] = []
         slowest = 0.0
+        lat: list[float] = []  # every request's wall time, for percentiles
 
         async def req(method, url, **kw):
             nonlocal slowest
@@ -60,6 +61,7 @@ async def main() -> None:
             rr = await c.request(method, url, headers=h, **kw)
             dt = time.monotonic() - t0
             slowest = max(slowest, dt)
+            lat.append(dt)
             if rr.status_code >= 500:
                 status_5xx.append(f"{method} {url[-60:]} -> {rr.status_code} {rr.text[:100]}")
             return rr
@@ -73,40 +75,68 @@ async def main() -> None:
                 op = rng.randrange(10)
                 tag = f"w{wid}r{i}-{rng.randrange(9999)}"
                 if op == 0:
-                    rr = await req("POST", f"{base}/connections", json={
-                        "provider_key": "generic_rest", "name": f"c-{tag}",
-                        "config": {}, "base_url": "https://x.example.com"})
+                    rr = await req(
+                        "POST",
+                        f"{base}/connections",
+                        json={
+                            "provider_key": "generic_rest",
+                            "name": f"c-{tag}",
+                            "config": {},
+                            "base_url": "https://x.example.com",
+                        },
+                    )
                     if rr.status_code == 201:
                         my_conns.append(rr.json()["data"]["id"])
                 elif op == 1 and my_conns:
-                    await req("PATCH", f"{base}/connections/{rng.choice(my_conns)}",
-                              json={"name": f"c-{tag}"})
+                    await req(
+                        "PATCH",
+                        f"{base}/connections/{rng.choice(my_conns)}",
+                        json={"name": f"c-{tag}"},
+                    )
                 elif op == 2 and my_conns:
                     cid = my_conns.pop()
                     await req("DELETE", f"{base}/connections/{cid}")
                 elif op == 3:
-                    rr = await req("POST", f"{base}/export-streams",
-                                   json={"name": f"s-{tag}", "dataset": "events"})
+                    rr = await req(
+                        "POST",
+                        f"{base}/export-streams",
+                        json={"name": f"s-{tag}", "dataset": "events"},
+                    )
                     if rr.status_code == 201:
                         my_streams.append(rr.json()["data"]["id"])
                 elif op == 4 and my_streams:
-                    await req("PATCH", f"{base}/export-streams/{rng.choice(my_streams)}",
-                              json={"enabled": bool(rng.randrange(2))})
+                    await req(
+                        "PATCH",
+                        f"{base}/export-streams/{rng.choice(my_streams)}",
+                        json={"enabled": bool(rng.randrange(2))},
+                    )
                 elif op == 5:
-                    await req("POST", f"{base}/scim-tokens",
-                              json={"name": f"t-{tag}", "group_map": {}})
+                    await req(
+                        "POST", f"{base}/scim-tokens", json={"name": f"t-{tag}", "group_map": {}}
+                    )
                 elif op == 6:
-                    await req("POST", f"{base}/domains",
-                              json={"domain": f"{tag}.example.edu"})
+                    await req("POST", f"{base}/domains", json={"domain": f"{tag}.example.edu"})
                 elif op == 7:
-                    await req("POST", f"{API}/orgs/{org}/webhooks", json={
-                        "url": f"https://sink.example.com/{tag}",
-                        "events": ["com.openskill.project.approved.v1"]})
+                    await req(
+                        "POST",
+                        f"{API}/orgs/{org}/webhooks",
+                        json={
+                            "url": f"https://sink.example.com/{tag}",
+                            "events": ["com.openskill.project.approved.v1"],
+                        },
+                    )
                 elif op == 8 and my_conns:
-                    rr = await req("POST", f"{base}/sync-profiles", json={
-                        "connection_id": rng.choice(my_conns), "name": f"p-{tag}",
-                        "model": "roster.class", "direction": "pull",
-                        "mapping_profile_id": None})
+                    rr = await req(
+                        "POST",
+                        f"{base}/sync-profiles",
+                        json={
+                            "connection_id": rng.choice(my_conns),
+                            "name": f"p-{tag}",
+                            "model": "roster.class",
+                            "direction": "pull",
+                            "mapping_profile_id": None,
+                        },
+                    )
                     if rr.status_code == 201:
                         my_profiles.append(rr.json()["data"]["id"])
                 else:
@@ -121,10 +151,24 @@ async def main() -> None:
         await asyncio.gather(*[worker(w) for w in range(WORKERS)])
         dt = time.monotonic() - t0
 
-        check(f"zero 5xx across the storm ({WORKERS}x{ROUNDS})", not status_5xx,
-              " | ".join(status_5xx[:3]))
+        check(
+            f"zero 5xx across the storm ({WORKERS}x{ROUNDS})",
+            not status_5xx,
+            " | ".join(status_5xx[:3]),
+        )
         check("storm wall-clock bound (<180s)", dt < 180, f"{dt:.1f}s")
         check("no request exceeded 20s (deadlock guard)", slowest < 20, f"slowest={slowest:.1f}s")
+        lat.sort()
+        p = lambda q: lat[min(len(lat) - 1, int(len(lat) * q))] if lat else 0.0  # noqa: E731
+        print(
+            f"  latency n={len(lat)} p50={p(0.50) * 1000:.0f}ms "
+            f"p95={p(0.95) * 1000:.0f}ms p99={p(0.99) * 1000:.0f}ms max={slowest * 1000:.0f}ms"
+        )
+        # SLO under a 20-worker storm on a loaded dev box: median under 1s,
+        # p95 under 5s. A regression here is a lock/N+1 smell even when
+        # nothing 5xxs.
+        check("storm p50 < 1s", p(0.50) < 1.0, f"p50={p(0.50):.2f}s")
+        check("storm p95 < 5s", p(0.95) < 5.0, f"p95={p(0.95):.2f}s")
 
         # terminal consistency: caps respected, no live runs left
         rr = await c.get(f"{base}/connections", headers=h)
