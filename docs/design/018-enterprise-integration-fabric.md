@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R274 (eighth window, twin-guard sweep round 2 — 3 pins)**: remaining
+  duplicated-guard occurrences probed per-index. Profile-UPDATE schedule
+  and mapping-create model guards KILLED. THREE survived and are pinned:
+  SCIM user-PATCH and group-PATCH `Operations` envelope validation
+  (missing/non-list/empty -> clean 400, never an iteration crash) and the
+  metadata-refresh DOCTYPE screen (a DTD'd metadata document refused
+  outright, same class as the R265 SLO pin). All re-probed KILLED.
 - **R273 (eighth window, twin-guard sweep — 2 IDOR pins)**: generalized
   R272's lesson into a fabric-wide sweep of DUPLICATED guard lines (same
   `if` text in 2+ places), probing each occurrence by index. 8 org-gate

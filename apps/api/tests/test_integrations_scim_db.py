@@ -829,3 +829,21 @@ async def test_bulk_fail_on_errors_must_be_nonnegative_int(ctx):
                 ],
             })
         assert e.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_patch_operations_must_be_nonempty_list(ctx):
+    """R274 (survivor pins): user-PATCH and group-PATCH validate the
+    Operations envelope — missing, non-list, or empty yields a clean
+    ScimError 400, never an iteration crash (IdPs send garbage)."""
+    res, _ = await _usvc(ctx).create(
+        {"userName": f"po-{uuid.uuid4().hex[:8]}@corp.example.edu"}
+    )
+    g = await _gsvc(ctx).create({"displayName": f"PG-{uuid.uuid4().hex[:6]}"})
+    for bad in ({}, {"Operations": "x"}, {"Operations": []}):
+        with pytest.raises(ScimError) as e:
+            await _usvc(ctx).patch(res["id"], bad)
+        assert e.value.status == 400
+        with pytest.raises(ScimError) as e:
+            await _gsvc(ctx).patch(g["id"], bad)
+        assert e.value.status == 400

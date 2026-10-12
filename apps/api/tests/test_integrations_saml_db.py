@@ -1033,3 +1033,23 @@ async def test_saml_authorize_route_screens_open_redirect(db):
     assert await minted_redirect("https://evil.example.com/phish") is None
     assert await minted_redirect("//evil.example.com/phish") is None
     assert await minted_redirect("/dashboard/orgs/X") == "/dashboard/orgs/X"
+
+
+@pytest.mark.asyncio
+async def test_metadata_refresh_rejects_doctype(db):
+    """R274 (survivor pin): a DOCTYPE-carrying metadata document is refused
+    outright (DTD forbidden) — the parser already resolves nothing, but the
+    screen must not rot silently behind it."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_metadata_url = "https://idp.example.com/metadata.xml"
+    await db.flush()
+    body = _metadata_xml(IDP_CERT, entity=IDP_ENTITY)
+    if isinstance(body, bytes):
+        body = body.decode()
+    doc = '<!DOCTYPE md [<!ENTITY x "y">]>' + body
+    with pytest.raises(AppError) as e:
+        await SsoAdminService(db).refresh_from_metadata(
+            org.id, conn.id, egress=_MetaEgress(doc)
+        )
+    assert e.value.code == "SSO_METADATA_INVALID"
