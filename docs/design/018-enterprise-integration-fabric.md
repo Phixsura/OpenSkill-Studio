@@ -928,6 +928,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R321 (tenth window, IDN-helper totality)**: hypothesis property over
+  normalized_email_domain — arbitrary text folds to a lowercase domain or
+  "", never raises (it sits on the login path; a hostile address must not
+  500 the gate). 300 examples hold.
 - **R320 (tenth window, ordering-hazard fix)**: a deterministic
   cross-file hazard surfaced while verifying R319 — test_auth.py's
   client-fixture tests leave pooled connections bound to a closed event

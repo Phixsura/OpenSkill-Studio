@@ -266,3 +266,16 @@ def test_validate_egress_url_total(url):
         pass
     else:
         assert isinstance(out, str)
+
+
+@given(st.text(max_size=120))
+@settings(max_examples=300, deadline=None)
+def test_normalized_email_domain_total(raw):
+    """R321: the IDN email-domain folder is TOTAL over arbitrary text —
+    returns a lowercase domain string or "", never raises (it feeds the
+    auth gate; a hostile address must not 500 the login path)."""
+    from app.integrations.services.domains import normalized_email_domain
+
+    out = normalized_email_domain(raw)
+    assert isinstance(out, str)
+    assert out == out.lower()
