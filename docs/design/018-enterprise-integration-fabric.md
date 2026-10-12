@@ -928,6 +928,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R336 (tenth window, PERF — EXPLAIN audit + events time index)**:
+  generalized R334 into a systematic EXPLAIN audit over ~26 fabric
+  hot-path predicates against the million-row dev DB. One more real find:
+  the retention sweep's global `time < cutoff` on intg_events (the
+  fastest-growing fabric table — every mesh emit) sequential-scanned
+  nightly, because the only time-bearing index leads with org_id.
+  intg17a00017 adds ix_intg_events_time; plan flips to an index scan;
+  fresh-DB reversibility re-verified at intg17. Everything else indexed
+  clean (deliveries, staged, runs, links, members, users-lower, domains,
+  import jobs/errors, export runs, subs).
 - **R335 (tenth window, mid regression record)**: post R319-R334 (IDN
   split-brain, ordering fixture, fabric format-clean, CI sweep + live-E2E
   jobs, JWKS floor + private_key_jwt pins, 22-check scale smoke, last-
