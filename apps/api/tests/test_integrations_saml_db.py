@@ -966,3 +966,44 @@ async def test_saml_request_id_single_use_and_connection_scoped(db):
             relay_state=state_b_victim,
         )
     assert xconn.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_slo_dtd_forbidden_even_when_signed(db):
+    """R265 (survivor pin): a DTD-carrying LogoutRequest is refused even
+    with a VALID IdP signature over the query — the doctype screen is not
+    allowed to rot behind the signature layer."""
+    import zlib
+    from urllib.parse import quote
+
+    from cryptography.hazmat.primitives import hashes as _h
+    from cryptography.hazmat.primitives import serialization as _ser
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+    req = (
+        "<!DOCTYPE foo [<!ENTITY bar \"x\">]>"
+        f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_LO{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).isoformat()}">'
+        f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer>"
+        "<saml:NameID>dtd-sub</saml:NameID>"
+        "</samlp:LogoutRequest>"
+    )
+    deflated = zlib.compress(req.encode())[2:-4]
+    base_q = (
+        f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}"
+        "&SigAlg=" + quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+    )
+    key = _ser.load_pem_private_key(
+        IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
+    )
+    sig = key.sign(base_q.encode(), _pad.PKCS1v15(), _h.SHA256())
+    with pytest.raises(AppError) as e:
+        await svc.handle_slo_request(
+            connection_id=conn.id,
+            raw_query=base_q + "&Signature=" + quote(base64.b64encode(sig).decode(), safe=""),
+        )
+    assert e.value.code == "SSO_ASSERTION_INVALID"

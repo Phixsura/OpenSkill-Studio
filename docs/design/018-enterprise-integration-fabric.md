@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R265 (eighth window, SLO probe ledger + DTD pin)**: batch 29 probed
+  the SAML Single Logout validator. Bad-signature and issuer-mismatch
+  KILLED. Two layered-defense equivalents documented: dropping the
+  unsigned-presence check still rejects (the empty Signature segment
+  fails inside the decode try -> slo_signature_invalid), and dropping the
+  SigAlg allowlist is absorbed by the hardcoded SHA256 verify. The DTD
+  screen however had NO SLO-side test (the assertion-side DTD test does
+  not reach this parser) — pinned with `test_slo_dtd_forbidden_even_when_
+signed` (valid IdP signature over a DOCTYPE-carrying LogoutRequest ->
+  refused); re-probed KILLED.
 - **R264 (eighth window, back-channel-logout probe ledger)**: batch 28
   probed the OIDC back-channel logout validator — nonce-prohibition, events
   member, iat freshness and sub requirement all KILLED. Two documented
