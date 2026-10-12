@@ -43,7 +43,13 @@ function section(name) {
 const email = `fabric-${Date.now()}@test.com`;
 const password = "Test1234!";
 
-const browser = await chromium.launch({ headless: true, executablePath: CHROMIUM_PATH });
+const browser = await chromium.launch({
+  headless: true,
+  executablePath: CHROMIUM_PATH,
+  // R367: Chromium honors the macOS SYSTEM proxy; never route the
+  // localhost walk through it (the user's local proxy 502s loopback).
+  args: ["--no-proxy-server"],
+});
 const context = await browser.newContext({ viewport: { width: 1380, height: 900 } });
 const page = await context.newPage();
 

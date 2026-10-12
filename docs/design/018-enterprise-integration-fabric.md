@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R367 (eleventh window, drills into the repo + system-proxy class)**:
+  the five operational drills (redis/minio outage, kill -9 crash,
+  4-hop migration, rate-limiter engagement) moved from throwaway job
+  tooling into `apps/api/tests/drills/` with repo-relative paths and a
+  README (what each breaks, what it asserts). Porting them surfaced a
+  new environment class: the user's macOS SYSTEM proxy came on
+  mid-session and urllib honors SystemConfiguration even with clean env
+  vars — localhost requests 502'd through the proxy. All drills now
+  install a direct (no-proxy) opener, the browser walk launches Chromium
+  with --no-proxy-server, and the httpx suites were already safe
+  (trust_env=False skips env; httpx never reads macOS system proxies).
+  Lesson: "no proxy env vars" proves nothing on macOS — force direct
+  handlers for loopback tooling.
 - **R366 (eleventh window, rate-limiter engagement drill — two production
   fixes)**: every live suite runs APP_ENV=test where rate limiting is
   skipped, so the 429 path had never been exercised live. A dev-mode
