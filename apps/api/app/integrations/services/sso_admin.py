@@ -61,6 +61,10 @@ class SsoAdminService:
                 raise AppError(
                     "SSO_CONFIG_INVALID", "at least one signing certificate required", 422
                 )
+        # R261 (R260 class): FOR UPDATE org lock makes the cap race-proof.
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         count = len(
             (
                 await self.db.execute(

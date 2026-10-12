@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R261 (eighth window, R260 class — cap TOCTOU sweep)**: swept every
+  per-org cap in the fabric for the same count-then-insert race. Domains
+  (R113) and webhooks already lock; SCIM token create and SSO connection
+  create did NOT — two concurrent creates at cap-1 both pass the count and
+  exceed the bound (each SCIM token is full provisioning power; each SSO
+  connection is a trust anchor). Both now take the FOR UPDATE org lock
+  before counting. Races pinned in races_db (exactly one win at cap-1 for
+  both) and demonstrated real with the lock removed + adverse scheduling
+  injected (both tests then yield cap+1).
 - **R260 (eighth window, SECURITY fix — break-glass cap TOCTOU)**:
   `set_break_glass` counted designees and then set the flag with no
   serialization — two concurrent enables at cap-1 both count 1 < 2 and

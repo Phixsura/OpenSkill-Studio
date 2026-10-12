@@ -170,6 +170,13 @@ class ScimTokenService:
     async def create(
         self, org_id: str, *, name: str, group_map: dict | None, created_by: str
     ) -> tuple[ScimToken, str]:
+        # R261 (R260 class): FOR UPDATE org lock serializes count-then-insert
+        # — two concurrent creates at cap-1 would otherwise both pass the
+        # count and exceed the token cap (each token is full provisioning
+        # power, so the bound must hold under races).
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
         active = (
             await self.db.execute(
                 select(ScimToken.id).where(

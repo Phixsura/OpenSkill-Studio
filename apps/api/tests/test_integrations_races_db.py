@@ -785,3 +785,69 @@ async def test_break_glass_cap_holds_under_concurrent_enables(db):
         )
     ).scalars().all()
     assert len(n) == 2
+
+
+@pytest.mark.asyncio
+async def test_scim_token_cap_holds_under_concurrent_creates(db):
+    """R261 (R260 class): two concurrent SCIM token creates at cap-1 must
+    yield exactly one success — FOR UPDATE org lock serializes the cap."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.models import MAX_SCIM_TOKENS_PER_ORG
+    from app.integrations.services.scim import ScimTokenService
+
+    org, owner = await _org(db)
+    for i in range(MAX_SCIM_TOKENS_PER_ORG - 1):
+        await ScimTokenService(db).create(
+            org.id, name=f"pre-{i}", group_map=None, created_by=owner.id
+        )
+    await db.commit()
+
+    async def creator(n):
+        async with AsyncSessionLocal() as own:
+            try:
+                await ScimTokenService(own).create(
+                    org.id, name=f"racer-{n}", group_map=None, created_by=owner.id
+                )
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(await asyncio.gather(creator(1), creator(2)))
+    assert results == ["SCIM_TOKEN_LIMIT", "won"]
+
+
+@pytest.mark.asyncio
+async def test_sso_connection_cap_holds_under_concurrent_creates(db):
+    """R261 (R260 class): two concurrent SSO connection creates at cap-1
+    must yield exactly one success."""
+    from app.core.database import AsyncSessionLocal
+    from app.exceptions import AppError
+    from app.integrations.services.sso_admin import (
+        MAX_SSO_CONNECTIONS_PER_ORG,
+        SsoAdminService,
+    )
+
+    org, owner = await _org(db)
+    for i in range(MAX_SSO_CONNECTIONS_PER_ORG - 1):
+        await SsoAdminService(db).create(
+            org.id, protocol="oidc",
+            oidc_issuer=f"https://idp{i}.example.com", oidc_client_id="c",
+        )
+    await db.commit()
+
+    async def creator(n):
+        async with AsyncSessionLocal() as own:
+            try:
+                await SsoAdminService(own).create(
+                    org.id, protocol="oidc",
+                    oidc_issuer=f"https://racer{n}.example.com", oidc_client_id="c",
+                )
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(await asyncio.gather(creator(1), creator(2)))
+    assert results == ["SSO_LIMIT_REACHED", "won"]
