@@ -1587,3 +1587,47 @@ async def test_jwks_kid_miss_refetch_floor(db, monkeypatch):
     fresh = await svc._jwks_keys(conn, "https://idp/jwks", kid="kid-2")
     assert calls["n"] == 2 and "kid-2" in fresh
     oidc_mod._jwks_cache.pop(conn.id, None)
+
+
+@pytest.mark.asyncio
+async def test_last_break_glass_cannot_be_removed_under_enforced_sso(db):
+    """R331 (R330 class): with enforce_sso active, removing the LAST
+    designee deletes the escape hatch the flip required — refused 409.
+    Allowed again once enforce_sso is off, or when a second designee
+    remains."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+    conn = await svc.create(
+        org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="c",
+    )
+    conn.status = "active"
+    from app.models.organization import OrgRole as _Role
+
+    await svc.set_break_glass(org.id, owner.id, enabled=True, actor_role=_Role.OWNER)
+    await svc.update(org.id, conn.id, enforce_sso=True)
+
+    # last designee + enforced -> refused, flag intact
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(org.id, owner.id, enabled=False, actor_role=_Role.OWNER)
+    assert e.value.code == "BREAK_GLASS_REQUIRED"
+    member = (
+        await db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org.id, OrgMember.user_id == owner.id
+            )
+        )
+    ).scalar_one()
+    assert member.is_break_glass is True
+
+    # a second designee makes removal of the first fine
+    u2 = await _user(db)
+    db.add(OrgMember(org_id=org.id, user_id=u2.id, role=OrgRole.ADMIN,
+                     status=MemberStatus.ACTIVE))
+    await db.flush()
+    await svc.set_break_glass(org.id, u2.id, enabled=True, actor_role=_Role.OWNER)
+    await svc.set_break_glass(org.id, owner.id, enabled=False, actor_role=_Role.OWNER)
+
+    # and with enforce off, the last one can retire too
+    await svc.update(org.id, conn.id, enforce_sso=False)
+    await svc.set_break_glass(org.id, u2.id, enabled=False, actor_role=_Role.OWNER)

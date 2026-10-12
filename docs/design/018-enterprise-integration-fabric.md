@@ -928,6 +928,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R331 (tenth window, R330 class — last-designee guard)**: the same
+  last-X sweep found the symmetric hole on break-glass: the owner could
+  retire the LAST designee while a connection still enforces SSO —
+  silently deleting the escape hatch the enforce flip REQUIRED (§5.2).
+  set_break_glass(enabled=False) now refuses (409 BREAK_GLASS_REQUIRED)
+  when an active enforced connection exists and no other designee
+  remains; pinned three ways (refused+flag intact; second designee frees
+  the first; enforce-off frees the last); guard-removed mutant KILLED.
 - **R330 (tenth window, SECURITY/availability fix — last-owner
   deprovision)**: the scale smoke found it the honest way — its own bulk
   deactivate archived the admin who minted the token, and every

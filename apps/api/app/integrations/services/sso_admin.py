@@ -447,5 +447,38 @@ class SsoAdminService:
             ).all()
             if len(current) >= 2 and not member.is_break_glass:
                 raise AppError("BREAK_GLASS_LIMIT", "At most 2 break-glass members", 422)
+        elif member.is_break_glass:
+            # R331 (R330 class — last-X invariants): removing the LAST
+            # designee while any connection still enforces SSO deletes the
+            # escape hatch the enforce flip REQUIRED (§5.2) — a botched IdP
+            # change then locks every password login out. Disable
+            # enforce_sso first, then retire the designee.
+            enforced = (
+                await self.db.execute(
+                    select(SsoConnection.id).where(
+                        SsoConnection.org_id == org_id,
+                        SsoConnection.enforce_sso.is_(True),
+                        SsoConnection.status == "active",
+                    )
+                )
+            ).first()
+            if enforced is not None:
+                others = (
+                    await self.db.execute(
+                        select(OrgMember.id).where(
+                            OrgMember.org_id == org_id,
+                            OrgMember.is_break_glass.is_(True),
+                            OrgMember.status == MemberStatus.ACTIVE,
+                            OrgMember.user_id != member_user_id,
+                        )
+                    )
+                ).first()
+                if others is None:
+                    raise AppError(
+                        "BREAK_GLASS_REQUIRED",
+                        "Enforced SSO requires a break-glass member — disable "
+                        "enforce_sso before removing the last designee",
+                        409,
+                    )
         member.is_break_glass = enabled
         await self.db.flush()
