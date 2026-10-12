@@ -179,7 +179,13 @@ async def test_resolution_unverified_email_queues(db):
     with pytest.raises(AppError) as e:
         await svc.resolve(_ident(org, email="a@acme.edu", verified=False))
     assert e.value.code == "IDENTITY_AMBIGUOUS"
-    q = (await db.execute(select(IdentityMatchQueue))).scalars().all()
+    # Lesson 8/24: never assert on the LAST row of a global, unordered
+    # select against the shared dev DB — key on our own org instead.
+    q = (
+        await db.execute(
+            select(IdentityMatchQueue).where(IdentityMatchQueue.org_id == org.id)
+        )
+    ).scalars().all()
     assert q and q[-1].reason == "email_unverified_or_foreign_domain"
     # Retried login does not duplicate the pending row.
     with pytest.raises(AppError):
@@ -1341,3 +1347,7 @@ async def test_queue_resolve_single_winner_under_race(db):
     assert results == ["IDENTITY_QUEUE_RESOLVED", "won"]
     await db.refresh(item)
     assert item.status == "rejected"
+    # tidy the committed row — global-select assertions elsewhere are
+    # sensitive to shared-DB leftovers.
+    await db.delete(item)
+    await db.commit()

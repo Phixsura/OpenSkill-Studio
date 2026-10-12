@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R310 (ninth window, shared-DB assertion hardening)**: R308's
+  committed race rows tripped a latent time bomb — an old test asserted
+  the reason of the LAST row of a GLOBAL unordered IdentityMatchQueue
+  select (lesson 8/24 shape). Fixed the assertion to key on its own org,
+  and the race test now tidies its committed row. Cert-expiry daily dedup
+  probe KILLED. Fabric battery 356 green.
 - **R309 (ninth window, alert edge-trigger pin)**: the unhealthy-alert
   edge condition (`status != before`) survived mutation — the existing
   transition test rode the auth->ERROR path, and parked connections leave
