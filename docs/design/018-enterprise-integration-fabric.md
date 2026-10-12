@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R293 (ninth window, mid-window regression record)**: after R277-R292
+  (1 security fix, retention, 2 UI staleness fixes + placeholder bug, the
+  53-check browser walk, 2 contract guards, sweep source-scan, ops-doc
+  guard, DX targets, unicode pin) the whole stack re-verified foreground:
+  12 backend chunks zero-fail, fabric battery 347 (make test-intg), web
+  764 + tsc + eslint, live E2E 62/62, adversarial 178/0.
 - **R292 (ninth window, unicode round-trip pin)**: CJK+emoji display
   names survive SCIM create/get, and the 100-char display-name cap cuts
   CHARACTERS not bytes (a 120-char CJK name truncates to exactly 100
