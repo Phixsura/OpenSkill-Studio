@@ -103,6 +103,26 @@ try {
   );
   check("health strip visible", /health|connection|deliver/i.test(hubText));
 
+  // ── 2b. Create a connection through the real form ──
+  const provSelect = await page.$('select[aria-label="Provider"]');
+  check("provider select present", provSelect !== null);
+  if (provSelect) {
+    await provSelect.selectOption("generic_rest");
+    await page.fill('input[aria-label="Connection name"]', "Walk ATS");
+    await page.fill('input[aria-label="Base URL"]', "https://ats.example.com/api");
+    const createConnBtn = await page.$('button:has-text("Create")');
+    if (createConnBtn) {
+      await createConnBtn.click();
+      await page.waitForTimeout(3000);
+      const afterConn = await page.textContent("body");
+      check("connection row listed", afterConn.includes("Walk ATS"), afterConn.slice(0, 160));
+      check(
+        "connection shows write-only credential affordance",
+        /credential|secret/i.test(afterConn),
+      );
+    }
+  }
+
   // ── 3. Identity: claim domain + mint SCIM token ──
   section("3. Identity page");
   await page.goto(`${intgBase}/identity`, { waitUntil: "networkidle", timeout: 30000 });
@@ -195,6 +215,21 @@ try {
   check("data page renders", /export|import|stream/i.test(dataText));
   const tmplBtn = await page.$('button:has-text("template"), a:has-text("template"), button:has-text("Template"), a:has-text("Template")');
   check("import template download present", tmplBtn !== null);
+
+  // ── 6a2. Create an export stream through the real form ──
+  const streamNameInput = await page.$('input[aria-label="Stream name"]');
+  check("stream form present", streamNameInput !== null);
+  if (streamNameInput) {
+    const sname = `walk-${Date.now()}`;
+    await streamNameInput.fill(sname);
+    const createStreamBtn = await page.$('button:has-text("Create stream")');
+    if (createStreamBtn) {
+      await createStreamBtn.click();
+      await page.waitForTimeout(3000);
+      const afterStream = await page.textContent("body");
+      check("export stream row listed", afterStream.includes(sname), afterStream.slice(0, 160));
+    }
+  }
 
   // ── 6b. Full import journey: upload CSV -> preview -> commit -> member ──
   const importedEmail = `imported-${Date.now()}@corp.example.edu`;

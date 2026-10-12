@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R283 (ninth window, browser walk — create journeys)**: the walk now
+  also drives the hub's New-connection form (generic_rest + base URL ->
+  row listed with the write-only credential affordance) and the data
+  page's export-stream form (name -> row listed). 35/35 PASS. Every
+  fabric admin CREATE surface is now exercised in a real browser:
+  connection, domain claim, SCIM token, webhook subscription, export
+  stream, import job.
 - **R282 (ninth window, browser walk — import journey)**: extended the
   walk with the full Part-K admin journey IN the browser: synthesize a
   users CSV, attach via the real file input, Upload & preview (dry-run
