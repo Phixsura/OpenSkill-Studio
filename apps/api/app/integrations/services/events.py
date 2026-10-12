@@ -381,6 +381,8 @@ RETAIN_DELIVERIES = timedelta(days=90)   # terminal deliveries + attempts
 RETAIN_EVENTS = timedelta(days=180)      # canonical events (cascade deliveries)
 RETAIN_SYNC_RUNS = timedelta(days=180)   # terminal runs (cascade record rows)
 RETAIN_ROW_ERRORS = timedelta(days=180)  # import row errors
+RETAIN_EXPORT_RUNS = timedelta(days=90)  # R280: hourly streams mint ~720 rows/month each
+RETAIN_RESOLVED_QUEUE = timedelta(days=180)  # R280: resolved identity-match items
 _RETENTION_BATCH = 10_000
 
 
@@ -450,6 +452,40 @@ async def sweep_retention(db: AsyncSession) -> dict[str, int]:
             ImportRowError.id.in_(
                 select(ImportRowError.id)
                 .where(ImportRowError.created_at < now - RETAIN_ROW_ERRORS)
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    # R280: two more unbounded-growth tables. Export runs are minted hourly
+    # per scheduled stream (manifests live in the bucket; the DB row is
+    # bookkeeping), and RESOLVED identity-queue items are audit crumbs —
+    # pending ones are never aged out.
+    from app.integrations.models import ExportRun, IdentityMatchQueue
+
+    counts["export_runs"] = 0
+    counts["queue_items"] = 0
+    await drain(
+        "export_runs",
+        lambda: delete(ExportRun).where(
+            ExportRun.id.in_(
+                select(ExportRun.id)
+                .where(
+                    ExportRun.status.in_(("succeeded", "failed")),
+                    ExportRun.created_at < now - RETAIN_EXPORT_RUNS,
+                )
+                .limit(_RETENTION_BATCH)
+            )
+        ),
+    )
+    await drain(
+        "queue_items",
+        lambda: delete(IdentityMatchQueue).where(
+            IdentityMatchQueue.id.in_(
+                select(IdentityMatchQueue.id)
+                .where(
+                    IdentityMatchQueue.status != "pending",
+                    IdentityMatchQueue.created_at < now - RETAIN_RESOLVED_QUEUE,
+                )
                 .limit(_RETENTION_BATCH)
             )
         ),

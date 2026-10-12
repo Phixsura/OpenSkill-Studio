@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R280 (ninth window, unbounded-growth round 3)**: table-by-table
+  retention audit found two tables the nightly sweep missed — ExportRun
+  (hourly streams mint ~720 bookkeeping rows per month EACH; manifests
+  live in the bucket) and IdentityMatchQueue (resolved items are audit
+  crumbs that accumulated forever). Both added to sweep_retention with
+  the same batched-drain pattern: terminal export runs age out at 90d,
+  resolved queue items at 180d; running runs and PENDING queue items
+  never age out. Pinned (old-terminal gone / live+pending kept) and all
+  three retention mutants KILLED.
 - **R279 (ninth window, R229 class — UI staleness sweep round 2)**:
   re-ran the queryKey-vs-invalidation map over every fabric page. Two
   co-rendered queries were never invalidated: the hub page's health strip

@@ -1165,3 +1165,50 @@ async def test_single_replay_rejected_on_inactive_subscription(db, egress):
     with pytest.raises(AppError) as e:
         await replay_delivery(db, org.id, d.id)
     assert e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_retention_sweep_covers_export_runs_and_resolved_queue(db):
+    """R280: two more unbounded-growth tables age out — TERMINAL export
+    runs (hourly streams mint ~720/month each) and RESOLVED identity-queue
+    items. Running runs and PENDING queue items never age out."""
+    from datetime import timedelta as _td
+
+    from app.integrations.models import ExportRun, ExportStream, IdentityMatchQueue
+    from app.integrations.services.events import sweep_retention
+
+    org = await _org(db)
+    old = datetime.now(UTC) - _td(days=200)
+    stream = ExportStream(
+        org_id=org.id, name=f"r-{uuid.uuid4().hex[:6]}", dataset="events",
+        field_allowlist=["id"], anonymize={}, schedule="manual",
+    )
+    db.add(stream)
+    await db.flush()
+    run_old = ExportRun(stream_id=stream.id, status="succeeded", created_at=old,
+                        cursor_from={})
+    run_live = ExportRun(stream_id=stream.id, status="running", created_at=old,
+                         cursor_from={})
+    q_old = IdentityMatchQueue(org_id=org.id, source="scim", connection_ref="c",
+                               subject=f"s-{uuid.uuid4().hex[:6]}", email="a@x.edu",
+                               reason="ambiguous", payload={}, status="dismissed",
+                               created_at=old)
+    q_pending = IdentityMatchQueue(org_id=org.id, source="scim", connection_ref="c",
+                                   subject=f"p-{uuid.uuid4().hex[:6]}", email="b@x.edu",
+                                   reason="ambiguous", payload={}, status="pending",
+                                   created_at=old)
+    db.add_all([run_old, run_live, q_old, q_pending])
+    await db.flush()
+    ids = (run_old.id, run_live.id, q_old.id, q_pending.id)
+    await db.commit()
+
+    counts = await sweep_retention(db)
+    assert counts["export_runs"] >= 1 and counts["queue_items"] >= 1
+    assert await db.get(ExportRun, ids[0]) is None       # old terminal: gone
+    assert await db.get(ExportRun, ids[1]) is not None   # running: kept
+    assert await db.get(IdentityMatchQueue, ids[2]) is None      # resolved: gone
+    assert await db.get(IdentityMatchQueue, ids[3]) is not None  # pending: kept
+    # tidy the kept rows so later sweeps/suites see a clean slate.
+    await db.delete(await db.get(ExportRun, ids[1]))
+    await db.delete(await db.get(IdentityMatchQueue, ids[3]))
+    await db.commit()
