@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R298 (ninth window, browser walk — SSO create + secret hygiene)**:
+  the walk now drives the OIDC SSO form (issuer + client id + secret ->
+  Add OIDC) and asserts the listed row carries NO echo of the client
+  secret anywhere in the rendered page (write-only secret, UI edition).
+  56/56 PASS. Also: uv lockfile verified consistent; pnpm audit
+  unavailable on the configured mirror registry (no audit endpoint) —
+  noted, not actionable here.
 - **R297 (ninth window, alembic-check audit)**: ran `alembic check` for
   model/migration drift (another never-run production gate). Findings:
   repo-wide, long-standing cosmetic drift — hand-written migrations omit

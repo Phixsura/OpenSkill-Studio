@@ -181,6 +181,27 @@ try {
     );
   }
 
+  // ── 3c. Create an OIDC SSO connection through the real form ──
+  const issuerInput = await page.$('input[aria-label="OIDC issuer"]');
+  check("SSO OIDC form present", issuerInput !== null);
+  if (issuerInput) {
+    await issuerInput.fill("https://login.walk-idp.example.com");
+    await page.fill('input[aria-label="Client ID"]', "walk-client");
+    await page.fill('input[aria-label="Client secret"]', "walk-secret");
+    const addSsoBtn = await page.$('button:has-text("Add OIDC")');
+    check("Add OIDC button present", addSsoBtn !== null);
+    if (addSsoBtn) {
+      await addSsoBtn.click();
+      await page.waitForTimeout(2500);
+      const afterSso = await page.textContent("body");
+      check(
+        "SSO connection row listed (no secret echoed)",
+        afterSso.includes("walk-idp.example.com") && !afterSso.includes("walk-secret"),
+        afterSso.slice(0, 160),
+      );
+    }
+  }
+
   // ── 4. Events: catalog + create subscription ──
   section("4. Events page");
   await page.goto(`${intgBase}/events`, { waitUntil: "networkidle", timeout: 30000 });
