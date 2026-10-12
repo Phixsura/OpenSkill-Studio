@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R340 (tenth window, roster-scale section)**: the smoke's fifth
+  section enrolls all 500 imported users into one cohort through the
+  roster import (the add_member funnel with its capacity lock, 500 rows)
+  — 25/25 within bounds.
 - **R338 (tenth window, walk-harness scoping note)**: attempted an
   internal-LTI-issuer negative in the walk; it CANNOT prove the egress
   screen there — the walk's API runs EGRESS_ALLOW_PRIVATE=true for its

@@ -140,8 +140,9 @@ async def main() -> None:
 
         # ── import at size: 500-row CSV upload -> preview -> commit ──
         idom = f"imp-{uuid.uuid4().hex[:8]}.example.edu"
+        imported_emails = [f"i{i}-{uuid.uuid4().hex[:4]}@{idom}" for i in range(500)]
         csv_body = "email,display_name,role\n" + "\n".join(
-            f"i{i}-{uuid.uuid4().hex[:4]}@{idom},Import {i},student" for i in range(500)
+            f"{e},Import {i},student" for i, e in enumerate(imported_emails)
         )
         t0 = time.monotonic()
         rr = await c.post(
@@ -171,6 +172,35 @@ async def main() -> None:
             total_members = rr.json().get("meta", {}).get("total", 0)
             check("member count reflects the import", total_members >= 500,
                   f"total={total_members} {rr.text[:100]}")
+
+        # ── roster at size: enroll the 500 imported users into one cohort ──
+        rr = await c.post(
+            f"{API}/orgs/{org}/cohorts", headers=h,
+            json={"name": f"Scale Cohort {uuid.uuid4().hex[:6]}"},
+        )
+        cohort_slug = rr.json()["data"]["slug"]
+        roster_csv = "email,cohort_slug,role\n" + "\n".join(
+            f"{e},{cohort_slug},learner" for e in imported_emails
+        )
+        rr = await c.post(
+            f"{base}/imports", headers=h,
+            data={"kind": "roster", "mode": "partial",
+                  "idempotency_key": f"ros-{uuid.uuid4().hex[:10]}"},
+            files={"file": ("roster.csv", roster_csv.encode(), "text/csv")},
+        )
+        ok_ros = rr.status_code in (200, 201) and rr.json()["data"]["dry_stats"]["valid"] == 500
+        check("500-row roster previews clean", ok_ros, rr.text[:160])
+        if ok_ros:
+            t0 = time.monotonic()
+            rr = await c.post(
+                f"{base}/imports/{rr.json()['data']['id']}/commit", headers=h,
+                timeout=httpx.Timeout(180.0),
+            )
+            dt_r = time.monotonic() - t0
+            applied_r = rr.json().get("data", {}).get("stats", {}).get("applied", 0)
+            check("500 enrollments committed", applied_r == 500,
+                  f"{rr.status_code} {rr.text[:140]}")
+            check("roster commit bound (<60s)", dt_r < 60, f"{dt_r:.1f}s")
 
         # ── mesh at size: 200 events fan out to 2 subscriptions ──
         sink_payloads: list[bytes] = []
