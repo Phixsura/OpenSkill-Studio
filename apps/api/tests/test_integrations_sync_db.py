@@ -1673,3 +1673,50 @@ async def test_per_org_sprawl_caps(db):
             direction="pull", mapping_profile_id=None,
         )
     assert e.value.code == "SYNC_PROFILE_LIMIT_REACHED"
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_cross_org_walls(db):
+    """R273 (survivor pins, IDOR class): (a) a sync profile cannot be
+    created against ANOTHER org's connection (the connection id is a
+    cross-org capability otherwise); (b) the DELETE route 404s for a
+    profile belonging to another org — uniform 404, no existence oracle."""
+    from app.integrations.api.sync import delete_sync_profile
+    from app.integrations.models import SyncProfile
+    from app.integrations.services.connections import ConnectionService
+
+    org_a, owner_a = await _org(db)
+    org_b, owner_b = await _org(db)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn_a = await csvc.create(
+        org_a.id, provider_key="oneroster", name=f"a-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner_a.id,
+    )
+    conn_a.status = "active"
+    await db.flush()
+
+    # (a) org B cannot attach a profile to org A's connection.
+    with pytest.raises(AppError) as e:
+        await SyncProfileService(db).create(
+            org_b.id, connection_id=conn_a.id, name="steal",
+            model="roster.class", direction="pull", mapping_profile_id=None,
+        )
+    assert e.value.code == "CONNECTION_NOT_FOUND"
+    assert e.value.status_code == 404
+
+    # (b) org B cannot delete org A's profile through the route.
+    profile_a = await SyncProfileService(db).create(
+        org_a.id, connection_id=conn_a.id, name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await delete_sync_profile(
+            org_id=org_b.id, profile_id=profile_a.id, db=db, user=owner_b
+        )
+    assert e.value.code == "SYNC_PROFILE_NOT_FOUND"
+    assert e.value.status_code == 404
+    assert await db.get(SyncProfile, profile_a.id) is not None

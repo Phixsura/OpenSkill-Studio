@@ -914,6 +914,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R273 (eighth window, twin-guard sweep — 2 IDOR pins)**: generalized
+  R272's lesson into a fabric-wide sweep of DUPLICATED guard lines (same
+  `if` text in 2+ places), probing each occurrence by index. 8 org-gate
+  occurrences probed: connections.get, sso_admin.get, both events-api
+  delivery gates, the events-service replay gate and the engine's profile
+  gate were KILLED; TWO survived — a sync profile could be CREATED against
+  another org's connection (the connection id acting as a cross-org
+  capability), and the profile DELETE route's org check had no test (org B
+  deleting org A's profile). Both pinned in
+  `test_sync_profile_cross_org_walls` (uniform 404, profile untouched);
+  re-probed KILLED. Sweep heuristic recorded: duplicated guard text means
+  the TEST corpus usually covers one twin — probe every occurrence.
 - **R272 (eighth window, SAML authorize open-redirect pin)**: batch 36
   probed the twin return_to screens on the authorize routes. The OIDC
   occurrence was KILLED; the SAML occurrence (identical line, first in
