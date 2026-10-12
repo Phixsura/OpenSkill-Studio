@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R278 (ninth window, state-machine pins)**: the MANUAL trigger's own
+  gates had no tests (the scheduler-side negatives were pinned in R243):
+  triggering a disabled profile or a profile on a disabled connection must
+  409, and cancel refuses an already-finished run (terminal status
+  sticks). Pinned in `test_trigger_and_cancel_state_machine_guards`; both
+  gate mutants re-probed KILLED.
 - **R277 (ninth window, SECURITY fix — group_map foreign-cohort wall)**:
   extended the R276 heuristic from "is this id org-gated at READ" to "is
   this STORED id org-validated at WRITE and org-scoped at EFFECT". The

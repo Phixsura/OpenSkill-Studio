@@ -1771,3 +1771,55 @@ async def test_cross_org_mapping_and_profile_gates(db):
     with pytest.raises(AppError) as e:
         await svc.update(org_b.id, p_b.id, mapping_profile_id=mp_a.id)
     assert e.value.code == "MAPPING_NOT_FOUND" and e.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_trigger_and_cancel_state_machine_guards(db):
+    """R278 (survivor pins): manual trigger refuses a DISABLED profile and
+    an UNAVAILABLE (disabled/error) connection with stable 409s; cancel
+    refuses a finished run (409) and the terminal status sticks. The
+    scheduler-side negatives were pinned in R243 — these pin the MANUAL
+    trigger's own gates."""
+    from app.integrations.services.connections import ConnectionService
+
+    org, owner = await _org(db)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn = await csvc.create(
+        org.id, provider_key="oneroster", name=f"t-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner.id,
+    )
+    conn.status = "active"
+    svc = SyncProfileService(db)
+    profile = await svc.create(
+        org.id, connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+
+    # disabled profile -> 409
+    await svc.update(org.id, profile.id, enabled=False)
+    with pytest.raises(AppError) as e:
+        await svc.trigger(org.id, profile.id)
+    assert e.value.code == "SYNC_PROFILE_DISABLED"
+    await svc.update(org.id, profile.id, enabled=True)
+
+    # disabled connection -> 409
+    conn.status = "disabled"
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.trigger(org.id, profile.id)
+    assert e.value.code == "SYNC_CONNECTION_UNAVAILABLE"
+    conn.status = "active"
+    await db.flush()
+
+    # cancel: queued run cancels; a finished run refuses and stays finished.
+    run = await svc.trigger(org.id, profile.id)
+    out = await svc.cancel(org.id, run.id)
+    assert out.status == "cancelled"
+    with pytest.raises(AppError) as e:
+        await svc.cancel(org.id, run.id)
+    assert e.value.code == "SYNC_RUN_NOT_CANCELLABLE"
+    await db.refresh(run)
+    assert run.status == "cancelled"
