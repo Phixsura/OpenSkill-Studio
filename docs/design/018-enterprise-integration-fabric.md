@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R259 (eighth window, SSRF + registry probe ledger)**: batches 26-27
+  probed the egress screen itself (userinfo smuggling, non-http(s) scheme,
+  port screen, literal private IP, internal TLD/localhost, CGNAT range,
+  mixed public+private resolution) and the connector registry (429 retry
+  bound, 401/403 ping -> unhealthy, 5xx ping -> unhealthy, empty OneRoster
+  token) — 11/11 KILLED with verified failure tails (probe harness now
+  asserts test paths exist and prints the pytest tail). Router audit:
+  every fabric endpoint across sync/connections/events/export/imports/
+  roster carries an owner|admin gate (AST-level sweep, zero missing);
+  response schemas carry no ciphertext/token fields by construction.
 - **R258 (eighth window, mapping field-cap pin + probe-harness lesson)**:
   batch 25 probed roster (cross-org connection IDOR, bad unenroll policy)
   and NRPS (cross-org resource link, inactive registration, next-link SSRF
