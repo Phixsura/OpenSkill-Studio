@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R254 (eighth window, probe ledger)**: 17 more mutants killed —
+  PII-purge filters (2), error-report identifier, SCIM filter case, revoked
+  links (2), conflict run-attachment + stale-accept guard, NRPS next-link
+  screen + page cap, egress scheme allowlist, co-sign rotation window (3:
+  infinite window, never-emitted, immediate-keeps-prev). Full suite
+  7364/7364 on the R253 HEAD; fabric 325, web 764+tsc+lint, E2E 62,
+  adversarial 178, zero tracebacks.
 - **R253 (eighth window, SECURITY fix — LTI dynreg platform mix-up,
   mutation-killed)**: the R251/R252 class for dynamic registration — a
   configuration document whose issuer lives on a DIFFERENT origin than the
