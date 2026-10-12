@@ -1351,3 +1351,38 @@ async def test_queue_resolve_single_winner_under_race(db):
     # sensitive to shared-DB leftovers.
     await db.delete(item)
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_break_glass_login_event_carries_ip_and_ua(db):
+    """R313 (ADR §5.2): the org.breakglass.login mesh event carries IP + UA
+    — a password bypass under enforced SSO must be attributable."""
+    from app.integrations.models import IntegrationEvent
+    from app.services.auth import AuthService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    dom = f"bgip-{uuid.uuid4().hex[:8]}.example.edu"
+    await _verified_domain(db, org, dom)
+    email = f"bg-{uuid.uuid4().hex[:8]}@{dom}"
+    emp = await _user(db, email=email)
+    db.add(OrgMember(org_id=org.id, user_id=emp.id, role=OrgRole.ADMIN,
+                     status=MemberStatus.ACTIVE, is_break_glass=True))
+    db.add(SsoConnection(org_id=org.id, protocol="oidc", status="active",
+                         oidc_issuer=ISSUER, oidc_client_id="c", enforce_sso=True))
+    await db.flush()
+    result = await AuthService(db).login(
+        email, "Test123!", ip_address="198.51.100.7", device_info="E2E-UA/1.0"
+    )
+    assert result.access_token
+    ev = (
+        await db.execute(
+            select(IntegrationEvent).where(
+                IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
+                IntegrationEvent.subject == emp.id,
+            )
+        )
+    ).scalars().first()
+    assert ev is not None
+    assert ev.data["ip_address"] == "198.51.100.7"
+    assert ev.data["user_agent"] == "E2E-UA/1.0"

@@ -186,7 +186,7 @@ class AuthService:
         # has verified this email's domain must authenticate via the IdP —
         # password login is refused unless the member is break-glass (owner-
         # granted escape hatch; every use is audited to the event mesh).
-        await self._enforce_sso_gate(user)
+        await self._enforce_sso_gate(user, ip_address=ip_address, device_info=device_info)
 
         user.last_login_at = datetime.now(UTC)
         await self.db.flush()
@@ -503,7 +503,9 @@ class AuthService:
 
     # ── Helpers ───────────────────────────────────────────────
 
-    async def _enforce_sso_gate(self, user: User) -> None:
+    async def _enforce_sso_gate(
+        self, user: User, *, ip_address: str | None = None, device_info: str | None = None
+    ) -> None:
         """Raise SSO_REQUIRED for password logins covered by enforced SSO
         (fail-safe OPEN only for mesh audit, never for the gate itself)."""
         from app.integrations.models import OrgDomain, SsoConnection
@@ -542,7 +544,14 @@ class AuthService:
                 org_id,
                 "org.breakglass.login",
                 subject=user.id,
-                data={"user_id": user.id},
+                # ADR §5.2 (R313): the audit row carries IP + UA — a
+                # break-glass use is a security event an operator must be
+                # able to attribute.
+                data={
+                    "user_id": user.id,
+                    "ip_address": ip_address,
+                    "user_agent": (device_info or "")[:300] or None,
+                },
             )
         except Exception:
             log.warning("mesh_emit_failed", event="org.breakglass.login", user_id=user.id)

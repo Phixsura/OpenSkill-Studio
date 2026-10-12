@@ -922,6 +922,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R313 (ninth window, fix — ADR commitment sweep continued)**: §5.2
+  also promises the break-glass audit row carries "IP + UA" — the emit
+  only carried user_id. login() already receives ip_address/device_info;
+  threaded them through the gate into the event payload (UA capped at
+  300 chars). Pinned. The third §5.2 clause ("WebAuthn-or-TOTP required")
+  is documented as an explicit deferral in §19 (R312): the platform has
+  no MFA infrastructure (Gap #181), compensating controls listed.
 - **R311 (ninth window, fix — ADR commitment never implemented)**:
   §5.2's S1.3 runbook rule ("the rotation endpoint refuses 409
   BREAK_GLASS_UNVERIFIED if no break-glass login succeeded in the last 90
