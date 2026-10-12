@@ -338,3 +338,55 @@ async def test_push_loads_connection_credentials(db):
     await db.commit()
     await execute_run(db, run.id)
     assert seen.get("api_key") == "ats-secret-xyz"
+
+
+@pytest.mark.asyncio
+async def test_push_model_gate_and_mapping_drift_fail_run(db):
+    """R270 (survivor pins, defense-in-depth): _execute_push refuses (a) a
+    push profile whose model is not talent.application (reachable only by
+    bypassing create-validation, but the run must fail closed, not push
+    roster rows into an ATS) and (b) a mapping whose version drifted from
+    the profile's pin — on the PUSH side (the pull side was already pinned)."""
+    from app.integrations.models import MappingProfile, SyncProfile, SyncRun
+
+    class _Conn(FakeAtsConnector):
+        async def write(self, ctx, model, records):
+            raise AssertionError("must never write")
+
+    org, owner = await _org(db)
+    conn, profile = await _setup(db, org, owner, _Conn())
+
+    # (a) model gate: direct row with a non-push model.
+    rogue = SyncProfile(
+        org_id=org.id, connection_id=conn.id, name=f"rogue-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="push", schedule="manual",
+        field_policy={}, options={},
+    )
+    db.add(rogue)
+    await db.flush()
+    run = SyncRun(profile_id=rogue.id, status="queued", trigger="manual")
+    db.add(run)
+    await db.commit()
+    await execute_run(db, run.id)
+    await db.refresh(run)
+    assert run.status == "failed"
+    assert run.error["class"] == "push_model_unsupported"
+
+    # (b) mapping drift on push: pin version, then bump the mapping.
+    doc = {"fields": [{"target": "status", "path": "status"}]}
+    mp = MappingProfile(
+        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", direction="outbound",
+        model="talent.application", document=doc, version=1,
+    )
+    db.add(mp)
+    await db.flush()
+    profile.mapping_profile_id = mp.id
+    profile.mapping_version = 1
+    mp.version = 2  # drift
+    run2 = SyncRun(profile_id=profile.id, status="queued", trigger="manual")
+    db.add(run2)
+    await db.commit()
+    await execute_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.status == "failed"
+    assert run2.error["class"] == "mapping_version_drift"

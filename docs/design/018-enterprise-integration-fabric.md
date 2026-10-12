@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R270 (eighth window, push defense-in-depth pins)**: batch 33 probed
+  the push pipeline. Consent semantics KILLED both ways (revoked treated
+  as consent; default-consent). Two defense-in-depth gaps pinned: the
+  push model gate (a profile reaching _execute_push with a non-
+  talent.application model — only possible past create-validation — must
+  fail closed with push_model_unsupported, never push roster rows into an
+  ATS) and the PUSH-side mapping version-drift check (pull side was
+  pinned; push side was not). Probe-harness note: the drift anchor occurs
+  twice (pull+push) — the first probe mutated the pull side and read as a
+  false survivor; re-probed the second occurrence via rfind: KILLED.
 - **R269 (eighth window, bulk failOnErrors pin + migration check)**:
   batch 32 probed SCIM /Bulk — op-count cap and BulkRequest-schema guard
   KILLED; the failOnErrors non-negative-int validation had no test (a
