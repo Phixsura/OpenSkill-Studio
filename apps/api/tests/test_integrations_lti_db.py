@@ -652,7 +652,7 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     # Missing required key (token_endpoint) -> CONFIG_INVALID.
     broken = dict(config)
     broken.pop("token_endpoint")
-    broken["issuer"] = f"{iss}-broken"
+    broken["issuer"] = f"{iss}/t-broken"
     with pytest.raises(AppError) as e_missing:
         await dynamic_register(
             db, org.id,
@@ -672,7 +672,7 @@ async def test_dynamic_registration_full_flow_and_screens(db):
             )
 
     eb_cfg = dict(config)
-    eb_cfg["issuer"] = f"{iss}-eb"
+    eb_cfg["issuer"] = f"{iss}/t-eb"
     with pytest.raises(AppError) as e_empty:
         await dynamic_register(
             db, org.id,
@@ -685,7 +685,7 @@ async def test_dynamic_registration_full_flow_and_screens(db):
     # Plain OIDC server (no platform claim) refused.
     bare = dict(config)
     bare.pop(PLATFORM_CONFIG_CLAIM)
-    bare["issuer"] = f"{iss}-bare"
+    bare["issuer"] = f"{iss}/t-bare"
     with pytest.raises(AppError) as e1:
         await dynamic_register(
             db, org.id,
@@ -719,7 +719,7 @@ async def test_dynamic_registration_full_flow_and_screens(db):
             )
 
     ref_cfg = dict(config)
-    ref_cfg["issuer"] = f"{iss}-ref"
+    ref_cfg["issuer"] = f"{iss}/t-ref"
     with pytest.raises(AppError) as e2:
         await dynamic_register(
             db, org.id,
@@ -751,3 +751,36 @@ async def test_deep_link_data_round_trips_verbatim(db):
     )
     claims2 = _pyjwt.decode(token2, options={"verify_signature": False})
     assert f"{DL_CLAIM}data" not in claims2
+
+
+@pytest.mark.asyncio
+async def test_dynreg_rejects_cross_origin_issuer(db):
+    """R253 (R251/R252 class): a configuration document whose issuer lives on
+    a DIFFERENT origin than the admin-pasted configuration URL is registering
+    us against another platform — refuse before posting the registration."""
+    from app.integrations.services.lti_dynreg import PLATFORM_CONFIG_CLAIM, dynamic_register
+
+    org, owner = await _org(db)
+    lms = f"https://lms-{uuid.uuid4().hex[:6]}.example.com"
+    evil = "https://other-platform.example.net"
+    config = {
+        "issuer": evil,
+        "authorization_endpoint": f"{evil}/auth",
+        "token_endpoint": f"{evil}/token",
+        "jwks_uri": f"{evil}/jwks",
+        "registration_endpoint": f"{evil}/register",
+        PLATFORM_CONFIG_CLAIM: {"product_family_code": "x"},
+    }
+
+    class Fake:
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            return httpx.Response(200, json=config, request=httpx.Request(method, url))
+
+    with pytest.raises(AppError) as e:
+        await dynamic_register(
+            db, org.id,
+            openid_configuration_url=f"{lms}/.well-known/openid-configuration",
+            registration_token=None,
+            egress=Fake(),
+        )
+    assert e.value.code == "LTI_DYNREG_CONFIG_INVALID"

@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R253 (eighth window, SECURITY fix — LTI dynreg platform mix-up,
+  mutation-killed)**: the R251/R252 class for dynamic registration — a
+  configuration document whose issuer lives on a DIFFERENT origin than the
+  admin-pasted URL registers the tool against another platform. Strict
+  OIDC-Discovery §4.3 derivation would break real LMSes (Moodle's
+  non-standard config path), so the guard is same-ORIGIN (scheme+host):
+  cross-origin issuer → 422 before anything is posted. Test-suite variant
+  issuers (used to dodge the unique index between sub-cases) moved to
+  same-origin path suffixes.
 - **R252 (eighth window, SECURITY fix — SAML metadata mix-up,
   mutation-killed)**: the R251 class on the SAML side. `refresh_from_metadata`
   ADOPTED whatever entityID the fetched document carried — a wrong document

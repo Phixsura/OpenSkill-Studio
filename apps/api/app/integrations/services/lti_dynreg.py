@@ -97,6 +97,21 @@ async def dynamic_register(
         )
     for key in ("authorization_endpoint", "token_endpoint", "jwks_uri", "registration_endpoint"):
         validate_egress_url(config[key])
+    # R253 (R251/R252 class — platform mix-up defense): the issuer must share
+    # the ORIGIN of the admin-pasted configuration URL. Strict OIDC-Discovery
+    # §4.3 derivation would break real LMSes (Moodle serves its config at a
+    # non-standard path), but a cross-origin issuer means the document is
+    # registering us against a DIFFERENT platform than the one the admin
+    # trusted — refuse it.
+    from urllib.parse import urlsplit as _us
+
+    cfg_o, iss_o = _us(openid_configuration_url), _us(config["issuer"])
+    if (cfg_o.scheme, cfg_o.netloc) != (iss_o.scheme, iss_o.netloc):
+        raise AppError(
+            "LTI_DYNREG_CONFIG_INVALID",
+            "issuer origin does not match the configuration URL",
+            422,
+        )
 
     headers = {"content-type": "application/json", "accept": "application/json"}
     if registration_token:
