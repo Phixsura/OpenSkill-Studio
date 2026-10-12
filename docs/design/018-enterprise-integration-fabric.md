@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R361 (eleventh window, crash-recovery drill)**: kill -9'd the API
+  12 seconds into a 20-worker write storm, restarted, and asserted the
+  healing invariants: zero import jobs stuck in committing/validating
+  (the single-transaction commit design rolls the claim back with the
+  work), no fresh orphan running runs/exports (the reaper owns older
+  ones), clean restart, battery 368 and lifecycle green immediately
+  after. R359/R360: query-param fuzz phase (330 hostile/seed) and the
+  fuzz step wired into the CI fabric job.
 - **R358 (eleventh window, fuzz phase 5 + fourth 500)**: SCIM PATCH
   path-filter bombs (unclosed brackets, emoji filters, 3KB expressions,
   2,000-op arrays, non-string paths) — found the window's FOURTH 500:
