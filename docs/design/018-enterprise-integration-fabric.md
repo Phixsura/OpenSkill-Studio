@@ -914,6 +914,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R307 (ninth window, final regression record)**: full foreground
+  verification at window end — backend 12 chunks zero-fail (10,761 test
+  items), fabric battery 354 (make test-intg), web 764 + tsc + eslint +
+  PRODUCTION BUILD, live E2E 62/62, adversarial 178/0, browser journey
+  63/63, migration chain fresh-DB zero-to-head + head-reversible.
 - **R306 (ninth window, fix — zombie terminal overwrite)**: `_finish`
   set run.status unconditionally — an operator CANCELLING a running run
   mid-execution would get it flipped back to "succeeded" by the oblivious
