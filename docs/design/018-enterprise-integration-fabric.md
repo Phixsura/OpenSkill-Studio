@@ -928,6 +928,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R335 (tenth window, mid regression record)**: post R319-R334 (IDN
+  split-brain, ordering fixture, fabric format-clean, CI sweep + live-E2E
+  jobs, JWKS floor + private_key_jwt pins, 22-check scale smoke, last-
+  owner/last-designee guards, lower(email) index + intg16) the whole
+  stack re-verified foreground: 12 chunks zero-fail, fabric battery 365,
+  web 764 + tsc + production build, live E2E 62/62, adversarial 178/0,
+  walk 65/65, scale 22/22, migrations fresh-DB reversible at intg16.
 - **R334 (tenth window, PERFORMANCE fix — lower(email) seq scan)**: the
   scale smoke's third section (500-row CSV import) blew its bound at
   87.7s (~175ms/row) and led straight to the real cause: every identity
