@@ -914,6 +914,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R276 (eighth window, org-gate completeness sweep — 6 IDOR pins)**:
+  exhaustive probe of EVERY `org_id !=` gate in the fabric (11 sites, each
+  occurrence by index). Five were already killed (subscription, import
+  job, identity link, mapping get, export stream). SIX survived and are
+  now pinned: the identity match-queue resolve gate (org B resolving org
+  A's pending item), BOTH ScimTokenService gates (update_group_map and
+  revoke — org B revoking org A's provisioning token), the sync-profile
+  get gate, and the mapping-attachment gates on profile CREATE and UPDATE
+  (a mapping id acting as a cross-org capability). Pinned in three tests
+  (uniform 404, state untouched); all six re-probed KILLED. The org-gate
+  class is now exhaustively probed fabric-wide.
 - **R275 (eighth window CLOSE — final tally)**: window 8 (single-chat
   foreground, T0 12:26) R250-R274: 4 SECURITY fixes (R250 conflict IDOR,
   R251/R252/R253 issuer/entityID/origin mix-up trilogy, R260/R261 cap

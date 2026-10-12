@@ -1244,3 +1244,29 @@ async def test_domain_cross_org_idor_uniform_404(db):
         assert e.value.status_code == 404
     # the domain is untouched
     assert (await svc.get(org_a.id, row.id)).status == "verified"
+
+
+@pytest.mark.asyncio
+async def test_match_queue_cross_org_wall(db):
+    """R276 (survivor pin, IDOR class): org B cannot resolve org A's
+    identity match-queue item — uniform 404."""
+    from app.integrations.models import IdentityMatchQueue
+    from app.integrations.services.identity import IdentityService
+
+    owner_a = await _user(db)
+    org_a = await _org(db, owner_a)
+    owner_b = await _user(db)
+    org_b = await _org(db, owner_b)
+    item = IdentityMatchQueue(
+        org_id=org_a.id, source="scim", connection_ref="c", subject="s",
+        email="q@x.edu", reason="ambiguous", payload={}, status="pending",
+    )
+    db.add(item)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await IdentityService(db).resolve_queue_item(
+            org_b.id, item.id, action="dismiss", user_id=None, actor_id=owner_b.id
+        )
+    assert e.value.code == "IDENTITY_QUEUE_NOT_FOUND" and e.value.status_code == 404
+    await db.refresh(item)
+    assert item.status == "pending"

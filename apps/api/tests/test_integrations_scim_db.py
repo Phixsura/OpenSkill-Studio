@@ -847,3 +847,25 @@ async def test_patch_operations_must_be_nonempty_list(ctx):
         with pytest.raises(ScimError) as e:
             await _gsvc(ctx).patch(g["id"], bad)
         assert e.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_scim_token_cross_org_walls(ctx):
+    """R276 (survivor pins, IDOR class): org B can neither revoke nor
+    rewrite the group_map of org A's SCIM token — uniform 404."""
+    from app.exceptions import AppError
+    from app.integrations.services.scim import ScimTokenService
+
+    db, token_a = ctx["db"], ctx["token"]
+    owner_b = await _user(db)
+    org_b = await _org(db, owner_b)
+    svc = ScimTokenService(db)
+    with pytest.raises(AppError) as e:
+        await svc.update_group_map(org_b.id, token_a.id, {})
+    assert e.value.code == "SCIM_TOKEN_NOT_FOUND"
+    assert e.value.status_code == 404
+    with pytest.raises(AppError) as e:
+        await svc.revoke(org_b.id, token_a.id)
+    assert e.value.code == "SCIM_TOKEN_NOT_FOUND"
+    assert e.value.status_code == 404
+    assert token_a.revoked_at is None

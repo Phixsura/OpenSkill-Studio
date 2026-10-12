@@ -1720,3 +1720,54 @@ async def test_sync_profile_cross_org_walls(db):
     assert e.value.code == "SYNC_PROFILE_NOT_FOUND"
     assert e.value.status_code == 404
     assert await db.get(SyncProfile, profile_a.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_cross_org_mapping_and_profile_gates(db):
+    """R276 (survivor pins, IDOR class): (a) SyncProfileService.get 404s for
+    another org's profile; (b) a profile cannot be CREATED with another
+    org's mapping profile; (c) nor UPDATED to pin one — the mapping id must
+    not act as a cross-org capability."""
+    from app.integrations.models import MappingProfile
+    from app.integrations.services.connections import ConnectionService
+
+    org_a, owner_a = await _org(db)
+    org_b, owner_b = await _org(db)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn_b = await csvc.create(
+        org_b.id, provider_key="oneroster", name=f"b-{uuid.uuid4().hex[:8]}",
+        config={"token_url": "https://idp.example.com/token"},
+        base_url="https://sis.example.com/ims/oneroster", created_by=owner_b.id,
+    )
+    conn_b.status = "active"
+    mp_a = MappingProfile(
+        org_id=org_a.id, name=f"ma-{uuid.uuid4().hex[:6]}", direction="inbound",
+        model="roster.class", document={"fields": [{"target": "t", "path": "a"}]},
+        version=1,
+    )
+    db.add(mp_a)
+    await db.flush()
+    svc = SyncProfileService(db)
+
+    # (b) create with org A's mapping -> 404
+    with pytest.raises(AppError) as e:
+        await svc.create(
+            org_b.id, connection_id=conn_b.id, name="x", model="roster.class",
+            direction="pull", mapping_profile_id=mp_a.id,
+        )
+    assert e.value.code == "MAPPING_NOT_FOUND" and e.value.status_code == 404
+
+    p_b = await svc.create(
+        org_b.id, connection_id=conn_b.id, name=f"pb-{uuid.uuid4().hex[:6]}",
+        model="roster.class", direction="pull", mapping_profile_id=None,
+    )
+    # (a) org A reading org B's profile -> 404
+    with pytest.raises(AppError) as e:
+        await svc.get(org_a.id, p_b.id)
+    assert e.value.code == "SYNC_PROFILE_NOT_FOUND" and e.value.status_code == 404
+    # (c) update pinning org A's mapping -> 404
+    with pytest.raises(AppError) as e:
+        await svc.update(org_b.id, p_b.id, mapping_profile_id=mp_a.id)
+    assert e.value.code == "MAPPING_NOT_FOUND" and e.value.status_code == 404
