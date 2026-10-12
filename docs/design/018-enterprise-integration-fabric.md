@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R304 (ninth window, probe ledger)**: LTI launch-state single-use and
+  expiry filters KILLED (R256's class, LTI edition); credential kind and
+  value-shape validations KILLED; webhook-update unknown-event KILLED.
+  Audited clean: login_initiation (target_link_uri unused; redirect goes
+  only to the registration's egress-screened auth_login_url; login_hint
+  urlencoded), all four repo AsyncClient constructions now carry
+  trust_env=False (fabric, legacy webhook R303, ecosystem sync, workflow
+  adapters), delivery timeouts bounded, fabric battery 353 green.
 - **R303 (ninth window, SECURITY fix — legacy dispatch client flags)**:
   the R302 sweep found a SECOND outbound client: the legacy webhook
   dispatcher built a bare `httpx.AsyncClient(timeout=10.0)` — httpx
