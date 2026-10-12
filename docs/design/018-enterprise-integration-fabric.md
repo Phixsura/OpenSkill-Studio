@@ -914,6 +914,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R250 (eighth window, IDOR-class survivor pin)**: `resolve_conflict`
+  verified the RUN belongs to the org but the RESULT was fetched by id alone
+  — removing the `result.run_id == run.id` check let an admin resolve a
+  FOREIGN org's conflict row via their own run id. Outcome pin: own-run +
+  foreign-result → uniform 404, row untouched. Batches 16–17 also killed 7:
+  PII-purge terminal-only + retention window, error-report identifier, SCIM
+  filter case-insensitivity, revoked-link listing, wrong-org unlink,
+  conflict-row run attachment, stale accept_theirs guard.
 - **R249 (seventh window, final foreground tally)**: four complete
   foreground passes of the full API suite on successive HEADs
   (7348 → 7356 → 7357 → 7361, zero failures), fabric suite to 322, web

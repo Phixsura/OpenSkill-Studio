@@ -1557,3 +1557,36 @@ def test_to_int_rejects_bool():
     doc = {"fields": [{"target": "n", "path": "v", "transform": ["to_int"]}]}
     mapped, errors = apply_mapping(doc, {"v": True})
     assert mapped == {} and errors and errors[0]["code"] == "transform_to_int"
+
+
+@pytest.mark.asyncio
+async def test_conflict_resolve_requires_result_belongs_to_run(db):
+    """R250 (survivor pin, IDOR class): resolve must verify the result row
+    BELONGS to the addressed run — dropping that check let a valid own-run id
+    resolve a FOREIGN org's conflict row (the run is org-gated, the result
+    was fetched by id alone)."""
+    from app.integrations.models import SyncRecordResult
+
+    org_a, owner_a = await _org(db)
+    org_b, owner_b = await _org(db)
+    # org B: a run with a conflict row.
+    _conn_b, prof_b = await _setup_profile(db, org_b, owner_b, FakeRosterConnector([[]]))
+    run_b = await SyncProfileService(db).trigger(org_b.id, prof_b.id)
+    conflict_b = SyncRecordResult(
+        run_id=run_b.id, external_id="x-1", model="roster.class",
+        outcome="conflict", conflict_class="clock_unresolvable",
+        detail={"field": "title", "ours": "a", "theirs": "b"},
+    )
+    db.add(conflict_b)
+    # org A: its own run.
+    _conn_a, prof_a = await _setup_profile(db, org_a, owner_a, FakeRosterConnector([[]]))
+    run_a = await SyncProfileService(db).trigger(org_a.id, prof_a.id)
+    await db.flush()
+
+    with pytest.raises(AppError) as e:
+        await SyncProfileService(db).resolve_conflict(
+            org_a.id, run_a.id, conflict_b.id, action="dismiss", actor_id=owner_a.id
+        )
+    assert e.value.status_code == 404  # uniform 404, never resolved
+    await db.refresh(conflict_b)
+    assert conflict_b.resolved_action is None
