@@ -198,6 +198,14 @@ async def main() -> int:
             r.text[:200],
         )
 
+        # R355: hardening headers on an authed JSON response.
+        check(
+            "no-store + no stack fingerprint on authed JSON",
+            r.headers.get("cache-control") == "no-store"
+            and "uvicorn" not in r.headers.get("server", "").lower(),
+            f"cc={r.headers.get('cache-control')} server={r.headers.get('server')}",
+        )
+
         # R344 regression wall: a live PATCH must serialize updated_at
         # cleanly (the update flush expires the onupdate column; without a
         # refresh the serializer's lazy load 500s with MissingGreenlet).

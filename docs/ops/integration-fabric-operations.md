@@ -204,6 +204,14 @@ import uploads all absorb concurrent duplicates with a clean idempotent
 response instead of a 500. The expensive triggers (`.../run` on export
 streams, `.../provision-roster`) are rate-limited 10/min per route.
 
+### Response hardening (window 11, R355)
+
+Every /api response carries `Cache-Control: no-store` (token-gated JSON
+must not be cached by intermediaries or the browser) plus the standard
+security headers, and the app overrides `Server`. Deployments should ALSO
+start uvicorn with `--no-server-header` (our make targets and E2E runners
+do) so the stack is not fingerprinted at the protocol layer.
+
 ### CI coverage (window 10, R322–R324)
 
 Every PR now runs, besides the full backend suite: the fabric Playwright

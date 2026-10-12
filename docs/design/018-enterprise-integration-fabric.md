@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R355 (eleventh window, response hardening + drills)**: live header
+  audit found two gaps — authed JSON had NO Cache-Control (token-gated
+  data cacheable by intermediaries/bfcache) and the Server header
+  fingerprinted uvicorn. The security middleware now stamps
+  `Cache-Control: no-store` on /api responses (route-set values win) and
+  overrides Server; every runner/make target/CI uvicorn start gained
+  `--no-server-header`. Pinned live in the lifecycle (rides CI). Also:
+  4-hop migration drill (head -> intg13 -> head, every hop verified) on a
+  scratch DB — clean.
 - **R354 (eleventh window, concurrency storm)**: new live storm
   (`tests/e2e_storm_fabric.py`, `make e2e-intg-storm`) — 20 workers x 15
   rounds of interleaved admin CRUD in one org (connections/streams/

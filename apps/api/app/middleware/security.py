@@ -72,6 +72,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["X-XSS-Protection"] = "0"
+        # R355 (live header audit): don't fingerprint the stack, and keep
+        # token-gated JSON out of intermediary/browser caches. Routes that
+        # deliberately set their own Cache-Control (none today) win.
+        response.headers["Server"] = "api"
+        if "cache-control" not in response.headers and request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
 
         # Only apply CSP to HTML responses — JSON API responses don't need it,
         # and applying it breaks Swagger docs in debug mode.

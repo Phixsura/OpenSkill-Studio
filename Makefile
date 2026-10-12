@@ -14,14 +14,14 @@ dev:                              ## Start frontend + backend dev servers (2 ter
 	@echo "Or use: make dev-all (requires background jobs)"
 
 dev-all:                          ## Start both servers (frontend foreground, API background)
-	cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --port 8000 &
+	cd apps/api && uv run uvicorn app.main:app --no-server-header --reload --reload-dir app --port 8000 &
 	pnpm dev:web
 
 dev-web:                          ## Start frontend only
 	pnpm dev:web
 
 dev-api:                          ## Start backend only (hot reload)
-	cd apps/api && uv run uvicorn app.main:app --reload --reload-dir app --port 8000
+	cd apps/api && uv run uvicorn app.main:app --no-server-header --reload --reload-dir app --port 8000
 
 dev-worker:                       ## Start control-plane worker (outbox + crons)
 	cd apps/api && uv run arq app.controlplane.worker.WorkerSettings
@@ -58,7 +58,7 @@ lint-fix:                         ## Fix lint issues
 
 e2e-intg: ## Live-API E2E for the integration fabric (starts its own uvicorn on :8443)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
-		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
+		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --no-server-header --port 8443 & \
 		echo $$! > /tmp/intg-e2e-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-e2e-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
@@ -69,7 +69,7 @@ e2e-intg: ## Live-API E2E for the integration fabric (starts its own uvicorn on 
 
 e2e-intg-scale: ## Fabric scale smoke: 300 SCIM users + 400 mesh deliveries (uvicorn :8443)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
-		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
+		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --no-server-header --port 8443 & \
 		echo $$! > /tmp/intg-scale-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-scale-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
@@ -80,7 +80,7 @@ e2e-intg-scale: ## Fabric scale smoke: 300 SCIM users + 400 mesh deliveries (uvi
 
 e2e-intg-fuzz: ## Fabric hostile-input fuzz: 250 reqs, asserts zero 5xx (uvicorn :8443)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
-		APP_ENV=test uv run uvicorn app.main:app --port 8443 & \
+		APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8443 & \
 		echo $$! > /tmp/intg-fuzz-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-fuzz-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
@@ -91,7 +91,7 @@ e2e-intg-fuzz: ## Fabric hostile-input fuzz: 250 reqs, asserts zero 5xx (uvicorn
 
 e2e-intg-storm: ## Fabric concurrency storm: 20 workers mixed CRUD, zero 5xx (uvicorn :8443)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
-		APP_ENV=test uv run uvicorn app.main:app --port 8443 & \
+		APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8443 & \
 		echo $$! > /tmp/intg-storm-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-storm-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
@@ -116,7 +116,7 @@ test-intg: ## Run the integration-fabric suites (ADR-018, needs infra-up + db-mi
 		tests/test_ops_doc_contract.py -q
 
 e2e-exp: ## Live-API E2E for the experimentation platform (starts its own uvicorn on :8442)
-	cd apps/api && (APP_ENV=test uv run uvicorn app.main:app --port 8442 & \
+	cd apps/api && (APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8442 & \
 		echo $$! > /tmp/exp-e2e-uvicorn.pid; \
 		until curl -sf http://localhost:8442/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/exp-e2e-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
