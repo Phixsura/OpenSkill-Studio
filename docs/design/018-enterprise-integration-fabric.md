@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R342 (tenth window, sync-pull-scale section)**: section seven stages
+  1,000 connector records through execute_run (profile + run minted via
+  the API, a two-batch in-process fake registered for the pull) — staged
+  count exact, run succeeded, bounded. The smoke now covers ALL FIVE
+  fabric pipelines at size: SCIM directory, imports (users+roster), mesh
+  fan-out, warehouse export, and sync pull. 33/33.
 - **R341 (tenth window, export-scale section)**: section six exports the
   org's 200+ mesh events to object storage through the API run endpoint —
   succeeded, row_count verified, bounded. The smoke now exercises every

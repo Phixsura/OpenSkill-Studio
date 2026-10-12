@@ -294,6 +294,85 @@ async def main() -> None:
         )
         check("export wall-clock bound (<60s)", dt_x < 60, f"{dt_x:.1f}s")
 
+        # ── sync pull at size: 1,000 connector records staged ──
+        rr = await c.post(
+            f"{base}/connections",
+            json={"provider_key": "oneroster", "name": f"scale-sis-{uuid.uuid4().hex[:6]}",
+                  "config": {"token_url": "https://idp.example.com/token"},
+                  "base_url": "https://sis.example.com/ims/oneroster"},
+            headers=h,
+        )
+        check("sync connection created", rr.status_code == 201, rr.text[:120])
+        conn_id = rr.json()["data"]["id"]
+
+        from sqlalchemy import select as _select
+        from sqlalchemy import update as _update
+
+        from app.integrations import registry
+        from app.integrations.models import IntegrationConnection, StagedRecord
+        from app.integrations.services.sync_engine import execute_run
+
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                _update(IntegrationConnection)
+                .where(IntegrationConnection.id == conn_id)
+                .values(status="active")
+            )
+            await db.commit()
+
+        rr = await c.post(
+            f"{base}/sync-profiles",
+            json={"connection_id": conn_id, "name": f"scale-pull-{uuid.uuid4().hex[:6]}",
+                  "model": "roster.class", "direction": "pull",
+                  "mapping_profile_id": None},
+            headers=h,
+        )
+        check("pull profile created", rr.status_code == 201, rr.text[:120])
+        profile_id = rr.json()["data"]["id"]
+        rr = await c.post(f"{base}/sync-profiles/{profile_id}/run", headers=h)
+        run_id = rr.json()["data"]["id"]
+
+        class _Fake1k:
+            key = "oneroster"
+            capabilities = frozenset({"roster.read"})
+
+            async def read(self, ctx, model, state):
+                for b in range(2):
+                    yield {
+                        "records": [
+                            {"external_id": f"cls-{b}-{i}", "title": f"Class {b}-{i}"}
+                            for i in range(500)
+                        ],
+                        "state": {"endpoint_offset": (b + 1) * 500},
+                    }
+
+        saved = registry.CONNECTORS.get("oneroster")
+        registry.CONNECTORS["oneroster"] = _Fake1k()
+        try:
+            t0 = time.monotonic()
+            async with AsyncSessionLocal() as db:
+                await execute_run(db, run_id)
+            dt_s = time.monotonic() - t0
+        finally:
+            if saved is not None:
+                registry.CONNECTORS["oneroster"] = saved
+        async with AsyncSessionLocal() as db:
+            staged = (
+                await db.execute(
+                    _select(StagedRecord.id).where(
+                        StagedRecord.connection_id == conn_id,
+                        StagedRecord.model == "roster.class",
+                    )
+                )
+            ).all()
+        check("1,000 records staged", len(staged) == 1000, f"staged={len(staged)}")
+        check("sync pull bound (<60s)", dt_s < 60, f"{dt_s:.1f}s")
+        rr = await c.get(f"{base}/sync-runs", headers=h)
+        run_rows = [x for x in rr.json()["data"] if x["id"] == run_id]
+        check("run reported succeeded",
+              run_rows and run_rows[0]["status"] == "succeeded",
+              str(run_rows)[:120])
+
     print(f"\nPASS={PASS} FAIL={FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)
 
