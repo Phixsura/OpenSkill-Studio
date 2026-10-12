@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R352 (tenth window, terminal-HEAD chunk proof)**: all 12 backend
+  chunks re-run AT THE FINAL HEAD after the last test additions — 10,772
+  items, zero failures; the closing evidence is a full pass of the exact
+  shipped tree.
 - **R351 (tenth window CLOSE — final tally)**: window 10 (single-chat
   foreground, T0 22:34) R319-R350, ~33 commits. FIXES: R319 IDN
   normalization split-brain (security/i18n), R330 last-owner deprovision,
