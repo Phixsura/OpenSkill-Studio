@@ -914,6 +914,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R272 (eighth window, SAML authorize open-redirect pin)**: batch 36
+  probed the twin return_to screens on the authorize routes. The OIDC
+  occurrence was KILLED; the SAML occurrence (identical line, first in
+  file) had NO test — a crafted /saml/authorize?return_to=https://evil
+  link would mint state carrying the absolute URL and turn the post-IdP
+  landing into an open redirect. Pinned at the ROUTE level (absolute and
+  scheme-relative dropped -> state.redirect_to NULL; relative path
+  preserved); re-probed KILLED. Probe-harness note: twin-occurrence
+  anchors must be probed per-occurrence by index, not replace(...,1).
 - **R271 (eighth window, import-cap layering)**: batch 34 probed the
   upload size cap. The router-side check is a documented layered
   equivalent (it bounds MEMORY by reading at most MAX+1 bytes before the

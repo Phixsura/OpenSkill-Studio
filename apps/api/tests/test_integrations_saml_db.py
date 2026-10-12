@@ -1007,3 +1007,29 @@ async def test_slo_dtd_forbidden_even_when_signed(db):
             raw_query=base_q + "&Signature=" + quote(base64.b64encode(sig).decode(), safe=""),
         )
     assert e.value.code == "SSO_ASSERTION_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_saml_authorize_route_screens_open_redirect(db):
+    """R272 (survivor pin): the /saml/authorize ROUTE drops absolute and
+    scheme-relative return_to values before minting state (the OIDC twin was
+    pinned; this one was not) — a crafted login link must not become an
+    open redirect after the IdP round-trip."""
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.integrations.api.sso import saml_authorize
+    from app.integrations.models import SsoLoginState
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+
+    async def minted_redirect(return_to):
+        resp = await saml_authorize(connection=conn.id, return_to=return_to, db=db)
+        q = parse_qs(urlsplit(resp.headers["location"]).query)
+        state_id = q["RelayState"][0]
+        row = await db.get(SsoLoginState, state_id)
+        return row.redirect_to
+
+    assert await minted_redirect("https://evil.example.com/phish") is None
+    assert await minted_redirect("//evil.example.com/phish") is None
+    assert await minted_redirect("/dashboard/orgs/X") == "/dashboard/orgs/X"
