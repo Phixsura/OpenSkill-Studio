@@ -784,3 +784,44 @@ async def test_dynreg_rejects_cross_origin_issuer(db):
             egress=Fake(),
         )
     assert e.value.code == "LTI_DYNREG_CONFIG_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_lti_registration_caps(db):
+    """R263 (R262 class): per-org registration cap + per-request
+    deployment_ids bound, both with stable error codes."""
+    from app.integrations.services.lti import (
+        MAX_DEPLOYMENTS_PER_REGISTRATION,
+        MAX_LTI_REGISTRATIONS_PER_ORG,
+    )
+
+    org, owner = await _org(db)
+    svc = LtiService(db)
+    for i in range(MAX_LTI_REGISTRATIONS_PER_ORG):
+        await svc.create_registration(
+            org.id, issuer=f"https://lms{i}.example.com", client_id="c1",
+            auth_login_url=f"https://lms{i}.example.com/auth",
+            auth_token_url=f"https://lms{i}.example.com/token",
+            jwks_url=f"https://lms{i}.example.com/jwks",
+            deployment_ids=["d1"],
+        )
+    with pytest.raises(AppError) as e:
+        await svc.create_registration(
+            org.id, issuer="https://lms-over.example.com", client_id="c1",
+            auth_login_url="https://lms-over.example.com/auth",
+            auth_token_url="https://lms-over.example.com/token",
+            jwks_url="https://lms-over.example.com/jwks",
+            deployment_ids=["d1"],
+        )
+    assert e.value.code == "LTI_REGISTRATION_LIMIT_REACHED"
+
+    org2, _owner2 = await _org(db)
+    with pytest.raises(AppError) as e:
+        await LtiService(db).create_registration(
+            org2.id, issuer="https://lms-dep.example.com", client_id="c1",
+            auth_login_url="https://lms-dep.example.com/auth",
+            auth_token_url="https://lms-dep.example.com/token",
+            jwks_url="https://lms-dep.example.com/jwks",
+            deployment_ids=[f"d{i}" for i in range(MAX_DEPLOYMENTS_PER_REGISTRATION + 1)],
+        )
+    assert e.value.code == "LTI_REGISTRATION_INVALID"

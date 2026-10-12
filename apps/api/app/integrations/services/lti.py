@@ -39,6 +39,9 @@ from app.integrations.services.identity import (
 
 log = structlog.get_logger()
 
+MAX_LTI_REGISTRATIONS_PER_ORG = 10  # R263: each registration is a trust anchor
+MAX_DEPLOYMENTS_PER_REGISTRATION = 50  # R263: rows inserted per request entry
+
 CLAIM = "https://purl.imsglobal.org/spec/lti/claim/"
 STATE_TTL = timedelta(minutes=10)
 CLOCK_SKEW_S = 300
@@ -75,6 +78,30 @@ class LtiService:
             validate_egress_url(url)
         if default_role not in JIT_ALLOWED_ROLES:
             raise AppError("SSO_JIT_ROLE_INVALID", "default_role not allowed", 422)
+        # R263 (R262 class): bound the request body (deployment rows are
+        # inserted per entry) and per-org registration sprawl (each
+        # registration is a platform trust anchor), race-proof under the
+        # FOR UPDATE org lock.
+        if len(deployment_ids) > MAX_DEPLOYMENTS_PER_REGISTRATION:
+            raise AppError(
+                "LTI_REGISTRATION_INVALID",
+                f"at most {MAX_DEPLOYMENTS_PER_REGISTRATION} deployment_ids",
+                422,
+            )
+        from app.models.organization import Organization as _Org
+
+        await self.db.execute(select(_Org.id).where(_Org.id == org_id).with_for_update())
+        count = len(
+            (
+                await self.db.execute(
+                    select(LtiRegistration.id).where(LtiRegistration.org_id == org_id)
+                )
+            ).all()
+        )
+        if count >= MAX_LTI_REGISTRATIONS_PER_ORG:
+            raise AppError(
+                "LTI_REGISTRATION_LIMIT_REACHED", "Too many LTI registrations for this org", 422
+            )
         reg = LtiRegistration(
             org_id=org_id,
             issuer=issuer.rstrip("/"),

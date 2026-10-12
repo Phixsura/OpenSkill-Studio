@@ -914,6 +914,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R263 (eighth window, R262 class — LTI caps)**: LTI registrations had
+  no per-org bound (each is a platform trust anchor) and `deployment_ids`
+  was inserted row-per-entry with no request bound (a single create could
+  park unbounded rows). Added MAX_LTI_REGISTRATIONS_PER_ORG=10 under the
+  FOR UPDATE org lock and MAX_DEPLOYMENTS_PER_REGISTRATION=50 as a request
+  screen; `test_lti_registration_caps` drives both rejections.
 - **R262 (eighth window, sprawl caps — shared-sweep fan-out bound)**: the
   fabric had NO per-org bound on connections, export streams, or sync
   profiles, yet three shared sweeps fan out over those rows for every org
