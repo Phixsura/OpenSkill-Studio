@@ -176,7 +176,7 @@ try {
     const afterMint = await page.textContent("body");
     check(
       "shown-once SCIM secret displayed",
-      afterMint.includes("oskst_") || /shown once|copy/i.test(afterMint),
+      afterMint.includes("osks_scim_") || /shown once|copy/i.test(afterMint),
       afterMint.slice(0, 160),
     );
   }
@@ -185,7 +185,7 @@ try {
   // survive a page refresh (it lives in component state, never a query).
   await page.reload({ waitUntil: "networkidle" });
   const afterReload = await page.textContent("body");
-  check("SCIM secret gone after reload", !afterReload.includes("oskst_"));
+  check("SCIM secret gone after reload", !afterReload.includes("osks_scim_"));
 
   // ── 3c. Create an OIDC SSO connection through the real form ──
   const issuerInput = await page.$('input[aria-label="OIDC issuer"]');

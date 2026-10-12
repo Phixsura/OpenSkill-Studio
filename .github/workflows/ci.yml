@@ -203,10 +203,11 @@ jobs:
         run: |
           pnpm --filter web dev &
           sleep 15
-      - name: Run Playwright (talent + sweep)
+      - name: Run Playwright (talent + sweep + integrations)
         run: >
           cd apps/web && npx playwright test
           e2e/talent-pages.spec.ts e2e/sweep-all-pages.spec.ts
+          e2e/sweep-integrations.spec.ts
           --reporter=line
         env:
           E2E_BASE_URL: http://localhost:3000

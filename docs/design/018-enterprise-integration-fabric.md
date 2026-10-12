@@ -928,6 +928,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R323 (tenth window, fabric pages enter CI)**: CI's Playwright job
+  never visited the five fabric pages — a crashed page component or
+  route rename would ship invisibly. New `e2e/sweep-integrations.spec.ts`
+  (4 serial tests on the repo's own helpers: hub + connection create,
+  identity domain-claim TXT + SCIM mint shown-once-gone-on-reload, events
+  catalog + subscription secret, sync/data + stream create) added to the
+  CI run list; 4/4 locally against live servers. Writing it exposed a
+  stale assertion in the local walk (SCIM prefix is osks_scim_, not
+  oskst_ — the old check passed via its OR-arm); fixed, walk 63/63.
 - **R322 (tenth window, CI format-gate: fabric scope cleaned)**: CI's
   lint-backend job runs `ruff format --check .` — the R318 finding is not
   just a local make-target: a PR cannot pass CI with unformatted files.
