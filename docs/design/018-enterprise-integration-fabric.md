@@ -870,6 +870,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   direction). This is the privacy-safe reading of "map CRM deals/accounts
   to Client Briefs ... without leaking internal learner data."
 
+- **Deferred (explicit, R311 audit)**: §5.2's "WebAuthn-or-TOTP required"
+  clause for break-glass members is NOT implemented — the platform has no
+  MFA infrastructure at all (tracked as Gap #181 under the talent epic),
+  so building WebAuthn/TOTP under issue #43 would be an unscoped
+  cross-epic auth feature. Compensating controls in place: max-2 designee
+  cap (race-proof, R260), owner-only designation, every break-glass login
+  audited + mesh-emitted, and the 90-day freshness gate on manual cert
+  rotation (R311). Revisit when platform MFA lands.
 - **Deferred (explicit, as of R19)**: import template kinds `roster`
   (SHIPPED R129) and `opportunities` (SHIPPED R131 — draft-only postings,
   employer-profile gate, idempotent by lower(title)); LTI NRPS
