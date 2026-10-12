@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R287 (ninth window, cross-layer contract drift guard)**: new
+  `tests/test_web_api_contract.py` extracts every template-literal API
+  call from the five fabric pages (expanding the shared `base` prefix,
+  dropping query strings and unclosed nested-ternary tails), and matches
+  each against the resolved OpenAPI route table — a renamed or removed
+  endpoint now breaks CI instead of 404ing an admin (the R63-R71
+  login-journey class, mechanized). ~45 calls matched; detection proven
+  by renaming a call in the page source (test fails, names the path).
+  FastAPI note: `app.routes` now holds lazy `_IncludedRouter` entries —
+  `app.openapi()["paths"]` is the authoritative resolved table.
 - **R286 (ninth window, browser walk — a11y gate)**: section 9 audits
   every input/select/textarea on the five pages for an accessible name
   (aria-label, label[for], or wrapping label) — all clean. 53/53 PASS.
