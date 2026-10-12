@@ -303,6 +303,27 @@ async def main() -> None:
             n_5xx += 1
             check("5xx: 2000-op PATCH", False, f"{rr.status_code} {rr.text[:100]}")
 
+        # 6) hostile QUERY params on list endpoints
+        q_bombs = ["💥", "x" * 299, "' OR 1=1 --", "%00", "null", "-1", "1e308",
+                   '"; DROP TABLE users; --']
+        list_routes = [
+            (f"{base}/deliveries", "status"),
+            (f"{base}/events", "type_prefix"),
+            (f"{base}/sync-runs", "profile_id"),
+            (f"{base}/imports", "kind"),
+            (f"{API}/scim/v2/Users", "filter"),
+        ]
+        for url, param in list_routes:
+            for qb in q_bombs:
+                headers = sh if "/scim/" in url else h
+                rr = await c.get(url, params={param: qb, "count": 5, "limit": 5},
+                                 headers=headers)
+                total += 1
+                if rr.status_code >= 500:
+                    n_5xx += 1
+                    check(f"5xx: GET {url[-35:]}?{param}", False,
+                          f"{rr.status_code} q={qb[:30]} {rr.text[:100]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         print(f"elapsed={_t.monotonic()-_t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")
