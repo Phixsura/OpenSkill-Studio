@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R362 (eleventh window, dependency-outage drills)**: stopped the real
+  infra containers mid-traffic. REDIS down: 20 authed reads+writes all
+  answered (metering/rate-limit fail-open held, zero 5xx), full function
+  on restart. MINIO down: an export run lands as a CLEAN terminal
+  `failed` row (202 envelope, no 500, nothing stuck), and the rerun after
+  recovery succeeds — the cursor-only-advances-on-success rule means no
+  data loss across the outage. Both drill scripts kept under the job
+  tmp tooling.
 - **R361 (eleventh window, crash-recovery drill)**: kill -9'd the API
   12 seconds into a 20-worker write storm, restarted, and asserted the
   healing invariants: zero import jobs stuck in committing/validating

@@ -204,6 +204,16 @@ import uploads all absorb concurrent duplicates with a clean idempotent
 response instead of a 500. The expensive triggers (`.../run` on export
 streams, `.../provision-roster`) are rate-limited 10/min per route.
 
+### Outage semantics (window 11, R362 — drilled live)
+
+Redis down: API keeps answering (metering + rate limiting fail OPEN by
+design; an outage is an infra alert, not an API kill). Object storage
+down: export runs land as terminal `failed` rows and the NEXT run after
+recovery re-exports the same span (cursor advances only on success).
+API process kill -9: safe — imports are single-transaction (a crash rolls
+back to `previewed`), crashed sync runs are reaped by the stale-run
+sweeper, delivery retries resume from the outbox.
+
 ### Response hardening (window 11, R355)
 
 Every /api response carries `Cache-Control: no-store` (token-gated JSON
