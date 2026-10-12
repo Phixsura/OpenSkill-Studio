@@ -204,6 +204,19 @@ import uploads all absorb concurrent duplicates with a clean idempotent
 response instead of a 500. The expensive triggers (`.../run` on export
 streams, `.../provision-roster`) are rate-limited 10/min per route.
 
+### Browser E2E (window 9, R281–R285)
+
+`apps/api/tests/browser_e2e_integrations.mjs` walks the whole fabric admin
+journey in a real Chromium: register → org → hub (catalog, health strip,
+New-connection form) → identity (domain claim with TXT token, freemail
+rejection UX, SCIM token mint with shown-once secret) → events (datalist
+catalog, subscription create with shown-once signing secret, bad-URL
+rejection UX) → sync → data (export-stream create, template download, full
+CSV import upload→preview→commit→member-visible) → mobile-viewport sweep
+(390px, no page-level x-overflow) — with a console gate that fails on any
+JS exception or React warning. Run: web on :3000, api on :8000
+(APP_ENV=test), `node tests/browser_e2e_integrations.mjs`.
+
 ### Per-org resource caps (window 8, R260–R263)
 
 All count-then-insert caps are serialized under a `FOR UPDATE` org-row lock

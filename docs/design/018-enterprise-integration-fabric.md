@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R285 (ninth window, browser walk — mobile viewport)**: section 8
+  re-walks all five fabric pages at 390px asserting render + zero
+  page-level horizontal overflow (tables scroll inside their own
+  containers, the page itself never does). 48/48 PASS.
 - **R284 (ninth window, browser walk — negative journeys)**: the walk now
   provokes rejections and asserts the UX: a freemail domain claim shows a
   visible "public email" error and the form stays interactive, and a

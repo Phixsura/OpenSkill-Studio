@@ -322,6 +322,23 @@ try {
     realErrors.slice(0, 3).join(" | "),
   );
   if (badResponses.length) results.push(`  (4xx/5xx responses: ${badResponses.slice(0, 8).join(" ; ")})`);
+  // ── 8. Mobile viewport: the five pages render without x-overflow ──
+  section("8. Mobile viewport (390px)");
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [label, path] of [
+    ["hub", ""], ["identity", "/identity"], ["events", "/events"],
+    ["sync", "/sync"], ["data", "/data"],
+  ]) {
+    await page.goto(`${intgBase}${path}`, { waitUntil: "networkidle", timeout: 30000 });
+    const body = await page.textContent("body");
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    check(`${label} renders at 390px`, body.length > 200);
+    // Tables/code may scroll inside their own containers; the PAGE must not.
+    check(`${label} has no page-level x-overflow`, overflow <= 2, `overflow=${overflow}px`);
+  }
+
 } catch (err) {
   fail++;
   results.push(`  ❌ UNCAUGHT: ${String(err).slice(0, 300)}`);
