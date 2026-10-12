@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R348 (tenth window, never-called-live closure)**: mechanized the
+  R344 heuristic — diffed the fabric OpenAPI (method, path) table against
+  what the four live scripts actually call, then walled the risky
+  flush-then-serialize leftovers live: SCIM Groups full cycle
+  (create/PATCH/GET/DELETE over real HTTP + scim content types),
+  break-glass set/unset (the route returns 204), and sync-run cancel.
+  Lifecycle 73/73. Remaining uncalled routes are either IdP-side
+  endpoints that need a real IdP round-trip (ACS, OIDC callback, bcl,
+  SLO — covered by their service-level signature suites), dynreg (needs
+  a live platform), or other epics' surfaces.
 - **R347 (tenth window, final regression record)**: terminal-HEAD
   verification — backend 12 chunks zero-fail (10,772 items), fabric
   battery 366, web 764 + tsc + eslint + production build, live lifecycle

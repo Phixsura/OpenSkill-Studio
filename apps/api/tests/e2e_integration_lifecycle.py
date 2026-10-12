@@ -143,6 +143,7 @@ async def main() -> int:
         )
         check("register", r.status_code == 201, r.text[:200])
         tok = r.json()["access_token"]
+        admin_user_id = r.json()["user"]["id"]
         h = {"Authorization": f"Bearer {tok}"}
 
         r = await c.post(
@@ -374,6 +375,51 @@ async def main() -> int:
             check("replay accepted", r.status_code == 200, r.text[:200])
             await drive_outbox()
             check("replay redelivered to sink", len(sink.payloads) >= 2)
+
+        # ── R348 (R344 class): live walls for flush-then-serialize routes
+        # the suites only ever hit in-process ──
+        # SCIM Groups full live cycle
+        r = await c.post(
+            "/scim/v2/Groups",
+            json={"displayName": f"Live G {uid()}"},
+            headers=scim_h,
+        )
+        check("live SCIM group create", r.status_code == 201, r.text[:160])
+        gid = r.json().get("id", "")
+        r = await c.patch(
+            f"/scim/v2/Groups/{gid}",
+            json={"Operations": [{"op": "replace", "path": "displayName",
+                                   "value": f"Live G2 {uid()}"}]},
+            headers=scim_h,
+        )
+        check("live SCIM group PATCH", r.status_code == 200, r.text[:160])
+        r = await c.get(f"/scim/v2/Groups/{gid}", headers=scim_h)
+        check("live SCIM group GET", r.status_code == 200, r.text[:120])
+        r = await c.delete(f"/scim/v2/Groups/{gid}", headers=scim_h)
+        check("live SCIM group DELETE", r.status_code in (204, 200), str(r.status_code))
+
+        # break-glass set + sync-run cancel (fresh queued run)
+        r = await c.post(
+            f"{base}/break-glass",
+            json={"user_id": admin_user_id, "enabled": True},
+            headers=h,
+        )
+        check("live break-glass set", r.status_code in (200, 204), str(r.status_code))
+        r = await c.post(
+            f"{base}/break-glass",
+            json={"user_id": admin_user_id, "enabled": False},
+            headers=h,
+        )
+        check("live break-glass unset", r.status_code in (200, 204), str(r.status_code))
+
+        r = await c.post(f"{base}/sync-profiles/{profile_id}/run", headers=h)
+        cancel_run_id = r.json()["data"]["id"]
+        r = await c.post(f"{base}/sync-runs/{cancel_run_id}/cancel", headers=h)
+        check(
+            "live sync-run cancel",
+            r.status_code == 200 and r.json()["data"]["status"] == "cancelled",
+            r.text[:160],
+        )
 
         # ── export (MinIO) ──
         r = await c.post(
