@@ -48,3 +48,19 @@ def test_ops_caps_table_matches_code():
     assert doc, "caps table not found in the ops doc — heading or format moved"
     drift = {k: (doc.get(k), v) for k, v in code.items() if doc.get(k) != v}
     assert drift == {}, f"ops caps table drifted from code (doc, code): {drift}"
+
+
+def test_doc_referenced_test_files_exist():
+    """R333: every tests/*.py path the ADR and ops doc name must exist —
+    a renamed suite must not leave the documentation pointing at nothing."""
+    root = pathlib.Path(__file__).resolve().parents[3]
+    docs = [
+        root / "docs/design/018-enterprise-integration-fabric.md",
+        root / "docs/ops/integration-fabric-operations.md",
+    ]
+    missing = []
+    for doc in docs:
+        for ref in set(re.findall(r"tests/[a-z_0-9]+\.(?:py|mjs)", doc.read_text())):
+            if not (root / "apps/api" / ref).exists():
+                missing.append(f"{doc.name}: {ref}")
+    assert missing == [], f"docs reference nonexistent test files: {missing}"

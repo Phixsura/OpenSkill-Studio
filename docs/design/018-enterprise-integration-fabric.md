@@ -928,6 +928,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R333/R332 (tenth window, guards + DX)**: doc-reference guard — every
+  tests/*.py|mjs path the ADR/ops doc name must exist (a renamed suite
+  can't leave docs pointing at nothing). The scale make target gained
+  EGRESS_ALLOW_PRIVATE (its mesh section delivers to a local sink; the
+  first run without it failed exactly as the screen should make it fail).
 - **R331 (tenth window, R330 class — last-designee guard)**: the same
   last-X sweep found the symmetric hole on break-glass: the owner could
   retire the LAST designee while a connection still enforces SSO —
