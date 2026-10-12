@@ -354,6 +354,31 @@ try {
     realErrors.slice(0, 3).join(" | "),
   );
   if (badResponses.length) results.push(`  (4xx/5xx responses: ${badResponses.slice(0, 8).join(" ; ")})`);
+  // ── 6c. Error-report journey: a bad row surfaces + errors.csv offered ──
+  await page.goto(`${intgBase}/data`, { waitUntil: "networkidle", timeout: 30000 });
+  const badEmail = `bad-${Date.now()}`;
+  const badCsv = `email,display_name,role\n${badEmail},No At Sign,student\n`;
+  const fileInput2 = await page.$('input[type="file"]');
+  check("error-journey file input present", fileInput2 !== null);
+  if (fileInput2) {
+    await fileInput2.setInputFiles({
+      name: "bad.csv", mimeType: "text/csv", buffer: Buffer.from(badCsv),
+    });
+    const uploadBtn2 = await page.$('button:has-text("Upload & preview")');
+    if (uploadBtn2) {
+      await uploadBtn2.click();
+      await page.waitForTimeout(3500);
+      const afterBadPrev = await page.textContent("body");
+      check(
+        "bad-row dry-run shows a nonzero error count",
+        /errors:\s*[1-9]/.test(afterBadPrev),
+        afterBadPrev.slice(0, 160),
+      );
+      const errBtn = await page.$('button:has-text("Download error report")');
+      check("error-report download offered", errBtn !== null);
+    }
+  }
+
   // ── 8. Mobile viewport: the five pages render without x-overflow ──
   section("8. Mobile viewport (390px)");
   await page.setViewportSize({ width: 390, height: 844 });

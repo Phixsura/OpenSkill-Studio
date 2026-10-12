@@ -914,6 +914,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R305 (ninth window, error-report journey)**: the walk uploads a CSV
+  with an invalid row and asserts the operator-facing failure path: the
+  dry-run surfaces a nonzero error count and the "Download error report"
+  button appears. 63/63 PASS. (Walk-harness lesson: a journey that
+  navigates away must re-navigate before the next section — a missing
+  element inside an un-checked `if` silently skips the whole section;
+  presence now asserted.)
 - **R304 (ninth window, probe ledger)**: LTI launch-state single-use and
   expiry filters KILLED (R256's class, LTI edition); credential kind and
   value-shape validations KILLED; webhook-update unknown-event KILLED.
