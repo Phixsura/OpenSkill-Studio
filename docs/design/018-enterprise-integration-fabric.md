@@ -931,6 +931,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R351 (tenth window CLOSE — final tally)**: window 10 (single-chat
+  foreground, T0 22:34) R319-R350, ~33 commits. FIXES: R319 IDN
+  normalization split-brain (security/i18n), R330 last-owner deprovision,
+  R331 last-designee under enforce, R334 lower(email) functional index
+  (1M-row seq scans -> point lookups, intg16), R336 events time index
+  (intg17), R337 import row cap, R344 MissingGreenlet 500 on connection
+  PATCH (expired onupdate column), R320 fixture ordering. NEW EVIDENCE
+  INFRA: 37-check scale smoke covering ALL FIVE pipelines at size
+  (+tidy), lifecycle grown to 74 with live PATCH/Groups/break-glass/
+  cancel/queue walls (R344 heuristic mechanized via OpenAPI diff), CI
+  gains the fabric Playwright sweep + live-E2E job, fabric files
+  format-clean for the CI gate, JWKS-floor + private_key_jwt conformance
+  pins, make targets hardened against port-handoff races (R350).
+  Terminal state: 12 chunks zero-fail (10,772), battery 366, web 764 +
+  build, lifecycle 74/74, scale 37/37, adversarial 178/0, walk 65/65,
+  migrations reversible at intg17. Branch pushed; NOT merged.
+- **R350 (tenth window, DX)**: both self-hosting make targets clear
+  :8443 before binding — back-to-back invocations no longer race the
+  dying predecessor.
 - **R349 (tenth window)**: identity-queue resolve walled live too (a
   pending row minted in-process; producing one over HTTP needs a real
   IdP's ambiguous assertion). Lifecycle 74/74.

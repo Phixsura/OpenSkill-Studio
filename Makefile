@@ -57,7 +57,8 @@ lint-fix:                         ## Fix lint issues
 	pnpm lint:fix
 
 e2e-intg: ## Live-API E2E for the integration fabric (starts its own uvicorn on :8443)
-	cd apps/api && (APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
+	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
+		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
 		echo $$! > /tmp/intg-e2e-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-e2e-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
@@ -67,7 +68,8 @@ e2e-intg: ## Live-API E2E for the integration fabric (starts its own uvicorn on 
 		rm -f /tmp/intg-e2e-uvicorn.pid; exit $$status)
 
 e2e-intg-scale: ## Fabric scale smoke: 300 SCIM users + 400 mesh deliveries (uvicorn :8443)
-	cd apps/api && (APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
+	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
+		APP_ENV=test EGRESS_ALLOW_PRIVATE=true uv run uvicorn app.main:app --port 8443 & \
 		echo $$! > /tmp/intg-scale-uvicorn.pid; \
 		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
 			! kill -0 $$(cat /tmp/intg-scale-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
