@@ -928,6 +928,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R329 (tenth window, scale smoke)**: first realistic-size run —
+  `tests/e2e_scale_smoke.py` (+ `make e2e-intg-scale`) creates 300 SCIM
+  users 10-way concurrent over live HTTP, pages the whole directory
+  through the SQL-side pagination, point-looks-up one user by eq filter,
+  and bulk-deactivates 50 — each under a generous wall-clock bound (the
+  R218 O(N)-regression tripwire at sizes the unit suites never reach).
+  11/11 green on first run (create 300 well under 60s, paging under 15s,
+  filter under 2s, bulk under 20s). Soak this window: fabric battery x2
+  and races x3 back-to-back, zero flakes.
 - **R327 (tenth window, walk — LTI registration journey)**: the LTI
   Register-LMS form was the last create surface the walk never drove —
   now filled end-to-end (issuer/client/URLs/deployment ids -> row
