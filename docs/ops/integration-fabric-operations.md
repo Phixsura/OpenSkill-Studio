@@ -204,6 +204,16 @@ import uploads all absorb concurrent duplicates with a clean idempotent
 response instead of a 500. The expensive triggers (`.../run` on export
 streams, `.../provision-roster`) are rate-limited 10/min per route.
 
+### CI coverage (window 10, R322–R324)
+
+Every PR now runs, besides the full backend suite: the fabric Playwright
+sweep (`apps/web/e2e/sweep-integrations.spec.ts` — the five admin pages,
+one real create per page, shown-once secret semantics) inside the
+Playwright job, and a dedicated `e2e-integration-fabric` job that boots
+postgres/redis/MinIO, migrates to head and runs the 62-check live-HTTP
+lifecycle (`make e2e-intg`). Fabric source files are ruff-format clean
+(the CI lint job enforces `ruff format --check`).
+
 ### Browser E2E (window 9, R281–R285)
 
 `apps/api/tests/browser_e2e_integrations.mjs` walks the whole fabric admin
