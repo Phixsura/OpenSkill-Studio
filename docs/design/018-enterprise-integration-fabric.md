@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R363 (eleventh window, walk de-flaked — cold-compile/networkidle class)**:
+  the 65-check browser walk crept from ~3 min to ~11 min and started
+  blowing runner budgets. Two independent causes: (1) cold next-dev
+  compiles under load made first-visit gotos eat 20-30 s (fixed: runner
+  pre-warms /register,/login,/dashboard,/orgs/new before the walk; all
+  goto timeouts raised to 90 s as backstop); (2) `waitUntil: "networkidle"`
+  blocks ~30 s per navigation against next-dev because HMR keeps a
+  long-lived request open — 17 uniform 30 s gaps measured in the API log
+  while no API call exceeded 5 s. Fixed: every goto/reload uses
+  `waitUntil: "load"` + a 2.2 s settle sleep. Walk: 65/65 in 109 s.
+  Lesson: networkidle is a dev-server trap; never diagnose walk slowness
+  from the walk's own output — diff server-log timestamps for uniform gaps.
 - **R362 (eleventh window, dependency-outage drills)**: stopped the real
   infra containers mid-traffic. REDIS down: 20 authed reads+writes all
   answered (metering/rate-limit fail-open held, zero 5xx), full function

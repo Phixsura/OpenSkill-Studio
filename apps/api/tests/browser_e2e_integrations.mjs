@@ -73,7 +73,8 @@ page.on("response", (res) => {
 try {
   // ── 1. Register (auto-auth) + org ──
   section("1. Register + Org");
-  await page.goto(`${BASE}/register`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${BASE}/register`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   await page.fill("#displayName", "Fabric Admin");
   await page.fill("#email", email);
   await page.fill("#password", password);
@@ -86,7 +87,8 @@ try {
   }
   check("registered and on dashboard", page.url().includes("dashboard"));
 
-  await page.goto(`${BASE}/dashboard/orgs/new`, { waitUntil: "networkidle", timeout: 20000 });
+  await page.goto(`${BASE}/dashboard/orgs/new`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const nameField = await page.$('input[id="name"], input[name="name"], input[placeholder*="name" i]');
   check("org form renders", nameField !== null);
   await nameField.fill(`Fabric Org ${Date.now()}`);
@@ -99,7 +101,8 @@ try {
 
   // ── 2. Hub: provider catalog + health strip ──
   section("2. Integrations hub");
-  await page.goto(intgBase, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(intgBase, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const hubText = await page.textContent("body");
   check("hub renders", hubText.length > 200);
   check(
@@ -131,7 +134,8 @@ try {
 
   // ── 3. Identity: claim domain + mint SCIM token ──
   section("3. Identity page");
-  await page.goto(`${intgBase}/identity`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${intgBase}/identity`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const idText = await page.textContent("body");
   check("identity page renders", /domain|SSO|SCIM/i.test(idText));
 
@@ -189,7 +193,8 @@ try {
 
   // Shown-once means GONE after reload: the minted SCIM secret must not
   // survive a page refresh (it lives in component state, never a query).
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const afterReload = await page.textContent("body");
   check("SCIM secret gone after reload", !afterReload.includes("osks_scim_"));
 
@@ -241,7 +246,8 @@ try {
 
   // ── 4. Events: catalog + create subscription ──
   section("4. Events page");
-  await page.goto(`${intgBase}/events`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${intgBase}/events`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const evText = await page.textContent("body");
   check("events page renders", /subscription|deliver|event/i.test(evText));
   const catalogOpts = await page.$$eval(
@@ -294,19 +300,22 @@ try {
   }
 
   // Shown-once signing secret gone after reload too.
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const evReload = await page.textContent("body");
   check("webhook signing secret gone after reload", !evReload.includes("whsec_"));
 
   // ── 5. Sync page ──
   section("5. Sync page");
-  await page.goto(`${intgBase}/sync`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${intgBase}/sync`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const syncText = await page.textContent("body");
   check("sync page renders", /mapping|profile|sync|run/i.test(syncText));
 
   // ── 6. Data page (exports + imports) ──
   section("6. Data page");
-  await page.goto(`${intgBase}/data`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${intgBase}/data`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const dataText = await page.textContent("body");
   check("data page renders", /export|import|stream/i.test(dataText));
   const tmplBtn = await page.$('button:has-text("template"), a:has-text("template"), button:has-text("Template"), a:has-text("Template")');
@@ -356,8 +365,9 @@ try {
         check("job shows committed", /committed/i.test(afterCommit), afterCommit.slice(0, 160));
         // the imported user lands on the members page
         await page.goto(`${BASE}/dashboard/orgs/${orgId}/members`, {
-          waitUntil: "networkidle", timeout: 30000,
+          waitUntil: "load", timeout: 90000,
         });
+        await page.waitForTimeout(2200);
         const memText = await page.textContent("body");
         check("imported member visible on members page", memText.includes(importedEmail));
       }
@@ -386,7 +396,8 @@ try {
   );
   if (badResponses.length) results.push(`  (4xx/5xx responses: ${badResponses.slice(0, 8).join(" ; ")})`);
   // ── 6c. Error-report journey: a bad row surfaces + errors.csv offered ──
-  await page.goto(`${intgBase}/data`, { waitUntil: "networkidle", timeout: 30000 });
+  await page.goto(`${intgBase}/data`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
   const badEmail = `bad-${Date.now()}`;
   const badCsv = `email,display_name,role\n${badEmail},No At Sign,student\n`;
   const fileInput2 = await page.$('input[type="file"]');
@@ -417,7 +428,8 @@ try {
     ["hub", ""], ["identity", "/identity"], ["events", "/events"],
     ["sync", "/sync"], ["data", "/data"],
   ]) {
-    await page.goto(`${intgBase}${path}`, { waitUntil: "networkidle", timeout: 30000 });
+    await page.goto(`${intgBase}${path}`, { waitUntil: "load", timeout: 90000 });
+    await page.waitForTimeout(2200);
     const body = await page.textContent("body");
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -431,7 +443,8 @@ try {
   section("8b. Outsider lockout");
   const ctx2 = await browser.newContext({ viewport: { width: 1380, height: 900 } });
   const page2 = await ctx2.newPage();
-  await page2.goto(`${BASE}/register`, { waitUntil: "networkidle", timeout: 30000 });
+  await page2.goto(`${BASE}/register`, { waitUntil: "load", timeout: 90000 });
+  await page2.waitForTimeout(2200);
   await page2.fill("#displayName", "Outsider");
   await page2.fill("#email", `outsider-${Date.now()}@test.com`);
   await page2.fill("#password", password);
@@ -439,14 +452,16 @@ try {
   await page2.waitForTimeout(3000);
   const cont2 = await page2.$('button:has-text("Continue to Dashboard")');
   if (cont2) { await cont2.click(); await page2.waitForTimeout(2000); }
-  await page2.goto(intgBase, { waitUntil: "networkidle", timeout: 30000 });
+  await page2.goto(intgBase, { waitUntil: "load", timeout: 90000 });
+  await page2.waitForTimeout(2200);
   const outText = await page2.textContent("body");
   check(
     "outsider sees no fabric data on org A's hub",
     !outText.includes("Walk ATS") && !outText.includes("oskst_"),
     outText.slice(0, 160),
   );
-  await page2.goto(`${intgBase}/identity`, { waitUntil: "networkidle", timeout: 30000 });
+  await page2.goto(`${intgBase}/identity`, { waitUntil: "load", timeout: 90000 });
+  await page2.waitForTimeout(2200);
   const outId = await page2.textContent("body");
   check(
     "outsider sees no domains/tokens on org A's identity page",
@@ -462,7 +477,8 @@ try {
     ["hub", ""], ["identity", "/identity"], ["events", "/events"],
     ["sync", "/sync"], ["data", "/data"],
   ]) {
-    await page.goto(`${intgBase}${path}`, { waitUntil: "networkidle", timeout: 30000 });
+    await page.goto(`${intgBase}${path}`, { waitUntil: "load", timeout: 90000 });
+    await page.waitForTimeout(2200);
     const unnamed = await page.$$eval(
       "input:not([type=hidden]), select, textarea",
       (els) =>

@@ -232,7 +232,13 @@ postgres/redis/MinIO, migrates to head and runs the 62-check live-HTTP
 lifecycle (`make e2e-intg`). Fabric source files are ruff-format clean
 (the CI lint job enforces `ruff format --check`).
 
-### Browser E2E (window 9, R281–R285)
+### Browser E2E
+
+> Flake rule (R363): never use `waitUntil: "networkidle"` against the
+> next-dev server — HMR holds a connection open and each navigation
+> stalls ~30 s. Use `"load"` plus a short settle sleep, and pre-warm
+> dev compiles before the walk.
+> (window 9, R281–R285)
 
 `apps/api/tests/browser_e2e_integrations.mjs` walks the whole fabric admin
 journey in a real Chromium: register → org → hub (catalog, health strip,
