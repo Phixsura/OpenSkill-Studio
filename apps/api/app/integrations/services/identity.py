@@ -319,7 +319,31 @@ class IdentityService:
         item = await self.db.get(IdentityMatchQueue, item_id)
         if item is None or item.org_id != org_id:
             raise AppError("IDENTITY_QUEUE_NOT_FOUND", "Queue item not found", 404)
-        if item.status != "pending":
+        if action not in ("link", "reject"):
+            raise AppError("IDENTITY_QUEUE_INVALID", "action must be link|reject", 422)
+        # R308 (R306 class): the pending->resolved transition is an atomic
+        # claim — two admins adjudicating the SAME item concurrently must
+        # yield exactly one winner, never a link+reject mix or a double
+        # link. The claim happens first; if the link work below fails the
+        # whole transaction rolls back and the item is pending again.
+        from sqlalchemy import update as _update
+
+        claimed = (
+            await self.db.execute(
+                _update(IdentityMatchQueue)
+                .where(
+                    IdentityMatchQueue.id == item_id,
+                    IdentityMatchQueue.status == "pending",
+                )
+                .values(
+                    status="linked" if action == "link" else "rejected",
+                    resolved_by=actor_id,
+                    resolved_at=datetime.now(UTC),
+                )
+                .returning(IdentityMatchQueue.id)
+            )
+        ).scalar_one_or_none()
+        if claimed is None:
             raise AppError("IDENTITY_QUEUE_RESOLVED", "Queue item already resolved", 409)
         if action == "link":
             if not user_id:
@@ -344,12 +368,6 @@ class IdentityService:
                 email_verified=False,
             )
             await self._link(ident, user_id)
-            item.status = "linked"
-        elif action == "reject":
-            item.status = "rejected"
-        else:
-            raise AppError("IDENTITY_QUEUE_INVALID", "action must be link|reject", 422)
-        item.resolved_by = actor_id
-        item.resolved_at = datetime.now(UTC)
         await self.db.flush()
+        await self.db.refresh(item)
         return item

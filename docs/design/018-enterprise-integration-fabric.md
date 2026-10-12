@@ -914,6 +914,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R308 (ninth window, fix — queue-adjudication race)**: R306's class
+  swept across terminal-state writers found one more check-then-set:
+  resolve_queue_item read `status == "pending"` then wrote the terminal
+  state — two admins adjudicating the same item concurrently could both
+  pass (link+reject mix, or double link). Now an atomic
+  pending->resolved claim (UPDATE ... WHERE status='pending' RETURNING)
+  taken BEFORE the link work, so a failed link rolls the claim back with
+  it. Race-pinned: two gather'd sessions, exactly one winner, loser 409.
+  Swept the rest of the class: export runs (no cancel API), deliveries/
+  imports (already claim-based), reaper (conditioned) — closed.
 - **R307 (ninth window, final regression record)**: full foreground
   verification at window end — backend 12 chunks zero-fail (10,761 test
   items), fabric battery 354 (make test-intg), web 764 + tsc + eslint +

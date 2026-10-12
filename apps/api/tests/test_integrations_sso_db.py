@@ -1302,3 +1302,42 @@ async def test_sso_update_validations(db):
     await db.refresh(conn)
     assert conn.oidc_issuer == "https://idp.example.com"
     assert conn.default_role == "student"
+
+
+@pytest.mark.asyncio
+async def test_queue_resolve_single_winner_under_race(db):
+    """R308 (R306 class): two admins adjudicating the SAME pending item
+    concurrently yield exactly one winner — the loser gets a clean 409,
+    never a link+reject mix."""
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import IdentityMatchQueue
+    from app.integrations.services.identity import IdentityService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    item = IdentityMatchQueue(
+        org_id=org.id, source="scim", connection_ref="c",
+        subject=f"rq-{uuid.uuid4().hex[:6]}", email="rq@x.edu",
+        reason="ambiguous", payload={}, status="pending",
+    )
+    db.add(item)
+    await db.commit()
+
+    async def resolver(n):
+        async with AsyncSessionLocal() as own:
+            try:
+                await IdentityService(own).resolve_queue_item(
+                    org.id, item.id, action="reject", user_id=None,
+                    actor_id=owner.id,
+                )
+                await own.commit()
+                return "won"
+            except AppError as exc:
+                return exc.code
+
+    results = sorted(await asyncio.gather(resolver(1), resolver(2)))
+    assert results == ["IDENTITY_QUEUE_RESOLVED", "won"]
+    await db.refresh(item)
+    assert item.status == "rejected"
