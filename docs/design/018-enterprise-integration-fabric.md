@@ -914,6 +914,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R299 (ninth window, shown-once-really-once)**: the walk now reloads
+  after minting the SCIM token and after creating the subscription, and
+  asserts neither secret survives the refresh (shown-once lives in
+  component state, never in a refetchable query). 58/58 PASS.
 - **R298 (ninth window, browser walk — SSO create + secret hygiene)**:
   the walk now drives the OIDC SSO form (issuer + client id + secret ->
   Add OIDC) and asserts the listed row carries NO echo of the client

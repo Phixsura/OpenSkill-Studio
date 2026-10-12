@@ -181,6 +181,12 @@ try {
     );
   }
 
+  // Shown-once means GONE after reload: the minted SCIM secret must not
+  // survive a page refresh (it lives in component state, never a query).
+  await page.reload({ waitUntil: "networkidle" });
+  const afterReload = await page.textContent("body");
+  check("SCIM secret gone after reload", !afterReload.includes("oskst_"));
+
   // ── 3c. Create an OIDC SSO connection through the real form ──
   const issuerInput = await page.$('input[aria-label="OIDC issuer"]');
   check("SSO OIDC form present", issuerInput !== null);
@@ -255,6 +261,11 @@ try {
       else results.push("  (webhook POSTs: NONE FIRED)");
     }
   }
+
+  // Shown-once signing secret gone after reload too.
+  await page.reload({ waitUntil: "networkidle" });
+  const evReload = await page.textContent("body");
+  check("webhook signing secret gone after reload", !evReload.includes("whsec_"));
 
   // ── 5. Sync page ──
   section("5. Sync page");
