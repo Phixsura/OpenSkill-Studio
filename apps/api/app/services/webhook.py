@@ -345,7 +345,17 @@ class WebhookService:
         mesh deliveries for 7 days so receivers can roll keys without a hard
         break. ``immediate=True`` is the leaked-secret path — the old key
         stops signing right now."""
-        sub = await self.db.get(WebhookSubscription, webhook_id)
+        # R401 (R207 class): rotation is read-modify-write on secret/prev —
+        # two concurrent rotations both reading secret S would each set
+        # prev=S and race the new secret; the loser's one-time reveal is
+        # silently dead. Row-lock so rotations serialize.
+        sub = (
+            await self.db.execute(
+                select(WebhookSubscription)
+                .where(WebhookSubscription.id == webhook_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if sub is None or sub.org_id != org_id:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook subscription not found", 404)
         from datetime import UTC as _UTC

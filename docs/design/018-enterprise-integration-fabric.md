@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R401 (thirteenth window, rotation row-lock)**: webhook secret
+  rotation was an unlocked read-modify-write on (secret, secret_prev) —
+  two concurrent rotations both read secret S, both set prev=S, and the
+  loser's one-time reveal was silently dead. Rotations now serialize on
+  a row lock (the R207 class, applied to the one remaining chained-prev
+  structure in the fabric). 17 rotation tests green.
 - **R400 (thirteenth window, discard-mode completion)**: the sync webhook
   test dispatch gets discard_body too, and discard mode now also skips
   the declared Content-Length screen — a receiver declaring a huge body
