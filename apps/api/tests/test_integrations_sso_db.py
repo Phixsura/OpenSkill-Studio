@@ -2014,3 +2014,91 @@ async def test_oidc_callback_reject_matrix_network_and_token_shapes(db):
         assert exc.value.code == "SSO_ASSERTION_INVALID", name
         assert exc.value.status_code == 401, name
     mod._jwks_cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_domain_sweep_dns_hiccup_notok_and_race_recovery(db, monkeypatch):
+    """R428: sweep_pending's remaining arms. A verifier EXCEPTION (DNS
+    hiccup) leaves the row pending for the next sweep; a False answer
+    likewise; and the true concurrent race (another process verified the
+    same domain between the pre-check and the flush) recovers the session
+    and marks the loser failed instead of aborting the sweep."""
+    import app.integrations.services.domains as mod
+    from app.integrations.services.domains import OrgDomainService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = OrgDomainService(db)
+    d_hiccup = await svc.claim(org.id, f"hic-{uuid.uuid4().hex[:6]}.example.edu")
+    d_notok = await svc.claim(org.id, f"no-{uuid.uuid4().hex[:6]}.example.edu")
+    await db.execute(
+        OrgDomain.__table__.delete().where(
+            OrgDomain.status == "pending",
+            OrgDomain.id.notin_([d_hiccup.id, d_notok.id]),
+        )
+    )
+    await db.commit()
+
+    class Flaky:
+        async def verify(self, h, t):
+            if h.startswith("hic-"):
+                raise OSError("dns timeout")
+            return False
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Flaky())
+    changed = await svc.sweep_pending()
+    assert changed == 0
+    await db.refresh(d_hiccup)
+    await db.refresh(d_notok)
+    # Both stay pending (retry next sweep), but were touched.
+    assert d_hiccup.status == "pending" and d_hiccup.last_checked_at is not None
+    assert d_notok.status == "pending" and d_notok.last_checked_at is not None
+
+    # True concurrent race: pre-check passes, flush explodes -> session
+    # recovered, row marked failed, sweep returns (not raises).
+    class Yep:
+        async def verify(self, h, t):
+            return True
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
+    # TRUE concurrent race: another org commits a VERIFIED row for the same
+    # domain in the window BETWEEN the sweep's pre-check and its flush. We
+    # reproduce that window deterministically with a side-effecting flush:
+    # the first time the sweep flushes inside its savepoint, a SEPARATE
+    # session commits the competing winner, so the real flush then collides
+    # with uq_intg_domain_verified for real — exercising the IntegrityError
+    # rollback + mark-failed recovery with genuine IO (no execute patching).
+    from app.core.database import AsyncSessionLocal
+
+    await db.execute(OrgDomain.__table__.delete().where(OrgDomain.id == d_notok.id))
+    await db.commit()
+
+    other_owner = await _user(db)
+    other_org = await _org(db, other_owner)
+    await db.commit()
+
+    real_flush = db.flush
+    state = {"armed": True}
+
+    async def racing_flush(*a, **k):
+        if state["armed"]:
+            state["armed"] = False
+            async with AsyncSessionLocal() as rival:
+                rival.add(
+                    OrgDomain(
+                        org_id=other_org.id,
+                        domain=d_hiccup.domain,
+                        status="verified",
+                        verification_token="tok",
+                        verified_at=datetime.now(UTC),
+                    )
+                )
+                await rival.commit()
+        return await real_flush(*a, **k)
+
+    monkeypatch.setattr(db, "flush", racing_flush)
+    changed2 = await svc.sweep_pending()
+    monkeypatch.setattr(db, "flush", real_flush)
+    assert changed2 == 0  # the loser never counted as verified
+    row = await db.get(OrgDomain, d_hiccup.id)
+    assert row.status == "failed"  # recovered, not aborted, not verified

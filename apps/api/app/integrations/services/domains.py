@@ -227,6 +227,11 @@ class OrgDomainService:
                 continue
             row.status = "verified"
             row.verified_at = now
+            # R428: capture the id BEFORE any rollback — rollback() expires
+            # the instance, and `row.id` would then lazy-load synchronously
+            # inside the except arm (MissingGreenlet), crashing the very
+            # recovery that was supposed to keep the sweep alive.
+            row_id = row.id
             try:
                 async with self.db.begin_nested():
                     await self.db.flush()
@@ -237,7 +242,7 @@ class OrgDomainService:
                 # pre-check and the flush) — recover the session, then mark
                 # failed in a fresh transaction.
                 await self.db.rollback()
-                refreshed = await self.db.get(OrgDomain, row.id)
+                refreshed = await self.db.get(OrgDomain, row_id)
                 if refreshed is not None and refreshed.status == "pending":
                     refreshed.status = "failed"
                     await self.db.commit()

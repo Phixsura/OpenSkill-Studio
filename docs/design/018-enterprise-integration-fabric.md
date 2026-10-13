@@ -931,6 +931,7 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R428 (fifteenth window, REAL BUG — sweep race recovery crashed on lazy-load)**: covering `sweep_pending`'s DNS-hiccup (verifier raises -> row stays pending), not-ok (False -> pending), and TRUE concurrent-race arms surfaced a real defect in the race recovery itself. The except arm did `await self.db.rollback()` then `await self.db.get(OrgDomain, row.id)` — but rollback() EXPIRES the instance, so `row.id` triggers a synchronous lazy-load outside the async greenlet (MissingGreenlet), i.e. the recovery that was supposed to keep the sweep alive would itself crash the whole sweep the moment the race it guards against actually fired. Fix: capture `row_id = row.id` before the try. The race arm is now covered deterministically with a side-effecting flush (a separate AsyncSessionLocal commits the competing verified row in the pre-check->flush window, so the real flush collides with uq_intg_domain_verified); reverting the fix reproduces the MissingGreenlet, proving the test catches it.
 - **R427 (fifteenth window, OIDC login reject matrix)**: the login
   callback's reject arms had never executed — the fuzzer dies at the
   discovery egress before reaching them (R416's lesson, login side).
