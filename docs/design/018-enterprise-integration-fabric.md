@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R445 (sixteenth window, sync-profile create reject arms)**:
+  SyncProfileService.create's own reject arms (beyond the already-covered
+  bidirectional and capability gates) — unknown model, bad direction, bad
+  schedule, mapping-not-found (404), mapping-model-mismatch (422), and the
+  duplicate (connection,model,direction) unique-index loser -> 409
+  SYNC_PROFILE_EXISTS (savepoint-guarded, no session poison).
 - **R443 (sixteenth window, LTI JWKS cache arms)**: LtiService._jwks_keys's
   cache/refetch/failure arms. A cached kid is served without refetch; a
   kid-miss within the 30s refetch floor returns the stale cache (rate-limit,

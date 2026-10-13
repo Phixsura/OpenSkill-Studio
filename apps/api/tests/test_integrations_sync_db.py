@@ -2346,3 +2346,58 @@ async def test_resolve_conflict_reject_arms(db):
         )
     # Staleness guard refuses the overwrite with a 409 (re-run the sync).
     assert e.value.code == "SYNC_CONFLICT_STALE" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_sync_profile_create_reject_arms(db):
+    """R445: SyncProfileService.create's own reject arms — unknown model, bad
+    direction, bad schedule, mapping-not-found, mapping-model-mismatch, and the
+    duplicate (connection,model,direction) 409."""
+    from app.integrations.models import MappingProfile
+    from app.integrations.services.sync_engine import SyncProfileService
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+
+    async def mk(**over):
+        base = dict(
+            connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
+            model="roster.class", direction="pull", mapping_profile_id=None,
+        )
+        base.update(over)
+        return await svc.create(org.id, **base)
+
+    with pytest.raises(AppError) as e:
+        await mk(model="nope.model")
+    assert e.value.code == "SYNC_PROFILE_INVALID"
+
+    with pytest.raises(AppError) as e:
+        await mk(direction="sideways")
+    assert e.value.code == "SYNC_PROFILE_INVALID"
+
+    with pytest.raises(AppError) as e:
+        await mk(schedule="fortnightly")
+    assert e.value.code == "SYNC_PROFILE_INVALID"
+
+    with pytest.raises(AppError) as e:
+        await mk(mapping_profile_id="01NOPENOPENOPENOPENOPENOPE")
+    assert e.value.code == "MAPPING_NOT_FOUND"
+
+    # mapping exists but for a DIFFERENT model -> mismatch 422.
+    mp = MappingProfile(
+        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", direction="inbound",
+        model="roster.user", document={"fields": []}, version=1,
+    )
+    db.add(mp)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await mk(mapping_profile_id=mp.id)  # profile model is roster.class
+    assert e.value.code == "SYNC_PROFILE_INVALID"
+
+    # Duplicate (connection, model, direction) -> 409. _setup_profile already
+    # made a roster.class/pull profile on this conn.
+    with pytest.raises(AppError) as e:
+        await mk()
+    assert e.value.code == "SYNC_PROFILE_EXISTS" and e.value.status_code == 409
