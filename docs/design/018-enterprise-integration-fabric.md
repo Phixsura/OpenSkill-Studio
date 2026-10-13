@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R420 (fourteenth window, closing regression)**: full wave after
+  R408-R419 — 12/12 chunks = 10,808 backend tests; battery 390;
+  lifecycle 77/77; scale 37/37; storm 8/8; fuzz 399/seed zero-5xx;
+  adversarial 178/0; walk 65/65; a11y 5/5; web 766; all 10 drills green
+  (EXPLAIN flagged=0). Window-14 theme was depth over breadth on an
+  already-converged fabric: property SOUNDNESS (SSRF), three shipped
+  write-path coverage fills (push/AGS/fan-out), two race-recovery
+  branches, and mutation-testing the SSRF/SCIM/webhook-crypto cores to
+  convert "executed" into "asserted" — one real bug (R409 SCIM member
+  case). head intg21a00021; not merged, no PR.
 - **R419 (fourteenth window, \_deprovision mutation-tight)**: mutation-tested
   the SCIM _deprovision last-owner guard (R330, access-control-critical) —
   6/6 mutants killed, 0 survivors; the guard that stops an IdP from
