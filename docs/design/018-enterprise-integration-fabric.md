@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R405 (thirteenth window, final tally + flake kill)**: the global
+  LIMIT-200 domain sweep could crowd a test's own pending rows out of the
+  batch — the sweep test now isolates by deleting other pending rows
+  first (test hygiene; the sweep itself is robust since R402), and the
+  storm namespaces all resources per run (no more cross-run dup domains).
+  Closing wave: 12/12 chunks = 10,787; battery 377; lifecycle 77/77;
+  scale 37/37; storm 8/8; fuzz 399 req/seed zero-5xx envelope-clean (20+
+  seeds this window, ~8,000 hostile requests); adversarial 178/0; walk
+  65/65; web 766; all 10 drills green via `make drills`. Head
+  intg20a00020; no merge/PR per standing rule.
 - **R404 (thirteenth window, HTTP idempotency-race drill)**: the in-process
   DB test proved the import idempotency service; this proves the FULL ASGI
   stack under real socket concurrency — 12 simultaneous uploads with the
