@@ -1686,3 +1686,59 @@ async def test_domain_sweep_survives_two_orgs_same_domain(db, monkeypatch):
         .all()
     )
     assert sorted(rows) == ["failed", "verified"]
+
+
+@pytest.mark.asyncio
+async def test_identity_link_first_login_race_recovery(db):
+    """R414: _link's loser-recovery branch (lines 159-173) — when a
+    concurrent first login already committed the (connection_ref, subject)
+    link, the second INSERT violates the partial unique index INSIDE the
+    savepoint; the except re-reads and returns the winner's link instead of
+    500ing. Driven deterministically: pre-commit the link in one session,
+    then _link the same identity in a fresh session (one-per-request, as
+    prod does) and assert it returns the existing link, not an error."""
+    from sqlalchemy import func as _func
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import ExternalIdentityLink
+    from app.integrations.services.identity import IdentityService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    dom = f"race-{uuid.uuid4().hex[:8]}.example.edu"
+    await _verified_domain(db, org, dom)
+    member = await _user(db, email=f"racer@{dom}")
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=member.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
+    await db.commit()
+
+    cref, subj = f"01RC{uuid.uuid4().hex[:8].upper()}", "race-sub"
+    ident_kw = dict(org=org, conn_ref=cref, subject=subj, email=f"racer@{dom}")
+
+    # winner: create + commit the link in its own session
+    async with AsyncSessionLocal() as s1:
+        won = await IdentityService(s1)._link(_ident(**ident_kw), member.id)
+        await s1.commit()
+        won_id = won.id
+
+    # loser: _link the SAME identity -> INSERT collides -> recovery re-reads
+    async with AsyncSessionLocal() as s2:
+        relinked = await IdentityService(s2)._link(_ident(**ident_kw), member.id)
+        assert relinked.id == won_id  # returned the winner, did not 500
+        await s2.commit()
+
+    n = (
+        await db.execute(
+            select(_func.count())
+            .select_from(ExternalIdentityLink)
+            .where(
+                ExternalIdentityLink.connection_ref == cref,
+                ExternalIdentityLink.subject == subj,
+                ExternalIdentityLink.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one()
+    assert n == 1, f"recovery left {n} links, expected exactly 1"

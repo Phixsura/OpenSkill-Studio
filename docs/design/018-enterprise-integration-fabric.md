@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R414 (fourteenth window, identity first-login race recovery)**:
+  `_link`'s loser-recovery branch (a concurrent first login already
+  committed the (connection_ref, subject) link, so the second INSERT
+  violates the partial unique index inside the savepoint and the except
+  re-reads the winner instead of 500ing) had never executed in tests.
+  Driven deterministically with two one-per-request sessions: winner
+  commits the link, loser _links the same identity → INSERT collides →
+  recovery returns the winner's link, exactly one link survives. Only the
+  defensive re-raise (unrecoverable case) stays uncovered, correctly.
 - **R413 (fourteenth window, gradeable-event fan-out coverage)**:
   `handle_gradeable_event` — the worker hook that turns an internal
   gradeable event into AGS pushes (the automation that makes
