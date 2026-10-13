@@ -121,11 +121,45 @@ export default function IntegrationEventsPage() {
   } = useQuery({
     queryKey: ["intg-deliveries", orgId, statusFilter],
     queryFn: () =>
-      apiWithAuth<{ data: Delivery[] }>(
-        `${base}/deliveries${statusFilter ? `?status=${statusFilter}` : ""}`,
-      ),
+      apiWithAuth<{
+        data: Delivery[];
+        meta?: { next_cursor: string | null; has_more: boolean };
+      }>(`${base}/deliveries${statusFilter ? `?status=${statusFilter}` : ""}`),
   });
-  const deliveries = deliveriesData?.data ?? [];
+  // R375: keyset "Load older" for deliveries — mirrors the events list.
+  const [olderDel, setOlderDel] = useState<{
+    items: Delivery[];
+    cursor: string | null;
+    hasMore: boolean | null;
+  }>({ items: [], cursor: null, hasMore: null });
+  const [loadingOlderDel, setLoadingOlderDel] = useState(false);
+  useEffect(() => {
+    setOlderDel({ items: [], cursor: null, hasMore: null });
+  }, [orgId, statusFilter]);
+  const deliveries = [...(deliveriesData?.data ?? []), ...olderDel.items];
+  const delCursor = olderDel.cursor ?? deliveriesData?.meta?.next_cursor ?? null;
+  const hasOlderDel = olderDel.hasMore ?? deliveriesData?.meta?.has_more ?? false;
+  const loadOlderDeliveries = async () => {
+    if (!delCursor || loadingOlderDel) return;
+    setLoadingOlderDel(true);
+    try {
+      const r = await apiWithAuth<{
+        data: Delivery[];
+        meta?: { next_cursor: string | null; has_more: boolean };
+      }>(
+        `${base}/deliveries?before=${encodeURIComponent(delCursor)}${
+          statusFilter ? `&status=${statusFilter}` : ""
+        }`,
+      );
+      setOlderDel((prev) => ({
+        items: [...prev.items, ...(r.data ?? [])],
+        cursor: r.meta?.next_cursor ?? null,
+        hasMore: r.meta?.has_more ?? false,
+      }));
+    } finally {
+      setLoadingOlderDel(false);
+    }
+  };
 
   const { data: detailData } = useQuery({
     queryKey: ["intg-delivery", orgId, openDelivery],
@@ -459,6 +493,16 @@ export default function IntegrationEventsPage() {
             </li>
           ))}
         </ul>
+        {hasOlderDel && (
+          <button
+            type="button"
+            className="mt-2 rounded border px-3 py-1 text-sm disabled:opacity-50"
+            onClick={loadOlderDeliveries}
+            disabled={loadingOlderDel}
+          >
+            {loadingOlderDel ? "Loading…" : "Load older deliveries"}
+          </button>
+        )}
       </section>
 
       <section className="space-y-3">

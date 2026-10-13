@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R379 (twelfth window, deliveries Load-older + audit-cost check)**: the
+  deliveries list gets the same keyset Load-older as events (filter-reset,
+  in-flight guard). Storm re-run after the 19 new audit writes:
+  p50=135 ms, p95=732 ms — no latency regression from auditing every
+  config mutation.
 - **R378 (twelfth window, SCIM meta conformance + before-param fuzz)**:
   SCIM User/Group `meta` now carries `created`/`lastModified` (RFC 7643
   §3.1 SHOULD — Okta/Entra conformance checkers flag absence). Gotcha
