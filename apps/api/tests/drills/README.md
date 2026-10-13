@@ -14,6 +14,7 @@ semantics. Run from `apps/api` with infra up (`make infra-up`):
 | `slow_sink_drill.py` | webhook sink accepts then stalls 60s (slowloris) | EgressClient read-timeout fires at 15s as a clean failure result (no hang/500); fast sink succeeds right after (R380) |
 | `explain_audit.py` | nothing — reads query plans on the big dev DB | every fabric hot-path predicate index-scans; any Seq Scan over a >10k-row table is flagged (R387) |
 | `soak_drill.py` | N consecutive storms on one process, RSS sampled per storm | no unbounded growth (final < 2x warm, < 1.5 GB); measured: flat 244→230 MB over 12 storms (R398) |
+| `idempotency_drill.py` | 12 concurrent same-key import uploads over real sockets | exactly ONE job id, zero 5xx (unique index + savepoint recovery, R404) |
 | `ratelimit_drill.py` | bursts a 10/60 route in dev mode | exactly 10 allowed (X-RateLimit-* present), 11th = 429 with Retry-After, per-route bucket (R366) |
 
 Logs land in `apps/api/.drill-logs/` (gitignored).
