@@ -54,7 +54,6 @@ AUDIT_ACTIONS = frozenset(
         "intg.sso.metadata_refreshed",
         "intg.identity.unlinked",
         "intg.connection.created",
-        "intg.connection.deleted",
         "intg.credential.set",
         "intg.scim_token.minted",
         "intg.scim_token.revoked",
