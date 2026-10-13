@@ -1065,3 +1065,37 @@ async def test_patch_path_must_be_string(ctx):
         with pytest.raises(ScimError) as e:
             await svc.patch(rid, {"Operations": [{"op": "remove", "path": 123}]})
         assert e.value.status == 400
+
+
+async def test_group_list_filter_displayname_and_externalid(ctx):
+    """R391: /Groups silently IGNORED the filter param — Okta dedups groups
+    with `displayName eq "..."` before creating, so an ignored filter
+    returned the whole directory and let the IdP duplicate or mis-match
+    groups. Filter must narrow (case-insensitive displayName, exact
+    externalId) and reject unknown attributes loudly."""
+    svc = _gsvc(ctx)
+    await svc.create({"displayName": "Engineering", "externalId": "ext-eng"})
+    await svc.create({"displayName": "Design", "externalId": "ext-des"})
+
+    out = await svc.list(start_index=1, count=100, filter_expr='displayName eq "engineering"')
+    assert out["totalResults"] == 1
+    assert out["Resources"][0]["displayName"] == "Engineering"
+
+    out = await svc.list(start_index=1, count=100, filter_expr='externalId eq "ext-des"')
+    assert out["totalResults"] == 1
+    assert out["Resources"][0]["displayName"] == "Design"
+
+    out = await svc.list(start_index=1, count=100, filter_expr='displayName eq "nope"')
+    assert out["totalResults"] == 0 and out["Resources"] == []
+
+    import pytest as _pytest
+
+    from app.integrations.services.scim import ScimError
+
+    with _pytest.raises(ScimError) as e:
+        await svc.list(start_index=1, count=100, filter_expr='members eq "x"')
+    assert e.value.status == 400
+
+    # no filter still lists everything
+    out = await svc.list(start_index=1, count=100)
+    assert out["totalResults"] == 2

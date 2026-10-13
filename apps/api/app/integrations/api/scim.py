@@ -244,12 +244,15 @@ async def delete_user(
 async def list_groups(
     startIndex: int = Query(default=1, ge=1),  # noqa: N803
     count: int = Query(default=100, ge=0, le=200),
+    filter: str | None = Query(default=None, max_length=256),  # noqa: A002 — SCIM param name
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
     async def fn(token):
         return _scim_json(
-            await ScimGroupService(db, token).list(start_index=startIndex, count=count)
+            await ScimGroupService(db, token).list(
+                start_index=startIndex, count=count, filter_expr=filter
+            )
         )
 
     return await _run(db, authorization, fn)

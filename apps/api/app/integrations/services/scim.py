@@ -714,8 +714,19 @@ class ScimGroupService:
         group = await self._group(group_id)
         return _group_resource(group, await self._member_ids(group.id))
 
-    async def list(self, *, start_index: int, count: int) -> dict:
+    async def list(self, *, start_index: int, count: int, filter_expr: str | None = None) -> dict:
         base = select(ScimGroup).where(ScimGroup.org_id == self.org_id)
+        if filter_expr:
+            # R391: Okta dedups groups with `displayName eq "..."` before
+            # creating — a silently IGNORED filter returned the whole
+            # directory and let the IdP mis-match or duplicate groups.
+            attr, value = ScimUserService._parse_filter(filter_expr)
+            if attr == "displayname":
+                base = base.where(func.lower(ScimGroup.display_name) == value.lower())
+            elif attr == "externalid":
+                base = base.where(ScimGroup.external_id == value)
+            else:
+                raise ScimError(400, f"Unsupported filter attribute: {attr}", "invalidFilter")
         total = (
             await self.db.execute(select(func.count()).select_from(base.subquery()))
         ).scalar_one()

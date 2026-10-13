@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R391 (twelfth window, SCIM Groups filter)**: /Groups silently IGNORED
+  the `filter` query param — Okta dedups groups with `displayName eq
+"..."` before creating, so the ignored filter returned the whole
+  directory and let the IdP duplicate or mis-match groups. Now supported:
+  case-insensitive `displayName eq`, exact `externalId eq`; any other
+  attribute is a loud 400 invalidFilter (reject beats silently-ignore for
+  protocol params). Pinned (narrowing, miss, unknown-attr 400, unfiltered
+  list unchanged); SCIM suite 37/37, battery 374.
 - **R390 (twelfth window, deliveries Load-older page test)**: symmetric
   vitest coverage for the deliveries cursor UI (append, cursor consumed,
   button hides at the end). Web 766 tests. Render gotcha: delivery rows
