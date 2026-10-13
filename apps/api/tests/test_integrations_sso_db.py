@@ -1789,3 +1789,126 @@ async def test_identity_link_first_login_race_recovery(db):
         )
     ).scalar_one()
     assert n == 1, f"recovery left {n} links, expected exactly 1"
+
+
+class _NoneScalarResult:
+    def scalar_one_or_none(self):
+        return None
+
+
+def _skip_first_select(session):
+    """Patch session.execute so the FIRST call reports no row (the loser's
+    pre-insert snapshot) and every later call is real. Returns the call
+    counter so tests can assert the recovery re-select ran."""
+    real = session.execute
+    calls = {"n": 0}
+
+    async def patched(stmt, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _NoneScalarResult()
+        return await real(stmt, *a, **k)
+
+    session.execute = patched
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_jit_provision_user_race_loser_recovers_active_winner(db):
+    """R426: _jit_provision's user-INSERT race recovery (R166) had never
+    executed. Loser's snapshot saw no user, its INSERT collides with the
+    committed winner, and it must adopt the winner's ACTIVE account and
+    still create the membership."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    winner = await _user(db, email=f"race-{uuid.uuid4().hex[:8]}@acme.edu")
+    await db.flush()
+
+    svc = IdentityService(db)
+    calls = _skip_first_select(db)
+    user = await svc._jit_provision(
+        _ident(org, subject=f"s-{uuid.uuid4().hex[:6]}", email=winner.email), "student"
+    )
+    assert user.id == winner.id  # adopted the winner, no second account
+    assert calls["n"] >= 3  # recovery re-select + membership select ran
+    member = (
+        await db.execute(
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == winner.id)
+        )
+    ).scalar_one_or_none()
+    assert member is not None and member.role == OrgRole.STUDENT
+
+
+@pytest.mark.asyncio
+async def test_jit_provision_user_race_loser_inactive_winner_queues(db):
+    """R426: same race, but the winner account is NOT active — the loser
+    must queue for admin confirmation (403), never attach a membership to
+    a suspended account."""
+    from app.models.user import UserStatus
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    winner = await _user(db, email=f"race-{uuid.uuid4().hex[:8]}@acme.edu")
+    winner.status = UserStatus.SUSPENDED
+    await db.flush()
+
+    svc = IdentityService(db)
+    _skip_first_select(db)
+    with pytest.raises(AppError) as exc:
+        await svc._jit_provision(
+            _ident(org, subject=f"s-{uuid.uuid4().hex[:6]}", email=winner.email), "student"
+        )
+    assert exc.value.code == "IDENTITY_AMBIGUOUS" and exc.value.status_code == 403
+    items = await svc.list_queue(org.id)
+    assert any(i.reason == "existing_account_inactive" for i in items)
+    member = (
+        await db.execute(
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == winner.id)
+        )
+    ).scalar_one_or_none()
+    assert member is None  # no membership minted onto the suspended account
+
+
+@pytest.mark.asyncio
+async def test_jit_provision_member_race_loser_is_noop(db):
+    """R426: the membership-INSERT race arm (second savepoint) — the loser's
+    snapshot saw no membership, its INSERT collides, and the pass-branch
+    must leave exactly ONE membership with the original role."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    user = await _user(db, email=f"race-{uuid.uuid4().hex[:8]}@acme.edu")
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=user.id, role=OrgRole.INSTRUCTOR, status=MemberStatus.ACTIVE
+        )
+    )
+    await db.flush()
+
+    svc = IdentityService(db)
+    real = db.execute
+    calls = {"n": 0}
+
+    async def member_select_sees_nothing(stmt, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 2:  # 1 = user select (real hit), 2 = member select
+            return _NoneScalarResult()
+        return await real(stmt, *a, **k)
+
+    db.execute = member_select_sees_nothing
+    returned = await svc._jit_provision(
+        _ident(org, subject=f"s-{uuid.uuid4().hex[:6]}", email=user.email), "student"
+    )
+    db.execute = real
+    assert returned.id == user.id
+    members = (
+        (
+            await db.execute(
+                select(OrgMember).where(
+                    OrgMember.org_id == org.id, OrgMember.user_id == user.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(members) == 1 and members[0].role == OrgRole.INSTRUCTOR  # not downgraded

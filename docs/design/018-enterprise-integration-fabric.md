@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R426 (fifteenth window, JIT race arms)**: `_jit_provision`'s three
+  race-recovery arms (R166 class) had never executed; all three now
+  covered deterministically with the pre-insert-snapshot technique.
+  (1) user-INSERT loser adopts the committed ACTIVE winner and still
+  mints the membership; (2) loser against a SUSPENDED winner queues for
+  admin confirmation (403 `IDENTITY_AMBIGUOUS`, reason
+  `existing_account_inactive`) and must NOT attach a membership to the
+  suspended account; (3) the membership-INSERT loser is a clean no-op —
+  exactly one membership remains and an existing INSTRUCTOR role is not
+  downgraded by the student JIT default.
 - **R425 (fifteenth window, SCIM arm cover)**: the bulk dispatcher's
   Users-PUT and Groups-PUT/PATCH/DELETE SUCCESS arms had never executed
   (only their 404/400 reject arms were pinned); the user-PATCH externalId
