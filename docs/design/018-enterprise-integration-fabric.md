@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R441 (sixteenth window, roster/opportunity validator arms)**: the
+  remaining bulk-import validators pinned as pure-function matrices (same
+  family as R421's user-row validator). `_validate_roster_rows`: invalid
+  email, invalid/oversized cohort_slug, invalid role, and the per-(email,
+  cohort_slug) in-file duplicate (same email in a different cohort is NOT a
+  dup). `_validate_opportunity_rows`: invalid title, invalid
+  opportunity_type, NUL-in-description, invalid location_mode, non-integer/
+  out-of-range openings (1-999), and case-insensitive in-file title dup.
 - **R440 (sixteenth window, login/upgrade/credential arms)**: three more
   clusters. `login_initiation`: unknown-issuer reject (LTI_LAUNCH_INVALID)
   and the optional lti_message_hint passthrough branch. `upgrade`: provider

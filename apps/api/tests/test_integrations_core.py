@@ -1390,3 +1390,79 @@ async def test_oneroster_ping_and_map_record_defaults():
 
     # external_id is always stringified sourcedId, even numeric.
     assert m("roster.term", {"sourcedId": 42})["external_id"] == "42"
+
+
+def test_validate_roster_rows_reject_arms():
+    """R441: _validate_roster_rows' per-column reject arms — invalid email,
+    invalid/oversized cohort_slug, invalid role, and the per-(email,slug)
+    in-file duplicate. A valid row passes; same email in a DIFFERENT cohort
+    is NOT a duplicate."""
+    from app.integrations.services.bulk_import import _validate_roster_rows
+
+    rows, errors = _validate_roster_rows([(1, {"email": "bad", "cohort_slug": "c1"})])
+    assert rows == [] and errors[0]["code"] == "invalid_email"
+
+    rows, errors = _validate_roster_rows([(1, {"email": "a@x.com", "cohort_slug": ""})])
+    assert rows == [] and errors[0]["code"] == "invalid_cohort_slug"
+
+    rows, errors = _validate_roster_rows(
+        [(1, {"email": "a@x.com", "cohort_slug": "x" * 201})]
+    )
+    assert rows == [] and errors[0]["code"] == "invalid_cohort_slug"
+
+    rows, errors = _validate_roster_rows(
+        [(1, {"email": "a@x.com", "cohort_slug": "c1", "role": "overlord"})]
+    )
+    assert rows == [] and errors[0]["code"] == "invalid_role"
+
+    # Same (email, cohort) twice -> duplicate; same email, different cohort -> ok.
+    rows, errors = _validate_roster_rows(
+        [
+            (1, {"email": "a@x.com", "cohort_slug": "c1"}),
+            (2, {"email": "a@x.com", "cohort_slug": "c1"}),
+            (3, {"email": "a@x.com", "cohort_slug": "c2"}),
+        ]
+    )
+    assert len(rows) == 2  # row1 and row3
+    assert [e["code"] for e in errors] == ["duplicate_in_file"]
+
+
+def test_validate_opportunity_rows_reject_arms():
+    """R441: _validate_opportunity_rows' per-column reject arms — invalid
+    title, invalid opportunity_type, NUL in description, invalid
+    location_mode, non-integer/out-of-range openings, and in-file title dup."""
+    from app.integrations.services.bulk_import import _validate_opportunity_rows
+
+    def one(row):
+        rows, errors = _validate_opportunity_rows([(1, row)])
+        return rows, {e["code"] for e in errors}
+
+    _, codes = one({"title": "", "opportunity_type": "internship"})
+    assert "invalid_title" in codes
+
+    _, codes = one({"title": "Dev", "opportunity_type": "wizard"})
+    assert "invalid_type" in codes
+
+    _, codes = one({"title": "Dev", "opportunity_type": "internship", "description": "a\x00b"})
+    assert "control_chars" in codes
+
+    _, codes = one(
+        {"title": "Dev", "opportunity_type": "internship", "location_mode": "mars"}
+    )
+    assert "invalid_location_mode" in codes
+
+    _, codes = one(
+        {"title": "Dev", "opportunity_type": "internship", "openings": "lots"}
+    )
+    assert "invalid_openings" in codes
+    _, codes = one({"title": "Dev", "opportunity_type": "internship", "openings": "1000"})
+    assert "invalid_openings" in codes
+
+    # Valid row passes; duplicate title (case-insensitive) flagged.
+    rows, errors = _validate_opportunity_rows(
+        [
+            (1, {"title": "Backend Dev", "opportunity_type": "full_time"}),
+            (2, {"title": "backend dev", "opportunity_type": "full_time"}),
+        ]
+    )
+    assert len(rows) == 1 and [e["code"] for e in errors] == ["duplicate_in_file"]
