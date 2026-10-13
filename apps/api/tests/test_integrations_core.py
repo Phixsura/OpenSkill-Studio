@@ -1466,3 +1466,53 @@ def test_validate_opportunity_rows_reject_arms():
         ]
     )
     assert len(rows) == 1 and [e["code"] for e in errors] == ["duplicate_in_file"]
+
+
+def test_crm_map_record_all_models_and_id_fallback():
+    """R444: GenericCrmConnector._map_record for all three models, the
+    id/external_id fallback, and the alternate name keys (full_name/title)."""
+    from app.integrations.registry import GenericCrmConnector
+
+    m = GenericCrmConnector._map_record
+
+    acct = m("crm.account", {"id": "a1", "name": "Acme", "domain": "acme.com"})
+    assert acct == {"external_id": "a1", "name": "Acme", "domain": "acme.com"}
+
+    # external_id fallback when no "id"; contact uses full_name alt key.
+    contact = m("crm.contact", {"external_id": "c9", "full_name": "Ada L",
+                                "email": "a@x.com", "account_id": "a1"})
+    assert contact["external_id"] == "c9" and contact["name"] == "Ada L"
+    assert contact["email"] == "a@x.com" and contact["account_external_id"] == "a1"
+
+    # deal uses the title alt key; missing account_id -> None.
+    deal = m("crm.deal", {"id": "d1", "title": "Big Deal", "stage": "won"})
+    assert deal["name"] == "Big Deal" and deal["stage"] == "won"
+    assert deal["account_external_id"] is None
+
+    # neither id nor external_id -> empty external_id string, never a crash.
+    assert m("crm.account", {})["external_id"] == ""
+
+
+def test_parse_users_json_header_map_inversion_and_nondict_rows():
+    """R444: parse_users_json._canon_obj — a header_map (canonical<-source)
+    renames source keys to canonical, string cells are stripped (CSV parity),
+    and a non-dict array element becomes an empty row (then an invalid_email
+    error), never a crash."""
+    import json as _json
+
+    from app.integrations.services.bulk_import import parse_users_json
+
+    body = _json.dumps(
+        [
+            {"Mail": "  A@X.COM  ", "Full Name": "  Ada  "},  # source keys + padding
+            "not-an-object",  # non-dict element -> empty row
+        ]
+    ).encode()
+    # header_map maps canonical -> source: email<-mail, display_name<-full name.
+    rows, errors = parse_users_json(
+        body, header_map={"email": "Mail", "display_name": "Full Name"}, kind="users"
+    )
+    assert rows[0]["email"] == "a@x.com"  # renamed + stripped + lowercased
+    assert rows[0]["display_name"] == "Ada"  # stripped
+    # the non-dict row failed validation (empty -> invalid_email), not crashed.
+    assert any(e["row_number"] == 2 and e["code"] == "invalid_email" for e in errors)

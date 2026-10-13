@@ -1336,3 +1336,61 @@ async def test_login_initiation_unknown_issuer_and_message_hint(db):
     )
     qs = parse_qs(urlsplit(url).query)
     assert qs["lti_message_hint"] == ["deep-link-123"]
+
+
+@pytest.mark.asyncio
+async def test_jwks_keys_cache_refetch_floor_and_fetch_parse_arms(db):
+    """R443: LtiService._jwks_keys's cache/refetch/failure arms. A cached kid
+    is served without refetch; a kid-miss within the refetch floor returns the
+    stale cache (rate-limit, no refetch); a 5xx jwks fetch -> jwks_fetch_failed;
+    a garbage keys body -> jwks_parse_failed; and non-RSA / kid-less keys are
+    skipped during parse."""
+    import app.integrations.services.lti as lti_mod
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    lti_mod._jwks_cache.clear()
+
+    # Count egress calls to prove cache hits don't refetch.
+    class CountingJwks:
+        def __init__(self, response):
+            self.response = response
+            self.calls = 0
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            self.calls += 1
+            return self.response(httpx.Request(method, url))
+
+    good = CountingJwks(lambda r: httpx.Response(200, json={"keys": [_JWK]}, request=r))
+    svc.egress = good
+    keys = await svc._jwks_keys(reg, kid="lms-k1")
+    assert "lms-k1" in keys and good.calls == 1
+    # Cached kid hit: no second fetch.
+    await svc._jwks_keys(reg, kid="lms-k1")
+    assert good.calls == 1
+
+    # kid miss within the refetch floor -> returns the stale cache, no refetch.
+    stale = await svc._jwks_keys(reg, kid="unknown-kid")
+    assert good.calls == 1 and stale == keys
+
+    # 5xx fetch -> jwks_fetch_failed (clear cache + bypass floor by aging it).
+    lti_mod._jwks_cache.clear()
+    bad = CountingJwks(lambda r: httpx.Response(503, request=r))
+    svc.egress = bad
+    with pytest.raises(AppError) as e:
+        await svc._jwks_keys(reg, kid="lms-k1")
+    assert e.value.code == "LTI_LAUNCH_INVALID"
+
+    # Garbage body -> jwks_parse_failed.
+    lti_mod._jwks_cache.clear()
+    svc.egress = CountingJwks(lambda r: httpx.Response(200, text="not json", request=r))
+    with pytest.raises(AppError):
+        await svc._jwks_keys(reg, kid="lms-k1")
+
+    # Non-RSA and kid-less keys are skipped; only the valid RSA key lands.
+    lti_mod._jwks_cache.clear()
+    mixed = {"keys": [{"kty": "oct", "kid": "sym"}, {"kty": "RSA"}, _JWK]}
+    svc.egress = CountingJwks(lambda r: httpx.Response(200, json=mixed, request=r))
+    keys2 = await svc._jwks_keys(reg, kid="lms-k1")
+    assert set(keys2) == {"lms-k1"}
+    lti_mod._jwks_cache.clear()

@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R443 (sixteenth window, LTI JWKS cache arms)**: LtiService._jwks_keys's
+  cache/refetch/failure arms. A cached kid is served without refetch; a
+  kid-miss within the 30s refetch floor returns the stale cache (rate-limit,
+  no refetch); a 5xx jwks fetch -> jwks_fetch_failed; a garbage body ->
+  jwks_parse_failed; and non-RSA / kid-less keys are skipped so only valid
+  RSA keys land (prevents a symmetric-key confusion at verify time).
+- **R444 (sixteenth window, CRM map + JSON canon)**: GenericCrmConnector.
+  _map_record for all three models (account/contact/deal), the id/
+  external_id fallback and the full_name/title alt keys; and
+  parse_users_json._canon_obj — a header_map (canonical<-source) renaming
+  with CSV-parity cell stripping, plus a non-dict array element degrading to
+  an empty row (validation error, never a crash).
 - **R442 (sixteenth window, SSO update setter arms)**: sso_admin.update's
   SUCCESS setter arms (the reject arms — invalid status/default_role/
   egress-blocked issuer — were already covered). A valid default_role,
