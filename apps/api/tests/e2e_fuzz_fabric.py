@@ -459,6 +459,7 @@ async def main() -> None:
             (f"{base}/deliveries", "before"),
             (f"{base}/imports", "kind"),
             (f"{API}/scim/v2/Users", "filter"),
+            (f"{API}/scim/v2/Groups", "filter"),  # R391
         ]
         for url, param in list_routes:
             for qb in q_bombs:
