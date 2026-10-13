@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R393 (twelfth window, retention-sweep index — the drill pays off)**:
+  the checked-in EXPLAIN drill flagged its first real regression the same
+  day it landed: today's storms pushed intg_sync_runs past 10k rows and
+  the nightly retention delete (terminal status + created_at < cutoff)
+  started seq-scanning. Migration intg20a00020 adds the partial index
+  ix_intg_runs_retention (created_at WHERE status terminal), declared in
+  the model so the parity guard stays green; drilled down/up; EXPLAIN
+  flagged=0; battery 374; sync suite 47/47. This is the compounding
+  loop working: R387 checked the drill in, R393 is the drill catching
+  drift hours later.
 - **R392 (twelfth window, closing regression tally)**: full sweep after
   R370-R391: backend 12/12 chunks = 10,786 tests; fabric battery 374;
   lifecycle 77/77; scale smoke 37/37; storm 8/8 (p95=840 ms under

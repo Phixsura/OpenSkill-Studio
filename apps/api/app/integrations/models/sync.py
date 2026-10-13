@@ -146,6 +146,14 @@ class SyncRun(Base):
             unique=True,
             postgresql_where="status IN ('queued','running')",
         ),
+        # R393: the nightly retention sweep deletes terminal runs older than
+        # the window — without this partial index it seq-scans once the
+        # table passes ~10k rows (caught live by the EXPLAIN drill).
+        Index(
+            "ix_intg_runs_retention",
+            "created_at",
+            postgresql_where="status IN ('succeeded','failed','cancelled')",
+        ),
     )
 
     id: Mapped[str] = ulid_pk()
