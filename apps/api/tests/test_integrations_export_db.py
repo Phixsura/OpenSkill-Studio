@@ -647,3 +647,52 @@ async def test_s3_round_trip_bucket_bytes_honor_allowlist_and_anonymize(db):
     # cleanup the object (bucket hygiene for repeated runs)
     async for client in get_s3_client():
         await client.delete_object(Bucket=settings.s3_bucket, Key=run.parts[0])
+
+
+@pytest.mark.asyncio
+async def test_sweep_naive_last_run_coerced_and_apperror_skipped(db, monkeypatch):
+    """R429: sweep_scheduled_exports's naive-last-run coercion (a prior run
+    row stored tz-less must still be compared against the cadence) and the
+    per-stream AppError skip (one failing export must not abort the sweep
+    of the others)."""
+    from datetime import UTC, datetime, timedelta
+
+    import app.integrations.services.warehouse as wh
+    from app.exceptions import AppError
+    from app.integrations.models import ExportRun
+    from app.integrations.services.warehouse import sweep_scheduled_exports
+
+    org, owner = await _org(db)
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    s_ok = await svc.create_stream(org.id, name=f"ok-{ULID()}", dataset="events", schedule="daily")
+    s_bad = await svc.create_stream(org.id, name=f"bad-{ULID()}", dataset="events", schedule="daily")
+    await emit_event(db, org.id, "project.approved", subject="s", data={})
+    await db.flush()
+
+    # s_ok has a NAIVE last-run row 2 days ago -> due again (coercion arm);
+    # if the naive datetime weren't coerced, the subtraction would raise.
+    db.add(
+        ExportRun(
+            stream_id=s_ok.id,
+            status="succeeded",
+            created_at=(datetime.now(UTC) - timedelta(days=2)).replace(tzinfo=None),
+            parts=[],
+        )
+    )
+    await db.flush()
+
+    # s_bad's export raises AppError -> that stream is skipped, s_ok still runs.
+    real_run = WarehouseExportService.run_export
+
+    async def flaky_run(self, org_id, stream_id):
+        if stream_id == s_bad.id:
+            raise AppError("EXPORT_SINK_UNAVAILABLE", "sink down", 503)
+        return await real_run(self, org_id, stream_id)
+
+    monkeypatch.setattr(wh.WarehouseExportService, "run_export", flaky_run)
+    ran = await sweep_scheduled_exports(db, writer)
+    assert ran == 1  # s_ok ran; s_bad raised and was skipped, not fatal
+    runs_ok = await svc.list_runs(org.id, s_ok.id)
+    assert any(r.status == "succeeded" and r.created_at > datetime.now(UTC) - timedelta(minutes=5)
+               for r in runs_ok)

@@ -1163,3 +1163,59 @@ async def test_assertion_replay_concurrent_insert_race_is_clean_401(db):
         assert exc.value.code == "SSO_ASSERTION_INVALID"
         assert exc.value.status_code == 401
         assert calls["n"] == 1  # the reject came from the INSERT, not the get
+
+
+@pytest.mark.asyncio
+async def test_cert_expiry_sweep_tolerates_malformed_cert_dates(db):
+    """R429: sweep_expiring_certificates's cert-parsing arms had never
+    executed. A cert with no not_after is skipped; a malformed not_after
+    (unparseable) is skipped, not crashed; a NAIVE datetime (no tzinfo) is
+    coerced to UTC and still compared — the sweep must survive every
+    hostile cert shape without raising and alert exactly on the one real
+    near-expiry naive cert."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.integrations.models import IntegrationEvent
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    # Three certs on one connection: no not_after, garbage not_after, and a
+    # NAIVE (tz-less) near-expiry timestamp that must drive the alert.
+    naive_soon = (datetime.now(UTC) + timedelta(days=5)).replace(tzinfo=None).isoformat()
+    conn.idp_certificates = [
+        {"pem": conn.idp_certificates[0]["pem"]},  # no not_after key
+        dict(conn.idp_certificates[0], not_after="not-a-date"),
+        dict(conn.idp_certificates[0], not_after=naive_soon),
+    ]
+    await db.flush()
+
+    svc = SsoAdminService(db)
+    assert await svc.sweep_expiring_certificates() == 1  # only the naive cert
+    ev = (
+        (
+            await db.execute(
+                _select(IntegrationEvent).where(
+                    IntegrationEvent.subject == conn.id,
+                    IntegrationEvent.type
+                    == "com.openskill.integration.sso.cert_expiring.v1",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(ev) == 1 and 4 <= ev[0].data["days_left"] <= 5
+
+
+@pytest.mark.asyncio
+async def test_cert_expiry_sweep_no_not_after_anywhere_is_quiet(db):
+    """R429: a connection whose every cert lacks a usable not_after yields
+    soonest=None -> the continue arm; no alert, no crash."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_certificates = [{"pem": conn.idp_certificates[0]["pem"]}]
+    await db.flush()
+    svc = SsoAdminService(db)
+    assert await svc.sweep_expiring_certificates() == 0
