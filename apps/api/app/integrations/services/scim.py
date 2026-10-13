@@ -289,6 +289,16 @@ class ScimTokenService:
 # ── user resource logic ──
 
 
+def _iso_loaded(obj, attr: str) -> str | None:
+    """ISO timestamp from the ORM instance's LOADED state only. After a
+    flush, onupdate columns (updated_at) are expired; touching them from a
+    sync serializer triggers a lazy refresh outside the greenlet
+    (MissingGreenlet — the R344 class). __dict__ holds only loaded values.
+    """
+    val = obj.__dict__.get(attr)
+    return val.isoformat() if val is not None else None
+
+
 def _user_resource(user: User, member: OrgMember, link: ExternalIdentityLink | None) -> dict:
     return {
         "schemas": [SCIM_USER_SCHEMA],
@@ -299,7 +309,14 @@ def _user_resource(user: User, member: OrgMember, link: ExternalIdentityLink | N
         "name": {"formatted": user.display_name},
         "emails": [{"value": user.email, "primary": True}],
         "active": member.status == MemberStatus.ACTIVE,
-        "meta": {"resourceType": "User", "location": f"/api/v1/scim/v2/Users/{user.id}"},
+        "meta": {
+            "resourceType": "User",
+            "location": f"/api/v1/scim/v2/Users/{user.id}",
+            # RFC 7643 §3.1: created/lastModified SHOULD be present —
+            # Okta/Entra conformance checkers flag their absence (R378).
+            "created": _iso_loaded(user, "created_at"),
+            "lastModified": _iso_loaded(user, "updated_at") or _iso_loaded(user, "created_at"),
+        },
     }
 
 
@@ -666,7 +683,12 @@ def _group_resource(group: ScimGroup, member_ids: list[str]) -> dict:
         "displayName": group.display_name,
         "externalId": group.external_id,
         "members": [{"value": uid} for uid in member_ids],
-        "meta": {"resourceType": "Group", "location": f"/api/v1/scim/v2/Groups/{group.id}"},
+        "meta": {
+            "resourceType": "Group",
+            "location": f"/api/v1/scim/v2/Groups/{group.id}",
+            "created": _iso_loaded(group, "created_at"),
+            "lastModified": _iso_loaded(group, "updated_at") or _iso_loaded(group, "created_at"),
+        },
     }
 
 

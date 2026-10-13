@@ -430,6 +430,8 @@ async def main() -> None:
             (f"{base}/deliveries", "status"),
             (f"{base}/events", "type_prefix"),
             (f"{base}/sync-runs", "profile_id"),
+            (f"{base}/events", "before"),  # R375 keyset cursor
+            (f"{base}/deliveries", "before"),
             (f"{base}/imports", "kind"),
             (f"{API}/scim/v2/Users", "filter"),
         ]

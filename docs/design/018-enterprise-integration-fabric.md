@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R378 (twelfth window, SCIM meta conformance + before-param fuzz)**:
+  SCIM User/Group `meta` now carries `created`/`lastModified` (RFC 7643
+  §3.1 SHOULD — Okta/Entra conformance checkers flag absence). Gotcha
+  re-confirmed as a CLASS: reading `updated_at` in a sync serializer
+  after a flush triggers MissingGreenlet (onupdate column expired) — new
+  `_iso_loaded()` reads the ORM instance's loaded state only. The R375
+  `before` cursor joined the fuzzer's query-param phase (375 req/seed,
+  zero 5xx) after a hostile manual probe (NUL, emoji, SQL, boundary
+  ULIDs) came back clean. Battery 372, SCIM suite 36/36.
 - **R377 (twelfth window, audit-trail coverage — 19 new sites)**: a route
   probe showed only 18 of 48 mutating fabric routes wrote the audit trail;
   uncovered included **break-glass** (disabling SSO enforcement — the
