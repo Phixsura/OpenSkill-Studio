@@ -188,7 +188,7 @@ export default function DashboardPage() {
               >
                 <h3 className="font-semibold">{org.name}</h3>
                 <div className="mt-2 flex items-center gap-3 text-xs text-[hsl(var(--muted-foreground))]">
-                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize">
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize text-[hsl(var(--secondary-foreground))]">
                     {org.role}
                   </span>
                   <span>

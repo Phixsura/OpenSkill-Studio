@@ -13,6 +13,9 @@ importers:
 
   .:
     devDependencies:
+      axe-core:
+        specifier: '4'
+        version: 4.13.0
       husky:
         specifier: ^9
         version: 9.1.7

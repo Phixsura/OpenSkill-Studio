@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R372 (twelfth window, axe-core WCAG 2.1 A/AA audit)**: new
+  `make e2e-intg-a11y` runs the full axe-core ruleset (wcag2a/aa +
+  wcag21a/aa — the VPAT procurement baseline) over the five fabric pages
+  plus the auth pages as a logged-in admin, failing on any
+  serious/critical violation and printing moderate/minor as advisory.
+  All five fabric pages came back CLEAN on first run; the one serious
+  violation (color-contrast) was the base dashboard's org-role badge
+  using bg-secondary without its paired secondary-foreground text color —
+  fixed in both occurrences. 7/7 pages clean after; web 764 tests + tsc
+  still green. Note: /register and /login audited while authenticated
+  redirect to /dashboard, so those rows effectively audit the dashboard.
 - **R371 (twelfth window, webhook secrets encrypted at rest + intg19)**:
   secrets-at-rest audit: connection credentials and LTI private keys were
   Fernet-encrypted, SCIM tokens hashed — but webhook SIGNING secrets sat

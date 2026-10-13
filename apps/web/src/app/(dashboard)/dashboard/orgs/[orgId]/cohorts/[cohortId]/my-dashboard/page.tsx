@@ -83,16 +83,13 @@ export default function MyDashboardPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["my-cohort-dashboard", cohortId],
     queryFn: () =>
-      apiWithAuth<{ data: LearnerDashboard }>(
-        `/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`,
-      ),
+      apiWithAuth<{ data: LearnerDashboard }>(`/orgs/${orgId}/cohorts/${cohortId}/my-dashboard`),
   });
 
   // Fetch all cohorts the learner belongs to (for switching)
   const { data: myCohorts } = useQuery({
     queryKey: ["my-cohorts", orgId],
-    queryFn: () =>
-      apiWithAuth<{ data: CohortSummary[] }>(`/orgs/${orgId}/my-cohorts`),
+    queryFn: () => apiWithAuth<{ data: CohortSummary[] }>(`/orgs/${orgId}/my-cohorts`),
   });
 
   const d = data?.data;
@@ -102,7 +99,11 @@ export default function MyDashboardPage() {
     return <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading...</p>;
   }
   if (isError) {
-    return <p className="text-sm text-red-600">Failed to load dashboard. You may not be a member of this cohort.</p>;
+    return (
+      <p className="text-sm text-red-600">
+        Failed to load dashboard. You may not be a member of this cohort.
+      </p>
+    );
   }
   if (!d) return null;
 
@@ -130,9 +131,7 @@ export default function MyDashboardPage() {
         )}
       </div>
       {d.cohort.description && (
-        <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">
-          {d.cohort.description}
-        </p>
+        <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">{d.cohort.description}</p>
       )}
 
       {/* Skills */}
@@ -243,20 +242,16 @@ export default function MyDashboardPage() {
             {d.recent_feedback.map((fb) => (
               <div key={fb.review_id} className="rounded border px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 capitalize">
+                  <span className="rounded-full bg-[hsl(var(--secondary))] px-2 py-0.5 text-xs capitalize text-[hsl(var(--secondary-foreground))]">
                     {fb.reviewer_type === "ai" ? "🤖 AI Review" : "👤 Instructor"}
                   </span>
-                  {fb.score !== null && (
-                    <span className="text-sm font-medium">{fb.score} pts</span>
-                  )}
+                  {fb.score !== null && <span className="text-sm font-medium">{fb.score} pts</span>}
                   <span className="text-xs text-[hsl(var(--muted-foreground))]">
                     {new Date(fb.created_at).toLocaleDateString()}
                   </span>
                 </div>
                 {fb.feedback && (
-                  <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                    {fb.feedback}
-                  </p>
+                  <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{fb.feedback}</p>
                 )}
               </div>
             ))}

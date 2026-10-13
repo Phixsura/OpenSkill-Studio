@@ -103,6 +103,9 @@ e2e-intg-storm: ## Fabric concurrency storm: 20 workers mixed CRUD, zero 5xx (uv
 e2e-intg-browser: ## Fabric browser journey (needs web on :3000 + api on :8000, APP_ENV=test)
 	cd apps/api && node tests/browser_e2e_integrations.mjs
 
+e2e-intg-a11y: ## Fabric axe-core WCAG 2.1 A/AA audit (needs web :3000 + api :8000, APP_ENV=test)
+	cd apps/api && node tests/browser_a11y_integrations.mjs
+
 test-intg: ## Run the integration-fabric suites (ADR-018, needs infra-up + db-migrate)
 	cd apps/api && uv run pytest tests/test_integrations_core.py tests/test_integrations_db.py \
 		tests/test_integrations_events_db.py tests/test_integrations_sso_db.py \

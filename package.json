@@ -22,6 +22,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "axe-core": "4",
     "husky": "^9",
     "lint-staged": "^15",
     "openapi-typescript": "^7",
