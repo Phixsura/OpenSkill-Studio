@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R430 (fifteenth window, catalog + sync race arms)**: two more
+  maintenance/race arms. `sync_provider_catalog`: the stale-version/
+  disabled upgrade arm (a provider at version 0 or disabled is re-synced
+  in place, fields refreshed) and the removed-key disable arm (a provider
+  key no longer in PROVIDER_CATALOG is DISABLED, never deleted, so
+  connection FKs survive). `SyncProfileService.trigger`: the live-run
+  race-recovery arm — two callers pass the no-live-run check, the partial
+  unique live-run index arbitrates the INSERT, and the loser re-selects
+  and returns the winner's run (never raises, never double-inserts);
+  reproduced with the side-effecting-flush technique (a rival session
+  commits a queued run in the check->flush window).
 - **R429 (fifteenth window, sweep parsing/skip arms)**: two more sweeps'
   tolerance arms pinned. `sweep_expiring_certificates`: a cert with no
   not_after is skipped, a malformed not_after (unparseable -> ValueError)

@@ -470,3 +470,48 @@ async def test_config_fix_reopens_errored_connection(ctx):
     await ctx["db"].flush()
     updated3 = await svc.update(org.id, conn3.id, name=f"n-{uuid.uuid4().hex[:8]}")
     assert updated3.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_catalog_sync_upgrades_stale_version_and_disables_removed(ctx):
+    """R430: sync_provider_catalog's two maintenance arms. (1) An existing
+    provider at a stale version (or disabled) is re-synced in place and its
+    fields refreshed. (2) A provider row whose key is no longer in the
+    in-repo catalog is DISABLED, never deleted (connections keep their FK)."""
+    from app.integrations.models import IntegrationProvider
+
+    db, svc = ctx["db"], ctx["svc"]
+
+    # Pick a real catalog provider and backdate it to force the upgrade arm.
+    stale = (
+        await db.execute(select(IntegrationProvider).where(IntegrationProvider.key == "oneroster"))
+    ).scalar_one()
+    stale.version = 0
+    stale.enabled = False
+    stale.display_name = "OUTDATED"
+
+    # A provider key that no longer exists in PROVIDER_CATALOG, still enabled.
+    ghost = IntegrationProvider(
+        key=f"legacy_ghost_{uuid.uuid4().hex[:6]}",
+        category="crm",
+        auth_mode="api_key",
+        display_name="Legacy Ghost",
+        capabilities=[],
+        config_schema={},
+        version=1,
+        enabled=True,
+    )
+    db.add(ghost)
+    await db.flush()
+
+    changed = await svc.sync_provider_catalog()
+    assert changed >= 2  # stale upgraded + ghost disabled
+
+    # Persist sync's in-session mutations, then reread from the DB.
+    await db.flush()
+    await db.refresh(stale)
+    assert stale.enabled is True and stale.version >= 1 and stale.display_name != "OUTDATED"
+    await db.refresh(ghost)
+    assert ghost.enabled is False  # disabled, not deleted
+    reread = await db.get(IntegrationProvider, ghost.id)
+    assert reread is not None and reread.enabled is False

@@ -2132,3 +2132,55 @@ async def test_execute_push_cycle_stats_results_and_echo(db, monkeypatch):
     await se._execute_push(db, run2, profile, conn, push)
     await db.refresh(run2)
     assert run2.stats["unchanged"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_trigger_live_run_race_recovers_winner(db, monkeypatch):
+    """R430: trigger()'s live-run race-recovery arm. Two callers pass the
+    'no live run' check, both try to INSERT a run, and the partial unique
+    live-run index arbitrates; the loser must re-select and RETURN the
+    winner's run, never raise. Reproduced deterministically with a side-
+    effecting flush that commits a rival queued run in the check->flush
+    window."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import SyncRun
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    await db.commit()
+
+    svc = SyncProfileService(db)
+    real_flush = db.flush
+    state = {"armed": True, "rival_id": None}
+
+    async def racing_flush(*a, **k):
+        if state["armed"]:
+            state["armed"] = False
+            async with AsyncSessionLocal() as rival:
+                r = SyncRun(
+                    profile_id=profile.id, status="queued", trigger="manual", cursor_in={}
+                )
+                rival.add(r)
+                await rival.commit()
+                state["rival_id"] = r.id
+        return await real_flush(*a, **k)
+
+    monkeypatch.setattr(db, "flush", racing_flush)
+    run = await svc.trigger(org.id, profile.id)
+    monkeypatch.setattr(db, "flush", real_flush)
+    # The loser adopted the rival's committed run, did not raise or double-insert.
+    assert run.id == state["rival_id"]
+    live = (
+        (
+            await db.execute(
+                select(SyncRun).where(
+                    SyncRun.profile_id == profile.id,
+                    SyncRun.status.in_(("queued", "running")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(live) == 1  # the unique live-run index held
