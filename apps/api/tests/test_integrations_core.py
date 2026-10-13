@@ -1212,3 +1212,50 @@ async def test_egress_discard_body_never_buffers_and_cap_still_enforced(monkeypa
     finally:
         server.close()
         await server.wait_closed()
+
+
+def test_scim_normalize_path_strips_fully_qualified_urn():
+    """R417 (mutation-caught): a fully-qualified SCIM URN path must have the
+    schema prefix + colon stripped to the bare attribute — pins the exact
+    slice offset (len(SCHEMA)+1) in _normalize_path so an off-by-one there
+    cannot survive."""
+    from app.integrations.services.scim import (
+        SCIM_GROUP_SCHEMA,
+        SCIM_USER_SCHEMA,
+        _normalize_path,
+    )
+
+    assert _normalize_path(f"{SCIM_USER_SCHEMA}:userName") == "userName"
+    assert _normalize_path(f"{SCIM_GROUP_SCHEMA}:members") == "members"
+    assert _normalize_path(f"{SCIM_USER_SCHEMA}:name.familyName") == "name.familyName"
+    # no URN prefix: returned as-is (lowercased by comparison callers, not here)
+    assert _normalize_path("displayName") == "displayName"
+
+
+def test_egress_url_length_boundary():
+    """R417 (mutation-caught): the URL-length guard is `> MAX_URL_LEN`, so a
+    URL of EXACTLY MAX_URL_LEN is admissible and MAX_URL_LEN+1 is refused —
+    pins the boundary so a >/>= mutation cannot survive."""
+    from app.config import settings
+    from app.integrations.security import (
+        MAX_URL_LEN,
+        EgressBlockedError,
+        validate_egress_url,
+    )
+
+    old = settings.egress_allow_private
+    settings.egress_allow_private = True
+    try:
+        host = "https://h.example.com/"
+        pad = MAX_URL_LEN - len(host)
+        at_limit = host + ("a" * pad)
+        assert len(at_limit) == MAX_URL_LEN
+        # exactly at the limit: passes the length guard (returns a str)
+        assert isinstance(validate_egress_url(at_limit), str)
+        # one over: refused by the length guard
+        import pytest as _pytest
+
+        with _pytest.raises(EgressBlockedError):
+            validate_egress_url(at_limit + "a")
+    finally:
+        settings.egress_allow_private = old

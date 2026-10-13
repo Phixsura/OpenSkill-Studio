@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R417 (fourteenth window, mutation-testing the SSRF + SCIM parsers)**:
+  ran the AST mutation harness against validate_egress_url/_is_forbidden_ip
+  and SCIM _normalize_path/_coerce_active. 5 mutants survived = real
+  assertion gaps the line-coverage missed: the egress URL-length boundary
+  (>MAX_URL_LEN vs >=) and the SCIM URN-prefix strip offset (len+1). Added
+  killing tests: a boundary URL at exactly 500 chars passes / 501 refused,
+  and a fully-qualified URN path strips to the exact bare attribute
+  (case-preserved per R409). Re-run confirms them killed; the two
+  remaining security mutants are genuine EQUIVALENTS (the https/80 default
+  port only feeds the allowlist, where 443 and 80 are both admitted —
+  mutating the default changes no admit/deny outcome). Lesson: line
+  coverage says "executed", mutation says "asserted".
 - **R416 (fourteenth window, backchannel-logout reject matrix)**: running
   the fuzzer against a COVERAGE-instrumented server proved phase 9b's
   hostile logout_tokens die at the OIDC discovery egress fetch (fake
