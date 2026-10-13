@@ -487,14 +487,18 @@ def test_every_registered_eco_handler_has_an_enqueue_site():
     from app.controlplane.worker import HANDLERS, load_handlers
 
     load_handlers()
+    import re
+
     app_dir = Path(__file__).resolve().parents[1] / "app"
-    enqueue_lines = [
-        line
-        for p in app_dir.rglob("*.py")
-        for line in p.read_text().splitlines()
-        if "enqueue(" in line and "def enqueue" not in line
-    ]
-    corpus = "\n".join(enqueue_lines)
+    # Windowed scan, not line-based: a formatter may legally split
+    # enqueue(db, "topic", {...}) across lines (R364 broke the old
+    # same-line heuristic). Take 300 chars after each enqueue( call site.
+    windows = []
+    for p in app_dir.rglob("*.py"):
+        text = p.read_text()
+        for m in re.finditer(r"(?<!def )enqueue\(", text):
+            windows.append(text[m.start() : m.start() + 300])
+    corpus = "\n".join(windows)
     orphans = []
     for topic in HANDLERS:
         if not topic.startswith("eco."):
