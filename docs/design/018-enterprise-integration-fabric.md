@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R433 (sixteenth window, SAML SLO arms)**: handle_slo_request's
+  remaining reject/skip arms. No SAMLRequest at all -> slo_request_missing
+  (checked before the signature path); a Signature segment that is not
+  valid base64 -> the decode arm (distinct from a valid-b64-but-wrong
+  signature); a validly-SIGNED query whose SAMLRequest payload is not
+  deflate+base64 -> the decompress-failure arm (slo_request_invalid); and
+  a connection whose cert list leads with an empty-pem entry must SKIP it
+  (the continue arm) and still verify against the real pinned cert. These
+  complete the SLO matrix alongside the already-covered unsigned/rogue/
+  wrong-issuer/wrong-root vectors.
 - **R432 (sixteenth window, SAML ACS front-door arms)**: handle_acs's
   remaining reject arms, all mapping to the uniform SSO_ASSERTION_INVALID
   (never a raw 500): oversized payload rejected BEFORE decode (length cap),

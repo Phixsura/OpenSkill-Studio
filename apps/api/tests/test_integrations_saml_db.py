@@ -1266,3 +1266,57 @@ async def test_saml_acs_size_base64_conditions_timestamp_arms(db):
     )
     assert "not-a-timestamp" in xml_bad_ts
     await expect_reject(_wrap_response(_sign_assertion(xml_bad_ts)), relay=state)
+
+
+@pytest.mark.asyncio
+async def test_slo_missing_request_bad_sig_b64_and_decompress_arms(db):
+    """R433: handle_slo_request's remaining arms. No SAMLRequest at all ->
+    slo_request_missing; a Signature segment that isn't valid base64 ->
+    slo_signature_invalid (the decode arm, distinct from a bad-but-valid-b64
+    signature); a SAMLRequest payload that isn't deflate/base64 -> the
+    decompress-failure arm; and a connection whose cert list LEADS with an
+    empty-pem entry must SKIP it and still verify against the real cert."""
+    from urllib.parse import quote
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+
+    async def expect_reject(query):
+        with pytest.raises(AppError) as e:
+            await svc.handle_slo_request(connection_id=conn.id, raw_query=query)
+        assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    sigalg = quote("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe="")
+
+    # No SAMLRequest -> slo_request_missing (checked before the signed check).
+    await expect_reject(f"SigAlg={sigalg}&Signature=AAAA")
+
+    # Signature present but not valid base64 (validate=True) -> decode arm.
+    q = _signed_slo_query("s")
+    corrupt = "&".join(
+        "Signature=@@notb64@@" if seg.startswith("Signature=") else seg for seg in q.split("&")
+    )
+    await expect_reject(corrupt)
+
+    # Valid signature, but the SAMLRequest payload is not deflate+base64 ->
+    # slo_request_invalid (the decompress/parse arm). Sign the exact query so
+    # verification PASSES and we reach the decompress try.
+    from cryptography.hazmat.primitives import hashes as _h
+    from cryptography.hazmat.primitives import serialization as _ser
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad
+
+    base_q = f"SAMLRequest={quote('not-a-deflate-stream', safe='')}&SigAlg={sigalg}"
+    key = _ser.load_pem_private_key(
+        IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
+    )
+    sig = key.sign(base_q.encode(), _pad.PKCS1v15(), _h.SHA256())
+    await expect_reject(base_q + "&Signature=" + quote(base64.b64encode(sig).decode(), safe=""))
+
+    # Leading empty-pem cert entry is skipped; the real cert still verifies.
+    conn.idp_certificates = [{"pem": ""}, *conn.idp_certificates]
+    await db.flush()
+    _, swept, _ = await svc.handle_slo_request(
+        connection_id=conn.id, raw_query=_signed_slo_query("never-seen-subject")
+    )
+    assert swept == 0  # unknown subject, but the signature verified past the empty entry
