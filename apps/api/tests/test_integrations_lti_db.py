@@ -1030,3 +1030,107 @@ async def test_ags_push_score_cycle(db, monkeypatch):
         is False
     )
     assert eg_off.calls == []
+
+
+async def test_handle_gradeable_event_fanout_and_score_clamp(db, monkeypatch):
+    """R413: the worker hook that turns an internal gradeable event into AGS
+    pushes (handle_gradeable_event) was uncovered — it is the automation
+    that makes grade-passback actually fire. Cover: unknown event type -> 0,
+    missing target/user -> 0, a matched grade-enabled link -> one push with
+    the score clamped into [0,100], and a non-numeric score -> 0.0."""
+    from types import SimpleNamespace
+
+    from app.integrations.services import lti_ags
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    svc.egress = FakePlatform()
+    skill_target = "01SKILLXXXXXXXXXXXXXXXXXXX"
+    await svc.map_resource_link(
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-1",
+        kind="skill",
+        target_id=skill_target,
+        grade_sync_enabled=True,
+    )
+    state, nonce = await _start(svc, reg)
+    ags = {
+        f"{CLAIM.replace('lti/claim/', 'lti-ags/claim/')}endpoint": {
+            "lineitem": "https://lms.example.edu/ags/line/1"
+        }
+    }
+    _, _link, result, _ = await svc.handle_launch(state_value=state, id_token=_mint(nonce, **ags))
+    await db.flush()
+    uid = result.user.id
+
+    pushes: list[dict] = []
+
+    async def _fake_push(_db, link, *, user_id, score_given, score_maximum=100.0, egress=None):
+        pushes.append({"link": link.id, "user_id": user_id, "score": score_given})
+        return True
+
+    monkeypatch.setattr(lti_ags, "push_score", _fake_push)
+
+    def ev(etype, data):
+        return SimpleNamespace(type=etype, data=data, org_id=org.id)
+
+    # unknown event type
+    assert await lti_ags.handle_gradeable_event(db, ev("com.openskill.unknown.v1", {})) == 0
+    # missing user/target
+    assert (
+        await lti_ags.handle_gradeable_event(
+            db, ev("com.openskill.skill.completed.v1", {"skill_id": skill_target})
+        )
+        == 0
+    )
+    assert not pushes
+
+    # matched skill.completed (no score_key -> defaults to 100)
+    n = await lti_ags.handle_gradeable_event(
+        db, ev("com.openskill.skill.completed.v1", {"skill_id": skill_target, "user_id": uid})
+    )
+    assert n == 1 and pushes[-1]["score"] == 100.0 and pushes[-1]["user_id"] == uid
+
+    # project.approved with an over-range final_score -> clamped to 100
+    await svc.map_resource_link(
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-proj",
+        kind="project",
+        target_id="proj-9",
+        grade_sync_enabled=True,
+    )
+    # the project link needs an AGS lineitem to be selected — relaunch sets it
+    # per resource_link; instead set it directly for this unit.
+    from app.integrations.models import LtiResourceLink
+
+    plink = (
+        await db.execute(
+            select(LtiResourceLink).where(LtiResourceLink.resource_link_id == "rl-proj")
+        )
+    ).scalar_one()
+    plink.ags_lineitem_url = "https://lms.example.edu/ags/line/2"
+    await db.flush()
+    pushes.clear()
+    n = await lti_ags.handle_gradeable_event(
+        db,
+        ev(
+            "com.openskill.project.approved.v1",
+            {"project_id": "proj-9", "user_id": uid, "final_score": 150},
+        ),
+    )
+    assert n == 1 and pushes[-1]["score"] == 100.0  # clamped
+
+    # non-numeric score -> 0.0
+    pushes.clear()
+    n = await lti_ags.handle_gradeable_event(
+        db,
+        ev(
+            "com.openskill.project.approved.v1",
+            {"project_id": "proj-9", "user_id": uid, "final_score": "A+"},
+        ),
+    )
+    assert n == 1 and pushes[-1]["score"] == 0.0

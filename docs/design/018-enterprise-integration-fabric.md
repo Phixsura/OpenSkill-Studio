@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R413 (fourteenth window, gradeable-event fan-out coverage)**:
+  `handle_gradeable_event` — the worker hook that turns an internal
+  gradeable event into AGS pushes (the automation that makes
+  grade-passback actually fire) — was uncovered. Test covers: unknown
+  event type → 0, missing target/user → 0, a matched grade-enabled link →
+  one push, score clamped into [0,100] (final_score 150 → 100), and a
+  non-numeric score → 0.0. lti_ags coverage 60%→79%.
 - **R412 (fourteenth window, AGS grade-passback coverage)**: `push_score`
   (LTI AGS grade → the LMS /scores endpoint) was another uncovered
   outbound WRITE path. New test launches to JIT a mapped user, then
