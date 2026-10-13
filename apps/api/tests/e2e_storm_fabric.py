@@ -53,6 +53,7 @@ async def main() -> None:
 
         status_5xx: list[str] = []
         shared_hooks: list[str] = []  # R401: rotation-race target
+        _run_uid = uuid.uuid4().hex[:6]  # R402: per-run resource namespace
         slowest = 0.0
         lat: list[float] = []  # every request's wall time, for percentiles
 
@@ -74,7 +75,11 @@ async def main() -> None:
             my_profiles: list[str] = []
             for i in range(ROUNDS):
                 op = rng.randrange(10)
-                tag = f"w{wid}r{i}-{rng.randrange(9999)}"
+                # run-unique prefix: a seeded rng regenerates identical tags
+                # every run, which left cross-run duplicate pending domains in
+                # the dev DB (R402 cruft class). _run_uid makes each storm's
+                # resources globally unique.
+                tag = f"{_run_uid}w{wid}r{i}-{rng.randrange(9999)}"
                 if op == 0:
                     rr = await req(
                         "POST",
