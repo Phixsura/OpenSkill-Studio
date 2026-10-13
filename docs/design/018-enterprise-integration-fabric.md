@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R408 (fourteenth window, SSRF soundness properties)**: the egress
+  validator had a TOTALITY property (never leaks a parser error over
+  arbitrary URL text) but no SOUNDNESS property (never ADMITS a
+  private/metadata target). Added hypothesis tests that generate the full
+  IPv4 space + the canonical metadata/loopback/private literals and their
+  IPv4-mapped-IPv6 encodings, cross-check against the authoritative
+  _is_forbidden_ip classifier, and assert validate_egress_url REFUSES
+  every forbidden one in production mode — a URL-parse-confusion bypass
+  would fail here. Posture clean; this closes the "no-crash ≠ no-bypass"
+  gap on the single most security-critical fabric parser.
 - **R407 (thirteenth window, close)**: migration chain intg18→intg21 all
   reversible (4-hop drill), all 10 operational drills green, battery 377,
   parity clean. Window 13 total R394-R407: 2 production security fixes

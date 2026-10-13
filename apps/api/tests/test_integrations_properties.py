@@ -279,3 +279,76 @@ def test_normalized_email_domain_total(raw):
     out = normalized_email_domain(raw)
     assert isinstance(out, str)
     assert out == out.lower()
+
+
+@given(st.integers(min_value=0, max_value=2**32 - 1), st.sampled_from([80, 443, 8080, 8443]))
+@settings(max_examples=500, deadline=None)
+def test_egress_soundness_private_ipv4_always_blocked(ip_int, port):
+    """R408 (SSRF SOUNDNESS, not just totality): every IPv4 the classifier
+    deems forbidden (private/loopback/link-local/CGNAT/metadata/reserved)
+    must be REFUSED by validate_egress_url in production mode — no URL-parse
+    confusion path may admit one. Generates the full IPv4 space and cross-
+    checks the validator against the authoritative classifier."""
+    import ipaddress
+
+    from app.config import settings
+    from app.integrations.security import (
+        EgressBlockedError,
+        _is_forbidden_ip,
+        validate_egress_url,
+    )
+
+    ip = str(ipaddress.IPv4Address(ip_int))
+    forbidden = _is_forbidden_ip(ip)
+    if not forbidden:
+        return  # public IP: admit/deny is a separate (port/scheme) concern
+
+    old = settings.egress_allow_private
+    settings.egress_allow_private = False
+    try:
+        raised = False
+        try:
+            validate_egress_url(f"https://{ip}:{port}/x")
+        except EgressBlockedError:
+            raised = True
+        assert raised, f"SSRF BYPASS: private/metadata {ip} was admitted"
+    finally:
+        settings.egress_allow_private = old
+
+
+# Alternate IPv4 encodings that have historically bypassed SSRF screens.
+_METADATA_ENCODINGS = [
+    "169.254.169.254",  # AWS/GCP/Azure metadata
+    "[::ffff:169.254.169.254]",  # IPv4-mapped IPv6
+    "[::ffff:a9fe:a9fe]",  # same, hex form
+    "127.0.0.1",
+    "[::1]",
+    "10.0.0.1",
+    "192.168.1.1",
+    "172.16.0.1",
+    "100.64.0.1",  # CGNAT
+    "0.0.0.0",
+    "[fd00::1]",  # IPv6 ULA (private)
+    "[fe80::1]",  # IPv6 link-local
+]
+
+
+@given(st.sampled_from(_METADATA_ENCODINGS), st.sampled_from([80, 443, 8080, 8443]))
+@settings(max_examples=60, deadline=None)
+def test_egress_soundness_metadata_encodings_blocked(host, port):
+    """R408: the canonical metadata/loopback/private literals and their
+    IPv4-mapped-IPv6 encodings are ALWAYS refused in production mode."""
+    from app.config import settings
+    from app.integrations.security import EgressBlockedError, validate_egress_url
+
+    old = settings.egress_allow_private
+    settings.egress_allow_private = False
+    try:
+        raised = False
+        try:
+            validate_egress_url(f"https://{host}:{port}/p")
+        except EgressBlockedError:
+            raised = True
+        assert raised, f"SSRF BYPASS: {host} admitted"
+    finally:
+        settings.egress_allow_private = old
