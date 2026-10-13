@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R435 (sixteenth window, push guard/conflict/crash arms)**: the
+  _execute_push arms R411 didn't reach. A non-talent.application profile ->
+  failed(push_model_unsupported) with no extract; a mapping_profile whose
+  version no longer matches the profile's pinned mapping_version ->
+  failed(mapping_version_drift); a mapping document that yields field
+  errors (a to_int transform on a non-numeric stage) -> schema_invalid
+  conflict, the row never sent; and connector.write raising -> the run is
+  finished failed(<exc class>), never left dangling in 'running'. With
+  R411 (consent_missing / updated / error / unchanged / echo) the push
+  execution path is now fully arm-covered.
 - **R434 (sixteenth window, NRPS sync arms)**: sync_memberships's data-
   fetch and member-shape arms. The membership GET returning 401 or any
   non-200 -> 502; a non-JSON body -> 502; members not a list -> 502; a

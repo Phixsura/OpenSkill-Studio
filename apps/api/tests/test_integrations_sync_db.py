@@ -2189,3 +2189,93 @@ async def test_trigger_live_run_race_recovers_winner(db, monkeypatch):
         .all()
     )
     assert len(live) == 1  # the unique live-run index held
+
+
+@pytest.mark.asyncio
+async def test_execute_push_model_unsupported_mapping_drift_and_crash(db, monkeypatch):
+    """R435: _execute_push's guard/conflict/crash arms that R411 didn't
+    reach. (1) a non-talent.application profile -> failed(push_model_
+    unsupported), no extract. (2) a mapping_profile whose version no longer
+    matches the profile's pinned mapping_version -> failed(mapping_version_
+    drift). (3) a mapping document that yields field errors -> schema_invalid
+    conflict (the row is never sent). (4) the connector.write raising ->
+    the run is finished failed(crash class), not left running."""
+    from app.integrations.models import MappingProfile, SyncRun
+    from app.integrations.services import sync_engine as se
+
+    org, owner = await _org(db)
+    push = _FakePushConnector()
+
+    # (1) model unsupported.
+    conn, profile = await _setup_profile(db, org, owner, push)
+    profile.direction = "push"
+    profile.model = "roster.class"  # not talent.application
+    await db.flush()
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run)
+    await db.flush()
+    await se._execute_push(db, run, profile, conn, push)
+    await db.refresh(run)
+    assert run.status == "failed" and run.error["class"] == "push_model_unsupported"
+
+    # (2) mapping version drift.
+    mp = MappingProfile(
+        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", model="talent.application",
+        direction="push", document={"fields": {}}, version=5,
+    )
+    db.add(mp)
+    await db.flush()
+    profile.model = "talent.application"
+    profile.mapping_profile_id = mp.id
+    profile.mapping_version = 4  # pinned to an older version than mp.version=5
+    await db.flush()
+    run2 = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run2)
+    await db.flush()
+    await se._execute_push(db, run2, profile, conn, push)
+    await db.refresh(run2)
+    assert run2.status == "failed" and run2.error["class"] == "mapping_version_drift"
+
+    # (3) schema_invalid conflict: a mapping that errors on the row.
+    mp.version = 4  # align so we pass the drift gate
+    mp.document = {
+        "fields": [{"target": "stage", "path": "stage", "transform": ["to_int"]}]
+    }
+    await db.flush()
+
+    async def extract_bad(_db, _org):
+        return [{"external_id": "app-bad", "candidate_user_id": "u", "stage": "not-an-int",
+                 "_consented": True}]
+
+    monkeypatch.setattr(se, "_extract_push_applications", extract_bad)
+    run3 = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run3)
+    await db.flush()
+    await se._execute_push(db, run3, profile, conn, push)
+    await db.refresh(run3)
+    assert run3.stats["conflicts"] == 1 and run3.stats["pushed"] == 0
+    assert "app-bad" not in push.written  # never sent
+
+    # (4) connector.write raises -> failed(crash class).
+    profile.mapping_profile_id = None
+    profile.mapping_version = None
+    await db.flush()
+
+    async def extract_ok(_db, _org):
+        return [{"external_id": "app-x", "candidate_user_id": "u", "stage": "s",
+                 "_consented": True}]
+
+    monkeypatch.setattr(se, "_extract_push_applications", extract_ok)
+
+    class Boom:
+        capabilities = push.capabilities
+
+        async def write(self, ctx, model, batch):
+            raise RuntimeError("ats connection reset")
+
+    run4 = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run4)
+    await db.flush()
+    await se._execute_push(db, run4, profile, conn, Boom())
+    await db.refresh(run4)
+    assert run4.status == "failed" and run4.error["class"] == "RuntimeError"
