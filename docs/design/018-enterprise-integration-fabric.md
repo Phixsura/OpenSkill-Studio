@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R402 (thirteenth window, domain-sweep session poisoning)**: a latent
+  bug the storm cruft surfaced — when TWO orgs hold the same pending
+  domain and both pass DNS in ONE sweep pass, the second verify hit
+  uq_intg_domain_verified inside the savepoint; asyncpg marks the whole
+  transaction failed, so the per-row commit raised PendingRollbackError
+  and aborted the rest of the nightly sweep (every later domain left
+  unprocessed). The savepoint-rollback-alone pattern does NOT contain a
+  flush failure in async SQLAlchemy once the per-row commit model is in
+  play. Fixed: pre-check the partial-unique winner before flipping to
+  verified (the same guard claim()/verify() use), with an explicit
+  session rollback + fresh-transaction failed-mark as the belt for the
+  true concurrent race. Pinned; sso suite 41/41. (Also: storm runs leave
+  global pending-domain cruft in the dev DB — the storm now seeds
+  org-unique domains going forward would avoid that, but the real fix is
+  the sweep being robust to duplicates, which it now is.)
 - **R401 (thirteenth window, rotation row-lock)**: webhook secret
   rotation was an unlocked read-modify-write on (secret, secret_prev) —
   two concurrent rotations both read secret S, both set prev=S, and the

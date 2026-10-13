@@ -1640,3 +1640,39 @@ async def test_last_break_glass_cannot_be_removed_under_enforced_sso(db):
     # and with enforce off, the last one can retire too
     await svc.update(org.id, conn.id, enforce_sso=False)
     await svc.set_break_glass(org.id, u2.id, enabled=False, actor_role=_Role.OWNER)
+
+
+@pytest.mark.asyncio
+async def test_domain_sweep_survives_two_orgs_same_domain(db, monkeypatch):
+    """R402: two orgs holding the SAME pending domain, both passing DNS in
+    ONE sweep pass, used to poison the async session — the second verify
+    hit uq_intg_domain_verified inside the savepoint, asyncpg marked the
+    whole transaction failed, and the per-row commit raised
+    PendingRollbackError that aborted the rest of the sweep. The sweep now
+    pre-checks the winner: exactly one ends verified, the other failed, and
+    the session stays usable for the next pass."""
+    import app.integrations.services.domains as mod
+    from app.integrations.models import OrgDomain
+
+    shared = f"dup-{uuid.uuid4().hex[:8]}.example.edu"
+    o1 = await _org(db, await _user(db))
+    o2 = await _org(db, await _user(db))
+    await OrgDomainService(db).claim(o1.id, shared)
+    await OrgDomainService(db).claim(o2.id, shared)
+
+    class Yep:
+        async def verify(self, h, t):
+            return True
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
+    svc = OrgDomainService(db)
+    await svc.sweep_pending()
+    # session not poisoned — a second sweep runs cleanly
+    await svc.sweep_pending()
+
+    rows = (
+        (await db.execute(select(OrgDomain.status).where(OrgDomain.domain == shared)))
+        .scalars()
+        .all()
+    )
+    assert sorted(rows) == ["failed", "verified"]

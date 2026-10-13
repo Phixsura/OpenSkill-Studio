@@ -204,18 +204,43 @@ class OrgDomainService:
                 continue
             if not ok:
                 continue
+            # R402: PRE-CHECK the partial-unique winner before flipping to
+            # verified. Relying on the IntegrityError + savepoint rollback
+            # alone poisoned the whole async session when TWO orgs in the
+            # SAME sweep batch both verified the same domain (asyncpg marks
+            # the transaction failed; the per-row commit then raised
+            # PendingRollbackError and aborted the rest of the sweep). The
+            # savepoint stays as a belt for the true concurrent race.
+            other = (
+                await self.db.execute(
+                    select(OrgDomain.id).where(
+                        OrgDomain.domain == row.domain,
+                        OrgDomain.status == "verified",
+                        OrgDomain.org_id != row.org_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if other is not None:
+                row.status = "failed"
+                changed += 1
+                await self.db.commit()
+                continue
             row.status = "verified"
             row.verified_at = now
             try:
                 async with self.db.begin_nested():
                     await self.db.flush()
                 changed += 1
+                await self.db.commit()
             except Exception:
-                # Another org won the partial-unique race — mark failed.
-                row.status = "failed"
-            # R228 (R226 class): each verify is a slow DNS lookup — commit
-            # per verified row so a job-timeout kill keeps progress.
-            await self.db.commit()
+                # True concurrent race (another process verified between the
+                # pre-check and the flush) — recover the session, then mark
+                # failed in a fresh transaction.
+                await self.db.rollback()
+                refreshed = await self.db.get(OrgDomain, row.id)
+                if refreshed is not None and refreshed.status == "pending":
+                    refreshed.status = "failed"
+                    await self.db.commit()
         # Trailing writes (failed statuses, last_checked_at) are constraint-
         # free, but guard anyway so one poisoned row can never abort the
         # whole sweep (R113 hardening).
