@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R451 (sixteenth window, MUTATION — SCIM group member delta)**: the
+  group-PATCH replace-members full-set delta (add=target-current, remove=
+  current-target) was a NEVER-EXERCISED path — a `-`->`+` mutant would have
+  crashed on `set + set` but no test reached it. Added a replace-members
+  delta test (-A +C, B kept) and a rename-collision 409. Re-run 33/42 killed;
+  remaining 9 are tolerant-server no-op And->Or branches, truncation
+  boundaries, and the concurrent-rename savepoint 409 (race, covered by
+  outcome).
 - **R450 (sixteenth window, MUTATION — SCIM patch grammar)**: AST-mutating
   both SCIM patch methods (user active/displayname/externalId + group
   member-delta/rename) left 20 survivors at 22/42. Added grammar tests

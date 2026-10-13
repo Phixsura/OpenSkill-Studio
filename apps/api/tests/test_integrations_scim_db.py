@@ -1314,3 +1314,43 @@ async def test_group_patch_displayname_and_filtered_remove_grammar(ctx):
     after2 = await gsvc.get(g["id"])
     member_ids = {m["value"] for m in after2.get("members", [])}
     assert u["id"] in member_ids  # still a member; the add-with-filter didn't remove
+
+
+@pytest.mark.asyncio
+async def test_group_patch_replace_members_delta_and_rename_collision(ctx):
+    """R451 (mutation-kill): the group-PATCH replace-members full-set delta
+    (op=replace, path=members computes add=target-current, remove=current-
+    target — a never-exercised path) and the rename-collision 409."""
+    from app.integrations.services.scim import ScimError
+
+    usvc, gsvc = _usvc(ctx), _gsvc(ctx)
+    a, _ = await usvc.create({"userName": f"ma-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    b, _ = await usvc.create({"userName": f"mb-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    c, _ = await usvc.create({"userName": f"mc-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+
+    g = await gsvc.create(
+        {"displayName": f"G1-{uuid.uuid4().hex[:6]}",
+         "members": [{"value": a["id"]}, {"value": b["id"]}]}
+    )
+    # Replace the full member set with {B, C}: A drops, C joins, B stays.
+    await gsvc.patch(
+        g["id"],
+        {"Operations": [
+            {"op": "replace", "path": "members",
+             "value": [{"value": b["id"]}, {"value": c["id"]}]}
+        ]},
+    )
+    after = await gsvc.get(g["id"])
+    ids = {m["value"] for m in after.get("members", [])}
+    assert ids == {b["id"], c["id"]}  # delta applied: -A +C, B kept
+
+    # Rename collision: a second group, then rename g onto its name -> 409.
+    other = await gsvc.create({"displayName": f"Taken-{uuid.uuid4().hex[:6]}"})
+    with pytest.raises(ScimError) as e:
+        await gsvc.patch(
+            g["id"],
+            {"Operations": [
+                {"op": "replace", "path": "displayName", "value": other["displayName"]}
+            ]},
+        )
+    assert e.value.status == 409
