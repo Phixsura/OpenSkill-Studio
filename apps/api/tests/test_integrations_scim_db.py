@@ -1230,3 +1230,87 @@ async def test_group_map_validation_rejects_and_token_scoping(ctx):
     with pytest.raises(AppError) as exc:
         await svc.update_group_map("01FAKEORGFAKEORGFAKEORGFAK", token.id, {})
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_user_patch_active_and_displayname_grammar(ctx):
+    """R450 (mutation-kill): the user-PATCH op grammar's security-critical
+    arms. active=False on an active member deprovisions; active=True on an
+    active member must NOT deprovision (kills the `is False and active` ->
+    `or` mutant); active=True on an inactive member reactivates; an empty
+    displayname string is ignored (kills the `isinstance and strip` -> `or`
+    mutant); and non-dict/unsupported/invalid-active ops carry exact 400s."""
+    from app.integrations.services.scim import ScimError
+    from app.models.organization import MemberStatus
+
+    usvc = _usvc(ctx)
+
+    # active=True on an ACTIVE member -> stays active, NOT deprovisioned.
+    u1, _ = await usvc.create({"userName": f"a1-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    await usvc.patch(u1["id"], {"Operations": [{"op": "replace", "path": "active", "value": True}]})
+    _, m1 = await usvc._member_for(u1["id"])
+    assert m1.status == MemberStatus.ACTIVE
+
+    # active=False on an ACTIVE member -> deprovisioned.
+    u2, _ = await usvc.create({"userName": f"a2-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    await usvc.patch(u2["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]})
+    _, m2 = await usvc._member_for(u2["id"])
+    assert m2.status != MemberStatus.ACTIVE
+
+    # active=True on the now-inactive member -> reactivated.
+    await usvc.patch(u2["id"], {"Operations": [{"op": "replace", "path": "active", "value": True}]})
+    _, m2b = await usvc._member_for(u2["id"])
+    assert m2b.status == MemberStatus.ACTIVE
+
+    # Empty displayname string is ignored (no overwrite to blank).
+    u3, _ = await usvc.create(
+        {"userName": f"a3-{uuid.uuid4().hex[:6]}@corp.example.edu", "displayName": "Keep Me"}
+    )
+    await usvc.patch(
+        u3["id"], {"Operations": [{"op": "replace", "path": "displayName", "value": "  "}]}
+    )
+    got = await usvc.get(u3["id"])
+    assert got["displayName"] == "Keep Me"
+
+    # Exact 400s.
+    with pytest.raises(ScimError) as e:
+        await usvc.patch(u3["id"], {"Operations": ["not-a-dict"]})
+    assert e.value.status == 400
+    with pytest.raises(ScimError) as e:
+        await usvc.patch(u3["id"], {"Operations": [{"op": "frobnicate"}]})
+    assert e.value.status == 400
+    with pytest.raises(ScimError) as e:
+        await usvc.patch(
+            u3["id"], {"Operations": [{"op": "replace", "path": "active", "value": "maybe"}]}
+        )
+    assert e.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_group_patch_displayname_and_filtered_remove_grammar(ctx):
+    """R450 (mutation-kill): group-PATCH grammar. A 'remove' op on displayName
+    must NOT rename (kills the `displayname and name in add/replace` -> `or`
+    mutant), and a FILTERED member path with a non-remove op must NOT remove a
+    member (kills the `m and name == remove` -> `or` mutant)."""
+    usvc, gsvc = _usvc(ctx), _gsvc(ctx)
+    u, _ = await usvc.create({"userName": f"gm-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    g = await gsvc.create(
+        {"displayName": f"G-{uuid.uuid4().hex[:6]}", "members": [{"value": u["id"]}]}
+    )
+    orig_name = g["displayName"]
+
+    # 'remove' on displayName is NOT a rename (rename only on add/replace).
+    await gsvc.patch(
+        g["id"], {"Operations": [{"op": "remove", "path": "displayName", "value": "WIPED"}]}
+    )
+    after = await gsvc.get(g["id"])
+    assert after["displayName"] == orig_name
+
+    # A filtered member path with op='add' must NOT remove the member.
+    await gsvc.patch(
+        g["id"],
+        {"Operations": [{"op": "add", "path": f'members[value eq "{u["id"]}"]'}]},
+    )
+    after2 = await gsvc.get(g["id"])
+    member_ids = {m["value"] for m in after2.get("members", [])}
+    assert u["id"] in member_ids  # still a member; the add-with-filter didn't remove

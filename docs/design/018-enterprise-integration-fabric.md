@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R450 (sixteenth window, MUTATION — SCIM patch grammar)**: AST-mutating
+  both SCIM patch methods (user active/displayname/externalId + group
+  member-delta/rename) left 20 survivors at 22/42. Added grammar tests
+  pinning the security-critical arms: active=True on an active member must
+  NOT deprovision (and active=False does), active=True reactivates an inactive
+  member, an empty displayname string is ignored, a 'remove' op on displayName
+  is not a rename, a FILTERED member path with op!='remove' must not remove a
+  member, and non-dict/unsupported/invalid-active ops carry exact 400s. Re-run
+  29/42 killed; the remaining 13 are member set-diff arithmetic, audit
+  side-effects and truncation boundaries (lower-value/equivalent).
 - **R449 (sixteenth window, MUTATION — set_break_glass)**: AST-mutating the
   break-glass designee manager (the password-bypass escape hatch under
   enforced SSO) left 5 status-code survivors at 14/19. Added
