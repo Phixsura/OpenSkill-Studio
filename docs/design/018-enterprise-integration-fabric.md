@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R381 (twelfth window, S3 round-trip export proof)**: every export
+  content assertion ran through MemWriter — the real S3PartWriter seam
+  (bucket bytes, key layout, content type) was never exercised. New DB
+  test runs an export through S3PartWriter against the real MinIO,
+  fetches the part back from the bucket, and asserts the BYTES IN THE
+  BUCKET are allowlist-narrowed ({id,type,subject} only) and anonymized
+  (raw subject absent). PII governance now proven at the storage
+  boundary, not just the writer interface.
 - **R380 (twelfth window, slow-sink drill)**: slowloris receiver drill —
   a sink that ACCEPTS the connection then stalls 60 s must not wedge
   delivery. Proven live: the synchronous /webhooks/{id}/test dispatch

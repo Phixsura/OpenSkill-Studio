@@ -607,3 +607,43 @@ async def test_sweep_never_runs_manual_or_disabled_streams(db):
             (await db.execute(select(ExportRun).where(ExportRun.stream_id == s.id))).scalars().all()
         )
         assert runs == [], f"stream {s.schedule}/{s.enabled} must not auto-run"
+
+
+async def test_s3_round_trip_bucket_bytes_honor_allowlist_and_anonymize(db):
+    """R381: every export content proof used MemWriter — the real
+    S3PartWriter seam (content-type, key layout, the actual bucket bytes)
+    was never exercised. Run an export through S3PartWriter against the
+    real MinIO, fetch the part back from the bucket, and assert the BYTES
+    IN THE BUCKET are allowlist-narrowed and anonymized."""
+    import json as _json
+
+    from app.config import settings
+    from app.core.storage import get_s3_client
+    from app.integrations.facade import emit_event
+    from app.integrations.services.warehouse import S3PartWriter, WarehouseExportService
+
+    org, _ = await _org(db)
+    await emit_event(db, org.id, "project.approved", subject="s3-secret-subject", data={"k": 1})
+    await db.flush()
+
+    svc = WarehouseExportService(db, writer=S3PartWriter())
+    stream = await svc.create_stream(
+        org.id,
+        name=f"s3rt-{ULID()}",
+        dataset="events",
+        field_allowlist=["id", "type", "subject"],
+        anonymize={"subject": "hash"},
+    )
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded" and run.parts, (run.status, run.error)
+
+    async for client in get_s3_client():
+        obj = await client.get_object(Bucket=settings.s3_bucket, Key=run.parts[0])
+        raw = await obj["Body"].read()
+    rows = [_json.loads(x) for x in raw.decode().strip().split("\n")]
+    assert rows, "bucket part is empty"
+    assert all(set(r) == {"id", "type", "subject"} for r in rows), rows[0].keys()
+    assert all(r["subject"] != "s3-secret-subject" for r in rows), "anonymize missed the bucket"
+    # cleanup the object (bucket hygiene for repeated runs)
+    async for client in get_s3_client():
+        await client.delete_object(Bucket=settings.s3_bucket, Key=run.parts[0])
