@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R436 (sixteenth window, conflict-resolution reject arms)**:
+  resolve_conflict's reject arms. A non-conflict result -> 422; an invalid
+  action -> 422; accept_theirs on a non-clock_unresolvable conflict -> 422;
+  and the staleness guard — a later run already moved the field so the
+  recorded 'ours' no longer matches staged -> 409 SYNC_CONFLICT_STALE
+  (re-run the sync), never a silent overwrite of newer data. These
+  complete the resolver alongside the already-covered accept_theirs/
+  keep_ours/dismiss happy paths, double-resolve 409 and cross-org 404.
 - **R435 (sixteenth window, push guard/conflict/crash arms)**: the
   _execute_push arms R411 didn't reach. A non-talent.application profile ->
   failed(push_model_unsupported) with no extract; a mapping_profile whose

@@ -2279,3 +2279,70 @@ async def test_execute_push_model_unsupported_mapping_drift_and_crash(db, monkey
     await se._execute_push(db, run4, profile, conn, Boom())
     await db.refresh(run4)
     assert run4.status == "failed" and run4.error["class"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_resolve_conflict_reject_arms(db):
+    """R436: resolve_conflict's reject arms. A non-conflict result -> 422; an
+    invalid action -> 422; accept_theirs on a NON-clock_unresolvable conflict
+    -> 422; and the staleness guard (a later run already moved the field, so
+    the recorded 'ours' no longer matches staged) -> 422."""
+    from app.integrations.models import StagedRecord, SyncRecordResult, SyncRun
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+
+    run = SyncRun(profile_id=profile.id, status="succeeded", trigger="manual")
+    db.add(run)
+    await db.flush()
+
+    # (1) result that isn't a conflict -> 422.
+    upd = SyncRecordResult(
+        run_id=run.id, external_id="x1", model=profile.model, outcome="updated"
+    )
+    db.add(upd)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(org.id, run.id, upd.id, action="dismiss", actor_id=owner.id)
+    assert e.value.code == "SYNC_CONFLICT_INVALID" and e.value.status_code == 422
+
+    # (2) invalid action on a real conflict -> 422.
+    conf = SyncRecordResult(
+        run_id=run.id, external_id="x2", model=profile.model, outcome="conflict",
+        conflict_class="schema_invalid", detail={"errors": []},
+    )
+    db.add(conf)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(org.id, run.id, conf.id, action="frobnicate", actor_id=owner.id)
+    assert e.value.code == "SYNC_CONFLICT_INVALID" and e.value.status_code == 422
+
+    # (3) accept_theirs on a non-clock_unresolvable conflict -> 422.
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(
+            org.id, run.id, conf.id, action="accept_theirs", actor_id=owner.id
+        )
+    assert e.value.code == "SYNC_CONFLICT_INVALID" and e.value.status_code == 422
+
+    # (4) staleness guard: a clock_unresolvable conflict whose recorded "ours"
+    # no longer matches the staged field (a later run moved it).
+    staged = StagedRecord(
+        connection_id=conn.id, model="roster.class", external_id="c1",
+        payload={"timed": "MOVED_SINCE"}, raw_hash="h", status="active",
+    )
+    db.add(staged)
+    clock = SyncRecordResult(
+        run_id=run.id, external_id="c1", model="roster.class", outcome="conflict",
+        conflict_class="clock_unresolvable",
+        detail={"field": "timed", "ours": "OLD_LOCAL", "theirs": "REMOTE"},
+    )
+    db.add(clock)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(
+            org.id, run.id, clock.id, action="accept_theirs", actor_id=owner.id
+        )
+    # Staleness guard refuses the overwrite with a 409 (re-run the sync).
+    assert e.value.code == "SYNC_CONFLICT_STALE" and e.value.status_code == 409
