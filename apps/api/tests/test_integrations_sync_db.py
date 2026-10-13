@@ -2401,3 +2401,158 @@ async def test_sync_profile_create_reject_arms(db):
     with pytest.raises(AppError) as e:
         await mk()
     assert e.value.code == "SYNC_PROFILE_EXISTS" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_apply_record_field_policy_and_echo_matrix(db):
+    """R448 (mutation-kill): _apply_record's field-policy merge + echo
+    suppression. Pins the ours/theirs/prefer_ours_unless_blank/most_recent
+    rules, the clock_unresolvable conflict (equal/missing timestamps), the
+    echo-suppression window (<=24h reflected write is unchanged, naive ts
+    normalized, >24h is NOT suppressed), the duplicate-in-batch conflict, and
+    the missing-external-id error."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.models import StagedRecord, SyncRun
+    from app.integrations.services import sync_engine as se
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run)
+    await db.flush()
+
+    async def apply(raw, *, policy=None, staged_payload=None, last_outbound=None, seen=None):
+        profile.field_policy = policy or {}
+        staged = None
+        if staged_payload is not None:
+            staged = StagedRecord(
+                connection_id=conn.id, model=profile.model, external_id=raw["external_id"],
+                payload=staged_payload, raw_hash="prev", status="active",
+                last_outbound=last_outbound,
+            )
+            db.add(staged)
+            await db.flush()
+        counter, _ = await se._apply_record(
+            db, run, profile, conn, None, dict(raw), seen if seen is not None else set(),
+            staged_map={raw["external_id"]: staged} if staged is not None else {},
+        )
+        # NOTE: _apply_record mutates staged.payload in-session (no flush),
+        # so read the live object directly — a refresh would revert to the
+        # pre-flush DB value.
+        return counter, staged
+
+    # missing external_id -> error
+    c, _ = await apply({"external_id": ""})
+    assert c == "errors"
+
+    # duplicate within the batch -> conflict
+    seen = {"dup1"}
+    c, _ = await apply({"external_id": "dup1", "title": "x"}, seen=seen)
+    assert c == "conflicts"
+
+    # rule "ours": inbound never overwrites the owned field.
+    c, st = await apply(
+        {"external_id": "r-ours", "title": "THEIRS"},
+        policy={"title": "ours"}, staged_payload={"title": "OURS"},
+    )
+    assert c == "updated" and st.payload["title"] == "OURS"
+
+    # rule "theirs": inbound wins.
+    c, st = await apply(
+        {"external_id": "r-theirs", "title": "THEIRS"},
+        policy={"title": "theirs", "_default": "ours"}, staged_payload={"title": "OURS"},
+    )
+    assert c == "updated" and st.payload["title"] == "THEIRS"
+
+    # prefer_ours_unless_blank: fills only when ours is blank.
+    c, st = await apply(
+        {"external_id": "r-blank", "title": "FILLED"},
+        policy={"title": "prefer_ours_unless_blank", "_default": "ours"},
+        staged_payload={"title": ""},
+    )
+    assert st.payload["title"] == "FILLED"
+    c, st = await apply(
+        {"external_id": "r-noblank", "title": "IGNORED"},
+        policy={"title": "prefer_ours_unless_blank", "_default": "ours"},
+        staged_payload={"title": "KEEP"},
+    )
+    assert st.payload["title"] == "KEEP"
+
+    # most_recent: newer theirs wins; equal/missing timestamps -> conflict.
+    c, st = await apply(
+        {"external_id": "r-mr", "title": "NEW", "updated_at": "2026-02-01T00:00:00+00:00"},
+        policy={"title": "most_recent", "_default": "ours"},
+        staged_payload={"title": "OLD", "_updated_at": "2026-01-01T00:00:00+00:00"},
+    )
+    assert c == "updated" and st.payload["title"] == "NEW"
+
+    c, st = await apply(
+        {"external_id": "r-tie", "title": "NEW", "updated_at": "2026-01-01T00:00:00+00:00"},
+        policy={"title": "most_recent", "_default": "ours"},
+        staged_payload={"title": "OLD", "_updated_at": "2026-01-01T00:00:00+00:00"},
+    )
+    assert c == "conflicts"  # equal timestamps -> clock_unresolvable
+
+    # raw_hash already equals new_hash AND status active -> unchanged (no
+    # result row). Kills the raw_hash==/status=="active" equality mutants.
+    from app.integrations.services.sync_engine import _payload_hash
+
+    matched = {"external_id": "r-match", "title": "M"}
+    stm = StagedRecord(
+        connection_id=conn.id, model=profile.model, external_id="r-match",
+        payload={"title": "M"}, raw_hash=_payload_hash(matched), status="active",
+    )
+    db.add(stm)
+    await db.flush()
+    profile.field_policy = {"_default": "theirs"}
+    c2, _ = await se._apply_record(
+        db, run, profile, conn, None, dict(matched), set(), staged_map={"r-match": stm}
+    )
+    assert c2 == "unchanged"
+
+    # Same hash but status NOT active (tombstoned) -> NOT unchanged (revives).
+    matched2 = {"external_id": "r-tomb", "title": "T"}
+    stt = StagedRecord(
+        connection_id=conn.id, model=profile.model, external_id="r-tomb",
+        payload={"title": "T"}, raw_hash=_payload_hash(matched2), status="tombstoned",
+    )
+    db.add(stt)
+    await db.flush()
+    c3, _ = await se._apply_record(
+        db, run, profile, conn, None, dict(matched2), set(), staged_map={"r-tomb": stt}
+    )
+    assert c3 != "unchanged"
+
+    # last_outbound hash that DOESN'T match -> echo skipped -> merge/update.
+    c, st = await apply(
+        {"external_id": "r-echo-diff", "title": "NEW"},
+        policy={"_default": "theirs"},
+        staged_payload={"title": "stale"},
+        last_outbound={"fields_hash": "nope", "written_at": datetime.now(UTC).isoformat()},
+    )
+    assert c == "updated"
+
+
+    mapped_echo = {"external_id": "r-echo", "title": "ECHOED"}
+    h = _payload_hash(mapped_echo)
+    c, st = await apply(
+        mapped_echo,
+        policy={"_default": "theirs"},
+        staged_payload={"title": "stale"},
+        last_outbound={"fields_hash": h, "written_at": datetime.now(UTC).isoformat()},
+    )
+    assert c == "unchanged"
+
+    # echo OUTSIDE the 24h window -> NOT suppressed (proceeds to merge/update).
+    c, st = await apply(
+        {"external_id": "r-echo-old", "title": "ECHOED"},
+        policy={"_default": "theirs"},
+        staged_payload={"title": "stale"},
+        last_outbound={
+            "fields_hash": _payload_hash({"external_id": "r-echo-old", "title": "ECHOED"}),
+            "written_at": (datetime.now(UTC) - timedelta(hours=25)).isoformat(),
+        },
+    )
+    assert c == "updated"

@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R448 (sixteenth window, MUTATION — \_apply_record field-policy core)**:
+  AST-mutating the pull-direction record-apply core (field-level source-of-
+  truth merge + echo suppression) left 19 survivors at 14/33. Added
+  test_apply_record_field_policy_and_echo_matrix pinning every merge rule
+  (ours never overwrites, theirs wins, prefer_ours_unless_blank fills only
+  blanks, most_recent takes the newer timestamp and conflicts on equal/
+  missing ones -> clock_unresolvable), the echo-suppression window (<=24h
+  reflected write -> unchanged, naive ts normalized, >24h and hash-mismatch
+  NOT suppressed), the raw_hash/status fast-path, tombstone revival, the
+  duplicate-in-batch conflict and missing-external-id error. Re-run 20/33
+  killed. The remaining 13 are equivalent/cosmetic: the 255 length boundary
+  and [:10] error cap are cosmetic, and the raw_hash==/status=="active"
+  fast-path checks are an optimization — when the hash matches the merge path
+  is itself a no-op, so flipping the equality reaches the same unchanged
+  outcome.
 - **R447 (sixteenth window, MUTATION — identity.resolve core)**: AST-
   mutating the SSO identity-resolution core (which decides who is provisioned
   into which org) left 12 survivors at 16/28; added
