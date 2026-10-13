@@ -2299,3 +2299,52 @@ async def test_identity_resolve_boundary_and_status_codes(db):
     with pytest.raises(AppError) as e:
         await svc.resolve(_ident(org, subject="linked-gone", email=None, verified=False))
     assert e.value.code == "SSO_NO_ACCOUNT" and e.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_set_break_glass_exact_status_codes(db):
+    """R449 (mutation-kill): set_break_glass's reject paths must carry their
+    EXACT status codes — non-owner 403, member-not-found 404, cap-exceeded
+    422, and the last-designee-while-enforced guard 409 (403-vs-404 etc. is
+    the existence-oracle class, and the codes are contract)."""
+    from app.models.organization import OrgRole as _Role
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+
+    # Non-owner actor -> 403 (exact).
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(org.id, owner.id, enabled=True, actor_role=_Role.ADMIN)
+    assert e.value.code == "FORBIDDEN" and e.value.status_code == 403
+
+    # Owner but unknown/non-member target -> 404 (exact).
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(
+            org.id, "01GHOSTGHOSTGHOSTGHOSTGHOST", enabled=True, actor_role=_Role.OWNER
+        )
+    assert e.value.code == "MEMBER_NOT_FOUND" and e.value.status_code == 404
+
+    # Cap exceeded -> 422 (exact).
+    m = [owner]
+    for _ in range(2):
+        u = await _user(db)
+        db.add(OrgMember(org_id=org.id, user_id=u.id, role=_Role.ADMIN, status=MemberStatus.ACTIVE))
+        m.append(u)
+    await db.flush()
+    await svc.set_break_glass(org.id, m[0].id, enabled=True, actor_role=_Role.OWNER)
+    await svc.set_break_glass(org.id, m[1].id, enabled=True, actor_role=_Role.OWNER)
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(org.id, m[2].id, enabled=True, actor_role=_Role.OWNER)
+    assert e.value.code == "BREAK_GLASS_LIMIT" and e.value.status_code == 422
+
+    # Removing the LAST designee while a connection enforces SSO -> 409 (exact).
+    # Disable one designee so m[0] is the last; enforce SSO on a live conn.
+    await svc.set_break_glass(org.id, m[1].id, enabled=False, actor_role=_Role.OWNER)
+    conn = await svc.create(org.id, protocol="oidc", oidc_issuer=ISSUER, oidc_client_id="bg-c")
+    conn.status = "active"
+    conn.enforce_sso = True
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.set_break_glass(org.id, m[0].id, enabled=False, actor_role=_Role.OWNER)
+    assert e.value.code == "BREAK_GLASS_REQUIRED" and e.value.status_code == 409
