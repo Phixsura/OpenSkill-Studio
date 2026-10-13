@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import ssl
 from urllib.parse import urlsplit
 
 import httpx
@@ -108,7 +109,11 @@ def validate_egress_url(url: str) -> str:
     if not host:
         raise EgressBlockedError("URL has no hostname")
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    if port not in _ALLOWED_PORTS:
+    # R396: the port allowlist is a PROD hardening (stops cross-protocol
+    # smuggling at 25/6379/11211 etc.). egress_allow_private is the explicit
+    # local-test switch — test sinks bind ephemeral localhost ports, so the
+    # port wall lifts with it while every other check stays on.
+    if port not in _ALLOWED_PORTS and not settings.egress_allow_private:
         raise EgressBlockedError(f"Port not allowed: {port}")
     lowered = host.lower().rstrip(".")
     if (lowered.endswith(_BLOCKED_TLDS) or lowered == "localhost") and (
@@ -126,6 +131,12 @@ def validate_egress_url(url: str) -> str:
     return url
 
 
+# R396: one shared TLS context — httpx builds a fresh SSLContext (a full
+# certifi CA-bundle parse, ~2 MB and milliseconds) PER AsyncClient, and the
+# delivery path mints a client per attempt. Build it once at import.
+_SHARED_SSL_CONTEXT = ssl.create_default_context()
+
+
 class EgressClient:
     """SSRF-safe outbound HTTP. One instance per call site; stateless."""
 
@@ -137,6 +148,7 @@ class EgressClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         read_timeout: float = READ_TIMEOUT,
+        discard_body: bool = False,
     ) -> httpx.Response:
         validate_egress_url(url)
         parsed = urlsplit(url)
@@ -161,7 +173,10 @@ class EgressClient:
 
         timeout = httpx.Timeout(connect=CONNECT_TIMEOUT, read=read_timeout, write=10.0, pool=5.0)
         async with httpx.AsyncClient(
-            follow_redirects=False, timeout=timeout, trust_env=False
+            follow_redirects=False,
+            timeout=timeout,
+            trust_env=False,
+            verify=_SHARED_SSL_CONTEXT,
         ) as client:
             # R217: STREAM the response and abort past the cap. The old
             # `len(resp.content) > cap` check buffered the ENTIRE body first —
@@ -185,12 +200,20 @@ class EgressClient:
                     except ValueError:
                         pass  # garbage header — fall through to counted read
                 chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.aiter_bytes():
-                    total += len(chunk)
-                    if total > MAX_RESPONSE_BYTES:
-                        raise EgressBlockedError("Response exceeds size cap")
-                    chunks.append(chunk)
+                if discard_body:
+                    # R396 (R171 semantics): callers that only care the
+                    # request was ACCEPTED (webhook delivery) never read the
+                    # receiver's body at all — close after the status line,
+                    # aborting the transfer (zero buffering, like the old
+                    # stream-and-exit dispatcher).
+                    pass
+                else:
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > MAX_RESPONSE_BYTES:
+                            raise EgressBlockedError("Response exceeds size cap")
+                        chunks.append(chunk)
             finally:
                 await resp.aclose()
             # Hand back a normal buffered Response (callers use .content/.json()).

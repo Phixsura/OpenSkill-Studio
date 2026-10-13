@@ -225,11 +225,16 @@ async def main() -> int:
                 "provider_key": "generic_rest",
                 "name": "evil",
                 "config": {},
-                "base_url": "https://169.254.169.254:6379/x",
+                # R396: the metadata-IP + redis-port URL is only blocked by
+                # the PROD walls (private-IP + port), both deliberately open
+                # under EGRESS_ALLOW_PRIVATE=true — assert a wall that holds
+                # in EVERY mode instead (userinfo smuggling); the prod port
+                # wall is pinned in test_integrations_core.
+                "base_url": "https://admin:pw@evil.example.com/x",
             },
             headers=h,
         )
-        check("egress port wall", r.status_code == 422, r.text[:200])
+        check("egress userinfo wall", r.status_code == 422, r.text[:200])
 
         # ── domain + SCIM ──
         domain = f"e2e-{uid()}.example.edu"

@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R396 (thirteenth window, legacy dispatcher gets the DNS pin)**: the
+  legacy webhook dispatcher re-validated the URL per retry but still
+  DIALED BY HOSTNAME — a rebind between validate and connect slipped the
+  wall. It now sends through EgressClient (resolve → validate every IP →
+  dial the pinned literal), with a new `discard_body` mode preserving the
+  R171 never-read-the-receiver's-body property (close after the status
+  line). Two spillover wins: (1) one shared SSLContext — httpx parsed the
+  full certifi CA bundle (~2 MB) per AsyncClient, and delivery minted a
+  client per attempt; built once at import now. (2) The egress port
+  allowlist documented + pinned as PROD-only (egress_allow_private lifts
+  it for local test sinks; scheme/userinfo walls hold in every mode) —
+  the lifecycle's port-wall check moved to the mode-independent userinfo
+  wall with the prod port wall pinned in unit tests. Webhook suite
+  120/120, lifecycle 77/77, battery 374.
 - **R395 (thirteenth window, hostile-JWT fuzz at a real LTI launch)**:
   phase 9 mints an LTI registration and a fresh single-use state via
   /lti/login per attempt, then fires alg:none, HS256-confusion,

@@ -1136,3 +1136,28 @@ def test_every_mutating_fabric_route_audits_or_is_exempt():
         if "record_fabric_audit" not in src:
             uncovered.append(key)
     assert not uncovered, f"mutating fabric routes with no audit posture: {uncovered}"
+
+
+def test_egress_port_wall_is_prod_only(monkeypatch):
+    """R396: the port allowlist ({80,443,8080,8443}) blocks cross-protocol
+    smuggling in PROD; egress_allow_private is the explicit local-test
+    switch that lifts ONLY the port/private walls — scheme and userinfo
+    walls hold in every mode."""
+    import pytest as _pytest
+
+    from app.config import settings
+    from app.integrations.security import EgressBlockedError, validate_egress_url
+
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    with _pytest.raises(EgressBlockedError, match="Port not allowed"):
+        validate_egress_url("https://h.example.com:6379/x")
+
+    monkeypatch.setattr(settings, "egress_allow_private", True)
+    validate_egress_url("https://h.example.com:6379/x")  # lifted with the switch
+    # mode-independent walls
+    for mode in (False, True):
+        monkeypatch.setattr(settings, "egress_allow_private", mode)
+        with _pytest.raises(EgressBlockedError):
+            validate_egress_url("https://admin:pw@h.example.com/")
+        with _pytest.raises(EgressBlockedError):
+            validate_egress_url("ftp://h.example.com/")

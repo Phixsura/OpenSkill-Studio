@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt_secret_tolerant
 from app.exceptions import AppError
+from app.integrations.security import EgressClient
 from app.models.webhook import WebhookSubscription
 
 log = structlog.get_logger()
@@ -532,7 +533,6 @@ class WebhookService:
         We use the original URL for httpx so TLS cert verification works
         correctly (certs are issued for hostnames, not IPs).
         """
-        import httpx
 
         # Re-validate URL at delivery time to catch DNS rebinding
         # (R171: async wrapper — DNS resolution must not block the event loop)
@@ -580,30 +580,27 @@ class WebhookService:
                     return
             status: int | None = None
             try:
-                # R303: trust_env=False — HTTP(S)_PROXY env vars must never
-                # reroute deliveries through an attacker-influenced proxy;
-                # follow_redirects=False made explicit (R301 class).
-                async with httpx.AsyncClient(
-                    timeout=10.0, trust_env=False, follow_redirects=False
-                ) as client:
-                    # R171: stream and discard the response — a plain .post()
-                    # buffers the receiver's ENTIRE body into memory. The
-                    # receiver is an org-controlled server: one returning
-                    # multi-GB bodies across 25 subscriptions per org was an
-                    # unbounded memory amplification against the API worker.
-                    # We only care that the POST was accepted; never read the
-                    # body.
-                    async with client.stream(
-                        "POST",
-                        url,
-                        content=body,
-                        headers={
-                            "Content-Type": "application/json",
-                            "X-Webhook-Signature": signature,
-                            "X-Webhook-Event": event_type,
-                        },
-                    ) as resp:
-                        status = resp.status_code
+                # R396: dial through EgressClient — it resolves, validates
+                # EVERY resolved IP, then dials the pinned literal with
+                # Host/SNI set, so a DNS rebind BETWEEN validate and connect
+                # cannot slip through (the per-retry _is_blocked_url_async
+                # recheck above only narrowed the window; the pin closes it).
+                # EgressClient also keeps the R303 (no proxy env), R301
+                # (no redirects) and R171/R217 (streamed size-capped read)
+                # properties.
+                resp = await EgressClient().request(
+                    "POST",
+                    url,
+                    content=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Webhook-Signature": signature,
+                        "X-Webhook-Event": event_type,
+                    },
+                    read_timeout=10.0,
+                    discard_body=True,
+                )
+                status = resp.status_code
             except Exception:
                 log.warning(
                     "webhook_delivery_failed",
