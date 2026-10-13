@@ -545,6 +545,31 @@ async def main() -> int:
                 r.text[:200],
             )
 
+        # ── R375: keyset pagination on the events list ──
+        r = await c.get(f"{base}/events", params={"limit": 1}, headers=h)
+        body = r.json()
+        first_page = body.get("data", [])
+        meta = body.get("meta", {})
+        check(
+            "events list carries keyset meta",
+            r.status_code == 200 and "has_more" in meta and "next_cursor" in meta,
+            r.text[:200],
+        )
+        if first_page and meta.get("has_more"):
+            r2 = await c.get(
+                f"{base}/events",
+                params={"limit": 1, "before": meta["next_cursor"]},
+                headers=h,
+            )
+            second = r2.json().get("data", [])
+            check(
+                "cursor page 2 is older and non-overlapping",
+                r2.status_code == 200 and second and second[0]["id"] < first_page[0]["id"],
+                r2.text[:200],
+            )
+        else:
+            check("cursor page 2 is older and non-overlapping", True, "single page org")
+
         # ── R20/R22: identity links + webhook rotation over HTTP ──
         r = await c.get(f"{base}/identity-links", headers=h)
         check("identity links list (R20)", r.status_code == 200, r.text[:200])

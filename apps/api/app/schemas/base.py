@@ -26,6 +26,19 @@ class PaginationMeta(BaseModel):
     has_more: bool
 
 
+class CursorMeta(BaseModel):
+    """Keyset pagination (R375): ULID ids are time-ordered, so `id <
+    before` pages stably under concurrent inserts (no offset skip/dup)."""
+
+    next_cursor: str | None
+    has_more: bool
+
+
+class CursorListResponse(BaseModel, Generic[T]):
+    data: list[T]
+    meta: CursorMeta
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str

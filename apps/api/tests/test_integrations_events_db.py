@@ -1325,3 +1325,42 @@ async def test_legacy_webhook_dispatch_client_flags(db, monkeypatch):
     )
     assert seen.get("trust_env") is False
     assert seen.get("follow_redirects") is False
+
+
+async def test_events_keyset_pagination_walks_without_overlap(db, egress):
+    """R375: the events list was head-limited (no way past the newest N).
+    Keyset `before` cursor must walk ALL events in strictly descending id
+    order with no overlap and no skips, and has_more/next_cursor must
+    agree with reality."""
+    from app.integrations.api.events import list_events
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    for i in range(7):
+        await emit_event(db, org.id, "project.approved", subject=f"pg-{i}", data={})
+    await db.commit()
+
+    owner_row = (
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
+    user = await db.get(_User, owner_row.user_id)
+
+    seen: list[str] = []
+    cursor = None
+    pages = 0
+    while True:
+        out = await list_events(org.id, type_prefix=None, limit=3, before=cursor, db=db, user=user)
+        ids = [e.id for e in out["data"]]
+        assert ids == sorted(ids, reverse=True), "page not id-descending"
+        assert not set(ids) & set(seen), "cursor pages overlap"
+        seen.extend(ids)
+        pages += 1
+        meta = out["meta"]
+        if not meta["has_more"]:
+            assert meta["next_cursor"] is None
+            break
+        assert meta["next_cursor"] == ids[-1]
+        cursor = meta["next_cursor"]
+        assert pages < 10, "cursor failed to terminate"
+    assert len(seen) == 7
+    assert pages == 3  # 3 + 3 + 1

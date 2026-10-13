@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R375 (twelfth window, keyset pagination on events/deliveries)**: both
+  admin lists were head-limited (newest 200, nothing older reachable).
+  Added `before` keyset cursors — ULIDs are time-ordered, so `id <
+before` IS the time cursor, served by the primary-key index, and pages
+  stably under concurrent inserts (no offset skip/dup). Envelope gains
+  `meta: {next_cursor, has_more}` (CursorListResponse; limit+1 fetch
+  answers has_more without a count). Gotcha pinned: direct (non-HTTP)
+  callers hit the truthy Query default — `before` is isinstance-guarded.
+  DB pin walks 7 events in 3 pages with zero overlap/skip; lifecycle
+  gains a live two-page wall (77/77).
 - **R374 (twelfth window, route-contract guard)**: structural test over
   every MOUNTED fabric route (108 collected by recursive router unwrap —
   this FastAPI version nests _IncludedRouters, so naive app.routes

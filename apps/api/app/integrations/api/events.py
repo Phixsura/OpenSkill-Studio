@@ -14,7 +14,7 @@ from app.integrations.models import DeliveryAttempt, EventDelivery, IntegrationE
 from app.integrations.services.events import replay_delivery
 from app.models.organization import OrgRole
 from app.models.user import User
-from app.schemas.base import DataResponse
+from app.schemas.base import CursorListResponse, DataResponse
 
 router = APIRouter(prefix="/orgs/{org_id}/integrations", tags=["Integrations"])
 
@@ -54,27 +54,39 @@ async def _admin(org_id: str, user: User, db: AsyncSession) -> None:
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
 
 
-@router.get("/events", response_model=DataResponse[list[EventResponse]])
+@router.get("/events", response_model=CursorListResponse[EventResponse])
 async def list_events(
     org_id: str,
     type_prefix: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=50, ge=1, le=200),
+    before: str | None = Query(default=None, max_length=26),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """R375: keyset pagination — the list was head-limited to 200 with no
+    way to reach older rows. `before` is the last id of the previous page
+    (ULIDs are time-ordered, so `id < before` is the time cursor and the
+    primary key index serves it)."""
     await _admin(org_id, user, db)
     q = (
         select(IntegrationEvent)
         .where(IntegrationEvent.org_id == org_id)
-        .order_by(IntegrationEvent.time.desc())
-        .limit(limit)
+        .order_by(IntegrationEvent.id.desc())
+        .limit(limit + 1)  # one extra row answers has_more without count()
     )
+    if isinstance(before, str) and before:  # direct (non-HTTP) callers pass the Query default
+        q = q.where(IntegrationEvent.id < before)
     if type_prefix:
         from app.ecosystem.security import escape_like
 
         q = q.where(IntegrationEvent.type.like(f"{escape_like(type_prefix)}%", escape="\\"))
     events = (await db.execute(q)).scalars().all()
-    return {"data": [EventResponse.model_validate(e, from_attributes=True) for e in events]}
+    has_more = len(events) > limit
+    events = events[:limit]
+    return {
+        "data": [EventResponse.model_validate(e, from_attributes=True) for e in events],
+        "meta": {"next_cursor": events[-1].id if has_more else None, "has_more": has_more},
+    }
 
 
 def _delivery_response(
@@ -187,12 +199,13 @@ async def subscription_stats(
     return {"data": out}
 
 
-@router.get("/deliveries", response_model=DataResponse[list[DeliveryResponse]])
+@router.get("/deliveries", response_model=CursorListResponse[DeliveryResponse])
 async def list_deliveries(
     org_id: str,
     status: str | None = Query(default=None, max_length=20),
     subscription_id: str | None = Query(default=None, max_length=26),
     limit: int = Query(default=50, ge=1, le=200),
+    before: str | None = Query(default=None, max_length=26),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -201,15 +214,22 @@ async def list_deliveries(
         select(EventDelivery, IntegrationEvent.type)
         .join(IntegrationEvent, IntegrationEvent.id == EventDelivery.event_id)
         .where(IntegrationEvent.org_id == org_id)
-        .order_by(EventDelivery.created_at.desc())
-        .limit(limit)
+        .order_by(EventDelivery.id.desc())  # R375: keyset — see list_events
+        .limit(limit + 1)
     )
+    if isinstance(before, str) and before:  # direct (non-HTTP) callers pass the Query default
+        q = q.where(EventDelivery.id < before)
     if status:
         q = q.where(EventDelivery.status == status)
     if subscription_id:
         q = q.where(EventDelivery.subscription_id == subscription_id)
     rows = (await db.execute(q)).all()
-    return {"data": [_delivery_response(d, t) for d, t in rows]}
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "data": [_delivery_response(d, t) for d, t in rows],
+        "meta": {"next_cursor": rows[-1][0].id if has_more else None, "has_more": has_more},
+    }
 
 
 @router.get("/deliveries/{delivery_id}", response_model=DataResponse[DeliveryResponse])
