@@ -105,6 +105,17 @@ class LtiToolKey(Base):
     Private key is a crypto.py envelope; the public JWK serves at /lti/jwks."""
 
     __tablename__ = "intg_lti_tool_keys"
+    __table_args__ = (
+        # R422: the arbitration ensure_tool_key's race recovery relies on.
+        # kid is random and never collides — without this partial index a
+        # cold-start race mints TWO active keys and the recovery is dead code.
+        Index(
+            "uq_intg_lti_tool_key_active",
+            "active",
+            unique=True,
+            postgresql_where="active",
+        ),
+    )
 
     id: Mapped[str] = ulid_pk()
     kid: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)

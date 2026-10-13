@@ -319,10 +319,20 @@ async def test_sso_first_login_race_single_link(db):
 
 @pytest.mark.asyncio
 async def test_tool_key_concurrent_first_use_single_key(db):
-    """R111: two concurrent ensure_tool_key calls — the singleton index
-    arbitrates, the loser gets the winner's key, neither session poisons."""
+    """R111/R422: two concurrent ensure_tool_key calls — the singleton index
+    arbitrates, the loser gets the winner's key, neither session poisons.
+    R422 found this test was VACUOUS on a warm DB (an active key already
+    existed, so both miners hit the early return and never raced), which
+    hid that the arbitrating index itself was missing. Force the cold path
+    by deactivating every key first."""
+    from sqlalchemy import update
+
     from app.core.database import AsyncSessionLocal
+    from app.integrations.models import LtiToolKey
     from app.integrations.services.lti_ags import ensure_tool_key
+
+    await db.execute(update(LtiToolKey).where(LtiToolKey.active.is_(True)).values(active=False))
+    await db.commit()
 
     async def miner():
         async with AsyncSessionLocal() as own:
@@ -332,6 +342,60 @@ async def test_tool_key_concurrent_first_use_single_key(db):
 
     kids = await asyncio.gather(miner(), miner())
     assert kids[0] == kids[1]
+    assert kids[0].startswith("osks-")
+    active = (
+        (await db.execute(select(LtiToolKey).where(LtiToolKey.active.is_(True)))).scalars().all()
+    )
+    assert len(active) == 1  # the partial unique index holds the singleton
+
+
+@pytest.mark.asyncio
+async def test_tool_key_race_loser_recovers_via_index(db):
+    """R422: deterministic cover of the IntegrityError recovery branch —
+    before the uq_intg_lti_tool_key_active index existed this branch was
+    DEAD CODE (kid is random and never collides), so a cold-start race
+    minted two active keys. Simulate the loser exactly: its initial SELECT
+    sees no key (pre-insert snapshot), it generates and INSERTs, the index
+    rejects it, and it must return the winner's committed key."""
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import LtiToolKey
+    from app.integrations.services.lti_ags import ensure_tool_key
+
+    await db.execute(update(LtiToolKey).where(LtiToolKey.active.is_(True)).values(active=False))
+    await db.commit()
+
+    # Winner mints and commits first.
+    async with AsyncSessionLocal() as winner:
+        won = await ensure_tool_key(winner)
+        await winner.commit()
+        winner_kid = won.kid
+
+    class _NoneResult:
+        def scalar_one_or_none(self):
+            return None
+
+    async with AsyncSessionLocal() as loser:
+        real_execute = loser.execute
+        calls = {"n": 0}
+
+        async def first_select_sees_nothing(stmt, *a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _NoneResult()  # the loser's pre-insert snapshot
+            return await real_execute(stmt, *a, **k)
+
+        loser.execute = first_select_sees_nothing
+        key = await ensure_tool_key(loser)
+        await loser.commit()
+
+    assert key.kid == winner_kid  # loser recovered the winner's key
+    assert calls["n"] >= 2  # the recovery re-select actually ran
+    active = (
+        (await db.execute(select(LtiToolKey).where(LtiToolKey.active.is_(True)))).scalars().all()
+    )
+    assert len(active) == 1 and active[0].kid == winner_kid
 
 
 @pytest.mark.asyncio

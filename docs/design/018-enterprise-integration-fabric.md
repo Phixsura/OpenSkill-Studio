@@ -931,6 +931,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R422 (fifteenth window, REAL BUG — missing singleton index)**: a
+  coverage-guided sweep showed `ensure_tool_key`'s generation path at 14%
+  — the warm dev DB always early-returns, which exposed that the R111
+  concurrent-first-use race test was VACUOUS (both miners hit the early
+  return; `kids[0]==kids[1]` held trivially). Behind the vacuous test hid
+  a real bug: the race recovery is written against a "singleton index
+  arbitrates" contract, but no such index ever existed — `kid` is random
+  and never collides, so a true cold-start race mints TWO active signing
+  keys and the IntegrityError recovery branch was dead code. Fix:
+  migration `intg22a00022` dedupes any raced environments (keep newest
+  active key) then adds partial unique index `uq_intg_lti_tool_key_active
+ON intg_lti_tool_keys (active) WHERE active` (+ model `__table_args__`).
+  Tests: race test now forces the cold path and asserts exactly one
+  active key; a deterministic loser-recovery test (first SELECT sees the
+  pre-insert snapshot, INSERT rejected by the index, winner's key
+  returned); a generation-property test pinning the osks- kid, published
+  JWK completeness (kty/alg/use/kid/e/n, no private members), envelope
+  encryption, and a sign-with-stored-PEM / verify-with-published-JWK
+  roundtrip. Head is now intg22a00022 (up/down/up verified).
 - **R421 (fourteenth window, mutation)**: AST-mutating `_validate_user_rows`
   (bulk_import, 9 mutants) left 5 survivors: `Or->And` on the email reject
   chain (a non-empty, short, NUL-free but format-invalid email would have

@@ -455,3 +455,35 @@ async def test_push_score_failure_and_guard_matrix(db):
         await push_score(db, link, user_id=user.id, score_given=4, egress=FakeAgsPlatform(jwks))
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_key_generation_jwk_roundtrip(db):
+    """R422: the key GENERATION path had never executed in the battery (a
+    warm DB always early-returns the existing key). Force a fresh mint and
+    pin what the path promises: osks- kid, complete published JWK, encrypted
+    private envelope, and — the part that matters — a token signed with the
+    stored private key verifies against the PUBLISHED public JWK."""
+    import time
+
+    from sqlalchemy import update
+
+    from app.core.crypto import decrypt_credentials
+    from app.integrations.models import LtiToolKey
+
+    await db.execute(update(LtiToolKey).where(LtiToolKey.active.is_(True)).values(active=False))
+    await db.flush()
+
+    key = await ensure_tool_key(db)
+    assert key.kid.startswith("osks-") and len(key.kid) == len("osks-") + 16
+    jwk = key.public_jwk
+    assert jwk["kty"] == "RSA" and jwk["alg"] == "RS256" and jwk["use"] == "sig"
+    assert jwk["kid"] == key.kid and jwk["e"] == "AQAB" and "n" in jwk
+    assert "d" not in jwk and "p" not in jwk  # no private material published
+    assert "BEGIN PRIVATE KEY" not in key.private_pem_ct  # envelope-encrypted
+
+    pem = decrypt_credentials(key.private_pem_ct)["pem"]
+    token = pyjwt.encode({"iss": "osks", "exp": int(time.time()) + 60}, pem, algorithm="RS256")
+    pub = pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+    claims = pyjwt.decode(token, key=pub, algorithms=["RS256"], options={"verify_aud": False})
+    assert claims["iss"] == "osks"
