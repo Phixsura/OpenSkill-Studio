@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R415 (fourteenth window, mid-window regression + close)**: full wave
+  after R408-R414 — 12/12 chunks = 10,800 backend tests; battery 384;
+  lifecycle 77/77; scale 37/37; storm 8/8 (p95 elevated under post-wave
+  machine load, SLO held); fuzz 399/seed zero-5xx; adversarial 178/0;
+  walk 65/65; a11y 5/5; web 766; all 10 drills green (EXPLAIN flagged=0 —
+  intg20/intg21 indexes holding). This window's theme: property-based
+  SOUNDNESS (not just totality) on the SSRF gate (5,500-IP sweep,
+  0 bypass) + filling three shipped-write-path coverage holes
+  (_execute_push, AGS push_score, gradeable fan-out) + two race-recovery
+  branches (R409 case bug was the one real defect; R414 the identity
+  loser-recovery). head intg21a00021; not merged.
 - **R414 (fourteenth window, identity first-login race recovery)**:
   `_link`'s loser-recovery branch (a concurrent first login already
   committed the (connection_ref, subject) link, so the second INSERT
