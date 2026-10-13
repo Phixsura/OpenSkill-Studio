@@ -324,11 +324,36 @@ registration refuses a configuration whose issuer lives on a different
 origin than the admin-pasted URL. Conflict adjudication now also verifies
 the result row belongs to the addressed run (uniform 404 otherwise).
 
+## 7b. Audit trail (window 12, R377/R384)
+
+Every mutating `/integrations` route writes `cp_audit_events` via
+`record_fabric_audit` (actor, target, config-shape payload — never
+secrets) or sits on an explicit exempt list (pings, previews, LTI
+protocol surfaces). Three composed guards keep this honest: action
+literals must be registered in `AUDIT_ACTIONS` (unregistered = silent
+no-op), every mutating route must call-or-declare (structural test), and
+a DB test proves a row actually lands. Break-glass (`intg.break_glass.set`)
+is the headline entry an auditor will ask for.
+
+## 7c. Admin list pagination (R375/R376)
+
+`GET .../events` and `.../deliveries` take `before=<last id>` (keyset —
+ULIDs are time-ordered; stable under concurrent inserts) and return
+`meta: {next_cursor, has_more}`. The events page exposes it as
+"Load older".
+
+## 7d. Accessibility gate (R372/R383)
+
+`make e2e-intg-a11y` (local) and `sweep-a11y-integrations.spec.ts` (CI
+Playwright job) run axe-core WCAG 2.1 A/AA over the five fabric pages as
+an authenticated admin; any serious/critical violation fails.
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned
 literal with Host/SNI; mixed public+private resolution refused; enforced by
-a lint test), write-only Fernet credential envelopes, uniform-404 IDOR
+a lint test), write-only Fernet credential envelopes (webhook signing secrets
+included since intg19 — rotate via CREDENTIAL_ENCRYPTION_KEY MultiFernet), uniform-404 IDOR
 walls, per-route rate limits on every unauthenticated protocol surface
 (guard test), XSW-safe SAML (only the signed subtree is consumed; exclusive
 c14n), nonce/state single-use with replay caches, SCIM deprovision sweeps
