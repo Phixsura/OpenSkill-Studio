@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R403 (thirteenth window, closing tally)**: full sweep after R394-R402:
+  12/12 chunks = 10,787 backend tests; battery 377; lifecycle 77/77;
+  scale 37/37; storm 8/8 (now exercises the R401 rotation race on a
+  shared hook); fuzz 399 req/seed zero-5xx envelope-clean; adversarial
+  178/0; walk 65/65; CI fabric specs 9/9; web 766 + tsc + eslint; all 9
+  operational drills green via `make drills`; head intg20a00020. Two
+  production fixes this window (R396 DNS-pin, R401 rotation lock) and one
+  latent nightly-sweep aborter (R402), all pinned.
 - **R402 (thirteenth window, domain-sweep session poisoning)**: a latent
   bug the storm cruft surfaced — when TWO orgs hold the same pending
   domain and both pass DNS in ONE sweep pass, the second verify hit
