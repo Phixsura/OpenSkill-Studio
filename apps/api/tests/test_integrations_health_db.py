@@ -153,7 +153,9 @@ async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
         def __init__(self, code):
             self.code = code
 
-        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+        async def request(
+            self, method, url, *, headers=None, content=None, read_timeout=None, discard_body=False
+        ):
             calls.append({"url": url, "headers": headers, "body": content})
             if self.code == -1:
                 raise httpx.ConnectTimeout("boom")
