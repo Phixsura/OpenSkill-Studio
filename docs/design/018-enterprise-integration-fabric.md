@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R392 (twelfth window, closing regression tally)**: full sweep after
+  R370-R391: backend 12/12 chunks = 10,786 tests; fabric battery 374;
+  lifecycle 77/77; scale smoke 37/37; storm 8/8 (p95=840 ms under
+  parallel churn; soak p95 441 ms warm); fuzz 383 hostile requests/seed,
+  zero 5xx, 4xx envelope-clean (seeds 9100/99999 + 15 earlier this
+  window); adversarial 178/0; browser walk 65/65; CI fabric Playwright
+  specs 9/9 (sweep 4 + a11y 5); web 766 tests + tsc + eslint + build;
+  head intg19a00019 (4-hop drill walks intg16→19). All eight drills
+  green at head. Hygiene: clean tree, no stray listeners, empty stash.
 - **R391 (twelfth window, SCIM Groups filter)**: /Groups silently IGNORED
   the `filter` query param — Okta dedups groups with `displayName eq
 "..."` before creating, so the ignored filter returned the whole
