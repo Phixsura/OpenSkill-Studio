@@ -1354,3 +1354,31 @@ async def test_group_patch_replace_members_delta_and_rename_collision(ctx):
             ]},
         )
     assert e.value.status == 409
+
+
+@pytest.mark.asyncio
+async def test_group_patch_nondict_op_and_user_reactivate_guard(ctx):
+    """R452 (mutation-kill): a non-dict op in a GROUP patch -> exact 400; and
+    a non-active user-patch op (displayName) on an INACTIVE member must NOT
+    reactivate it (kills the reactivate-guard `is True and not-active` -> `or`
+    mutant — under or, any op on an inactive member would revive it)."""
+    from app.integrations.services.scim import ScimError
+    from app.models.organization import MemberStatus
+
+    usvc, gsvc = _usvc(ctx), _gsvc(ctx)
+
+    g = await gsvc.create({"displayName": f"G-{uuid.uuid4().hex[:6]}"})
+    with pytest.raises(ScimError) as e:
+        await gsvc.patch(g["id"], {"Operations": [12345]})
+    assert e.value.status == 400
+
+    # Deactivate a user, then PATCH only its displayName -> stays inactive.
+    u, _ = await usvc.create({"userName": f"ra-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+    await usvc.patch(u["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]})
+    _, m = await usvc._member_for(u["id"])
+    assert m.status != MemberStatus.ACTIVE
+    await usvc.patch(
+        u["id"], {"Operations": [{"op": "replace", "path": "displayName", "value": "Renamed"}]}
+    )
+    _, m2 = await usvc._member_for(u["id"])
+    assert m2.status != MemberStatus.ACTIVE  # displayName op did NOT reactivate

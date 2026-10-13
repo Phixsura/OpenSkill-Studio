@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R452 (sixteenth window, MUTATION — SCIM patch final arms)**: a non-dict
+  op in a GROUP patch -> exact 400, and a non-active user-patch op on an
+  INACTIVE member must NOT reactivate it (kills the reactivate-guard
+  `is True and not-active` -> `or` mutant — under or, ANY op on an inactive
+  member would silently revive it). SCIM patch now 35/42 killed; the
+  remaining 7 are tolerant-server no-op branches, truncation boundaries, and
+  the concurrent-rename savepoint race (covered by outcome).
 - **R451 (sixteenth window, MUTATION — SCIM group member delta)**: the
   group-PATCH replace-members full-set delta (add=target-current, remove=
   current-target) was a NEVER-EXERCISED path — a `-`->`+` mutant would have
