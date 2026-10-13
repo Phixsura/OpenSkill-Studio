@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R386 (twelfth window, mid-window full wave + all-drills pass)**: after
+  R370-R385 the whole surface re-proved: backend 12/12 chunks = 10,785
+  (one find: ruff B033 duplicate in AUDIT_ACTIONS — the registry's own
+  lint); battery 373; lifecycle 77/77; scale 37/37; storm 8/8
+  (p50=99 ms, p95=731 ms); fuzz 375 req/seed zero-5xx (fresh seeds
+  424242, 90125); adversarial 178/0; walk 65/65; a11y spec 5/5; web 765 +
+  tsc + eslint + build. ALL SEVEN drills re-run green at head:
+  migration 4-hop now walks intg16→intg19, crash kill -9, redis
+  fail-open, minio clean-fail, slow-sink 15 s cap, rate-limit
+  engagement, backup/restore. Web security headers verified already
+  complete (XFO DENY, CSP, HSTS, nosniff — no gap).
 - **R384 (twelfth window, audit-lands proof)**: record_fabric_audit is
   best-effort (swallows every failure with a warning), so R377's 19 call
   sites could all be silent no-ops while every STRUCTURAL guard still
