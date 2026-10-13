@@ -1912,3 +1912,105 @@ async def test_jit_provision_member_race_loser_is_noop(db):
         .all()
     )
     assert len(members) == 1 and members[0].role == OrgRole.INSTRUCTOR  # not downgraded
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_reject_matrix_network_and_token_shapes(db):
+    """R427: the login-callback reject arms had never executed (the fuzzer
+    dies at discovery egress before reaching them — R416's lesson on the
+    login side). Script each hostile IdP response after a clean authorize
+    build and assert every arm maps to the uniform 401, never a raw 500:
+    discovery 5xx/non-JSON/missing-field, token-exchange 4xx/non-JSON/
+    no-id_token, and id_token garbage/HS256/unknown-kid plus JWKS
+    5xx/garbage-key failures."""
+    import app.integrations.services.sso_oidc as mod
+
+    org, conn = await _oidc_setup(db)
+    email = f"rej-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    class ScriptedIdp(FakeIdp):
+        def __init__(self, factory):
+            super().__init__(factory)
+            self.overrides = {}
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            path = urlsplit(url).path
+            for suffix, make in self.overrides.items():
+                if path.endswith(suffix):
+                    return make(method, url)
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    def resp(status, *, json_body=None, text=None):
+        def make(method, url):
+            req = httpx.Request(method, url)
+            if json_body is not None:
+                return httpx.Response(status, json=json_body, request=req)
+            return httpx.Response(status, text=text or "", request=req)
+
+        return make
+
+    bad_discovery = dict(_discovery_doc())
+    bad_discovery.pop("jwks_uri")
+
+    def tok(form):
+        return _mint_id_token(sub="s", email=email, nonce=tok.nonce, aud="client-1")
+
+    scenarios = [
+        ("discovery_5xx", {"openid-configuration": resp(503)}, tok),
+        ("discovery_not_json", {"openid-configuration": resp(200, text="<html>")}, tok),
+        ("discovery_missing_field", {"openid-configuration": resp(200, json_body=bad_discovery)}, tok),
+        ("token_4xx", {"/token": resp(400, json_body={"error": "invalid_grant"})}, tok),
+        ("token_not_json", {"/token": resp(200, text="not json")}, tok),
+        ("token_no_id_token", {"/token": resp(200, json_body={"access_token": "x"})}, tok),
+        ("id_token_garbage", {}, lambda form: "!!not-a-jwt!!"),
+        (
+            "id_token_hs256",
+            {},
+            lambda form: pyjwt.encode({"sub": "s"}, "shh", algorithm="HS256"),
+        ),
+        (
+            "id_token_unknown_kid",
+            {},
+            lambda form: _mint_id_token(
+                sub="s", email=email, nonce=getattr(tok, "nonce", ""), aud="client-1"
+            ),
+        ),
+        ("jwks_5xx", {"/jwks": resp(500)}, tok),
+        (
+            "jwks_garbage_keys",
+            {"/jwks": resp(200, json_body={"keys": [{"kty": "RSA", "kid": "k1", "n": "!b", "e": "!b"}]})},
+            tok,
+        ),
+    ]
+
+    for name, overrides, factory in scenarios:
+        mod._jwks_cache.clear()  # isolate JWKS scenarios from earlier caching
+        svc = mod.OidcService(db)
+        idp = ScriptedIdp(factory)
+        svc.egress = idp
+        url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+        qs = parse_qs(urlsplit(url).query)
+        tok.nonce = qs["nonce"][0]
+        if name == "id_token_unknown_kid":
+
+            def factory_k2(form):
+                t = _mint_id_token(sub="s", email=email, nonce=tok.nonce, aud="client-1")
+                # re-sign with an unknown kid header
+                return pyjwt.encode(
+                    pyjwt.decode(t, options={"verify_signature": False}),
+                    _PRIV,
+                    algorithm="RS256",
+                    headers={"kid": "k-unknown"},
+                )
+
+            idp.id_token_factory = factory_k2
+        idp.overrides = overrides
+        with pytest.raises(AppError) as exc:
+            await svc.handle_callback(
+                state_value=qs["state"][0], code="c", redirect_uri="https://app.test/cb"
+            )
+        assert exc.value.code == "SSO_ASSERTION_INVALID", name
+        assert exc.value.status_code == 401, name
+    mod._jwks_cache.clear()

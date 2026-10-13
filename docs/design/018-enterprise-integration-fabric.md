@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R427 (fifteenth window, OIDC login reject matrix)**: the login
+  callback's reject arms had never executed — the fuzzer dies at the
+  discovery egress before reaching them (R416's lesson, login side).
+  Scripted IdP covering all eleven arms after a clean authorize build:
+  discovery 5xx / non-JSON / missing-required-field, token exchange 4xx /
+  non-JSON / missing id_token, id_token garbage / HS256 / unknown kid,
+  and JWKS 5xx / garbage-key parse failure. Every arm maps to the uniform
+  401 `SSO_ASSERTION_INVALID`, never a raw 500; the JWKS cache is cleared
+  per scenario so cached keys can't mask the fetch/parse arms.
 - **R426 (fifteenth window, JIT race arms)**: `_jit_provision`'s three
   race-recovery arms (R166 class) had never executed; all three now
   covered deterministically with the pre-insert-snapshot technique.
