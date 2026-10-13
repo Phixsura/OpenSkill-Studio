@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R374 (twelfth window, route-contract guard)**: structural test over
+  every MOUNTED fabric route (108 collected by recursive router unwrap —
+  this FastAPI version nests _IncludedRouters, so naive app.routes
+  iteration sees zero): every /integrations route must carry
+  get_current_user in its dependant tree (protocol surfaces auth
+  in-handler and are out of scope), every JSON route must declare a
+  response_model (204 DELETEs and deliberate raw responses — errors.csv,
+  template, payload — allowlisted), and the org-scoped router must keep
+  its router-level rate limiter (router-level deps do NOT appear in
+  route.dependant here, which also explains why a per-route rate-limit
+  scan was an artifact — R366's live drill is the engagement proof).
+  First run: posture already clean; the guard exists so the NEXT route
+  added without auth fails in the battery, not in an audit.
 - **R373 (twelfth window, backup/restore drill)**: backups nobody has
   restored are Schrödinger backups — drilled the real path: pg_dump -Fc
   of the live dev DB (766 MB, 1,266,752 rows in scope) inside the

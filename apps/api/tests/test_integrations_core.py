@@ -1014,3 +1014,68 @@ def test_csv_oversized_cell_is_file_error_not_crash():
     rows, errors = parse_users_csv(big_header)
     assert rows == []
     assert errors and errors[0]["code"] == "malformed_csv"
+
+
+def test_fabric_route_contract():
+    """R374: structural contract over every MOUNTED fabric route — a new
+    endpoint added without auth, or an org-scoped JSON route without a
+    response envelope, fails here before any live test runs.
+
+    - Every /orgs/{org_id}/integrations route must carry get_current_user
+      in its dependant tree (protocol surfaces — /sso, /scim, /lti — auth
+      inside the handler via connection/token/JWKS and are allowlisted).
+    - Every such route must declare a response_model unless it is a 204
+      DELETE or a deliberate raw-Response route (csv, template, payload).
+    - The org-scoped integrations router itself must carry the
+      router-level rate limiter (R366: route.dependant does NOT show
+      router-level deps in this FastAPI version, so check the router).
+    """
+    from fastapi.routing import APIRoute
+
+    from app.integrations.api import integrations_router
+    from app.main import app
+
+    def collect(routes, acc):
+        for r in routes:
+            if isinstance(r, APIRoute):
+                acc.append(r)
+            inner = getattr(r, "original_router", None)
+            if inner is not None:
+                collect(inner.routes, acc)
+            sub = getattr(r, "routes", None)
+            if sub and not isinstance(r, APIRoute):
+                collect(sub, acc)
+        return acc
+
+    def dep_names(dependant, acc):
+        for d in dependant.dependencies:
+            if d.call is not None:
+                acc.add(getattr(d.call, "__qualname__", str(d.call)))
+            dep_names(d, acc)
+        return acc
+
+    fabric = [r for r in collect(app.routes, []) if "/integrations" in r.path]
+    assert len(fabric) >= 60, f"route collection broke: only {len(fabric)} fabric routes found"
+
+    raw_response_ok = ("/errors.csv", "/imports/template", "/payload")
+    unauthed, unmodeled = [], []
+    for r in fabric:
+        names = dep_names(r.dependant, set())
+        if not any("get_current_user" in x for x in names):
+            unauthed.append(f"{sorted(r.methods)} {r.path}")
+        if r.response_model is None:
+            if "DELETE" in r.methods or r.path.endswith(raw_response_ok):
+                continue
+            if r.path.endswith("/break-glass"):  # 204 by design
+                continue
+            unmodeled.append(f"{sorted(r.methods)} {r.path}")
+    assert not unauthed, f"fabric routes without user auth: {unauthed}"
+    assert not unmodeled, f"fabric JSON routes without response_model: {unmodeled}"
+
+    router_dep_names = {
+        getattr(d.dependency, "__qualname__", str(d.dependency))
+        for d in integrations_router.dependencies
+    }
+    assert any("rate_limit" in x or "checker" in x for x in router_dep_names), (
+        "org-scoped integrations router lost its router-level rate limiter"
+    )
