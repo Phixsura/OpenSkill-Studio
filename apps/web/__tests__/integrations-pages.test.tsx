@@ -713,3 +713,39 @@ describe("events keyset paging (R375/R376)", () => {
     );
   });
 });
+
+describe("deliveries keyset paging (R375/R379)", () => {
+  it("Load older deliveries appends and respects the status filter", async () => {
+    const base = "/orgs/ORG1234567890123456789012/integrations";
+    const mk = (id: string) => ({
+      id,
+      event_id: "e1",
+      event_type: `evt.${id}.v1`,
+      subscription_id: "s1",
+      status: "succeeded",
+      attempt_count: 1,
+      next_attempt_at: null,
+      replay_of: null,
+    });
+    route({
+      [`${base}/deliveries?before=D2`]: {
+        data: [mk("D1")],
+        meta: { next_cursor: null, has_more: false },
+      },
+      [`${base}/deliveries`]: {
+        data: [mk("D3"), mk("D2")],
+        meta: { next_cursor: "D2", has_more: true },
+      },
+    });
+    render(<EventsPage />, { wrapper: wrapper() });
+    await screen.findByText(/evt\.D3\.v1/);
+    const btn = await screen.findByRole("button", { name: /load older deliveries/i });
+    fireEvent.click(btn);
+    await screen.findByText(/evt\.D1\.v1/);
+    expect(screen.getByText(/evt\.D2\.v1/)).toBeTruthy();
+    expect(api.mock.calls.some(([p]) => String(p).includes("deliveries?before=D2"))).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /load older deliveries/i })).toBeNull(),
+    );
+  });
+});

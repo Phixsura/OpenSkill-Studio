@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R390 (twelfth window, deliveries Load-older page test)**: symmetric
+  vitest coverage for the deliveries cursor UI (append, cursor consumed,
+  button hides at the end). Web 766 tests. Render gotcha: delivery rows
+  show event_type, not the raw id — match what the DOM paints.
 - **R389 (twelfth window, 4xx envelope invariant in the fuzzer)**: the
   fuzzer graduated from "never a 5xx" to also asserting the DOCUMENTED
   error contract — an httpx response hook validates that every 4xx any
