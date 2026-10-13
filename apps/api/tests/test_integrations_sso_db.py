@@ -619,6 +619,16 @@ async def test_domain_sweep_verifies_and_expires(db, monkeypatch):
         .values(created_at=datetime.now(UTC) - timedelta(days=8))
     )
 
+    # Test isolation: sweep_pending is global + LIMIT 200, so accumulated
+    # pending rows from other suites/E2E runs can crowd this test's own two
+    # rows out of the batch. Drop every OTHER pending row first so the sweep
+    # sees only what this test created (R402 cruft class).
+    await db.execute(
+        OrgDomain.__table__.delete().where(
+            OrgDomain.status == "pending",
+            OrgDomain.id.notin_([fresh.id, stale.id]),
+        )
+    )
     db.expire_all()  # the core UPDATE above bypassed the identity map
 
     class Yep:
