@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R380 (twelfth window, slow-sink drill)**: slowloris receiver drill —
+  a sink that ACCEPTS the connection then stalls 60 s must not wedge
+  delivery. Proven live: the synchronous /webhooks/{id}/test dispatch
+  returns `{delivered: false, error: "ReadTimeout", latency_ms: 15028}`
+  at exactly the EgressClient 15 s read cap (no hang, no 500), and a fast
+  sink on the same port delivers in 6 ms immediately after. Checked in as
+  tests/drills/slow_sink_drill.py. Drill detail: the egress port
+  allowlist {80,443,8080,8443} applies even in private-egress test mode —
+  sinks must sit on 8080.
 - **R379 (twelfth window, deliveries Load-older + audit-cost check)**: the
   deliveries list gets the same keyset Load-older as events (filter-reset,
   in-flight guard). Storm re-run after the 19 new audit writes:
