@@ -380,3 +380,61 @@ def test_scim_normalize_path_total(path):
         # case PRESERVED by design (member-filter ids); totality is the
         # invariant — a str out, never a bare AttributeError/500.
         assert isinstance(out, str)
+
+
+_json_like = st.recursive(
+    st.one_of(
+        st.none(), st.booleans(), st.integers(), st.floats(allow_nan=True), st.text(max_size=20)
+    ),
+    lambda c: st.one_of(
+        st.lists(c, max_size=4), st.dictionaries(st.text(max_size=8), c, max_size=4)
+    ),
+    max_leaves=12,
+)
+
+
+@given(_json_like)
+@settings(max_examples=400, deadline=None)
+def test_scim_coerce_active_total(value):
+    """R410: the SCIM active-flag coercion is TOTAL over arbitrary PATCH
+    values (bool/str/dict-wrapped/garbage) — returns bool or None, never
+    raises (it gates deprovisioning; a hostile value must not 500 the
+    SCIM write path), and is recursion-safe on nested dicts."""
+    from app.integrations.services.scim import _coerce_active
+
+    out = _coerce_active(value)
+    assert out is None or isinstance(out, bool)
+
+
+@given(st.text(max_size=60))
+@settings(max_examples=300, deadline=None)
+def test_saml_parse_time_total(value):
+    """R410: the SAML timestamp parser returns an AWARE datetime or raises
+    a clean ValueError (never TypeError/AttributeError) over arbitrary
+    strings — the caller's ValueError guard turns malformed stamps into a
+    403, so any other exception class would 500 the ACS."""
+    from datetime import datetime
+
+    from app.integrations.services.sso_saml import _parse_time
+
+    try:
+        out = _parse_time(value)
+    except ValueError:
+        pass
+    else:
+        assert isinstance(out, datetime) and out.tzinfo is not None
+
+
+@given(st.binary(max_size=4096), st.text(max_size=40), st.integers(min_value=0, max_value=2**40))
+@settings(max_examples=200, deadline=None)
+def test_webhook_sign_payload_total_and_deterministic(body, secret, ts):
+    """R410: the Standard-Webhooks signer is TOTAL (any bytes body / secret
+    / timestamp) and DETERMINISTIC — the same inputs always yield the same
+    signature, and it is a non-empty base64 string (receivers recompute
+    and compare)."""
+    from app.integrations.services.events import sign_payload
+
+    s1 = sign_payload(secret, "evt_1", ts, body)
+    s2 = sign_payload(secret, "evt_1", ts, body)
+    assert s1 == s2
+    assert isinstance(s1, str) and s1.startswith("v1,") and len(s1) > 4

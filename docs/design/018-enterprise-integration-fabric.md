@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R410 (fourteenth window, parser totality nets)**: hypothesis totality
+  properties over three more security-critical parsers — SCIM
+  `_coerce_active` (bool/None over arbitrary nested PATCH values,
+  recursion-safe), SAML `_parse_time` (aware datetime or clean ValueError,
+  never TypeError/500 on the ACS), and the webhook `sign_payload`
+  (total + deterministic, confirmed emitting the Standard-Webhooks
+  `v1,<sig>` format). All clean — regression nets, no new defect.
 - **R409 (fourteenth window, SCIM op-path case + property net)**: a
   hypothesis totality property over `_normalize_path` surfaced that the
   Group PATCH filtered member-remove regex `members[value eq "..."]`
