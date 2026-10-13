@@ -36,6 +36,15 @@ class IntegrationConnection(Base):
     __table_args__ = (
         Index("ix_intg_conn_org", "org_id", "status"),
         Index("uq_intg_conn_org_name", "org_id", "name", unique=True),
+        # R406 (R393 class): the health sweep slices active/degraded
+        # connections ordered by updated_at — a partial index serves both
+        # the predicate and the sort once the table passes ~10k rows (the
+        # EXPLAIN drill flagged the seq scan the day storms pushed it over).
+        Index(
+            "ix_intg_conn_sweep",
+            "updated_at",
+            postgresql_where="status IN ('active','degraded')",
+        ),
     )
 
     id: Mapped[str] = ulid_pk()

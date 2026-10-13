@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R406 (thirteenth window, connection-sweep index — drill pays off #2)**:
+  the EXPLAIN drill flagged its SECOND real regression this window —
+  intg_connections crossed 10k rows and the health sweep slice
+  (status active/degraded ORDER BY updated_at LIMIT 100) started
+  seq-scanning. Migration intg21a00021 adds partial index
+  ix_intg_conn_sweep (updated_at WHERE status active/degraded), declared
+  in the model for parity; drilled down/up; EXPLAIN flagged=0; battery 377. R393 + R406 are the same drill catching the same class twice as
+  the data grew — exactly why it is checked in.
 - **R405 (thirteenth window, final tally + flake kill)**: the global
   LIMIT-200 domain sweep could crowd a test's own pending rows out of the
   batch — the sweep test now isolates by deleting other pending rows
