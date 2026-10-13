@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R421 (fourteenth window, mutation)**: AST-mutating `_validate_user_rows`
+  (bulk_import, 9 mutants) left 5 survivors: `Or->And` on the email reject
+  chain (a non-empty, short, NUL-free but format-invalid email would have
+  passed validation under the mutant — the regex disjunct was never exercised
+  in isolation), the 255-char email length boundary, and the 100/200-char
+  display/raw-echo truncation caps. Added
+  `test_validate_user_rows_reject_disjuncts_and_truncation_boundaries`
+  pinning each disjunct independently and both caps exactly; re-run 9/9
+  killed. Assertion-gap class (R417/R418 family), no production change.
 - **R420 (fourteenth window, closing regression)**: full wave after
   R408-R419 — 12/12 chunks = 10,808 backend tests; battery 390;
   lifecycle 77/77; scale 37/37; storm 8/8; fuzz 399/seed zero-5xx;

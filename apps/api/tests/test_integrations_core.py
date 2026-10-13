@@ -1259,3 +1259,46 @@ def test_egress_url_length_boundary():
             validate_egress_url(at_limit + "a")
     finally:
         settings.egress_allow_private = old
+
+
+def test_validate_user_rows_reject_disjuncts_and_truncation_boundaries():
+    """R421: mutation survivors in _validate_user_rows showed the email reject
+    chain and the truncation caps were unasserted. Pin each disjunct of the
+    email check INDEPENDENTLY (Or->And mutant), the 255-char length boundary
+    (Gt->GtE / 255->256 mutants), the display_name [:100] cap, and the
+    raw_row echo [:200] cap."""
+    from app.integrations.services.bulk_import import _validate_user_rows
+
+    # Exactly 255 chars and valid shape -> accepted (boundary is >255).
+    local = "a" * (255 - len("@example.com"))
+    ok255 = f"{local}@example.com"
+    assert len(ok255) == 255
+    rows, errors = _validate_user_rows([(1, {"email": ok255})])
+    assert len(rows) == 1 and errors == []
+
+    # 256 chars, still regex-valid -> rejected purely by the length disjunct.
+    too_long = "a" + ok255
+    assert len(too_long) == 256
+    rows, errors = _validate_user_rows([(1, {"email": too_long})])
+    assert rows == [] and [e["code"] for e in errors] == ["invalid_email"]
+
+    # Non-empty, short, NUL-free but format-invalid -> rejected purely by the
+    # regex disjunct (kills Or->And: under And this row would pass).
+    rows, errors = _validate_user_rows([(1, {"email": "notanemail"})])
+    assert rows == [] and [e["code"] for e in errors] == ["invalid_email"]
+
+    # NUL inside an otherwise plausible email -> rejected by the NUL disjunct.
+    rows, errors = _validate_user_rows([(1, {"email": "a\x00b@example.com"})])
+    assert rows == [] and [e["code"] for e in errors] == ["invalid_email"]
+
+    # display_name hard-truncates at exactly 100 chars.
+    rows, errors = _validate_user_rows(
+        [(1, {"email": "ok@example.com", "display_name": "d" * 101})]
+    )
+    assert errors == [] and rows[0]["display_name"] == "d" * 100
+
+    # Rejected-row echo truncates every raw value at exactly 200 chars.
+    rows, errors = _validate_user_rows(
+        [(1, {"email": "bad", "notes": "n" * 300})]
+    )
+    assert rows == [] and errors[0]["raw_row"]["notes"] == "n" * 200
