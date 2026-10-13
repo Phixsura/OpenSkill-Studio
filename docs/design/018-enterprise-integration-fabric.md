@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R434 (sixteenth window, NRPS sync arms)**: sync_memberships's data-
+  fetch and member-shape arms. The membership GET returning 401 or any
+  non-200 -> 502; a non-JSON body -> 502; members not a list -> 502; a
+  member entry that isn't a dict is skipped (never counted as read); and a
+  member whose computed JIT role is invalid (registration default_role set
+  outside JIT_ALLOWED_ROLES) is counted skipped, not fatal — so one bad
+  roster row never aborts the whole class sync.
 - **R433 (sixteenth window, SAML SLO arms)**: handle_slo_request's
   remaining reject/skip arms. No SAMLRequest at all -> slo_request_missing
   (checked before the signature path); a Signature segment that is not

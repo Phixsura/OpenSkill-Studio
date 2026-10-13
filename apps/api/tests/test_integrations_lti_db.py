@@ -1166,3 +1166,71 @@ async def test_map_resource_link_update_in_place(db):
     assert second.id == first.id  # same row, updated in place
     assert second.kind == "project" and second.target_id == "PROJ_B"
     assert second.grade_sync_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_nrps_sync_fetch_and_member_shape_arms(db):
+    """R434: sync_memberships's data-fetch and member-shape arms. The
+    membership GET returning 401 or any non-200 -> 502; a non-JSON body ->
+    502; members not being a list -> 502; a member that isn't a dict is
+    skipped (continue); and a member whose computed JIT role is invalid is
+    counted as skipped, not fatal."""
+    from app.integrations.services.lti_ags import ensure_tool_key
+    from app.integrations.services.lti_nrps import sync_memberships
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    await ensure_tool_key(db)
+    link = await svc.map_resource_link(
+        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-n", kind="skill",
+        target_id="S1",
+    )
+    link.nrps_url = "https://lms.example.com/api/nrps/ctx-x"
+    await db.flush()
+
+    class TokenOk:
+        """Token endpoint always succeeds; the membership GET is overridable."""
+
+        def __init__(self, membership):
+            self.membership = membership
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(
+                    200, json={"access_token": "nrps-tok"}, request=httpx.Request(method, url)
+                )
+            return self.membership(method, url)
+
+    def r(status, *, json_body=None, text=None):
+        def make(method, url):
+            req = httpx.Request(method, url)
+            if json_body is not None:
+                return httpx.Response(status, json=json_body, request=req)
+            return httpx.Response(status, text=text or "", request=req)
+
+        return make
+
+    async def expect(code, membership):
+        with pytest.raises(AppError) as e:
+            await sync_memberships(db, org.id, link.id, egress=TokenOk(membership))
+        assert e.value.code == code
+
+    await expect("LTI_NRPS_TOKEN_REFUSED", r(401))
+    await expect("LTI_NRPS_FETCH_FAILED", r(503))
+    await expect("LTI_NRPS_FETCH_FAILED", r(200, text="<<not json>>"))
+    await expect("LTI_NRPS_FETCH_FAILED", r(200, json_body={"members": "nope"}))
+
+    # A non-dict member entry is skipped; the sync still succeeds overall.
+    report = await sync_memberships(
+        db, org.id, link.id, egress=TokenOk(r(200, json_body={"members": ["not-a-dict", 42]}))
+    )
+    assert report["read"] == 0 and report["skipped"] == 0  # non-dicts never counted as read
+
+    # An invalid default JIT role makes every learner's mint invalid -> skipped.
+    reg.default_role = "superadmin"  # not in JIT_ALLOWED_ROLES
+    await db.flush()
+    member = {"user_id": "u-1", "status": "Active", "email": f"x@{_mint.domain}", "roles": []}
+    report2 = await sync_memberships(
+        db, org.id, link.id, egress=TokenOk(r(200, json_body={"members": [member]}))
+    )
+    assert report2["read"] == 1 and report2["skipped"] == 1 and report2["resolved"] == 0
