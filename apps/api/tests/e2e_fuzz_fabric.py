@@ -12,10 +12,14 @@ Usage: api on :8443 (APP_ENV=test), then
 """
 
 import asyncio
+import base64
 import json
 import os
 import random
 import uuid
+from datetime import UTC as _UTC
+from datetime import datetime as _dt
+from datetime import timedelta as _td
 
 import httpx
 
@@ -574,6 +578,77 @@ async def main() -> None:
             if rr.status_code >= 500:
                 n_5xx += 1
                 check(f"5xx: multipart {label}", False, f"{rr.status_code} {rr.text[:120]}")
+
+        # ── phase 8: hostile STRUCTURED XML at a real SAML connection ──
+        # The proto cases above 404 at connection lookup before any XML is
+        # parsed. Mint an ACTIVE SAML connection (throwaway self-signed
+        # cert) so XXE / billion-laughs / external-DTD / deep-nesting /
+        # unsigned-assertion payloads actually reach the hardened parser
+        # and the signature wall (R394).
+        from cryptography import x509 as _x509
+        from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives import serialization as _ser
+        from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
+        from cryptography.x509.oid import NameOID as _NameOID
+
+        _key = _rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        _name = _x509.Name([_x509.NameAttribute(_NameOID.COMMON_NAME, "fuzz-idp")])
+        _cert = (
+            _x509.CertificateBuilder()
+            .subject_name(_name)
+            .issuer_name(_name)
+            .public_key(_key.public_key())
+            .serial_number(_x509.random_serial_number())
+            .not_valid_before(_dt.now(_UTC) - _td(days=1))
+            .not_valid_after(_dt.now(_UTC) + _td(days=365))
+            .sign(_key, _hashes.SHA256())
+        )
+        _pem = _cert.public_bytes(_ser.Encoding.PEM).decode()
+        rr = await c.post(
+            f"{base}/sso-connections",
+            json={
+                "protocol": "saml",
+                "idp_entity_id": "https://fuzz-idp.example.com/meta",
+                "idp_sso_url": "https://fuzz-idp.example.com/sso",
+                "idp_certificates": [{"pem": _pem}],
+            },
+            headers=h,
+        )
+        if rr.status_code == 201:
+            saml_conn = rr.json()["data"]["id"]
+            await c.patch(
+                f"{base}/sso-connections/{saml_conn}", json={"status": "active"}, headers=h
+            )
+            _laughs = (
+                b"""<?xml version="1.0"?>\n<!DOCTYPE lolz [<!ENTITY lol "lol">"""
+                + b"".join(
+                    b'<!ENTITY lol%d "%s">' % (i, b"&lol%d;" % (i - 1) * 10) for i in range(1, 9)
+                )
+                + b']><samlp:Response xmlns:samlp="urn:x">&lol8;</samlp:Response>'
+            )
+            xml_bombs = [
+                b"""<?xml version="1.0"?>\n<!DOCTYPE foo [<!ENTITY x SYSTEM "file:///etc/passwd">]>\n<samlp:Response xmlns:samlp="urn:x">&x;</samlp:Response>""",
+                _laughs,
+                b'<?xml version="1.0"?>' + b"<a>" * 4000 + b"</a>" * 4000,
+                b"""<?xml version="1.0"?>\n<!DOCTYPE foo SYSTEM "http://169.254.169.254/meta">\n<samlp:Response xmlns:samlp="urn:x">x</samlp:Response>""",
+                b'<?xml version="1.0"?><samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_x" Version="2.0"><saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_a"><saml:Subject><saml:NameID>evil@x.com</saml:NameID></saml:Subject></saml:Assertion></samlp:Response>',
+                b'<?xml version="1.0"?><r>\x00</r>',
+            ]
+            for xml in xml_bombs:
+                _t1 = _t.monotonic()
+                rr = await c.post(
+                    f"{API}/sso/saml/acs/{saml_conn}",
+                    data={"SAMLResponse": base64.b64encode(xml).decode()},
+                )
+                _el = _t.monotonic() - _t1
+                total += 1
+                if rr.status_code >= 500:
+                    n_5xx += 1
+                    check("5xx: hostile XML at real SAML conn", False, f"{rr.status_code}")
+                if _el > 5:
+                    check("hostile XML parse stayed fast", False, f"{_el:.1f}s")
+        else:
+            check("fuzz SAML connection minted", False, f"{rr.status_code} {rr.text[:100]}")
 
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(

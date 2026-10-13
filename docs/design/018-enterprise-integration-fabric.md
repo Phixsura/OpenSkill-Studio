@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R394 (thirteenth window, structured-XML fuzz at a real SAML conn)**:
+  the proto fuzz cases 404 at connection lookup BEFORE any XML parses —
+  the hostile payloads never reached the parser. Phase 8 mints an ACTIVE
+  SAML connection (throwaway self-signed cert) per fuzz run and fires
+  XXE, billion-laughs, 4000-deep nesting, external-DTD SSRF, unsigned
+  assertion and NUL XML at its ACS: all clean 401s in ≤20 ms (parser
+  flags resolve_entities=False/no_network/dtd_validation=False + the
+  signature wall hold; the 1024 KB form-field cap stops oversized
+  payloads earlier). Fuzzer now 389 req/seed; seeds 13001-13003 clean.
+  Lesson: a fuzz case that dies at the lookup wall proves nothing about
+  the parser behind it — provision the real resource.
 - **R393 (twelfth window, retention-sweep index — the drill pays off)**:
   the checked-in EXPLAIN drill flagged its first real regression the same
   day it landed: today's storms pushed intg_sync_runs past 10k rows and
