@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R368 (eleventh window, closing regression wave)**: full sweep after
+  the window's fixes (R353-R367): backend 12/12 chunks = 10,776 tests
+  (one corpus-scan test updated to windowed matching after the R364
+  format sweep); web 764/764 + tsc + eslint; fabric battery 368;
+  lifecycle 75/75; scale smoke 37/37; fuzz zero-5xx (seed 43 + 2027/
+  31337/99991/777 earlier, 330 hostile requests each); storm 8/8 with
+  latency SLO (p50=146 ms, p95=665 ms); adversarial 178/0; browser walk
+  65/65 in ~2 min (post-R363/R367); alembic head intg17a00017 (the
+  repo-wide `alembic check` drift is pre-existing base-repo
+  model/migration divergence in older epics' tables, not fabric).
+  Hygiene: clean tree, zero stray listeners, zero backups, empty stash.
 - **R367 (eleventh window, drills into the repo + system-proxy class)**:
   the five operational drills (redis/minio outage, kill -9 crash,
   4-hop migration, rate-limiter engagement) moved from throwaway job
