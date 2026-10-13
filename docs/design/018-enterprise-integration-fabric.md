@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R389 (twelfth window, 4xx envelope invariant in the fuzzer)**: the
+  fuzzer graduated from "never a 5xx" to also asserting the DOCUMENTED
+  error contract — an httpx response hook validates that every 4xx any
+  /orgs/ JSON surface returns parses as `{error: {code, message}}`
+  (SCIM surfaces speak the SCIM error schema, protocol surfaces return
+  redirects/XML — out of scope). One hook covers all seven phases.
+  Seeds 8001-8003 all envelope-clean. Also verified locally that the CI
+  Playwright fabric specs pass together (sweep-integrations 9/9 + a11y
+  5/5 in 32 s).
 - **R388 (twelfth window, endurance block)**: 10-seed fuzz marathon
   (3,750 hostile requests, zero 5xx) + 5-seed storm (all 8/8, p95
   442-531 ms) + a 10-storm SOAK on one server process (~2,000 mixed CRUD

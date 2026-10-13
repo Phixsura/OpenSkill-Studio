@@ -87,7 +87,32 @@ def _mutate(obj):
 
 
 async def main() -> None:
-    async with httpx.AsyncClient(timeout=10.0, trust_env=False) as c:
+    # R389: envelope invariant — every 4xx a JSON admin surface returns
+    # must carry the documented {error: {code, message}} envelope (SCIM
+    # surfaces speak the SCIM error schema and protocol surfaces return
+    # redirects/XML, so only /orgs/ URLs are held to it). One response
+    # hook covers every phase.
+    malformed_env: list[str] = []
+
+    async def _env_hook(response: httpx.Response) -> None:
+        url = str(response.request.url)
+        if "/orgs/" not in url or not 400 <= response.status_code < 500:
+            return
+        await response.aread()
+        try:
+            body = response.json()
+        except Exception:
+            malformed_env.append(f"{response.status_code} non-json {url[-60:]}")
+            return
+        err = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(err, dict) or "code" not in err or "message" not in err:
+            malformed_env.append(
+                f"{response.status_code} bad-envelope {url[-60:]} {str(body)[:80]}"
+            )
+
+    async with httpx.AsyncClient(
+        timeout=10.0, trust_env=False, event_hooks={"response": [_env_hook]}
+    ) as c:
         email = f"fuzz-{uuid.uuid4().hex[:10]}@test.com"
         r = await c.post(
             f"{API}/auth/register",
@@ -550,6 +575,11 @@ async def main() -> None:
                 check(f"5xx: multipart {label}", False, f"{rr.status_code} {rr.text[:120]}")
 
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
+        check(
+            "every 4xx on JSON admin surfaces carries the error envelope",
+            not malformed_env,
+            " | ".join(malformed_env[:4]),
+        )
         print(f"elapsed={_t.monotonic() - _t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")
         raise SystemExit(0 if FAIL == 0 else 1)
