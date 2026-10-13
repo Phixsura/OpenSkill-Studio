@@ -1118,3 +1118,48 @@ async def test_rotation_requires_fresh_break_glass_under_enforced_sso(db):
         require_fresh_break_glass=True,
     )
     assert out3["rotated"] is True
+
+
+@pytest.mark.asyncio
+async def test_assertion_replay_concurrent_insert_race_is_clean_401(db):
+    """R423: the R199 branch — two concurrent POSTs of the SAME assertion
+    both pass the replay-cache SELECT and race to INSERT the deterministic
+    key; the unique-violation loser must surface as a detected replay
+    (clean 401 AppError), not a raw IntegrityError 500. The branch had
+    never executed in the battery: simulate the loser exactly with a get()
+    that sees the pre-insert snapshot while the winner's row is committed."""
+    from app.core.database import AsyncSessionLocal
+
+    org, _, _ = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn_id = conn.id
+    await db.commit()  # make org/conn visible to the per-request sessions
+
+    assertion_id = f"_replay-race-{uuid.uuid4()}"
+    horizon = datetime.now(UTC) + timedelta(minutes=5)
+
+    # Winner records the assertion id and commits.
+    async with AsyncSessionLocal() as winner:
+        await SamlService(winner)._assert_id_unseen(conn_id, assertion_id, horizon)
+        await winner.commit()
+
+    # Loser: its pre-insert snapshot saw nothing (patched get), so it takes
+    # the INSERT path and the unique key must turn the collision into the
+    # replay rejection.
+    async with AsyncSessionLocal() as loser:
+        svc = SamlService(loser)
+        real_get = loser.get
+        calls = {"n": 0}
+
+        async def get_sees_nothing(entity, ident, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return await real_get(entity, ident, **kw)
+
+        loser.get = get_sees_nothing
+        with pytest.raises(AppError) as exc:
+            await svc._assert_id_unseen(conn_id, assertion_id, horizon)
+        assert exc.value.code == "SSO_ASSERTION_INVALID"
+        assert exc.value.status_code == 401
+        assert calls["n"] == 1  # the reject came from the INSERT, not the get

@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R423 (fifteenth window, guard-branch cover)**: three security-relevant
+  branches the battery had never executed, now deterministically covered.
+  (1) SAML assertion-replay concurrent-INSERT race (the R199 branch): the
+  unique-violation loser surfaces as a clean 401 `SSO_ASSERTION_INVALID`,
+  not a raw 500 — driven with a patched pre-insert-snapshot `get()` against
+  a committed winner (same technique as R422's loser test). (2) egress
+  `_resolve_and_validate` DNS-failure and empty-answer branches: both must
+  raise `EgressBlockedError`, never a raw OSError or IndexError on
+  `addrs[0]`. (3) `record_fabric_audit` fail-open contract: a None actor
+  (system-initiated) is a silent no-op with no row, and a tenant-resolution
+  explosion is swallowed — the caller's admin mutation must never fail on
+  an audit hiccup (R377/R384 best-effort contract).
 - **R422 (fifteenth window, REAL BUG — missing singleton index)**: a
   coverage-guided sweep showed `ensure_tool_key`'s generation path at 14%
   — the warm dev DB always early-returns, which exposed that the R111

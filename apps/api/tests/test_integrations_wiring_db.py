@@ -321,3 +321,47 @@ async def test_fabric_audit_row_actually_lands(db):
     assert row.target_type == "user" and row.target_id == user.id
     assert row.after == {"enabled": True}
     assert row.tenant_id, "audit row lost its tenant scope"
+
+
+@pytest.mark.asyncio
+async def test_fabric_audit_fail_open_branches(db, monkeypatch):
+    """R423: the two guard branches of record_fabric_audit had never
+    executed. (1) actor None (system-initiated mutation) -> silent no-op,
+    no row, no error. (2) the tenant lookup exploding -> swallowed with a
+    warning, the caller's operation MUST NOT fail (best-effort contract,
+    R377/R384)."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane import facade as cp_facade
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.integrations.facade import record_fabric_audit
+
+    user = await _user(db)
+    org = await _org(db, user)
+
+    # (1) system actor: returns without touching the audit table.
+    await record_fabric_audit(
+        db, org.id, None, "intg.sweeper.ran", "connection", "none"
+    )
+    await db.flush()
+    row = (
+        (
+            await db.execute(
+                _select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.sweeper.ran"
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is None
+
+    # (2) tenant resolution explodes: swallowed, never propagates.
+    async def boom(*a, **k):
+        raise RuntimeError("tenant backend down")
+
+    monkeypatch.setattr(cp_facade, "get_tenant_for_org", boom)
+    await record_fabric_audit(
+        db, org.id, user.id, "intg.break_glass.set", "user", user.id
+    )  # must not raise

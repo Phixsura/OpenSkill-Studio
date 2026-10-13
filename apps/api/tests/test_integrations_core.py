@@ -1302,3 +1302,25 @@ def test_validate_user_rows_reject_disjuncts_and_truncation_boundaries():
         [(1, {"email": "bad", "notes": "n" * 300})]
     )
     assert rows == [] and errors[0]["raw_row"]["notes"] == "n" * 200
+
+
+def test_egress_resolve_failure_branches(monkeypatch):
+    """R423: _resolve_and_validate's DNS-failure and empty-answer branches
+    had never executed. Both must surface as EgressBlockedError (the caller
+    maps it to a clean 4xx), never a raw OSError."""
+    import socket as socket_mod
+
+    from app.integrations.security import EgressBlockedError, _resolve_and_validate
+
+    def boom(host, port, proto=0):
+        raise socket_mod.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr("app.integrations.security.socket.getaddrinfo", boom)
+    with pytest.raises(EgressBlockedError):
+        _resolve_and_validate("does-not-resolve.invalid", 443)
+
+    # Resolver returns an empty answer set (seen with some stub resolvers):
+    # must also refuse, not IndexError on addrs[0].
+    monkeypatch.setattr("app.integrations.security.socket.getaddrinfo", lambda *a, **k: [])
+    with pytest.raises(EgressBlockedError):
+        _resolve_and_validate("empty-answer.example.com", 443)
