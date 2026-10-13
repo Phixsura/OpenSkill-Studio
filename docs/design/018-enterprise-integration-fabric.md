@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R442 (sixteenth window, SSO update setter arms)**: sso_admin.update's
+  SUCCESS setter arms (the reject arms — invalid status/default_role/
+  egress-blocked issuer — were already covered). A valid default_role,
+  oidc_issuer (trailing slash stripped + egress-screened), the field-setter
+  loop (oidc_client_id/attribute_map/allow_jit), the oidc_client_secret
+  rotation into an envelope, and the enforce_sso flip (requires a
+  break-glass member to turn ON, no gate to turn OFF) all apply.
 - **R441 (sixteenth window, roster/opportunity validator arms)**: the
   remaining bulk-import validators pinned as pure-function matrices (same
   family as R421's user-row validator). `_validate_roster_rows`: invalid

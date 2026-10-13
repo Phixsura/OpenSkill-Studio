@@ -2146,3 +2146,50 @@ async def test_resolve_queue_item_invalid_action_and_double_resolve_and_missing_
             org.id, "01NOPENOPENOPENOPENOPENOPE", action="reject", user_id=None, actor_id=owner.id
         )
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sso_update_applies_all_settable_fields_and_enforce_toggle(db):
+    """R442: sso_admin.update's SUCCESS setter arms (the reject arms are
+    covered elsewhere). A valid default_role, oidc_issuer (trailing slash
+    stripped + egress-screened), the field-setter loop (oidc_client_id/
+    attribute_map/allow_jit), the oidc_client_secret rotation, and the
+    enforce_sso flip (which requires a break-glass member) all apply."""
+    from app.models.organization import OrgRole
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = SsoAdminService(db)
+    conn = await svc.create(
+        org.id, protocol="oidc", oidc_issuer="https://idp.example.com",
+        oidc_client_id="c0", oidc_client_secret="old-secret",
+    )
+    conn.status = "active"
+    await db.flush()
+
+    updated = await svc.update(
+        org.id,
+        conn.id,
+        default_role="instructor",
+        oidc_issuer="https://idp2.example.com/",  # trailing slash stripped
+        oidc_client_id="c1",
+        attribute_map={"email": "mail"},
+        allow_jit=False,
+        oidc_client_secret="new-secret",
+    )
+    assert updated.default_role == "instructor"
+    assert updated.oidc_issuer == "https://idp2.example.com"  # rstrip('/')
+    assert updated.oidc_client_id == "c1"
+    assert updated.attribute_map == {"email": "mail"}
+    assert updated.allow_jit is False
+    assert updated.oidc_client_secret_ct  # secret rotated into an envelope
+
+    # enforce_sso flip needs a break-glass member in place.
+    with pytest.raises(AppError):
+        await svc.update(org.id, conn.id, enforce_sso=True)
+    await svc.set_break_glass(org.id, owner.id, enabled=True, actor_role=OrgRole.OWNER)
+    enforced = await svc.update(org.id, conn.id, enforce_sso=True)
+    assert enforced.enforce_sso is True
+    # And it can be turned back off without the gate.
+    off = await svc.update(org.id, conn.id, enforce_sso=False)
+    assert off.enforce_sso is False
