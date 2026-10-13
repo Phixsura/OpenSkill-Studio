@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R440 (sixteenth window, login/upgrade/credential arms)**: three more
+  clusters. `login_initiation`: unknown-issuer reject (LTI_LAUNCH_INVALID)
+  and the optional lti_message_hint passthrough branch. `upgrade`: provider
+  disabled at a newer version -> 409 PROVIDER_DISABLED (before the config
+  screen), and a missing connector -> 409 CAPABILITY_MISSING, with
+  provider_version never bumped on failure. `set_credential`: the
+  concurrent-first-time-set race (R212) — the unique-violation loser on the
+  1:1 envelope rotates in place on the winner's row (last-writer-wins)
+  rather than 500ing, reproduced with the side-effecting-flush technique.
 - **R439 (sixteenth window, LTI dynreg fetch/shape arms)**:
   dynamic_register's remaining fetch/response-shape arms. Config GET
   non-200 -> 502 LTI_DYNREG_CONFIG_FAILED; config body not JSON -> 502;

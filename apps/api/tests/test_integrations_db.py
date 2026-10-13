@@ -547,3 +547,90 @@ def test_validate_config_type_length_and_bound_arms():
 
     # a fully valid config -> no problems.
     assert _validate_config({"name": "ok", "count": 5}, schema) == []
+
+
+@pytest.mark.asyncio
+async def test_upgrade_provider_disabled_and_connector_missing(ctx, monkeypatch):
+    """R440: upgrade's provider-disabled (409 PROVIDER_DISABLED) and
+    connector-missing (409 CAPABILITY_MISSING) arms."""
+    from app.integrations.models import IntegrationProvider
+    from app.integrations.services import connections as conn_mod
+
+    svc, org, db = ctx["svc"], ctx["org"], ctx["db"]
+    conn = await _mk_conn(
+        ctx, provider_key="oneroster",
+        config={"token_url": "https://idp.example.com/token", "page_size": 15},
+    )
+    provider = (
+        await db.execute(select(IntegrationProvider).where(IntegrationProvider.key == "oneroster"))
+    ).scalar_one()
+
+    # (1) provider disabled at a newer version -> 409 before config screen.
+    provider.version = 2
+    provider.enabled = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.upgrade(org.id, conn.id)
+    assert e.value.code == "PROVIDER_DISABLED" and e.value.status_code == 409
+    assert conn.provider_version == 1
+
+    # (2) enabled again but no connector registered -> 409 CAPABILITY_MISSING.
+    provider.enabled = True
+    await db.flush()
+    patched = dict(conn_mod.CONNECTORS)
+    patched.pop("oneroster", None)
+    monkeypatch.setattr(conn_mod, "CONNECTORS", patched)
+    with pytest.raises(AppError) as e:
+        await svc.upgrade(org.id, conn.id)
+    assert e.value.code == "CAPABILITY_MISSING" and e.value.status_code == 409
+    assert conn.provider_version == 1  # never bumped on failure
+
+    # Restore catalog row for sibling tests.
+    provider.version = 1
+    await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_set_credential_concurrent_first_set_race(ctx, monkeypatch):
+    """R440: set_credential's concurrent-first-time-set race arm (R212). Two
+    callers both see no existing credential and race to INSERT the 1:1
+    envelope; the unique-violation loser must rotate-in-place on the winner's
+    row, not 500. Reproduced with the side-effecting-flush technique."""
+    from app.core.database import AsyncSessionLocal
+    from app.integrations.models import IntegrationConnectionCredential as Cred
+
+    svc, org, db = ctx["svc"], ctx["org"], ctx["db"]
+    conn = await _mk_conn(
+        ctx, provider_key="oneroster",
+        config={"token_url": "https://idp.example.com/token", "page_size": 15},
+    )
+    await db.commit()
+
+    real_flush = db.flush
+    state = {"armed": True}
+
+    async def racing_flush(*a, **k):
+        if state["armed"]:
+            state["armed"] = False
+            async with AsyncSessionLocal() as rival:
+                rival.add(
+                    Cred(
+                        connection_id=conn.id, kind="api_key",
+                        ciphertext="rival-ct", expires_at=None,
+                    )
+                )
+                await rival.commit()
+        return await real_flush(*a, **k)
+
+    monkeypatch.setattr(db, "flush", racing_flush)
+    cred = await svc.set_credential(
+        org.id, conn.id, kind="api_key", values={"token": "mine"}, expires_at=None
+    )
+    monkeypatch.setattr(db, "flush", real_flush)
+    # Loser rotated in place on the winner's row: exactly one credential row,
+    # carrying this caller's rotated ciphertext (last-writer-wins).
+    rows = (
+        (await db.execute(select(Cred).where(Cred.connection_id == conn.id))).scalars().all()
+    )
+    assert len(rows) == 1
+    assert cred.ciphertext != "rival-ct"  # this caller's value won the rotate

@@ -1302,3 +1302,37 @@ async def test_dynamic_register_fetch_and_response_shape_arms(db):
             register_resp=lambda r: httpx.Response(201, json={"not_client_id": "x"}, request=r),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_login_initiation_unknown_issuer_and_message_hint(db):
+    """R440: login_initiation's unknown-issuer reject and the optional
+    lti_message_hint passthrough branch."""
+    from urllib.parse import parse_qs, urlsplit
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+
+    # Unknown issuer -> invalid (no registration).
+    with pytest.raises(AppError) as e:
+        await svc.login_initiation(
+            iss="https://not-registered.example.com",
+            login_hint="u",
+            client_id=None,
+            lti_message_hint=None,
+            target_link_uri="https://tool.example.com/launch",
+            redirect_uri="https://tool.example.com/api/v1/lti/launch",
+        )
+    assert e.value.code == "LTI_LAUNCH_INVALID"
+
+    # lti_message_hint present -> echoed into the authorize params.
+    url = await svc.login_initiation(
+        iss=ISS,
+        login_hint="u7",
+        client_id="tool-client-1",
+        lti_message_hint="deep-link-123",
+        target_link_uri="https://tool.example.com/launch",
+        redirect_uri="https://tool.example.com/api/v1/lti/launch",
+    )
+    qs = parse_qs(urlsplit(url).query)
+    assert qs["lti_message_hint"] == ["deep-link-123"]
