@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R382 (twelfth window, Load-older page test)**: vitest coverage for the
+  keyset UI — first page renders with meta.has_more, clicking Load older
+  issues `events?before=<cursor>`, the older page APPENDS (page 1 still
+  visible), and the button disappears when has_more goes false. Also
+  verified the uniqueness races are already mechanized (domain claim org
+  lock + savepoint + IntegrityError recovery; verify partial-unique 409;
+  SCIM Bulk bounded at 100 ops/413) — no gap found there. Web 765 tests.
 - **R381 (twelfth window, S3 round-trip export proof)**: every export
   content assertion ran through MemWriter — the real S3PartWriter seam
   (bucket bytes, key layout, content type) was never exercised. New DB

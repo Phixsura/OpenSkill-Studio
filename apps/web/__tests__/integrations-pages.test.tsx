@@ -682,3 +682,34 @@ describe("data page", () => {
     );
   });
 });
+
+describe("events keyset paging (R375/R376)", () => {
+  it("Load older appends the next cursor page and hides at the end", async () => {
+    const base = "/orgs/ORG1234567890123456789012/integrations";
+    route({
+      // specific (cursor) route first — route() matches by startsWith
+      [`${base}/events?before=EV2`]: {
+        data: [{ id: "EV1", type: "com.openskill.skill.completed.v1", subject: "older", data: {} }],
+        meta: { next_cursor: null, has_more: false },
+      },
+      [`${base}/events`]: {
+        data: [
+          { id: "EV3", type: "com.openskill.project.approved.v1", subject: "newest", data: {} },
+          { id: "EV2", type: "com.openskill.project.approved.v1", subject: "newer", data: {} },
+        ],
+        meta: { next_cursor: "EV2", has_more: true },
+      },
+    });
+    render(<EventsPage />, { wrapper: wrapper() });
+    await screen.findByText("newest");
+    const btn = await screen.findByRole("button", { name: /load older events/i });
+    fireEvent.click(btn);
+    await screen.findByText("older");
+    // page 1 still present, cursor consumed, button gone (has_more=false)
+    expect(screen.getByText("newer")).toBeTruthy();
+    expect(api.mock.calls.some(([p]) => String(p).includes("events?before=EV2"))).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /load older events/i })).toBeNull(),
+    );
+  });
+});
