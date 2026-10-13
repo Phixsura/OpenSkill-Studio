@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R400 (thirteenth window, discard-mode completion)**: the sync webhook
+  test dispatch gets discard_body too, and discard mode now also skips
+  the declared Content-Length screen — a receiver declaring a huge body
+  is irrelevant when the body is never read; "accepted" is the only
+  signal delivery cares about. Unit pin: discard returns status with
+  EMPTY content against an over-cap body while normal mode still raises
+  EgressBlockedError. Side effect: the webhook delivery test block
+  dropped 38 s → 7 s (no more draining receiver bodies).
 - **R399 (thirteenth window, `make drills`)**: one command runs the whole
   operational drill suite in sequence (redis/minio outage, crash,
   migration 4-hop, rate-limit engagement, slow-sink, backup/restore,

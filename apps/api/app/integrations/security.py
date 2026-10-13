@@ -193,7 +193,9 @@ class EgressClient:
             resp = await client.send(req, stream=True)
             try:
                 declared = resp.headers.get("content-length")
-                if declared is not None:
+                if declared is not None and not discard_body:
+                    # (discard mode never reads the body, so a huge declared
+                    # length is irrelevant — the receiver ACCEPTED the POST.)
                     try:
                         if int(declared) > MAX_RESPONSE_BYTES:
                             raise EgressBlockedError("Response exceeds size cap")
