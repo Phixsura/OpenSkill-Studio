@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R412 (fourteenth window, AGS grade-passback coverage)**: `push_score`
+  (LTI AGS grade → the LMS /scores endpoint) was another uncovered
+  outbound WRITE path. New test launches to JIT a mapped user, then
+  exercises every branch: grade-sync-disabled returns False with no call,
+  a never-launched user (no subject) returns False with no POST, the happy
+  path POSTs a well-formed AGS Score (userId/scoreGiven/FullyGraded) to
+  <lineitem>/scores and returns True, and an LMS 4xx refusal returns
+  False. lti_ags coverage 44%→60%.
 - **R411 (fourteenth window, push-execution coverage)**: a coverage sweep
   found `_execute_push` (talent.application → external ATS/HRIS, ~150
   lines) had ZERO execution coverage — only the preview rejection was

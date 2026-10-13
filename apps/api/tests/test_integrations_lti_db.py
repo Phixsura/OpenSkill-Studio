@@ -926,3 +926,107 @@ async def test_service_token_private_key_jwt_shape(db):
     assert claims["sub"] == reg.client_id
     assert claims["jti"] and len(claims["jti"]) >= 16
     assert 0 < claims["exp"] - claims["iat"] <= 300
+
+
+class _FakeAgsEgress:
+    """Captures the AGS score POST; returns the configured status."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.calls: list[dict] = []
+
+    async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+        import json as _json
+
+        self.calls.append({"method": method, "url": url, "body": _json.loads(content)})
+
+        class _R:
+            status_code = self.status
+
+        return _R()
+
+
+async def test_ags_push_score_cycle(db, monkeypatch):
+    """R412: AGS grade-passback (push_score → the LMS /scores endpoint) was
+    uncovered — a shipped outbound WRITE path. Launch to JIT a mapped user,
+    then exercise push_score: a grade-sync-disabled link returns False
+    without a call, a user who never launched returns False, the happy path
+    POSTs a well-formed AGS Score to <lineitem>/scores and returns True,
+    and an LMS refusal (4xx) returns False."""
+    from app.integrations.models import LtiResourceLink
+    from app.integrations.services import lti_ags
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    svc.egress = FakePlatform()
+    await svc.map_resource_link(
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-1",
+        kind="skill",
+        target_id="01SKILLXXXXXXXXXXXXXXXXXXX",
+        grade_sync_enabled=True,
+    )
+    state, nonce = await _start(svc, reg)
+    ags = {
+        f"{CLAIM.replace('lti/claim/', 'lti-ags/claim/')}endpoint": {
+            "lineitem": "https://lms.example.edu/ags/line/1"
+        }
+    }
+    _, link, result, _ = await svc.handle_launch(state_value=state, id_token=_mint(nonce, **ags))
+    await db.flush()
+    link = (
+        await db.execute(select(LtiResourceLink).where(LtiResourceLink.id == link.id))
+    ).scalar_one()
+    user_id = result.user.id
+
+    # _ags_token does a real client-credentials exchange — stub it.
+    async def _tok(_db, _reg, _egress):
+        return "ags-access-token"
+
+    monkeypatch.setattr(lti_ags, "_ags_token", _tok)
+
+    # happy path
+    eg = _FakeAgsEgress(status=200)
+    ok = await lti_ags.push_score(db, link, user_id=user_id, score_given=87.5, egress=eg)
+    assert ok is True
+    assert len(eg.calls) == 1
+    call = eg.calls[0]
+    assert call["url"] == "https://lms.example.edu/ags/line/1/scores"
+    assert call["body"]["scoreGiven"] == 87.5
+    assert call["body"]["gradingProgress"] == "FullyGraded"
+
+    # LMS refuses
+    eg_bad = _FakeAgsEgress(status=403)
+    assert (
+        await lti_ags.push_score(db, link, user_id=user_id, score_given=50.0, egress=eg_bad)
+        is False
+    )
+
+    # user who never launched this LMS -> no subject -> False, no POST
+    eg_none = _FakeAgsEgress(status=200)
+    other = User(
+        email=f"never-{uuid.uuid4().hex[:10]}@x.edu",
+        password_hash=hash_password("Test123!"),
+        display_name="Never",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(other)
+    await db.flush()
+    assert (
+        await lti_ags.push_score(db, link, user_id=other.id, score_given=10.0, egress=eg_none)
+        is False
+    )
+    assert eg_none.calls == []
+
+    # grade-sync disabled -> False, no token/POST
+    link.grade_sync_enabled = False
+    await db.flush()
+    eg_off = _FakeAgsEgress(status=200)
+    assert (
+        await lti_ags.push_score(db, link, user_id=user_id, score_given=99.0, egress=eg_off)
+        is False
+    )
+    assert eg_off.calls == []
