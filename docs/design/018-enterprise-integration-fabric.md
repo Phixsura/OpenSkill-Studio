@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R447 (sixteenth window, MUTATION — identity.resolve core)**: AST-
+  mutating the SSO identity-resolution core (which decides who is provisioned
+  into which org) left 12 survivors at 16/28; added
+  test_identity_resolve_boundary_and_status_codes pinning the subject-length
+  guard, email-length degradation, the single-vs-multi member-match boundary,
+  and the EXACT 403 status on every reject path (403-vs-404 existence-oracle
+  class, R91). Re-run 24/28 killed. The 6 remaining are equivalent/cosmetic:
+  the 255/500 length boundaries lead to the same queue/403 outcome on both
+  sides, `len(members) > 1` vs `>= 1` is unreachable (the `== 1` branch
+  returns first), and the display_name `[:100] or None` truncation is cosmetic.
 - **R446 (sixteenth window, domain-claim cap arm)**: claim's per-org cap
   arm — once MAX_DOMAINS_PER_ORG is reached a further claim raises
   DOMAIN_LIMIT_REACHED (422). (The concurrent-INSERT IntegrityError recovery

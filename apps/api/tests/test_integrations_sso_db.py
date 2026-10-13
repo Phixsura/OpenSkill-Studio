@@ -2214,3 +2214,88 @@ async def test_domain_claim_limit_reached(db, monkeypatch):
     with pytest.raises(AppError) as e:
         await svc.claim(org.id, f"d3-{uuid.uuid4().hex[:6]}.example.edu")
     assert e.value.code == "DOMAIN_LIMIT_REACHED" and e.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_identity_resolve_boundary_and_status_codes(db):
+    """R447 (mutation-kill): identity.resolve's boundary + status-code arms.
+    Subject length cap (>500), email length degradation (>255 -> None ->
+    queue), the multi-member-match ambiguity boundary (>1), and the EXACT 403
+    status on every reject path (403-vs-404 is the existence-oracle class —
+    these must never leak existence as a 404)."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "acme.edu")
+    svc = IdentityService(db)
+
+    # Subject boundary: 500 chars is allowed past the guard (then queues on
+    # the email path); 501 chars is rejected AT the guard with 403.
+    with pytest.raises(AppError) as e:
+        await svc.resolve(_ident(org, subject="s" * 501, email=None, verified=False))
+    assert e.value.code == "IDENTITY_AMBIGUOUS" and e.value.status_code == 403
+    with pytest.raises(AppError):
+        await svc.resolve(_ident(org, subject="", email=None, verified=False))
+
+    # Email length degradation: a 256-char "verified" email degrades to None
+    # -> queue 403 (never reaches a DB column).
+    long_email = ("x" * 250) + "@acme.edu"
+    assert len(long_email) > 255
+    with pytest.raises(AppError) as e:
+        await svc.resolve(
+            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email=long_email, verified=True)
+        )
+    assert e.value.status_code == 403
+
+    # Unverified email -> 403 (exact).
+    with pytest.raises(AppError) as e:
+        await svc.resolve(
+            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email="a@acme.edu", verified=False)
+        )
+    assert e.value.status_code == 403
+
+    # Zero member match, no JIT -> SSO_NO_ACCOUNT 403.
+    with pytest.raises(AppError) as e:
+        await svc.resolve(
+            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email="ghost@acme.edu",
+                   verified=True),
+            allow_jit=False,
+        )
+    assert e.value.code == "SSO_NO_ACCOUNT" and e.value.status_code == 403
+
+    # Multi-member match (>1) -> 403 multiple_member_matches. Two ACTIVE
+    # members sharing the same email (data anomaly the resolver must refuse).
+    h = uuid.uuid4().hex[:6]
+    # Case-variant local parts: distinct in the case-sensitive unique email
+    # index, but both match func.lower(email) == the lowercased probe.
+    await _add_member(db, org, f"Dup-{h}@acme.edu")
+    await _add_member(db, org, f"dup-{h}@acme.edu")
+    with pytest.raises(AppError) as e:
+        await svc.resolve(
+            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email=f"dup-{h}@acme.edu",
+                   verified=True)
+        )
+    assert e.value.code == "IDENTITY_AMBIGUOUS" and e.value.status_code == 403
+
+    # Linked account that is no longer ACTIVE -> SSO_NO_ACCOUNT 403.
+    from app.integrations.models import ExternalIdentityLink
+    from app.models.user import UserStatus
+
+    # Single member match -> SUCCESS (links, jit_created False). Kills the
+    # len(members) > 1 -> >= 1 mutant: under >=, one match would wrongly queue.
+    solo_email = f"solo-{uuid.uuid4().hex[:6]}@acme.edu"
+    solo = await _add_member(db, org, solo_email)
+    res = await svc.resolve(
+        _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email=solo_email, verified=True)
+    )
+    assert res.user.id == solo.id and res.jit_created is False and res.link is not None
+
+    gone = await _user(db, email=f"gone-{uuid.uuid4().hex[:6]}@acme.edu")
+    gone.status = UserStatus.SUSPENDED
+    link = ExternalIdentityLink(
+        connection_ref="01CONN", subject="linked-gone", user_id=gone.id, org_id=org.id, source="sso",
+    )
+    db.add(link)
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.resolve(_ident(org, subject="linked-gone", email=None, verified=False))
+    assert e.value.code == "SSO_NO_ACCOUNT" and e.value.status_code == 403
