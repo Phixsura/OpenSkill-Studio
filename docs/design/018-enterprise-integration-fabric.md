@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R416 (fourteenth window, backchannel-logout reject matrix)**: running
+  the fuzzer against a COVERAGE-instrumented server proved phase 9b's
+  hostile logout_tokens die at the OIDC discovery egress fetch (fake
+  issuer host won't resolve) BEFORE reaching JWT verification — the
+  R394 lesson recursing one layer deeper: a route the fuzz "reaches" can
+  still shield a parser behind an earlier network step. Completed the
+  backchannel-logout reject matrix as unit tests (injected discovery +
+  JWKS): alg≠RS256 (HS-confusion), unknown kid, unparseable header, and
+  tampered-signature all refuse cleanly. sso_oidc backchannel branches
+  now fully covered.
 - **R415 (fourteenth window, mid-window regression + close)**: full wave
   after R408-R414 — 12/12 chunks = 10,800 backend tests; battery 384;
   lifecycle 77/77; scale 37/37; storm 8/8 (p95 elevated under post-wave

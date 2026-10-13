@@ -978,6 +978,53 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
             ),
             service=svc,
         )
+    # R416: non-RS256 alg refused (HS-confusion against the JWKS RSA key).
+    hs_tok = pyjwt.encode(
+        {
+            "iss": ISSUER,
+            "aud": "client-1",
+            "sub": "bcl-sub",
+            "jti": uuid.uuid4().hex,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 120,
+            "events": {"http://schemas.openid.net/event/backchannel-logout": {}},
+        },
+        "shared-secret",
+        algorithm="HS256",
+        headers={"kid": "k1"},
+    )
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(db, conn.id, hs_tok, service=svc)
+    # R416: unknown kid refused (key not in the JWKS set).
+    unk_kid = pyjwt.encode(
+        {
+            "iss": ISSUER,
+            "aud": "client-1",
+            "sub": "bcl-sub",
+            "jti": uuid.uuid4().hex,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 120,
+            "events": {"http://schemas.openid.net/event/backchannel-logout": {}},
+        },
+        _PRIV,
+        algorithm="RS256",
+        headers={"kid": "no-such-kid"},
+    )
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(db, conn.id, unk_kid, service=svc)
+    # R416: an unparseable token header is a clean reject (not a 500) — the
+    # fuzz can't reach this branch because discovery egress fails first.
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(db, conn.id, "not-a-jwt", service=svc)
+    # R416: a structurally-valid-but-signature-garbage token (right kid,
+    # tampered body) fails the RS256 decode cleanly.
+    tampered = unk_kid  # reuse: wrong kid already; craft a body-tampered k1 token
+    good = _mint_logout_token(sub="bcl-sub")
+    h, p, sig = good.split(".")
+    tampered = f"{h}.{p[:-4]}AAAA.{sig}"
+    with pytest.raises(AppError):
+        await handle_backchannel_logout(db, conn.id, tampered, service=svc)
+
     # A REVOKED link is not authoritative: logout for its subject sweeps 0.
     from app.integrations.models import ExternalIdentityLink as _Link
 
