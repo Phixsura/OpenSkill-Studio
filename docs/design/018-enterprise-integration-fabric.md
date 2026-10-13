@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R431 (sixteenth window, reject/update arms)**: three more arm clusters.
+  `resolve_queue_item`: invalid action -> 422 before any claim, double
+  resolve -> 409 (the atomic pending->resolved claim, R308 class), link
+  with no user_id -> 422 (claim rolled back), unknown/cross-org item ->
+  uniform 404. `map_resource_link`: the update-in-place arm (same reg+
+  deployment+resource_link_id re-mapped mutates the existing row's kind/
+  target/grade_sync, no duplicate insert). `_t_to_decimal`: the
+  InvalidOperation arm (a value unparseable as Decimal — 'abc', '1.2.3',
+  '$5' — becomes a clean _TransformError, not a bare ValueError to 500).
 - **R430 (fifteenth window, catalog + sync race arms)**: two more
   maintenance/race arms. `sync_provider_catalog`: the stale-version/
   disabled upgrade arm (a provider at version 0 or disabled is re-synced

@@ -144,6 +144,11 @@ def test_transforms_and_boundaries_matrix():
     for bad in ("NaN", "Infinity", "-Infinity"):
         with pytest.raises(_TransformError):
             _t_to_decimal(bad)
+    # R431: a value that is not parseable as a Decimal at all (InvalidOperation
+    # arm) is a clean _TransformError, not a bare ValueError bubbling to 500.
+    for junk in ("abc", "1.2.3", "$5"):
+        with pytest.raises(_TransformError):
+            _t_to_decimal(junk)
     assert _t_to_decimal("1.50") == "1.50" and _t_to_decimal(None) is None
     # date_iso: empty string -> None (not error); truncates to 10 chars so a
     # datetime input is accepted as its date part.

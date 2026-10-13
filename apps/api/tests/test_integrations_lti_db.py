@@ -1134,3 +1134,35 @@ async def test_handle_gradeable_event_fanout_and_score_clamp(db, monkeypatch):
         ),
     )
     assert n == 1 and pushes[-1]["score"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_map_resource_link_update_in_place(db):
+    """R431: map_resource_link's update-in-place arm (same reg+deployment+
+    resource_link_id re-mapped) had never executed — only the create arm and
+    the bad-kind reject. Re-mapping must mutate the existing row (kind,
+    target, grade_sync), not insert a duplicate."""
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+
+    first = await svc.map_resource_link(
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-upd",
+        kind="skill",
+        target_id="SKILL_A",
+        grade_sync_enabled=False,
+    )
+    second = await svc.map_resource_link(
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-upd",
+        kind="project",
+        target_id="PROJ_B",
+        grade_sync_enabled=True,
+    )
+    assert second.id == first.id  # same row, updated in place
+    assert second.kind == "project" and second.target_id == "PROJ_B"
+    assert second.grade_sync_enabled is True

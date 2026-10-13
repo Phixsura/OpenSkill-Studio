@@ -2102,3 +2102,47 @@ async def test_domain_sweep_dns_hiccup_notok_and_race_recovery(db, monkeypatch):
     assert changed2 == 0  # the loser never counted as verified
     row = await db.get(OrgDomain, d_hiccup.id)
     assert row.status == "failed"  # recovered, not aborted, not verified
+
+
+@pytest.mark.asyncio
+async def test_resolve_queue_item_invalid_action_and_double_resolve_and_missing_user(db):
+    """R431: resolve_queue_item's reject arms. (1) an action other than
+    link|reject -> 422 BEFORE any claim. (2) a second resolve of an
+    already-claimed item -> 409 (the atomic pending->resolved claim, R308).
+    (3) a link action with no user_id -> 422 after the claim (rolled back)."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = IdentityService(db)
+
+    async def fresh_item(subject):
+        with pytest.raises(AppError):
+            await svc.resolve(_ident(org, subject=subject, email=None, verified=False))
+        return next(i for i in await svc.list_queue(org.id) if i.subject == subject)
+
+    # (1) invalid action.
+    it1 = await fresh_item(f"qa-{uuid.uuid4().hex[:6]}")
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_queue_item(org.id, it1.id, action="merge", user_id=None, actor_id=owner.id)
+    assert exc.value.code == "IDENTITY_QUEUE_INVALID" and exc.value.status_code == 422
+
+    # (2) double resolve: first reject wins, second is 409.
+    it2 = await fresh_item(f"qb-{uuid.uuid4().hex[:6]}")
+    await svc.resolve_queue_item(org.id, it2.id, action="reject", user_id=None, actor_id=owner.id)
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_queue_item(
+            org.id, it2.id, action="reject", user_id=None, actor_id=owner.id
+        )
+    assert exc.value.code == "IDENTITY_QUEUE_RESOLVED" and exc.value.status_code == 409
+
+    # (3) link with no user_id -> 422 (claim rolled back by the raise).
+    it3 = await fresh_item(f"qc-{uuid.uuid4().hex[:6]}")
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_queue_item(org.id, it3.id, action="link", user_id=None, actor_id=owner.id)
+    assert exc.value.code == "IDENTITY_QUEUE_INVALID" and exc.value.status_code == 422
+
+    # Cross-org / unknown item -> uniform 404.
+    with pytest.raises(AppError) as exc:
+        await svc.resolve_queue_item(
+            org.id, "01NOPENOPENOPENOPENOPENOPE", action="reject", user_id=None, actor_id=owner.id
+        )
+    assert exc.value.status_code == 404
