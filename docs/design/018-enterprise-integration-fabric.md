@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R438 (sixteenth window, metadata parse arms)**: refresh_from_metadata's
+  remaining external-XML parse arms, completing the hardened metadata
+  parser's matrix. Malformed XML -> 422 SSO_METADATA_INVALID (not a 500);
+  a well-formed document with no IDPSSODescriptor -> 422; and a
+  KeyDescriptor whose X509Certificate text is empty is skipped, so a
+  document carrying only an empty cert yields the 'no signing certificates' 422. These sit alongside the already-covered rotation, R252 entityID
+  mix-up defense, encryption-only-keys, DTD-forbidden, 502-upstream,
+  wrong-protocol and no-URL vectors.
 - **R437 (sixteenth window, validator + fan-out fail-safe arms)**:
   `_validate_config`'s failure arms — bool-for-integer rejection (bool is
   an int subclass; a dropped guard would accept True), wrong type,

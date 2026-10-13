@@ -1320,3 +1320,49 @@ async def test_slo_missing_request_bad_sig_b64_and_decompress_arms(db):
         connection_id=conn.id, raw_query=_signed_slo_query("never-seen-subject")
     )
     assert swept == 0  # unknown subject, but the signature verified past the empty entry
+
+
+@pytest.mark.asyncio
+async def test_metadata_refresh_malformed_xml_no_idp_and_empty_cert_arms(db):
+    """R438: refresh_from_metadata's remaining parse arms. Malformed XML ->
+    422 SSO_METADATA_INVALID (not a 500); a well-formed document with no
+    IDPSSODescriptor -> 422; and a KeyDescriptor whose X509Certificate text
+    is empty is skipped, so a document with only an empty cert yields the
+    'no signing certificates' 422."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    conn.idp_metadata_url = "https://idp.example.com/metadata.xml"
+    await db.flush()
+    svc = SsoAdminService(db)
+
+    # Malformed XML -> 422 (XMLSyntaxError arm).
+    with pytest.raises(AppError) as e:
+        await svc.refresh_from_metadata(
+            org.id, conn.id, egress=_MetaEgress(b"<md:EntityDescriptor not closed")
+        )
+    assert e.value.code == "SSO_METADATA_INVALID" and e.value.status_code == 422
+
+    # Well-formed, but no IDPSSODescriptor -> 422.
+    no_idp = (
+        b'<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" '
+        b'entityID="https://idp.example.com/meta"></md:EntityDescriptor>'
+    )
+    with pytest.raises(AppError) as e:
+        await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(no_idp))
+    assert e.value.code == "SSO_METADATA_INVALID" and e.value.status_code == 422
+
+    # KeyDescriptor present but the X509Certificate element is empty -> skipped
+    # -> no signing certs -> 422.
+    empty_cert = (
+        b'<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" '
+        b'xmlns:ds="http://www.w3.org/2000/09/xmldsig#" '
+        b'entityID="https://idp.example.com/meta">'
+        b'<md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">'
+        b'<md:KeyDescriptor use="signing"><ds:KeyInfo><ds:X509Data>'
+        b"<ds:X509Certificate>   </ds:X509Certificate>"
+        b"</ds:X509Data></ds:KeyInfo></md:KeyDescriptor>"
+        b"</md:IDPSSODescriptor></md:EntityDescriptor>"
+    )
+    with pytest.raises(AppError) as e:
+        await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(empty_cert))
+    assert e.value.code == "SSO_METADATA_INVALID"  # no signing certificates
