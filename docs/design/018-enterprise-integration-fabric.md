@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R370 (twelfth window, multipart fuzz phase + csv field-limit 500)**:
+  fuzz phase 7 covers the one surface phases 1-6 never touched — the
+  multipart import upload, which parses inline at create_job: 18 hostile
+  files (binary garbage, fake xlsx/zip magic, bad UTF-8, NULs, BOM,
+  unclosed quotes, 5000 columns, formula injection, emoji headers) ×
+  hostile form fields × hand-rolled malformed multipart envelopes
+  (bad/missing boundary, no file part, truncated). Found: a single CSV
+  cell beyond Python's 128KB csv field limit raised `_csv.Error` out of
+  `parse_users_csv` → 500 on upload. Fixed: both the header-row pull
+  (`reader.fieldnames`) and the row loop wrap csv.Error into a clean
+  per-file `malformed_csv` error. Pinned in test_integrations_core.
+  Fuzzer total now 359 requests/seed; seeds 7001-7004 zero-5xx. Lesson:
+  every content-type boundary (JSON done, multipart was not) needs its
+  own fuzz phase — inline-parse-at-upload makes the uploader the parser's
+  error boundary.
 - **R369 (eleventh window, fabric model/migration parity guard + intg18)**:
   new DB test scopes alembic autogenerate comparison to intg_* tables and
   asserts an EMPTY diff — fabric must never inherit the base repo's

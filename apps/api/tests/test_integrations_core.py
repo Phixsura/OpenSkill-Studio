@@ -996,3 +996,21 @@ async def test_egress_client_hardening_flags(monkeypatch):
     assert resp.status_code == 200
     assert seen.get("trust_env") is False
     assert seen.get("follow_redirects") is False
+
+
+def test_csv_oversized_cell_is_file_error_not_crash():
+    """R370 (fuzz phase 7): a single CSV cell beyond Python's 128KB field
+    limit raised _csv.Error out of parse_users_csv — a 500 on upload. It
+    must land as a clean per-file `malformed_csv` error instead, both when
+    the explosion happens in the header row and mid-file."""
+    from app.integrations.services.bulk_import import parse_users_csv
+
+    big = b"email,display_name\na@x.com," + b"A" * 300_000 + b"\n"
+    rows, errors = parse_users_csv(big)
+    assert rows == []
+    assert errors and errors[0]["code"] == "malformed_csv"
+
+    big_header = b"email,display_name" + b"X" * 300_000 + b"\nb@x.com,B\n"
+    rows, errors = parse_users_csv(big_header)
+    assert rows == []
+    assert errors and errors[0]["code"] == "malformed_csv"

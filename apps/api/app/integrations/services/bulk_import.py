@@ -384,7 +384,16 @@ def parse_users_csv(
         h = header.strip().lower()
         return alias_to_canonical.get(h, h)
 
-    headers = [_canon(h) for h in (reader.fieldnames or [])]
+    try:
+        # .fieldnames pulls the first row through the csv engine — a cell
+        # beyond the 128KB field limit raises csv.Error here, not just in
+        # the row loop (R370: escaped as a 500 before).
+        fieldnames = reader.fieldnames or []
+    except csv.Error as e:
+        return [], [
+            {"row_number": 1, "code": "malformed_csv", "message": f"CSV not parseable: {e}"}
+        ]
+    headers = [_canon(h) for h in fieldnames]
     # R205: two source columns mapping to the SAME canonical field (duplicate
     # headers, or a header_map that aliases "Email" and "E-mail" both to
     # "email") would make csv.DictReader silently keep only the LAST — a
@@ -420,10 +429,21 @@ def parse_users_csv(
             for c in missing
         ]
     raw_rows = []
-    for i, raw in enumerate(reader, start=2):  # header is row 1
-        raw_rows.append(
-            (i, {_canon(k or ""): (v or "").strip() for k, v in raw.items() if k is not None})
-        )
+    try:
+        for i, raw in enumerate(reader, start=2):  # header is row 1
+            raw_rows.append(
+                (i, {_canon(k or ""): (v or "").strip() for k, v in raw.items() if k is not None})
+            )
+    except csv.Error as e:
+        # oversized cell / stateful parse explosion mid-file: fail the FILE
+        # with the offending row, never the request (R370).
+        return [], [
+            {
+                "row_number": len(raw_rows) + 2,
+                "code": "malformed_csv",
+                "message": f"CSV not parseable: {e}",
+            }
+        ]
     return KIND_SPECS[kind].validator(raw_rows)
 
 

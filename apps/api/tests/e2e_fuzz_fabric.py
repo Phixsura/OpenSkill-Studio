@@ -446,6 +446,107 @@ async def main() -> None:
                         f"{rr.status_code} q={qb[:30]} {rr.text[:100]}",
                     )
 
+        # ── phase 7: hostile multipart / CSV-XLSX import surface ──
+        # Upload runs the sniffer + parser inline (dry-run preview inside
+        # create_job), so binary garbage reaches csv/openpyxl immediately —
+        # the one surface phases 1-6 never touched.
+        hostile_files = [
+            ("empty", b""),
+            ("whitespace", b"   \n\t\r\n  "),
+            ("nul-cells", b"email,display_name\nnul\x00@x.com,A\x00B\n"),
+            ("bad-utf8", b"email,display_name\n\xff\xfe\xfa@x.com,caf\xe9\n"),
+            ("bom-only", b"\xef\xbb\xbf"),
+            ("bom-csv", b"\xef\xbb\xbfemail,display_name\nb@x.com,B\n"),
+            ("huge-cell", b"email,display_name\na@x.com," + b"A" * 300_000 + b"\n"),
+            (
+                "5000-cols",
+                b",".join(b"c%d" % i for i in range(5000)) + b"\n" + b"x," * 4999 + b"x\n",
+            ),
+            ("unclosed-quote", b'email,display_name\n"unterminated,oops\n'),
+            ("cr-only", b"email,display_name\ra@x.com,A\rb@x.com,B"),
+            ("formula-inj", b"email,display_name\n=cmd|calc!A1@x.com,=1+1\n"),
+            ("png-magic", b"\x89PNG\r\n\x1a\n" + bytes(rng.randrange(256) for _ in range(512))),
+            ("fake-xlsx", b"PK\x03\x04" + bytes(rng.randrange(256) for _ in range(2048))),
+            ("fake-zip-bomb", b"PK\x03\x04\x14\x00\x00\x00\x08\x00" + b"\x00" * 500),
+            ("json-garbage", b'{"rows": [{"email": NaN,}]'),
+            ("json-deep", b"[" * 3000 + b"]" * 3000),
+            ("binary-random", bytes(rng.randrange(256) for _ in range(4096))),
+            ("emoji-headers", "💥,🙂\na@x.com,B\n".encode()),
+        ]
+        hostile_forms = [
+            {"kind": "users", "mode": "partial"},
+            {"kind": "💥", "mode": "partial"},
+            {"kind": "users", "mode": "\x00"},
+            {"kind": "users", "mode": "partial", "header_map": "{not json"},
+            {"kind": "users", "mode": "partial", "header_map": '{"a": ' * 100 + "1" + "}" * 100},
+            {"kind": "users", "mode": "partial", "header_map": '{"email": ["list","not","str"]}'},
+            {"kind": "roster", "mode": "partial"},
+        ]
+        for fname, fbytes in hostile_files:
+            # valid kind so the file always REACHES the parser; hostile
+            # form fields get their own pass below
+            form = {"kind": rng.choice(["users", "roster"]), "mode": "partial"}
+            filename = rng.choice(
+                [fname + ".csv", fname + ".xlsx", fname + ".json", fname, "💥.csv"]
+            )
+            ctype = rng.choice(["text/csv", "application/octet-stream", "application/json", ""])
+            try:
+                rr = await c.post(
+                    f"{base}/imports",
+                    data=form,
+                    files={"file": (filename, fbytes, ctype or None)},
+                    headers=h,
+                )
+                total += 1
+                if rr.status_code >= 500:
+                    n_5xx += 1
+                    check(
+                        f"5xx: import {fname}",
+                        False,
+                        f"{rr.status_code} form={form} {rr.text[:120]}",
+                    )
+            except httpx.HTTPError as e:
+                total += 1
+                check(f"transport error: import {fname}", False, repr(e)[:120])
+        benign = b"email,display_name\\na@x.com,A\\n"
+        for form in hostile_forms:
+            rr = await c.post(
+                f"{base}/imports",
+                data=form,
+                files={"file": ("a.csv", benign, "text/csv")},
+                headers=h,
+            )
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(f"5xx: import form {form}", False, f"{rr.status_code} {rr.text[:120]}")
+
+        # malformed multipart envelopes (hand-rolled bodies)
+        raw_bodies = [
+            ("no-boundary", {"Content-Type": "multipart/form-data"}, b"junk"),
+            (
+                "bad-boundary",
+                {"Content-Type": "multipart/form-data; boundary=XYZ"},
+                b"--ABC\r\nContent-Disposition: form-data; name=file\r\n\r\nx\r\n--ABC--",
+            ),
+            (
+                "no-file-part",
+                {"Content-Type": "multipart/form-data; boundary=B"},
+                b'--B\r\nContent-Disposition: form-data; name="kind"\r\n\r\nusers\r\n--B--\r\n',
+            ),
+            (
+                "truncated",
+                {"Content-Type": "multipart/form-data; boundary=B"},
+                b'--B\r\nContent-Disposition: form-data; name="file"; filename="a.csv"\r\n',
+            ),
+        ]
+        for label, ct_headers, body in raw_bodies:
+            rr = await c.post(f"{base}/imports", content=body, headers={**h, **ct_headers})
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(f"5xx: multipart {label}", False, f"{rr.status_code} {rr.text[:120]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         print(f"elapsed={_t.monotonic() - _t0:.1f}s")
         print(f"\nseed={SEED} total={total} PASS={PASS} FAIL={FAIL}")
