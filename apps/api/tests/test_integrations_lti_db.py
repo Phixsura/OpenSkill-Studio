@@ -1234,3 +1234,71 @@ async def test_nrps_sync_fetch_and_member_shape_arms(db):
         db, org.id, link.id, egress=TokenOk(r(200, json_body={"members": [member]}))
     )
     assert report2["read"] == 1 and report2["skipped"] == 1 and report2["resolved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dynamic_register_fetch_and_response_shape_arms(db):
+    """R439: dynamic_register's remaining fetch/shape arms. Config GET non-200
+    -> 502; config body not JSON -> 502; registration response not JSON ->
+    502; and a registration response with no client_id -> 502. None crash."""
+    from app.integrations.services.lti_dynreg import (
+        PLATFORM_CONFIG_CLAIM,
+        dynamic_register,
+    )
+
+    org, owner = await _org(db)
+    iss = f"https://lms-{uuid.uuid4().hex[:6]}.example.com"
+    cfg = {
+        "issuer": iss,
+        "authorization_endpoint": f"{iss}/auth",
+        "token_endpoint": f"{iss}/token",
+        "jwks_uri": f"{iss}/jwks",
+        "registration_endpoint": f"{iss}/register",
+        PLATFORM_CONFIG_CLAIM: {"product_family_code": "moodle"},
+    }
+    cfg_url = f"{iss}/.well-known/openid-configuration"
+
+    class Platform:
+        def __init__(self, *, config_resp, register_resp=None):
+            self.config_resp = config_resp
+            self.register_resp = register_resp
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            req = httpx.Request(method, url)
+            if urlsplit(url).path.endswith("/.well-known/openid-configuration"):
+                return self.config_resp(req)
+            if urlsplit(url).path.endswith("/register"):
+                return self.register_resp(req)
+            return httpx.Response(404, request=req)
+
+    async def expect(code, platform):
+        with pytest.raises(AppError) as e:
+            await dynamic_register(
+                db, org.id, openid_configuration_url=cfg_url,
+                registration_token=None, egress=platform,
+            )
+        assert e.value.code == code
+
+    # Config GET non-200.
+    await expect("LTI_DYNREG_CONFIG_FAILED", Platform(config_resp=lambda r: httpx.Response(503, request=r)))
+    # Config not JSON.
+    await expect(
+        "LTI_DYNREG_CONFIG_FAILED",
+        Platform(config_resp=lambda r: httpx.Response(200, text="<<not json>>", request=r)),
+    )
+    # Registration response not JSON.
+    await expect(
+        "LTI_DYNREG_REFUSED",
+        Platform(
+            config_resp=lambda r: httpx.Response(200, json=cfg, request=r),
+            register_resp=lambda r: httpx.Response(201, text="nope", request=r),
+        ),
+    )
+    # Registration response with no client_id.
+    await expect(
+        "LTI_DYNREG_REFUSED",
+        Platform(
+            config_resp=lambda r: httpx.Response(200, json=cfg, request=r),
+            register_resp=lambda r: httpx.Response(201, json={"not_client_id": "x"}, request=r),
+        ),
+    )

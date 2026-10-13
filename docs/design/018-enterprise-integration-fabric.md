@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R439 (sixteenth window, LTI dynreg fetch/shape arms)**:
+  dynamic_register's remaining fetch/response-shape arms. Config GET
+  non-200 -> 502 LTI_DYNREG_CONFIG_FAILED; config body not JSON -> 502;
+  registration response not JSON -> 502 LTI_DYNREG_REFUSED; a registration
+  response with no client_id -> 502. None crash. These complete the
+  dynamic-registration matrix alongside the already-covered happy path,
+  R253 issuer-origin mix-up defense, private-endpoint egress block,
+  403-refusal, missing-config-keys and no-platform-claim vectors.
 - **R438 (sixteenth window, metadata parse arms)**: refresh_from_metadata's
   remaining external-XML parse arms, completing the hardened metadata
   parser's matrix. Malformed XML -> 422 SSO_METADATA_INVALID (not a 500);
