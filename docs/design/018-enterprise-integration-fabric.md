@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R388 (twelfth window, endurance block)**: 10-seed fuzz marathon
+  (3,750 hostile requests, zero 5xx) + 5-seed storm (all 8/8, p95
+  442-531 ms) + a 10-storm SOAK on one server process (~2,000 mixed CRUD
+  ops, 30 orgs): p95 improved as the process warmed (892→441 ms), no
+  pool-leak or drift signal. Plus one fuzz run against a DEV-mode server
+  so the real rate limiter sat in the request path under hostile load:
+  381 responses, zero 5xx (and zero 429 — the fuzzer's per-route rate
+  stays under budget; limiter ENGAGEMENT is the R366 drill's job).
 - **R387 (twelfth window, EXPLAIN drill in-repo)**: the R336 query-plan
   audit (EXPLAIN over ~26 fabric hot predicates on the 1M-row dev DB,
   flagging Seq Scans on >10k-row tables) moved into tests/drills/ with
