@@ -699,3 +699,62 @@ def test_delivery_headers_sign_with_decrypted_secret():
         headers = build_delivery_headers(sub, "evt_1", body, now)
         expected = sign_payload(plain, "evt_1", int(now.timestamp()), body)
         assert headers["webhook-signature"] == expected
+
+
+def test_webhook_cosign_window_boundary():
+    """R418 (mutation-caught): during a rotation grace the PREVIOUS secret
+    co-signs alongside the current one for SECRET_PREV_WINDOW (7d) so
+    receivers can roll keys without a hard break. Pins the window: two
+    signatures just inside the window, one just outside, and one when
+    there is no secret_prev — killing the And/<=/window-arithmetic mutants
+    in build_delivery_headers."""
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+
+    from app.integrations.services.events import (
+        SECRET_PREV_WINDOW,
+        build_delivery_headers,
+        sign_payload,
+    )
+
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    body = b'{"x":1}'
+    cur, prev = "c" * 64, "p" * 64
+
+    def sigs_for(sub):
+        return build_delivery_headers(sub, "evt_1", body, now)["webhook-signature"].split(" ")
+
+    # inside the window -> current + prev (two sigs)
+    inside = SimpleNamespace(
+        secret=cur,
+        secret_prev=prev,
+        secret_rotated_at=now - SECRET_PREV_WINDOW + timedelta(hours=1),
+    )
+    s_in = sigs_for(inside)
+    assert len(s_in) == 2
+    ts = int(now.timestamp())
+    assert s_in[0] == sign_payload(cur, "evt_1", ts, body)
+    assert s_in[1] == sign_payload(prev, "evt_1", ts, body)
+
+    # just outside the window -> current only (one sig)
+    outside = SimpleNamespace(
+        secret=cur,
+        secret_prev=prev,
+        secret_rotated_at=now - SECRET_PREV_WINDOW - timedelta(hours=1),
+    )
+    assert len(sigs_for(outside)) == 1
+
+    # no prev secret -> current only
+    noprev = SimpleNamespace(secret=cur, secret_prev=None, secret_rotated_at=None)
+    assert len(sigs_for(noprev)) == 1
+
+    # secret_prev set but no rotated_at -> current only (both guards required,
+    # kills the And->Or mutant; under `or` this would reach `now - None`)
+    half = SimpleNamespace(secret=cur, secret_prev=prev, secret_rotated_at=None)
+    assert len(sigs_for(half)) == 1
+
+    # EXACTLY at the window boundary -> included (<=, kills LtE->Lt)
+    at_edge = SimpleNamespace(
+        secret=cur, secret_prev=prev, secret_rotated_at=now - SECRET_PREV_WINDOW
+    )
+    assert len(sigs_for(at_edge)) == 2

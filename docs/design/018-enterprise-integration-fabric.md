@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R418 (fourteenth window, mutation-killing the co-sign window)**:
+  mutation testing build_delivery_headers surfaced that the webhook
+  secret-rotation co-sign grace (previous secret co-signs for 7 days so
+  receivers can roll keys) was executed but under-asserted — And→Or,
+  LtE→Lt and window-arithmetic mutants survived. Added a boundary test:
+  two sigs just inside / one just outside the window, one when
+  secret_prev is unset, one when rotated_at is missing (both guards
+  required), and inclusion EXACTLY at the 7-day edge. All mutants killed
+  (0 survivors). The domains email-slice mutant (rsplit maxsplit 1→2) is a
+  true equivalent — `[-1]` is the last segment regardless of maxsplit.
 - **R417 (fourteenth window, mutation-testing the SSRF + SCIM parsers)**:
   ran the AST mutation harness against validate_egress_url/_is_forbidden_ip
   and SCIM _normalize_path/_coerce_active. 5 mutants survived = real
