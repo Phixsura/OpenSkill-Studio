@@ -1364,3 +1364,35 @@ async def test_events_keyset_pagination_walks_without_overlap(db, egress):
         assert pages < 10, "cursor failed to terminate"
     assert len(seen) == 7
     assert pages == 3  # 3 + 3 + 1
+
+
+@pytest.mark.asyncio
+async def test_handle_event_created_missing_event_and_ags_hook_failsafe(db, monkeypatch):
+    """R437: handle_event_created's guard + fail-safe arms. A payload naming
+    an event that no longer exists (rolled back / purged) returns silently,
+    no fan-out. And the AGS grade-push hook raising must be SWALLOWED — a
+    webhook event must never fail because the grade-return side errored."""
+    import app.integrations.services.lti_ags as ags
+    from app.integrations.services.events import handle_event_created
+
+    # (1) unknown event id -> silent no-op.
+    await handle_event_created(db, {"event_id": "01NOPENOPENOPENOPENOPENOPE"})
+    await handle_event_created(db, {})  # missing key -> "" -> no-op
+
+    # (2) AGS hook explodes -> swallowed; the webhook fan-out still committed.
+    org = await _org(db)
+    await _sub(db, org)
+    event = await emit_event(db, org.id, "project.approved", data={})
+    await db.flush()
+
+    async def boom(_db, _event):
+        raise RuntimeError("ags backend down")
+
+    monkeypatch.setattr(ags, "handle_gradeable_event", boom)
+    await handle_event_created(db, {"event_id": event.id})  # must not raise
+    deliveries = (
+        (await db.execute(select(EventDelivery).where(EventDelivery.event_id == event.id)))
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) == 1  # fan-out happened despite the AGS failure

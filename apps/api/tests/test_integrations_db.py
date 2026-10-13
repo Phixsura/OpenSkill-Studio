@@ -515,3 +515,35 @@ async def test_catalog_sync_upgrades_stale_version_and_disables_removed(ctx):
     assert ghost.enabled is False  # disabled, not deleted
     reread = await db.get(IntegrationProvider, ghost.id)
     assert reread is not None and reread.enabled is False
+
+
+def test_validate_config_type_length_and_bound_arms():
+    """R437: _validate_config's failure arms — bool-for-integer rejection,
+    wrong type, over-maxLength string, and below-minimum / above-maximum
+    integer bounds. (A valid config returns no problems.)"""
+    from app.integrations.services.connections import _validate_config
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "maxLength": 5},
+            "count": {"type": "integer", "minimum": 1, "maximum": 10},
+        },
+    }
+
+    # bool supplied for an integer field -> rejected explicitly (bool is an
+    # int subclass; a mutant dropping this check would accept True).
+    assert _validate_config({"count": True}, schema) == ["config.count: expected integer"]
+
+    # wrong type (string where integer expected).
+    assert _validate_config({"count": "nope"}, schema) == ["config.count: expected integer"]
+
+    # string over maxLength.
+    assert _validate_config({"name": "toolong"}, schema) == ["config.name: too long"]
+
+    # integer below minimum / above maximum.
+    assert _validate_config({"count": 0}, schema) == ["config.count: below minimum 1"]
+    assert _validate_config({"count": 99}, schema) == ["config.count: above maximum 10"]
+
+    # a fully valid config -> no problems.
+    assert _validate_config({"name": "ok", "count": 5}, schema) == []

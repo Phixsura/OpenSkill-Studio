@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R437 (sixteenth window, validator + fan-out fail-safe arms)**:
+  `_validate_config`'s failure arms — bool-for-integer rejection (bool is
+  an int subclass; a dropped guard would accept True), wrong type,
+  over-maxLength string, below-minimum / above-maximum integer bounds —
+  pinned as a pure-function matrix. `handle_event_created`: a payload
+  naming a purged/rolled-back event returns silently (no fan-out), and the
+  AGS grade-push hook raising is SWALLOWED so a webhook event never fails
+  because the grade-return side errored (the fan-out still committed).
 - **R436 (sixteenth window, conflict-resolution reject arms)**:
   resolve_conflict's reject arms. A non-conflict result -> 422; an invalid
   action -> 422; accept_theirs on a non-clock_unresolvable conflict -> 422;
