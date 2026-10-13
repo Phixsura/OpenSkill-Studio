@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R383 (twelfth window, a11y into CI)**: the fabric WCAG gate now runs
+  on every push — new sweep-a11y-integrations.spec.ts (axe-core 2.1 A/AA,
+  serious/critical fail) covers all five pages as an authenticated admin
+  and joined the CI Playwright run list. Unlike the RUN_A11Y-gated
+  one-off audit, this is unconditional: axe-core became a real workspace
+  devDependency in R372, so no network fetch or staging step. Local run:
+  5/5 in 27 s. Spec gotcha: Playwright transpiles specs as CJS —
+  `createRequire(import.meta.url)` makes the file silently unloadable
+  ("No tests found"); plain `require.resolve` works.
 - **R382 (twelfth window, Load-older page test)**: vitest coverage for the
   keyset UI — first page renders with meta.has_more, clicking Load older
   issues `events?before=<cursor>`, the older page APPENDS (page 1 still

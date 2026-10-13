@@ -283,6 +283,7 @@ jobs:
           cd apps/web && npx playwright test
           e2e/talent-pages.spec.ts e2e/sweep-all-pages.spec.ts
           e2e/sweep-integrations.spec.ts
+          e2e/sweep-a11y-integrations.spec.ts
           --reporter=line
         env:
           E2E_BASE_URL: http://localhost:3000
