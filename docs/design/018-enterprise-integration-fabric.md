@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R419 (fourteenth window, \_deprovision mutation-tight)**: mutation-tested
+  the SCIM _deprovision last-owner guard (R330, access-control-critical) —
+  6/6 mutants killed, 0 survivors; the guard that stops an IdP from
+  deactivating an org's last owner is fully assertion-covered, not just
+  executed. Harness-safety note added to memory: NEVER interrupt the AST
+  mutation harness mid-run — its source restore is in a `finally`, so a
+  TaskStop leaves the target file mutated (recovered here with `git
+checkout` + a scoped, fast test cmd that completes within the cap).
 - **R418 (fourteenth window, mutation-killing the co-sign window)**:
   mutation testing build_delivery_headers surfaced that the webhook
   secret-rotation co-sign grace (previous secret co-signs for 7 days so
