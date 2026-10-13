@@ -734,19 +734,6 @@ class BulkImportService:
         existing = (cohort.id, user.id) in member_pairs
         return ("skipped" if existing else "created"), None
 
-    async def _preview_roster_row(self, org_id: str, row: dict):
-        cohort, user, err = await self._resolve_roster_refs(org_id, row)
-        if err is not None:
-            return None, err
-        existing = (
-            await self.db.execute(
-                select(CohortMember).where(
-                    CohortMember.cohort_id == cohort.id, CohortMember.user_id == user.id
-                )
-            )
-        ).scalar_one_or_none()
-        return ("skipped" if existing is not None else "created"), None
-
     async def _validate(self, job: ImportJob, file_bytes: bytes) -> None:
         rows, errors = parse_users(
             file_bytes, detect_format(file_bytes), job.header_map or {}, kind=job.kind

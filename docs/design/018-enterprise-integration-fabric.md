@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R424 (fifteenth window, dead code + connector defaults)**: coverage
+  sweep follow-ups. (1) `BulkImportService._preview_roster_row` was dead
+  code — superseded by the batched `_preview_roster_row_mapped` (the R253
+  N+1 fix) but never deleted; removed. (2) `OneRosterConnector.ping` (0%)
+  and `_map_record`'s term/enrollment/user branches pinned: the config
+  gate 422s before egress validation, and the canonical mapping tolerates
+  the degenerate nested shapes real OneRoster servers emit (empty `terms`,
+  null `class`/`user`/`school` objects, givenName-less users falling back
+  to username, numeric sourcedId stringified). Also verified the
+  `ctx.config["token_url"]` hard subscript is safe: the provider schema
+  requires token_url and BOTH create and update run `_screen_config`, so
+  the R88 hard-subscript class cannot fire through the admin API.
 - **R423 (fifteenth window, guard-branch cover)**: three security-relevant
   branches the battery had never executed, now deterministically covered.
   (1) SAML assertion-replay concurrent-INSERT race (the R199 branch): the

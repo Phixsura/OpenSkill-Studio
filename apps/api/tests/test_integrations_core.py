@@ -1324,3 +1324,69 @@ def test_egress_resolve_failure_branches(monkeypatch):
     monkeypatch.setattr("app.integrations.security.socket.getaddrinfo", lambda *a, **k: [])
     with pytest.raises(EgressBlockedError):
         _resolve_and_validate("empty-answer.example.com", 443)
+
+
+@pytest.mark.asyncio
+async def test_oneroster_ping_and_map_record_defaults():
+    """R424: OneRosterConnector.ping had 0% coverage and _map_record's
+    term/enrollment/user branches were half-covered. Pin the ping config
+    gate and the canonical mapping for all four models, including the
+    degenerate nested shapes OneRoster servers actually emit (empty terms
+    list, missing school object, givenName-less users)."""
+    from app.exceptions import AppError
+    from app.integrations.registry import ConnCtx, OneRosterConnector
+
+    c = OneRosterConnector()
+
+    # ping: base_url is required before any egress validation runs.
+    with pytest.raises(AppError) as exc:
+        await c.ping(ConnCtx(connection_id="cx-test", base_url="", config={"token_url": "https://x.example.com/t"}))
+    assert exc.value.code == "CONNECTION_CONFIG_INVALID"
+
+    # ping: both URLs run the egress gate (private sinks allowed in test env).
+    await c.ping(
+        ConnCtx(
+            connection_id="cx-test",
+            base_url="https://sis.example.com/ims/oneroster/v1p2",
+            config={"token_url": "https://sis.example.com/oauth/token"},
+        )
+    )
+
+    m = OneRosterConnector._map_record
+
+    term = m("roster.term", {"sourcedId": "t1", "title": "Fall", "startDate": "2026-08-01",
+                             "endDate": "2026-12-20", "schoolYear": "2026"})
+    assert term == {"external_id": "t1", "name": "Fall", "start_date": "2026-08-01",
+                    "end_date": "2026-12-20", "school_year": "2026"}
+
+    cls = m("roster.class", {"sourcedId": "c1", "title": "Algebra", "classCode": "ALG-1",
+                             "terms": [{"sourcedId": "t1"}], "school": {"sourcedId": "s1"},
+                             "subjects": ["math"], "grades": ["09"]})
+    assert cls["term_external_id"] == "t1" and cls["school_external_id"] == "s1"
+    assert cls["subjects"] == ["math"] and cls["grades"] == ["09"]
+
+    # Degenerate class: empty terms / missing school must not raise.
+    bare = m("roster.class", {"sourcedId": "c2", "terms": [], "title": "X"})
+    assert bare["term_external_id"] is None and bare["school_external_id"] is None
+    assert bare["subjects"] == [] and bare["grades"] == []
+
+    enr = m("roster.enrollment", {"sourcedId": "e1", "class": {"sourcedId": "c1"},
+                                  "user": {"sourcedId": "u1"}, "role": "student",
+                                  "beginDate": "2026-08-01", "endDate": None, "primary": True})
+    assert enr["class_external_id"] == "c1" and enr["user_external_id"] == "u1"
+    assert enr["role"] == "student" and enr["primary"] is True
+
+    # Degenerate enrollment: null class/user objects -> None ids, not a crash.
+    e2 = m("roster.enrollment", {"sourcedId": "e2", "class": None, "user": None})
+    assert e2["class_external_id"] is None and e2["user_external_id"] is None
+
+    usr = m("roster.user", {"sourcedId": "u1", "email": "a@x.com", "givenName": "Ada",
+                            "familyName": "L", "role": "student", "username": "ada"})
+    assert usr["display_name"] == "Ada L" and usr["email"] == "a@x.com"
+
+    # No given/family name -> falls back to username.
+    u2 = m("roster.user", {"sourcedId": "u2", "username": "ghost"})
+    assert u2["display_name"] == "ghost"
+
+    # external_id is always stringified sourcedId, even numeric.
+    assert m("roster.term", {"sourcedId": 42})["external_id"] == "42"
