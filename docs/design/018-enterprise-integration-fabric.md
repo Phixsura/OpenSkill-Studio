@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R397 (thirteenth window, backchannel-logout fuzz)**: phase 9b mints a
+  real ACTIVE OIDC connection and fires hostile logout_tokens (alg:none,
+  HS256 confusion, garbage, 10 KB blobs) at /oidc/backchannel-logout —
+  the last JWT-consuming surface that was only fuzzed at its lookup
+  wall. Fuzzer now 399 req/seed; seeds 13020/13021 clean.
 - **R396 (thirteenth window, legacy dispatcher gets the DNS pin)**: the
   legacy webhook dispatcher re-validated the URL per retry but still
   DIALED BY HOSTNAME — a rebind between validate and connect slipped the

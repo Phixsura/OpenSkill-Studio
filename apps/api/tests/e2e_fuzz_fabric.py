@@ -727,6 +727,41 @@ async def main() -> None:
         else:
             check("fuzz LTI registration minted", False, f"{rr.status_code} {rr.text[:100]}")
 
+        # ── phase 9b: hostile logout_tokens at a REAL OIDC connection ──
+        rr = await c.post(
+            f"{base}/sso-connections",
+            json={
+                "protocol": "oidc",
+                "oidc_issuer": f"https://oidc-{uuid.uuid4().hex[:6]}.example.com",
+                "oidc_client_id": "fz-oidc",
+                "oidc_client_secret": "s3cret",
+            },
+            headers=h,
+        )
+        if rr.status_code == 201:
+            oidc_conn = rr.json()["data"]["id"]
+            await c.patch(
+                f"{base}/sso-connections/{oidc_conn}", json={"status": "active"}, headers=h
+            )
+            logout_tokens = [
+                _jwt({"alg": "none"}, {"iss": "x", "sub": "u", "events": {}}),
+                _jwt({"alg": "HS256"}, {"iss": "x"}, b"y" * 64),
+                "💥",
+                "..",
+                "a" * 10_000,
+            ]
+            for lt in logout_tokens:
+                rr = await c.post(
+                    f"{API}/sso/oidc/backchannel-logout/{oidc_conn}",
+                    data={"logout_token": lt},
+                )
+                total += 1
+                if rr.status_code >= 500:
+                    n_5xx += 1
+                    check("5xx: hostile logout_token", False, f"{rr.status_code} {rr.text[:100]}")
+        else:
+            check("fuzz OIDC connection minted", False, f"{rr.status_code} {rr.text[:100]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",
