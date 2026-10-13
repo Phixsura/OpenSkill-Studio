@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R387 (twelfth window, EXPLAIN drill in-repo)**: the R336 query-plan
+  audit (EXPLAIN over ~26 fabric hot predicates on the 1M-row dev DB,
+  flagging Seq Scans on >10k-row tables) moved into tests/drills/ with
+  the other drills. Re-run at head post-intg18/19: flagged=0; the two
+  domain probes had drifted to a stale table name (org_domains →
+  intg_org_domains) — fixed in the checked-in copy.
 - **R386 (twelfth window, mid-window full wave + all-drills pass)**: after
   R370-R385 the whole surface re-proved: backend 12/12 chunks = 10,785
   (one find: ruff B033 duplicate in AUDIT_ACTIONS — the registry's own

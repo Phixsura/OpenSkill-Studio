@@ -12,6 +12,7 @@ semantics. Run from `apps/api` with infra up (`make infra-up`):
 | `migration_drill.py` | alembic downgrade 4 hops, upgrade back | every hop reversible, head restored |
 | `backup_restore_drill.py` | pg_dump -Fc the live DB, pg_restore into a scratch DB | alembic head + every intg_*/users/webhook row count matches; encrypted secrets byte-identical; scratch dropped (R373) |
 | `slow_sink_drill.py` | webhook sink accepts then stalls 60s (slowloris) | EgressClient read-timeout fires at 15s as a clean failure result (no hang/500); fast sink succeeds right after (R380) |
+| `explain_audit.py` | nothing — reads query plans on the big dev DB | every fabric hot-path predicate index-scans; any Seq Scan over a >10k-row table is flagged (R387) |
 | `ratelimit_drill.py` | bursts a 10/60 route in dev mode | exactly 10 allowed (X-RateLimit-* present), 11th = 429 with Retry-After, per-route bucket (R366) |
 
 Logs land in `apps/api/.drill-logs/` (gitignored).
