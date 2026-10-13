@@ -21,10 +21,12 @@ class WebhookSubscription(Base):
     )
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     events: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
-    secret: Mapped[str] = mapped_column(String(64), nullable=False)
+    # R371: Fernet ciphertext at rest (~140 chars); legacy plaintext rows
+    # (64 hex) still decrypt tolerantly until next rotation.
+    secret: Mapped[str] = mapped_column(String(255), nullable=False)
     # Zero-downtime rotation (ADR-018 §12.2): after a rotation the previous
     # secret co-signs deliveries for 7 days so receivers can roll keys.
-    secret_prev: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    secret_prev: Mapped[str | None] = mapped_column(String(255), nullable=True)
     secret_rotated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

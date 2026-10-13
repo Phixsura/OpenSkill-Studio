@@ -119,7 +119,10 @@ async def create_webhook(
     svc = WebhookService(db)
     sub = await svc.create(org_id, body.url, body.events, actor_user_id=user.id)
     await db.commit()
-    return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
+    # R371: stored value is ciphertext; the one-time reveal is the transient
+    # plaintext the service attached.
+    resp = WebhookCreatedResponse.model_validate(sub)
+    return DataResponse(data=resp.model_copy(update={"secret": sub.plaintext_secret}))
 
 
 @router.get(
@@ -192,7 +195,8 @@ async def rotate_webhook_secret(
     svc = WebhookService(db)
     sub = await svc.rotate_secret(webhook_id, org_id, actor_user_id=user.id, immediate=immediate)
     await db.commit()
-    return DataResponse(data=WebhookCreatedResponse.model_validate(sub))
+    resp = WebhookCreatedResponse.model_validate(sub)
+    return DataResponse(data=resp.model_copy(update={"secret": sub.plaintext_secret}))
 
 
 @router.post(

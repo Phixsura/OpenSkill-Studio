@@ -51,6 +51,24 @@ def _fernet() -> MultiFernet:
     return MultiFernet(fernets)
 
 
+def encrypt_secret(value: str) -> str:
+    """Encrypt a single secret string (webhook signing secrets, R371)."""
+    return _fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_secret_tolerant(value: str | None) -> str | None:
+    """Decrypt a stored secret, tolerating LEGACY PLAINTEXT rows (R371):
+    rows written before encryption-at-rest decrypt to themselves. A value
+    that is not a valid Fernet token under any configured key is returned
+    unchanged — it IS the secret."""
+    if not value:
+        return value
+    try:
+        return _fernet().decrypt(value.encode()).decode()
+    except (InvalidToken, ValueError):
+        return value
+
+
 def encrypt_credentials(data: dict[str, str]) -> str:
     """Encrypt a {field_name: value} dict to an opaque token (primary key)."""
     return _fernet().encrypt(json.dumps(data).encode()).decode()

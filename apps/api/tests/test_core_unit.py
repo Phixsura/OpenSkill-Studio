@@ -660,3 +660,42 @@ def test_http_error_handler_preserves_exception_headers():
     assert r.status_code == 429
     assert r.headers.get("Retry-After") == "60"
     assert r.json()["error"]["code"] == "HTTP_ERROR"
+
+
+# ── R371: webhook secrets encrypted at rest ─────────────────────────────────
+
+
+def test_secret_roundtrip_and_legacy_plaintext_tolerance():
+    """R371: encrypt_secret/decrypt_secret_tolerant round-trip, and a legacy
+    PLAINTEXT row (written before encryption-at-rest) decrypts to itself so
+    old subscriptions keep signing until their next rotation."""
+    from app.core.crypto import decrypt_secret_tolerant, encrypt_secret
+
+    plain = "a" * 64
+    ct = encrypt_secret(plain)
+    assert ct != plain and len(ct) > 100 and ct.startswith("gAAAA")
+    assert decrypt_secret_tolerant(ct) == plain
+    # legacy plaintext passes through unchanged
+    assert decrypt_secret_tolerant(plain) == plain
+    assert decrypt_secret_tolerant(None) is None
+    assert decrypt_secret_tolerant("") == ""
+
+
+def test_delivery_headers_sign_with_decrypted_secret():
+    """R371: build_delivery_headers must sign with the PLAINTEXT the client
+    was shown, not the stored ciphertext — and must handle a legacy
+    plaintext-stored subscription identically."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.core.crypto import encrypt_secret
+    from app.integrations.services.events import build_delivery_headers, sign_payload
+
+    plain = "s" * 64
+    now = datetime.now(UTC)
+    body = b'{"x":1}'
+    for stored in (encrypt_secret(plain), plain):  # encrypted and legacy
+        sub = SimpleNamespace(secret=stored, secret_prev=None, secret_rotated_at=None)
+        headers = build_delivery_headers(sub, "evt_1", body, now)
+        expected = sign_payload(plain, "evt_1", int(now.timestamp()), body)
+        assert headers["webhook-signature"] == expected

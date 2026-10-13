@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import decrypt_secret_tolerant
 from app.exceptions import AppError
 from app.integrations.models import (
     EVENT_NAMESPACE,
@@ -198,13 +199,15 @@ def build_delivery_headers(
     sub: WebhookSubscription, event_id: str, body: bytes, now: datetime
 ) -> dict[str, str]:
     ts = int(now.timestamp())
-    sigs = [sign_payload(sub.secret, event_id, ts, body)]
+    # R371: secrets are ciphertext at rest; legacy plaintext rows pass
+    # through decrypt_secret_tolerant unchanged.
+    sigs = [sign_payload(decrypt_secret_tolerant(sub.secret), event_id, ts, body)]
     if sub.secret_prev and sub.secret_rotated_at:
         rotated = sub.secret_rotated_at
         if rotated.tzinfo is None:
             rotated = rotated.replace(tzinfo=UTC)
         if now - rotated <= SECRET_PREV_WINDOW:
-            sigs.append(sign_payload(sub.secret_prev, event_id, ts, body))
+            sigs.append(sign_payload(decrypt_secret_tolerant(sub.secret_prev), event_id, ts, body))
     return {
         "content-type": "application/json",
         "webhook-id": event_id,

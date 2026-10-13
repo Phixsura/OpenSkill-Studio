@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R371 (twelfth window, webhook secrets encrypted at rest + intg19)**:
+  secrets-at-rest audit: connection credentials and LTI private keys were
+  Fernet-encrypted, SCIM tokens hashed — but webhook SIGNING secrets sat
+  as plaintext String(64); a DB dump handed an attacker every org's
+  delivery-forging key. Now: `encrypt_secret` on create/rotate (the
+  one-time reveal rides a transient `plaintext_secret` attribute, never
+  persisted), `decrypt_secret_tolerant` on every signing path (legacy
+  plaintext rows decrypt to themselves until their next rotation), and
+  migration intg19a00019 widens the columns and encrypted all 8,627
+  existing rows in place (idempotent via length guard; drilled down/up).
+  Pinned: round-trip + legacy tolerance + build_delivery_headers signs
+  with the revealed plaintext for both storage forms. Lifecycle 75/75
+  (live create→deliver→HMAC-verify loop), battery 369, webhook suite
+  120/120. Lesson: audit at-rest posture per secret CLASS — the mesh's
+  newest secrets had the oldest storage.
 - **R370 (twelfth window, multipart fuzz phase + csv field-limit 500)**:
   fuzz phase 7 covers the one surface phases 1-6 never touched — the
   multipart import upload, which parses inline at create_job: 18 hostile

@@ -676,7 +676,13 @@ async def test_webhook_secret_rotation(db):
     rotated = await svc.rotate_secret(sub.id, org.id)
     assert rotated.id == sub.id
     assert rotated.secret != old_secret
-    assert len(rotated.secret) == 64  # token_hex(32)
+    # R371: stored value is Fernet ciphertext; the one-time reveal is the
+    # transient plaintext (token_hex(32)) and it decrypts from storage.
+    from app.core.crypto import decrypt_secret_tolerant
+
+    assert rotated.secret.startswith("gAAAA")  # encrypted at rest
+    assert len(rotated.plaintext_secret) == 64  # token_hex(32)
+    assert decrypt_secret_tolerant(rotated.secret) == rotated.plaintext_secret
     assert rotated.url == "https://hooks.example.com/rot"
     # org containment: a foreign org gets the uniform 404
     with _pytest.raises(_AppError) as e:

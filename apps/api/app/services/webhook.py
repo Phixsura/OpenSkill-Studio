@@ -14,6 +14,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import decrypt_secret_tolerant
 from app.exceptions import AppError
 from app.models.webhook import WebhookSubscription
 
@@ -251,14 +252,20 @@ class WebhookService:
                 422,
             )
 
+        from app.core.crypto import encrypt_secret
+
         secret = secrets.token_hex(32)
         sub = WebhookSubscription(
             org_id=org_id,
             url=url,
             events=events,
-            secret=secret,
+            # R371: ciphertext at rest — a DB dump must not hand an attacker
+            # every org's delivery-forging key.
+            secret=encrypt_secret(secret),
             active=True,
         )
+        # transient, never persisted: the one-time reveal for the response
+        sub.plaintext_secret = secret
         self.db.add(sub)
         await self.db.flush()
         log.info("webhook_created", webhook_id=sub.id, org_id=org_id, events=events)
@@ -343,9 +350,13 @@ class WebhookService:
         from datetime import UTC as _UTC
         from datetime import datetime as _dt
 
+        from app.core.crypto import encrypt_secret
+
         sub.secret_prev = None if immediate else sub.secret
         sub.secret_rotated_at = _dt.now(_UTC)
-        sub.secret = secrets.token_hex(32)
+        new_secret = secrets.token_hex(32)
+        sub.secret = encrypt_secret(new_secret)
+        sub.plaintext_secret = new_secret  # transient one-time reveal
         await self.db.flush()
         await self._record_webhook_audit(
             sub, action="webhook.secret_rotated", actor_user_id=actor_user_id
@@ -441,7 +452,7 @@ class WebhookService:
             deliveries.append(
                 {
                     "url": sub.url,
-                    "secret": sub.secret,
+                    "secret": decrypt_secret_tolerant(sub.secret),
                     "webhook_id": sub.id,
                 }
             )
