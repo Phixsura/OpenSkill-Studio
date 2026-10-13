@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R373 (twelfth window, backup/restore drill)**: backups nobody has
+  restored are Schrödinger backups — drilled the real path: pg_dump -Fc
+  of the live dev DB (766 MB, 1,266,752 rows in scope) inside the
+  postgres container, pg_restore --exit-on-error into a scratch DB
+  (102 s dump / 169 s restore), then asserted alembic_version ==
+  intg19a00019, all 31 fabric-scope table counts byte-for-byte equal,
+  and an R371-encrypted webhook secret identical post-restore. Scratch
+  DB dropped, dump removed. Checked in as tests/drills/
+  backup_restore_drill.py.
 - **R372 (twelfth window, axe-core WCAG 2.1 A/AA audit)**: new
   `make e2e-intg-a11y` runs the full axe-core ruleset (wcag2a/aa +
   wcag21a/aa — the VPAT procurement baseline) over the five fabric pages
