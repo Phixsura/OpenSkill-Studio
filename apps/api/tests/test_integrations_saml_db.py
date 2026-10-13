@@ -1219,3 +1219,50 @@ async def test_cert_expiry_sweep_no_not_after_anywhere_is_quiet(db):
     await db.flush()
     svc = SsoAdminService(db)
     assert await svc.sweep_expiring_certificates() == 0
+
+
+@pytest.mark.asyncio
+async def test_saml_acs_size_base64_conditions_timestamp_arms(db):
+    """R432: handle_acs's remaining front-door reject arms. Oversized payload
+    (pre-decode), invalid base64, a signed assertion with NO Conditions, and
+    a Conditions block whose timestamps are unparseable — every one maps to
+    the uniform SSO_ASSERTION_INVALID, never a raw 500."""
+    import re as _re
+
+    from app.integrations.services.sso_saml import MAX_RESPONSE_BYTES
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    email = f"a-{uuid.uuid4().hex[:6]}@{domain}"
+    svc = SamlService(db)
+
+    async def expect_reject(b64, relay=None):
+        with pytest.raises(AppError) as e:
+            await svc.handle_acs(connection_id=conn.id, saml_response_b64=b64, relay_state=relay)
+        assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    # Oversized before decode.
+    await expect_reject("A" * (MAX_RESPONSE_BYTES + 1))
+
+    # Invalid base64 (validate=True rejects the '!' chars).
+    await expect_reject("!!!!not-base64!!!!")
+
+    # Signed assertion with the Conditions element removed -> no_conditions.
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    xml_no_cond = _re.sub(r"<saml:Conditions.*?</saml:Conditions>", "", xml, flags=_re.DOTALL)
+    assert "Conditions" not in xml_no_cond
+    await expect_reject(_wrap_response(_sign_assertion(xml_no_cond)), relay=state)
+
+    # Conditions with a garbage NotOnOrAfter -> bad_timestamps (ValueError arm).
+    state = await _start(db, conn)
+    xml = _assertion_xml(in_response_to=state, email=email)
+    # Corrupt the Conditions NotOnOrAfter value so _parse_time raises.
+    xml_bad_ts = _re.sub(
+        r'(<saml:Conditions NotBefore="[^"]*" NotOnOrAfter=")[^"]*(")',
+        r"\1not-a-timestamp\2",
+        xml,
+        count=1,
+    )
+    assert "not-a-timestamp" in xml_bad_ts
+    await expect_reject(_wrap_response(_sign_assertion(xml_bad_ts)), relay=state)

@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R432 (sixteenth window, SAML ACS front-door arms)**: handle_acs's
+  remaining reject arms, all mapping to the uniform SSO_ASSERTION_INVALID
+  (never a raw 500): oversized payload rejected BEFORE decode (length cap),
+  invalid base64 (validate=True), a signed assertion with NO Conditions
+  element (no_conditions), and a Conditions block whose NotOnOrAfter is
+  unparseable (bad_timestamps — the _parse_time ValueError arm). These sit
+  alongside the already-covered rogue-cert, audience, expiry, issuer,
+  unsigned, XSW and DTD-smuggling vectors.
 - **R431 (sixteenth window, reject/update arms)**: three more arm clusters.
   `resolve_queue_item`: invalid action -> 422 before any claim, double
   resolve -> 409 (the atomic pending->resolved claim, R308 class), link
