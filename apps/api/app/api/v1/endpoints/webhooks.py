@@ -247,7 +247,11 @@ async def test_webhook(
     headers = build_delivery_headers(sub, event_id, body, now)
     started = _time.monotonic()
     try:
-        resp = await EgressClient().request("POST", sub.url, headers=headers, content=body)
+        # R399b: discard_body — the sample dispatch only reports status +
+        # latency; never buffer a hostile receiver's response body.
+        resp = await EgressClient().request(
+            "POST", sub.url, headers=headers, content=body, discard_body=True
+        )
         result = {
             "delivered": 200 <= resp.status_code < 300,
             "status_code": resp.status_code,
