@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R369 (eleventh window, fabric model/migration parity guard + intg18)**:
+  new DB test scopes alembic autogenerate comparison to intg_* tables and
+  asserts an EMPTY diff — fabric must never inherit the base repo's
+  model/DDL drift habit (`alembic check` fails repo-wide on older epics).
+  First run found 41 real items: 40 timestamp columns the models declare
+  NOT NULL (Mapped[datetime] + server_default=now()) that the hand-written
+  DDL left nullable — a raw write could insert NULLs the ORM can never
+  produce — plus the model not declaring ix_intg_events_time (intg17).
+  Fixed by migration intg18a00018 (defensive backfill + SET NOT NULL on
+  all 40, reversible — down/up drilled) and index=True on
+  IntegrationEvent.time. Parity test green; battery subset + lifecycle
+  75/75 after. Lesson: hand-written migrations need a scoped autogenerate
+  guard from day one — nullability is the silent drift axis.
 - **R368 (eleventh window, closing regression wave)**: full sweep after
   the window's fixes (R353-R367): backend 12/12 chunks = 10,776 tests
   (one corpus-scan test updated to windowed matching after the R364

@@ -43,7 +43,13 @@ class IntegrationEvent(Base):
     type: Mapped[str] = mapped_column(String(100), nullable=False)
     source: Mapped[str] = mapped_column(String(200), nullable=False)
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    time: Mapped[datetime] = mapped_column(
+        # index=True matches ix_intg_events_time (intg17) so the
+        # model/migration parity guard sees no drift (R369)
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
     dataschema: Mapped[str | None] = mapped_column(String(200), nullable=True)
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
 

@@ -240,3 +240,40 @@ async def test_invoice_finalized_routes_to_every_tenant_org_ids_only(db):
     for e in events:
         assert e.data == {"invoice_id": inv.id, "tenant_id": tenant_id}
         assert "12345" not in str(e.data)  # amounts never leak into the mesh
+
+
+@pytest.mark.asyncio
+async def test_fabric_tables_have_zero_model_migration_drift():
+    """R369: the repo-wide `alembic check` fails on pre-existing drift in
+    older epics' tables — fabric must not inherit that habit. Autogenerate
+    comparison scoped to intg_* tables (and their indexes/constraints)
+    must be EMPTY: every fabric model change ships with its migration."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    import app.controlplane.models  # noqa: F401 — cp_* registration (FK targets)
+    import app.ecosystem.models  # noqa: F401
+    import app.experiments.models  # noqa: F401
+    import app.integrations.models  # noqa: F401
+    import app.talent.models  # noqa: F401
+    from app.core.database import engine
+    from app.models import Base  # same aggregator migrations/env.py uses
+
+    def _is_fabric(obj, name, type_, *_a, **_k):
+        if type_ == "table":
+            return bool(name and name.startswith("intg_"))
+        table = getattr(obj, "table", None)
+        tname = getattr(table, "name", "") or ""
+        return tname.startswith("intg_")
+
+    def _diffs(sync_conn):
+        ctx = MigrationContext.configure(
+            sync_conn,
+            opts={"compare_type": True, "include_object": _is_fabric},
+        )
+        return compare_metadata(ctx, Base.metadata)
+
+    async with engine.connect() as conn:
+        diffs = await conn.run_sync(_diffs)
+    await engine.dispose()
+    assert not diffs, f"fabric model/migration drift: {diffs[:5]}"
