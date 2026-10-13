@@ -1099,3 +1099,26 @@ async def test_group_list_filter_displayname_and_externalid(ctx):
     # no filter still lists everything
     out = await svc.list(start_index=1, count=100)
     assert out["totalResults"] == 2
+
+
+async def test_group_patch_member_remove_filter_is_case_insensitive(ctx):
+    """R409: the filtered member-remove op `Members[value eq "..."]` must
+    match regardless of the attribute-name case (the rest of the PATCH
+    grammar is case-insensitive) — a case-varying IdP's member removal
+    must not silently no-op. The captured member id stays case-exact."""
+    u, _ = await _usvc(ctx).create({"userName": f"ci-{uuid.uuid4().hex[:8]}@corp.example.edu"})
+    svc = _gsvc(ctx)
+    grp = await svc.create(
+        {"displayName": f"Eng-{uuid.uuid4().hex[:6]}", "members": [{"value": u["id"]}]}
+    )
+    assert u["id"] in [m["value"] for m in grp["members"]]
+
+    # capital "Members" (and the exact-case id) must still remove
+    out = await svc.patch(
+        grp["id"],
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            "Operations": [{"op": "remove", "path": f'Members[value eq "{u["id"]}"]'}],
+        },
+    )
+    assert u["id"] not in [m["value"] for m in out["members"]]

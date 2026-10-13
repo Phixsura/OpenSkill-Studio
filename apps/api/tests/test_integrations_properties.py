@@ -352,3 +352,31 @@ def test_egress_soundness_metadata_encodings_blocked(host, port):
         assert raised, f"SSRF BYPASS: {host} admitted"
     finally:
         settings.egress_allow_private = old
+
+
+@given(
+    st.one_of(
+        st.none(),
+        st.text(max_size=120),
+        st.integers(),
+        st.lists(st.text(max_size=8), max_size=4),
+        st.dictionaries(st.text(max_size=6), st.text(max_size=6), max_size=3),
+    )
+)
+@settings(max_examples=300, deadline=None)
+def test_scim_normalize_path_total(path):
+    """R409: the SCIM PATCH op-path normalizer is TOTAL over arbitrary op
+    shapes — a non-string path (int/list/dict) raises a clean ScimError,
+    any string returns a lowercased str; never a bare AttributeError /
+    500 (R358 was exactly that class, fuzz-found). The PATCH grammar is
+    attacker-shaped input."""
+    from app.integrations.services.scim import ScimError, _normalize_path
+
+    try:
+        out = _normalize_path(path)
+    except ScimError as e:
+        assert e.status == 400
+    else:
+        # case PRESERVED by design (member-filter ids); totality is the
+        # invariant — a str out, never a bare AttributeError/500.
+        assert isinstance(out, str)

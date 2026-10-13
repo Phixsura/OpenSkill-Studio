@@ -335,7 +335,9 @@ def _coerce_active(value: Any) -> bool | None:
 
 
 def _normalize_path(path: str | None) -> str:
-    """Strip fully-qualified attribute URNs; lowercase the attribute."""
+    """Strip fully-qualified attribute URNs. Case is PRESERVED (a
+    members[value eq "ULID"] filter carries a case-sensitive id); callers
+    lowercase the attribute NAME themselves for comparison (R409)."""
     if not path:
         return ""
     if not isinstance(path, str):
@@ -857,7 +859,11 @@ class ScimGroupService:
                     rename = value.strip()[:255]
                 continue
             # members add/remove — plain path or filtered remove
-            m = re.fullmatch(r'members\[value eq "([^"]+)"\]', path)
+            # R409: Okta sends lowercase per spec, but the rest of the op
+            # grammar is case-insensitive here — a case-varying IdP's
+            # filtered member-remove must not silently no-op. Keywords
+            # case-insensitive; the captured id stays case-exact.
+            m = re.fullmatch(r'members\[value eq "([^"]+)"\]', path, re.IGNORECASE)
             if m and name == "remove":
                 remove.append(m.group(1))
                 continue

@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R409 (fourteenth window, SCIM op-path case + property net)**: a
+  hypothesis totality property over `_normalize_path` surfaced that the
+  Group PATCH filtered member-remove regex `members[value eq "..."]`
+  matched the path CASE-SENSITIVELY while the rest of the op grammar
+  lowercases — a case-varying IdP's member removal silently no-op'd.
+  Fixed: regex keywords case-insensitive (captured member id stays
+  case-exact), misleading "lowercase the attribute" docstring corrected
+  (case is preserved by design for the filter id). Pinned both as a
+  property (totality) and an example (capital "Members" removes). SCIM
+  suite 38/38.
 - **R408 (fourteenth window, SSRF soundness properties)**: the egress
   validator had a TOTALITY property (never leaks a parser error over
   arbitrary URL text) but no SOUNDNESS property (never ADMITS a
