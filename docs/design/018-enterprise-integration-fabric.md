@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R376 (twelfth window, Load-older UI)**: the events page consumes the
+  R375 cursor — a "Load older events" button appends keyset pages (older
+  state resets on filter/org change, in-flight guard, disabled state).
+  tsc + eslint + 764 web tests + 65/65 walk green.
 - **R375 (twelfth window, keyset pagination on events/deliveries)**: both
   admin lists were head-limited (newest 200, nothing older reachable).
   Added `before` keyset cursors — ULIDs are time-ordered, so `id <

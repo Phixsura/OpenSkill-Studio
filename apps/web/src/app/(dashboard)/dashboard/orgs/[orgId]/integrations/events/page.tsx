@@ -3,7 +3,7 @@
 // Event mesh console (ADR-018 §12): browse canonical events, inspect
 // webhook deliveries with per-attempt history, replay failed deliveries.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -74,11 +74,45 @@ export default function IntegrationEventsPage() {
   const { data: eventsData, isLoading: eventsLoading } = useQuery({
     queryKey: ["intg-events", orgId, typePrefix],
     queryFn: () =>
-      apiWithAuth<{ data: MeshEvent[] }>(
+      apiWithAuth<{ data: MeshEvent[]; meta?: { next_cursor: string | null; has_more: boolean } }>(
         `${base}/events${typePrefix ? `?type_prefix=${encodeURIComponent(typePrefix)}` : ""}`,
       ),
   });
-  const events = eventsData?.data ?? [];
+  // R375: keyset "Load older" — pages past the head window via the
+  // `before` cursor; older pages reset whenever the filter changes.
+  const [older, setOlder] = useState<{
+    items: MeshEvent[];
+    cursor: string | null;
+    hasMore: boolean | null;
+  }>({ items: [], cursor: null, hasMore: null });
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  useEffect(() => {
+    setOlder({ items: [], cursor: null, hasMore: null });
+  }, [orgId, typePrefix]);
+  const events = [...(eventsData?.data ?? []), ...older.items];
+  const nextCursor = older.cursor ?? eventsData?.meta?.next_cursor ?? null;
+  const hasOlder = older.hasMore ?? eventsData?.meta?.has_more ?? false;
+  const loadOlder = async () => {
+    if (!nextCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const r = await apiWithAuth<{
+        data: MeshEvent[];
+        meta?: { next_cursor: string | null; has_more: boolean };
+      }>(
+        `${base}/events?before=${encodeURIComponent(nextCursor)}${
+          typePrefix ? `&type_prefix=${encodeURIComponent(typePrefix)}` : ""
+        }`,
+      );
+      setOlder((prev) => ({
+        items: [...prev.items, ...(r.data ?? [])],
+        cursor: r.meta?.next_cursor ?? null,
+        hasMore: r.meta?.has_more ?? false,
+      }));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   const {
     data: deliveriesData,
@@ -464,6 +498,16 @@ export default function IntegrationEventsPage() {
             <li className="text-muted-foreground text-sm">No events recorded.</li>
           )}
         </ul>
+        {hasOlder && (
+          <button
+            type="button"
+            className="mt-2 rounded border px-3 py-1 text-sm disabled:opacity-50"
+            onClick={loadOlder}
+            disabled={loadingOlder}
+          >
+            {loadingOlder ? "Loading…" : "Load older events"}
+          </button>
+        )}
       </section>
     </div>
   );
