@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R398 (thirteenth window, RSS soak drill)**: prior soaks proved
+  latency stays flat; this one proves the PROCESS doesn't grow — 12
+  consecutive storms (~2,400 mixed CRUD ops) against one uvicorn worker
+  with RSS sampled per storm: flat at ~244 MB, ending LOWER at 230 MB
+  (GC), p95 range 413-650 ms. Gate: final < 2x warm and < 1.5 GB.
+  Checked in as tests/drills/soak_drill.py (takes N as argv).
 - **R397 (thirteenth window, backchannel-logout fuzz)**: phase 9b mints a
   real ACTIVE OIDC connection and fires hostile logout_tokens (alg:none,
   HS256 confusion, garbage, 10 KB blobs) at /oidc/backchannel-logout —
