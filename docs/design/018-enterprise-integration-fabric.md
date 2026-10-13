@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R384 (twelfth window, audit-lands proof)**: record_fabric_audit is
+  best-effort (swallows every failure with a warning), so R377's 19 call
+  sites could all be silent no-ops while every STRUCTURAL guard still
+  passed. New DB test writes the break-glass action for a real fabric
+  org and reads the row back from cp_audit_events — actor, target,
+  payload and tenant scope intact. The three audit guards now compose:
+  action literals registered (R147), every mutating route calls or is
+  exempt (R377), and the write path actually lands a row (R384).
 - **R383 (twelfth window, a11y into CI)**: the fabric WCAG gate now runs
   on every push — new sweep-a11y-integrations.spec.ts (axe-core 2.1 A/AA,
   serious/critical fail) covers all five pages as an authenticated admin

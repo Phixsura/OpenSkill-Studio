@@ -277,3 +277,47 @@ async def test_fabric_tables_have_zero_model_migration_drift():
         diffs = await conn.run_sync(_diffs)
     await engine.dispose()
     assert not diffs, f"fabric model/migration drift: {diffs[:5]}"
+
+
+@pytest.mark.asyncio
+async def test_fabric_audit_row_actually_lands(db):
+    """R384 (closes the R377 loop): record_fabric_audit is BEST-EFFORT — it
+    swallows every failure with a log line, so 19 new call sites could all
+    be silent no-ops and every structural guard would still pass. Prove a
+    row LANDS: write the break-glass action for a real fabric org and read
+    it back from cp_audit_events with the actor/target/payload intact."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.integrations.facade import record_fabric_audit
+
+    user = await _user(db)
+    org = await _org(db, user)
+
+    await record_fabric_audit(
+        db,
+        org.id,
+        user.id,
+        "intg.break_glass.set",
+        "user",
+        user.id,
+        after={"enabled": True},
+    )
+    await db.flush()
+
+    row = (
+        (
+            await db.execute(
+                _select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.break_glass.set",
+                    CommercialAuditEvent.actor_user_id == user.id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is not None, "audit write was silently swallowed"
+    assert row.target_type == "user" and row.target_id == user.id
+    assert row.after == {"enabled": True}
+    assert row.tenant_id, "audit row lost its tenant scope"
