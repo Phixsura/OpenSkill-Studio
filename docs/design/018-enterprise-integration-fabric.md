@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R399 (thirteenth window, `make drills`)**: one command runs the whole
+  operational drill suite in sequence (redis/minio outage, crash,
+  migration 4-hop, rate-limit engagement, slow-sink, backup/restore,
+  EXPLAIN audit, RSS soak) and fails fast — first full run: ALL DRILLS
+  OK in ~8 minutes. The ops doc's drill table is now executable.
 - **R398 (thirteenth window, RSS soak drill)**: prior soaks proved
   latency stays flat; this one proves the PROCESS doesn't grow — 12
   consecutive storms (~2,400 mixed CRUD ops) against one uvicorn worker

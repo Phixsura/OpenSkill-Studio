@@ -106,6 +106,14 @@ e2e-intg-browser: ## Fabric browser journey (needs web on :3000 + api on :8000, 
 e2e-intg-a11y: ## Fabric axe-core WCAG 2.1 A/AA audit (needs web :3000 + api :8000, APP_ENV=test)
 	cd apps/api && node tests/browser_a11y_integrations.mjs
 
+drills: ## Run every fabric operational drill sequentially (infra up required; ~15 min)
+	cd apps/api && for f in redis_drill minio_drill crash_drill migration_drill \
+		ratelimit_drill slow_sink_drill backup_restore_drill explain_audit soak_drill; do \
+		echo "== $$f =="; uv run python tests/drills/$$f.py || exit 1; \
+	done
+	@echo "ALL DRILLS OK"
+
+
 test-intg: ## Run the integration-fabric suites (ADR-018, needs infra-up + db-migrate)
 	cd apps/api && uv run pytest tests/test_integrations_core.py tests/test_integrations_db.py \
 		tests/test_integrations_events_db.py tests/test_integrations_sso_db.py \

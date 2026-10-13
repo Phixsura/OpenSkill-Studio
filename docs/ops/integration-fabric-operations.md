@@ -324,6 +324,14 @@ registration refuses a configuration whose issuer lives on a different
 origin than the admin-pasted URL. Conflict adjudication now also verifies
 the result row belongs to the addressed run (uniform 404 otherwise).
 
+## 7a2. Drills (`make drills`, R399)
+
+`make drills` (infra up, ~10 min) runs every operational drill in
+`apps/api/tests/drills/` sequentially and fails fast — outage semantics,
+crash recovery, migration reversibility, limiter engagement, slow-sink
+timeout, backup/restore, query plans, RSS soak. Run it before a release
+cut or after infra-level changes.
+
 ## 7b. Audit trail (window 12, R377/R384)
 
 Every mutating `/integrations` route writes `cp_audit_events` via
