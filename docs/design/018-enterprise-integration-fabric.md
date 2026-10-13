@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R407 (thirteenth window, close)**: migration chain intg18→intg21 all
+  reversible (4-hop drill), all 10 operational drills green, battery 377,
+  parity clean. Window 13 total R394-R407: 2 production security fixes
+  (R396 DNS-pin dispatcher, R401 rotation lock), 1 latent nightly-sweep
+  aborter (R402), 2 index regressions the EXPLAIN drill caught as data
+  grew (R393/R406 class, now intg20/intg21), 3 new fuzz phases reaching
+  real SAML/LTI/OIDC surfaces, 2 new drills (RSS soak, HTTP idempotency),
+  `make drills`. Head intg21a00021; not merged, no PR.
 - **R406 (thirteenth window, connection-sweep index — drill pays off #2)**:
   the EXPLAIN drill flagged its SECOND real regression this window —
   intg_connections crossed 10k rows and the health sweep slice
