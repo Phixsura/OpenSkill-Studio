@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R411 (fourteenth window, push-execution coverage)**: a coverage sweep
+  found `_execute_push` (talent.application → external ATS/HRIS, ~150
+  lines) had ZERO execution coverage — only the preview rejection was
+  tested, so the whole outbound write cycle shipped unexercised. New DB
+  test drives it against a fake ATS: consented rows push (outcome=updated
+  - echo-suppression sidecar written), an un-consented row is a
+    consent_missing conflict (never sent), an ATS-rejected row is an error,
+    a re-run with identical payloads skips unchanged, and the run finishes
+    `partial` when conflicts/errors exist. sync_engine coverage 73%→84%.
 - **R410 (fourteenth window, parser totality nets)**: hypothesis totality
   properties over three more security-critical parsers — SCIM
   `_coerce_active` (bool/None over arbitrary nested PATCH values,

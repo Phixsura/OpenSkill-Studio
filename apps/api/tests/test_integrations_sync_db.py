@@ -2023,3 +2023,112 @@ async def test_cancelled_run_not_overwritten_by_worker_finish(db):
     await _finish(db, run2, "succeeded")
     await db.refresh(run2)
     assert run2.status == "succeeded"
+
+
+class _FakePushConnector:
+    """ATS/HRIS push target: records writes, fails ids in `fail_ids`."""
+
+    # roster.* for the pull-profile create (_setup_profile), talent.* for
+    # the push flip under test.
+    capabilities = ["roster.read", "roster.write", "talent.read", "talent.write"]
+
+    def __init__(self, fail_ids=None):
+        self.fail_ids = set(fail_ids or [])
+        self.written: list[str] = []
+
+    async def write(self, ctx, model, batch):
+        results = []
+        for rec in batch:
+            self.written.append(rec["external_id"])
+            if rec["external_id"] in self.fail_ids:
+                results.append({"ok": False, "error": "ats rejected"})
+            else:
+                results.append({"ok": True})
+        return results
+
+
+async def test_execute_push_cycle_stats_results_and_echo(db, monkeypatch):
+    """R411: the talent.application PUSH execution path (_execute_push) had
+    ZERO coverage — only the preview rejection was tested. Drive the full
+    cycle against a fake ATS: consented rows push (outcome=updated + echo
+    sidecar), an un-consented row is a consent_missing conflict, an
+    ATS-rejected row is an error, a re-run with the SAME payloads skips
+    unchanged, and final status is partial when conflicts/errors exist."""
+    from app.integrations.services import sync_engine as se
+
+    org, owner = await _org(db)
+    push = _FakePushConnector(fail_ids={"app-err"})
+    conn, profile = await _setup_profile(db, org, owner, push)
+    profile.direction = "push"
+    profile.model = "talent.application"
+    await db.flush()
+
+    recs = [
+        {"external_id": "app-ok", "candidate_user_id": "u1", "stage": "screen", "_consented": True},
+        {
+            "external_id": "app-err",
+            "candidate_user_id": "u2",
+            "stage": "screen",
+            "_consented": True,
+        },
+        {
+            "external_id": "app-noconsent",
+            "candidate_user_id": "u3",
+            "stage": "x",
+            "_consented": False,
+        },
+    ]
+
+    async def _fake_extract(_db, _org_id):
+        # return fresh dicts each call (the engine pops "_consented")
+        return [dict(r) for r in recs]
+
+    monkeypatch.setattr(se, "_extract_push_applications", _fake_extract)
+
+    # Call _execute_push directly — the capability gate in execute_run is
+    # separately tested and needs provider-catalog wiring; this isolates the
+    # push EXECUTION logic (the uncovered path).
+    from app.integrations.models import SyncRun
+
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run)
+    await db.flush()
+    await se._execute_push(db, run, profile, conn, push)
+    await db.refresh(run)
+
+    assert run.status == "partial", run.status  # one conflict + one error
+    assert run.stats["read"] == 3
+    assert run.stats["pushed"] == 1  # only app-ok
+    assert run.stats["conflicts"] == 1  # app-noconsent
+    assert run.stats["errors"] == 1  # app-err
+    assert "app-noconsent" not in push.written  # never sent
+
+    from sqlalchemy import select as _sel
+
+    from app.integrations.models import StagedRecord, SyncRecordResult
+
+    outcomes = {
+        r.external_id: r.outcome
+        for r in (
+            await db.execute(_sel(SyncRecordResult).where(SyncRecordResult.run_id == run.id))
+        ).scalars()
+    }
+    assert outcomes == {"app-ok": "updated", "app-err": "error", "app-noconsent": "conflict"}
+
+    # echo sidecar written on the successful push
+    staged_ok = (
+        await db.execute(
+            _sel(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "app-ok"
+            )
+        )
+    ).scalar_one()
+    assert (staged_ok.last_outbound or {}).get("fields_hash")
+
+    # re-run with identical payloads: app-ok is now unchanged (skipped)
+    run2 = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run2)
+    await db.flush()
+    await se._execute_push(db, run2, profile, conn, push)
+    await db.refresh(run2)
+    assert run2.stats["unchanged"] >= 1
