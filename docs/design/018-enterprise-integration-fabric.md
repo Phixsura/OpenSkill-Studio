@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R395 (thirteenth window, hostile-JWT fuzz at a real LTI launch)**:
+  phase 9 mints an LTI registration and a fresh single-use state via
+  /lti/login per attempt, then fires alg:none, HS256-confusion,
+  kid-traversal, non-JWT garbage and empty-segment tokens at /lti/launch.
+  Probe results: alg walls hold (401), RS256 path's JWKS fetch dies
+  cleanly in the egress guard (422 EGRESS_BLOCKED, never a hang), huge
+  JWTs capped at 16 KB by schema. Fuzzer now 394 req/seed; seeds
+  13010-13012 clean.
 - **R394 (thirteenth window, structured-XML fuzz at a real SAML conn)**:
   the proto fuzz cases 404 at connection lookup BEFORE any XML parses —
   the hostile payloads never reached the parser. Phase 8 mints an ACTIVE

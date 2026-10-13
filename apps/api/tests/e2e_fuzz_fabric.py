@@ -650,6 +650,83 @@ async def main() -> None:
         else:
             check("fuzz SAML connection minted", False, f"{rr.status_code} {rr.text[:100]}")
 
+        # ── phase 9: hostile JWTs at /lti/launch with a REAL state ──
+        # Same R394 lesson for LTI: a hostile id_token only reaches the JWT
+        # validator when the state is real — mint a registration, then a
+        # state via /lti/login per attempt (states are single-use).
+        import json as _json
+        from urllib.parse import parse_qs as _pq
+        from urllib.parse import urlparse as _up
+
+        def _b64u(b: bytes) -> str:
+            return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+        _issuer = f"https://lms-{uuid.uuid4().hex[:6]}.example.com"
+        rr = await c.post(
+            f"{base}/lti/registrations",
+            json={
+                "issuer": _issuer,
+                "client_id": "fz-client",
+                "auth_login_url": f"{_issuer}/auth",
+                "auth_token_url": f"{_issuer}/token",
+                "jwks_url": f"{_issuer}/jwks",
+                "deployment_ids": ["dep-1"],
+            },
+            headers=h,
+        )
+        if rr.status_code == 201:
+
+            def _claims(nonce):
+                return {
+                    "iss": _issuer,
+                    "aud": "fz-client",
+                    "sub": "u1",
+                    "nonce": nonce,
+                    "exp": int(_t.time()) + 300,
+                }
+
+            def _jwt(header: dict, payload: dict, sig: bytes = b"") -> str:
+                return (
+                    _b64u(_json.dumps(header).encode())
+                    + "."
+                    + _b64u(_json.dumps(payload).encode())
+                    + "."
+                    + (_b64u(sig) if sig else "")
+                )
+
+            jwt_makers = [
+                lambda n: _jwt({"alg": "none"}, _claims(n)),
+                lambda n: _jwt({"alg": "HS256", "kid": "k"}, _claims(n), b"x" * 64),
+                lambda n: _jwt({"alg": "RS256", "kid": "../../etc"}, _claims(n), b"x" * 256),
+                lambda n: "💥💥💥",
+                lambda n: "..",
+            ]
+            for make in jwt_makers:
+                lr = await c.get(
+                    f"{API}/lti/login",
+                    params={
+                        "iss": _issuer,
+                        "client_id": "fz-client",
+                        "login_hint": "u1",
+                        "target_link_uri": "https://app/launch",
+                    },
+                )
+                if lr.status_code not in (302, 307):
+                    check("fuzz LTI state minted", False, f"{lr.status_code}")
+                    continue
+                q = _pq(_up(lr.headers["location"]).query)
+                state = q.get("state", [""])[0]
+                nonce = q.get("nonce", [""])[0]
+                rr = await c.post(
+                    f"{API}/lti/launch", data={"state": state, "id_token": make(nonce)}
+                )
+                total += 1
+                if rr.status_code >= 500:
+                    n_5xx += 1
+                    check("5xx: hostile LTI JWT", False, f"{rr.status_code} {rr.text[:100]}")
+        else:
+            check("fuzz LTI registration minted", False, f"{rr.status_code} {rr.text[:100]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",
