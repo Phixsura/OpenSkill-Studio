@@ -52,6 +52,7 @@ async def main() -> None:
         base = f"{API}/orgs/{org}/integrations"
 
         status_5xx: list[str] = []
+        shared_hooks: list[str] = []  # R401: rotation-race target
         slowest = 0.0
         lat: list[float] = []  # every request's wall time, for percentiles
 
@@ -117,7 +118,7 @@ async def main() -> None:
                 elif op == 6:
                     await req("POST", f"{base}/domains", json={"domain": f"{tag}.example.edu"})
                 elif op == 7:
-                    await req(
+                    rr = await req(
                         "POST",
                         f"{API}/orgs/{org}/webhooks",
                         json={
@@ -125,6 +126,16 @@ async def main() -> None:
                             "events": ["com.openskill.project.approved.v1"],
                         },
                     )
+                    # R401: all workers rotate the SAME shared webhook —
+                    # concurrent rotations must serialize on the row lock
+                    # (chained-prev race), never 5xx.
+                    if rr.status_code == 201:
+                        shared_hooks.append(rr.json()["data"]["id"])
+                    if shared_hooks:
+                        await req(
+                            "POST",
+                            f"{API}/orgs/{org}/webhooks/{shared_hooks[0]}/rotate-secret",
+                        )
                 elif op == 8 and my_conns:
                     rr = await req(
                         "POST",
