@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.integrations.facade import record_fabric_audit
 from app.integrations.services.warehouse import S3PartWriter, WarehouseExportService
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -79,6 +80,17 @@ async def create_stream(
         schedule=body.schedule,
     )
     resp = ExportStreamResponse.model_validate(stream, from_attributes=True)
+    # R377: exports move data OUT of the platform — every config mutation
+    # and run is audit-trail material.
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.export_stream.created",
+        "export_stream",
+        stream.id,
+        after={"dataset": stream.dataset, "name": stream.name},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -110,6 +122,15 @@ async def update_stream(
         enabled=body.enabled,
     )
     resp = ExportStreamResponse.model_validate(stream, from_attributes=True)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.export_stream.updated",
+        "export_stream",
+        stream.id,
+        after={"enabled": stream.enabled, "schedule": stream.schedule},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -131,6 +152,15 @@ async def run_stream(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     run = await WarehouseExportService(db, writer=S3PartWriter()).run_export(org_id, stream_id)
     resp = ExportRunResponse.model_validate(run, from_attributes=True)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.export_run.triggered",
+        "export_run",
+        run.id,
+        after={"stream_id": stream_id, "status": run.status},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -147,6 +177,9 @@ async def delete_stream(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     stream = await WarehouseExportService(db).get_stream(org_id, stream_id)
     await db.delete(stream)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.export_stream.deleted", "export_stream", stream_id
+    )
     await db.commit()
 
 

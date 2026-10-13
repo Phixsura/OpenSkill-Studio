@@ -295,6 +295,15 @@ async def trigger_sync(
         org_id, profile_id, trigger="backfill" if backfill else "manual"
     )
     resp = SyncRunResponse.model_validate(run, from_attributes=True)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.sync_run.triggered",
+        "sync_run",
+        run.id,
+        after={"profile_id": profile_id, "backfill": backfill},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -418,6 +427,7 @@ async def cancel_sync_run(
     await _admin(org_id, user, db)
     run = await SyncProfileService(db).cancel(org_id, run_id)
     resp = SyncRunResponse.model_validate(run, from_attributes=True)
+    await record_fabric_audit(db, org_id, user.id, "intg.sync_run.cancelled", "sync_run", run.id)
     await db.commit()
     return {"data": resp}
 

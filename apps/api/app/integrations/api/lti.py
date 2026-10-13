@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.config import settings
 from app.core.rate_limit import rate_limit
+from app.integrations.facade import record_fabric_audit
 from app.integrations.models import LtiDeployment, LtiRegistration
 from app.integrations.services.lti import LtiService
 from app.models.organization import OrgRole
@@ -119,6 +120,15 @@ async def create_registration(
         default_role=body.default_role,
     )
     resp = await _reg_response(db, reg)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.lti_registration.created",
+        "lti_registration",
+        reg.id,
+        after={"issuer": reg.issuer, "client_id": reg.client_id},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -200,6 +210,15 @@ async def dynamic_registration(
         registration_token=body.registration_token,
     )
     resp = await _reg_response(db, reg)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.lti_registration.created",
+        "lti_registration",
+        reg.id,
+        after={"issuer": reg.issuer, "dynamic": True},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -217,6 +236,9 @@ async def delete_registration(
     svc = LtiService(db)
     reg = await svc.get_registration(org_id, reg_id)
     await db.delete(reg)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.lti_registration.deleted", "lti_registration", reg_id
+    )
     await db.commit()
 
 

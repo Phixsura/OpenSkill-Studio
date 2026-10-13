@@ -244,6 +244,15 @@ async def update_connection(
         status=body.status,
     )
     resp = await _to_response(db, conn)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.connection.updated",
+        "connection",
+        conn.id,
+        after={"name": conn.name, "status": conn.status},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -257,6 +266,9 @@ async def delete_connection(
 ):
     await _admin(org_id, user, db)
     await ConnectionService(db).delete(org_id, connection_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.connection.deleted", "connection", connection_id
+    )
     await db.commit()
 
 
@@ -302,6 +314,15 @@ async def upgrade_connection(
     await _admin(org_id, user, db)
     conn = await ConnectionService(db).upgrade(org_id, connection_id)
     resp = await _to_response(db, conn)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.connection.upgraded",
+        "connection",
+        conn.id,
+        after={"provider_key": conn.provider_key},
+    )
     await db.commit()
     return {"data": resp}
 

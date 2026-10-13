@@ -414,6 +414,15 @@ async def update_scim_token(
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     token = await ScimTokenService(db).update_group_map(org_id, token_id, body.group_map)
     resp = _token_resp(token)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.scim_token.group_map_updated",
+        "scim_token",
+        token.id,
+        after={"group_map_keys": sorted((body.group_map or {}).keys())[:50]},
+    )
     await db.commit()
     return {"data": resp}
 

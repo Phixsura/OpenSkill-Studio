@@ -150,6 +150,15 @@ async def claim_domain(
     await _admin(org_id, user, db)
     row = await OrgDomainService(db).claim(org_id, body.domain)
     resp = DomainResponse.model_validate(row, from_attributes=True)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.domain.claimed",
+        "org_domain",
+        row.id,
+        after={"domain": row.domain},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -164,6 +173,15 @@ async def verify_domain(
     await _admin(org_id, user, db)
     row = await OrgDomainService(db).verify(org_id, domain_id)
     resp = DomainResponse.model_validate(row, from_attributes=True)
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.domain.verified",
+        "org_domain",
+        row.id,
+        after={"domain": row.domain, "status": row.status},
+    )
     await db.commit()
     return {"data": resp}
 
@@ -177,6 +195,7 @@ async def delete_domain(
 ):
     await _admin(org_id, user, db)
     await OrgDomainService(db).delete(org_id, domain_id)
+    await record_fabric_audit(db, org_id, user.id, "intg.domain.deleted", "org_domain", domain_id)
     await db.commit()
 
 
@@ -268,6 +287,7 @@ async def delete_sso_connection(
 ):
     await _admin(org_id, user, db)
     await SsoAdminService(db).delete(org_id, conn_id)
+    await record_fabric_audit(db, org_id, user.id, "intg.sso.deleted", "sso_connection", conn_id)
     await db.commit()
 
 
@@ -281,6 +301,17 @@ async def set_break_glass(
     member = await require_org_member(org_id, user, db, OrgRole.OWNER)
     await SsoAdminService(db).set_break_glass(
         org_id, body.user_id, enabled=body.enabled, actor_role=member.role
+    )
+    # R377: break-glass disables SSO enforcement for a user — the single
+    # most audit-worthy switch in the fabric.
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.break_glass.set",
+        "user",
+        body.user_id,
+        after={"enabled": body.enabled},
     )
     await db.commit()
 
@@ -387,6 +418,15 @@ async def resolve_identity_queue(
     await _admin(org_id, user, db)
     item = await IdentityService(db).resolve_queue_item(
         org_id, item_id, action=body.action, user_id=body.user_id, actor_id=user.id
+    )
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.identity_queue.resolved",
+        "identity_queue_item",
+        item.id,
+        after={"action": body.action, "status": item.status},
     )
     await db.commit()
     return {"data": {"id": item.id, "status": item.status}}

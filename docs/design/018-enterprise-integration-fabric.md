@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R377 (twelfth window, audit-trail coverage — 19 new sites)**: a route
+  probe showed only 18 of 48 mutating fabric routes wrote the audit trail;
+  uncovered included **break-glass** (disabling SSO enforcement — the
+  single most audit-worthy switch in the fabric), connection
+  update/delete/upgrade, domain claim/verify/delete, sso-connection
+  delete, scim-token group-map update, export stream create/update/
+  delete/run, LTI registration create/dynamic/delete, roster provision,
+  sync run/cancel, identity-queue resolve, delivery replay. All 19 now
+  call record_fabric_audit (payloads carry config shape, never secrets).
+  The existing R147 registry guard immediately caught that unregistered
+  actions are SILENT NO-OPS in record_audit — all 20 action literals
+  registered in AUDIT_ACTIONS. New coverage guard: every mutating
+  /integrations route must audit in-handler or sit on an explicit exempt
+  list (ping/previews/LTI protocol surfaces), so a new mutating route
+  fails the battery until it declares its audit posture. Battery 372.
 - **R376 (twelfth window, Load-older UI)**: the events page consumes the
   R375 cursor — a "Load older events" button appends keyset pages (older
   state resets on filter/org change, in-flight guard, disabled state).

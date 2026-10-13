@@ -1079,3 +1079,60 @@ def test_fabric_route_contract():
     assert any("rate_limit" in x or "checker" in x for x in router_dep_names), (
         "org-scoped integrations router lost its router-level rate limiter"
     )
+
+
+def test_every_mutating_fabric_route_audits_or_is_exempt():
+    """R377: admin mutations on fabric config must write the audit trail
+    (Part O). Found live: break-glass — the single most audit-worthy switch
+    in the fabric — plus connection/domains/export/LTI/sync mutations wrote
+    NO audit row. Every mutating /integrations route must now either call
+    record_fabric_audit in its handler or sit on the EXPLICIT exempt list
+    (with the reason); a new mutating route fails here until it declares
+    its audit posture."""
+    import inspect
+
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    def collect(routes, acc):
+        for r in routes:
+            if isinstance(r, APIRoute):
+                acc.append(r)
+            inner = getattr(r, "original_router", None)
+            if inner is not None:
+                collect(inner.routes, acc)
+            sub = getattr(r, "routes", None)
+            if sub and not isinstance(r, APIRoute):
+                collect(sub, acc)
+        return acc
+
+    exempt = {
+        # read-like probes / previews: no config change to audit
+        "POST /orgs/{org_id}/integrations/connections/{connection_id}/ping",
+        "POST /orgs/{org_id}/integrations/mapping-profiles/{profile_id}/preview",
+        "POST /orgs/{org_id}/integrations/sync-profiles/{profile_id}/preview",
+        # LTI protocol-driven surfaces (platform-initiated, signed launches)
+        "POST /orgs/{org_id}/integrations/lti/registrations/{reg_id}/resource-links",
+        "POST /orgs/{org_id}/integrations/lti/resource-links/{link_id}/nrps-sync",
+        "POST /orgs/{org_id}/integrations/lti/deep-link/select",
+    }
+    uncovered = []
+    for r in collect(app.routes, []):
+        if "/integrations" not in r.path:
+            continue
+        if r.path.startswith("/talent/"):  # talent epic, not fabric (#43)
+            continue
+        methods = r.methods & {"POST", "PATCH", "PUT", "DELETE"}
+        if not methods:
+            continue
+        key = f"{sorted(methods)[0]} {r.path}"
+        if key in exempt:
+            continue
+        try:
+            src = inspect.getsource(r.endpoint)
+        except OSError:
+            src = ""
+        if "record_fabric_audit" not in src:
+            uncovered.append(key)
+    assert not uncovered, f"mutating fabric routes with no audit posture: {uncovered}"

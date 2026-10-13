@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.integrations.facade import record_fabric_audit
 from app.integrations.services.roster import RosterProvisioningService
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -41,6 +42,15 @@ async def provision_roster(
         connection_id,
         actor_id=user.id,
         options=body.model_dump(),
+    )
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.roster.provisioned",
+        "connection",
+        connection_id,
+        after={k: v for k, v in report.items() if isinstance(v, (int, str, bool))},
     )
     await db.commit()
     return {"data": report}

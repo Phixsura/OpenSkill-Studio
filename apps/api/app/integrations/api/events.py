@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
+from app.integrations.facade import record_fabric_audit
 from app.integrations.models import DeliveryAttempt, EventDelivery, IntegrationEvent
 from app.integrations.services.events import replay_delivery
 from app.models.organization import OrgRole
@@ -293,7 +294,6 @@ async def replay_exhausted_bulk(
     """R155: bulk recovery after an endpoint outage — requeue every
     exhausted delivery of this subscription (capped per call; repeat to
     drain a larger backlog). Audited."""
-    from app.integrations.facade import record_fabric_audit
     from app.integrations.services.events import replay_exhausted
 
     await _admin(org_id, user, db)
@@ -322,5 +322,14 @@ async def replay(
     clone = await replay_delivery(db, org_id, delivery_id)
     event = await db.get(IntegrationEvent, clone.event_id)
     resp = _delivery_response(clone, event.type if event else "?")
+    await record_fabric_audit(
+        db,
+        org_id,
+        user.id,
+        "intg.delivery.replayed",
+        "event_delivery",
+        clone.id,
+        after={"source_delivery_id": delivery_id},
+    )
     await db.commit()
     return {"data": resp}
