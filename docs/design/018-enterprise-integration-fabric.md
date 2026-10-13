@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R446 (sixteenth window, domain-claim cap arm)**: claim's per-org cap
+  arm — once MAX_DOMAINS_PER_ORG is reached a further claim raises
+  DOMAIN_LIMIT_REACHED (422). (The concurrent-INSERT IntegrityError recovery
+  arm's OUTCOME is covered by the R207 serialized-claim test; forcing its
+  exact line via a side-effecting flush deadlocks on the R207 org FOR UPDATE
+  lock, so it is left to the outcome test.)
 - **R445 (sixteenth window, sync-profile create reject arms)**:
   SyncProfileService.create's own reject arms (beyond the already-covered
   bidirectional and capability gates) — unknown model, bad direction, bad

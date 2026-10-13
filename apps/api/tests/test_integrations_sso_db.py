@@ -2193,3 +2193,24 @@ async def test_sso_update_applies_all_settable_fields_and_enforce_toggle(db):
     # And it can be turned back off without the gate.
     off = await svc.update(org.id, conn.id, enforce_sso=False)
     assert off.enforce_sso is False
+
+
+@pytest.mark.asyncio
+async def test_domain_claim_limit_reached(db, monkeypatch):
+    """R446: claim's per-org cap arm — once MAX_DOMAINS_PER_ORG is reached, a
+    further claim raises DOMAIN_LIMIT_REACHED (the concurrent-INSERT recovery
+    arm's OUTCOME is covered by test_concurrent_domain_claim_same_org_no_500;
+    forcing its exact line here deadlocks on the R207 org FOR UPDATE lock)."""
+    import app.integrations.services.domains as mod
+    from app.integrations.services.domains import OrgDomainService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = OrgDomainService(db)
+
+    monkeypatch.setattr(mod, "MAX_DOMAINS_PER_ORG", 2)
+    await svc.claim(org.id, f"d1-{uuid.uuid4().hex[:6]}.example.edu")
+    await svc.claim(org.id, f"d2-{uuid.uuid4().hex[:6]}.example.edu")
+    with pytest.raises(AppError) as e:
+        await svc.claim(org.id, f"d3-{uuid.uuid4().hex[:6]}.example.edu")
+    assert e.value.code == "DOMAIN_LIMIT_REACHED" and e.value.status_code == 422
