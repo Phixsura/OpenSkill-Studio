@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R425 (fifteenth window, SCIM arm cover)**: the bulk dispatcher's
+  Users-PUT and Groups-PUT/PATCH/DELETE SUCCESS arms had never executed
+  (only their 404/400 reject arms were pinned); the user-PATCH externalId
+  add (link upsert) and remove (link clear) arms and the non-dict
+  operation reject likewise. Also pinned every `_validate_group_map`
+  reject — malformed spec, unknown kind, cohort-without-id, and the mint
+  ceiling (`role: owner`/`admin` can never be group-mapped, the R91
+  role-mint class) — plus `update_group_map`'s cross-org uniform 404
+  (existence-oracle class).
 - **R424 (fifteenth window, dead code + connector defaults)**: coverage
   sweep follow-ups. (1) `BulkImportService._preview_roster_row` was dead
   code — superseded by the batched `_preview_roster_row_mapped` (the R253

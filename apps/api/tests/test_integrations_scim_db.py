@@ -1122,3 +1122,111 @@ async def test_group_patch_member_remove_filter_is_case_insensitive(ctx):
         },
     )
     assert u["id"] not in [m["value"] for m in out["members"]]
+
+
+@pytest.mark.asyncio
+async def test_bulk_users_put_and_groups_put_patch_delete_success(ctx):
+    """R425: the bulk dispatcher's Users-PUT and Groups-PUT/PATCH/DELETE
+    SUCCESS arms had never executed (only the 404/400 arms were pinned)."""
+    from app.integrations.services.scim import apply_bulk
+
+    db, token = ctx["db"], ctx["token"]
+    email = f"bp-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u, _ = await _usvc(ctx).create({"userName": email, "displayName": "Before"})
+    g = await _gsvc(ctx).create({"displayName": f"BG-{uuid.uuid4().hex[:6]}"})
+
+    out = await apply_bulk(
+        db,
+        token,
+        {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+            "Operations": [
+                {
+                    "method": "PUT",
+                    "path": f"/Users/{u['id']}",
+                    "data": {"userName": email, "displayName": "After PUT", "active": True},
+                },
+                {
+                    "method": "PUT",
+                    "path": f"/Groups/{g['id']}",
+                    "data": {"displayName": f"BG2-{uuid.uuid4().hex[:6]}"},
+                },
+                {
+                    "method": "PATCH",
+                    "path": f"/Groups/{g['id']}",
+                    "data": {
+                        "Operations": [
+                            {
+                                "op": "add",
+                                "path": "members",
+                                "value": [{"value": u["id"]}],
+                            }
+                        ]
+                    },
+                },
+                {"method": "DELETE", "path": f"/Groups/{g['id']}"},
+            ],
+        },
+    )
+    assert [op["status"] for op in out["Operations"]] == ["200", "200", "200", "204"]
+    assert out["Operations"][0]["location"] == f"/Users/{u['id']}"
+    refreshed = await _usvc(ctx).get(u["id"])
+    assert refreshed["displayName"] == "After PUT"
+
+
+@pytest.mark.asyncio
+async def test_user_patch_external_id_add_and_remove(ctx):
+    """R425: patch's externalId add (upsert link) and remove (clear link)
+    arms, plus the non-dict operation reject."""
+    from app.integrations.services.scim import ScimError
+
+    email = f"xi-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u, _ = await _usvc(ctx).create({"userName": email})
+
+    res = await _usvc(ctx).patch(
+        u["id"],
+        {"Operations": [{"op": "add", "path": "externalId", "value": "ext-r425"}]},
+    )
+    assert res["externalId"] == "ext-r425"
+
+    res = await _usvc(ctx).patch(
+        u["id"], {"Operations": [{"op": "remove", "path": "externalId"}]}
+    )
+    assert res.get("externalId") in (None, "")
+
+    with pytest.raises(ScimError):
+        await _usvc(ctx).patch(u["id"], {"Operations": ["not-a-dict"]})
+
+
+@pytest.mark.asyncio
+async def test_group_map_validation_rejects_and_token_scoping(ctx):
+    """R425: every _validate_group_map reject arm, including the mint
+    ceiling (owner/admin can never be group-mapped), and update_group_map's
+    cross-org 404."""
+    from app.exceptions import AppError
+    from app.integrations.services.scim import ScimTokenService
+
+    db, org, token = ctx["db"], ctx["org"], ctx["token"]
+    svc = ScimTokenService(db)
+
+    for bad in (
+        {"G": "not-a-dict"},
+        {"G": {"kind": "nonsense"}},
+        {"G": {"kind": "cohort"}},  # cohort id required
+        {"G": {"kind": "role", "role": "owner"}},  # mint ceiling
+        {"G": {"kind": "role", "role": "admin"}},  # mint ceiling
+    ):
+        with pytest.raises(AppError) as exc:
+            await svc.update_group_map(org.id, token.id, bad)
+        assert exc.value.code == "SCIM_GROUP_MAP_INVALID"
+
+    # Valid role map lands.
+    tok = await svc.update_group_map(
+        org.id, token.id, {"Students": {"kind": "role", "role": "student"}}
+    )
+    assert tok.group_map == {"Students": {"kind": "role", "role": "student"}}
+
+    # Wrong org (existence oracle): uniform 404.
+    with pytest.raises(AppError) as exc:
+        await svc.update_group_map("01FAKEORGFAKEORGFAKEORGFAK", token.id, {})
+    assert exc.value.status_code == 404
