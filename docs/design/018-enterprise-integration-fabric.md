@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R449 (sixteenth window, MUTATION — set_break_glass)**: AST-mutating the
+  break-glass designee manager (the password-bypass escape hatch under
+  enforced SSO) left 5 status-code survivors at 14/19. Added
+  test_set_break_glass_exact_status_codes pinning the EXACT code on every
+  reject: non-owner 403, member-not-found 404, cap-exceeded 422, and the
+  last-designee-while-enforced guard 409 (BREAK_GLASS_REQUIRED). Re-run 18/19
+  killed; the lone survivor is the FOR UPDATE org-lock WHERE clause whose
+  concurrency-serialization effect is unobservable in a single-threaded
+  test — equivalent.
 - **R448 (sixteenth window, MUTATION — \_apply_record field-policy core)**:
   AST-mutating the pull-direction record-apply core (field-level source-of-
   truth merge + echo suppression) left 19 survivors at 14/33. Added
