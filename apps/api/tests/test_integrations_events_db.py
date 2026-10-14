@@ -137,6 +137,23 @@ async def _drain(db, rounds=10):
     return total
 
 
+async def _isolate_intg_outbox(db):
+    """Delete pending intg outbox messages left over from OTHER suites on the
+    shared dev DB. _drain() polls the WHOLE outbox, so a leftover delivery-
+    attempt would be processed with THIS test's fake egress — consuming its
+    scripted status codes and flipping a should-exhaust delivery to
+    'succeeded' (the intermittent events-delivery battery flake)."""
+    from app.controlplane.models.outbox import OutboxMessage
+
+    await db.execute(
+        OutboxMessage.__table__.delete().where(
+            OutboxMessage.topic.in_(INTG_TOPICS),
+            OutboxMessage.status == "pending",
+        )
+    )
+    await db.commit()
+
+
 # ── matching ──
 
 
@@ -158,6 +175,7 @@ def test_event_matches_rules():
 
 @pytest.mark.asyncio
 async def test_emit_fanout_deliver_success(db, egress):
+    await _isolate_intg_outbox(db)  # shared-DB: drop other suites' pending outbox
     org = await _org(db)
     sub = await _sub(db, org)
     other = await _sub(db, org, events=["com.openskill.skill.*"])  # no match
@@ -225,6 +243,7 @@ async def test_failure_schedules_ladder_and_exhausts(db, monkeypatch):
     fake = _FakeEgress([500] * MAX_ATTEMPTS)
     monkeypatch.setattr(svc, "EgressClient", lambda: fake)
 
+    await _isolate_intg_outbox(db)  # shared-DB: leftover deliveries would eat the 500s
     org = await _org(db)
     sub = await _sub(db, org)
     event = await emit_event(db, org.id, "project.approved", data={})

@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R470 (eighteenth window, FLAKY TEST FIX — events-delivery outbox
+  isolation)**: pinned the real cause of the intermittent `make test-intg`
+  Error 1 (distinct from R462's 'pem' flake). `test_emit_fanout_deliver_success`
+  and `test_failure_schedules_ladder_and_exhausts` drive `_drain()`, which
+  polls the WHOLE shared-dev-DB outbox — so pending delivery-attempt messages
+  left by OTHER suites get processed with THIS test's fake egress, consuming
+  its scripted `[500]*MAX_ATTEMPTS` list; this test's delivery then hits the
+  fake's default 200 and reports 'succeeded' instead of 'exhausted' (and the
+  fan-out count drifts). Added `_isolate_intg_outbox(db)` (delete pending
+  intg-topic outbox rows) at the start of both tests so `_drain` processes
+  only their own work. Not a product bug — a shared-DB test-isolation defect.
 - **R469 (eighteenth window, FUZZER EXPANSION)**: added two hostile phases
   to e2e_fuzz_fabric.py (399 -> 422 requests/seed). Phase 10 hammers the
   warehouse EXPORT surface — hostile field_allowlist (data.<5k-char>, non-str,
