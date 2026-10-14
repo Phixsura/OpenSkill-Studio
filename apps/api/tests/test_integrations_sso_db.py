@@ -2348,3 +2348,30 @@ async def test_set_break_glass_exact_status_codes(db):
     with pytest.raises(AppError) as e:
         await svc.set_break_glass(org.id, m[0].id, enabled=False, actor_role=_Role.OWNER)
     assert e.value.code == "BREAK_GLASS_REQUIRED" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_oidc_callback_attribute_map_none_resolves(db):
+    """R456 (mutation-kill): OIDC handle_callback with attribute_map=None must
+    still resolve email/name via the default claim keys (kills the
+    `conn.attribute_map or {}` -> `and {}` mutant, which would make amap None
+    and crash on .get)."""
+    import app.integrations.services.sso_oidc as mod
+
+    org, conn = await _oidc_setup(db)
+    conn.attribute_map = None
+    await db.flush()
+    svc = mod.OidcService(db)
+    email = f"amnull-{uuid.uuid4().hex[:8]}@oidc.example.edu"
+
+    def factory(form):
+        return _mint_id_token(sub="am-sub", email=email, nonce=factory.nonce, aud="client-1")
+
+    svc.egress = FakeIdp(factory)
+    url = await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+    qs = parse_qs(urlsplit(url).query)
+    factory.nonce = qs["nonce"][0]
+    _, result, _ = await svc.handle_callback(
+        state_value=qs["state"][0], code="authcode", redirect_uri="https://app.test/cb"
+    )
+    assert result.user.email == email  # resolved via default "email" claim

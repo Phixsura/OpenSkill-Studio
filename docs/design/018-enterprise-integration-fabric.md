@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R456 (seventeenth window, MUTATION — OIDC handle_callback)**: AST-
+  mutating the OIDC login-verification core left 2 survivors at 4/6. Added an
+  attribute_map=None callback test (kills the `conn.attribute_map or {}` ->
+  `and {}` mutant). 5/6 killed; the lone survivor is `conn.oidc_client_id or
+""` in the token-exchange body — equivalent in the harness (the fake IdP
+  token endpoint does not validate client_id, and both None and "" are the
+  same falsy on the wire).
 - **R455 (seventeenth window, MUTATION — SAML handle_acs)**: AST-mutating
   the SAML assertion consumer (the most security-critical login path) left 6
   survivors at 12/18. Added a clock-skew grace test (a token expired by 30s
