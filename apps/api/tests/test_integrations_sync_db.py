@@ -2556,3 +2556,81 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
         },
     )
     assert c == "updated"
+
+
+@pytest.mark.asyncio
+async def test_execute_run_claim_staleness_and_connector_missing(db, monkeypatch):
+    """R454 (mutation-kill): execute_run's atomic-claim staleness window and
+    connector-missing guard. A RUNNING run with a FRESH heartbeat is a no-op
+    (redelivered message for a live worker — kills the stale-cutoff direction
+    + the running&stale condition mutants); a RUNNING run with a STALE
+    heartbeat is re-claimed and executed (crashed-worker recovery); and a
+    pull profile whose connector has no read() fails with connector_missing."""
+    from app.integrations.models import SyncRun
+    from app.integrations.services.sync_engine import execute_run
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+
+    # (1) RUNNING with a FRESH heartbeat -> execute_run no-ops (not claimed).
+    live = await SyncProfileService(db).trigger(org.id, profile.id)
+    live.status = "running"
+    live.heartbeat_at = datetime.now(UTC)  # fresh
+    await db.commit()
+    await execute_run(db, live.id)
+    await db.refresh(live)
+    assert live.status == "running"  # untouched — a live worker owns it
+    assert not live.stats.get("read")  # never executed
+
+    # (2) RUNNING with a STALE heartbeat (>10min) -> re-claimed and executed.
+    from app.integrations import registry
+
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "c1", "title": "A"}]], respect_state=False
+    )
+    live.heartbeat_at = datetime.now(UTC) - timedelta(minutes=30)
+    await db.commit()
+    await execute_run(db, live.id)
+    await db.refresh(live)
+    assert live.status in ("succeeded", "partial")  # crashed-worker recovery ran it
+
+    # (3) pull profile whose connector lacks read() -> failed(connector_missing).
+    class _NoRead:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read"})
+        # no read()/write() methods
+
+    run2 = await SyncProfileService(db).trigger(org.id, profile.id)
+    await db.commit()
+    registry.CONNECTORS["oneroster"] = _NoRead()
+    try:
+        await execute_run(db, run2.id)
+    finally:
+        registry.CONNECTORS["oneroster"] = fake
+    await db.refresh(run2)
+    assert run2.status == "failed" and run2.error["class"] == "connector_missing"
+
+    # (4) PUSH profile whose connector EXISTS but has no write() -> the push
+    # branch's connector-missing guard (distinct from the pull guard above).
+    class _NoWrite:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read", "talent.write"})
+
+        async def read(self, ctx, model, state):  # has read, lacks write
+            if False:
+                yield {}
+
+    profile.direction = "push"
+    profile.model = "talent.application"
+    await db.flush()
+    run3 = SyncRun(profile_id=profile.id, status="queued", trigger="manual")
+    db.add(run3)
+    await db.commit()
+    registry.CONNECTORS["oneroster"] = _NoWrite()
+    try:
+        await execute_run(db, run3.id)
+    finally:
+        registry.CONNECTORS["oneroster"] = fake
+    await db.refresh(run3)
+    assert run3.status == "failed" and run3.error["class"] == "connector_missing"

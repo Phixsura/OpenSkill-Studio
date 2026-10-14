@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R454 (seventeenth window, MUTATION — execute_run claim/connector)**:
+  AST-mutating the pull-engine driver left 14 survivors at 18/32. Added
+  test_execute_run_claim_staleness_and_connector_missing: a RUNNING run with
+  a FRESH heartbeat is a no-op (a live worker owns it — kills the stale-cutoff
+  direction and the status==running condition), a RUNNING run with a STALE
+  heartbeat is re-claimed (crashed-worker recovery), a pull connector lacking
+  read() and a push connector lacking write() both fail connector_missing.
+  Re-run 22/32 killed; the remaining 10 are connector-None-equivalent Or->And
+  guards, the heartbeat <=/< boundary, and read-loop internals.
 - **R453 (sixteenth window, MUTATION — connection health sweep)**: AST-
   mutating sweep_connection_health left 2 survivors — the `swept += 1`
   counter (the existing alert test only asserted `swept >= 1`, so `+= N`
