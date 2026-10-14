@@ -312,7 +312,7 @@ class CohortService:
                     data={"cohort_id": cohort_id, "user_id": user_id},
                 )
             except Exception:
-                log.warning("mesh_emit_failed", event="learner.enrolled", cohort_id=cohort_id)
+                log.warning("mesh_emit_failed", event_type="learner.enrolled", cohort_id=cohort_id)
         return member
 
     async def remove_member(self, cohort_id: str, user_id: str, org_id: str) -> None:

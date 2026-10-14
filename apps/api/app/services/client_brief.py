@@ -79,7 +79,7 @@ class ClientBriefService:
                 },
             )
         except Exception:
-            log.warning("mesh_emit_failed", event="brief.created", brief_id=brief.id)
+            log.warning("mesh_emit_failed", event_type="brief.created", brief_id=brief.id)
         return brief
 
     async def list_briefs(

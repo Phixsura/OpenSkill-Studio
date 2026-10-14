@@ -1728,7 +1728,7 @@ async def finalize_invoice(db: AsyncSession, invoice: Invoice, *, actor: Actor) 
                 data={"invoice_id": invoice.id, "tenant_id": invoice.tenant_id},
             )
     except Exception:
-        log.warning("mesh_emit_failed", event="invoice.finalized", invoice_id=invoice.id)
+        log.warning("mesh_emit_failed", event_type="invoice.finalized", invoice_id=invoice.id)
     return invoice
 
 

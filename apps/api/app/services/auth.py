@@ -555,7 +555,7 @@ class AuthService:
                 },
             )
         except Exception:
-            log.warning("mesh_emit_failed", event="org.breakglass.login", user_id=user.id)
+            log.warning("mesh_emit_failed", event_type="org.breakglass.login", user_id=user.id)
 
     async def _create_token_pair(
         self,

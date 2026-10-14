@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R466 (eighteenth window, PROJECT-WIDE BUG SWEEP + guard)**: the R465
+  structlog `event=` collision was not isolated — the identical self-defeating
+  fail-safe pattern `log.warning("mesh_emit_failed", event=..., ...)` existed
+  in 8 more sites across the wider app (billing invoice.finalized, client_portal
+  accepted + notify, auth breakglass.login, cohort learner.enrolled, skill
+  skill.completed, client_brief brief.created, project project.approved) —
+  every one a mesh-emit except arm that would TypeError-crash instead of
+  swallowing. Fixed all 8 (event= -> event_type=). Added a project-wide guard
+  test that scans the whole app/ tree and fails on any `log.<level>("...",
+... event=...)` collision, so it cannot regress anywhere.
 - **R465 (eighteenth window, REAL BUG — fail-safe arm crashes on structlog
   collision)**: covering the best-effort mesh-emit arms of `_finish` (sync
   completion event) and `ScimUserService._audit` (deprovision/reactivate)

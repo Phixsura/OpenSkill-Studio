@@ -1140,7 +1140,7 @@ class ProjectService:
                     },
                 )
             except Exception:
-                log.warning("mesh_emit_failed", event="project.approved", submission_id=sub.id)
+                log.warning("mesh_emit_failed", event_type="project.approved", submission_id=sub.id)
         elif review_status == ReviewStatus.REVISION_REQUESTED:
             sub.status = SubmissionStatus.REVISION_REQUESTED
             # Clear any score from a prior approval — the work is being redone,

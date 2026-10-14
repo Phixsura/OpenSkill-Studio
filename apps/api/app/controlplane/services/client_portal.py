@@ -464,7 +464,7 @@ async def final_accept(
             },
         )
     except Exception:
-        log.warning("mesh_emit_failed", event="client.accepted", submission_id=submission.id)
+        log.warning("mesh_emit_failed", event_type="client.accepted", submission_id=submission.id)
     return record
 
 
@@ -509,4 +509,4 @@ async def _notify_org(
                 data={"project_id": submission.project_id, "submission_id": submission.id},
             )
     except Exception:  # noqa: BLE001 — notifications must never fail the decision
-        log.warning("cp_portal_notify_failed", event=event, exc_info=True)
+        log.warning("cp_portal_notify_failed", event_type=event, exc_info=True)

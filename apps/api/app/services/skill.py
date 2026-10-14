@@ -859,7 +859,7 @@ class SkillService:
                     data={"skill_id": skill_id, "user_id": user_id},
                 )
             except Exception:
-                log.warning("mesh_emit_failed", event="skill.completed", skill_id=skill_id)
+                log.warning("mesh_emit_failed", event_type="skill.completed", skill_id=skill_id)
             try:
                 from app.services.gamification import POINTS_SKILL_COMPLETION, GamificationService
 

@@ -1516,3 +1516,32 @@ def test_parse_users_json_header_map_inversion_and_nondict_rows():
     assert rows[0]["display_name"] == "Ada"  # stripped
     # the non-dict row failed validation (empty -> invalid_email), not crashed.
     assert any(e["row_number"] == 2 and e["code"] == "invalid_email" for e in errors)
+
+
+def test_no_structlog_event_kwarg_collision_anywhere():
+    """R466 (regression guard, project-wide): structlog binds the FIRST
+    positional arg of log.<level>(...) as the reserved `event` field, so ALSO
+    passing `event=` raises TypeError at call time — which silently turns a
+    best-effort except arm into a crash (R465). Guard the whole app tree so no
+    `log.<level>("msg", ... event=...)` collision can creep back in."""
+    import pathlib
+    import re
+
+    app_root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    # log.<level>("literal message", ... event=... ) — the first positional is
+    # a string literal (the event name), so a trailing event= kwarg collides.
+    pattern = re.compile(
+        r"""log\.(?:warning|info|error|debug|exception|critical)\(\s*["'][^"']*["']"""
+        r"""[^)]*?\bevent\s*=""",
+        re.DOTALL,
+    )
+    offenders = []
+    for path in app_root.rglob("*.py"):
+        text = path.read_text()
+        for m in pattern.finditer(text):
+            # event_type=/event_id= etc. are fine — only a bare `event=` collides.
+            tail = text[m.end() - 6 : m.end() + 1]
+            if re.search(r"\bevent\s*=", tail) and "event_type" not in tail and "event_id" not in tail:
+                line = text[: m.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(app_root.parent)}:{line}")
+    assert not offenders, "structlog event= collision(s): " + ", ".join(offenders)
