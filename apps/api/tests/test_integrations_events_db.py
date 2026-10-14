@@ -1396,3 +1396,33 @@ async def test_handle_event_created_missing_event_and_ags_hook_failsafe(db, monk
         .all()
     )
     assert len(deliveries) == 1  # fan-out happened despite the AGS failure
+
+
+@pytest.mark.asyncio
+async def test_delivery_http_success_range_boundaries(db, monkeypatch):
+    """R459 (mutation-kill): the delivery success classifier is exactly
+    [200, 300). 200 and 299 succeed; 199 and 300 do NOT (they retry). Pins
+    the 200<=status<300 boundaries that the 500/200 happy/fail tests left
+    unasserted at the edges."""
+    from app.integrations.services import events as svc
+    from app.integrations.services.events import handle_delivery_attempt
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+
+    async def attempt_with(code):
+        event = await emit_event(db, org.id, "project.approved", data={})
+        await db.flush()
+        d = EventDelivery(event_id=event.id, subscription_id=sub.id, status="pending")
+        db.add(d)
+        await db.flush()
+        monkeypatch.setattr(svc, "EgressClient", lambda: _FakeEgress([code]))
+        await handle_delivery_attempt(db, {"delivery_id": d.id})
+        # read the live in-session object (the handler mutates status without
+        # committing — a refresh would revert to the pre-flush DB value)
+        return d.status
+
+    assert await attempt_with(200) == "succeeded"
+    assert await attempt_with(299) == "succeeded"  # top of the 2xx range
+    assert await attempt_with(300) != "succeeded"  # 3xx is a failure -> retry
+    assert await attempt_with(199) != "succeeded"  # below 2xx -> retry

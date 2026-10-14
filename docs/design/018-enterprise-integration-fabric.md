@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R459 (seventeenth window, MUTATION — webhook delivery classifier)**:
+  AST-mutating handle_delivery_attempt (with the retry-ladder + 410-gone
+  tests included) left the HTTP success-range classifier unpinned at the
+  edges. Added a boundary test: 200 and 299 succeed, 199 and 300 retry —
+  killing the status-setting `200 <= status < 300` boundary mutants (correct
+  success/failure classification is what decides retry vs done). The
+  remaining survivors are string-slice caps ([:2000]/[:500]/[:200] on
+  snippet/error, cosmetic) and the snippet-capture range (diagnostic-only,
+  and equivalent under the fake egress which returns empty bodies for 2xx/3xx).
 - **R458 (seventeenth window, PROPERTY — import validators + mappers)**:
   hypothesis totality proofs on two more untrusted-input surfaces. The three
   bulk-import row validators (user/roster/opportunity) are TOTAL over
