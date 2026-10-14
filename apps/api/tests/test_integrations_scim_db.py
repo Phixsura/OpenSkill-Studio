@@ -1430,3 +1430,29 @@ async def test_scim_create_replace_tolerate_nondict_name(ctx):
         res["id"], {"userName": email, "name": "ignored-string", "displayName": "Real Name"}
     )
     assert out["displayName"] == "Real Name"
+
+
+@pytest.mark.asyncio
+async def test_scim_group_create_tolerates_malformed_members(ctx):
+    """R474 (R471 class): group create must tolerate a malformed `members`
+    attribute — a non-list, or non-dict entries (buggy IdP) — never crash with
+    AttributeError. Only {value: <str>} entries become members."""
+    gsvc, usvc = _gsvc(ctx), _usvc(ctx)
+    u, _ = await usvc.create({"userName": f"gm-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+
+    # members as a bare string -> no crash, no members.
+    g1 = await gsvc.create({"displayName": f"G1-{uuid.uuid4().hex[:6]}", "members": "nope"})
+    assert {mm["value"] for mm in g1.get("members", [])} == set()
+
+    # members with non-dict entries mixed with a valid one -> only the valid.
+    g2 = await gsvc.create(
+        {
+            "displayName": f"G2-{uuid.uuid4().hex[:6]}",
+            "members": ["string", 42, True, None, {"value": u["id"]}, {"novalue": 1}],
+        }
+    )
+    assert {mm["value"] for mm in g2.get("members", [])} == {u["id"]}
+
+    # members as an int -> no crash.
+    g3 = await gsvc.create({"displayName": f"G3-{uuid.uuid4().hex[:6]}", "members": 99})
+    assert {mm["value"] for mm in g3.get("members", [])} == set()

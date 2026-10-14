@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R474 (nineteenth window, REAL BUG — SCIM group create crash on malformed
+  members)**: group create looped `for m in (payload.get('members') or []):
+(m or {}).get('value')` — unguarded, unlike replace/PATCH (R425). A buggy
+  IdP sending `members: ['x']` / `[42]` (non-dict entries) crashes with
+  AttributeError; `members: 'x'` (a string) iterates characters. Fix: coerce
+  non-list members to [], keep only dict entries with a string value (matching
+  the replace path). Regression covers members as string/int and mixed
+  non-dict entries.
 - **R473 (nineteenth window, REAL BUG — SCIM create/replace crash on
   non-dict name)**: continuing the R471-class sweep, SCIM user create (L478)
   and replace (L563) both did `(payload.get('name') or {}).get('formatted')`

@@ -791,12 +791,17 @@ class ScimGroupService:
                 await self.db.flush()
         except IntegrityError as exc:
             raise ScimError(409, "Group already exists", "uniqueness") from exc
-        initial = payload.get("members") or []
-        added = []
-        for m in initial:
-            uid = (m or {}).get("value")
-            if isinstance(uid, str):
-                added.append(uid)
+        # R474 (R471 class): members may arrive malformed (a non-list, or
+        # non-dict entries) from a buggy IdP — only dict entries with a string
+        # value are members; never crash on members=["x"] or members="x".
+        initial = payload.get("members")
+        if not isinstance(initial, list):
+            initial = []
+        added = [
+            m["value"]
+            for m in initial
+            if isinstance(m, dict) and isinstance(m.get("value"), str)
+        ]
         if added:
             await self._apply_member_delta(group, add=added, remove=[])
         return _group_resource(group, await self._member_ids(group.id))
