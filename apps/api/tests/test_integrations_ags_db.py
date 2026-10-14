@@ -168,8 +168,13 @@ async def test_tool_key_singleton_and_jwks(db):
     jwks = await tool_jwks(db)
     assert jwks["keys"][0]["kid"] == k1.kid
     assert jwks["keys"][0]["kty"] == "RSA"
-    # private pem never in the public row
-    assert "pem" not in json.dumps(jwks)
+    # R462: no private material in the published JWKS. The old check was
+    # `"pem" not in json.dumps(jwks)` — a substring scan that FLAKES because a
+    # base64 RSA modulus ("n") can contain "pem" by chance. Assert by FIELD
+    # instead: no RSA private params and no stray "pem"/"d" key on any JWK.
+    private_jwk_fields = {"d", "p", "q", "dp", "dq", "qi", "pem", "private_pem_ct"}
+    for jwk in jwks["keys"]:
+        assert private_jwk_fields.isdisjoint(jwk), f"private material in JWK: {set(jwk)}"
     stored = (await db.execute(select(LtiToolKey))).scalars().first()
     assert "BEGIN PRIVATE KEY" not in stored.private_pem_ct  # encrypted
 

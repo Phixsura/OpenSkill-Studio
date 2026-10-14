@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R462 (seventeenth window, FLAKY TEST FIX — JWKS leak check)**:
+  test_tool_key_singleton_and_jwks asserted `"pem" not in json.dumps(jwks)`
+  — a SUBSTRING scan that flakes whenever the active key's base64 RSA modulus
+  ("n") happens to contain the three letters "pem" (the base64 alphabet
+  includes p/e/m). It surfaced as an intermittent single-process battery
+  failure. Verified it is a FALSE POSITIVE (the published JWK carries only
+  kty/kid/alg/use/e/n/key_ops — no private material). Replaced with a
+  field-level check: no JWK may carry any RSA private param (d/p/q/dp/dq/qi)
+  or a pem/private_pem_ct key. Not a leak — a weak assertion hardened.
 - **R460/R461 (seventeenth window, MUTATION — AGS grade return)**: AST-
   mutating push_score + handle_gradeable_event (the grade write-back to the
   LMS) left 5 survivors at 19/24. R460: push_score's AGS success classifier
