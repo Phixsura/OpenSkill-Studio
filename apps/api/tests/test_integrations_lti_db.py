@@ -201,6 +201,10 @@ async def test_launch_rejection_vectors(db):
         with pytest.raises(AppError) as e:
             await svc.handle_launch(state_value=state, id_token=token)
         assert e.value.code == code
+        # R457: every launch reject is a 401 (kills the deployment-unknown and
+        # other status-code mutants; a launch failure must never leak as a 4xx
+        # that an IdP retries differently).
+        assert e.value.status_code == 401
 
     await expect_reject(nonce="echoed-from-captured-token")  # nonce mismatch
     await expect_reject(aud="other-tool")  # audience

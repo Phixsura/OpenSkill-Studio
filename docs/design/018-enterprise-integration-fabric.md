@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R457 (seventeenth window, MUTATION — LTI handle_launch)**: AST-mutating
+  the LTI launch verifier left 7 survivors at 17/24. Hardened the
+  rejection-matrix helper to also assert status_code == 401 on every launch
+  reject (nonce/aud/issuer/expired/version/type/azp/deployment-unknown/alg) —
+  killing the deployment-unknown 401->402 mutant and pinning that a launch
+  failure never leaks as a differently-retriable 4xx. 18/24 killed; the
+  remaining 6 are the AGS/NRPS URL and log-string truncation caps
+  ([:500]/[:100], cosmetic) and the resource-link/NRPS claim-capture And/Or
+  guards (side-effect-only, low value).
 - **R456 (seventeenth window, MUTATION — OIDC handle_callback)**: AST-
   mutating the OIDC login-verification core left 2 survivors at 4/6. Added an
   attribute_map=None callback test (kills the `conn.attribute_map or {}` ->
