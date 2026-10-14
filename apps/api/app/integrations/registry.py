@@ -256,6 +256,21 @@ class GenericAtsConnector:
         return [{"external_id": r.get("external_id"), "ok": ok, "error": error} for r in records]
 
 
+def _sourced_id(ref: object) -> str | None:
+    """R471: extract sourcedId from a OneRoster reference tolerantly — a
+    hostile/malformed payload may send a non-dict where a {sourcedId: ...}
+    object is expected; never crash the mapper (the read would 500)."""
+    return ref.get("sourcedId") if isinstance(ref, dict) else None
+
+
+def _first_sourced_id(refs: object) -> str | None:
+    """R471: first sourcedId of a reference LIST, tolerant of a non-list or a
+    non-dict first element."""
+    if isinstance(refs, list) and refs:
+        return _sourced_id(refs[0])
+    return None
+
+
 class OneRosterConnector:
     """OneRoster 1.2 Rostering consumer (pull-only; the REST binding permits
     reading only — S3.2). OAuth2 client-credentials, offset pagination.
@@ -329,17 +344,17 @@ class OneRosterConnector:
                 {
                     "title": item.get("title"),
                     "course_code": item.get("classCode"),
-                    "term_external_id": ((item.get("terms") or [{}])[0] or {}).get("sourcedId"),
-                    "school_external_id": (item.get("school") or {}).get("sourcedId"),
-                    "subjects": item.get("subjects") or [],
-                    "grades": item.get("grades") or [],
+                    "term_external_id": _first_sourced_id(item.get("terms")),
+                    "school_external_id": _sourced_id(item.get("school")),
+                    "subjects": item.get("subjects") if isinstance(item.get("subjects"), list) else [],
+                    "grades": item.get("grades") if isinstance(item.get("grades"), list) else [],
                 }
             )
         elif model == "roster.enrollment":
             out.update(
                 {
-                    "class_external_id": (item.get("class") or {}).get("sourcedId"),
-                    "user_external_id": (item.get("user") or {}).get("sourcedId"),
+                    "class_external_id": _sourced_id(item.get("class")),
+                    "user_external_id": _sourced_id(item.get("user")),
                     "role": item.get("role"),
                     "begin_date": item.get("beginDate"),
                     "end_date": item.get("endDate"),

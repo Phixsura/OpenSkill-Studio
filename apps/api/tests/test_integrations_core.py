@@ -1556,3 +1556,33 @@ def test_validate_egress_url_unparseable_is_blocked():
     for bad in ("http://[invalid", "http://[::1", "https://[::"):
         with pytest.raises(EgressBlockedError):
             validate_egress_url(bad)
+
+
+def test_oneroster_map_record_tolerates_malformed_references():
+    """R471 (regression): OneRosterConnector._map_record must not crash on a
+    hostile/malformed payload where terms/school/class/user are the wrong type
+    (a OneRoster server bug or an attacker). Found by the R458 property test:
+    terms=True -> True[0] TypeError; terms=[True] -> True.get() AttributeError."""
+    from app.integrations.registry import OneRosterConnector
+
+    m = OneRosterConnector._map_record
+
+    # roster.class: terms as a bool / list-of-bool / string; school as a string.
+    for terms in (True, [True], "nope", 42, {"sourcedId": "x"}, [None]):
+        out = m("roster.class", {"sourcedId": "c", "terms": terms, "school": "notdict"})
+        assert out["external_id"] == "c"
+        assert out["term_external_id"] is None or isinstance(out["term_external_id"], str)
+        assert out["school_external_id"] is None
+    # a proper terms list still resolves.
+    assert m("roster.class", {"terms": [{"sourcedId": "t1"}]})["term_external_id"] == "t1"
+    # subjects/grades as non-lists degrade to [].
+    bad = m("roster.class", {"subjects": "math", "grades": 9})
+    assert bad["subjects"] == [] and bad["grades"] == []
+
+    # roster.enrollment: class/user as wrong types -> None, no crash.
+    for ref in (True, "x", 1, [], {"sourcedId": "u"}):
+        out = m("roster.enrollment", {"class": ref, "user": ref})
+        cx, ux = out["class_external_id"], out["user_external_id"]
+        assert cx is None or isinstance(cx, str)
+        assert ux is None or isinstance(ux, str)
+    assert m("roster.enrollment", {"user": {"sourcedId": "u9"}})["user_external_id"] == "u9"

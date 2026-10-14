@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R471 (eighteenth window, REAL BUG — OneRoster mapper crashes on
+  malformed references)**: the R458 property test (Hypothesis) found it on a
+  later random seed (the real cause of the 'intermittent' property-test
+  battery failure). `OneRosterConnector._map_record` for roster.class/
+  enrollment did `((item.get('terms') or [{}])[0] or {}).get('sourcedId')` and
+  `(item.get('class') or {}).get('sourcedId')` — assuming terms is a list of
+  dicts and school/class/user are dicts. A hostile/buggy OneRoster payload
+  with `terms=True` (-> True[0] TypeError), `terms=[True]` (-> True.get()
+  AttributeError) or a non-dict class/user/school CRASHES the mapper, which
+  would 500 the sync read mid-pull. Fix: `_sourced_id`/`_first_sourced_id`
+  helpers tolerant of any type (dict-or-None, list-or-None), and subjects/
+  grades coerced to [] unless a real list. Deterministic regression test +
+  the property test (3 seeds) confirm totality.
 - **R470 (eighteenth window, FLAKY TEST FIX — events-delivery outbox
   isolation)**: pinned the real cause of the intermittent `make test-intg`
   Error 1 (distinct from R462's 'pem' flake). `test_emit_fanout_deliver_success`
