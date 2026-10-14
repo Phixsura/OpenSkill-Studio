@@ -1337,3 +1337,26 @@ def test_import_row_count_capped():
     ok_body = ("email\n" + "\n".join(f"k{i}@x.example.edu" for i in range(1000))).encode()
     rows, errors = parse_users(ok_body, "csv")
     assert len(rows) == 1000 and errors == []
+
+
+@pytest.mark.asyncio
+async def test_create_job_bad_mode_and_oversized_header_map(db):
+    """R468: create_job validation arms — an invalid mode -> 422, and a
+    header_map with >20 entries -> 422 (never reaches parsing)."""
+    org, owner = await _org(db)
+    svc = BulkImportService(db)
+
+    with pytest.raises(AppError) as e:
+        await svc.create_job(
+            org.id, kind="users", mode="sideways", file_bytes=b"email\n",
+            file_key="k", created_by=owner.id, idempotency_key=f"m-{uuid.uuid4()}",
+        )
+    assert e.value.code == "IMPORT_MODE_INVALID"
+
+    with pytest.raises(AppError) as e:
+        await svc.create_job(
+            org.id, kind="users", mode="partial", file_bytes=b"email\n",
+            file_key="k", created_by=owner.id, idempotency_key=f"h-{uuid.uuid4()}",
+            header_map={f"k{i}": f"v{i}" for i in range(21)},
+        )
+    assert e.value.code == "IMPORT_HEADER_MAP_INVALID"

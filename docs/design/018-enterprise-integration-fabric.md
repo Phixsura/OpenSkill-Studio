@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R468 (eighteenth window, create-path validation arms)**: shipped
+  create-path validators. create_job: invalid mode -> 422, header_map with
+  > 20 entries -> 422. create_stream: invalid schedule -> 422, duplicate
+  > (org, name) -> 409 EXPORT_NAME_TAKEN (savepoint-guarded, no 500).
 - **R467 (eighteenth window, except-arm coverage)**: after an except-arm
   sweep (the R465 lesson — rarely-run except arms hide crashes) confirmed the
   remaining 33 uncovered except arms are all clean (mapped raises / pass /

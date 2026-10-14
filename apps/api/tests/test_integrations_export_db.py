@@ -696,3 +696,23 @@ async def test_sweep_naive_last_run_coerced_and_apperror_skipped(db, monkeypatch
     runs_ok = await svc.list_runs(org.id, s_ok.id)
     assert any(r.status == "succeeded" and r.created_at > datetime.now(UTC) - timedelta(minutes=5)
                for r in runs_ok)
+
+
+@pytest.mark.asyncio
+async def test_create_stream_bad_schedule_and_duplicate_name(db):
+    """R468: create_stream validation arms — an invalid schedule -> 422, and a
+    duplicate (org, name) -> 409 EXPORT_NAME_TAKEN (savepoint-guarded, no 500)."""
+    org, owner = await _org(db)
+    svc = WarehouseExportService(db, writer=MemWriter())
+
+    with pytest.raises(AppError) as e:
+        await svc.create_stream(
+            org.id, name=f"s-{ULID()}", dataset="events", schedule="fortnightly"
+        )
+    assert e.value.code == "EXPORT_CONFIG_INVALID"
+
+    name = f"dup-{ULID()}"
+    await svc.create_stream(org.id, name=name, dataset="events")
+    with pytest.raises(AppError) as e:
+        await svc.create_stream(org.id, name=name, dataset="events")
+    assert e.value.code == "EXPORT_NAME_TAKEN" and e.value.status_code == 409
