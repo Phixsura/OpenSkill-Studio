@@ -256,6 +256,18 @@ class GenericAtsConnector:
         return [{"external_id": r.get("external_id"), "ok": ok, "error": error} for r in records]
 
 
+def _json_obj(resp) -> dict:
+    """R475: parse a connector HTTP response body as a JSON object, tolerantly.
+    A buggy/malicious SIS or CRM may return a top-level JSON array/scalar or a
+    non-JSON body; `resp.json().get(...)` would then crash the sync read with
+    AttributeError/JSONDecodeError. Return {} for any non-object body."""
+    try:
+        body = resp.json()
+    except Exception:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 def _sourced_id(ref: object) -> str | None:
     """R471: extract sourcedId from a OneRoster reference tolerantly — a
     hostile/malformed payload may send a non-dict where a {sourcedId: ...}
@@ -319,7 +331,7 @@ class OneRosterConnector:
         )
         if resp.status_code != 200:
             raise AppError("CONNECTION_AUTH_REJECTED", "OneRoster token refused", 422)
-        token = resp.json().get("access_token", "")
+        token = _json_obj(resp).get("access_token", "")
         if not token:
             raise AppError("CONNECTION_AUTH_REJECTED", "No access_token in response", 422)
         return token
@@ -401,7 +413,7 @@ class OneRosterConnector:
                 raise AppError("CONNECTION_AUTH_REJECTED", "OneRoster 401", 422)
             if resp.status_code != 200:
                 raise AppError("CONNECTION_PING_FAILED", f"OneRoster {resp.status_code}", 422)
-            items = resp.json().get(collection_key, []) or []
+            items = _json_obj(resp).get(collection_key, []) or []
             records = [self._map_record(model, i) for i in items if isinstance(i, dict)]
             offset += len(items)
             last_page = len(items) < page_size
@@ -488,7 +500,7 @@ class GenericCrmConnector:
                 raise AppError("CONNECTION_AUTH_REJECTED", f"CRM {resp.status_code}", 422)
             if resp.status_code != 200:
                 raise AppError("CONNECTION_PING_FAILED", f"CRM {resp.status_code}", 422)
-            items = resp.json().get(collection_key, []) or []
+            items = _json_obj(resp).get(collection_key, []) or []
             records = [self._map_record(model, i) for i in items if isinstance(i, dict)]
             offset += len(items)
             last_page = len(items) < page_size

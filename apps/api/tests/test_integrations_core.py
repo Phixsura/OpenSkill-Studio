@@ -1586,3 +1586,54 @@ def test_oneroster_map_record_tolerates_malformed_references():
         assert cx is None or isinstance(cx, str)
         assert ux is None or isinstance(ux, str)
     assert m("roster.enrollment", {"user": {"sourcedId": "u9"}})["user_external_id"] == "u9"
+
+
+@pytest.mark.asyncio
+async def test_oneroster_read_tolerates_nonobject_response_body():
+    """R475: a buggy/malicious SIS may return a top-level JSON ARRAY (or a
+    non-JSON body) where OneRoster mandates {collection: [...]}. read() must
+    not crash with AttributeError on resp.json().get(...) — it yields an empty
+    batch instead of 500ing the sync mid-pull."""
+    import httpx
+
+    from app.integrations.registry import ConnCtx, OneRosterConnector
+
+    class _Egress:
+        def __init__(self, collection_body):
+            self.collection_body = collection_body
+
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            req = httpx.Request(method, url)
+            if url.endswith("/token"):
+                return httpx.Response(200, json={"access_token": "t"}, request=req)
+            return self.collection_body(req)
+
+    async def run(collection_body):
+        ctx = ConnCtx(
+            connection_id="c-test",
+            config={"token_url": "https://sis.example.com/token", "page_size": 100},
+            base_url="https://sis.example.com/ims/oneroster/v1p2",
+            egress=_Egress(collection_body),
+        )
+        batches = []
+        async for b in OneRosterConnector().read(ctx, "roster.user", {}):
+            batches.append(b)
+        return batches
+
+    # Top-level JSON array instead of {"users": [...]} -> empty, no crash.
+    out = await run(lambda r: httpx.Response(200, json=[{"sourcedId": "u1"}], request=r))
+    assert out and all(b["records"] == [] for b in out)
+
+    # Top-level JSON scalar -> empty, no crash.
+    out = await run(lambda r: httpx.Response(200, json="nope", request=r))
+    assert all(b["records"] == [] for b in out)
+
+    # Non-JSON body -> empty, no crash.
+    out = await run(lambda r: httpx.Response(200, text="<html>not json</html>", request=r))
+    assert all(b["records"] == [] for b in out)
+
+    # Proper shape still maps.
+    out = await run(
+        lambda r: httpx.Response(200, json={"users": [{"sourcedId": "u1", "email": "a@x.com"}]}, request=r)
+    )
+    assert out[0]["records"][0]["external_id"] == "u1"

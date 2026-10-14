@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R475 (nineteenth window, REAL BUG — connector read() crash on non-object
+  response)**: OneRoster & CRM `read()` (and the OAuth token step) did
+  `resp.json().get(collection_key, [])` — a buggy/malicious SIS/CRM returning
+  a top-level JSON ARRAY/scalar (or a non-JSON body) makes `resp.json()` a
+  list/str and `.get()` raise AttributeError (or JSONDecodeError), 500ing the
+  sync read mid-pull. Added `_json_obj(resp)` (parse tolerantly; {} for any
+  non-object or unparseable body) at all 3 sites. Token step degrades to a
+  clean CONNECTION_AUTH_REJECTED; collection reads yield an empty batch.
+  Regression drives the real OneRosterConnector.read with array/scalar/
+  non-JSON bodies.
 - **R474 (nineteenth window, REAL BUG — SCIM group create crash on malformed
   members)**: group create looped `for m in (payload.get('members') or []):
 (m or {}).get('value')` — unguarded, unlike replace/PATCH (R425). A buggy
