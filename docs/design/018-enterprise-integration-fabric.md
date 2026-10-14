@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R458 (seventeenth window, PROPERTY — import validators + mappers)**:
+  hypothesis totality proofs on two more untrusted-input surfaces. The three
+  bulk-import row validators (user/roster/opportunity) are TOTAL over
+  arbitrary (row_number, dict) inputs — never raise, and every error carries
+  the full envelope with all raw_row values stringified (no dict/list reaches
+  JSONB, R87 class). The OneRoster and generic-CRM `_map_record` mappers are
+  TOTAL over arbitrary provider JSON (a degenerate record becomes a dict with
+  a stringified external_id, never a crash).
 - **R457 (seventeenth window, MUTATION — LTI handle_launch)**: AST-mutating
   the LTI launch verifier left 7 survivors at 17/24. Hardened the
   rejection-matrix helper to also assert status_code == 401 on every launch

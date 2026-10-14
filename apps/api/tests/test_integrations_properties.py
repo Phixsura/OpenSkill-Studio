@@ -438,3 +438,49 @@ def test_webhook_sign_payload_total_and_deterministic(body, secret, ts):
     s2 = sign_payload(secret, "evt_1", ts, body)
     assert s1 == s2
     assert isinstance(s1, str) and s1.startswith("v1,") and len(s1) > 4
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.integers(min_value=1, max_value=10_000),
+            st.dictionaries(st.text(max_size=12), json_values, max_size=6),
+        ),
+        max_size=6,
+    )
+)
+def test_bulk_import_row_validators_total(rows):
+    """R458: the three bulk-import row validators are TOTAL over arbitrary
+    (row_number, dict) inputs — untrusted import data must never raise (R87
+    class). Each returns (clean_rows, errors) where every error carries the
+    full envelope (row_number/column/code/message/raw_row)."""
+    from app.integrations.services.bulk_import import (
+        _validate_opportunity_rows,
+        _validate_roster_rows,
+        _validate_user_rows,
+    )
+
+    for fn in (_validate_user_rows, _validate_roster_rows, _validate_opportunity_rows):
+        clean, errors = fn(list(rows))
+        assert isinstance(clean, list) and isinstance(errors, list)
+        for e in errors:
+            assert {"row_number", "column", "code", "message", "raw_row"} <= set(e)
+            # raw_row values are all truncated strings (never a dict/list reaching JSONB)
+            assert all(isinstance(v, str) for v in e["raw_row"].values())
+
+
+@settings(max_examples=200, deadline=None)
+@given(item=st.dictionaries(st.text(max_size=12), json_values, max_size=6))
+def test_connector_map_record_total(item):
+    """R458: the OneRoster and generic-CRM canonical mappers are TOTAL over
+    arbitrary provider JSON objects — a hostile/degenerate record must never
+    raise (it becomes a dict with a stringified external_id)."""
+    from app.integrations.registry import GenericCrmConnector, OneRosterConnector
+
+    for model in ("roster.term", "roster.class", "roster.enrollment", "roster.user"):
+        out = OneRosterConnector._map_record(model, dict(item))
+        assert isinstance(out, dict) and isinstance(out["external_id"], str)
+    for model in ("crm.account", "crm.contact", "crm.deal"):
+        out = GenericCrmConnector._map_record(model, dict(item))
+        assert isinstance(out, dict) and isinstance(out["external_id"], str)
