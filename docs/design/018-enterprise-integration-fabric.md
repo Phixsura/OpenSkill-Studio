@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R464 (eighteenth window, coverage — \_apply_record fallback SELECT)**:
+  the one remaining uncovered line in _apply_record (the staged_map=None
+  fallback point-SELECT) — the batched execute_run always passes a prefetch
+  map, and R448's test passed `{}` (which is 'not None'), so the direct-caller
+  fallback never ran. Added a staged_map=None call: no existing row -> created
+  via the fallback SELECT; a second call finds the row it just made ->
+  unchanged. Same fallback-path gap-class as R463.
 - **R463 (eighteenth window, MUTATION — roster user resolution)**: AST-
   mutating RosterProvisioningService._resolve_user (SIS enrollment -> cohort
   member) left 7/9 survivors — the FALLBACK point-SELECT path (used by direct

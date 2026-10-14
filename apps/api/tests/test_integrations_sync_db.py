@@ -2634,3 +2634,44 @@ async def test_execute_run_claim_staleness_and_connector_missing(db, monkeypatch
         registry.CONNECTORS["oneroster"] = fake
     await db.refresh(run3)
     assert run3.status == "failed" and run3.error["class"] == "connector_missing"
+
+
+@pytest.mark.asyncio
+async def test_apply_record_staged_map_none_fallback_select(db):
+    """R464: _apply_record's staged_map=None fallback point-SELECT (line 713) —
+    the direct-caller path the batched execute_run never takes (it always
+    passes a prefetch map). With no prefetch map and no existing staged row,
+    the fallback SELECT finds nothing and the record is created; a second call
+    (still no map) finds the row it just made and reports unchanged."""
+    from app.integrations.models import StagedRecord, SyncRun
+    from app.integrations.services import sync_engine as se
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "fb1", "title": "A"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run)
+    await db.flush()
+
+    raw = {"external_id": "fb1", "title": "A"}
+    # First call: staged_map=None -> fallback SELECT finds nothing -> created.
+    counter, _ = await se._apply_record(
+        db, run, profile, conn, None, dict(raw), set(), staged_map=None
+    )
+    assert counter == "created"
+    await db.flush()
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "fb1"
+            )
+        )
+    ).scalar_one()
+    assert staged is not None
+
+    # Second call: still no map -> fallback SELECT finds the existing row ->
+    # identical payload -> unchanged.
+    counter2, _ = await se._apply_record(
+        db, run, profile, conn, None, dict(raw), set(), staged_map=None
+    )
+    assert counter2 == "unchanged"
