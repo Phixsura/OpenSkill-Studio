@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R463 (eighteenth window, MUTATION — roster user resolution)**: AST-
+  mutating RosterProvisioningService._resolve_user (SIS enrollment -> cohort
+  member) left 7/9 survivors — the FALLBACK point-SELECT path (used by direct
+  callers when links_map/users_map are None) was unasserted because batched
+  provision() always passes prefetch maps (R220). Added a direct-call test
+  forcing the fallback: the roster.user lookup matches on EXACTLY
+  (connection_id, model, external_id, status=='active') — wrong connection /
+  tombstoned / wrong-model / missing-email all yield an ambiguous no_email
+  conflict — and the JIT-created user carries the payload display_name
+  (killing the `(payload or {}).get(...) or '' or None` default chain). 9/9
+  killed.
 - **R462 (seventeenth window, FLAKY TEST FIX — JWKS leak check)**:
   test_tool_key_singleton_and_jwks asserted `"pem" not in json.dumps(jwks)`
   — a SUBSTRING scan that flakes whenever the active key's base64 RSA modulus

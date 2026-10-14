@@ -810,3 +810,80 @@ async def test_invalid_unenroll_policy_rejected(db):
             org.id, conn.id, actor_id=owner.id, options={"on_unenroll": "archive"}
         )
     assert e.value.code == "ROSTER_OPTIONS_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_resolve_user_fallback_point_select_arms(db):
+    """R463 (mutation-kill): _resolve_user's FALLBACK point-SELECT path (used
+    by direct callers when links_map/users_map are None — the batched
+    provision() always passes maps, so this path was unasserted). Pins that
+    the roster.user lookup matches on EXACTLY (connection_id, model,
+    external_id, status=='active') and that a missing/blank email -> ambiguous
+    no_email conflict."""
+    from app.integrations.models import StagedRecord
+    from app.integrations.services.roster import RosterProvisioningService
+
+    org, owner = await _org(db)
+    await _domain(db, org, "sch-fb.example.edu")
+    conn = await _conn(db, org, owner)
+    conn2 = await _conn(db, org, owner)  # a different connection
+
+    # The enrollment record (only its external_id is used for conflict rows).
+    _stage(db, conn, "roster.enrollment", "e-1", {"user_external_id": "u-ok"})
+    await db.flush()
+    rec = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "e-1"
+            )
+        )
+    ).scalar_one()
+
+    svc = RosterProvisioningService(db)
+
+    async def resolve(user_ext):
+        report = {"conflicts": 0}
+        uid = await svc._resolve_user(
+            org.id, conn.id, user_ext, True, None, rec, report,
+            links_map=None, users_map=None,  # force the fallback point-SELECTs
+        )
+        return uid, report["conflicts"]
+
+    # Matching ACTIVE roster.user with a verified-domain email -> resolves,
+    # and the JIT-created user carries the payload display_name (kills the
+    # `(payload or {}).get("display_name") or "" or None` default-chain mutants).
+    _stage(
+        db, conn, "roster.user", "u-ok",
+        {"email": "kid@sch-fb.example.edu", "display_name": "Roster Kid"},
+    )
+    await db.flush()
+    uid, conflicts = await resolve("u-ok")
+    assert uid is not None and conflicts == 0
+    created = await db.get(User, uid)
+    assert created is not None and created.display_name == "Roster Kid"
+
+    # Same external_id but staged under a DIFFERENT connection -> the
+    # connection_id filter misses -> no_email conflict (kills that == mutant).
+    _stage(db, conn2, "roster.user", "u-otherconn", {"email": "x@sch-fb.example.edu"})
+    await db.flush()
+    uid, conflicts = await resolve("u-otherconn")
+    assert uid is None and conflicts == 1
+
+    # A TOMBSTONED roster.user -> the status=='active' filter misses -> no_email.
+    _stage(db, conn, "roster.user", "u-dead", {"email": "d@sch-fb.example.edu"}, status="tombstoned")
+    await db.flush()
+    uid, conflicts = await resolve("u-dead")
+    assert uid is None and conflicts == 1
+
+    # Under the WRONG model -> missed -> no_email.
+    _stage(db, conn, "roster.class", "u-asclass", {"email": "c@sch-fb.example.edu"})
+    await db.flush()
+    uid, conflicts = await resolve("u-asclass")
+    assert uid is None and conflicts == 1
+
+    # roster.user present but payload has NO email -> ambiguous no_email
+    # (kills the payload/email default chain).
+    _stage(db, conn, "roster.user", "u-noemail", {"display_name": "No Email"})
+    await db.flush()
+    uid, conflicts = await resolve("u-noemail")
+    assert uid is None and conflicts == 1
