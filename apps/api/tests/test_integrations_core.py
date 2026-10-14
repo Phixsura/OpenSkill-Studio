@@ -1545,3 +1545,14 @@ def test_no_structlog_event_kwarg_collision_anywhere():
                 line = text[: m.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(app_root.parent)}:{line}")
     assert not offenders, "structlog event= collision(s): " + ", ".join(offenders)
+
+
+def test_validate_egress_url_unparseable_is_blocked():
+    """R467: validate_egress_url's urlsplit ValueError arm — a malformed URL
+    (invalid IPv6 literal) must raise EgressBlockedError, never let a
+    ValueError escape to a 500."""
+    from app.integrations.security import EgressBlockedError, validate_egress_url
+
+    for bad in ("http://[invalid", "http://[::1", "https://[::"):
+        with pytest.raises(EgressBlockedError):
+            validate_egress_url(bad)

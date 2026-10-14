@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R467 (eighteenth window, except-arm coverage)**: after an except-arm
+  sweep (the R465 lesson — rarely-run except arms hide crashes) confirmed the
+  remaining 33 uncovered except arms are all clean (mapped raises / pass /
+  guard-clean logs, no more event= collisions), added coverage for two
+  security reject arms: validate_egress_url's urlsplit ValueError guard (a
+  malformed IPv6 URL -> EgressBlockedError, never a 500) and the OIDC
+  backchannel logout_token single-use replay rejection (the same jti replayed
+  -> logout_token_replayed, never re-executed).
 - **R466 (eighteenth window, PROJECT-WIDE BUG SWEEP + guard)**: the R465
   structlog `event=` collision was not isolated — the identical self-defeating
   fail-safe pattern `log.warning("mesh_emit_failed", event=..., ...)` existed

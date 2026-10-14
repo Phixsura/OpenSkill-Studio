@@ -2375,3 +2375,26 @@ async def test_oidc_callback_attribute_map_none_resolves(db):
         state_value=qs["state"][0], code="authcode", redirect_uri="https://app.test/cb"
     )
     assert result.user.email == email  # resolved via default "email" claim
+
+
+@pytest.mark.asyncio
+async def test_backchannel_logout_replay_rejected(db):
+    """R467: a backchannel logout_token is single-use — replaying the SAME
+    token (same jti) is rejected as logout_token_replayed (the jti single-use
+    cache pre-check), never re-executed."""
+    import app.integrations.services.sso_oidc as mod
+    from app.exceptions import AppError
+    from app.integrations.services.sso_oidc import handle_backchannel_logout
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    svc.egress = FakeIdp(lambda form: "")  # JWKS served for logout-token verify
+    jti = f"jti-{uuid.uuid4().hex[:10]}"
+    tok = _mint_logout_token(sub="bcl-replay", jti=jti)
+
+    # First delivery is accepted (unknown subject sweeps 0, still success).
+    await handle_backchannel_logout(db, conn.id, tok, service=svc)
+    # Exact same token replayed -> rejected as replayed.
+    with pytest.raises(AppError) as e:
+        await handle_backchannel_logout(db, conn.id, tok, service=svc)
+    assert e.value.code == "SSO_ASSERTION_INVALID"
