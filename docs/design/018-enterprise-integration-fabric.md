@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R465 (eighteenth window, REAL BUG — fail-safe arm crashes on structlog
+  collision)**: covering the best-effort mesh-emit arms of `_finish` (sync
+  completion event) and `ScimUserService._audit` (deprovision/reactivate)
+  exposed a real defect: both except arms call `log.warning("mesh_emit_failed",
+event=..., ...)` — structlog binds the FIRST positional as `event`, so
+  passing `event=` too raises `TypeError: got multiple values for argument
+'event'`. The fail-safe that should SWALLOW an emit failure instead CRASHES,
+  propagating out and failing run finalization / the SCIM deprovision. Fix:
+  rename to `event_type=` in both. Tests drive both arms with emit raising (now
+  swallow cleanly); R465 also covers preview non-dict-skip + read-crash 502,
+  and R464 the _apply_record staged_map=None fallback.
 - **R464 (eighteenth window, coverage — \_apply_record fallback SELECT)**:
   the one remaining uncovered line in _apply_record (the staged_map=None
   fallback point-SELECT) — the batched execute_run always passes a prefetch
