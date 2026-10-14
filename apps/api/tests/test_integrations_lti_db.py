@@ -1398,3 +1398,23 @@ async def test_jwks_keys_cache_refetch_floor_and_fetch_parse_arms(db):
     keys2 = await svc._jwks_keys(reg, kid="lms-k1")
     assert set(keys2) == {"lms-k1"}
     lti_mod._jwks_cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_launch_tolerates_nondict_resource_link_claim(db):
+    """R472 (R471 class): a buggy/compromised platform may send a non-dict
+    resource_link claim (e.g. a string). handle_launch must tolerate it (no
+    mapping, link=None), never crash the launch with AttributeError."""
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    svc.egress = FakePlatform()
+
+    for bad in ("not-a-dict", 42, ["a"], True):
+        state, nonce = await _start(svc, reg)
+        reg2, link, result, claims = await svc.handle_launch(
+            state_value=state,
+            id_token=_mint(nonce, **{f"{CLAIM}resource_link": bad}),
+        )
+        assert reg2.id == reg.id
+        assert link is None  # malformed claim -> no resource-link mapping
+        assert result is not None  # launch still resolved the user

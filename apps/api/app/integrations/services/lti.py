@@ -344,7 +344,11 @@ class LtiService:
         # Resource link mapping (None for deep-linking requests or unmapped
         # placements — the caller decides what to render).
         link = None
-        rl = claims.get(f"{CLAIM}resource_link") or {}
+        rl = claims.get(f"{CLAIM}resource_link")
+        # R472 (R471 class): a buggy/compromised platform may send a non-dict
+        # resource_link claim — tolerate it (no mapping), never crash the launch.
+        if not isinstance(rl, dict):
+            rl = {}
         if message_type == "LtiResourceLinkRequest" and rl.get("id"):
             link = (
                 await self.db.execute(

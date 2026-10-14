@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R472 (nineteenth window, REAL BUG — LTI launch crash on non-dict
+  resource_link claim)**: a static sweep for the R471 pattern found
+  handle_launch did `rl = claims.get(f'{CLAIM}resource_link') or {}` then
+  `rl.get('id')` — a buggy/compromised (but signature-valid) platform sending
+  a non-dict resource_link (e.g. a string) makes `rl.get` raise
+  AttributeError, 500ing the launch (the sibling ags/nrps claims were already
+  isinstance-guarded; this one wasn't). Fix: coerce rl to {} unless it is a
+  dict. Regression test launches with resource_link as str/int/list/bool —
+  all tolerated (link=None), user still resolved.
 - **R471 (eighteenth window, REAL BUG — OneRoster mapper crashes on
   malformed references)**: the R458 property test (Hypothesis) found it on a
   later random seed (the real cause of the 'intermittent' property-test
