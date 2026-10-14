@@ -125,7 +125,15 @@ async def service_token(
     if resp.status_code != 200:
         log.warning("ags_token_refused", registration_id=reg.id, status=resp.status_code)
         return None
-    return resp.json().get("access_token") or None
+    # R476 (R471 class): a non-object / non-JSON token body must not crash the
+    # grade-push path — a missing token simply means no AGS push this run.
+    try:
+        body = resp.json()
+    except Exception:
+        return None
+    if not isinstance(body, dict):
+        return None
+    return body.get("access_token") or None
 
 
 async def _ags_token(db: AsyncSession, reg: LtiRegistration, egress: EgressClient) -> str | None:

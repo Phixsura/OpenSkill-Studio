@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R476 (nineteenth window, REAL BUG — non-object external bodies crash
+  auth/sync reads)**: four more valid-JSON-but-non-object crash sites (the
+  JSONDecodeError-only excepts don't catch a top-level array's later
+  `.get(...)`): OIDC `_discovery` (a discovery doc that's a JSON array crashes
+  build_authorize_redirect AND handle_callback -> login down), OIDC
+  token-exchange body, NRPS membership body, and the AGS `_ags_token` response
+  (grade-push path, not even in a try). Added isinstance(dict) guards -> clean
+  discovery_not_json / token_response_not_json / LTI_NRPS_FETCH_FAILED / no AGS
+  push. (OIDC JWKS parse was already behind a broad except — safe.) Regression
+  tests drive array bodies through discovery, token and NRPS.
 - **R475 (nineteenth window, REAL BUG — connector read() crash on non-object
   response)**: OneRoster & CRM `read()` (and the OAuth token step) did
   `resp.json().get(collection_key, [])` — a buggy/malicious SIS/CRM returning

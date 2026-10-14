@@ -2398,3 +2398,49 @@ async def test_backchannel_logout_replay_rejected(db):
     with pytest.raises(AppError) as e:
         await handle_backchannel_logout(db, conn.id, tok, service=svc)
     assert e.value.code == "SSO_ASSERTION_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_oidc_discovery_and_token_nonobject_body_rejected(db):
+    """R476 (R471 class): OIDC discovery and token-exchange bodies that are
+    valid JSON but NOT objects (a top-level array/scalar) must be rejected as
+    invalid (uniform 401), never crash handle_callback with AttributeError."""
+    import app.integrations.services.sso_oidc as mod
+
+    org, conn = await _oidc_setup(db)
+
+    class _ArrDiscovery(FakeIdp):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/.well-known/openid-configuration"):
+                return httpx.Response(200, json=[1, 2, 3], request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    svc = mod.OidcService(db)
+    svc.egress = _ArrDiscovery(lambda f: "")
+    # build_authorize_redirect fetches discovery too -> the array body is
+    # rejected there (discovery_not_json), never crashing on doc.get(...).
+    with pytest.raises(AppError) as e:
+        await svc.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+    assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    # Token endpoint returns a JSON array -> token_response_not_json, uniform 401.
+    class _ArrToken(FakeIdp):
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(200, json=["not", "an", "object"],
+                                      request=httpx.Request(method, url))
+            return await super().request(
+                method, url, headers=headers, content=content, read_timeout=read_timeout
+            )
+
+    svc2 = mod.OidcService(db)
+    svc2.egress = _ArrToken(lambda f: "")
+    url2 = await svc2.build_authorize_redirect(conn.id, redirect_uri="https://app.test/cb")
+    qs2 = parse_qs(urlsplit(url2).query)
+    with pytest.raises(AppError) as e:
+        await svc2.handle_callback(
+            state_value=qs2["state"][0], code="c", redirect_uri="https://app.test/cb"
+        )
+    assert e.value.code == "SSO_ASSERTION_INVALID"

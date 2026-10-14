@@ -74,6 +74,10 @@ class OidcService:
             doc = resp.json()
         except json.JSONDecodeError as exc:
             raise _invalid("discovery_not_json") from exc
+        # R476 (R471 class): a valid-JSON-but-non-object body (e.g. a top-level
+        # array) would make doc.get(...) below crash — treat it as not-JSON.
+        if not isinstance(doc, dict):
+            raise _invalid("discovery_not_json")
         for key in ("authorization_endpoint", "token_endpoint", "jwks_uri", "issuer"):
             if not isinstance(doc.get(key), str):
                 raise _invalid(f"discovery_missing_{key}")
@@ -206,9 +210,13 @@ class OidcService:
         if token_resp.status_code != 200:
             raise _invalid("token_exchange_failed")
         try:
-            id_token = token_resp.json().get("id_token", "")
+            token_body = token_resp.json()
         except json.JSONDecodeError as exc:
             raise _invalid("token_response_not_json") from exc
+        # R476: a non-object token body (array/scalar) must not crash .get.
+        if not isinstance(token_body, dict):
+            raise _invalid("token_response_not_json")
+        id_token = token_body.get("id_token", "")
         if not id_token:
             raise _invalid("no_id_token")
 

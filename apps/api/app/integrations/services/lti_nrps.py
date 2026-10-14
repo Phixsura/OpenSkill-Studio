@@ -89,6 +89,10 @@ async def sync_memberships(
             doc = resp.json()
         except Exception as exc:
             raise AppError("LTI_NRPS_FETCH_FAILED", "NRPS body not JSON", 502) from exc
+        # R476 (R471 class): a valid-JSON-but-non-object body (e.g. a top-level
+        # array) would make doc.get(...) crash — reject it as a bad body.
+        if not isinstance(doc, dict):
+            raise AppError("LTI_NRPS_FETCH_FAILED", "NRPS body is not an object", 502)
         members = doc.get("members") or []
         if not isinstance(members, list):
             raise AppError("LTI_NRPS_FETCH_FAILED", "members is not a list", 502)

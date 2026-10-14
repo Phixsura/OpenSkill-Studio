@@ -1418,3 +1418,32 @@ async def test_launch_tolerates_nondict_resource_link_claim(db):
         assert reg2.id == reg.id
         assert link is None  # malformed claim -> no resource-link mapping
         assert result is not None  # launch still resolved the user
+
+
+@pytest.mark.asyncio
+async def test_nrps_sync_nonobject_body_rejected(db):
+    """R476 (R471 class): an NRPS membership body that is valid JSON but NOT an
+    object (a top-level array) must be a clean 502, never crash doc.get(...)."""
+    from app.integrations.services.lti_ags import ensure_tool_key
+    from app.integrations.services.lti_nrps import sync_memberships
+
+    org, owner = await _org(db)
+    svc, reg = await _registration(db, org)
+    await ensure_tool_key(db)
+    link = await svc.map_resource_link(
+        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-arr", kind="skill",
+        target_id="S1",
+    )
+    link.nrps_url = "https://lms.example.com/api/nrps/ctx-arr"
+    await db.flush()
+
+    class TokenOkArrayMembers:
+        async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
+            req = httpx.Request(method, url)
+            if urlsplit(url).path.endswith("/token"):
+                return httpx.Response(200, json={"access_token": "t"}, request=req)
+            return httpx.Response(200, json=[{"user_id": "u"}], request=req)  # array, not object
+
+    with pytest.raises(AppError) as e:
+        await sync_memberships(db, org.id, link.id, egress=TokenOkArrayMembers())
+    assert e.value.code == "LTI_NRPS_FETCH_FAILED"
