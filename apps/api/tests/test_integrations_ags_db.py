@@ -487,3 +487,61 @@ async def test_tool_key_generation_jwk_roundtrip(db):
     pub = pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
     claims = pyjwt.decode(token, key=pub, algorithms=["RS256"], options={"verify_aud": False})
     assert claims["iss"] == "osks"
+
+
+@pytest.mark.asyncio
+async def test_push_score_success_range_boundaries(db):
+    """R460 (mutation-kill): push_score's AGS success classifier is exactly
+    [200, 300). A 299 score POST reports success; a 300 reports failure. Pins
+    the `200 <= status < 300` boundary the 200/403 matrix left unasserted."""
+    org, user = await _org(db)
+    reg, link = await _setup(db, org, user)
+    jwks = await tool_jwks(db)
+
+    assert (
+        await push_score(
+            db, link, user_id=user.id, score_given=1,
+            egress=_RefusingPlatform(jwks, score_status=299),
+        )
+        is True
+    )
+    assert (
+        await push_score(
+            db, link, user_id=user.id, score_given=1,
+            egress=_RefusingPlatform(jwks, score_status=300),
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_gradeable_event_missing_score_key_defaults_full(db, monkeypatch):
+    """R461 (mutation-kill): when the gradeable spec names a score_key but the
+    event data omits it, the score DEFAULTS to 100.0 (completion credit) — it
+    must NOT fall to 0.0. Kills the `score_key is not None AND data.get(...) is
+    not None` -> `OR` mutant (which would KeyError->0.0 on the missing key)."""
+    import app.integrations.services.lti_ags as mod
+
+    org, user = await _org(db)
+    reg, link = await _setup(db, org, user)
+    jwks = await tool_jwks(db)
+    platform = FakeAgsPlatform(jwks)
+    monkeypatch.setattr(mod, "EgressClient", lambda: platform)
+
+    event = IntegrationEvent(
+        org_id=org.id,
+        type="com.openskill.project.approved.v1",  # score_key = "final_score"
+        source=f"/orgs/{org.id}",
+        subject="sub-nokey",
+        data={
+            "submission_id": "s9",
+            "project_id": "01PROJXXXXXXXXXXXXXXXXXXXX",
+            "user_id": user.id,
+            # NO final_score -> default full credit, never 0.0
+        },
+    )
+    db.add(event)
+    await db.flush()
+    pushed = await handle_gradeable_event(db, event)
+    assert pushed == 1
+    assert platform.scores[0]["scoreGiven"] == 100.0  # default, not 0.0

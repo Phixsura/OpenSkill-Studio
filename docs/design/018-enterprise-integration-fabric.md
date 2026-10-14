@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R460/R461 (seventeenth window, MUTATION — AGS grade return)**: AST-
+  mutating push_score + handle_gradeable_event (the grade write-back to the
+  LMS) left 5 survivors at 19/24. R460: push_score's AGS success classifier
+  is exactly [200,300) (299 success, 300 failure) — the 200/403 matrix left
+  the edges unpinned. R461: when the gradeable spec names a score_key but the
+  event omits it, the score DEFAULTS to 100.0 (completion credit), never 0.0
+  — kills the `score_key is not None AND data.get(...) is not None` -> `OR`
+  mutant that would KeyError->0.0 and silently zero a learner's grade. 22/24
+  killed; the remaining 2 are the subject rsplit maxsplit ([-1] identical) and
+  a str-slice error cap — equivalent/cosmetic.
 - **R459 (seventeenth window, MUTATION — webhook delivery classifier)**:
   AST-mutating handle_delivery_attempt (with the retry-ladder + 410-gone
   tests included) left the HTTP success-range classifier unpinned at the
