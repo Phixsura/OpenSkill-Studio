@@ -1403,3 +1403,30 @@ async def test_scim_audit_swallows_mesh_emit_failure(ctx, monkeypatch):
     await usvc.patch(u["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]})
     _, m = await usvc._member_for(u["id"])
     assert m.status != MemberStatus.ACTIVE  # deprovision completed despite emit failure
+
+
+@pytest.mark.asyncio
+async def test_scim_create_replace_tolerate_nondict_name(ctx):
+    """R473 (R471 class): a malformed IdP may send the SCIM `name` attribute as
+    a string (not the {formatted: ...} object). create/replace must tolerate it
+    (fall back to displayName or the userName local part), never crash with
+    AttributeError and 500 the provisioning request."""
+    usvc = _usvc(ctx)
+
+    # create with name as a bare string -> no crash; display falls back.
+    email = f"nd-{uuid.uuid4().hex[:6]}@corp.example.edu"
+    res, created = await usvc.create({"userName": email, "name": "John Doe String"})
+    assert created and res["userName"] == email
+    assert isinstance(res.get("displayName"), str) and res["displayName"]
+
+    # create with name as other non-dict types -> no crash.
+    for bad in (42, ["a"], True):
+        e2 = f"nd{uuid.uuid4().hex[:6]}@corp.example.edu"
+        r2, _ = await usvc.create({"userName": e2, "name": bad})
+        assert r2["userName"] == e2
+
+    # replace with name as a string -> no crash; displayName override wins.
+    out = await usvc.replace(
+        res["id"], {"userName": email, "name": "ignored-string", "displayName": "Real Name"}
+    )
+    assert out["displayName"] == "Real Name"

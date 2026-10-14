@@ -299,6 +299,19 @@ def _iso_loaded(obj, attr: str) -> str | None:
     return val.isoformat() if val is not None else None
 
 
+def _scim_display_name(payload: dict) -> str | None:
+    """R473: resolve a SCIM user's display name tolerantly. A malformed IdP may
+    send `name` as a string (not the {formatted: ...} object SCIM mandates);
+    `(payload.get("name") or {}).get("formatted")` would then AttributeError
+    and 500 the create/replace. Fall back through displayName -> name.formatted
+    only when name is actually a dict."""
+    display = payload.get("displayName")
+    if not display:
+        name = payload.get("name")
+        display = name.get("formatted") if isinstance(name, dict) else None
+    return display
+
+
 def _user_resource(user: User, member: OrgMember, link: ExternalIdentityLink | None) -> dict:
     return {
         "schemas": [SCIM_USER_SCHEMA],
@@ -474,8 +487,7 @@ class ScimUserService:
         if not username or len(username) > 255 or not _EMAIL_RE.fullmatch(username):
             raise ScimError(400, "userName must be an email address", "invalidValue")
         display = str(
-            payload.get("displayName")
-            or (payload.get("name") or {}).get("formatted")
+            _scim_display_name(payload)
             or username.split("@", 1)[0]
         )[:100]
         active = _coerce_active(payload.get("active", True))
@@ -560,7 +572,7 @@ class ScimUserService:
 
     async def replace(self, user_id: str, payload: dict) -> dict:
         user, member = await self._member_for(user_id)
-        display = payload.get("displayName") or (payload.get("name") or {}).get("formatted")
+        display = _scim_display_name(payload)
         if isinstance(display, str) and display.strip():
             user.display_name = display.strip()[:100]
         if payload.get("externalId") is not None:

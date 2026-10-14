@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R473 (nineteenth window, REAL BUG — SCIM create/replace crash on
+  non-dict name)**: continuing the R471-class sweep, SCIM user create (L478)
+  and replace (L563) both did `(payload.get('name') or {}).get('formatted')`
+  — a malformed IdP sending `name` as a STRING (not the SCIM {formatted: ...}
+  object) makes `'John'.get('formatted')` raise AttributeError and 500 the
+  provisioning request. Fix: `_scim_display_name()` helper that only reads
+  name.formatted when name is actually a dict (else falls back to displayName
+  / userName local part). Regression test covers name as str/int/list/bool on
+  both create and replace.
 - **R472 (nineteenth window, REAL BUG — LTI launch crash on non-dict
   resource_link claim)**: a static sweep for the R471 pattern found
   handle_launch did `rl = claims.get(f'{CLAIM}resource_link') or {}` then
