@@ -762,6 +762,82 @@ async def main() -> None:
         else:
             check("fuzz OIDC connection minted", False, f"{rr.status_code} {rr.text[:100]}")
 
+        # ── phase 10: hostile warehouse EXPORT stream configs ──
+        # The projection is BUILT from field_allowlist + data.<key> paths and
+        # anonymize modes (R130) — hostile allowlists/modes must 4xx, never 5xx.
+        export_bodies = [
+            {"name": "e1", "dataset": "events", "field_allowlist": ["data." + "x" * 5000]},
+            {"name": "e2", "dataset": "events", "field_allowlist": [1, 2, 3]},
+            {"name": "e3", "dataset": "events", "field_allowlist": ["../../etc/passwd"]},
+            {"name": "e4", "dataset": "events", "anonymize": {"id": "no-such-mode"}},
+            {"name": "e5", "dataset": "events", "anonymize": {"\x00": "rot13"}},
+            {"name": "e6", "dataset": "events", "anonymize": "not-a-dict"},
+            {"name": "e7", "dataset": "\x00bad", "field_allowlist": ["id"]},
+            {"name": "e8", "dataset": "events", "schedule": "\x00"},
+            {"name": "e9", "dataset": "events", "field_allowlist": ["data." + "a.b.c." * 200]},
+            {"name": "\x00", "dataset": "events"},
+            {"name": "💥", "dataset": "events", "field_allowlist": ["💥"]},
+            {"name": "e12", "dataset": "events", "field_allowlist": ["data.a[" * 50]},
+        ]
+        for body in export_bodies:
+            body = dict(body, name=f"{body['name']}-{uuid.uuid4().hex[:6]}")
+            rr = await c.post(f"{base}/export-streams", json=body, headers=h)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: hostile export stream", False, f"{rr.status_code} {rr.text[:120]}")
+
+        # ── phase 11: hostile sync MAPPING documents + preview ──
+        # The mapping document carries attacker-shaped jmespath paths and
+        # transform chains; create validates, preview applies them to samples.
+        mapping_docs = [
+            {"fields": [{"target": "x", "path": "a" * 10000}]},
+            {"fields": [{"target": "x", "path": "a[[[[[[", }]},
+            {"fields": [{"target": "x", "path": "a", "transform": ["eval", "exec", "__import__"]}]},
+            {"fields": [{"target": "x", "path": "a", "transform": ["to_int"] * 500}]},
+            {"fields": [{"target": "x", "path": "a", "enum_map": {str(i): i for i in range(5000)}}]},
+            {"fields": "not-a-list"},
+            {"fields": [{"no_target": "x"}]},
+            {"fields": [{"target": "\x00", "path": "a"}]},
+            {"fields": [{"target": "x", "path": None}]},
+            {"not_fields": 1},
+            {"fields": [{"target": "x", "path": "a || b && c | [*].@"}]},
+        ]
+        for doc in mapping_docs:
+            rr = await c.post(
+                f"{base}/mapping-profiles",
+                json={
+                    "name": f"m-{uuid.uuid4().hex[:6]}",
+                    "direction": "inbound",
+                    "model": "roster.class",
+                    "document": doc,
+                },
+                headers=h,
+            )
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: hostile mapping document", False, f"{rr.status_code} {rr.text[:120]}")
+            # If a doc was accepted, hammer its preview with hostile samples.
+            if rr.status_code < 300:
+                mid = rr.json()["data"]["id"]
+                hostile_samples = [
+                    {"a": "x" * 100_000},
+                    {"a": {"nested": {"deep": [1, 2, 3]}}},
+                    {"a": None},
+                    {"\x00": "v"},
+                    {"a": float("nan")} if False else {"a": 1e308},
+                ]
+                pr = await c.post(
+                    f"{base}/mapping-profiles/{mid}/preview",
+                    json={"samples": hostile_samples},
+                    headers=h,
+                )
+                total += 1
+                if pr.status_code >= 500:
+                    n_5xx += 1
+                    check("5xx: hostile mapping preview", False, f"{pr.status_code} {pr.text[:120]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",

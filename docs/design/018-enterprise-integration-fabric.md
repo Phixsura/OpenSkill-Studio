@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R469 (eighteenth window, FUZZER EXPANSION)**: added two hostile phases
+  to e2e_fuzz_fabric.py (399 -> 422 requests/seed). Phase 10 hammers the
+  warehouse EXPORT surface — hostile field_allowlist (data.<5k-char>, non-str,
+  path-traversal, deeply-nested data.a.b.c…, jmespath-bracket bombs),
+  anonymize (bad modes, NUL keys, non-dict), NUL dataset/schedule/name. Phase
+  11 hammers the sync MAPPING-document surface — pathological jmespath paths
+  (10k-char, unbalanced brackets, operator soup), transform chains (eval/exec
+  names, 500-deep), 5k-entry enum_map, malformed field shapes — then drives
+  the accepted docs' preview with hostile samples (100k strings, deep nesting,
+  NUL keys, 1e308). Both surfaces hold zero-5xx with the 4xx-envelope
+  invariant; these were the last two admin write-surfaces without a dedicated
+  fuzz phase.
 - **R468 (eighteenth window, create-path validation arms)**: shipped
   create-path validators. create_job: invalid mode -> 422, header_map with
   > 20 entries -> 422. create_stream: invalid schedule -> 422, duplicate
