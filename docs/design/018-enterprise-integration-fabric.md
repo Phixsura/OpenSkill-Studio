@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R477 (nineteenth window, PROPERTY — lock the external-input fixes)**:
+  hypothesis totality proofs over the pure helpers introduced by R471-R476 so
+  the fixes can't regress: `_sourced_id`/`_first_sourced_id` (any JSON ->
+  sourcedId or None, never crash), `_scim_display_name` (arbitrary SCIM
+  payload -> str or None, locks R473), and `_json_obj` (any JSON body or an
+  unparseable response -> a dict, locks R475/R476).
 - **R476 (nineteenth window, REAL BUG — non-object external bodies crash
   auth/sync reads)**: four more valid-JSON-but-non-object crash sites (the
   JSONDecodeError-only excepts don't catch a top-level array's later

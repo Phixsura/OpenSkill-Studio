@@ -484,3 +484,51 @@ def test_connector_map_record_total(item):
     for model in ("crm.account", "crm.contact", "crm.deal"):
         out = GenericCrmConnector._map_record(model, dict(item))
         assert isinstance(out, dict) and isinstance(out["external_id"], str)
+
+
+@settings(max_examples=200, deadline=None)
+@given(ref=json_values)
+def test_sourced_id_helpers_total(ref):
+    """R477: the R471/R475 reference extractors are TOTAL over arbitrary JSON —
+    a dict yields its sourcedId (str or None), anything else yields None, never
+    a crash."""
+    from app.integrations.registry import _first_sourced_id, _sourced_id
+
+    # dict -> its sourcedId value; anything else -> None. Never raises.
+    assert _sourced_id(ref) == (ref.get("sourcedId") if isinstance(ref, dict) else None)
+    expected = _sourced_id(ref[0]) if isinstance(ref, list) and ref else None
+    assert _first_sourced_id(ref) == expected
+
+
+@settings(max_examples=150, deadline=None)
+@given(payload=st.dictionaries(st.text(max_size=12), json_values, max_size=6))
+def test_scim_display_name_total(payload):
+    """R477 (locks R473): _scim_display_name is TOTAL over arbitrary SCIM
+    payloads — a non-dict `name` must never crash; result is a str or None."""
+    from app.integrations.services.scim import _scim_display_name
+
+    out = _scim_display_name(payload)
+    assert out is None or isinstance(out, str)
+
+
+class _FakeResp:
+    def __init__(self, body, raises=False):
+        self._body = body
+        self._raises = raises
+
+    def json(self):
+        if self._raises:
+            raise ValueError("not json")
+        return self._body
+
+
+@settings(max_examples=150, deadline=None)
+@given(body=json_values)
+def test_json_obj_total(body):
+    """R477 (locks R475/R476): _json_obj returns a dict for any JSON body and
+    {} for non-objects or unparseable bodies — never crashes."""
+    from app.integrations.registry import _json_obj
+
+    out = _json_obj(_FakeResp(body))
+    assert isinstance(out, dict)
+    assert _json_obj(_FakeResp(None, raises=True)) == {}
