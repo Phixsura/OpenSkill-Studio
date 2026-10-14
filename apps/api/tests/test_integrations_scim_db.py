@@ -102,13 +102,18 @@ async def test_token_auth_and_revocation(ctx):
     svc = ScimTokenService(db)
     token = await svc.authenticate(ctx["raw"])
     assert token.id == ctx["token"].id and token.last_used_at is not None
-    with pytest.raises(ScimError):
+    # R478: every auth reject is exactly 401 (not a 4xx a client retries
+    # differently). Valid-prefix-but-unknown, bad-prefix, and revoked.
+    with pytest.raises(ScimError) as e:
         await svc.authenticate("osks_scim_wrong")
-    with pytest.raises(ScimError):
+    assert e.value.status == 401
+    with pytest.raises(ScimError) as e:
         await svc.authenticate("Bearer-garbage")
+    assert e.value.status == 401
     await svc.revoke(ctx["org"].id, token.id)
-    with pytest.raises(ScimError):
+    with pytest.raises(ScimError) as e:
         await svc.authenticate(ctx["raw"])
+    assert e.value.status == 401
     # raw token never stored
     assert ctx["token"].token_hash == sha256(ctx["raw"].encode()).hexdigest()
 

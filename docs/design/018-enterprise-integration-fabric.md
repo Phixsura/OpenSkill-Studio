@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R478 (twentieth window, MUTATION — SCIM auth gate + crash-class
+  verification)**: verified the external-input crash class is fully closed
+  (every `config[...]`/`claims[...]` hard subscript is guarded by the dynreg
+  _REQUIRED_CONFIG_KEYS validation or the pyjwt `require` option; non-numeric
+  iat is rejected by pyjwt at decode; int/float coercions on external data are
+  in try/except or schema-validated). Then mutation-hardened the SCIM bearer-
+  token auth gate (`authenticate`, the entry point to all SCIM provisioning):
+  the revoked_at-filter arm was already asserted; added exact-401 assertions on
+  the bad-prefix and unknown-token rejects. 3/3 killed.
 - **R477 (nineteenth window, PROPERTY — lock the external-input fixes)**:
   hypothesis totality proofs over the pure helpers introduced by R471-R476 so
   the fixes can't regress: `_sourced_id`/`_first_sourced_id` (any JSON ->
