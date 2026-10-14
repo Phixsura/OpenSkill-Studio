@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R455 (seventeenth window, MUTATION — SAML handle_acs)**: AST-mutating
+  the SAML assertion consumer (the most security-critical login path) left 6
+  survivors at 12/18. Added a clock-skew grace test (a token expired by 30s
+  < the 90s skew is ACCEPTED, killing the `expiry + SKEW` -> `expiry - SKEW`
+  direction mutant; far-past rejected) and an attribute_map=None resolution
+  test (kills the `conn.attribute_map or {}` -> `and {}` mutant that would
+  make amap None and crash on .get). Re-run 14/18 killed; the remaining 4 are
+  the size-cap and not-yet-valid/expired exact-boundary mutants — equivalent
+  (both sides safe at the exact edge).
 - **R454 (seventeenth window, MUTATION — execute_run claim/connector)**:
   AST-mutating the pull-engine driver left 14 survivors at 18/32. Added
   test_execute_run_claim_staleness_and_connector_missing: a RUNNING run with

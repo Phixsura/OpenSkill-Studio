@@ -1366,3 +1366,55 @@ async def test_metadata_refresh_malformed_xml_no_idp_and_empty_cert_arms(db):
     with pytest.raises(AppError) as e:
         await svc.refresh_from_metadata(org.id, conn.id, egress=_MetaEgress(empty_cert))
     assert e.value.code == "SSO_METADATA_INVALID"  # no signing certificates
+
+
+@pytest.mark.asyncio
+async def test_saml_clock_skew_grace_window(db):
+    """R455 (mutation-kill): the ±90s CLOCK_SKEW grace must EXTEND validity,
+    not shrink it. An assertion expired by 30s (< skew) is still ACCEPTED
+    (kills the `expiry + SKEW` -> `expiry - SKEW` mutant); a NotBefore 30s in
+    the future is also ACCEPTED (within skew); and the far edges still reject."""
+    from datetime import UTC, datetime, timedelta
+
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+
+    # Expired by 30s (within the 90s skew) -> accepted.
+    state = await _start(db, conn)
+    email = f"skew-{uuid.uuid4().hex[:6]}@{domain}"
+    xml = _assertion_xml(
+        in_response_to=state, email=email,
+        not_on_or_after=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    _, result, _ = await svc.handle_acs(
+        connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml)),
+        relay_state=state,
+    )
+    assert result.user.email == email  # grace accepted the just-expired token
+
+    # attribute_map=None must still resolve email via the default "email" key
+    # (kills the `conn.attribute_map or {}` -> `and {}` mutant, which would
+    # make amap None and crash on .get).
+    conn.attribute_map = None
+    await db.flush()
+    state_am = await _start(db, conn)
+    email_am = f"am-{uuid.uuid4().hex[:6]}@{domain}"
+    xml_am = _assertion_xml(in_response_to=state_am, email=email_am)
+    _, res_am, _ = await svc.handle_acs(
+        connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml_am)),
+        relay_state=state_am,
+    )
+    assert res_am.user.email == email_am
+
+    # Expired well beyond the skew (10 min) -> rejected.
+    state2 = await _start(db, conn)
+    xml2 = _assertion_xml(
+        in_response_to=state2, email=f"old-{uuid.uuid4().hex[:6]}@{domain}",
+        not_on_or_after=datetime.now(UTC) - timedelta(minutes=10),
+    )
+    with pytest.raises(AppError):
+        await svc.handle_acs(
+            connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml2)),
+            relay_state=state2,
+        )
