@@ -370,9 +370,10 @@ async def test_health_sweep_slice_is_stalest_first_and_rotates(db):
                 .values(updated_at=_dt(2000, 1, 1 + idx, tzinfo=_UTC))
             )
         await db.commit()
-        await svc.sweep_connection_health(limit=1)
+        swept = await svc.sweep_connection_health(limit=1)
         # exactly the stalest one of OURS was pinged; the other untouched.
         assert pinged == [conns[0].id]
+        assert swept == 1  # R452: the limit-1 slice pings exactly one (kills swept += N)
         pinged.clear()
         # the ping bumped conns[0] to the back; conns[1] is now stalest.
         await svc.sweep_connection_health(limit=1)

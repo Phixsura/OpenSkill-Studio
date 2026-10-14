@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R453 (sixteenth window, MUTATION — connection health sweep)**: AST-
+  mutating sweep_connection_health left 2 survivors — the `swept += 1`
+  counter (the existing alert test only asserted `swept >= 1`, so `+= N`
+  survived) and the limit=100 default. Added a `swept == 1` assertion to the
+  limit=1 rotation test (deterministic one-connection slice). 4/5 killed; the
+  lone survivor is the default limit value (equivalent — tests pass explicit
+  limits).
 - **R452 (sixteenth window, MUTATION — SCIM patch final arms)**: a non-dict
   op in a GROUP patch -> exact 400, and a non-active user-patch op on an
   INACTIVE member must NOT reactivate it (kills the reactivate-guard
