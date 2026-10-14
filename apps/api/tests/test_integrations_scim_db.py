@@ -1382,3 +1382,24 @@ async def test_group_patch_nondict_op_and_user_reactivate_guard(ctx):
     )
     _, m2 = await usvc._member_for(u["id"])
     assert m2.status != MemberStatus.ACTIVE  # displayName op did NOT reactivate
+
+
+@pytest.mark.asyncio
+async def test_scim_audit_swallows_mesh_emit_failure(ctx, monkeypatch):
+    """R465: ScimUserService._audit is best-effort — a mesh emit failure must
+    be swallowed, never propagate and fail the deprovision. (Also guards the
+    `event=` structlog-collision bug: the except arm itself must not TypeError.)"""
+    import app.integrations.facade as facade
+    from app.models.organization import MemberStatus
+
+    usvc = _usvc(ctx)
+    u, _ = await usvc.create({"userName": f"au-{uuid.uuid4().hex[:6]}@corp.example.edu"})
+
+    async def boom(*a, **k):
+        raise RuntimeError("mesh down")
+
+    monkeypatch.setattr(facade, "emit_event", boom)
+    # active=False -> deprovision -> _audit emits -> emit raises -> swallowed.
+    await usvc.patch(u["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]})
+    _, m = await usvc._member_for(u["id"])
+    assert m.status != MemberStatus.ACTIVE  # deprovision completed despite emit failure

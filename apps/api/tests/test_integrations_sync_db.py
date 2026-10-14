@@ -2675,3 +2675,64 @@ async def test_apply_record_staged_map_none_fallback_select(db):
         db, run, profile, conn, None, dict(raw), set(), staged_map=None
     )
     assert counter2 == "unchanged"
+
+
+@pytest.mark.asyncio
+async def test_sync_preview_nondict_skip_and_read_crash(db):
+    """R465: preview's non-dict-record skip and the connector-read-crash arm.
+    A batch mixing a dict and a non-dict record yields only the dict; a
+    connector whose read() raises surfaces as SYNC_PREVIEW_FAILED (502), never
+    an uncaught 500."""
+    from app.exceptions import AppError
+    from app.integrations import registry
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "c1", "title": "A"}, "not-a-dict", 42]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    await db.commit()
+
+    out = await SyncProfileService(db).preview(org.id, profile.id, limit=5)
+    assert out["count"] == 1 and out["records"][0]["raw"]["external_id"] == "c1"
+
+    # A connector whose read() raises -> SYNC_PREVIEW_FAILED 502.
+    class _Boom:
+        key = "oneroster"
+        capabilities = frozenset({"roster.read"})
+
+        async def read(self, ctx, model, state):
+            raise RuntimeError("source exploded")
+            yield  # pragma: no cover
+
+    registry.CONNECTORS["oneroster"] = _Boom()
+    try:
+        with pytest.raises(AppError) as e:
+            await SyncProfileService(db).preview(org.id, profile.id)
+        assert e.value.code == "SYNC_PREVIEW_FAILED" and e.value.status_code == 502
+    finally:
+        registry.CONNECTORS["oneroster"] = fake
+
+
+@pytest.mark.asyncio
+async def test_finish_swallows_mesh_emit_failure(db, monkeypatch):
+    """R465: _finish's completion-event emit is best-effort — a mesh emit
+    failure must be swallowed (logged), never propagate and fail the run
+    finalization."""
+    import app.integrations.facade as facade
+    from app.integrations.models import SyncRun
+    from app.integrations.services import sync_engine as se
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    run = SyncRun(profile_id=profile.id, status="running", trigger="manual")
+    db.add(run)
+    await db.flush()
+
+    async def boom(*a, **k):
+        raise RuntimeError("mesh down")
+
+    # _finish imports emit_event from facade inside the function -> patch there.
+    monkeypatch.setattr(facade, "emit_event", boom)
+    await se._finish(db, run, "succeeded")  # must not raise
+    await db.refresh(run)
+    assert run.status == "succeeded"

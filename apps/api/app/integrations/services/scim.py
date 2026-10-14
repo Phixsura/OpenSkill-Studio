@@ -672,7 +672,7 @@ class ScimUserService:
                 data={"user_id": user_id, "token_id": self.token.id},
             )
         except Exception:
-            log.warning("mesh_emit_failed", event=event, user_id=user_id)
+            log.warning("mesh_emit_failed", event_type=event, user_id=user_id)
 
 
 # ── group resource logic ──

@@ -1071,7 +1071,9 @@ async def _finish(
             )
             await db.commit()
         except Exception:
-            log.warning("mesh_emit_failed", event="integration.sync.completed", run_id=run.id)
+            log.warning(
+                "mesh_emit_failed", event_type="integration.sync.completed", run_id=run.id
+            )
 
 
 async def sweep_scheduled_profiles(db: AsyncSession) -> int:
