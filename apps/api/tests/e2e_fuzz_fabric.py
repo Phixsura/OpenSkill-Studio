@@ -124,7 +124,7 @@ async def main() -> None:
         )
         tok = r.json()["access_token"]
         h = {"Authorization": f"Bearer {tok}"}
-        r = await c.post(f"{API}/orgs", json={"name": f"Fuzz {uuid.uuid4().hex[:6]}"}, headers=h)
+        r = await c.post(f"{API}/orgs", json={"name": f"Fuzz {uuid.uuid4().hex[:12]}"}, headers=h)
         org = r.json()["data"]["id"]
         base = f"{API}/orgs/{org}/integrations"
 
@@ -661,7 +661,7 @@ async def main() -> None:
         def _b64u(b: bytes) -> str:
             return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
-        _issuer = f"https://lms-{uuid.uuid4().hex[:6]}.example.com"
+        _issuer = f"https://lms-{uuid.uuid4().hex[:12]}.example.com"
         rr = await c.post(
             f"{base}/lti/registrations",
             json={
@@ -732,7 +732,7 @@ async def main() -> None:
             f"{base}/sso-connections",
             json={
                 "protocol": "oidc",
-                "oidc_issuer": f"https://oidc-{uuid.uuid4().hex[:6]}.example.com",
+                "oidc_issuer": f"https://oidc-{uuid.uuid4().hex[:12]}.example.com",
                 "oidc_client_id": "fz-oidc",
                 "oidc_client_secret": "s3cret",
             },

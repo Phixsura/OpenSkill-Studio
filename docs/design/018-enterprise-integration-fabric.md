@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R479 (twenty-second window, FUZZ HARNESS — birthday collision on the
+  6-hex org suffix)**: after ~1,500 accumulated varied-seed fuzz runs against
+  the shared dev DB, two batch runs aborted with `KeyError: 'data'` at fuzzer
+  setup while the same seeds reproduced clean in isolation. Root cause was the
+  harness, not the fabric: setup names the org `Fuzz {uuid4().hex[:6]}` —
+  16.7M values, so by the birthday bound ~1,500 persisted orgs give a ~6–7%
+  per-run collision chance → `POST /orgs` 409 → the hard
+  `r.json()["data"]["id"]` subscript crashed the run. Widened the org-name,
+  LTI-issuer and OIDC-issuer suffixes to `hex[:12]` (16^12 ≈ 2.8e14 — collision
+  odds vanish for any plausible run count); the SCIM-phase short suffixes stay
+  as-is because those reads are tolerant (`.get("id", "x")`) and a 409 is an
+  acceptable fuzz outcome mid-phase. 10/10 varied seeds clean post-fix. Lesson:
+  a fuzz harness that persists artifacts across runs needs collision-free
+  naming for anything it later hard-subscripts on.
 - **R478 (twentieth window, MUTATION — SCIM auth gate + crash-class
   verification)**: verified the external-input crash class is fully closed
   (every `config[...]`/`claims[...]` hard subscript is guarded by the dynreg
