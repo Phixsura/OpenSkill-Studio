@@ -915,6 +915,78 @@ async def main() -> None:
                 n_5xx += 1
                 check("5xx: ssrf-shaped webhook url", False, f"{rr.status_code} {rr.text[:120]}")
 
+        # ── phase 13: hostile UPDATE bodies on REAL resources — PATCH
+        # handlers re-validate config/certs/documents; junk-ID PATCHes 404
+        # before that code runs, so only a real resource exercises it.
+        async def _mk(url, body):
+            r13 = await c.post(url, json=body, headers=h)
+            if r13.status_code < 300:
+                return r13.json().get("data", {}).get("id")
+            return None
+
+        sso13 = await _mk(
+            f"{base}/sso-connections",
+            {
+                "protocol": "oidc",
+                "oidc_issuer": f"https://p13-{uuid.uuid4().hex[:12]}.example.com",
+                "oidc_client_id": "c13",
+                "oidc_client_secret": "s13",
+            },
+        )
+        map13 = await _mk(
+            f"{base}/mapping-profiles",
+            {
+                "name": f"m13-{uuid.uuid4().hex[:8]}",
+                "direction": "inbound",
+                "model": "roster.class",
+                "document": {"fields": [{"target": "t", "path": "a"}]},
+            },
+        )
+        sync13 = await _mk(
+            f"{base}/sync-profiles",
+            {
+                "connection_id": conn12,
+                "name": f"p13-{uuid.uuid4().hex[:8]}",
+                "model": "roster.class",
+                "direction": "pull",
+                "mapping_profile_id": map13,
+            },
+        )
+        exp13 = await _mk(
+            f"{base}/export-streams", {"name": f"s13-{uuid.uuid4().hex[:8]}", "dataset": "events"}
+        )
+        patch_surfaces = []
+        patch_surfaces.append(
+            (f"{base}/connections/{conn12}", {"name": "n2", "config": {}, "base_url": "https://y.example.com"})
+        )
+        if sso13:
+            patch_surfaces.append(
+                (
+                    f"{base}/sso-connections/{sso13}",
+                    {"oidc_client_id": "c14", "attribute_map": {"email": "mail"}},
+                )
+            )
+        if map13:
+            patch_surfaces.append(
+                (
+                    f"{base}/mapping-profiles/{map13}",
+                    {"document": {"fields": [{"target": "t", "path": "b"}]}},
+                )
+            )
+        if sync13:
+            patch_surfaces.append((f"{base}/sync-profiles/{sync13}", {"name": "p14"}))
+        if exp13:
+            patch_surfaces.append(
+                (f"{base}/export-streams/{exp13}", {"field_allowlist": "id,type"})
+            )
+        for _ in range(40):
+            url13, body13 = rng.choice(patch_surfaces)
+            rr = await c.patch(url13, json=_mutate(body13), headers=h)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(f"5xx: PATCH {url13[-45:]}", False, f"{rr.status_code} {rr.text[:140]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",

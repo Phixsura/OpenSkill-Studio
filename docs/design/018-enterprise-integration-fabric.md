@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R482 (twenty-fourth window, FUZZ phase 13 — hostile UPDATE bodies on
+  REAL resources)**: the fuzzer PATCHed only junk IDs, which 404 before the
+  update handlers' re-validation code (config screen, cert screen, mapping
+  document re-validate) ever runs. Phase 13 creates a real connection /
+  OIDC sso-connection / mapping profile / sync profile / export stream and
+  fires 40 mutated PATCH bodies per seed across all five update surfaces
+  (fixed seed now 504 requests). 30/30 varied seeds clean — the update paths
+  are total. Also swept Response-schema non-Optional fields against nullable
+  model columns of the same name (a NULL there is a live-only
+  ResponseValidationError 500): zero mismatches fabric-wide.
 - **R481 (twenty-third window, AUTHZ VERIFICATION — write-surface IDOR
   wall)**: the lifecycle IDOR wall only probed GET surfaces; the mutating
   per-resource endpoints (upgrade, ping, credentials, provision-roster,
