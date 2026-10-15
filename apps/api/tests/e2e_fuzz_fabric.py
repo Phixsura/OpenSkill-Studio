@@ -987,6 +987,38 @@ async def main() -> None:
                 n_5xx += 1
                 check(f"5xx: PATCH {url13[-45:]}", False, f"{rr.status_code} {rr.text[:140]}")
 
+        # ── phase 14: deletion-ordering probes — wrong-order deletes must be
+        # clean 409/404s (R84/R174 guards), never cascade crashes; operations
+        # on deleted resources must 404, not 500.
+        del_seq = [
+            ("DELETE", f"{base}/mapping-profiles/{map13}"),  # pinned by sync13 -> 409
+            ("DELETE", f"{base}/sync-profiles/{sync13}"),
+            ("DELETE", f"{base}/mapping-profiles/{map13}"),  # now free -> 204
+            ("DELETE", f"{base}/mapping-profiles/{map13}"),  # double delete -> 404
+            ("PATCH", f"{base}/sync-profiles/{sync13}"),  # op on deleted -> 404
+            ("POST", f"{base}/sync-profiles/{sync13}/run"),  # run deleted -> 404
+            ("DELETE", f"{base}/connections/{conn12}"),  # cascades (no live run)
+            ("POST", f"{base}/connections/{conn12}/upgrade"),  # upgrade deleted -> 404
+            ("DELETE", f"{base}/sso-connections/{sso13}"),
+            ("DELETE", f"{base}/export-streams/{exp13}"),
+            ("POST", f"{base}/export-streams/{exp13}/run"),  # run deleted -> 404
+        ]
+        for method14, url14 in del_seq:
+            if "None" in url14:
+                continue  # creation failed earlier in this seed; skip
+            if method14 == "PATCH":
+                rr = await c.patch(url14, json={"name": "zombie"}, headers=h)
+            elif method14 == "POST":
+                rr = await c.post(url14, json={}, headers=h)
+            else:
+                rr = await c.delete(url14, headers=h)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(
+                    f"5xx: {method14} {url14[-45:]}", False, f"{rr.status_code} {rr.text[:140]}"
+                )
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",

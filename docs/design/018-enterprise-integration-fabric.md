@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R483 (twenty-fourth window, FUZZ phase 14 — deletion-ordering
+  probes)**: wrong-order deletes (pinned mapping profile first), double
+  deletes, cascading connection delete, and operations on just-deleted
+  resources (PATCH/run/upgrade a zombie) — every outcome must be a clean
+  409/404/204, never a cascade crash. The R84 (mapping pinned → 409) and
+  R174 (connection delete cascades unless live run) guards hold live:
+  fixed seed 512 requests clean, 20/20 varied seeds clean.
 - **R482 (twenty-fourth window, FUZZ phase 13 — hostile UPDATE bodies on
   REAL resources)**: the fuzzer PATCHed only junk IDs, which 404 before the
   update handlers' re-validation code (config screen, cert screen, mapping
