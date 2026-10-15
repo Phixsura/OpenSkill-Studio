@@ -1540,7 +1540,9 @@ def test_audit_calls_reference_real_attributes():
     # bug `conn.provider_key` IS a schema field name; including schemas would
     # mask exactly the class this guards).
     for f in models:
-        tree = ast.parse(open(f).read())
+        from pathlib import Path
+
+        tree = ast.parse(Path(f).read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 known.add(node.target.id)
@@ -1550,7 +1552,9 @@ def test_audit_calls_reference_real_attributes():
                         known.add(t.id)
     flagged = []
     for f in glob.glob(os.path.join(api_dir, "*.py")):
-        tree = ast.parse(open(f).read())
+        from pathlib import Path
+
+        tree = ast.parse(Path(f).read_text())
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
