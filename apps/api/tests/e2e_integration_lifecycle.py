@@ -762,6 +762,31 @@ async def main() -> int:
             r = await c.get(path, headers=mallory)
             check(f"wall {path.split('/')[-1]}", r.status_code in (403, 404), str(r.status_code))
 
+        # ── IDOR wall on WRITE surfaces (R481: the GET wall above never
+        # probed the mutating per-resource endpoints phase-12 fuzzes) ──
+        for method, path, body in (
+            ("POST", f"{base}/connections/{conn_id}/upgrade", {}),
+            ("POST", f"{base}/connections/{conn_id}/ping", {}),
+            (
+                "POST",
+                f"{base}/connections/{conn_id}/credentials",
+                {"kind": "api_key", "values": {"k": "v"}},
+            ),
+            (
+                "POST",
+                f"{base}/connections/{conn_id}/provision-roster",
+                {"auto_create_cohorts": True},
+            ),
+            ("POST", f"{base}/sync-runs/{run_id}/cancel", {}),
+            ("DELETE", f"{base}/connections/{conn_id}", None),
+        ):
+            r = await c.request(method, path, json=body, headers=mallory)
+            check(
+                f"write wall {method} {path.split('/')[-1]}",
+                r.status_code in (403, 404),
+                str(r.status_code),
+            )
+
         # ── bulk replay of exhausted deliveries (R155) ──
         if sub_id:
             r = await c.post(f"{base}/webhooks/{sub_id}/replay-exhausted", headers=h)

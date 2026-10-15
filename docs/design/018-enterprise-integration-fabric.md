@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R481 (twenty-third window, AUTHZ VERIFICATION — write-surface IDOR
+  wall)**: the lifecycle IDOR wall only probed GET surfaces; the mutating
+  per-resource endpoints (upgrade, ping, credentials, provision-roster,
+  sync-run cancel, connection delete) were verified gated by code reading
+  only. Swept every fabric handler for its membership gate (`_admin` /
+  `require_org_member`) — all write handlers gated; the ungated set is
+  exactly the intentionally-public protocol endpoints (SAML ACS/SLO, OIDC
+  authorize/callback, discovery). Locked it in live: the lifecycle wall now
+  POSTs/DELETEs each write surface as a non-member and asserts 403/404
+  (6 new checks, lifecycle 83). Also swept emit_event/log-call attribute
+  reads fabric-wide with the R480 AST detector — `result.jit_created` et al.
+  all resolve; R480 was the only phantom-attribute site.
 - **R480 (twenty-third window, REAL BUG — connection upgrade 500s on a
   phantom attribute)**: fuzz phase 12 (new: the per-resource admin surfaces
   phases 1–11 never exercised — provision-roster, credentials/upgrade/ping,
