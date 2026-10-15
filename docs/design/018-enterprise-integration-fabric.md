@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R484 (twenty-fifth window, CONCURRENCY — duplicate-create race
+  probe)**: every fabric create that sits on a unique index (connection
+  org+name, mapping org+name, export-stream org+name, sync-profile
+  conn+model+direction, domain org+domain, SCIM group org+displayName, SCIM
+  userName reuse, LTI issuer+client) fired 8× in parallel with identical
+  payloads against the live API (tests/e2e_race_probe.py). Sequential
+  pre-checks pass the battery but lose the TOCTOU window under concurrency —
+  a 23505 loser leaking as 500 would mean no race recovery (23505 is
+  deliberately NOT in the DBAPIError input-sqlstate backstop, since a
+  server-generated collision is a fault). Result: 16/16 — zero 5xx on every
+  surface, ≥1 winner each, losers clean 409/422; R113's savepoint pattern and
+  its siblings hold live. (Probe gotcha: sync-profile create needs a
+  roster-capable provider — generic_rest 409s at the capability gate before
+  the unique index is ever reached.)
 - **R483 (twenty-fourth window, FUZZ phase 14 — deletion-ordering
   probes)**: wrong-order deletes (pinned mapping profile first), double
   deletes, cascading connection delete, and operations on just-deleted
