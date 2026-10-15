@@ -838,6 +838,83 @@ async def main() -> None:
                     n_5xx += 1
                     check("5xx: hostile mapping preview", False, f"{pr.status_code} {pr.text[:120]}")
 
+        # ── phase 12: hostile admin-surface bodies (roster provisioning,
+        # credentials/upgrade/ping, sync-run records+resolve, delivery
+        # replay/payload, webhook subscriptions, identity-queue resolve) —
+        # the per-resource POST surfaces phases 1-11 never exercised.
+        rr = await c.post(
+            f"{base}/connections",
+            json={
+                "provider_key": "generic_rest",
+                "name": f"fz12-{uuid.uuid4().hex[:8]}",
+                "config": {},
+                "base_url": "https://fz12.example.com",
+            },
+            headers=h,
+        )
+        conn12 = (
+            rr.json().get("data", {}).get("id", "0" * 26)
+            if rr.status_code < 300
+            else "0" * 26
+        )
+        prov_valid = {
+            "auto_create_cohorts": True,
+            "jit_users": False,
+            "on_unenroll": "remove_membership",
+        }
+        cred_valid = {"kind": "api_key", "values": {"api_key": "k"}}
+        hook_valid = {"url": "https://fz12.example.com/hook", "events": ["pack.published"]}
+        queue_valid = {"action": "link", "user_id": "0" * 26}
+        admin_surfaces = [
+            ("POST", f"{base}/connections/{conn12}/provision-roster", prov_valid),
+            ("POST", f"{base}/connections/{conn12}/credentials", cred_valid),
+            ("POST", f"{base}/connections/{conn12}/upgrade", {}),
+            ("POST", f"{base}/connections/{conn12}/ping", {}),
+            ("POST", f"{API}/orgs/{org}/webhooks", hook_valid),
+            (
+                "POST",
+                f"{base}/sync-runs/{rng.choice(JUNK_IDS)}/records/{rng.choice(JUNK_IDS)}/resolve",
+                {"action": "accept_theirs"},
+            ),
+            ("POST", f"{base}/deliveries/{rng.choice(JUNK_IDS)}/replay", {}),
+            ("GET", f"{base}/deliveries/{rng.choice(JUNK_IDS)}/payload", None),
+            ("GET", f"{base}/sync-runs/{rng.choice(JUNK_IDS)}/records", None),
+            ("POST", f"{base}/domains/{rng.choice(JUNK_IDS)}/verify", {}),
+            ("POST", f"{base}/identity-queue/{rng.choice(JUNK_IDS)}/resolve", queue_valid),
+            ("POST", f"{base}/webhooks/{rng.choice(JUNK_IDS)}/replay-exhausted", {}),
+        ]
+        for _ in range(36):
+            method, url, body12 = rng.choice(admin_surfaces)
+            if body12 is not None and rng.random() < 0.8:
+                body12 = _mutate(body12)
+            if body12 is None:
+                rr = await c.request(method, url, headers=h)
+            else:
+                rr = await c.request(method, url, json=body12, headers=h)
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check(f"5xx: {method} {url[-45:]}", False, f"{rr.status_code} {rr.text[:140]}")
+        # SSRF-shaped webhook targets must never 500 (reject or defer-to-
+        # egress-gate are both acceptable; crashing is not).
+        for bad_url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost:8443/api/v1/health",
+            "https://[::1]/x",
+            "http://0.0.0.0/x",
+            "http://127.0.0.1:1/x",
+            "http://metadata.google.internal/x",
+        ]:
+            rr = await c.post(
+                f"{API}/orgs/{org}/webhooks",
+                json={"url": bad_url, "events": ["pack.published"]},
+                headers=h,
+            )
+            total += 1
+            if rr.status_code >= 500:
+                n_5xx += 1
+                check("5xx: ssrf-shaped webhook url", False, f"{rr.status_code} {rr.text[:120]}")
+
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(
             "every 4xx on JSON admin surfaces carries the error envelope",

@@ -1518,6 +1518,56 @@ def test_parse_users_json_header_map_inversion_and_nondict_rows():
     assert any(e["row_number"] == 2 and e["code"] == "invalid_email" for e in errors)
 
 
+def test_audit_calls_reference_real_attributes():
+    """R480 guard: `POST /connections/{id}/upgrade` 500'd because its audit
+    payload read `conn.provider_key` — an attribute that does not exist on
+    IntegrationConnection (`provider_id` does). Router-level audit lines run
+    on no unit-test path, so a wrong attribute lives until a live request
+    crashes. Statically verify every attribute read inside a
+    record_fabric_audit(...) call resolves against the model/schema
+    namespace."""
+    import ast
+    import glob
+    import os
+
+    api_dir = os.path.join(os.path.dirname(__file__), "..", "app", "integrations", "api")
+    models = glob.glob(os.path.join(api_dir, "..", "models", "*.py")) + glob.glob(
+        os.path.join(api_dir, "..", "..", "models", "*.py")
+    )
+    known: set[str] = {"id", "org_id"}
+    # model columns only — request-schema fields (body.*) are skipped below,
+    # so schema names must NOT whitelist model attribute reads (the original
+    # bug `conn.provider_key` IS a schema field name; including schemas would
+    # mask exactly the class this guards).
+    for f in models:
+        tree = ast.parse(open(f).read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                known.add(node.target.id)
+            if isinstance(node, ast.Assign):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        known.add(t.id)
+    flagged = []
+    for f in glob.glob(os.path.join(api_dir, "*.py")):
+        tree = ast.parse(open(f).read())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "record_fabric_audit"
+            ):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Attribute)
+                        and isinstance(sub.value, ast.Name)
+                        and sub.value.id not in ("user", "body", "payload", "req")
+                        and sub.attr not in known
+                    ):
+                        flagged.append(f"{os.path.basename(f)}:{sub.lineno} {sub.value.id}.{sub.attr}")
+    assert not flagged, f"audit payloads read unknown attributes: {flagged}"
+
+
 def test_no_structlog_event_kwarg_collision_anywhere():
     """R466 (regression guard, project-wide): structlog binds the FIRST
     positional arg of log.<level>(...) as the reserved `event` field, so ALSO

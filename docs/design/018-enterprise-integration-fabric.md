@@ -931,6 +931,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R480 (twenty-third window, REAL BUG — connection upgrade 500s on a
+  phantom attribute)**: fuzz phase 12 (new: the per-resource admin surfaces
+  phases 1–11 never exercised — provision-roster, credentials/upgrade/ping,
+  sync-run records+resolve, delivery replay/payload, webhook subscriptions,
+  identity-queue resolve, SSRF-shaped webhook URLs) failed on its FIRST run:
+  `POST /connections/{id}/upgrade` returned 500 because the router's audit
+  payload read `conn.provider_key` — IntegrationConnection has `provider_id`,
+  not `provider_key`. The service-level upgrade is unit-tested; the ROUTER's
+  audit line runs on no unit path, so the AttributeError lived until a live
+  request crashed the endpoint (every real upgrade would have 500'd after
+  mutating state). Fixed to `{"provider_id", "provider_version"}` (version is
+  what upgrade changes). Hardened with (a) fuzz phase 12 — 42 extra hostile
+  requests/seed, fixed seed now 464 total; SSRF webhook URLs verified cleanly
+  422 `WEBHOOK_URL_BLOCKED`; (b) an AST guard test
+  (`test_audit_calls_reference_real_attributes`) that statically resolves
+  every attribute read inside `record_fabric_audit(...)` calls against the
+  model namespace — proven to fail on the reintroduced bug. Lesson: audit/
+  telemetry arguments on router lines are dead code to the unit suite;
+  phantom-attribute reads there need static guards or live fuzz.
 - **R479 (twenty-second window, FUZZ HARNESS — birthday collision on the
   6-hex org suffix)**: after ~1,500 accumulated varied-seed fuzz runs against
   the shared dev DB, two batch runs aborted with `KeyError: 'data'` at fuzzer

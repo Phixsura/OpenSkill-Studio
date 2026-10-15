@@ -321,7 +321,7 @@ async def upgrade_connection(
         "intg.connection.upgraded",
         "connection",
         conn.id,
-        after={"provider_key": conn.provider_key},
+        after={"provider_id": conn.provider_id, "provider_version": conn.provider_version},
     )
     await db.commit()
     return {"data": resp}
