@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R485 (thirty-third window, ENV — fake-IP DNS broke the SSRF positive
+  control)**: the adversarial suite's "public https webhook accepted"
+  positive control started failing 422 `WEBHOOK_URL_BLOCKED` after dozens of
+  green runs at the same commit. Root cause: the machine's DNS moved behind a
+  VPN fake-IP proxy — every public hostname (example.com included) now
+  resolves into 198.18.0.0/15, the RFC 2544 benchmarking range, which
+  `_ip_blocked` correctly treats as reserved → the gate fail-closes exactly
+  as designed. Verdict: the FABRIC is right; the control's assumption (public
+  names resolve to public IPs) is environment-dependent. The control now
+  detects fake-IP DNS (resolve example.com, check 198.18.0.0/15 membership;
+  resolution failure also counts) and accepts the 422 as the correct outcome
+  in that environment, still demanding 2xx under normal DNS. Lesson: SSRF
+  positive controls must be resilient to fake-IP resolvers, or a VPN turns
+  the suite red with zero code change.
 - **R484 (twenty-fifth window, CONCURRENCY — duplicate-create race
   probe)**: every fabric create that sits on a unique index (connection
   org+name, mapping org+name, export-stream org+name, sync-profile
