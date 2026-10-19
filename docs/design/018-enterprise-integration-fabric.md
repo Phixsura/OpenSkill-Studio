@@ -716,7 +716,7 @@ EXPORT_FIELD_NOT_ALLOWED, DELIVERY_NOT_REPLAYABLE`.
 
 `id, org_id, kind ('roster'|'users'|'opportunities'), template_version INT, mode
 ('atomic'|'partial'), status ('validating','previewed','committing','succeeded',
-'failed','partial','stale'), file_key (S3, 50 MB cap ⇒ IMPORT_TOO_LARGE),
+'failed','partial','stale'), file_key (S3; format-aware cap R488: CSV 200 MB streamed, JSON 50 MB ⇒ IMPORT_TOO_LARGE),
 fingerprint CHAR(64) (SHA-256 of file + template_version + relevant org state rev),
 stats JSONB, dry_stats JSONB, idempotency_key VARCHAR(100) NULL UNIQUE-per-org,
 created_by, created_at`. Errors in `intg_import_row_errors (job_id, row_number
@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R488 (thirty-fourth window, FEATURE — streaming CSV imports past
+  50MB)**: the benchmark table's ">50MB files" gap. The CSV parse now
+  decodes as a STREAM (TextIOWrapper over the byte buffer — no second
+  full-size text copy; a bad byte mid-file surfaces at iteration time as a
+  row-positioned encoding error, caught alongside csv.Error in both pulls).
+  Byte caps are format-aware: CSV 200MB, JSON stays 50MB (stdlib json
+  needs the whole document; ijson is not worth the dependency at the
+  100k-row bound, which remains the true memory cap). Enforced at the
+  upload boundary (chunked read, sniff, cap) AND in create_job (R15
+  layer-drift lesson: same predicate both layers). Full zero-copy
+  multipart-S3 streaming stays out of scope — the 46-call-site
+  file_bytes contract is not worth breaking for a cap the row limit
+  dominates anyway.
 - **R487 (thirty-fourth window, FEATURE — full JSON Schema per canonical
   model)**: the benchmark table's Airbyte-parity gap closed. MODEL_SCHEMAS
   gives every canonical model a bounded JSON-Schema subset (type / format

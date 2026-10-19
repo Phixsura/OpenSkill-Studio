@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.rate_limit import rate_limit
 from app.exceptions import AppError
 from app.integrations.facade import record_fabric_audit
-from app.integrations.models.bulk import MAX_IMPORT_BYTES
+from app.integrations.models.bulk import MAX_IMPORT_BYTES, MAX_IMPORT_BYTES_CSV
 from app.integrations.services.bulk_import import BulkImportService
 from app.models.organization import OrgRole
 from app.models.user import User
@@ -98,9 +98,22 @@ async def upload_import(
     user: User = Depends(get_current_user),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    content = await file.read(MAX_IMPORT_BYTES + 1)
-    if len(content) > MAX_IMPORT_BYTES:
-        raise AppError("IMPORT_TOO_LARGE", "file exceeds 50MB", 422)
+    # R488: chunked read up to the larger (CSV) cap; the format-specific cap
+    # is enforced once the format is sniffable, and again in create_job.
+    chunks: list[bytes] = []
+    received = 0
+    while received <= MAX_IMPORT_BYTES_CSV:
+        chunk = await file.read(1_048_576)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        received += len(chunk)
+    content = b"".join(chunks)
+    from app.integrations.services.bulk_import import detect_format
+
+    cap = MAX_IMPORT_BYTES_CSV if detect_format(content) == "csv" else MAX_IMPORT_BYTES
+    if len(content) > cap:
+        raise AppError("IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422)
     file_key = await _store_file(org_id, kind, content)
     job = await BulkImportService(db).create_job(
         org_id,

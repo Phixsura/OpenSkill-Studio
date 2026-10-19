@@ -267,7 +267,9 @@ async def test_import_cross_org_404_and_caps(db):
             org.id,
             kind="users",
             mode="partial",
-            file_bytes=b"x" * (52_428_800 + 1),
+            # R488: caps are format-aware — "x..." sniffs as CSV (200MB cap),
+            # so exceed the JSON cap with a JSON-shaped payload instead.
+            file_bytes=b"{" + b"x" * (52_428_800 + 1),
             file_key="k",
             created_by=owner.id,
         )
@@ -1360,3 +1362,87 @@ async def test_create_job_bad_mode_and_oversized_header_map(db):
             header_map={f"k{i}": f"v{i}" for i in range(21)},
         )
     assert e.value.code == "IMPORT_HEADER_MAP_INVALID"
+
+
+# ── R488: streaming CSV parse + format-aware caps ──
+
+
+def test_csv_cap_is_higher_than_json_cap():
+    from app.integrations.models.bulk import MAX_IMPORT_BYTES, MAX_IMPORT_BYTES_CSV
+
+    assert MAX_IMPORT_BYTES_CSV == 4 * MAX_IMPORT_BYTES == 209_715_200
+
+
+def test_csv_bad_byte_mid_file_reports_row_not_crash():
+    """R488: streamed decode surfaces a bad byte at ITERATION time — it must
+    come back as a row-positioned encoding error, never an unhandled
+    UnicodeDecodeError (the old whole-file pre-decode caught it up front)."""
+    from app.integrations.services.bulk_import import parse_users_csv
+
+    good = b"email,display_name\r\na@b.c,Alice\r\n"
+    bad_tail = b"b@c.d,Bob\xff\xfe\r\n"
+    rows, errors = parse_users_csv(good + bad_tail)
+    assert rows == [] or errors  # the file fails, not the request
+    assert errors and errors[0]["code"] == "encoding"
+    # bad byte in the HEADER row is also an encoding error, not a crash
+    rows2, errors2 = parse_users_csv(b"email,\xffname\r\na@b.c,A\r\n")
+    assert rows2 == [] and errors2[0]["code"] == "encoding"
+
+
+def test_csv_streamed_parse_still_handles_bom_crlf_and_aliases():
+    from app.integrations.services.bulk_import import parse_users_csv
+
+    content = "﻿E-Mail,Display Name\r\na@b.co,Alice\r\nb@c.de,Bob\r\n".encode()
+    rows, errors = parse_users_csv(
+        content, header_map={"email": "E-Mail", "display_name": "Display Name"}
+    )
+    assert errors == []
+    assert [r["email"] for r in rows] == ["a@b.co", "b@c.de"]
+
+
+@pytest.mark.asyncio
+async def test_create_job_format_aware_cap(db, monkeypatch):
+    """CSV accepts a payload over the JSON cap; JSON refuses it; both refuse
+    over their own cap (caps shrunk for the test)."""
+    import app.integrations.services.bulk_import as bi
+
+    org, owner = await _org(db)
+    svc = BulkImportService(db, file_loader=None)
+    monkeypatch.setattr(bi, "MAX_IMPORT_BYTES", 64)
+    monkeypatch.setattr(bi, "MAX_IMPORT_BYTES_CSV", 256)
+
+    filler = ",filler\r\n" + "x" * 80  # >64 bytes, CSV-looking
+    csv_bytes = ("email,display_name\r\na@b.c,A" + filler).encode()
+    assert len(csv_bytes) > 64
+    job = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=csv_bytes,
+        file_key="k1",
+        created_by=owner.id,
+    )
+    assert job.status in ("validating", "previewed")
+
+    json_bytes = b'{"users": [' + b" " * 70 + b"]}"
+    with pytest.raises(AppError) as e:
+        await svc.create_job(
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=json_bytes,
+            file_key="k2",
+            created_by=owner.id,
+        )
+    assert e.value.code == "IMPORT_TOO_LARGE"
+
+    with pytest.raises(AppError) as e:
+        await svc.create_job(
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=csv_bytes + b"y" * 300,
+            file_key="k3",
+            created_by=owner.id,
+        )
+    assert e.value.code == "IMPORT_TOO_LARGE"

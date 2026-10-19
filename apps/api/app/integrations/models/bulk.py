@@ -15,7 +15,10 @@ IMPORT_MODES = frozenset({"atomic", "partial"})
 IMPORT_STATUSES = frozenset(
     {"validating", "previewed", "committing", "succeeded", "failed", "partial"}
 )
-MAX_IMPORT_BYTES = 52_428_800  # 50 MB
+MAX_IMPORT_BYTES = 52_428_800  # 50 MB (JSON: stdlib parse needs the whole doc)
+# R488: CSV parses as a stream (TextIOWrapper decode + row iterator), so the
+# byte cap can be 4x higher; MAX_IMPORT_ROWS stays the real memory bound.
+MAX_IMPORT_BYTES_CSV = 209_715_200  # 200 MB
 MAX_ROW_ERRORS = 10_000
 MAX_IMPORT_ROWS = 100_000  # R337: byte cap alone admits ~1M rows
 IMPORT_CHUNK_ROWS = 500

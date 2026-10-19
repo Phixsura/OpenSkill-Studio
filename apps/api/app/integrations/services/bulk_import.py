@@ -30,6 +30,7 @@ from app.integrations.models.bulk import (
     IMPORT_KINDS,
     IMPORT_MODES,
     MAX_IMPORT_BYTES,
+    MAX_IMPORT_BYTES_CSV,
     MAX_IMPORT_ROWS,
     MAX_ROW_ERRORS,
     ImportJob,
@@ -369,11 +370,12 @@ def parse_users_csv(
     1-indexed INCLUDING the header (user's spreadsheet view). BOM + CRLF
     tolerated; extra columns ignored; missing required column fails the file
     before any row is processed."""
-    try:
-        text = file_bytes.decode("utf-8-sig", errors="strict")
-    except UnicodeDecodeError:
-        return [], [{"row_number": 1, "code": "encoding", "message": "File is not UTF-8"}]
-    reader = csv.DictReader(io.StringIO(text, newline=""))
+    # R488: stream the decode — TextIOWrapper decodes incrementally over the
+    # byte buffer instead of materializing a second full-size text copy
+    # (which capped imports at 50MB). UnicodeDecodeError now surfaces at
+    # ITERATION time, so both pulls below catch it alongside csv.Error.
+    stream = io.TextIOWrapper(io.BytesIO(file_bytes), encoding="utf-8-sig", newline="")
+    reader = csv.DictReader(stream)
     # R92 column mapping: {canonical: csv-header-alias}, case-insensitive on
     # the alias side. Unknown canonical keys are refused at create_job.
     alias_to_canonical = {
@@ -393,6 +395,8 @@ def parse_users_csv(
         return [], [
             {"row_number": 1, "code": "malformed_csv", "message": f"CSV not parseable: {e}"}
         ]
+    except UnicodeDecodeError:
+        return [], [{"row_number": 1, "code": "encoding", "message": "File is not UTF-8"}]
     headers = [_canon(h) for h in fieldnames]
     # R205: two source columns mapping to the SAME canonical field (duplicate
     # headers, or a header_map that aliases "Email" and "E-mail" both to
@@ -442,6 +446,16 @@ def parse_users_csv(
                 "row_number": len(raw_rows) + 2,
                 "code": "malformed_csv",
                 "message": f"CSV not parseable: {e}",
+            }
+        ]
+    except UnicodeDecodeError:
+        # R488: with streamed decode a bad byte mid-file lands here, with
+        # the row position preserved (was a whole-file pre-decode before).
+        return [], [
+            {
+                "row_number": len(raw_rows) + 2,
+                "code": "encoding",
+                "message": "File is not UTF-8",
             }
         ]
     return KIND_SPECS[kind].validator(raw_rows)
@@ -520,8 +534,13 @@ class BulkImportService:
             )
         if mode not in IMPORT_MODES:
             raise AppError("IMPORT_MODE_INVALID", "mode must be atomic|partial", 422)
-        if len(file_bytes) > MAX_IMPORT_BYTES:
-            raise AppError("IMPORT_TOO_LARGE", "file exceeds 50MB", 422)
+        # R488: CSV streams its parse, so it gets the higher cap; JSON needs
+        # the whole document in memory for stdlib parse and keeps 50MB.
+        cap = MAX_IMPORT_BYTES_CSV if detect_format(file_bytes) == "csv" else MAX_IMPORT_BYTES
+        if len(file_bytes) > cap:
+            raise AppError(
+                "IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422
+            )
         header_map = header_map or {}
         if len(header_map) > 20:
             raise AppError("IMPORT_HEADER_MAP_INVALID", "too many mappings", 422)
