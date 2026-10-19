@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R525/R526 (thirty-seventh window, CI-PARITY locally)**: this branch
+  never triggers CI (main/PR-only), so its gates were run by hand — the
+  apps/api ruff-format gate FAILED on 11 files (now formatted; gate green
+  at 942 files) and the web app got its first PRODUCTION build
+  (`next build` — clean, all routes compile).
 - **R524 (thirty-sixth window, R523 class — LTI side)**: every URL the
   Dynamic Registration payload advertises to the LMS (login, launch
   redirects, jwks, target links) is guarded against the registered routes

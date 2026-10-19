@@ -1186,7 +1186,11 @@ async def test_nrps_sync_fetch_and_member_shape_arms(db):
     svc, reg = await _registration(db, org)
     await ensure_tool_key(db)
     link = await svc.map_resource_link(
-        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-n", kind="skill",
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-n",
+        kind="skill",
         target_id="S1",
     )
     link.nrps_url = "https://lms.example.com/api/nrps/ctx-x"
@@ -1278,13 +1282,18 @@ async def test_dynamic_register_fetch_and_response_shape_arms(db):
     async def expect(code, platform):
         with pytest.raises(AppError) as e:
             await dynamic_register(
-                db, org.id, openid_configuration_url=cfg_url,
-                registration_token=None, egress=platform,
+                db,
+                org.id,
+                openid_configuration_url=cfg_url,
+                registration_token=None,
+                egress=platform,
             )
         assert e.value.code == code
 
     # Config GET non-200.
-    await expect("LTI_DYNREG_CONFIG_FAILED", Platform(config_resp=lambda r: httpx.Response(503, request=r)))
+    await expect(
+        "LTI_DYNREG_CONFIG_FAILED", Platform(config_resp=lambda r: httpx.Response(503, request=r))
+    )
     # Config not JSON.
     await expect(
         "LTI_DYNREG_CONFIG_FAILED",
@@ -1431,7 +1440,11 @@ async def test_nrps_sync_nonobject_body_rejected(db):
     svc, reg = await _registration(db, org)
     await ensure_tool_key(db)
     link = await svc.map_resource_link(
-        org.id, reg.id, deployment_id="dep-1", resource_link_id="rl-arr", kind="skill",
+        org.id,
+        reg.id,
+        deployment_id="dep-1",
+        resource_link_id="rl-arr",
+        kind="skill",
         target_id="S1",
     )
     link.nrps_url = "https://lms.example.com/api/nrps/ctx-arr"

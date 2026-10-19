@@ -7,6 +7,7 @@ hang) in ~15-20 s, and a normal fast sink still succeeds right after.
 
 Run from apps/api with infra up:  uv run python tests/drills/slow_sink_drill.py
 """
+
 import json
 import os
 import signal
@@ -40,6 +41,7 @@ def slow_sink(port: int, stall_s: float):
                 conn, _ = srv.accept()
             except OSError:
                 return
+
             def handle(c):
                 try:
                     c.settimeout(stall_s + 5)
@@ -48,6 +50,7 @@ def slow_sink(port: int, stall_s: float):
                     c.close()
                 except Exception:
                     pass
+
             threading.Thread(target=handle, args=(conn,), daemon=True).start()
 
     threading.Thread(target=loop, daemon=True).start()
@@ -82,8 +85,11 @@ time.sleep(0.5)
 env = dict(os.environ, APP_ENV="test", EGRESS_ALLOW_PRIVATE="true", PYTHONPATH=".")
 api = subprocess.Popen(
     ["uv", "run", "uvicorn", "app.main:app", "--no-server-header", "--port", "8443"],
-    cwd=API_DIR, stdout=open(f"{TMP}/uvicorn_slowsink.log", "w"),
-    stderr=subprocess.STDOUT, env=env, start_new_session=True,
+    cwd=API_DIR,
+    stdout=open(f"{TMP}/uvicorn_slowsink.log", "w"),
+    stderr=subprocess.STDOUT,
+    env=env,
+    start_new_session=True,
 )
 slow = slow_sink(8080, stall_s=60)  # 8080: the one allowed spare port
 fast = None
@@ -107,22 +113,34 @@ try:
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"{}")
 
-    st, body = req("POST", "/auth/register",
-                   {"email": f"ss-{uuid.uuid4().hex[:8]}@test.com",
-                    "password": "Test1234!", "display_name": "SlowSink Drill"})
+    st, body = req(
+        "POST",
+        "/auth/register",
+        {
+            "email": f"ss-{uuid.uuid4().hex[:8]}@test.com",
+            "password": "Test1234!",
+            "display_name": "SlowSink Drill",
+        },
+    )
     assert st == 201, (st, body)
     tok = body["access_token"]
     st, body = req("POST", "/orgs", {"name": f"SS {uuid.uuid4().hex[:5]}"}, tok)
     org = body["data"]["id"]
 
-    st, body = req("POST", f"/orgs/{org}/webhooks",
-                   {"url": "http://127.0.0.1:8080/hook",
-                    "events": ["com.openskill.project.approved.v1"]}, tok)
+    st, body = req(
+        "POST",
+        f"/orgs/{org}/webhooks",
+        {"url": "http://127.0.0.1:8080/hook", "events": ["com.openskill.project.approved.v1"]},
+        tok,
+    )
     assert st == 201, (st, body)
     slow_id = body["data"]["id"]
-    st, body = req("POST", f"/orgs/{org}/webhooks",
-                   {"url": "http://127.0.0.1:8080/hook",
-                    "events": ["com.openskill.project.approved.v1"]}, tok)
+    st, body = req(
+        "POST",
+        f"/orgs/{org}/webhooks",
+        {"url": "http://127.0.0.1:8080/hook", "events": ["com.openskill.project.approved.v1"]},
+        tok,
+    )
     fast_id = body["data"]["id"]
 
     t0 = time.monotonic()
@@ -143,9 +161,15 @@ try:
     dt2 = time.monotonic() - t1
     data2 = body2.get("data", {})
     print(f"fast sink: status={st2} elapsed={dt2:.1f}s result={str(data2)[:160]}")
-    ok_fast = st2 == 200 and dt2 < 10 and (
-        data2.get("ok") or data2.get("success") or data2.get("status_code") == 200
-        or data2.get("status") == 200
+    ok_fast = (
+        st2 == 200
+        and dt2 < 10
+        and (
+            data2.get("ok")
+            or data2.get("success")
+            or data2.get("status_code") == 200
+            or data2.get("status") == 200
+        )
     )
 
     ok = ok_slow and ok_fast

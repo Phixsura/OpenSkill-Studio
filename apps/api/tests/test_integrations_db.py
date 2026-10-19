@@ -558,7 +558,8 @@ async def test_upgrade_provider_disabled_and_connector_missing(ctx, monkeypatch)
 
     svc, org, db = ctx["svc"], ctx["org"], ctx["db"]
     conn = await _mk_conn(
-        ctx, provider_key="oneroster",
+        ctx,
+        provider_key="oneroster",
         config={"token_url": "https://idp.example.com/token", "page_size": 15},
     )
     provider = (
@@ -601,7 +602,8 @@ async def test_set_credential_concurrent_first_set_race(ctx, monkeypatch):
 
     svc, org, db = ctx["svc"], ctx["org"], ctx["db"]
     conn = await _mk_conn(
-        ctx, provider_key="oneroster",
+        ctx,
+        provider_key="oneroster",
         config={"token_url": "https://idp.example.com/token", "page_size": 15},
     )
     await db.commit()
@@ -615,8 +617,10 @@ async def test_set_credential_concurrent_first_set_race(ctx, monkeypatch):
             async with AsyncSessionLocal() as rival:
                 rival.add(
                     Cred(
-                        connection_id=conn.id, kind="api_key",
-                        ciphertext="rival-ct", expires_at=None,
+                        connection_id=conn.id,
+                        kind="api_key",
+                        ciphertext="rival-ct",
+                        expires_at=None,
                     )
                 )
                 await rival.commit()
@@ -629,8 +633,6 @@ async def test_set_credential_concurrent_first_set_race(ctx, monkeypatch):
     monkeypatch.setattr(db, "flush", real_flush)
     # Loser rotated in place on the winner's row: exactly one credential row,
     # carrying this caller's rotated ciphertext (last-writer-wins).
-    rows = (
-        (await db.execute(select(Cred).where(Cred.connection_id == conn.id))).scalars().all()
-    )
+    rows = (await db.execute(select(Cred).where(Cred.connection_id == conn.id))).scalars().all()
     assert len(rows) == 1
     assert cred.ciphertext != "rival-ct"  # this caller's value won the rotate

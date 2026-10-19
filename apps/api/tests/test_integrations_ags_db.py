@@ -505,14 +505,20 @@ async def test_push_score_success_range_boundaries(db):
 
     assert (
         await push_score(
-            db, link, user_id=user.id, score_given=1,
+            db,
+            link,
+            user_id=user.id,
+            score_given=1,
             egress=_RefusingPlatform(jwks, score_status=299),
         )
         is True
     )
     assert (
         await push_score(
-            db, link, user_id=user.id, score_given=1,
+            db,
+            link,
+            user_id=user.id,
+            score_given=1,
             egress=_RefusingPlatform(jwks, score_status=300),
         )
         is False

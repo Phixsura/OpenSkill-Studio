@@ -95,9 +95,7 @@ async def main() -> int:
                         seen_5xx.setdefault(f"{method.upper()} {raw_path}", body)
                 if method == "get" and "{" not in raw_path:
                     for q in HOSTILE_QUERIES:
-                        rr = await c.get(
-                            f"{HOST}{raw_path}", params=q, headers=h
-                        )
+                        rr = await c.get(f"{HOST}{raw_path}", params=q, headers=h)
                         total += 1
                         if rr.status_code >= 500:
                             seen_5xx.setdefault(f"GET? {raw_path} {q}", rr.text[:160])

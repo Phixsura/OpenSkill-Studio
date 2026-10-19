@@ -844,8 +844,15 @@ async def test_resolve_user_fallback_point_select_arms(db):
     async def resolve(user_ext):
         report = {"conflicts": 0}
         uid = await svc._resolve_user(
-            org.id, conn.id, user_ext, True, None, rec, report,
-            links_map=None, users_map=None,  # force the fallback point-SELECTs
+            org.id,
+            conn.id,
+            user_ext,
+            True,
+            None,
+            rec,
+            report,
+            links_map=None,
+            users_map=None,  # force the fallback point-SELECTs
         )
         return uid, report["conflicts"]
 
@@ -853,7 +860,10 @@ async def test_resolve_user_fallback_point_select_arms(db):
     # and the JIT-created user carries the payload display_name (kills the
     # `(payload or {}).get("display_name") or "" or None` default-chain mutants).
     _stage(
-        db, conn, "roster.user", "u-ok",
+        db,
+        conn,
+        "roster.user",
+        "u-ok",
         {"email": "kid@sch-fb.example.edu", "display_name": "Roster Kid"},
     )
     await db.flush()
@@ -870,7 +880,9 @@ async def test_resolve_user_fallback_point_select_arms(db):
     assert uid is None and conflicts == 1
 
     # A TOMBSTONED roster.user -> the status=='active' filter misses -> no_email.
-    _stage(db, conn, "roster.user", "u-dead", {"email": "d@sch-fb.example.edu"}, status="tombstoned")
+    _stage(
+        db, conn, "roster.user", "u-dead", {"email": "d@sch-fb.example.edu"}, status="tombstoned"
+    )
     await db.flush()
     uid, conflicts = await resolve("u-dead")
     assert uid is None and conflicts == 1

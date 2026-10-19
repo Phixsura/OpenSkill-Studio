@@ -10,6 +10,7 @@ Schrödinger backups.
 
 Run from apps/api with infra up:  uv run python tests/drills/backup_restore_drill.py
 """
+
 import subprocess
 import sys
 import time
@@ -42,30 +43,50 @@ t0 = time.monotonic()
 tables = psql(SRC_DB, TABLES_SQL).splitlines()
 src_counts = {t: int(psql(SRC_DB, f"SELECT count(*) FROM {t}")) for t in tables}
 src_head = psql(SRC_DB, "SELECT version_num FROM alembic_version")
-print(f"source: {len(tables)} tables, head={src_head}, "
-      f"{sum(src_counts.values()):,} rows in scope")
+print(f"source: {len(tables)} tables, head={src_head}, {sum(src_counts.values()):,} rows in scope")
 
 print("dumping (custom format)...")
-r = sh(["docker", "exec", CONTAINER, "pg_dump", "-U", "postgres", "-Fc",
-        "-f", DUMP, SRC_DB])
+r = sh(["docker", "exec", CONTAINER, "pg_dump", "-U", "postgres", "-Fc", "-f", DUMP, SRC_DB])
 if r.returncode != 0:
     print("pg_dump failed:", r.stderr[:300])
     sys.exit(1)
 size = sh(["docker", "exec", CONTAINER, "sh", "-c", f"du -h {DUMP} | cut -f1"]).stdout.strip()
 print(f"dump done: {size} in {time.monotonic() - t0:.0f}s")
 
-sh(["docker", "exec", CONTAINER, "psql", "-U", "postgres", "-c",
-    f"DROP DATABASE IF EXISTS {SCRATCH}"])
-r = sh(["docker", "exec", CONTAINER, "psql", "-U", "postgres", "-c",
-        f"CREATE DATABASE {SCRATCH}"])
+sh(
+    [
+        "docker",
+        "exec",
+        CONTAINER,
+        "psql",
+        "-U",
+        "postgres",
+        "-c",
+        f"DROP DATABASE IF EXISTS {SCRATCH}",
+    ]
+)
+r = sh(["docker", "exec", CONTAINER, "psql", "-U", "postgres", "-c", f"CREATE DATABASE {SCRATCH}"])
 if r.returncode != 0:
     print("createdb failed:", r.stderr[:300])
     sys.exit(1)
 
 print("restoring...")
 t1 = time.monotonic()
-r = sh(["docker", "exec", CONTAINER, "pg_restore", "-U", "postgres",
-        "-d", SCRATCH, "--no-owner", "--exit-on-error", DUMP])
+r = sh(
+    [
+        "docker",
+        "exec",
+        CONTAINER,
+        "pg_restore",
+        "-U",
+        "postgres",
+        "-d",
+        SCRATCH,
+        "--no-owner",
+        "--exit-on-error",
+        DUMP,
+    ]
+)
 if r.returncode != 0:
     print("pg_restore failed:", r.stderr[:400])
     sys.exit(1)
@@ -92,10 +113,11 @@ if src_sample != dst_sample:
     ok = False
     print("SECRET BYTES DIFFER after restore")
 
-sh(["docker", "exec", CONTAINER, "psql", "-U", "postgres", "-c",
-    f"DROP DATABASE {SCRATCH}"])
+sh(["docker", "exec", CONTAINER, "psql", "-U", "postgres", "-c", f"DROP DATABASE {SCRATCH}"])
 sh(["docker", "exec", CONTAINER, "rm", "-f", DUMP])
-print(f"head match: {restored_head == src_head}; tables checked: {len(tables)}; "
-      f"mismatches: {len(mismatches)}; total {time.monotonic() - t0:.0f}s")
+print(
+    f"head match: {restored_head == src_head}; tables checked: {len(tables)}; "
+    f"mismatches: {len(mismatches)}; total {time.monotonic() - t0:.0f}s"
+)
 print("DRILL", "OK" if ok else "FAIL")
 sys.exit(0 if ok else 1)

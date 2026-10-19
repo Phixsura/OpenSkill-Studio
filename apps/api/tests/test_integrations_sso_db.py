@@ -1903,9 +1903,7 @@ async def test_jit_provision_member_race_loser_is_noop(db):
     members = (
         (
             await db.execute(
-                select(OrgMember).where(
-                    OrgMember.org_id == org.id, OrgMember.user_id == user.id
-                )
+                select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == user.id)
             )
         )
         .scalars()
@@ -1960,7 +1958,11 @@ async def test_oidc_callback_reject_matrix_network_and_token_shapes(db):
     scenarios = [
         ("discovery_5xx", {"openid-configuration": resp(503)}, tok),
         ("discovery_not_json", {"openid-configuration": resp(200, text="<html>")}, tok),
-        ("discovery_missing_field", {"openid-configuration": resp(200, json_body=bad_discovery)}, tok),
+        (
+            "discovery_missing_field",
+            {"openid-configuration": resp(200, json_body=bad_discovery)},
+            tok,
+        ),
         ("token_4xx", {"/token": resp(400, json_body={"error": "invalid_grant"})}, tok),
         ("token_not_json", {"/token": resp(200, text="not json")}, tok),
         ("token_no_id_token", {"/token": resp(200, json_body={"access_token": "x"})}, tok),
@@ -1980,7 +1982,11 @@ async def test_oidc_callback_reject_matrix_network_and_token_shapes(db):
         ("jwks_5xx", {"/jwks": resp(500)}, tok),
         (
             "jwks_garbage_keys",
-            {"/jwks": resp(200, json_body={"keys": [{"kty": "RSA", "kid": "k1", "n": "!b", "e": "!b"}]})},
+            {
+                "/jwks": resp(
+                    200, json_body={"keys": [{"kty": "RSA", "kid": "k1", "n": "!b", "e": "!b"}]}
+                )
+            },
             tok,
         ),
     ]
@@ -2122,7 +2128,9 @@ async def test_resolve_queue_item_invalid_action_and_double_resolve_and_missing_
     # (1) invalid action.
     it1 = await fresh_item(f"qa-{uuid.uuid4().hex[:6]}")
     with pytest.raises(AppError) as exc:
-        await svc.resolve_queue_item(org.id, it1.id, action="merge", user_id=None, actor_id=owner.id)
+        await svc.resolve_queue_item(
+            org.id, it1.id, action="merge", user_id=None, actor_id=owner.id
+        )
     assert exc.value.code == "IDENTITY_QUEUE_INVALID" and exc.value.status_code == 422
 
     # (2) double resolve: first reject wins, second is 409.
@@ -2161,8 +2169,11 @@ async def test_sso_update_applies_all_settable_fields_and_enforce_toggle(db):
     org = await _org(db, owner)
     svc = SsoAdminService(db)
     conn = await svc.create(
-        org.id, protocol="oidc", oidc_issuer="https://idp.example.com",
-        oidc_client_id="c0", oidc_client_secret="old-secret",
+        org.id,
+        protocol="oidc",
+        oidc_issuer="https://idp.example.com",
+        oidc_client_id="c0",
+        oidc_client_secret="old-secret",
     )
     conn.status = "active"
     await db.flush()
@@ -2256,8 +2267,9 @@ async def test_identity_resolve_boundary_and_status_codes(db):
     # Zero member match, no JIT -> SSO_NO_ACCOUNT 403.
     with pytest.raises(AppError) as e:
         await svc.resolve(
-            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email="ghost@acme.edu",
-                   verified=True),
+            _ident(
+                org, subject=f"sub-{uuid.uuid4().hex[:6]}", email="ghost@acme.edu", verified=True
+            ),
             allow_jit=False,
         )
     assert e.value.code == "SSO_NO_ACCOUNT" and e.value.status_code == 403
@@ -2271,8 +2283,9 @@ async def test_identity_resolve_boundary_and_status_codes(db):
     await _add_member(db, org, f"dup-{h}@acme.edu")
     with pytest.raises(AppError) as e:
         await svc.resolve(
-            _ident(org, subject=f"sub-{uuid.uuid4().hex[:6]}", email=f"dup-{h}@acme.edu",
-                   verified=True)
+            _ident(
+                org, subject=f"sub-{uuid.uuid4().hex[:6]}", email=f"dup-{h}@acme.edu", verified=True
+            )
         )
     assert e.value.code == "IDENTITY_AMBIGUOUS" and e.value.status_code == 403
 
@@ -2292,7 +2305,11 @@ async def test_identity_resolve_boundary_and_status_codes(db):
     gone = await _user(db, email=f"gone-{uuid.uuid4().hex[:6]}@acme.edu")
     gone.status = UserStatus.SUSPENDED
     link = ExternalIdentityLink(
-        connection_ref="01CONN", subject="linked-gone", user_id=gone.id, org_id=org.id, source="sso",
+        connection_ref="01CONN",
+        subject="linked-gone",
+        user_id=gone.id,
+        org_id=org.id,
+        source="sso",
     )
     db.add(link)
     await db.flush()
@@ -2429,8 +2446,9 @@ async def test_oidc_discovery_and_token_nonobject_body_rejected(db):
     class _ArrToken(FakeIdp):
         async def request(self, method, url, *, headers=None, content=None, read_timeout=None):
             if urlsplit(url).path.endswith("/token"):
-                return httpx.Response(200, json=["not", "an", "object"],
-                                      request=httpx.Request(method, url))
+                return httpx.Response(
+                    200, json=["not", "an", "object"], request=httpx.Request(method, url)
+                )
             return await super().request(
                 method, url, headers=headers, content=content, read_timeout=read_timeout
             )

@@ -7,6 +7,7 @@ bound (connection pools, caches, replay stores). Pass: final RSS below
 
 Run from apps/api with infra up:  uv run python tests/drills/soak_drill.py [N]
 """
+
 import os
 import re
 import signal
@@ -39,8 +40,11 @@ time.sleep(0.5)
 env = dict(os.environ, APP_ENV="test", PYTHONPATH=".")
 api = subprocess.Popen(
     ["uv", "run", "uvicorn", "app.main:app", "--no-server-header", "--port", "8443"],
-    cwd=API_DIR, stdout=open(f"{TMP}/uvicorn_soak.log", "w"),
-    stderr=subprocess.STDOUT, env=env, start_new_session=True,
+    cwd=API_DIR,
+    stdout=open(f"{TMP}/uvicorn_soak.log", "w"),
+    stderr=subprocess.STDOUT,
+    env=env,
+    start_new_session=True,
 )
 try:
     for _ in range(60):
@@ -59,9 +63,10 @@ try:
     for i in range(N):
         r = subprocess.run(
             ["uv", "run", "python", "tests/e2e_storm_fabric.py"],
-            cwd=API_DIR, capture_output=True, text=True,
-            env=dict(env, E2E_INTG_API="http://localhost:8443/api/v1",
-                     STORM_SEED=str(500 + i)),
+            cwd=API_DIR,
+            capture_output=True,
+            text=True,
+            env=dict(env, E2E_INTG_API="http://localhost:8443/api/v1", STORM_SEED=str(500 + i)),
         )
         if r.returncode != 0:
             print(f"storm {i} FAILED:\n{r.stdout[-400:]}")
@@ -74,8 +79,10 @@ try:
     warm = samples[1] if len(samples) > 1 else samples[0]
     final = samples[-1]
     ok = final < max(warm * 2, warm + 200) and final < 1536
-    print(f"warm rss={warm:.0f}MB final rss={final:.0f}MB "
-          f"growth={(final - warm):+.0f}MB over {N - 1} storms")
+    print(
+        f"warm rss={warm:.0f}MB final rss={final:.0f}MB "
+        f"growth={(final - warm):+.0f}MB over {N - 1} storms"
+    )
     print("DRILL", "OK" if ok else "FAIL (unbounded RSS growth)")
     sys.exit(0 if ok else 1)
 finally:

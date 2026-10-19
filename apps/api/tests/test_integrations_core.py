@@ -1794,10 +1794,7 @@ def test_sp_metadata_urls_resolve_to_registered_routes():
 
     def registered(path: str) -> bool:
         probe = re.sub(r"\{[^}]+\}", "X", path)
-        for p in paths:
-            if re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", p), probe):
-                return True
-        return False
+        return any(re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", p), probe) for p in paths)
 
     xml = sp_metadata_xml("{connection_id}")
     urls = re.findall(r'(?:Location|entityID)="([^"]+)"', xml)

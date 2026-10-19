@@ -340,9 +340,7 @@ async def test_fabric_audit_fail_open_branches(db, monkeypatch):
     org = await _org(db, user)
 
     # (1) system actor: returns without touching the audit table.
-    await record_fabric_audit(
-        db, org.id, None, "intg.sweeper.ran", "connection", "none"
-    )
+    await record_fabric_audit(db, org.id, None, "intg.sweeper.ran", "connection", "none")
     await db.flush()
     row = (
         (
