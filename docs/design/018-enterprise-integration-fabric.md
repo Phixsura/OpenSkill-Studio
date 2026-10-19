@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R517 (thirty-sixth window, UI — payload schema hints)**: the events
+  page pattern box now shows the R514 payload keys inline when the typed
+  pattern exactly matches a documented type (hint disappears for
+  wildcards). R516: Playwright CI sweeps run locally (CI does not trigger
+  on this branch) — sweep-integrations + sweep-a11y 9/9.
 - **R515 (thirty-fifth window, MUTATION over the security fixes)**:
   AST-harness over handle_slo_request (26 mutants), org_controls_email and
   _foreign_existing_user. Two true survivors killed with pins: SigAlg-

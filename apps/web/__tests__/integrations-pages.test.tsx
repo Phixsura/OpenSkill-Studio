@@ -143,6 +143,41 @@ describe("integrations hub", () => {
 });
 
 describe("events page", () => {
+  it("R517: shows the payload schema hint when the pattern matches a documented type", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/event-catalog": {
+        data: {
+          canonical: ["com.openskill.project.approved.v1"],
+          wildcards: ["com.openskill.project.*"],
+          internal: {},
+          payloads: {
+            "com.openskill.project.approved.v1": {
+              type: "object",
+              properties: {
+                submission_id: { type: "string" },
+                final_score: { type: "number" },
+              },
+            },
+          },
+        },
+      },
+    });
+    render(<EventsPage />, { wrapper: wrapper() });
+    const patterns = await screen.findByLabelText("Event patterns");
+    expect(screen.queryByTestId("payload-schema-hint")).toBeNull();
+    fireEvent.change(patterns, {
+      target: { value: "com.openskill.project.approved.v1" },
+    });
+    await waitFor(() => expect(screen.getByTestId("payload-schema-hint")).toBeTruthy());
+    expect(screen.getByTestId("payload-schema-hint").textContent).toContain(
+      "submission_id: string",
+    );
+    expect(screen.getByTestId("payload-schema-hint").textContent).toContain("final_score: number");
+    // a wildcard pattern has no exact schema — hint disappears
+    fireEvent.change(patterns, { target: { value: "com.openskill.project.*" } });
+    await waitFor(() => expect(screen.queryByTestId("payload-schema-hint")).toBeNull());
+  });
+
   it("lists deliveries, expands attempts and replays", async () => {
     route({
       "/orgs/ORG1234567890123456789012/integrations/deliveries/d1/replay": { data: {} },

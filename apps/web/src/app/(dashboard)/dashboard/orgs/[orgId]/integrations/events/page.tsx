@@ -171,7 +171,12 @@ export default function IntegrationEventsPage() {
     queryKey: ["intg-event-catalog", orgId],
     queryFn: () =>
       apiWithAuth<{
-        data: { canonical: string[]; wildcards: string[]; internal: Record<string, string> };
+        data: {
+          canonical: string[];
+          wildcards: string[];
+          internal: Record<string, string>;
+          payloads?: Record<string, { properties?: Record<string, { type?: string }> }>;
+        };
       }>(`${base}/event-catalog`),
   });
   const catalogOptions = [
@@ -337,6 +342,23 @@ export default function IntegrationEventsPage() {
               <option key={t} value={t} />
             ))}
           </datalist>
+          {(() => {
+            // R517: when the pattern matches a documented type exactly, show
+            // its payload keys inline (R514 catalog schemas).
+            const schema = catalogQ.data?.data.payloads?.[subEvents.trim()];
+            if (!schema?.properties) return null;
+            return (
+              <p
+                className="text-muted-foreground w-full font-mono text-xs"
+                data-testid="payload-schema-hint"
+              >
+                data:{" "}
+                {Object.entries(schema.properties)
+                  .map(([k, v]) => `${k}: ${v.type ?? "any"}`)
+                  .join(", ")}
+              </p>
+            );
+          })()}
           <Button type="submit" size="sm" disabled={createSub.isPending}>
             Subscribe
           </Button>
