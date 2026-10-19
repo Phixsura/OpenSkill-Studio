@@ -24,6 +24,7 @@ class ExportStreamCreateRequest(BaseModel):
     field_allowlist: list[str] | None = None
     anonymize: dict | None = None
     schedule: str = "manual"
+    format: str = Field(default="ndjson", max_length=10)
 
 
 class ExportStreamResponse(BaseModel):
@@ -33,6 +34,7 @@ class ExportStreamResponse(BaseModel):
     field_allowlist: list
     anonymize: dict
     schedule: str
+    format: str
     cursor: dict
     enabled: bool
     created_at: datetime
@@ -78,6 +80,7 @@ async def create_stream(
         field_allowlist=body.field_allowlist,
         anonymize=body.anonymize,
         schedule=body.schedule,
+        part_format=body.format,
     )
     resp = ExportStreamResponse.model_validate(stream, from_attributes=True)
     # R377: exports move data OUT of the platform — every config mutation
@@ -101,6 +104,7 @@ class ExportStreamUpdateRequest(BaseModel):
     anonymize: dict | None = None
     schedule: str | None = Field(default=None, max_length=20)
     enabled: bool | None = None
+    format: str | None = Field(default=None, max_length=10)
 
 
 @router.patch("/export-streams/{stream_id}", response_model=DataResponse[ExportStreamResponse])
@@ -120,6 +124,7 @@ async def update_stream(
         anonymize=body.anonymize,
         schedule=body.schedule,
         enabled=body.enabled,
+        part_format=body.format,
     )
     resp = ExportStreamResponse.model_validate(stream, from_attributes=True)
     await record_fabric_audit(

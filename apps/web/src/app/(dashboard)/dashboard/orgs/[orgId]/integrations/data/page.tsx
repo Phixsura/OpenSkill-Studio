@@ -43,6 +43,7 @@ interface ExportStream {
   dataset: string;
   field_allowlist: string[];
   schedule: string;
+  format: string;
   enabled: boolean;
   cursor: Record<string, unknown>;
 }
@@ -71,6 +72,7 @@ export default function DataIntegrationsPage() {
   const [dataset, setDataset] = useState("events");
   const [streamFields, setStreamFields] = useState("");
   const [streamSchedule, setStreamSchedule] = useState("manual");
+  const [streamFormat, setStreamFormat] = useState("ndjson");
   const mountKey = useRef(Math.random().toString(36).slice(2, 10));
   const [openStream, setOpenStream] = useState<string | null>(null);
 
@@ -170,6 +172,7 @@ export default function DataIntegrationsPage() {
           name: streamName,
           dataset,
           schedule: streamSchedule,
+          format: streamFormat,
           ...(fields.length ? { field_allowlist: fields } : {}),
         }),
       });
@@ -179,6 +182,7 @@ export default function DataIntegrationsPage() {
       setStreamName("");
       setStreamFields("");
       setStreamSchedule("manual");
+      setStreamFormat("ndjson");
       queryClient.invalidateQueries({ queryKey: ["intg-export-streams", orgId] });
     },
     onError,
@@ -378,6 +382,7 @@ export default function DataIntegrationsPage() {
                 <div>
                   <span className="font-medium">{s.name}</span>
                   <span className="ml-2 font-mono text-xs">{s.dataset}</span>
+                  <span className="ml-2 font-mono text-xs">{s.format}</span>
                   <span className="text-muted-foreground ml-2 text-xs">
                     fields: {s.field_allowlist.join(", ")}
                   </span>
@@ -445,6 +450,15 @@ export default function DataIntegrationsPage() {
             <option value="manual">manual</option>
             <option value="hourly">hourly</option>
             <option value="daily">daily</option>
+          </select>
+          <select
+            aria-label="Stream format"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={streamFormat}
+            onChange={(e) => setStreamFormat(e.target.value)}
+          >
+            <option value="ndjson">ndjson</option>
+            <option value="parquet">parquet</option>
           </select>
           <Input
             aria-label="Stream fields"

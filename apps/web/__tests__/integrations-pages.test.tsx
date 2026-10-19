@@ -649,7 +649,36 @@ describe("data page", () => {
             name: "scored",
             dataset: "events",
             schedule: "manual",
+            format: "ndjson",
             field_allowlist: ["id", "type", "data.score"],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("R486: stream create can pick the parquet format", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/export-streams": { data: [] },
+    });
+    render(<DataPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Stream name"), {
+      target: { value: "wh" },
+    });
+    fireEvent.change(screen.getByLabelText("Stream format"), {
+      target: { value: "parquet" },
+    });
+    fireEvent.click(screen.getByText("Create stream"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/export-streams",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            name: "wh",
+            dataset: "events",
+            schedule: "manual",
+            format: "parquet",
           }),
         }),
       ),

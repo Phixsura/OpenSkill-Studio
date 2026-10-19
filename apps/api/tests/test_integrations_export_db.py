@@ -666,7 +666,9 @@ async def test_sweep_naive_last_run_coerced_and_apperror_skipped(db, monkeypatch
     writer = MemWriter()
     svc = WarehouseExportService(db, writer=writer)
     s_ok = await svc.create_stream(org.id, name=f"ok-{ULID()}", dataset="events", schedule="daily")
-    s_bad = await svc.create_stream(org.id, name=f"bad-{ULID()}", dataset="events", schedule="daily")
+    s_bad = await svc.create_stream(
+        org.id, name=f"bad-{ULID()}", dataset="events", schedule="daily"
+    )
     await emit_event(db, org.id, "project.approved", subject="s", data={})
     await db.flush()
 
@@ -694,8 +696,10 @@ async def test_sweep_naive_last_run_coerced_and_apperror_skipped(db, monkeypatch
     ran = await sweep_scheduled_exports(db, writer)
     assert ran == 1  # s_ok ran; s_bad raised and was skipped, not fatal
     runs_ok = await svc.list_runs(org.id, s_ok.id)
-    assert any(r.status == "succeeded" and r.created_at > datetime.now(UTC) - timedelta(minutes=5)
-               for r in runs_ok)
+    assert any(
+        r.status == "succeeded" and r.created_at > datetime.now(UTC) - timedelta(minutes=5)
+        for r in runs_ok
+    )
 
 
 @pytest.mark.asyncio
@@ -716,3 +720,112 @@ async def test_create_stream_bad_schedule_and_duplicate_name(db):
     with pytest.raises(AppError) as e:
         await svc.create_stream(org.id, name=name, dataset="events")
     assert e.value.code == "EXPORT_NAME_TAKEN" and e.value.status_code == 409
+
+
+# ── R486: parquet part format ──
+
+
+@pytest.mark.asyncio
+async def test_parquet_export_round_trip(db):
+    """format="parquet" writes readable parquet parts whose columns are
+    exactly the exported allowlist (drop-fields structurally absent), the
+    manifest advertises the format, and incremental cursors still advance."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    org, owner = await _org(db)
+    for i in range(3):
+        await emit_event(db, org.id, "project.approved", subject=f"pq{i}", data={"k": i})
+    await db.flush()
+
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    stream = await svc.create_stream(
+        org.id, name=f"pq-{ULID()}", dataset="events", part_format="parquet"
+    )
+    assert stream.format == "parquet"
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded" and run.row_count == 3
+    assert run.parts and all(p.endswith(".parquet") for p in run.parts)
+
+    manifest = json.loads(writer.files[run.manifest_key])
+    assert manifest["format"] == "parquet"
+
+    table = pq.read_table(io.BytesIO(writer.files[run.parts[0]]))
+    assert set(table.column_names) == set(manifest["fields"])
+    subjects = set(table.column("subject").to_pylist())
+    assert subjects == {"pq0", "pq1", "pq2"}
+
+    # Incremental second run picks up only the new event.
+    await emit_event(db, org.id, "project.approved", subject="pq-new", data={})
+    await db.flush()
+    run2 = await svc.run_export(org.id, stream.id)
+    assert run2.row_count == 1
+    t2 = pq.read_table(io.BytesIO(writer.files[run2.parts[0]]))
+    assert t2.column("subject").to_pylist() == ["pq-new"]
+
+
+@pytest.mark.asyncio
+async def test_parquet_unavailable_refused_at_config_and_run(db, monkeypatch):
+    """When pyarrow is absent: create/PATCH 422 EXPORT_FORMAT_UNAVAILABLE;
+    an already-parquet stream fails its run cleanly (no mid-run crash)."""
+    import app.integrations.services.warehouse as wh
+
+    org, owner = await _org(db)
+    svc = WarehouseExportService(db, writer=MemWriter())
+    stream = await svc.create_stream(org.id, name=f"na-{ULID()}", dataset="events")
+
+    monkeypatch.setattr(wh, "_parquet_available", lambda: False)
+    with pytest.raises(AppError) as e:
+        await svc.create_stream(
+            org.id, name=f"na2-{ULID()}", dataset="events", part_format="parquet"
+        )
+    assert e.value.code == "EXPORT_FORMAT_UNAVAILABLE" and e.value.status_code == 422
+    with pytest.raises(AppError) as e:
+        await svc.update_stream(org.id, stream.id, part_format="parquet")
+    assert e.value.code == "EXPORT_FORMAT_UNAVAILABLE"
+
+    # Stream already pinned to parquet (extra uninstalled underneath it):
+    # the run fails terminally with a diagnosable error, cursor untouched.
+    stream.format = "parquet"
+    await db.flush()
+    await emit_event(db, org.id, "project.approved", subject="x", data={})
+    await db.flush()
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "failed" and run.error == "EXPORT_FORMAT_UNAVAILABLE"
+    await db.refresh(stream)
+    assert (stream.cursor or {}).get("last_id") is None  # cursor did not advance
+
+
+@pytest.mark.asyncio
+async def test_create_stream_bad_format_rejected(db):
+    org, owner = await _org(db)
+    svc = WarehouseExportService(db, writer=MemWriter())
+    with pytest.raises(AppError) as e:
+        await svc.create_stream(org.id, name=f"bf-{ULID()}", dataset="events", part_format="csv")
+    assert e.value.code == "EXPORT_CONFIG_INVALID"
+    s = await svc.create_stream(org.id, name=f"ok-{ULID()}", dataset="events")
+    with pytest.raises(AppError) as e:
+        await svc.update_stream(org.id, s.id, part_format="xlsx")
+    assert e.value.code == "EXPORT_CONFIG_INVALID"
+
+
+def test_parquet_bytes_mixed_type_column_falls_back_to_string():
+    """A column mixing incompatible types (data.<key> selections) must not
+    fail the run: it falls back to utf8 with JSON-encoded non-scalars."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    from app.integrations.services.warehouse import _parquet_bytes
+
+    rows = [
+        {"a": 1, "b": "x"},
+        {"a": "two", "b": {"nested": True}},
+        {"a": None, "b": None},
+    ]
+    content = _parquet_bytes(rows, ["a", "b"])
+    table = pq.read_table(io.BytesIO(content))
+    assert table.column("a").to_pylist() == ["1", "two", None]
+    assert table.column("b").to_pylist() == ["x", '{"nested":true}', None]

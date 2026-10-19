@@ -31,6 +31,7 @@ from app.exceptions import AppError
 from app.integrations.models import IntegrationEvent
 from app.integrations.models.export import (
     ANONYMIZE_MODES,
+    EXPORT_FORMATS,
     EXPORT_PAGE_ROWS,
     EXPORT_SCHEDULES,
     ExportRun,
@@ -40,6 +41,53 @@ from app.integrations.models.export import (
 log = structlog.get_logger()
 
 SCHEMA_VERSION = 1
+
+
+def _parquet_available() -> bool:
+    """R486: pyarrow is an optional extra — parquet streams are refused at
+    CONFIG time when it is missing, never discovered mid-run."""
+    try:
+        import pyarrow  # noqa: F401
+        import pyarrow.parquet  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _parquet_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
+    """Serialize projected rows to a parquet part.
+
+    Column set comes from the ALLOWLIST (same universe as the NDJSON path —
+    the R82 projection already dropped un-listed fields). Types are inferred
+    by pyarrow; a column whose values mix incompatible types (possible for
+    `data.<key>` payload selections) falls back to utf8 with JSON-encoded
+    non-scalars rather than failing the run.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def _col(name: str) -> list[Any]:
+        return [r.get(name) for r in rows]
+
+    arrays: dict[str, pa.Array] = {}
+    for name in columns:
+        values = _col(name)
+        try:
+            arrays[name] = pa.array(values)
+        except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError):
+            arrays[name] = pa.array(
+                [
+                    None
+                    if v is None
+                    else (v if isinstance(v, str) else json.dumps(v, separators=(",", ":")))
+                    for v in values
+                ],
+                type=pa.string(),
+            )
+    table = pa.table(arrays)
+    sink = pa.BufferOutputStream()
+    pq.write_table(table, sink, compression="snappy")
+    return sink.getvalue().to_pybytes()
 
 
 class PartWriter(Protocol):
@@ -171,12 +219,14 @@ class WarehouseExportService:
         field_allowlist: list[str] | None = None,
         anonymize: dict | None = None,
         schedule: str = "manual",
+        part_format: str = "ndjson",
     ) -> ExportStream:
         spec = DATASETS.get(dataset)
         if spec is None:
             raise AppError("EXPORT_DATASET_UNKNOWN", f"unknown dataset: {dataset}", 422)
         if schedule not in EXPORT_SCHEDULES:
             raise AppError("EXPORT_CONFIG_INVALID", "bad schedule", 422)
+        self._check_format(part_format)
         allowlist = field_allowlist or list(spec["default_allowlist"])
         _check_fields(dataset, spec, allowlist, what="fields")
         anon = anonymize if anonymize is not None else dict(spec.get("default_anonymize", {}))
@@ -203,6 +253,7 @@ class WarehouseExportService:
             field_allowlist=allowlist,
             anonymize=anon,
             schedule=schedule,
+            format=part_format,
         )
         try:
             async with self.db.begin_nested():
@@ -222,6 +273,7 @@ class WarehouseExportService:
         anonymize: dict | None = None,
         schedule: str | None = None,
         enabled: bool | None = None,
+        part_format: str | None = None,
     ) -> ExportStream:
         """R81: edit a stream in place — same universe/anonymize validation
         as create. The dataset is immutable (cursor semantics differ per
@@ -245,8 +297,22 @@ class WarehouseExportService:
             stream.schedule = schedule
         if enabled is not None:
             stream.enabled = enabled
+        if part_format is not None:
+            self._check_format(part_format)
+            stream.format = part_format
         await self.db.flush()
         return stream
+
+    @staticmethod
+    def _check_format(part_format: str) -> None:
+        if part_format not in EXPORT_FORMATS:
+            raise AppError("EXPORT_CONFIG_INVALID", "bad format", 422)
+        if part_format == "parquet" and not _parquet_available():
+            raise AppError(
+                "EXPORT_FORMAT_UNAVAILABLE",
+                "parquet support is not installed on this server",
+                422,
+            )
 
     async def get_stream(self, org_id: str, stream_id: str) -> ExportStream:
         s = await self.db.get(ExportStream, stream_id)
@@ -328,19 +394,35 @@ class WarehouseExportService:
         part_no = 0
         last_cursor = since
         base = f"exports/{org_id}/{stream.dataset}/{run.id}"
+        # R486: format=parquet refuses at config time when pyarrow is absent,
+        # but guard the run too (the extra can be uninstalled under a stream).
+        fmt = getattr(stream, "format", None) or "ndjson"
+        if fmt == "parquet" and not _parquet_available():
+            run.status = "failed"
+            run.error = "EXPORT_FORMAT_UNAVAILABLE"
+            run.finished_at = datetime.now(UTC)
+            await self.db.flush()
+            return run
+        exported_columns = [
+            f for f in stream.field_allowlist if (stream.anonymize or {}).get(f) != "drop"
+        ]
         try:
             while True:
                 rows = await spec["extract"](self.db, org_id, last_cursor, EXPORT_PAGE_ROWS)
                 if not rows:
                     break
-                lines = []
+                projected = []
                 for row in rows:
                     last_cursor = row.pop("_cursor", last_cursor)
-                    lines.append(
-                        json.dumps(self._project_row(stream, row, salt), separators=(",", ":"))
-                    )
-                part_key = f"{base}/part-{part_no:05d}.ndjson"
-                await self.writer.write(part_key, ("\n".join(lines) + "\n").encode())
+                    projected.append(self._project_row(stream, row, salt))
+                if fmt == "parquet":
+                    part_key = f"{base}/part-{part_no:05d}.parquet"
+                    content = _parquet_bytes(projected, exported_columns)
+                else:
+                    part_key = f"{base}/part-{part_no:05d}.ndjson"
+                    lines = [json.dumps(p, separators=(",", ":")) for p in projected]
+                    content = ("\n".join(lines) + "\n").encode()
+                await self.writer.write(part_key, content)
                 parts.append(part_key)
                 total += len(rows)
                 part_no += 1
@@ -351,9 +433,8 @@ class WarehouseExportService:
                 "stream_id": stream.id,
                 "dataset": stream.dataset,
                 "schema_version": SCHEMA_VERSION,
-                "fields": [
-                    f for f in stream.field_allowlist if (stream.anonymize or {}).get(f) != "drop"
-                ],
+                "format": fmt,
+                "fields": exported_columns,
                 "cursor_from": run.cursor_from,
                 "cursor_to": {"last_id": last_cursor},
                 "row_count": total,
@@ -442,7 +523,11 @@ class S3PartWriter:
                 Key=key,
                 Body=content,
                 ContentType=(
-                    "application/json" if key.endswith(".json") else "application/x-ndjson"
+                    "application/json"
+                    if key.endswith(".json")
+                    else "application/vnd.apache.parquet"
+                    if key.endswith(".parquet")
+                    else "application/x-ndjson"
                 ),
             )
 

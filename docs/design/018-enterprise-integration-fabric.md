@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R486 (thirty-fourth window, FEATURE — parquet export format)**: the
+  benchmark table's "Parquet" gap closed. `ExportStream.format`
+  (ndjson|parquet, intg23 migration, UI select, PATCH-editable);
+  pyarrow ships as an optional `parquet` extra (and in dev for tests) —
+  format=parquet is refused 422 `EXPORT_FORMAT_UNAVAILABLE` at CONFIG time
+  when the import is missing, and a stream already pinned to parquet whose
+  extra was uninstalled fails its run terminally (cursor untouched) instead
+  of crashing mid-part. Columns come from the same allowlist projection as
+  NDJSON (drop-fields structurally absent); types are pyarrow-inferred with
+  a utf8 + JSON-encoded-non-scalar fallback for mixed `data.<key>` columns
+  so a hostile payload can never fail the run. Manifest gains `format`;
+  S3 content-type `application/vnd.apache.parquet`. Warehouse-native
+  (Snowflake share) delivery remains out of scope — parts land in the
+  tenant's bucket.
 - **R485 (thirty-third window, ENV — fake-IP DNS broke the SSRF positive
   control)**: the adversarial suite's "public https webhook accepted"
   positive control started failing 422 `WEBHOOK_URL_BLOCKED` after dozens of

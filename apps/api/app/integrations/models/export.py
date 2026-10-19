@@ -11,6 +11,9 @@ from app.models.base import Base, ulid_pk
 EXPORT_RUN_STATUSES = frozenset({"running", "succeeded", "failed"})
 ANONYMIZE_MODES = frozenset({"hash", "drop"})
 EXPORT_SCHEDULES = frozenset({"manual", "hourly", "daily"})
+# R486: part format. Parquet requires the optional pyarrow extra — creation
+# 422s with EXPORT_FORMAT_UNAVAILABLE when the import is missing.
+EXPORT_FORMATS = frozenset({"ndjson", "parquet"})
 EXPORT_PAGE_ROWS = 1000
 
 
@@ -30,6 +33,10 @@ class ExportStream(Base):
     # {field: "hash"|"drop"} — learner ids hash with a per-org salt by default.
     anonymize: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     schedule: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    # R486: part serialization format ("ndjson" | "parquet").
+    format: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="ndjson", server_default="ndjson"
+    )
     cursor: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
