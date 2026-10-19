@@ -15,3 +15,17 @@ exact failing input. 10 contracts across both files proven clean (R206):
 leap rule, month-length bounds, cost reversal antisymmetry + sign-follow,
 min-fee-never-flips-credit, semver patch-monotone / release>prerelease /
 reflexive, proration net==component-sum, days_left bounds.
+
+
+## R530 — fabric contracts (issue #43)
+
+`test_fabric_contracts.py`: six proven contracts over the fabric's pure
+cores — email-format shape (both halves required; multi-@ never passes),
+the schema walker's 10-violation bound and None≡absent rule, SCIM
+projection's id/schemas preservation, and the R502 drop-universe rule as a
+boolean identity. Run per-qualname (the whole-file runner trips a CrossHair
+formatting bug on FastAPI Literal annotations):
+
+    cd apps/api
+    PYTHONPATH=. uv run --with crosshair-tool crosshair check \
+        tests.symbolic.test_fabric_contracts.<fn> --per_condition_timeout=20
