@@ -333,12 +333,17 @@ try {
   if (streamNameInput) {
     const sname = `walk-${Date.now()}`;
     await streamNameInput.fill(sname);
+    // R486: pick the parquet format through the real select
+    const fmtSelect = await page.$('select[aria-label="Stream format"]');
+    check("stream format select present", fmtSelect !== null);
+    if (fmtSelect) await fmtSelect.selectOption("parquet");
     const createStreamBtn = await page.$('button:has-text("Create stream")');
     if (createStreamBtn) {
       await createStreamBtn.click();
       await page.waitForTimeout(3000);
       const afterStream = await page.textContent("body");
       check("export stream row listed", afterStream.includes(sname), afterStream.slice(0, 160));
+      check("stream row shows parquet format", /parquet/.test(afterStream), afterStream.slice(0, 160));
     }
   }
 
@@ -362,6 +367,10 @@ try {
         /previewed|dry-run|create/i.test(afterPrev),
         afterPrev.slice(0, 160),
       );
+      // R489: the mapped-sample table shows the row as the header map produced it
+      const sampleTable = await page.$('table[aria-label="Mapped sample rows"]');
+      check("mapped sample table rendered", sampleTable !== null);
+      check("sample shows the imported email", afterPrev.includes(importedEmail));
       const commitBtn = await page.$('button:has-text("Commit")');
       check("commit button present", commitBtn !== null);
       if (commitBtn) {

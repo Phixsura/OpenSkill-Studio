@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R495 (thirty-fourth window, BROWSER — new-UI journeys)**: the browser
+  suite grows to 69 checks: the export-stream form drives the R486 format
+  select (parquet row visible after create) and the import journey asserts
+  the R489 mapped-sample table renders with the uploaded row before
+  commit. 69/69 green against live web+api.
+- **R494 (thirty-fourth window, MUTATION pass over the R487 walker)**: the
+  enum arm had no catalog user (driven via injected schema) and the
+  10-entry detail bound was SKIPPED by every `continue` arm (type/format
+  errors could produce unbounded detail) — bound check moved to loop head;
+  exactly-10 pinned.
 - **R493 (thirty-fourth window, FUZZ — app-wide OpenAPI sweep)**: phase
   15's finding implied the class exists outside fabric markers. New
   companion script (tests/e2e_fuzz_appwide.py) walks EVERY /api/v1 spec
