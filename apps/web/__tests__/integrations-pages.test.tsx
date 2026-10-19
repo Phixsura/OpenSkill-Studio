@@ -340,6 +340,48 @@ describe("identity page", () => {
 });
 
 describe("sync page", () => {
+  it("R498: mints the inbound webhook trigger secret and shows it once", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/trigger-secret": {
+        data: { secret: "sth_abc123def456" },
+      },
+      "/orgs/ORG1234567890123456789012/integrations/sync-profiles": {
+        data: [
+          {
+            id: "sp1",
+            connection_id: "c1",
+            name: "roster",
+            model: "roster.class",
+            direction: "pull",
+            schedule: "manual",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    render(<SyncPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("roster")).toBeTruthy());
+    fireEvent.click(screen.getByText("Webhook trigger"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/trigger-secret",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("hook-secret-panel")).toBeTruthy());
+    expect(screen.getByText("sth_abc123def456")).toBeTruthy();
+    expect(screen.getByText(/sync-hooks\/sp1/)).toBeTruthy();
+    // disable clears the shown-once panel
+    fireEvent.click(screen.getByText("Disable hook"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/trigger-secret",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByTestId("hook-secret-panel")).toBeNull());
+  });
+
   it("runs profiles and surfaces conflicts", async () => {
     route({
       "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/run": { data: {} },

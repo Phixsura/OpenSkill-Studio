@@ -113,6 +113,28 @@ export default function SyncIntegrationsPage() {
   const onError = (err: unknown) =>
     toast.error(err instanceof ApiError ? err.message : "Request failed");
 
+  const [hookSecret, setHookSecret] = useState<{ id: string; secret: string } | null>(null);
+  const mintHook = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth<{ data: { secret: string } }>(`${base}/sync-profiles/${id}/trigger-secret`, {
+        method: "POST",
+      }).then((r) => ({ id, secret: r.data.secret })),
+    onSuccess: (res) => {
+      setHookSecret(res);
+      toast.success("Webhook trigger secret minted — shown once");
+    },
+    onError,
+  });
+  const clearHook = useMutation({
+    mutationFn: (id: string) =>
+      apiWithAuth(`${base}/sync-profiles/${id}/trigger-secret`, { method: "DELETE" }),
+    onSuccess: (_d, id) => {
+      if (hookSecret?.id === id) setHookSecret(null);
+      toast.success("Webhook trigger disabled");
+    },
+    onError,
+  });
+
   const runNow = useMutation({
     mutationFn: (args: { id: string; backfill: boolean }) =>
       apiWithAuth(`${base}/sync-profiles/${args.id}/run?backfill=${args.backfill}`, {
@@ -228,6 +250,18 @@ export default function SyncIntegrationsPage() {
             No sync profiles. Create one via the API for your connection.
           </p>
         )}
+        {hookSecret && (
+          <div className="rounded-md border p-3 text-xs" data-testid="hook-secret-panel">
+            <div className="font-medium">Inbound webhook trigger (shown once)</div>
+            <div className="mt-1">
+              POST{" "}
+              <span className="font-mono">/api/v1/integrations/sync-hooks/{hookSecret.id}</span>
+            </div>
+            <div className="mt-1">
+              Authorization: Bearer <span className="font-mono">{hookSecret.secret}</span>
+            </div>
+          </div>
+        )}
         <ul className="space-y-2">
           {profiles.map((p) => (
             <li
@@ -252,6 +286,23 @@ export default function SyncIntegrationsPage() {
                   onClick={() => runNow.mutate({ id: p.id, backfill: true })}
                 >
                   Backfill
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={mintHook.isPending}
+                  onClick={() => mintHook.mutate(p.id)}
+                  title="Mint (or rotate) the inbound webhook trigger secret — the source system POSTs it to enqueue an incremental run"
+                >
+                  Webhook trigger
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => clearHook.mutate(p.id)}
+                  title="Disable the inbound webhook trigger"
+                >
+                  Disable hook
                 </Button>
                 {p.direction === "pull" && (
                   <Button

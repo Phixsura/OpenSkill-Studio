@@ -168,6 +168,24 @@ Record-level rows carry `conflict_class`:
 | `consent_missing`       | talent push without ats_share consent             | learner must grant consent                                                       |
 | `ambiguous_identity`    | email unverified/foreign/duplicate                | resolve in the identity queue                                                    |
 
+## 5b. Inbound sync-trigger webhook (R497, CDC-lite)
+
+Instead of waiting for the hourly/daily schedule, the SOURCE system can
+notify the fabric that its data changed:
+
+1. Sync page → profile row → **Webhook trigger** mints the secret (shown
+   once; sha256 at rest; minting again rotates, **Disable hook** turns it
+   off — both audited).
+2. Configure the source system to
+   `POST /api/v1/integrations/sync-hooks/{profile_id}` with
+   `Authorization: Bearer sth_…` on change events.
+3. The fabric enqueues a normal INCREMENTAL run (`trigger="webhook"`,
+   cursor from the last run; a live run is reused, so notification storms
+   coalesce). The request body is ignored by design — cursors stay
+   destination-confirmed; an untrusted payload cannot steer them.
+4. Any mismatch (wrong id, wrong/cleared secret) is a uniform 401 — the
+   unauthenticated surface has no existence oracle. Rate limit: 30/60s.
+
 ## 6. Scheduled jobs (worker crons)
 
 | job                   | schedule        | does                                                                                                                                                  |

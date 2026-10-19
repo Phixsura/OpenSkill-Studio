@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R498 (thirty-fourth window, UI — webhook-trigger admin controls)**:
+  sync-page profile rows gain "Webhook trigger" (mint/rotate; shown-once
+  panel with the exact hook URL + bearer) and "Disable hook"; ops guide
+  §5b runbook. Web suite 19 tests.
 - **R497 (thirty-fourth window, FEATURE — inbound sync-trigger webhook,
   CDC-lite)**: trigger="webhook" sat in RUN_TRIGGERS with NOTHING able to
   produce it (the R11 never-driven-enum class) — and it is the honest
