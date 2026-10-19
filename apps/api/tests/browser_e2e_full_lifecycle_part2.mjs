@@ -80,7 +80,9 @@ async function register(prefix) {
 }
 function pyHelper(code) {
   return execFileSync("uv", ["run", "python", "-c", code], {
-    cwd: `${process.env.HOME}/Develop/OpenSkill-Studio/apps/api`,
+    // R528: resolve THIS checkout (worktrees broke the hardcoded main-repo
+    // path — helpers silently ran against a different branch's code/env).
+    cwd: new URL("..", import.meta.url).pathname,
     env: { ...process.env, NO_PROXY: "localhost,127.0.0.1", PYTHONPATH: "." },
     encoding: "utf8",
     timeout: 120000,
@@ -111,7 +113,7 @@ async function newPage(context) {
   return page;
 }
 async function uiLogin(page, email) {
-  await page.goto(`${BASE}/login`, { waitUntil: "networkidle", timeout: 20000 });
+  await page.goto(`${BASE}/login`, { waitUntil: "load", timeout: 20000 });
   await page.fill("#email", email);
   await page.fill("#password", "TestPass123!");
   await page.click('button[type="submit"]');
@@ -154,7 +156,7 @@ try {
   const octx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const opage = await newPage(octx);
   await uiLogin(opage, owner.email);
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/domains`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/domains`, { waitUntil: "load" });
   const host = `bf2-${uid()}.example.com`;
   await opage.fill('input[placeholder="academy.example.com"]', host);
   await opage.click('button:has-text("Add")');
@@ -187,7 +189,7 @@ try {
 
   // ═══════════════ 2. PLAN CHANGE DIALOG + PRORATION PREVIEW (UI) ═══════════════
   section("2. Billing: plan-change dialog previews proration, applies change");
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/billing`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/billing`, { waitUntil: "load" });
   await opage.waitForSelector('button:has-text("Change plan")', { timeout: 10000 });
   await opage.click('button:has-text("Change plan")');
   // <option> elements are always "hidden" to Playwright — wait for the select itself
@@ -208,7 +210,7 @@ try {
 
   // ═══════════════ 3. BRANDING white_label GATE (UI) ═══════════════
   section("3. Branding: growth plan has white_label — save succeeds");
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/branding`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/branding`, { waitUntil: "load" });
   await opage.waitForSelector('button:has-text("Save branding")', { timeout: 10000 });
   await opage.fill('input[placeholder="Partner Academy"]', "BF2 Academy");
   await opage.click('button:has-text("Save branding")');
@@ -217,7 +219,7 @@ try {
 
   // ═══════════════ 4. BUDGETS CREATE/REMOVE (UI) ═══════════════
   section("4. Budgets: create tenant-wide monthly budget, then remove");
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/budgets`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/budgets`, { waitUntil: "load" });
   await opage.click('button:has-text("New budget")');
   await opage.fill('input[placeholder="Limit (USD)"]', "250");
   await opage.click('button:has-text("Create")');
@@ -234,7 +236,7 @@ try {
   // ═══════════════ 5. TENANT MEMBERS ADD/REMOVE (UI) ═══════════════
   section("5. Members: add billing_admin by user id, then remove");
   const billingUser = await register("bf2-billing");
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/members`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}/members`, { waitUntil: "load" });
   await opage.fill('input[placeholder="User ID"]', billingUser.userId);
   await opage.click('button:has-text("Add")');
   await opage.waitForSelector("text=Member added", { timeout: 10000 });
@@ -252,7 +254,7 @@ try {
   const actx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const apage = await newPage(actx);
   await uiLogin(apage, admin.email);
-  await apage.goto(`${BASE}/platform/plans`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/plans`, { waitUntil: "load" });
   await apage.waitForSelector('button:has-text("New draft version")', { timeout: 10000 });
   await apage.locator('button:has-text("New draft version")').first().click();
   await apage.waitForSelector("text=Draft version created", { timeout: 10000 });
@@ -267,14 +269,14 @@ try {
 
   // ═══════════════ 7. SUSPEND → TENANT BANNER → REACTIVATE (UI) ═══════════════
   section("7. Lifecycle: suspend in console → banner in tenant UI → reactivate");
-  await apage.goto(`${BASE}/platform/tenants/${tenantId}`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/tenants/${tenantId}`, { waitUntil: "load" });
   await apage.waitForSelector('input[placeholder="Suspension reason (required)"]', { timeout: 15000 });
   await apage.fill('input[placeholder="Suspension reason (required)"]', "bf2 e2e lifecycle test");
   await apage.click('button:has-text("Suspend")');
   await apage.waitForSelector("text=Tenant suspended", { timeout: 10000 });
   check("tenant suspended via UI (toast)", true);
   // Owner sees the suspension banner
-  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}`, { waitUntil: "networkidle" });
+  await opage.goto(`${BASE}/dashboard/tenant/${tenantId}`, { waitUntil: "load" });
   const suspBanner = await opage
     .waitForSelector("text=This account is suspended", { timeout: 10000 })
     .then(() => true)
@@ -300,7 +302,7 @@ try {
   await apage.click('button:has-text("Reactivate")');
   await apage.waitForSelector("text=Tenant reactivated", { timeout: 10000 });
   check("tenant reactivated via UI (toast)", true);
-  await opage.reload({ waitUntil: "networkidle" });
+  await opage.reload({ waitUntil: "load" });
   await opage.waitForTimeout(1000);
   check("suspension banner gone after reactivate", !(await bodyText(opage)).includes("This account is suspended"));
 
@@ -346,7 +348,7 @@ try {
 
   const gctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const gpage = await newPage(gctx);
-  await gpage.goto(`${BASE}/client/access`, { waitUntil: "networkidle" });
+  await gpage.goto(`${BASE}/client/access`, { waitUntil: "load" });
   await gpage.fill('input[placeholder="Access code"]', reviewerToken);
   await gpage.click('button:has-text("Open project")');
   await gpage.waitForURL(new RegExp(`/client/${projectId}`), { timeout: 15000 });
@@ -363,7 +365,7 @@ try {
     { method: "POST", token: owner.token },
   );
   check("link revoked (API)", revokeR.status === 200, revokeR.status);
-  await gpage.reload({ waitUntil: "networkidle" });
+  await gpage.reload({ waitUntil: "load" });
   const bounced = await gpage
     .waitForURL(/client\/access/, { timeout: 15000 })
     .then(() => true)
@@ -373,14 +375,14 @@ try {
 
   // ═══════════════ 9. PLATFORM EXPLORERS RENDER SEEDED DATA (UI) ═══════════════
   section("9. Platform pricing + usage explorers");
-  await apage.goto(`${BASE}/platform/pricing`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/pricing`, { waitUntil: "load" });
   await apage.waitForTimeout(1000);
   const pricingBody = await bodyText(apage);
   check("pricing page renders policy tabs", pricingBody.includes("price policies"));
   await apage.click('button:has-text("price policies")');
   await apage.waitForTimeout(800);
   check("price policies table renders", (await bodyText(apage)).includes("Name"));
-  await apage.goto(`${BASE}/platform/usage`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/usage`, { waitUntil: "load" });
   await apage.fill('input[placeholder="Tenant ID"]', tenantId);
   await apage.waitForTimeout(1500);
   check("usage explorer filters by tenant", (await bodyText(apage)).length > 100);

@@ -931,6 +931,28 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R528 (thirty-seventh window, PRODUCTION-TOPOLOGY excavation — four
+  real defects)**: running the legacy platform browser journeys against a
+  TRUE production stack (standalone server + same-origin proxy) exposed a
+  chain nothing else could see:
+  (1) the standalone build output was EMPTY in any checkout where Next
+  infers the wrong workspace root (git worktrees see two lockfiles) —
+  `outputFileTracingRoot` now pinned to the monorepo root; `next start` on
+  a standalone build is unsupported and silently drops rewrite-proxy
+  responses (serving mode documented in next.config);
+  (2) refreshAccessToken never DRAINED the 401 response body — through the
+  compressed production proxy every anonymous page view held a socket for
+  the full 30s fetch timeout (networkidle never settled; pool pollution);
+  one-line body-cancel fix took landing-page settle from ∞ to ~750ms;
+  (3) the opportunities page requested applications?limit=200 against an
+  le=100 API cap — a guaranteed 422 on every page view (web↔API drift);
+  (4) matches page crashed (TypeError) on a match without
+  opportunity_type. Legacy suites also repaired: authed /login redirect
+  handling, networkidle→load on polling pages, and the pyHelper cwd that
+  silently ran DB helpers against the MAIN checkout from a worktree.
+  Result: browser_e2e 31/31, commercial 19/19, talent 22/22, part2 42/42,
+  full_lifecycle 52/59 (remaining 7 are issue-#27 billing-seed timing
+  checks), fabric 74/74 — all against the production artifact.
 - **R527 (thirty-seventh window, FULL-STACK verification)**: the entire
   backend suite run in chunks (the marathon had only run fabric+talent):
   control-plane 616, eco+experiments 1,109, all remaining 1,956 — with

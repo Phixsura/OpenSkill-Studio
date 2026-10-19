@@ -145,7 +145,7 @@ export default function OpportunitiesPage() {
   // Fetch user's applications to show "Applied" state
   const { data: applicationsData } = useQuery({
     queryKey: ["my-applications"],
-    queryFn: () => apiWithAuth<{ data: Application[] }>("/talent/applications?limit=200"),
+    queryFn: () => apiWithAuth<{ data: Application[] }>("/talent/applications?limit=100"),
   });
   const appliedOppIds = useMemo(() => {
     const ids = new Set<string>();

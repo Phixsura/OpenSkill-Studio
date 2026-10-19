@@ -112,6 +112,11 @@ async function refreshAccessToken(): Promise<string> {
   }
 
   if (!res.ok) {
+    // R528: DRAIN the body before throwing. An unread (compressed) response
+    // stream keeps the connection open in Chromium — through the production
+    // same-origin proxy every anonymous page view held a socket for the full
+    // 30s fetch timeout (networkidle never settled; socket pool polluted).
+    await res.body?.cancel().catch(() => {});
     useAuthStore.getState().clearAuth();
     redirectToLoginIfProtected();
     throw new ApiError(401, "SESSION_EXPIRED", "Please log in again");

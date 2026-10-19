@@ -85,7 +85,9 @@ async function register(prefix) {
 // execFileSync + arg array: no shell interpolation of the generated code string.
 function pyHelper(code) {
   return execFileSync("uv", ["run", "python", "-c", code], {
-    cwd: `${process.env.HOME}/Develop/OpenSkill-Studio/apps/api`,
+    // R528: resolve THIS checkout (worktrees broke the hardcoded main-repo
+    // path — helpers silently ran against a different branch's code/env).
+    cwd: new URL("..", import.meta.url).pathname,
     env: { ...process.env, NO_PROXY: "localhost,127.0.0.1", PYTHONPATH: "." },
     encoding: "utf8",
     timeout: 120000,
@@ -158,7 +160,7 @@ async function newPage(context) {
   return page;
 }
 async function uiLogin(page, email) {
-  await page.goto(`${BASE}/login`, { waitUntil: "networkidle", timeout: 20000 });
+  await page.goto(`${BASE}/login`, { waitUntil: "load", timeout: 20000 });
   await page.fill("#email", email);
   await page.fill("#password", "TestPass123!");
   await page.click('button[type="submit"]');
@@ -314,7 +316,7 @@ try {
   const pctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const ppage = await newPage(pctx);
   await uiLogin(ppage, partnerUser.email);
-  await ppage.goto(`${BASE}/partner/${partnerId}/provision`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/partner/${partnerId}/provision`, { waitUntil: "load" });
   check("provision wizard renders", (await bodyText(ppage)).includes("Provision a branded tenant"));
   const tenantName = `BFL Education ${uid()}`;
   const tenantSlug = `bfl-edu-${uid()}`;
@@ -338,7 +340,7 @@ try {
   await ppage.screenshot({ path: "/tmp/bfl-01-provision-run.png", fullPage: true });
 
   // Attributed tenant appears on the partner Tenants tab
-  await ppage.goto(`${BASE}/partner/${partnerId}/tenants`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/partner/${partnerId}/tenants`, { waitUntil: "load" });
   check("attributed tenant listed", (await bodyText(ppage)).includes(tenantSlug));
 
   // Make the partner admin also the tenant owner (API — platform-only op)
@@ -353,14 +355,14 @@ try {
   const actx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const apage = await newPage(actx);
   await uiLogin(apage, admin.email);
-  await apage.goto(`${BASE}/platform`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform`, { waitUntil: "load" });
   check("platform dashboard renders for admin", (await bodyText(apage)).includes("Platform dashboard"));
-  await apage.goto(`${BASE}/platform/tenants`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/tenants`, { waitUntil: "load" });
   await apage.fill('input[placeholder*="Search name"]', tenantSlug);
   await apage.waitForTimeout(1200);
   const searchBody = await bodyText(apage);
   check("tenant search finds provisioned tenant", searchBody.includes(tenantSlug));
-  await apage.goto(`${BASE}/platform/tenants/${tenantId}`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/tenants/${tenantId}`, { waitUntil: "load" });
   const lifecycleOk = await apage
     .waitForSelector("text=Lifecycle", { timeout: 15000 })
     .then(() => true)
@@ -375,7 +377,7 @@ try {
   await apage.screenshot({ path: "/tmp/bfl-02-tenant-detail.png", fullPage: true });
 
   // Ledger reflects it on the tenant credits page (partner-owner view)
-  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/credits`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/credits`, { waitUntil: "load" });
   const creditBody = await bodyText(ppage);
   check("tenant credits page shows balance", creditBody.includes("Balances"));
   check("ledger shows the $500 adjustment", /500\.00|adjustment/.test(creditBody), creditBody.slice(0, 300));
@@ -389,7 +391,7 @@ try {
   const orgsR = await api("/orgs", { token: partnerUser.token });
   const buyerOrg = orgsR.json.data.find((o) => o.name.includes("Campus"))?.id ?? orgsR.json.data[0]?.id;
   check("buyer org exists (blueprint-created)", Boolean(buyerOrg));
-  await ppage.goto(`${BASE}/registry/workflows/${packId}`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/registry/workflows/${packId}`, { waitUntil: "load" });
   await ppage.waitForTimeout(1500);
   const listingBody = await bodyText(ppage);
   check("price badge renders on registry detail", /214\.94|21494|\$214/.test(listingBody), listingBody.slice(0, 200));
@@ -406,7 +408,7 @@ try {
   await ppage.screenshot({ path: "/tmp/bfl-03-purchased.png", fullPage: true });
 
   // License visible on tenant licenses tab
-  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/licenses`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/licenses`, { waitUntil: "load" });
   const licBody = await bodyText(ppage);
   check("license row on tenant Licenses tab", licBody.includes("purchase"), licBody.slice(0, 300));
   check("purchase row shows amount", /214\.94/.test(licBody), licBody.slice(0, 300));
@@ -453,7 +455,7 @@ try {
   drainOutbox(); // close handler + accrual
 
   // Tenant billing page shows the invoice
-  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/billing`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/dashboard/tenant/${tenantId}/billing`, { waitUntil: "load" });
   await ppage.waitForTimeout(1000);
   const billBody = await bodyText(ppage);
   check("subscription card shows school plan", /school/i.test(billBody), billBody.slice(0, 300));
@@ -470,7 +472,7 @@ try {
 
   // ═══════════════ 5. §37 TRACE DRAWER (UI) ═══════════════
   section("5. Platform invoices: trace drawer reaches provider snapshots");
-  await apage.goto(`${BASE}/platform/invoices?tenant_id=${tenantId}`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/invoices?tenant_id=${tenantId}`, { waitUntil: "load" });
   await apage.fill('input[placeholder*="tenant ID" i]', tenantId).catch(() => {});
   await apage.waitForTimeout(1500);
   // Invoices render as collapsed <details> — expand them so line buttons are
@@ -498,7 +500,7 @@ try {
   // ═══════════════ 6. SETTLEMENT STATE MACHINE (UI) ═══════════════
   section("6. Settlements: generate → finalize → approve → mark paid");
   const period = new Date().toISOString().slice(0, 7);
-  await apage.goto(`${BASE}/platform/settlements`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/settlements`, { waitUntil: "load" });
   await apage.fill('input[placeholder="Partner ID"]', partnerId);
   await apage.fill('input[placeholder*="Period"]', period);
   await apage.click('button:has-text("Generate")');
@@ -520,7 +522,7 @@ try {
   await apage.screenshot({ path: "/tmp/bfl-06-settlement.png", fullPage: true });
 
   // Partner sees the statement + CSV export button
-  await ppage.goto(`${BASE}/partner/${partnerId}/statements`, { waitUntil: "networkidle" });
+  await ppage.goto(`${BASE}/partner/${partnerId}/statements`, { waitUntil: "load" });
   const stListBody = await bodyText(ppage);
   check("partner statement list shows period", stListBody.includes(period), stListBody.slice(0, 300));
   const stLink = ppage.locator(`a:has-text("${period}")`).first();
@@ -583,7 +585,7 @@ try {
   // Guest enters through the access page (fresh context = anonymous)
   const gctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const gpage = await newPage(gctx);
-  await gpage.goto(`${BASE}/client/access`, { waitUntil: "networkidle" });
+  await gpage.goto(`${BASE}/client/access`, { waitUntil: "load" });
   await gpage.fill('input[placeholder="Access code"]', guestToken);
   await gpage.click('button:has-text("Open project")');
   // /client/access itself matches /client/ — wait for the project URL specifically
@@ -613,7 +615,7 @@ try {
   check("creator resubmits v2 (API seed)", resubmitR.status === 200, JSON.stringify(resubmitR.json).slice(0, 150));
 
   // Approve + final accept
-  await gpage.reload({ waitUntil: "networkidle" });
+  await gpage.reload({ waitUntil: "load" });
   await gpage.waitForSelector('button:has-text("Approve version")', { timeout: 10000 });
   await gpage.click('button:has-text("Approve version")');
   await gpage.waitForSelector("text=Version approved", { timeout: 10000 });
@@ -624,7 +626,7 @@ try {
   await gpage.click('button:has-text("Final accept")');
   await gpage.waitForSelector("text=Project finally accepted", { timeout: 10000 });
   check("final accept via UI", true);
-  await gpage.reload({ waitUntil: "networkidle" });
+  await gpage.reload({ waitUntil: "load" });
   const finalBody = await bodyText(gpage);
   check("acceptance banner persists", finalBody.includes("finally accepted"));
   check("action buttons hidden after acceptance", !finalBody.includes("Request revision"));
@@ -634,7 +636,7 @@ try {
 
   // ═══════════════ 8. AUDIT TRAIL VISIBLE IN CONSOLE (UI) ═══════════════
   section("8. Platform audit explorer shows the lifecycle");
-  await apage.goto(`${BASE}/platform/audit`, { waitUntil: "networkidle" });
+  await apage.goto(`${BASE}/platform/audit`, { waitUntil: "load" });
   await apage.fill('input[placeholder="Tenant ID"]', tenantId);
   await apage.waitForTimeout(1500);
   const auditBody = await bodyText(apage);

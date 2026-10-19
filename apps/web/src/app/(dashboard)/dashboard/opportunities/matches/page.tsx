@@ -84,7 +84,7 @@ export default function OpportunityMatchesPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                  {match.employer_name} · {match.opportunity_type.replace(/_/g, " ")}
+                  {match.employer_name} · {(match.opportunity_type ?? "").replace(/_/g, " ")}
                 </p>
               </div>
               <div className="ml-4 text-right">

@@ -1,7 +1,17 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
   output: "standalone",
+  // R528: the standalone build NEEDS an explicit monorepo tracing root — in a
+  // checkout where Next infers the wrong workspace root (git worktrees see
+  // two pnpm lockfiles) the standalone output came out EMPTY (bare
+  // package.json, no server.js), i.e. the production artifact silently did
+  // not exist. `next start` on a standalone build is unsupported and drops
+  // rewrite-proxy responses; the ONLY supported serving mode is
+  // `node .next/standalone/apps/web/server.js`.
+  outputFileTracingRoot: path.join(__dirname, "../.."),
   // Dev proxy: /api/* → FastAPI, eliminates CORS issues
   async rewrites() {
     return [

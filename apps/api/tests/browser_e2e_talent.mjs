@@ -41,6 +41,7 @@ const consoleErrors = [];
 const apiErrors = [];
 
 page.on("console", (msg) => {
+  if (msg.type() === "error" && process.env.E2E_DEBUG) console.log("DBG", page.url(), msg.text().slice(0,120));
   if (msg.type() === "error") consoleErrors.push(msg.text());
 });
 
@@ -53,7 +54,7 @@ page.on("response", (resp) => {
 try {
   // ── 1. Register + Login ──
   section("1. Register + Login");
-  await page.goto(`${BASE}/register`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/register`, { waitUntil: "load", timeout: 15000 });
   await page.fill("#displayName", "Talent Tester");
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', password);
@@ -61,13 +62,16 @@ try {
   await page.waitForTimeout(3000);
   check("Registration flow", true);
 
-  // Always do explicit login after registration
-  await page.goto(`${BASE}/login`, { waitUntil: "networkidle", timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(1000);
-  await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
-  await page.click('button[type="submit"]');
-  // Wait for redirect to dashboard
+  // R528: registration auto-authenticates and /login now REDIRECTS authed
+  // users back to the dashboard — only drive the login form when the app
+  // actually shows it (fresh sessions), otherwise ride the redirect.
+  await page.goto(`${BASE}/login`, { waitUntil: "load", timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  if (page.url().includes("/login")) {
+    await page.fill('input[type="email"]', email, { timeout: 5000 }).catch(() => {});
+    await page.fill('input[type="password"]', password, { timeout: 5000 }).catch(() => {});
+    await page.click('button[type="submit"]').catch(() => {});
+  }
   await page.waitForURL("**/dashboard**", { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(2000);
   check("Lands on dashboard", page.url().includes("dashboard"), page.url());
@@ -81,7 +85,7 @@ try {
 
   // ── 3. Passport page ──
   section("3. Passport page");
-  await page.goto(`${BASE}/dashboard/passport`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/passport`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const passportContent = await page.textContent("body");
   check("Passport page loads", page.url().includes("/passport"));
@@ -90,7 +94,7 @@ try {
 
   // ── 4. Opportunities page ──
   section("4. Opportunities page");
-  await page.goto(`${BASE}/dashboard/opportunities`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/opportunities`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const oppContent = await page.textContent("body");
   check("Opportunities page loads", page.url().includes("/opportunities"));
@@ -98,7 +102,7 @@ try {
 
   // ── 5. Applications page ──
   section("5. Applications page");
-  await page.goto(`${BASE}/dashboard/applications`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/applications`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const appContent = await page.textContent("body");
   check("Applications page loads", page.url().includes("/applications"));
@@ -106,7 +110,7 @@ try {
 
   // ── 6. Talent Intelligence dashboard ──
   section("6. Talent Intelligence dashboard");
-  await page.goto(`${BASE}/dashboard/talent`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/talent`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const talentContent = await page.textContent("body");
   check("Talent dashboard loads", page.url().includes("/talent"));
@@ -114,7 +118,7 @@ try {
 
   // ── 7. Matched opportunities page ──
   section("7. Matched opportunities");
-  await page.goto(`${BASE}/dashboard/opportunities/matches`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/opportunities/matches`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const matchContent = await page.textContent("body");
   check("Matches page loads", page.url().includes("/matches"));
@@ -122,7 +126,7 @@ try {
 
   // ── 8. Passport snapshots page ──
   section("8. Passport snapshots");
-  await page.goto(`${BASE}/dashboard/passport/snapshots`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.goto(`${BASE}/dashboard/passport/snapshots`, { waitUntil: "load", timeout: 15000 });
   await page.waitForTimeout(2000);
   const snapContent = await page.textContent("body");
   check("Snapshots page loads", page.url().includes("/snapshots"));
@@ -133,7 +137,7 @@ try {
   // Open in a NEW context (no auth cookies) to verify it's truly public
   const publicContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const publicPage = await publicContext.newPage();
-  await publicPage.goto(`${BASE}/verify/passport/nonexistent-token-test`, { waitUntil: "networkidle", timeout: 15000 });
+  await publicPage.goto(`${BASE}/verify/passport/nonexistent-token-test`, { waitUntil: "load", timeout: 15000 });
   await publicPage.waitForTimeout(3000);
   const verifyUrl = publicPage.url();
   const verifyContent = await publicPage.textContent("body");
