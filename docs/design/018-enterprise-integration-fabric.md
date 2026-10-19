@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R502 (thirty-fourth window, PROPERTY totality — two real parquet
+  finds)**: hypothesis totality over the new helpers found (1) an
+  anonymize config that DROPS every allowed field exports empty objects
+  and a parquet part cannot even carry the row count — now refused 422 at
+  create AND update; (2) an empty-dict `data.<key>` value infers as a
+  childless struct that parquet cannot WRITE (ArrowNotImplementedError at
+  write time, past the array-level fallback) — non-scalar values are now
+  ALWAYS JSON-encoded strings (deterministic schema; heterogeneous
+  structs would give every part a different schema anyway), mixed scalars
+  still fall back to utf8. validate_model_payload and _project totality
+  properties pass clean.
 - **R501 (thirty-fourth window, MUTATION over the window's new cores)**:
   AST-harness runs — model_schema walker 18/18 killed after pinning two
   boundary survivors (exactly-maxLength valid; date fields tolerate a

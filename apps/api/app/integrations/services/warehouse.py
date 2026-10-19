@@ -66,8 +66,17 @@ def _parquet_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
     import pyarrow as pa
     import pyarrow.parquet as pq
 
+    def _norm(v: Any) -> Any:
+        # Scalars keep their types; dict/list values are ALWAYS JSON-encoded
+        # strings (R502, property-found: an empty dict infers as a childless
+        # struct that parquet cannot WRITE, and heterogeneous structs would
+        # give every part a different schema anyway).
+        if v is None or isinstance(v, (bool, int, float, str)):
+            return v
+        return json.dumps(v, separators=(",", ":"), default=str)
+
     def _col(name: str) -> list[Any]:
-        return [r.get(name) for r in rows]
+        return [_norm(r.get(name)) for r in rows]
 
     arrays: dict[str, pa.Array] = {}
     for name in columns:
@@ -75,13 +84,9 @@ def _parquet_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
         try:
             arrays[name] = pa.array(values)
         except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError):
+            # mixed scalar types (int + str in one data.<key> column)
             arrays[name] = pa.array(
-                [
-                    None
-                    if v is None
-                    else (v if isinstance(v, str) else json.dumps(v, separators=(",", ":")))
-                    for v in values
-                ],
+                [None if v is None else (v if isinstance(v, str) else str(v)) for v in values],
                 type=pa.string(),
             )
     table = pa.table(arrays)
@@ -197,6 +202,14 @@ def _check_fields(dataset: str, spec: dict, fields, *, what: str) -> None:
         raise AppError("EXPORT_CONFIG_INVALID", f"at most {MAX_DATA_KEYS} data.<key> entries", 422)
 
 
+def _check_exported_columns(allowlist: list, anonymize: dict) -> None:
+    """R502 (property-found): a config whose anonymize DROPS every allowed
+    field exports empty objects — and the parquet writer cannot even carry
+    the row count without columns. Refuse at config time for both formats."""
+    if not [f for f in allowlist if (anonymize or {}).get(f) != "drop"]:
+        raise AppError("EXPORT_CONFIG_INVALID", "every field is dropped — nothing to export", 422)
+
+
 def _org_salt(org_id: str) -> str:
     from app.config import settings
 
@@ -234,6 +247,7 @@ class WarehouseExportService:
         for mode in anon.values():
             if mode not in ANONYMIZE_MODES:
                 raise AppError("EXPORT_CONFIG_INVALID", "bad anonymize mode", 422)
+        _check_exported_columns(allowlist, anon)
         # R262 (R260 class): the hourly sweep visits every enabled stream
         # across every org — bound per-org sprawl, race-proof under the lock.
         from app.models.organization import Organization as _Org
@@ -297,6 +311,7 @@ class WarehouseExportService:
             stream.schedule = schedule
         if enabled is not None:
             stream.enabled = enabled
+        _check_exported_columns(stream.field_allowlist, stream.anonymize or {})
         if part_format is not None:
             self._check_format(part_format)
             stream.format = part_format

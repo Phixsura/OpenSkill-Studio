@@ -662,3 +662,72 @@ def test_validate_model_payload_boundaries():
         validate_model_payload("roster.term", {"name": "T", "start_date": "2026-01-15T00:00:00Z"})
         == []
     )
+
+
+# ── R502: totality properties over the window-34 helpers ──
+
+
+@settings(max_examples=150, deadline=None)
+@given(payload=json_values)
+def test_validate_model_payload_total_over_arbitrary_payloads(payload):
+    """The walker must never raise, whatever shape the mapping produced —
+    it returns bounded error strings or nothing."""
+    from app.integrations.services.model_schema import validate_model_payload
+
+    for model in ("roster.user", "crm.deal", "talent.application", "unknown.model"):
+        errors = validate_model_payload(model, payload)
+        assert isinstance(errors, list) and len(errors) <= 10
+        assert all(isinstance(e, str) for e in errors)
+
+
+@settings(max_examples=150, deadline=None)
+@given(
+    rows=st.lists(st.dictionaries(st.text(max_size=8), json_values, max_size=5), max_size=6),
+    columns=st.lists(st.text(min_size=1, max_size=8), min_size=1, max_size=5, unique=True),
+)
+def test_parquet_bytes_total_over_hostile_rows(rows, columns):
+    """R486's serializer must never fail a run on payload SHAPE: whatever
+    JSONB handed us (mixed types, NaN/inf, deep nesting), every row lands
+    in the part — the fallback stringifies rather than raises."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    from app.integrations.services.warehouse import _parquet_bytes
+
+    content = _parquet_bytes(rows, columns)
+    table = pq.read_table(io.BytesIO(content))
+    assert table.num_rows == len(rows)
+    assert set(table.column_names) == set(columns)
+
+
+@settings(max_examples=150, deadline=None)
+@given(
+    body=st.dictionaries(st.text(min_size=1, max_size=10), json_values, max_size=6),
+    attributes=st.one_of(st.none(), st.text(max_size=30)),
+    excluded=st.one_of(st.none(), st.text(max_size=30)),
+)
+def test_scim_projection_total_and_preserves_core(body, attributes, excluded):
+    """_project never raises on arbitrary resource dicts and never drops
+    id/schemas when present, whatever the query params say."""
+    from app.integrations.api.scim import _project
+
+    body = {**body, "id": "x", "schemas": ["urn:x"]}
+    out = _project(dict(body), attributes, excluded)
+    assert out.get("id") == "x" and out.get("schemas") == ["urn:x"]
+
+
+def test_export_config_all_fields_dropped_refused():
+    """R502 (found by the parquet totality property): anonymize dropping
+    EVERY allowed field exports empty objects (and a parquet part cannot
+    even carry the row count) — refused at config time."""
+    import pytest as _pytest
+
+    from app.exceptions import AppError
+    from app.integrations.services.warehouse import _check_exported_columns
+
+    with _pytest.raises(AppError) as e:
+        _check_exported_columns(["id", "type"], {"id": "drop", "type": "drop"})
+    assert e.value.code == "EXPORT_CONFIG_INVALID"
+    _check_exported_columns(["id", "type"], {"id": "drop", "type": "hash"})
+    _check_exported_columns(["id"], {})
