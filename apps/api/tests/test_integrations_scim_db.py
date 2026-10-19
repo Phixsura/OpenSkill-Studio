@@ -1194,9 +1194,7 @@ async def test_user_patch_external_id_add_and_remove(ctx):
     )
     assert res["externalId"] == "ext-r425"
 
-    res = await _usvc(ctx).patch(
-        u["id"], {"Operations": [{"op": "remove", "path": "externalId"}]}
-    )
+    res = await _usvc(ctx).patch(u["id"], {"Operations": [{"op": "remove", "path": "externalId"}]})
     assert res.get("externalId") in (None, "")
 
     with pytest.raises(ScimError):
@@ -1258,7 +1256,9 @@ async def test_user_patch_active_and_displayname_grammar(ctx):
 
     # active=False on an ACTIVE member -> deprovisioned.
     u2, _ = await usvc.create({"userName": f"a2-{uuid.uuid4().hex[:6]}@corp.example.edu"})
-    await usvc.patch(u2["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]})
+    await usvc.patch(
+        u2["id"], {"Operations": [{"op": "replace", "path": "active", "value": False}]}
+    )
     _, m2 = await usvc._member_for(u2["id"])
     assert m2.status != MemberStatus.ACTIVE
 
@@ -1334,16 +1334,23 @@ async def test_group_patch_replace_members_delta_and_rename_collision(ctx):
     c, _ = await usvc.create({"userName": f"mc-{uuid.uuid4().hex[:6]}@corp.example.edu"})
 
     g = await gsvc.create(
-        {"displayName": f"G1-{uuid.uuid4().hex[:6]}",
-         "members": [{"value": a["id"]}, {"value": b["id"]}]}
+        {
+            "displayName": f"G1-{uuid.uuid4().hex[:6]}",
+            "members": [{"value": a["id"]}, {"value": b["id"]}],
+        }
     )
     # Replace the full member set with {B, C}: A drops, C joins, B stays.
     await gsvc.patch(
         g["id"],
-        {"Operations": [
-            {"op": "replace", "path": "members",
-             "value": [{"value": b["id"]}, {"value": c["id"]}]}
-        ]},
+        {
+            "Operations": [
+                {
+                    "op": "replace",
+                    "path": "members",
+                    "value": [{"value": b["id"]}, {"value": c["id"]}],
+                }
+            ]
+        },
     )
     after = await gsvc.get(g["id"])
     ids = {m["value"] for m in after.get("members", [])}
@@ -1354,9 +1361,11 @@ async def test_group_patch_replace_members_delta_and_rename_collision(ctx):
     with pytest.raises(ScimError) as e:
         await gsvc.patch(
             g["id"],
-            {"Operations": [
-                {"op": "replace", "path": "displayName", "value": other["displayName"]}
-            ]},
+            {
+                "Operations": [
+                    {"op": "replace", "path": "displayName", "value": other["displayName"]}
+                ]
+            },
         )
     assert e.value.status == 409
 
@@ -1461,3 +1470,93 @@ async def test_scim_group_create_tolerates_malformed_members(ctx):
     # members as an int -> no crash.
     g3 = await gsvc.create({"displayName": f"G3-{uuid.uuid4().hex[:6]}", "members": 99})
     assert {mm["value"] for mm in g3.get("members", [])} == set()
+
+
+# ── R496: scim2-tester conformance fixes ──
+
+
+async def test_group_patch_externalid_add_replace_remove(ctx):
+    """Group externalId PATCH was a silent no-op (Users had the arm; Groups
+    never did — found by scim2-tester)."""
+    g = await _gsvc(ctx).create({"displayName": f"EXT-{uuid.uuid4().hex[:6]}"})
+    res = await _gsvc(ctx).patch(
+        g["id"], {"Operations": [{"op": "add", "path": "externalId", "value": "idp-77"}]}
+    )
+    assert res["externalId"] == "idp-77"
+    res = await _gsvc(ctx).patch(
+        g["id"], {"Operations": [{"op": "replace", "path": "externalId", "value": "idp-88"}]}
+    )
+    assert res["externalId"] == "idp-88"
+    res = await _gsvc(ctx).patch(g["id"], {"Operations": [{"op": "remove", "path": "externalId"}]})
+    assert res["externalId"] is None
+
+
+async def test_user_patch_complex_name_value(ctx):
+    """PATCH path "name" with the COMPLEX {"formatted": ...} value (Entra
+    dialect) was a silent no-op — only the dotted sub-path arm existed."""
+    res, _ = await _usvc(ctx).create(
+        {"userName": f"n-{uuid.uuid4().hex[:8]}@corp.example.edu", "displayName": "Old"}
+    )
+    out = await _usvc(ctx).patch(
+        res["id"],
+        {"Operations": [{"op": "replace", "path": "name", "value": {"formatted": "New Name"}}]},
+    )
+    assert out["displayName"] == "New Name"
+    # junk complex values stay tolerant no-ops
+    out = await _usvc(ctx).patch(
+        res["id"],
+        {"Operations": [{"op": "replace", "path": "name", "value": {"formatted": ["x"]}}]},
+    )
+    assert out["displayName"] == "New Name"
+
+
+def test_scim_projection_attributes_and_excluded():
+    """RFC 7644 §3.9 attributes/excludedAttributes projection: id+schemas
+    always survive; attributes keeps only the asked set (+meta); excluded
+    drops exactly the named keys; list bodies project per-resource."""
+    from app.integrations.api.scim import _project
+
+    res = {
+        "schemas": ["urn:x"],
+        "id": "u1",
+        "userName": "a@b.co",
+        "displayName": "A",
+        "active": True,
+        "meta": {"resourceType": "User"},
+    }
+    kept = _project(dict(res), "userName", None)
+    assert set(kept) == {"schemas", "id", "meta", "userName"}
+    dropped = _project(dict(res), None, "displayName,active")
+    assert set(dropped) == {"schemas", "id", "userName", "meta"}
+    # id/schemas cannot be excluded
+    assert set(_project(dict(res), None, "id,schemas")) == set(res)
+    listed = _project(
+        {"schemas": ["urn:list"], "totalResults": 1, "Resources": [dict(res)]},
+        None,
+        "displayName",
+    )
+    assert "displayName" not in listed["Resources"][0]
+    assert _project(dict(res), None, None) == res
+
+
+def test_scim_discovery_subresources_consistent():
+    """ResourceTypes/{id} and Schemas/{id} serve from the same tables as the
+    list endpoints; every ResourceType's schema URI is resolvable; declared
+    complex attributes carry subAttributes matching what we serialize."""
+    from app.integrations.api.scim import _RESOURCE_TYPE_DOCS, _SCHEMA_DOCS
+
+    for doc in _RESOURCE_TYPE_DOCS.values():
+        assert doc["schema"] in _SCHEMA_DOCS
+    user_attrs = {
+        a["name"]: a
+        for a in _SCHEMA_DOCS["urn:ietf:params:scim:schemas:core:2.0:User"]["attributes"]
+    }
+    assert user_attrs["userName"]["mutability"] == "immutable"
+    assert user_attrs["emails"]["mutability"] == "readOnly"
+    assert {s["name"] for s in user_attrs["name"]["subAttributes"]} == {"formatted"}
+    assert {s["name"] for s in user_attrs["emails"]["subAttributes"]} == {"value", "primary"}
+    group_attrs = {
+        a["name"]: a
+        for a in _SCHEMA_DOCS["urn:ietf:params:scim:schemas:core:2.0:Group"]["attributes"]
+    }
+    assert {s["name"] for s in group_attrs["members"]["subAttributes"]} == {"value", "display"}

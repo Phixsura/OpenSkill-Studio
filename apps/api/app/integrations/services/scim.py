@@ -612,6 +612,13 @@ class ScimUserService:
                 elif lowered in ("displayname", "name.formatted"):
                     if isinstance(value, str) and value.strip():
                         user.display_name = value.strip()[:100]
+                elif lowered == "name":
+                    # R496: Entra/scim2 PATCH the COMPLEX value {"formatted":
+                    # ...} at path "name" — was a silent no-op (only the
+                    # dotted sub-path arm existed).
+                    formatted = value.get("formatted") if isinstance(value, dict) else None
+                    if isinstance(formatted, str) and formatted.strip():
+                        user.display_name = formatted.strip()[:100]
                 elif lowered == "externalid":
                     await self._upsert_link(user.id, value)
                 # Unknown paths are stored-nothing no-ops (tolerant server).
@@ -869,6 +876,14 @@ class ScimGroupService:
             if low == "displayname" and name in ("add", "replace"):
                 if isinstance(value, str) and value.strip():
                     rename = value.strip()[:255]
+                continue
+            # R496 (scim2-tester): Group externalId was a silent no-op on
+            # PATCH — Users had the arm (R20 family), Groups never did.
+            if low == "externalid":
+                if name in ("add", "replace") and isinstance(value, str) and value.strip():
+                    group.external_id = value.strip()[:255]
+                elif name == "remove":
+                    group.external_id = None
                 continue
             # members add/remove — plain path or filtered remove
             # R409: Okta sends lowercase per spec, but the rest of the op

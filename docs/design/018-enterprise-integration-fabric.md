@@ -931,6 +931,24 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R496 (thirty-fourth window, CONFORMANCE — scim2-tester run; the
+  deferred dependency earned its keep)**: first run scored 15 SUCCESS / 31
+  ERROR; final run 48 SUCCESS / 0 hard / 12 dispositioned. Server fixes:
+  /ResourceTypes/{id} + /Schemas/{id} discovery sub-resources (served from
+  ONE table with the lists; schemas now declare subAttributes matching the
+  serializers, userName mutability=immutable, emails readOnly); SCIM-shaped
+  404 on unknown /scim/v2 paths and 405 on wrong-method against known
+  resource roots (catch-all registered last); Group PATCH externalId was a
+  SILENT NO-OP (add/replace/remove now real); user PATCH path "name" with
+  the complex {"formatted"} value (Entra dialect) was a silent no-op;
+  ?attributes / ?excludedAttributes projection on all four read surfaces
+  (id+schemas always survive). Dispositioned-by-design (asserted in
+  tests/e2e_scim_conformance.py so drift is visible): strict member
+  validation (never-guess identity), emails mirror userName, delete ≡
+  deactivate soft-delete, immutable userName, empty-member no-ops, POST
+  /.search unadvertised. Tester-side shims: httpx.URL.origin backfill and
+  email userNames (our strict-email rule). scim2-tester + scim2-client now
+  dev dependencies.
 - **R495 (thirty-fourth window, BROWSER — new-UI journeys)**: the browser
   suite grows to 69 checks: the export-stream form drives the R486 format
   select (parquet row visible after create) and the import journey asserts

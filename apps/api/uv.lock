@@ -1338,6 +1338,15 @@ wheels = [
 ]
 
 [[package]]
+name = "lark"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/34/28fff3ab31ccff1fd4f6c7c7b0ceb2b6968d8ea4950663eadcb5720591a0/lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905", size = 382732, upload-time = "2025-10-27T18:25:56.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12", size = 113151, upload-time = "2025-10-27T18:25:54.882Z" },
+]
+
+[[package]]
 name = "libcst"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1804,6 +1813,8 @@ dev = [
     { name = "mutmut" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "scim2-client" },
+    { name = "scim2-tester" },
 ]
 
 [package.metadata]
@@ -1844,6 +1855,8 @@ dev = [
     { name = "mutmut", specifier = ">=3.7.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "scim2-client", specifier = ">=0.5" },
+    { name = "scim2-tester", specifier = ">=0.5" },
 ]
 
 [[package]]
@@ -2397,6 +2410,44 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/62/74/8d69dcb7a9efe8baa2046891735e5dfe433ad558ae23d9e3c14c633d1d58/s3transfer-0.14.0.tar.gz", hash = "sha256:eff12264e7c8b4985074ccce27a3b38a485bb7f7422cc8046fee9be4983e4125", size = 151547, upload-time = "2025-09-09T19:23:31.089Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/48/f0/ae7ca09223a81a1d890b2557186ea015f6e0502e9b8cb8e1813f1d8cfa4e/s3transfer-0.14.0-py3-none-any.whl", hash = "sha256:ea3b790c7077558ed1f02a3072fb3cb992bbbd253392f4b6e9e8976941c7d456", size = 85712, upload-time = "2025-09-09T19:23:30.041Z" },
+]
+
+[[package]]
+name = "scim2-client"
+version = "0.13.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "scim2-models" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/9a/c84516f41990f32787ccc22ecce7224fd837322a20dedc1d3bc00bab24de/scim2_client-0.13.2.tar.gz", hash = "sha256:1397962f294f95c8982c543d422e2fa7fcf9295d5eb1af73067ab142090608e0", size = 37962, upload-time = "2026-10-09T11:28:09.624Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/56/d69c8bcf6cef54fac7afb930efae39e0f3b47399a12746ba6280df6d7ceb/scim2_client-0.13.2-py3-none-any.whl", hash = "sha256:9fafa5d903e1fae513a0d946ce7cd5fad2d697d47b55ae0b3204c0848c6d4b48", size = 41726, upload-time = "2026-10-09T11:28:07.874Z" },
+]
+
+[[package]]
+name = "scim2-models"
+version = "0.12.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lark" },
+    { name = "pydantic", extra = ["email"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/be/cba7330563df2f809db0e8cddd0ed0d64beddb42ff3af1eec6cacbf449c7/scim2_models-0.12.2.tar.gz", hash = "sha256:c8b1f7ae25af4874dba53edd2855ce126f7594d0dbe694a6e9bb32c369082234", size = 108565, upload-time = "2026-10-09T14:54:39.665Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/dc/3c3e0ea81420937a8502747c848379172608b0f9c5f77da9b796b19c3258/scim2_models-0.12.2-py3-none-any.whl", hash = "sha256:721b627f9ae50d24956103ba9fc2e852a1badbada8d25c0939bc8656881af62a", size = 131343, upload-time = "2026-10-09T14:54:38.229Z" },
+]
+
+[[package]]
+name = "scim2-tester"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "scim2-client" },
+    { name = "scim2-models" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/11/5f3952403a9bfa31fa7d2773fd2e550b458dce0d93f3615e284c1edcbd68/scim2_tester-0.5.2.tar.gz", hash = "sha256:f1d7f0d32eb66ff1b3aa48ce1ea272268322f902ce4bafdcd77f4c29b541e6a3", size = 27565, upload-time = "2026-10-06T09:51:09.947Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/9d/c7eba398c9c786228baf9c58ee32e8551a5204980ad55ab4e745854592e6/scim2_tester-0.5.2-py3-none-any.whl", hash = "sha256:10bc7068620d1c24f4b5cea2216f86bb8d57d0e56e585d622814f7e6b337dce5", size = 39787, upload-time = "2026-10-06T09:51:08.811Z" },
 ]
 
 [[package]]

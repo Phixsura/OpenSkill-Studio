@@ -90,6 +90,9 @@ dev = [
     "mutmut>=3.7.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0",
+    # R496: SCIM conformance run (tests/e2e_scim_conformance.py)
+    "scim2-tester>=0.5",
+    "scim2-client>=0.5",
 ]
 
 # ── mutmut (R198 overnight systematic mutation run — money core) ──

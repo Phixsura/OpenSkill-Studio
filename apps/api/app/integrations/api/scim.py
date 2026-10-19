@@ -36,6 +36,30 @@ def _scim_json(body: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(body, status_code=status, media_type=_CT)
 
 
+def _project(body: dict, attributes: str | None, excluded: str | None) -> dict:
+    """R496 (RFC 7644 §3.9): honor ?attributes / ?excludedAttributes on read
+    surfaces. Top-level keys only (sub-attribute selection keeps the parent);
+    id + schemas are always returned; meta rides along under `attributes`
+    so schema-aware clients can still validate the resource."""
+    if not attributes and not excluded:
+        return body
+
+    def one(res: dict) -> dict:
+        if attributes:
+            keep = {a.strip().split(".")[0] for a in attributes.split(",") if a.strip()}
+            keep |= {"schemas", "id", "meta"}
+            return {k: v for k, v in res.items() if k in keep}
+        drop = {a.strip().split(".")[0] for a in (excluded or "").split(",") if a.strip()}
+        drop -= {"schemas", "id"}
+        return {k: v for k, v in res.items() if k not in drop}
+
+    if isinstance(body.get("Resources"), list):
+        out = dict(body)
+        out["Resources"] = [one(r) for r in body["Resources"] if isinstance(r, dict)]
+        return out
+    return one(body)
+
+
 async def _auth(db: AsyncSession, authorization: str | None) -> ScimToken:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise ScimError(401, "Bearer token required")
@@ -88,30 +112,113 @@ async def service_provider_config():
     )
 
 
+# R496 (scim2-tester conformance): discovery sub-resources are served from
+# ONE table so /ResourceTypes, /ResourceTypes/{id}, /Schemas and
+# /Schemas/{id} can never drift apart.
+def _attr(
+    name: str,
+    *,
+    type_: str = "string",
+    multi: bool = False,
+    required: bool = False,
+    sub: list[dict] | None = None,
+) -> dict:
+    out = {
+        "name": name,
+        "type": type_,
+        "multiValued": multi,
+        "required": required,
+        "mutability": "readWrite",
+        "returned": "default",
+        "uniqueness": "none",
+    }
+    if sub is not None:
+        # Complex attributes DECLARE their sub-attributes — a schema-aware
+        # client (scim2-models) rejects undeclared keys as "extra inputs",
+        # so the declaration must match what _user/_group_resource emit.
+        out["subAttributes"] = sub
+    return out
+
+
+_SCHEMA_DOCS: dict[str, dict] = {
+    "urn:ietf:params:scim:schemas:core:2.0:User": {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Schema"],
+        "id": "urn:ietf:params:scim:schemas:core:2.0:User",
+        "name": "User",
+        "description": "User account (supported subset)",
+        "attributes": [
+            # userName is the platform identity (email) — settable at
+            # creation, never mutated through SCIM (takeover class, R26-33).
+            {**_attr("userName", required=True), "mutability": "immutable"},
+            _attr("displayName"),
+            _attr("name", type_="complex", sub=[_attr("formatted")]),
+            # emails mirror userName (identity IS the email) — read-only.
+            {
+                **_attr(
+                    "emails",
+                    type_="complex",
+                    multi=True,
+                    sub=[_attr("value"), _attr("primary", type_="boolean")],
+                ),
+                "mutability": "readOnly",
+            },
+            _attr("active", type_="boolean"),
+            _attr("externalId"),
+        ],
+    },
+    "urn:ietf:params:scim:schemas:core:2.0:Group": {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Schema"],
+        "id": "urn:ietf:params:scim:schemas:core:2.0:Group",
+        "name": "Group",
+        "description": "Group (supported subset)",
+        "attributes": [
+            _attr("displayName", required=True),
+            _attr(
+                "members",
+                type_="complex",
+                multi=True,
+                sub=[_attr("value"), _attr("display")],
+            ),
+            _attr("externalId"),
+        ],
+    },
+}
+
+_RESOURCE_TYPE_DOCS: dict[str, dict] = {
+    "User": {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+        "id": "User",
+        "name": "User",
+        "endpoint": "/Users",
+        "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
+    },
+    "Group": {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+        "id": "Group",
+        "name": "Group",
+        "endpoint": "/Groups",
+        "schema": "urn:ietf:params:scim:schemas:core:2.0:Group",
+    },
+}
+
+
 @scim_router.get("/ResourceTypes", dependencies=[Depends(rate_limit(240, 60))])
 async def resource_types():
     return _scim_json(
         {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-            "totalResults": 2,
-            "Resources": [
-                {
-                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
-                    "id": "User",
-                    "name": "User",
-                    "endpoint": "/Users",
-                    "schema": "urn:ietf:params:scim:schemas:core:2.0:User",
-                },
-                {
-                    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
-                    "id": "Group",
-                    "name": "Group",
-                    "endpoint": "/Groups",
-                    "schema": "urn:ietf:params:scim:schemas:core:2.0:Group",
-                },
-            ],
+            "totalResults": len(_RESOURCE_TYPE_DOCS),
+            "Resources": list(_RESOURCE_TYPE_DOCS.values()),
         }
     )
+
+
+@scim_router.get("/ResourceTypes/{type_id}", dependencies=[Depends(rate_limit(240, 60))])
+async def resource_type_by_id(type_id: str):
+    doc = _RESOURCE_TYPE_DOCS.get(type_id)
+    if doc is None:
+        return _scim_json(ScimError(404, f"ResourceType {type_id!r} not found").body(), 404)
+    return _scim_json(doc)
 
 
 @scim_router.get("/Schemas", dependencies=[Depends(rate_limit(240, 60))])
@@ -119,13 +226,18 @@ async def schemas():
     return _scim_json(
         {
             "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-            "totalResults": 2,
-            "Resources": [
-                {"id": "urn:ietf:params:scim:schemas:core:2.0:User", "name": "User"},
-                {"id": "urn:ietf:params:scim:schemas:core:2.0:Group", "name": "Group"},
-            ],
+            "totalResults": len(_SCHEMA_DOCS),
+            "Resources": list(_SCHEMA_DOCS.values()),
         }
     )
+
+
+@scim_router.get("/Schemas/{schema_id:path}", dependencies=[Depends(rate_limit(240, 60))])
+async def schema_by_id(schema_id: str):
+    doc = _SCHEMA_DOCS.get(schema_id)
+    if doc is None:
+        return _scim_json(ScimError(404, f"Schema {schema_id!r} not found").body(), 404)
+    return _scim_json(doc)
 
 
 # ── Users ──
@@ -158,6 +270,8 @@ async def list_users(
     filter: str | None = Query(default=None, max_length=300),  # noqa: A002
     startIndex: int = Query(default=1, ge=1),  # noqa: N803
     count: int = Query(default=100, ge=0, le=200),
+    attributes: str | None = Query(default=None, max_length=500),
+    excludedAttributes: str | None = Query(default=None, max_length=500),  # noqa: N803
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
@@ -165,7 +279,7 @@ async def list_users(
         body = await ScimUserService(db, token).list(
             filter_expr=filter, start_index=startIndex, count=count
         )
-        return _scim_json(body)
+        return _scim_json(_project(body, attributes, excludedAttributes))
 
     return await _run(db, authorization, fn)
 
@@ -187,11 +301,14 @@ async def create_user(
 @scim_router.get("/Users/{user_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def get_user(
     user_id: str,
+    attributes: str | None = Query(default=None, max_length=500),
+    excludedAttributes: str | None = Query(default=None, max_length=500),  # noqa: N803
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
     async def fn(token):
-        return _scim_json(await ScimUserService(db, token).get(user_id))
+        body = await ScimUserService(db, token).get(user_id)
+        return _scim_json(_project(body, attributes, excludedAttributes))
 
     return await _run(db, authorization, fn)
 
@@ -245,15 +362,16 @@ async def list_groups(
     startIndex: int = Query(default=1, ge=1),  # noqa: N803
     count: int = Query(default=100, ge=0, le=200),
     filter: str | None = Query(default=None, max_length=256),  # noqa: A002 — SCIM param name
+    attributes: str | None = Query(default=None, max_length=500),
+    excludedAttributes: str | None = Query(default=None, max_length=500),  # noqa: N803
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
     async def fn(token):
-        return _scim_json(
-            await ScimGroupService(db, token).list(
-                start_index=startIndex, count=count, filter_expr=filter
-            )
+        body = await ScimGroupService(db, token).list(
+            start_index=startIndex, count=count, filter_expr=filter
         )
+        return _scim_json(_project(body, attributes, excludedAttributes))
 
     return await _run(db, authorization, fn)
 
@@ -274,11 +392,14 @@ async def create_group(
 @scim_router.get("/Groups/{group_id}", dependencies=[Depends(rate_limit(240, 60))])
 async def get_group(
     group_id: str,
+    attributes: str | None = Query(default=None, max_length=500),
+    excludedAttributes: str | None = Query(default=None, max_length=500),  # noqa: N803
     db: AsyncSession = Depends(get_db),
     authorization: str | None = Header(default=None),
 ):
     async def fn(token):
-        return _scim_json(await ScimGroupService(db, token).get(group_id))
+        body = await ScimGroupService(db, token).get(group_id)
+        return _scim_json(_project(body, attributes, excludedAttributes))
 
     return await _run(db, authorization, fn)
 
@@ -443,3 +564,22 @@ async def revoke_scim_token(
         db, org_id, user.id, "intg.scim_token.revoked", "scim_token", token_id
     )
     await db.commit()
+
+
+# ── R496: SCIM-shaped 404/405 for every unknown /scim/v2 path ──
+# Registered LAST so every real route above wins; RFC 7644 clients (and
+# scim2-tester's random_url / endpoint_methods checks) expect the error
+# schema on 404s AND a 405 for a wrong METHOD on a known resource root.
+_SCIM_ROOTS = {"ServiceProviderConfig", "ResourceTypes", "Schemas", "Users", "Groups", "Bulk"}
+
+
+@scim_router.api_route(
+    "/{rest:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    include_in_schema=False,
+    dependencies=[Depends(rate_limit(240, 60))],
+)
+async def scim_not_found(rest: str):
+    if rest.split("/", 1)[0] in _SCIM_ROOTS:
+        return _scim_json(ScimError(405, "Method not allowed on this resource").body(), 405)
+    return _scim_json(ScimError(404, "Resource not found").body(), 404)
