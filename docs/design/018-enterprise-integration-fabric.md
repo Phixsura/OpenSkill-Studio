@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R490 (thirty-fourth window, PROBE — migration downgrade round-trip)**:
+  every downgrade() body is production-never-driven code (the R11/R16 gap
+  class) discovered exactly at emergency-rollback time. New standing probe
+  (tests/test_migrations_roundtrip_db.py) builds a THROWAWAY database
+  (never the shared dev DB — a mid-battery drop would poison concurrent
+  suites), runs base→head→base→head via subprocess alembic with
+  DATABASE_URL override, and asserts head→base leaves only
+  alembic_version (no orphan tables) and the re-upgraded table set is
+  identical. All 114 revisions round-trip green on first run — now pinned.
 - **R489 (thirty-fourth window, FEATURE — import mapping confirmation
   widget)**: the Flatfile-parity "mapping UI widget" gap. The dry run now
   returns `dry_stats.sample` — up to 5 rows AS THE HEADER MAP PRODUCED
