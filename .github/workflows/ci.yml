@@ -206,6 +206,22 @@ jobs:
           S3_ENDPOINT: http://localhost:9000
           S3_ACCESS_KEY: minioadmin
           S3_SECRET_KEY: minioadmin
+      - name: Run app-wide OpenAPI hostile sweep (zero unexplained 5xx)
+        run: make e2e-intg-appwide
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+      - name: Run scim2-tester conformance (zero hard failures)
+        run: make e2e-intg-scim-conformance
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
 
   test-playwright:
     name: Test (Playwright E2E)
