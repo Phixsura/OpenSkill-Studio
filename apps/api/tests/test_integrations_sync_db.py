@@ -2899,3 +2899,33 @@ async def test_webhook_triggered_run_executes_incrementally(db):
     await execute_run(db, run2.id)
     await db.refresh(run2)
     assert run2.status == "succeeded" and run2.trigger == "webhook"
+
+
+@pytest.mark.asyncio
+async def test_conflict_resolution_error_arms(db):
+    """R511: SYNC_RUN_NOT_FOUND / SYNC_CONFLICT_NOT_FOUND on junk ids and
+    SYNC_CONFLICT_RESOLVED on a double-resolve — the three error arms no
+    test asserted by code string."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "arm-1", "v": "no-title"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    profile.options = {"strict_schema": True}
+    await db.commit()
+    svc = SyncProfileService(db)
+
+    with pytest.raises(AppError) as e:
+        await svc.run_records(org.id, "0" * 26)
+    assert e.value.code == "SYNC_RUN_NOT_FOUND" and e.value.status_code == 404
+
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    rows = await svc.run_records(org.id, run.id, outcome="conflict")
+    assert rows, "expected a strict-schema conflict"
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(org.id, run.id, "0" * 26, action="dismiss", actor_id=owner.id)
+    assert e.value.code == "SYNC_CONFLICT_NOT_FOUND"
+    await svc.resolve_conflict(org.id, run.id, rows[0].id, action="dismiss", actor_id=owner.id)
+    with pytest.raises(AppError) as e:
+        await svc.resolve_conflict(org.id, run.id, rows[0].id, action="dismiss", actor_id=owner.id)
+    assert e.value.code == "SYNC_CONFLICT_RESOLVED" and e.value.status_code == 409

@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R511 (thirty-fifth window, AUDIT — error-arm totality)**: the R510 scan
+  generalized to ERROR codes: of 104 AppError codes the fabric can raise,
+  16 were never asserted by code string in any test (mostly junk-id 404s
+  exercised only via status-code walls). Every arm now has a direct driver
+  (tests/test_integrations_error_arms_db.py + sync-conflict arms), and a
+  standing guard fails on any NEW raised code no test asserts.
 - **R510 (thirty-fifth window, AUDIT — never-driven registry values,
   R11/R497 class productionized)**: an AST+corpus scan over every fabric
   vocabulary registry found four accepted-but-never-consumed values —
