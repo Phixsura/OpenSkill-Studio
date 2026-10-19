@@ -119,7 +119,19 @@ async function uiLogin(page, email) {
   await page.click('button[type="submit"]');
   await page.waitForURL(/dashboard/, { timeout: 15000 });
 }
-const bodyText = async (page) => (await page.textContent("body").catch(() => "")) || "";
+// R529: WAIT FOR HYDRATION before reading — with waitUntil:"load" on the
+// production build the body is still the noscript shell ("JavaScript
+// Required") for a beat; reading it immediately failed data checks that
+// were actually green.
+const bodyText = async (page) => {
+  await page
+    .waitForFunction(() => !document.body?.innerText?.includes("JavaScript Required"), {
+      timeout: 8000,
+    })
+    .catch(() => {});
+  await page.waitForTimeout(600);
+  return (await page.textContent("body").catch(() => "")) || "";
+};
 
 try {
   // ═══════════════ SEED: admin + owner with school-plan tenant ═══════════════

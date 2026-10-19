@@ -166,7 +166,19 @@ async function uiLogin(page, email) {
   await page.click('button[type="submit"]');
   await page.waitForURL(/dashboard/, { timeout: 15000 });
 }
-const bodyText = async (page) => (await page.textContent("body").catch(() => "")) || "";
+// R529: WAIT FOR HYDRATION before reading — with waitUntil:"load" on the
+// production build the body is still the noscript shell ("JavaScript
+// Required") for a beat; reading it immediately failed data checks that
+// were actually green.
+const bodyText = async (page) => {
+  await page
+    .waitForFunction(() => !document.body?.innerText?.includes("JavaScript Required"), {
+      timeout: 8000,
+    })
+    .catch(() => {});
+  await page.waitForTimeout(600);
+  return (await page.textContent("body").catch(() => "")) || "";
+};
 
 try {
   // ═══════════════ SEED (API, mirrors e2e_commercial_lifecycle.py) ═══════════════
@@ -356,7 +368,13 @@ try {
   const apage = await newPage(actx);
   await uiLogin(apage, admin.email);
   await apage.goto(`${BASE}/platform`, { waitUntil: "load" });
-  check("platform dashboard renders for admin", (await bodyText(apage)).includes("Platform dashboard"));
+  // R529: the platform layout verifies the admin role server-side first —
+  // wait for the heading rather than racing the access check's render beat.
+  const platformOk = await apage
+    .waitForSelector("text=Platform dashboard", { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  check("platform dashboard renders for admin", platformOk, apage.url());
   await apage.goto(`${BASE}/platform/tenants`, { waitUntil: "load" });
   await apage.fill('input[placeholder*="Search name"]', tenantSlug);
   await apage.waitForTimeout(1200);

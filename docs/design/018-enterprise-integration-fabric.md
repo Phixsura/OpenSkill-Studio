@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R529 (thirty-eighth window, LEGACY journeys to 100%)**: the last seven
+  full_lifecycle reds were the suite reading body text BEFORE hydration on
+  the production build (the "JavaScript Required" noscript shell) and one
+  render-beat race on the platform admin gate — bodyText is now
+  hydration-aware and the platform check waits for the heading. EVERY
+  browser journey in the repo is green against the production artifact:
+  browser_e2e 31/31, commercial 19/19, talent 22/22, full_lifecycle 60/60,
+  part2 42/42, fabric 74/74, a11y 7/7.
 - **R528 (thirty-seventh window, PRODUCTION-TOPOLOGY excavation — four
   real defects)**: running the legacy platform browser journeys against a
   TRUE production stack (standalone server + same-origin proxy) exposed a
