@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R501 (thirty-fourth window, MUTATION over the window's new cores)**:
+  AST-harness runs — model_schema walker 18/18 killed after pinning two
+  boundary survivors (exactly-maxLength valid; date fields tolerate a
+  trailing time via the [:10] slice — SIS exports send timestamps in date
+  columns); scim _project 2/2 killed; AnalyticsBody.get's 2 survivors
+  verified EQUIVALENT (bare extra=allow model: both and/or paths converge
+  on the getattr fallback — the declared-fields branch defends future
+  subclasses only).
 - **R500 (thirty-fourth window, VERIFY + CI)**: app-wide sweep and
   scim2-tester conformance wired as make targets + CI steps. Full-battery
   rerun tripped the three ROUTE-CONTRACT guards on R497's new surfaces —

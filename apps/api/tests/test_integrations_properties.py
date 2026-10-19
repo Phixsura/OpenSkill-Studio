@@ -646,3 +646,19 @@ def test_validate_model_payload_datetime_offsets():
     assert validate_model_payload(
         "talent.application", {"candidate_external_id": "c", "applied_at": "2026-99-99T99:00:00Z"}
     ) == ["applied_at: bad date-time"]
+
+
+def test_validate_model_payload_boundaries():
+    """R501 (AST-mutation survivors pinned): an exactly-maxLength value is
+    VALID (> not >=), and a date field tolerates a trailing time component
+    (the [:10] slice — SIS exports often send full timestamps in date
+    columns)."""
+    from app.integrations.services.model_schema import validate_model_payload
+
+    assert (
+        validate_model_payload("roster.user", {"email": "a@b.co", "display_name": "x" * 500}) == []
+    )
+    assert (
+        validate_model_payload("roster.term", {"name": "T", "start_date": "2026-01-15T00:00:00Z"})
+        == []
+    )
