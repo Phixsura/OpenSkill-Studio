@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R527 (thirty-seventh window, FULL-STACK verification)**: the entire
+  backend suite run in chunks (the marathon had only run fabric+talent):
+  control-plane 616, eco+experiments 1,109, all remaining 1,956 — with
+  fabric 533 and talent 3,366 that is ~7,580 backend tests green, plus the
+  platform-wide adversarial battery 178/178 against a correctly-flagged
+  live API (first run failed 10 SSRF walls because MY server carried
+  EGRESS_ALLOW_PRIVATE=true — the lifecycle's requirement, not the
+  battery's: the walls were right, the env was wrong) and web 769 + first
+  production build.
 - **R525/R526 (thirty-seventh window, CI-PARITY locally)**: this branch
   never triggers CI (main/PR-only), so its gates were run by hand — the
   apps/api ruff-format gate FAILED on 11 files (now formatted; gate green
