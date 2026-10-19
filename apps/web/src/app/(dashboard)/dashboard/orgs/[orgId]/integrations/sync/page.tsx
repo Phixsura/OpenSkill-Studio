@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { apiWithAuth, ApiError } from "@/lib/api";
 
 interface MappingProfile {
@@ -19,6 +20,17 @@ interface MappingProfile {
   model: string;
   document: { fields?: unknown[] };
   version: number;
+}
+
+interface ConnectionRow {
+  id: string;
+  name: string;
+  status: string;
+}
+
+interface CanonicalModel {
+  model: string;
+  required: string[];
 }
 
 interface SyncProfile {
@@ -88,6 +100,21 @@ export default function SyncIntegrationsPage() {
     queryKey: ["intg-mappings", orgId],
     queryFn: () => apiWithAuth<{ data: MappingProfile[] }>(`${base}/mapping-profiles`),
   });
+  // R503 (Part N parity): create sync profiles HERE, not "via the API".
+  const connectionsQ = useQuery({
+    queryKey: ["intg-connections", orgId],
+    queryFn: () => apiWithAuth<{ data: ConnectionRow[] }>(`${base}/connections`),
+  });
+  const modelsQ = useQuery({
+    queryKey: ["intg-models", orgId],
+    queryFn: () => apiWithAuth<{ data: CanonicalModel[] }>(`${base}/models`),
+  });
+  const [spName, setSpName] = useState("");
+  const [spConnection, setSpConnection] = useState("");
+  const [spModel, setSpModel] = useState("roster.user");
+  const [spDirection, setSpDirection] = useState("pull");
+  const [spSchedule, setSpSchedule] = useState("manual");
+  const [spMapping, setSpMapping] = useState("");
   const conflictsQ = useQuery({
     queryKey: ["intg-run-records", orgId, openRun],
     queryFn: () =>
@@ -112,6 +139,27 @@ export default function SyncIntegrationsPage() {
 
   const onError = (err: unknown) =>
     toast.error(err instanceof ApiError ? err.message : "Request failed");
+
+  const createProfile = useMutation({
+    mutationFn: () =>
+      apiWithAuth(`${base}/sync-profiles`, {
+        method: "POST",
+        body: JSON.stringify({
+          connection_id: spConnection,
+          name: spName,
+          model: spModel,
+          direction: spDirection,
+          schedule: spSchedule,
+          mapping_profile_id: spMapping || null,
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("Sync profile created");
+      setSpName("");
+      queryClient.invalidateQueries({ queryKey: ["intg-sync-profiles", orgId] });
+    },
+    onError,
+  });
 
   const [hookSecret, setHookSecret] = useState<{ id: string; secret: string } | null>(null);
   const mintHook = useMutation({
@@ -247,9 +295,83 @@ export default function SyncIntegrationsPage() {
         {profilesQ.isLoading && <p>Loading profiles…</p>}
         {profiles.length === 0 && !profilesQ.isLoading && (
           <p className="text-muted-foreground text-sm">
-            No sync profiles. Create one via the API for your connection.
+            No sync profiles yet — create one below for your connection.
           </p>
         )}
+        <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
+          <Input
+            aria-label="Profile name"
+            className="max-w-xs"
+            placeholder="nightly-roster"
+            value={spName}
+            onChange={(e) => setSpName(e.target.value)}
+          />
+          <select
+            aria-label="Profile connection"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={spConnection}
+            onChange={(e) => setSpConnection(e.target.value)}
+          >
+            <option value="">connection…</option>
+            {(connectionsQ.data?.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Profile model"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={spModel}
+            onChange={(e) => setSpModel(e.target.value)}
+          >
+            {(modelsQ.data?.data ?? [{ model: "roster.user", required: [] }]).map((m) => (
+              <option key={m.model} value={m.model}>
+                {m.model}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Profile direction"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={spDirection}
+            onChange={(e) => setSpDirection(e.target.value)}
+          >
+            <option value="pull">pull</option>
+            <option value="push">push</option>
+          </select>
+          <select
+            aria-label="Profile schedule"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={spSchedule}
+            onChange={(e) => setSpSchedule(e.target.value)}
+          >
+            <option value="manual">manual</option>
+            <option value="hourly">hourly</option>
+            <option value="daily">daily</option>
+          </select>
+          <select
+            aria-label="Profile mapping"
+            className="rounded-md border px-2 py-1 text-sm"
+            value={spMapping}
+            onChange={(e) => setSpMapping(e.target.value)}
+          >
+            <option value="">connector default mapping</option>
+            {(mappingsQ.data?.data ?? [])
+              .filter((m) => m.model === spModel)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} (v{m.version})
+                </option>
+              ))}
+          </select>
+          <Button
+            disabled={!spName || !spConnection || createProfile.isPending}
+            onClick={() => createProfile.mutate()}
+          >
+            Create profile
+          </Button>
+        </div>
         {hookSecret && (
           <div className="rounded-md border p-3 text-xs" data-testid="hook-secret-panel">
             <div className="font-medium">Inbound webhook trigger (shown once)</div>

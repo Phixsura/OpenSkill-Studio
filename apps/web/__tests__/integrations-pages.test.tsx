@@ -340,6 +340,71 @@ describe("identity page", () => {
 });
 
 describe("sync page", () => {
+  it("R503: creates a sync profile through the real form", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/sync-profiles": { data: [] },
+      "/orgs/ORG1234567890123456789012/integrations/connections": {
+        data: [{ id: "c1", name: "District SIS", status: "active" }],
+      },
+      "/orgs/ORG1234567890123456789012/integrations/models": {
+        data: [
+          { model: "roster.user", required: ["email"] },
+          { model: "crm.deal", required: ["name"] },
+        ],
+      },
+      "/orgs/ORG1234567890123456789012/integrations/mapping-profiles": {
+        data: [
+          {
+            id: "m1",
+            name: "sis-map",
+            direction: "inbound",
+            model: "roster.user",
+            document: {},
+            version: 2,
+          },
+          {
+            id: "m2",
+            name: "deal-map",
+            direction: "inbound",
+            model: "crm.deal",
+            document: {},
+            version: 1,
+          },
+        ],
+      },
+    });
+    render(<SyncPage />, { wrapper: wrapper() });
+    fireEvent.change(await screen.findByLabelText("Profile name"), {
+      target: { value: "nightly-roster" },
+    });
+    fireEvent.change(screen.getByLabelText("Profile connection"), { target: { value: "c1" } });
+    // mapping select filters to the chosen model
+    const mapSel = screen.getByLabelText("Profile mapping") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(mapSel.options).map((o) => o.textContent)).toContain("sis-map (v2)"),
+    );
+    expect(Array.from(mapSel.options).map((o) => o.textContent)).not.toContain("deal-map (v1)");
+    fireEvent.change(mapSel, { target: { value: "m1" } });
+    fireEvent.change(screen.getByLabelText("Profile schedule"), { target: { value: "daily" } });
+    fireEvent.click(screen.getByText("Create profile"));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(
+        "/orgs/ORG1234567890123456789012/integrations/sync-profiles",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            connection_id: "c1",
+            name: "nightly-roster",
+            model: "roster.user",
+            direction: "pull",
+            schedule: "daily",
+            mapping_profile_id: "m1",
+          }),
+        }),
+      ),
+    );
+  });
+
   it("R498: mints the inbound webhook trigger secret and shows it once", async () => {
     route({
       "/orgs/ORG1234567890123456789012/integrations/sync-profiles/sp1/trigger-secret": {

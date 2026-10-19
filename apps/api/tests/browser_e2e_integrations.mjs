@@ -318,6 +318,67 @@ try {
   const syncText = await page.textContent("body");
   check("sync page renders", /mapping|profile|sync|run/i.test(syncText));
 
+  // ── 5a. Create a sync profile through the real form (R503) ──
+  // The walk's generic_rest connection declares NO capabilities — create a
+  // generic_ats connection (talent.write) on the hub first, as an admin
+  // wiring an ATS push would.
+  await page.goto(intgBase, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
+  const provSelect2 = await page.$('select[aria-label="Provider"]');
+  if (provSelect2) {
+    await provSelect2.selectOption("generic_ats");
+    await page.fill('input[aria-label="Connection name"]', "Walk ATS Push");
+    await page.fill('input[aria-label="Base URL"]', "https://ats-push.example.com/api");
+    const createConnBtn2 = await page.$('button:has-text("Create")');
+    if (createConnBtn2) {
+      await createConnBtn2.click();
+      await page.waitForTimeout(2500);
+    }
+  }
+  await page.goto(`${intgBase}/sync`, { waitUntil: "load", timeout: 90000 });
+  await page.waitForTimeout(2200);
+  const spNameInput = await page.$('input[aria-label="Profile name"]');
+  check("sync profile form present", spNameInput !== null);
+  if (spNameInput) {
+    const spName = `walk-sync-${Date.now()}`;
+    await spNameInput.fill(spName);
+    const connSel = await page.$('select[aria-label="Profile connection"]');
+    const atsConn = connSel
+      ? await connSel.$$eval("option", (os) => {
+          const hit = os.find((o) => o.textContent.includes("Walk ATS Push"));
+          return hit ? hit.value : null;
+        })
+      : null;
+    check("profile connection options populated", Boolean(atsConn));
+    if (connSel && atsConn) {
+      await connSel.selectOption(atsConn);
+      // the journey's connection is generic_ats (talent.write) — push side
+      await page.selectOption('select[aria-label="Profile model"]', "talent.application");
+      await page.selectOption('select[aria-label="Profile direction"]', "push");
+      const createProfileBtn = await page.$('button:has-text("Create profile")');
+      if (createProfileBtn) {
+        await createProfileBtn.click();
+        await page.waitForTimeout(3000);
+        const afterProfile = await page.textContent("body");
+        check("sync profile row listed", afterProfile.includes(spName), afterProfile.slice(0, 200));
+        // ── 5b. Mint the inbound webhook trigger from the new row (R498) ──
+        const hookBtn = await page.$('button:has-text("Webhook trigger")');
+        check("webhook trigger button present", hookBtn !== null);
+        if (hookBtn) {
+          await hookBtn.click();
+          await page.waitForTimeout(2500);
+          const hookPanel = await page.$('[data-testid="hook-secret-panel"]');
+          const hookText = hookPanel ? await hookPanel.textContent() : "";
+          check(
+            "hook secret shown once with sync-hooks URL",
+            hookPanel !== null && /sth_/.test(hookText) && /sync-hooks/.test(hookText),
+            hookText.slice(0, 120),
+          );
+        }
+      }
+    }
+  }
+
   // ── 6. Data page (exports + imports) ──
   section("6. Data page");
   await page.goto(`${intgBase}/data`, { waitUntil: "load", timeout: 90000 });

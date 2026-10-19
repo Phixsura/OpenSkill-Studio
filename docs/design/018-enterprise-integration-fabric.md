@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R503 (thirty-fourth window, UI — sync-profile create form)**: the sync
+  page literally said "create one via the API" — the LAST admin create
+  without a form (Part N parity). Form drives connection (live list),
+  model (from the R487 /models catalog), direction, schedule and a
+  mapping select FILTERED to the chosen model. Browser journey extended:
+  creates a generic_ats connection on the hub, creates the push profile
+  through the form, then mints the R498 webhook trigger from the new row
+  (74 checks); a11y 7/7; web suite 20 tests.
 - **R502 (thirty-fourth window, PROPERTY totality — two real parquet
   finds)**: hypothesis totality over the new helpers found (1) an
   anonymize config that DROPS every allowed field exports empty objects
