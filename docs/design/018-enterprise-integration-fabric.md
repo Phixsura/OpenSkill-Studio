@@ -931,6 +931,23 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R508 (thirty-fourth window, REVIEW — adversarial code-review pass over
+  the window's diff; 7 findings, all fixed + pinned)**: (1) the chunked
+  upload read buffered up to the CSV cap for EVERY format — the
+  format-specific cap now trips mid-read off the first chunk's sniff (a
+  200MB JSON refuses after ~50MB); (2) R502's drop-universe check ran on
+  every PATCH, bricking legacy all-dropped streams out of their own
+  remediation — now only when allowlist/anonymize change; (3) per-part
+  Arrow type inference could give one parquet run UNMERGEABLE part
+  schemas — the first part now PINS column types (all-None pages pin utf8,
+  never null), later pages conform or fail the run terminally as
+  PARQUET_SCHEMA_DRIFT (multi-part schema-equality test); (4) SCIM
+  attributes projection was case-sensitive (RFC 7643 names are not);
+  (5) AnalyticsBody.get's getattr fallback returned bound methods for keys
+  like "copy"/"schema" — now extra+declared fields only; (6) the mapped-
+  sample table read headers from row 1 only, hiding sparse columns — now a
+  key union; (7) the SCIM catch-all 405'd DEEP unknown sub-paths
+  (/Users/{id}/emails) — 405 is now root and root/{id} only.
 - **R507 (thirty-fourth window, PROBE — deliveries keyset under
   mutation)**: R491's invariant applied to the second keyset surface —
   deliveries inserted between page pulls never duplicate/skip the walked

@@ -1526,6 +1526,9 @@ def test_scim_projection_attributes_and_excluded():
     }
     kept = _project(dict(res), "userName", None)
     assert set(kept) == {"schemas", "id", "meta", "userName"}
+    # R508: RFC 7643 §2.1 — attribute names are case-insensitive
+    assert set(_project(dict(res), "USERNAME", None)) == {"schemas", "id", "meta", "userName"}
+    assert "displayName" not in _project(dict(res), None, "DISPLAYNAME")
     dropped = _project(dict(res), None, "displayName,active")
     assert set(dropped) == {"schemas", "id", "userName", "meta"}
     # id/schemas cannot be excluded
@@ -1618,3 +1621,24 @@ async def test_scim_search_post_endpoint_parity(ctx):
         body = r.json()
         assert r.status_code == 200 and body["totalResults"] >= 2  # user + group
         assert body["itemsPerPage"] == len(body["Resources"])
+
+
+async def test_scim_catch_all_depth_404_vs_405(ctx):
+    """R508 (finding #7): wrong METHOD on a known root (or root/{id}) is a
+    SCIM-shaped 405; a DEEP unknown sub-path is a 404 — the resource is the
+    problem, not the method."""
+    import httpx
+
+    from app.main import app
+
+    sh = {"Authorization": f"Bearer {ctx['raw']}", "Content-Type": "application/scim+json"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1") as c:
+        r = await c.post("/scim/v2/ResourceTypes", headers=sh, json={})
+        assert r.status_code == 405 and "urn:ietf:params:scim" in r.text
+        r = await c.post("/scim/v2/Users/01X", headers=sh, json={})
+        assert r.status_code == 405
+        r = await c.get("/scim/v2/Users/01X/emails", headers=sh)
+        assert r.status_code == 404 and "urn:ietf:params:scim" in r.text
+        r = await c.get("/scim/v2/totally/unknown/path", headers=sh)
+        assert r.status_code == 404

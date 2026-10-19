@@ -71,11 +71,15 @@ class AnalyticsBody(BaseModel):
         `body.get(...)` on this model — BaseModel has no `.get`, so every
         such route 500'd AttributeError on ANY request (production-dead,
         not merely hostile-input fragile). Dict-style access over declared
-        + extra fields revives all of them at the one shared point."""
+        + extra fields revives all of them at the one shared point.
+
+        R508 (review finding #5): NEVER a raw getattr fallback — a key that
+        collides with a BaseModel attribute ("copy", "schema", "json",
+        "model_fields") must return the default, not a bound method."""
         extra = self.model_extra or {}
         if key in extra:
             return extra[key]
-        if key in type(self).model_fields and key in self.__pydantic_fields_set__:
-            return getattr(self, key)
-        value = getattr(self, key, None)
-        return default if value is None else value
+        if key in type(self).model_fields:
+            value = getattr(self, key)
+            return default if value is None else value
+        return default

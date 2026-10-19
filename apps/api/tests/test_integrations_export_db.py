@@ -825,7 +825,81 @@ def test_parquet_bytes_mixed_type_column_falls_back_to_string():
         {"a": "two", "b": {"nested": True}},
         {"a": None, "b": None},
     ]
-    content = _parquet_bytes(rows, ["a", "b"])
+    content, _types = _parquet_bytes(rows, ["a", "b"])
     table = pq.read_table(io.BytesIO(content))
     assert table.column("a").to_pylist() == ["1", "two", None]
     assert table.column("b").to_pylist() == ["x", '{"nested":true}', None]
+
+
+# ── R508: review-pass fixes on the parquet/stream paths ──
+
+
+@pytest.mark.asyncio
+async def test_legacy_all_dropped_stream_can_still_be_disabled(db):
+    """R508 (finding #2): the R502 drop-universe rule must not brick a
+    LEGACY all-dropped stream — enabled/schedule PATCHes pass; touching the
+    fields themselves still enforces the rule."""
+    org, owner = await _org(db)
+    svc = WarehouseExportService(db, writer=MemWriter())
+    s = await svc.create_stream(org.id, name=f"lg-{ULID()}", dataset="events")
+    # simulate a pre-R502 row: every field dropped (unreachable via API now)
+    s.anonymize = {f: "drop" for f in s.field_allowlist}
+    await db.flush()
+    out = await svc.update_stream(org.id, s.id, enabled=False)
+    assert out.enabled is False  # remediation PATCH works
+    with pytest.raises(AppError) as e:  # touching the universe re-checks
+        await svc.update_stream(org.id, s.id, anonymize={f: "drop" for f in s.field_allowlist})
+    assert e.value.code == "EXPORT_CONFIG_INVALID"
+
+
+def test_parquet_schema_pinning_and_drift():
+    """R508 (finding #3): the run's FIRST part pins column types (all-None
+    pages pin utf8, never the unmergeable null type); a later page that
+    cannot conform raises ParquetSchemaDriftError instead of emitting a
+    differently-typed part."""
+    import io
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from app.integrations.services.warehouse import ParquetSchemaDriftError, _parquet_bytes
+
+    # all-None first page pins utf8
+    content, types1 = _parquet_bytes([{"a": None}, {"a": None}], ["a"])
+    assert pa.types.is_string(types1["a"])
+    # a value page under the utf8 pin conforms (stringify fallback allowed)
+    content2, types2 = _parquet_bytes([{"a": 7}], ["a"], pinned=types1)
+    t2 = pq.read_table(io.BytesIO(content2))
+    assert t2.column("a").to_pylist() == ["7"] and types2["a"] == types1["a"]
+
+    # int-typed pin + an unconvertible later page = drift, not silent utf8
+    _c, int_types = _parquet_bytes([{"a": 1}, {"a": 2}], ["a"])
+    assert pa.types.is_integer(int_types["a"])
+    with pytest.raises(ParquetSchemaDriftError):
+        _parquet_bytes([{"a": "not-an-int"}], ["a"], pinned=int_types)
+
+
+@pytest.mark.asyncio
+async def test_parquet_run_all_parts_share_one_schema(db, monkeypatch):
+    """Multi-part parquet run: every part reads back with the SAME schema
+    (the per-part re-inference drift the review flagged)."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    import app.integrations.services.warehouse as wh
+
+    org, owner = await _org(db)
+    monkeypatch.setattr(wh, "EXPORT_PAGE_ROWS", 2)  # force multiple parts
+    for i in range(5):
+        await emit_event(db, org.id, "project.approved", subject=f"mp-{i}", data={})
+    await db.flush()
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    stream = await svc.create_stream(
+        org.id, name=f"mp-{ULID()}", dataset="events", part_format="parquet"
+    )
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded" and len(run.parts) >= 2
+    schemas = [pq.read_table(io.BytesIO(writer.files[p])).schema for p in run.parts]
+    assert all(sc.equals(schemas[0]) for sc in schemas[1:]), "parts disagree on schema"

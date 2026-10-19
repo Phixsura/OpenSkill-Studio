@@ -45,13 +45,15 @@ def _project(body: dict, attributes: str | None, excluded: str | None) -> dict:
         return body
 
     def one(res: dict) -> dict:
+        # R508 (review finding #4): RFC 7643 §2.1 — attribute names are
+        # case-INsensitive; match lowered on both sides.
         if attributes:
-            keep = {a.strip().split(".")[0] for a in attributes.split(",") if a.strip()}
+            keep = {a.strip().split(".")[0].lower() for a in attributes.split(",") if a.strip()}
             keep |= {"schemas", "id", "meta"}
-            return {k: v for k, v in res.items() if k in keep}
-        drop = {a.strip().split(".")[0] for a in (excluded or "").split(",") if a.strip()}
+            return {k: v for k, v in res.items() if k.lower() in keep}
+        drop = {a.strip().split(".")[0].lower() for a in (excluded or "").split(",") if a.strip()}
         drop -= {"schemas", "id"}
-        return {k: v for k, v in res.items() if k not in drop}
+        return {k: v for k, v in res.items() if k.lower() not in drop}
 
     if isinstance(body.get("Resources"), list):
         out = dict(body)
@@ -692,6 +694,10 @@ _SCIM_ROOTS = {"ServiceProviderConfig", "ResourceTypes", "Schemas", "Users", "Gr
     dependencies=[Depends(rate_limit(240, 60))],
 )
 async def scim_not_found(rest: str):
-    if rest.split("/", 1)[0] in _SCIM_ROOTS:
+    # R508 (review finding #7): 405 only for a known root or root/{id} —
+    # deeper unknown sub-paths (/Users/{id}/emails) are 404s: the RESOURCE
+    # does not exist; the method is not the problem.
+    segs = rest.split("/")
+    if segs[0] in _SCIM_ROOTS and len(segs) <= 2:
         return _scim_json(ScimError(405, "Method not allowed on this resource").body(), 405)
     return _scim_json(ScimError(404, "Resource not found").body(), 404)

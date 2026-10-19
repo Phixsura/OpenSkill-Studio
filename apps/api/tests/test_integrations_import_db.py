@@ -1521,3 +1521,48 @@ async def test_dry_run_sample_shows_mapped_rows(db):
         created_by=owner.id,
     )
     assert job3.dry_stats["sample"] == []
+
+
+@pytest.mark.asyncio
+async def test_upload_enforces_json_cap_during_chunked_read(db, monkeypatch):
+    """R508 (finding #1): a JSON body over ITS cap is refused as soon as the
+    cap is crossed mid-read — never buffered to the CSV cap first. Caps are
+    shrunk so the probe stays tiny; a CSV body of the same size passes the
+    read stage (and is rejected later, if at all, for other reasons)."""
+    import httpx
+
+    import app.integrations.api.imports as imports_api
+    from app.main import app
+
+    monkeypatch.setattr(imports_api, "MAX_IMPORT_BYTES", 64)
+    monkeypatch.setattr(imports_api, "MAX_IMPORT_BYTES_CSV", 4096)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1") as c:
+        email = f"up-{uuid.uuid4().hex[:8]}@test.com"
+        r = await c.post(
+            "/auth/register",
+            json={"email": email, "password": "Test1234!", "display_name": "Upload Cap"},
+        )
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        r = await c.post("/orgs", json={"name": f"Up {uuid.uuid4().hex[:8]}"}, headers=h)
+        org = r.json()["data"]["id"]
+
+        json_body = b'{"users": [' + b" " * 200 + b"]}"  # > 64, < 4096
+        r = await c.post(
+            f"/orgs/{org}/integrations/imports",
+            data={"kind": "users", "mode": "partial"},
+            files={"file": ("u.json", json_body, "application/json")},
+            headers=h,
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "IMPORT_TOO_LARGE"
+
+        csv_body = b"email,display_name\r\n" + b"a@x.edu,A\r\n" + b"#" + b" " * 180
+        r = await c.post(
+            f"/orgs/{org}/integrations/imports",
+            data={"kind": "users", "mode": "partial"},
+            files={"file": ("u.csv", csv_body, "text/csv")},
+            headers=h,
+        )
+        assert r.json().get("error", {}).get("code") != "IMPORT_TOO_LARGE", r.text

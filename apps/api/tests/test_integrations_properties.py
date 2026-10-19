@@ -695,7 +695,7 @@ def test_parquet_bytes_total_over_hostile_rows(rows, columns):
 
     from app.integrations.services.warehouse import _parquet_bytes
 
-    content = _parquet_bytes(rows, columns)
+    content, _types = _parquet_bytes(rows, columns)
     table = pq.read_table(io.BytesIO(content))
     assert table.num_rows == len(rows)
     assert set(table.column_names) == set(columns)

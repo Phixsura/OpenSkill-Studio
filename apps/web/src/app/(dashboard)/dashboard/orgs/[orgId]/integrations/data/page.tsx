@@ -334,35 +334,45 @@ export default function DataIntegrationsPage() {
                 committed — applied: {job.stats?.applied ?? 0}, errors: {job.stats?.errors ?? 0}
               </div>
             )}
-            {(job.dry_stats?.sample?.[0] ?? null) && (
-              <div className="mt-2 overflow-x-auto">
-                <div className="text-muted-foreground text-xs">
-                  Mapped sample (confirm your header mapping before committing):
-                </div>
-                <table className="mt-1 text-xs" aria-label="Mapped sample rows">
-                  <thead>
-                    <tr>
-                      {Object.keys(job.dry_stats.sample![0]!).map((c) => (
-                        <th key={c} className="border px-2 py-1 text-left font-mono">
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {job.dry_stats.sample!.map((row, i) => (
-                      <tr key={i}>
-                        {Object.keys(job.dry_stats.sample![0]!).map((c) => (
-                          <td key={c} className="border px-2 py-1">
-                            {row[c] ?? ""}
-                          </td>
+            {(job.dry_stats?.sample?.[0] ?? null) &&
+              (() => {
+                // R508 (review finding #6): header = UNION of keys across the
+                // sample — a column absent from row 1 but present later must
+                // not be hidden (sparse columns are exactly what the admin
+                // needs to confirm).
+                const sampleCols = Array.from(
+                  new Set(job.dry_stats.sample!.flatMap((r) => Object.keys(r))),
+                );
+                return (
+                  <div className="mt-2 overflow-x-auto">
+                    <div className="text-muted-foreground text-xs">
+                      Mapped sample (confirm your header mapping before committing):
+                    </div>
+                    <table className="mt-1 text-xs" aria-label="Mapped sample rows">
+                      <thead>
+                        <tr>
+                          {sampleCols.map((c) => (
+                            <th key={c} className="border px-2 py-1 text-left font-mono">
+                              {c}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {job.dry_stats.sample!.map((row, i) => (
+                          <tr key={i}>
+                            {sampleCols.map((c) => (
+                              <td key={c} className="border px-2 py-1">
+                                {row[c] ?? ""}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             <div className="mt-2 flex gap-2">
               {job.status === "previewed" && (
                 <Button size="sm" disabled={commit.isPending} onClick={() => commit.mutate(job.id)}>

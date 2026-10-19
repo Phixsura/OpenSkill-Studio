@@ -814,8 +814,10 @@ describe("data page", () => {
             updates: 0,
             skips: 0,
             sample: [
-              { email: "a@x.edu", display_name: "Alice", role: "student" },
-              { email: "b@x.edu", display_name: "Bob", role: null },
+              { email: "a@x.edu", display_name: "Alice" },
+              // R508: `role` appears only in a LATER row — the header must
+              // union keys across the sample, not read row 1 only
+              { email: "b@x.edu", display_name: "Bob", role: "student" },
             ],
           },
           stats: {},
@@ -833,6 +835,9 @@ describe("data page", () => {
     await waitFor(() => expect(screen.getByLabelText("Mapped sample rows")).toBeTruthy());
     expect(screen.getByText("a@x.edu")).toBeTruthy();
     expect(screen.getByText("Bob")).toBeTruthy();
+    // R508: the sparse column from row 2 is visible
+    expect(screen.getByText("role")).toBeTruthy();
+    expect(screen.getByText("student")).toBeTruthy();
     vi.unstubAllGlobals();
   });
 

@@ -98,22 +98,26 @@ async def upload_import(
     user: User = Depends(get_current_user),
 ):
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
-    # R488: chunked read up to the larger (CSV) cap; the format-specific cap
-    # is enforced once the format is sniffable, and again in create_job.
+    # R488/R508: the format is sniffable from the FIRST chunk, so the
+    # format-specific cap is enforced DURING the chunked read — a 200MB JSON
+    # body is refused after ~50MB, never buffered whole (review finding #1:
+    # the first cut held up to the CSV cap for every format).
+    from app.integrations.services.bulk_import import detect_format
+
     chunks: list[bytes] = []
     received = 0
-    while received <= MAX_IMPORT_BYTES_CSV:
+    cap = MAX_IMPORT_BYTES_CSV  # until the first chunk tells us better
+    while True:
         chunk = await file.read(1_048_576)
         if not chunk:
             break
+        if not chunks:
+            cap = MAX_IMPORT_BYTES_CSV if detect_format(chunk) == "csv" else MAX_IMPORT_BYTES
         chunks.append(chunk)
         received += len(chunk)
+        if received > cap:
+            raise AppError("IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422)
     content = b"".join(chunks)
-    from app.integrations.services.bulk_import import detect_format
-
-    cap = MAX_IMPORT_BYTES_CSV if detect_format(content) == "csv" else MAX_IMPORT_BYTES
-    if len(content) > cap:
-        raise AppError("IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422)
     file_key = await _store_file(org_id, kind, content)
     job = await BulkImportService(db).create_job(
         org_id,

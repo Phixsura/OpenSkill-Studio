@@ -54,7 +54,17 @@ def _parquet_available() -> bool:
     return True
 
 
-def _parquet_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
+class ParquetSchemaDriftError(Exception):
+    """R508: a later page's values cannot conform to the run's pinned
+    column types — fail the RUN terminally rather than emit parts a
+    dataset reader cannot merge."""
+
+
+def _parquet_bytes(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    pinned: dict[str, Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
     """Serialize projected rows to a parquet part.
 
     Column set comes from the ALLOWLIST (same universe as the NDJSON path —
@@ -79,20 +89,34 @@ def _parquet_bytes(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
         return [_norm(r.get(name)) for r in rows]
 
     arrays: dict[str, pa.Array] = {}
+    out_types: dict[str, Any] = {}
     for name in columns:
         values = _col(name)
+        want = (pinned or {}).get(name)
         try:
-            arrays[name] = pa.array(values)
-        except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError):
-            # mixed scalar types (int + str in one data.<key> column)
-            arrays[name] = pa.array(
+            arr = pa.array(values, type=want)
+        except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError) as exc:
+            if want is not None and not pa.types.is_string(want):
+                # R508 (review finding #3): the run's schema is PINNED by its
+                # first part — a later page that cannot conform must fail the
+                # run, not silently emit a differently-typed part the dataset
+                # reader cannot merge with the ones already written.
+                raise ParquetSchemaDriftError(f"column {name!r} drifted from {want}") from exc
+            # first part (or pinned utf8): mixed scalars fall back to utf8
+            arr = pa.array(
                 [None if v is None else (v if isinstance(v, str) else str(v)) for v in values],
                 type=pa.string(),
             )
+        if pinned is None and pa.types.is_null(arr.type):
+            # an all-None first page must not pin the unmergeable `null`
+            # type — later pages with values would drift immediately
+            arr = arr.cast(pa.string())
+        arrays[name] = arr
+        out_types[name] = arr.type
     table = pa.table(arrays)
     sink = pa.BufferOutputStream()
     pq.write_table(table, sink, compression="snappy")
-    return sink.getvalue().to_pybytes()
+    return sink.getvalue().to_pybytes(), out_types
 
 
 class PartWriter(Protocol):
@@ -311,7 +335,12 @@ class WarehouseExportService:
             stream.schedule = schedule
         if enabled is not None:
             stream.enabled = enabled
-        _check_exported_columns(stream.field_allowlist, stream.anonymize or {})
+        # R508 (review finding #2): validate the drop-universe only when the
+        # fields THEMSELVES change — an unconditional check bricked legacy
+        # all-dropped streams out of the exact remediation PATCH
+        # ({enabled:false} / a fixed allowlist) this rule exists to drive.
+        if field_allowlist is not None or anonymize is not None:
+            _check_exported_columns(stream.field_allowlist, stream.anonymize or {})
         if part_format is not None:
             self._check_format(part_format)
             stream.format = part_format
@@ -421,6 +450,7 @@ class WarehouseExportService:
         exported_columns = [
             f for f in stream.field_allowlist if (stream.anonymize or {}).get(f) != "drop"
         ]
+        parquet_types: dict | None = None  # pinned by the run's FIRST part (R508)
         try:
             while True:
                 rows = await spec["extract"](self.db, org_id, last_cursor, EXPORT_PAGE_ROWS)
@@ -432,7 +462,9 @@ class WarehouseExportService:
                     projected.append(self._project_row(stream, row, salt))
                 if fmt == "parquet":
                     part_key = f"{base}/part-{part_no:05d}.parquet"
-                    content = _parquet_bytes(projected, exported_columns)
+                    content, parquet_types = _parquet_bytes(
+                        projected, exported_columns, pinned=parquet_types
+                    )
                 else:
                     part_key = f"{base}/part-{part_no:05d}.ndjson"
                     lines = [json.dumps(p, separators=(",", ":")) for p in projected]
@@ -459,6 +491,12 @@ class WarehouseExportService:
             await self.writer.write(manifest_key, json.dumps(manifest, indent=2).encode())
         except AppError:
             raise
+        except ParquetSchemaDriftError as exc:
+            run.status = "failed"
+            run.error = f"PARQUET_SCHEMA_DRIFT: {exc}"[:200]
+            run.finished_at = datetime.now(UTC)
+            await self.db.flush()
+            return run
         except Exception as exc:
             run.status = "failed"
             run.error = type(exc).__name__[:200]
