@@ -1560,3 +1560,61 @@ def test_scim_discovery_subresources_consistent():
         for a in _SCHEMA_DOCS["urn:ietf:params:scim:schemas:core:2.0:Group"]["attributes"]
     }
     assert {s["name"] for s in group_attrs["members"]["subAttributes"]} == {"value", "display"}
+
+
+async def test_scim_search_post_endpoint_parity(ctx):
+    """R506 (.search, RFC 7644 §3.4.3): POST-bodied query returns the same
+    results as GET with query params, honors attributes projection, and
+    rejects hostile bodies with SCIM-shaped 400s — total over junk."""
+    import httpx
+
+    from app.main import app
+
+    uname = f"srch-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    await _usvc(ctx).create({"userName": uname, "displayName": "Searchable"})
+    await ctx["db"].commit()
+    transport = httpx.ASGITransport(app=app)
+    sh = {
+        "Authorization": f"Bearer {ctx['raw']}",
+        "Content-Type": "application/scim+json",
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1") as c:
+        r = await c.post(
+            "/scim/v2/Users/.search",
+            headers=sh,
+            json={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+                "filter": f'userName eq "{uname}"',
+                "attributes": ["userName"],
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["totalResults"] == 1
+        res = body["Resources"][0]
+        assert res["userName"] == uname
+        assert "displayName" not in res and res["id"]
+        # junk bodies: SCIM-shaped 400, never a crash
+        for junk in [[], {"filter": {"a": 1}}, {"startIndex": "x"}, {"count": [1]}]:
+            r = await c.post("/scim/v2/Users/.search", headers=sh, json=junk)
+            assert r.status_code == 400, (junk, r.status_code, r.text[:120])
+            assert "urn:ietf:params:scim" in r.text
+        # groups parity
+        g = await _gsvc(ctx).create({"displayName": f"SG-{uuid.uuid4().hex[:6]}"})
+        await ctx["db"].commit()
+        r = await c.post(
+            "/scim/v2/Groups/.search",
+            headers=sh,
+            json={"filter": f'displayName eq "{g["displayName"]}"'},
+        )
+        assert r.status_code == 200 and r.json()["totalResults"] == 1
+        # service-root .search spans both resource types; a userName filter
+        # contributes nothing from Groups (and vice versa), never a 400
+        r = await c.post("/scim/v2/.search", headers=sh, json={"filter": f'userName eq "{uname}"'})
+        assert r.status_code == 200, r.text
+        assert r.json()["totalResults"] == 1
+        assert r.json()["Resources"][0]["userName"] == uname
+        r = await c.post("/scim/v2/.search", headers=sh, json={})
+        body = r.json()
+        assert r.status_code == 200 and body["totalResults"] >= 2  # user + group
+        assert body["itemsPerPage"] == len(body["Resources"])

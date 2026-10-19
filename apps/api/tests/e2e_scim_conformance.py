@@ -15,9 +15,8 @@ Remaining dispositioned non-successes (asserted below, so a change in either
 direction is visible):
 - members add/replace with an EMPTY member object is a tolerant-server no-op
   (our delta engine ignores value-less entries; adding nothing is nothing);
-- POST /.search is advertised unsupported (filter via GET is implemented;
-  ServiceProviderConfig carries no .search claim) — the tester probes it
-  anyway.
+- (.search shipped R506 — the former "advertised unsupported" disposition
+  is gone; resource-level POST .search now answers for real.)
 
 Usage: api on :8000 (APP_ENV=test), then
   PYTHONPATH=. uv run python tests/e2e_scim_conformance.py
@@ -59,8 +58,6 @@ for mod in (_patch_add, _patch_replace):
 ALLOWED_FAILURES = (
     "returned unexpected value for 'members'",  # empty-member no-op (tolerant)
     "did not remove attribute",  # tester couples remove to the members run
-    "Resource not found",  # POST /.search — advertised unsupported
-    "Method not allowed",  # POST /.search on servers mapping it to 405
     # Group members MUST reference a provisioned org user (never-guess
     # identity rule, ADR-018 §9) — the tester's synthetic references are
     # rejected 400 BY DESIGN; IdPs provision users before group push.

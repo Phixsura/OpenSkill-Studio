@@ -284,6 +284,99 @@ async def list_users(
     return await _run(db, authorization, fn)
 
 
+@scim_router.post("/.search", dependencies=[Depends(rate_limit(240, 60))])
+async def search_root(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """RFC 7644 §3.4.3 service-root .search (R506): the query spans BOTH
+    resource types; a filter that doesn't parse for one type simply
+    contributes nothing from it (userName filters skip Groups and vice
+    versa). Paging windows over the merged head (200 per type) — bounded,
+    like every list surface."""
+
+    async def fn(token):
+        params = _parse_search_request(await _json_body(request))
+        resources: list[dict] = []
+        total = 0
+        for svc_cls in (ScimUserService, ScimGroupService):
+            try:
+                out = await svc_cls(db, token).list(
+                    filter_expr=params["filter"], start_index=1, count=200
+                )
+            except ScimError:
+                continue  # filter attribute unknown to this resource type
+            resources.extend(out.get("Resources", []))
+            total += out.get("totalResults", 0)
+        start, count = params["startIndex"], params["count"]
+        page = resources[start - 1 : start - 1 + count]
+        body = {
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+            "totalResults": total,
+            "startIndex": start,
+            "itemsPerPage": len(page),
+            "Resources": page,
+        }
+        return _scim_json(_project(body, params["attributes"], params["excludedAttributes"]))
+
+    return await _run(db, authorization, fn)
+
+
+@scim_router.post("/Users/.search", dependencies=[Depends(rate_limit(240, 60))])
+async def search_users(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """RFC 7644 §3.4.3 (R506): POST-bodied query — same engine as GET
+    /Users, for clients that must keep filters out of URLs/logs."""
+
+    async def fn(token):
+        body = await _json_body(request)
+        params = _parse_search_request(body)
+        out = await ScimUserService(db, token).list(
+            filter_expr=params["filter"],
+            start_index=params["startIndex"],
+            count=params["count"],
+        )
+        return _scim_json(_project(out, params["attributes"], params["excludedAttributes"]))
+
+    return await _run(db, authorization, fn)
+
+
+def _parse_search_request(body: dict) -> dict:
+    """Bounded SearchRequest parse — total over hostile bodies (R87)."""
+    if not isinstance(body, dict):
+        raise ScimError(400, "SearchRequest must be an object", "invalidSyntax")
+    filt = body.get("filter")
+    if filt is not None and (not isinstance(filt, str) or len(filt) > 300):
+        raise ScimError(400, "Invalid filter", "invalidFilter")
+    try:
+        start = int(body.get("startIndex", 1))
+        count = int(body.get("count", 100))
+    except (TypeError, ValueError) as exc:
+        raise ScimError(400, "startIndex/count must be integers", "invalidValue") from exc
+    start = max(start, 1)
+    count = min(max(count, 0), 200)
+
+    def _csv(key: str) -> str | None:
+        v = body.get(key)
+        if v is None:
+            return None
+        if isinstance(v, list):
+            v = ",".join(str(x) for x in v[:50])
+        return str(v)[:500]
+
+    return {
+        "filter": filt,
+        "startIndex": start,
+        "count": count,
+        "attributes": _csv("attributes"),
+        "excludedAttributes": _csv("excludedAttributes"),
+    }
+
+
 @scim_router.post("/Users", dependencies=[Depends(rate_limit(240, 60))])
 async def create_user(
     request: Request,
@@ -372,6 +465,25 @@ async def list_groups(
             start_index=startIndex, count=count, filter_expr=filter
         )
         return _scim_json(_project(body, attributes, excludedAttributes))
+
+    return await _run(db, authorization, fn)
+
+
+@scim_router.post("/Groups/.search", dependencies=[Depends(rate_limit(240, 60))])
+async def search_groups(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    async def fn(token):
+        body = await _json_body(request)
+        params = _parse_search_request(body)
+        out = await ScimGroupService(db, token).list(
+            filter_expr=params["filter"],
+            start_index=params["startIndex"],
+            count=params["count"],
+        )
+        return _scim_json(_project(out, params["attributes"], params["excludedAttributes"]))
 
     return await _run(db, authorization, fn)
 

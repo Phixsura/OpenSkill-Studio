@@ -76,9 +76,7 @@ async def main() -> None:
             },
             h,
         )
-        conn_id = next(
-            (r.json()["data"]["id"] for r in rs if r.status_code < 300), None
-        )
+        conn_id = next((r.json()["data"]["id"] for r in rs if r.status_code < 300), None)
 
         # 2) mapping profiles — uq_intg_mapping_org_name
         rs = await race(
@@ -94,9 +92,7 @@ async def main() -> None:
             },
             h,
         )
-        map_id = next(
-            (r.json()["data"]["id"] for r in rs if r.status_code < 300), None
-        )
+        map_id = next((r.json()["data"]["id"] for r in rs if r.status_code < 300), None)
 
         # 3) export streams — uq_intg_export_org_name
         await race(
@@ -229,7 +225,11 @@ async def main() -> None:
         )
         hcodes = sorted(r2.status_code for r2 in hook_rs)
         check("hook tick storm: zero 5xx", all(s2 < 500 for s2 in hcodes), f"codes={hcodes}")
-        check("hook tick storm: every tick accepted", all(s2 == 202 for s2 in hcodes), f"codes={hcodes}")
+        check(
+            "hook tick storm: every tick accepted",
+            all(s2 == 202 for s2 in hcodes),
+            f"codes={hcodes}",
+        )
         run_ids = {r2.json()["data"]["run_id"] for r2 in hook_rs if r2.status_code == 202}
         check("hook tick storm coalesced onto one run", len(run_ids) == 1, f"runs={len(run_ids)}")
 

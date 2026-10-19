@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R506 (thirty-fourth window, FEATURE — SCIM .search, RFC 7644 §3.4.3)**:
+  the "advertised unsupported" disposition converted to a real feature:
+  POST /Users/.search, /Groups/.search (same engine as the GET lists;
+  bounded total SearchRequest parse; attributes projection) and the
+  service-ROOT /.search spanning both resource types (a filter that does
+  not parse for one type contributes nothing from it; paging windows over
+  the merged bounded head). scim2-tester now 50 SUCCESS / 0 hard / 11
+  dispositioned.
 - **R505 (thirty-fourth window, CONCURRENCY — R484 probe extended to the
   R497 surfaces)**: trigger-secret mint storm (8 parallel rotations of the
   same row — every call 2xx, zero 5xx, last write wins) and hook tick
