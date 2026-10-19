@@ -1492,3 +1492,63 @@ async def test_events_keyset_pagination_stable_under_concurrent_inserts(db, egre
     fresh = await list_events(org.id, type_prefix=None, limit=200, before=None, db=db, user=user)
     subjects = {e.subject for e in fresh["data"]}
     assert {"mut-new-a", "mut-new-b"} <= subjects  # visible on a fresh walk
+
+
+async def test_deliveries_keyset_pagination_stable_under_concurrent_inserts(db, egress):
+    """R507 (R491 applied to the OTHER keyset surface): deliveries created
+    BETWEEN page pulls must not duplicate or skip the rows being walked;
+    the status filter composes with the cursor without breaking the
+    invariant."""
+    from app.integrations.api.events import list_deliveries
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    ids = []
+    for i in range(7):
+        ev = await emit_event(db, org.id, "project.approved", subject=f"dk-{i}", data={})
+        d = EventDelivery(event_id=ev.id, subscription_id=sub.id, status="delivered")
+        db.add(d)
+        await db.flush()
+        ids.append(d.id)
+    await db.commit()
+
+    owner_row = (
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
+    user = await db.get(_User, owner_row.user_id)
+
+    async def page(before=None, status=None):
+        return await list_deliveries(
+            org.id,
+            status=status,
+            subscription_id=sub.id,
+            limit=3,
+            before=before,
+            db=db,
+            user=user,
+        )
+
+    out = await page()
+    seen = [d.id for d in out["data"]]
+    original = set(ids)
+
+    # mutation between pulls: a NEW delivery lands at the head
+    ev = await emit_event(db, org.id, "project.approved", subject="dk-new", data={})
+    db.add(EventDelivery(event_id=ev.id, subscription_id=sub.id, status="pending"))
+    await db.commit()
+
+    cursor = out["meta"]["next_cursor"]
+    while cursor:
+        out = await page(before=cursor)
+        page_ids = [d.id for d in out["data"]]
+        assert not set(page_ids) & set(seen), "duplicate under insert"
+        seen.extend(page_ids)
+        cursor = out["meta"]["next_cursor"]
+    assert set(seen) == original, "skip under insert"
+
+    # status filter composes with the cursor: only delivered rows, no dups
+    out = await page(status="delivered")
+    assert all(d.status == "delivered" for d in out["data"])
+    out2 = await page(before=out["meta"]["next_cursor"], status="delivered")
+    assert not {d.id for d in out2["data"]} & {d.id for d in out["data"]}

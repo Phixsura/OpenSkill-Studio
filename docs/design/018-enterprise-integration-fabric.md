@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R507 (thirty-fourth window, PROBE — deliveries keyset under
+  mutation)**: R491's invariant applied to the second keyset surface —
+  deliveries inserted between page pulls never duplicate/skip the walked
+  rows, and the status filter composes with the cursor.
 - **R506 (thirty-fourth window, FEATURE — SCIM .search, RFC 7644 §3.4.3)**:
   the "advertised unsupported" disposition converted to a real feature:
   POST /Users/.search, /Groups/.search (same engine as the GET lists;
