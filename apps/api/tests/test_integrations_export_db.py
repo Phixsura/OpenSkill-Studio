@@ -924,3 +924,49 @@ async def test_manifest_carries_per_part_checksums(db):
         blob = writer.files[key]
         assert meta["bytes"] == len(blob)
         assert meta["sha256"] == hashlib.sha256(blob).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_ndjson_and_parquet_exports_agree_row_for_row(db):
+    """R520 (differential probe): the SAME source rows exported through both
+    formats must agree on row count, column set and values (parquet may
+    stringify a mixed column; scalars here are homogeneous so equality is
+    exact). Catches a projection/serializer divergence between the paths."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    org, owner = await _org(db)
+    for i in range(4):
+        await emit_event(db, org.id, "project.approved", subject=f"df-{i}", data={"k": i})
+    await db.flush()
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    nd = await svc.create_stream(
+        org.id,
+        name=f"nd-{ULID()}",
+        dataset="events",
+        field_allowlist=["id", "type", "subject", "data.k"],
+    )
+    parq = await svc.create_stream(
+        org.id,
+        name=f"pq-{ULID()}",
+        dataset="events",
+        field_allowlist=["id", "type", "subject", "data.k"],
+        part_format="parquet",
+    )
+    run_nd = await svc.run_export(org.id, nd.id)
+    run_pq = await svc.run_export(org.id, parq.id)
+    assert run_nd.status == run_pq.status == "succeeded"
+    assert run_nd.row_count == run_pq.row_count == 4
+
+    nd_rows = [
+        json.loads(line)
+        for p in run_nd.parts
+        for line in writer.files[p].decode().strip().split("\n")
+    ]
+    pq_rows = []
+    for p in run_pq.parts:
+        pq_rows.extend(pq.read_table(io.BytesIO(writer.files[p])).to_pylist())
+    key = lambda r: r["id"]  # noqa: E731
+    assert sorted(nd_rows, key=key) == sorted(pq_rows, key=key)

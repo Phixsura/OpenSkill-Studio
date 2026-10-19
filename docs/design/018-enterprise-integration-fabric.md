@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R520 (thirty-sixth window, DIFFERENTIAL probe)**: the same source rows
+  exported through NDJSON and parquet must agree row-for-row (count,
+  columns, values incl. data.<key> selections) — a serializer/projection
+  divergence between the two paths fails immediately. R519: the epic's
+  CHANGELOG entry (the fabric had none).
 - **R518 (thirty-sixth window, FEATURE — manifest part checksums)**: export
   manifests gain a `checksums` map (byte size + sha256 per part,
   Stripe-pipeline style) so warehouse loaders verify their fetches;
