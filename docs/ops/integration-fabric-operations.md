@@ -385,3 +385,12 @@ walls, per-route rate limits on every unauthenticated protocol surface
 c14n), nonce/state single-use with replay caches, SCIM deprovision sweeps
 sessions, export allowlist-built projections with org-salted hashing, and
 ~200 hand-rolled mutation-probe killers across all nine fabric cores.
+
+Window-35 additions (R512/R513): binding an EXISTING platform account via
+SCIM or bulk import requires a VERIFIED claim on the email's domain — the
+same rule SSO identity resolution always applied — so no tenant can
+conscript, deprovision-sweep, or rename a foreign account; and SAML SLO
+refuses duplicate signed query parameters, parses exactly the signed
+segment, and enforces an IssueInstant freshness window with single-use
+request IDs (a captured logout redirect is not a replayable
+session-revocation weapon).
