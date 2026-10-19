@@ -29,17 +29,10 @@ PROVIDER_CATEGORIES = frozenset(
     }
 )
 
-AUTH_MODES = frozenset(
-    {
-        "oauth2_cc",
-        "oauth2_ac",
-        "api_key",
-        "basic",
-        "saml_metadata",
-        "oidc_discovery",
-        "none",
-    }
-)
+# R510: modes the PROVIDER_CATALOG actually declares (coherence-pinned).
+# oauth2_ac/saml_metadata/oidc_discovery/basic were vocabulary with no
+# provider and no validator — re-add with their first connector (#44).
+AUTH_MODES = frozenset({"oauth2_cc", "api_key", "none"})
 
 
 class IntegrationProvider(Base):

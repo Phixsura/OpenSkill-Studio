@@ -190,7 +190,8 @@ CONFLICT_CLASSES = frozenset(
         "duplicate_external_id",
         "missing_reference",
         "role_conflict",
-        "date_invalid",
+        # "date_invalid" removed R510: never produced — bad dates surface as
+        # schema_invalid via the R487 catalog's date/date-time formats.
         "enum_unmapped",
         "schema_invalid",
         "clock_unresolvable",

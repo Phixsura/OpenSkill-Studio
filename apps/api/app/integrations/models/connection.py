@@ -25,7 +25,12 @@ CONNECTION_TRANSITIONS: dict[str, frozenset[str]] = {
 # Connections the scheduler/engine will touch.
 SCHEDULABLE_STATUSES = frozenset({"active", "degraded"})
 
-CREDENTIAL_KINDS = frozenset({"oauth2_tokens", "api_key", "basic", "client_secret"})
+# R510 (never-driven audit): kinds the fabric actually CONSUMES — api_key
+# (generic REST/ATS/CRM headers) and client_secret (OneRoster oauth2_cc
+# token fetch). "oauth2_tokens"/"basic" were accepted-but-never-read:
+# an admin storing them got silently dead credentials. Re-add alongside a
+# consumer, never before (#44 marketplace connectors).
+CREDENTIAL_KINDS = frozenset({"api_key", "client_secret"})
 
 # consecutive_failures threshold that flips active -> degraded.
 DEGRADE_AFTER_FAILURES = 3

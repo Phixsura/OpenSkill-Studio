@@ -255,7 +255,7 @@ async def test_full_acceptance_chain(db, monkeypatch):
     await csvc.set_credential(
         org.id,
         conn.id,
-        kind="oauth2_tokens",
+        kind="client_secret",
         values={"client_id": "cid", "client_secret": "cs"},
         expires_at=None,
     )

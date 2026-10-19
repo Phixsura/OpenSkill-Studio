@@ -731,3 +731,47 @@ def test_export_config_all_fields_dropped_refused():
     assert e.value.code == "EXPORT_CONFIG_INVALID"
     _check_exported_columns(["id", "type"], {"id": "drop", "type": "hash"})
     _check_exported_columns(["id"], {})
+
+
+def test_fabric_registries_have_no_never_driven_values():
+    """R510 (the R11/R497 gap class, productionized): every value in the
+    fabric's vocabulary registries must be PRODUCED or CONSUMED somewhere in
+    app code beyond its own definition — an accepted-but-never-read value is
+    a silent dead end (oauth2_tokens credentials, the date_invalid conflict
+    class and four phantom AUTH_MODES all shipped that way). Adding a value
+    without a driver fails here."""
+    import pathlib
+
+    from app.integrations.models.connection import CREDENTIAL_KINDS
+    from app.integrations.models.provider import AUTH_MODES
+    from app.integrations.models.sync import (
+        CONFLICT_CLASSES,
+        FIELD_POLICIES,
+        RECORD_OUTCOMES,
+        RUN_TRIGGERS,
+    )
+    from app.integrations.registry import PROVIDER_CATALOG
+
+    corpus = ""
+    for f in pathlib.Path("app").rglob("*.py"):
+        corpus += f.read_text()
+
+    # every catalog auth_mode is registered, and every registered mode has
+    # at least one catalog provider (vocabulary == reality)
+    catalog_modes = {p["auth_mode"] for p in PROVIDER_CATALOG.values()}
+    assert catalog_modes <= AUTH_MODES, catalog_modes - AUTH_MODES
+    assert catalog_modes >= AUTH_MODES, f"modes with no provider: {AUTH_MODES - catalog_modes}"
+
+    dead = []
+    for reg_name, values in {
+        "CREDENTIAL_KINDS": CREDENTIAL_KINDS,
+        "CONFLICT_CLASSES": CONFLICT_CLASSES,
+        "RUN_TRIGGERS": RUN_TRIGGERS,
+        "RECORD_OUTCOMES": RECORD_OUTCOMES,
+        "FIELD_POLICIES": FIELD_POLICIES,
+    }.items():
+        for v in values:
+            n = corpus.count(f'"{v}"') + corpus.count(f"'{v}'")
+            if n <= 1:  # only its own definition
+                dead.append(f"{reg_name}:{v}")
+    assert not dead, f"registry values nothing drives: {dead}"

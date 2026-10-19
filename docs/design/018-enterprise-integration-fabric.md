@@ -317,7 +317,7 @@ external_id}` backlink), CohortMember, OrgMember. Each mapped write goes through
 4. Conflicts append `SyncRecordResult` rows (§11.4) with `conflict_class` ∈
    `ambiguous_identity, duplicate_external_id, missing_reference (enrollment →
 unknown class), role_conflict (external says instructor, local manual role
-differs), date_invalid`. Conflicted records are **skipped, not guessed** — the
+differs)`. Conflicted records are **skipped, not guessed** — the
    admin resolves via API (resolution = pick local / pick external / link identity),
    and the next run applies it.
 5. Per-connection failure isolation (Clever lesson, S3.1): a run failure in one
@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R510 (thirty-fifth window, AUDIT — never-driven registry values,
+  R11/R497 class productionized)**: an AST+corpus scan over every fabric
+  vocabulary registry found four accepted-but-never-consumed values —
+  `oauth2_tokens`/`basic` credential kinds (an admin storing them got
+  silently DEAD credentials: no connector ever read those shapes), the
+  `date_invalid` conflict class (never produced; bad dates surface as
+  schema_invalid via the R487 formats) and four phantom AUTH_MODES with no
+  provider and no validator. All trimmed (re-add with their first consumer,
+  #44); a standing guard now fails on ANY registry value that nothing in
+  app code drives, plus AUTH_MODES ⇔ PROVIDER_CATALOG coherence both ways.
 - **R508 (thirty-fourth window, REVIEW — adversarial code-review pass over
   the window's diff; 7 findings, all fixed + pinned)**: (1) the chunked
   upload read buffered up to the CSV cap for EVERY format — the
