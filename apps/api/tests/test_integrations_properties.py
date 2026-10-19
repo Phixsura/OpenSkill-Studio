@@ -610,3 +610,39 @@ def test_validate_model_payload_matrix():
     # bounded detail: many violations never exceed 10 entries
     bad = {k: 123 for k in ("external_id", "class_external_id", "user_external_id", "role")}
     assert len(validate_model_payload("roster.enrollment", bad)) <= 10
+
+
+def test_validate_model_payload_enum_arm_and_detail_bound(monkeypatch):
+    """R494 (mutation pass over R487): the enum arm had no catalog user yet
+    (dead until a schema adopts one) — drive it via an injected schema; and
+    the detail bound must stop at EXACTLY 10 entries for 12 violations."""
+    from app.integrations.models import sync as sync_models
+    from app.integrations.services.model_schema import validate_model_payload
+
+    test_schema = {
+        "type": "object",
+        "additionalProperties": True,
+        "required": [],
+        "properties": {
+            "mode": {"type": "string", "enum": ["a", "b"]},
+            **{f"f{i}": {"type": "integer"} for i in range(12)},
+        },
+    }
+    monkeypatch.setitem(sync_models.MODEL_SCHEMAS, "test.model", test_schema)
+    assert validate_model_payload("test.model", {"mode": "a"}) == []
+    assert validate_model_payload("test.model", {"mode": "c"}) == ["mode: not in enum"]
+    # enum violation on a non-string value still lands in the enum arm
+    bad = {f"f{i}": "nope" for i in range(12)}
+    errors = validate_model_payload("test.model", bad)
+    assert len(errors) == 10  # bounded at exactly 10, not 12
+    assert all(e.endswith("expected integer") for e in errors)
+
+
+def test_validate_model_payload_datetime_offsets():
+    from app.integrations.services.model_schema import validate_model_payload
+
+    ok = {"candidate_external_id": "c", "applied_at": "2026-01-15T10:00:00+05:00"}
+    assert validate_model_payload("talent.application", ok) == []
+    assert validate_model_payload(
+        "talent.application", {"candidate_external_id": "c", "applied_at": "2026-99-99T99:00:00Z"}
+    ) == ["applied_at: bad date-time"]

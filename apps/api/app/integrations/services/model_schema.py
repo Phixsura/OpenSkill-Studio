@@ -57,6 +57,8 @@ def validate_model_payload(model: str, payload: Any) -> list[str]:
         return ["payload is not an object"]
     errors: list[str] = []
     for key, spec in schema.get("properties", {}).items():
+        if len(errors) >= 10:  # bounded detail — checked FIRST: the type/
+            break  # format arms `continue` and would skip a tail check (R494)
         if key not in payload or payload[key] is None:
             continue
         value = payload[key]
@@ -81,6 +83,4 @@ def validate_model_payload(model: str, payload: Any) -> list[str]:
         enum = spec.get("enum")
         if enum is not None and value not in enum:
             errors.append(f"{key}: not in enum")
-        if len(errors) >= 10:  # bounded detail, matching the mapping gate
-            break
     return errors
