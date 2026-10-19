@@ -924,13 +924,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 | Mappings declarative, non-executable     | JMESPath + fixed transform table, compile-at-save, caps; no user code paths                                                                                                                                                                                                  |
 | Warehouse exports incremental + governed | cursor advances only on success; allowlist-BUILT projection; manifest freshness; schedules + retention                                                                                                                                                                       |
 | Connector health/conflicts observable    | health summary endpoint + hub strip, half-hourly ping sweep + unhealthy transitions, per-subscription stats, record-level conflict rows + UI adjudication                                                                                                                    |
-| Full E2E chain                           | tests/e2e_integration_lifecycle.py: 62 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→bulk-replay→export→CSV/JSON+roster+opportunities imports→IDOR walls) + acceptance-chain DB test                                                   |
-| Browser journey (every admin create)     | tests/browser_e2e_integrations.mjs: 65 checks — register→org→all five pages, every create form driven (connection/domain/SCIM token/SSO/LTI/subscription/stream/import), negatives, shown-once-gone-on-reload, outsider lockout, 390px no-overflow, a11y names, console gate |
+| Full E2E chain                           | tests/e2e_integration_lifecycle.py: 92 live-HTTP checks (register→domain→connection→SCIM→mapping→sync→mesh delivery→replay→bulk-replay→export→CSV/JSON+roster+opportunities imports→IDOR walls) + acceptance-chain DB test                                                   |
+| Browser journey (every admin create)     | tests/browser_e2e_integrations.mjs: 74 checks — register→org→all five pages, every create form driven (connection/domain/SCIM token/SSO/LTI/subscription/stream/import), negatives, shown-once-gone-on-reload, outsider lockout, 390px no-overflow, a11y names, console gate |
 | Realistic scale bounds                   | tests/e2e_scale_smoke.py: 22 checks — 300 SCIM users, full-directory paging, eq-filter point lookup, 50-user bulk deactivate, 500-row CSV import commit, 200 events→2 subs→400 live deliveries, all wall-clock bounded                                                       |
 | CI enforcement                           | ci.yml: fabric Playwright sweep (sweep-integrations.spec.ts) + e2e-integration-fabric live-HTTP job + ruff format gate; contract guards (web→API path+method, sweep source-scan, ops caps table, doc test refs) run in the backend suite                                     |
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R521 (thirty-sixth window, DIFFERENTIAL + doc accuracy)**: SCIM
+  .search's response must byte-equal GET /Users with the same filter
+  (remap drift pin); the §20a acceptance table's stale check counts
+  refreshed (lifecycle 92, browser 74).
 - **R520 (thirty-sixth window, DIFFERENTIAL probe)**: the same source rows
   exported through NDJSON and parquet must agree row-for-row (count,
   columns, values incl. data.<key> selections) — a serializer/projection

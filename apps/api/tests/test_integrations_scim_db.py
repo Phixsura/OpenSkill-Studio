@@ -1679,3 +1679,24 @@ async def _verify_domain(db, org_id: str, domain: str) -> None:
         )
     )
     await db.flush()
+
+
+async def test_scim_search_equals_get_list(ctx):
+    """R521 (differential): POST .search with a filter must return exactly
+    what GET /Users with the same query params returns — the remap cannot
+    drift."""
+    import httpx
+
+    from app.main import app
+
+    uname = f"deq-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    await _usvc(ctx).create({"userName": uname, "displayName": "Diff Eq"})
+    await ctx["db"].commit()
+    sh = {"Authorization": f"Bearer {ctx['raw']}", "Content-Type": "application/scim+json"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t/api/v1") as c:
+        flt = f'userName eq "{uname}"'
+        got = await c.get("/scim/v2/Users", params={"filter": flt}, headers=sh)
+        posted = await c.post("/scim/v2/Users/.search", headers=sh, json={"filter": flt})
+        assert got.status_code == posted.status_code == 200
+        assert got.json() == posted.json()
