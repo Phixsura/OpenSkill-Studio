@@ -176,9 +176,28 @@ async def test_duplicate_409_and_reactivation(ctx):
 
 @pytest.mark.asyncio
 async def test_membership_only_provision_for_existing_platform_user(ctx):
+    """R512: binding an EXISTING platform account requires a VERIFIED claim
+    on the email's domain — without it, 403 (any org's IdP could otherwise
+    conscript a foreign account and sweep its sessions on deprovision)."""
     db = ctx["db"]
-    existing = await _user(db, email=f"cross-{uuid.uuid4().hex[:8]}@other.example.com")
+    suffix = f"corp-{uuid.uuid4().hex[:8]}.example.com"
+    existing = await _user(db, email=f"cross-{uuid.uuid4().hex[:8]}@{suffix}")
     old_hash = existing.password_hash
+
+    # foreign (unverified domain): refused with no membership side effect
+    with pytest.raises(ScimError) as e:
+        await _usvc(ctx).create({"userName": existing.email})
+    assert e.value.status == 403
+    none_yet = (
+        await db.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == ctx["org"].id, OrgMember.user_id == existing.id
+            )
+        )
+    ).scalar_one_or_none()
+    assert none_yet is None
+
+    await _verify_domain(db, ctx["org"].id, suffix)
     res, _ = await _usvc(ctx).create({"userName": existing.email})
     assert res["id"] == existing.id
     assert existing.password_hash == old_hash  # credentials untouched
@@ -1642,3 +1661,21 @@ async def test_scim_catch_all_depth_404_vs_405(ctx):
         assert r.status_code == 404 and "urn:ietf:params:scim" in r.text
         r = await c.get("/scim/v2/totally/unknown/path", headers=sh)
         assert r.status_code == 404
+
+
+async def _verify_domain(db, org_id: str, domain: str) -> None:
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dtt
+
+    from app.integrations.models import OrgDomain
+
+    db.add(
+        OrgDomain(
+            org_id=org_id,
+            domain=domain,
+            verification_token="ok-test",
+            status="verified",
+            verified_at=_dtt.now(_UTC),
+        )
+    )
+    await db.flush()

@@ -501,6 +501,21 @@ class ScimUserService:
                     )
                 )
             ).scalar_one_or_none()
+            if member is None:
+                # R512 (security review): binding an EXISTING platform account
+                # the org has NO prior relationship with requires a VERIFIED
+                # claim on the email's domain — the same takeover guard
+                # identity.resolve() applies to SSO. Without it, any org's
+                # IdP could conscript a foreign account (then deprovision it,
+                # sweeping the victim's sessions platform-wide, or rename it).
+                from app.integrations.services.domains import org_controls_email
+
+                if not await org_controls_email(self.db, self.org_id, username):
+                    raise ScimError(
+                        403,
+                        "userName belongs to an existing account outside this "
+                        "organization's verified domains",
+                    )
             if member is not None and member.status == MemberStatus.ACTIVE:
                 raise ScimError(409, "User already exists", "uniqueness")
             if member is not None:

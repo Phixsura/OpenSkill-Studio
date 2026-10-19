@@ -45,6 +45,17 @@ def normalized_email_domain(email: str) -> str:
         return ""
 
 
+async def org_controls_email(db, org_id: str, email: str) -> bool:
+    """R512: does this org hold a VERIFIED claim on the email's domain?
+    The takeover guard identity.resolve() applies to SSO — SCIM create and
+    bulk import must apply the SAME rule before binding an EXISTING
+    platform account the org has no prior relationship with."""
+    domain = normalized_email_domain(email or "")
+    if not domain:
+        return False
+    return domain in await OrgDomainService(db).verified_domains(org_id)
+
+
 class OrgDomainService:
     def __init__(self, db: AsyncSession):
         self.db = db

@@ -1198,8 +1198,7 @@ async def test_cert_expiry_sweep_tolerates_malformed_cert_dates(db):
             await db.execute(
                 _select(IntegrationEvent).where(
                     IntegrationEvent.subject == conn.id,
-                    IntegrationEvent.type
-                    == "com.openskill.integration.sso.cert_expiring.v1",
+                    IntegrationEvent.type == "com.openskill.integration.sso.cert_expiring.v1",
                 )
             )
         )
@@ -1384,11 +1383,13 @@ async def test_saml_clock_skew_grace_window(db):
     state = await _start(db, conn)
     email = f"skew-{uuid.uuid4().hex[:6]}@{domain}"
     xml = _assertion_xml(
-        in_response_to=state, email=email,
+        in_response_to=state,
+        email=email,
         not_on_or_after=datetime.now(UTC) - timedelta(seconds=30),
     )
     _, result, _ = await svc.handle_acs(
-        connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml)),
+        connection_id=conn.id,
+        saml_response_b64=_wrap_response(_sign_assertion(xml)),
         relay_state=state,
     )
     assert result.user.email == email  # grace accepted the just-expired token
@@ -1402,7 +1403,8 @@ async def test_saml_clock_skew_grace_window(db):
     email_am = f"am-{uuid.uuid4().hex[:6]}@{domain}"
     xml_am = _assertion_xml(in_response_to=state_am, email=email_am)
     _, res_am, _ = await svc.handle_acs(
-        connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml_am)),
+        connection_id=conn.id,
+        saml_response_b64=_wrap_response(_sign_assertion(xml_am)),
         relay_state=state_am,
     )
     assert res_am.user.email == email_am
@@ -1410,11 +1412,98 @@ async def test_saml_clock_skew_grace_window(db):
     # Expired well beyond the skew (10 min) -> rejected.
     state2 = await _start(db, conn)
     xml2 = _assertion_xml(
-        in_response_to=state2, email=f"old-{uuid.uuid4().hex[:6]}@{domain}",
+        in_response_to=state2,
+        email=f"old-{uuid.uuid4().hex[:6]}@{domain}",
         not_on_or_after=datetime.now(UTC) - timedelta(minutes=10),
     )
     with pytest.raises(AppError):
         await svc.handle_acs(
-            connection_id=conn.id, saml_response_b64=_wrap_response(_sign_assertion(xml2)),
+            connection_id=conn.id,
+            saml_response_b64=_wrap_response(_sign_assertion(xml2)),
             relay_state=state2,
         )
+
+
+# ── R513: SLO duplicate-parameter bypass + replay/freshness ──
+
+
+def _forged_slo_xml(subject: str, issuer: str = IDP_ENTITY) -> str:
+    import zlib
+    from urllib.parse import quote
+
+    req = (
+        f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_FORGED{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).isoformat()}">'
+        f"<saml:Issuer>{issuer}</saml:Issuer>"
+        f"<saml:NameID>{subject}</saml:NameID>"
+        "</samlp:LogoutRequest>"
+    )
+    deflated = zlib.compress(req.encode())[2:-4]
+    return quote(base64.b64encode(deflated).decode(), safe="")
+
+
+@pytest.mark.asyncio
+async def test_slo_duplicate_samlrequest_is_refused(db):
+    """R513 (security review): a query carrying TWO SAMLRequest params —
+    first a forged one (what parse_qs would consume), last the captured
+    signed one (what the raw signed-string rebuild would verify) — must be
+    refused outright, never verify-one-parse-another."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    victim = f"victim-{uuid.uuid4().hex[:6]}@{domain}"
+    attacker_target = f"other-{uuid.uuid4().hex[:6]}@{domain}"
+    captured = _signed_slo_query(victim)
+    forged_first = f"SAMLRequest={_forged_slo_xml(attacker_target)}&{captured}"
+    svc = SamlService(db)
+    with pytest.raises(AppError) as e:
+        await svc.handle_slo_request(connection_id=conn.id, raw_query=forged_first)
+    assert e.value.code == "SSO_ASSERTION_INVALID"
+    # duplicates of the OTHER signed params are refused too
+    for dup in ("RelayState=x", "SigAlg=x", "Signature=x"):
+        with pytest.raises(AppError):
+            await svc.handle_slo_request(connection_id=conn.id, raw_query=f"{captured}&{dup}")
+
+
+@pytest.mark.asyncio
+async def test_slo_request_replay_and_staleness_refused(db):
+    """R513: a captured signed LogoutRequest is single-use (ID replay cache)
+    and must carry a fresh IssueInstant (±5 min)."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    subject = f"rp-{uuid.uuid4().hex[:6]}@{domain}"
+    svc = SamlService(db)
+
+    q = _signed_slo_query(subject)
+    _conn, swept, _relay = await svc.handle_slo_request(connection_id=conn.id, raw_query=q)
+    with pytest.raises(AppError) as e:  # exact same signed query again
+        await svc.handle_slo_request(connection_id=conn.id, raw_query=q)
+    assert e.value.code == "SSO_ASSERTION_INVALID"
+
+    # stale IssueInstant: build a signed request dated 10 minutes ago
+    import zlib
+    from urllib.parse import quote
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    old = (
+        f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_LO{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{(datetime.now(UTC) - timedelta(minutes=10)).isoformat()}">'
+        f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer>"
+        f"<saml:NameID>{subject}</saml:NameID>"
+        "</samlp:LogoutRequest>"
+    )
+    deflated = zlib.compress(old.encode())[2:-4]
+    query = f"SAMLRequest={quote(base64.b64encode(deflated).decode(), safe='')}&SigAlg=" + quote(
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""
+    )
+    key = serialization.load_pem_private_key(
+        IDP_KEY if isinstance(IDP_KEY, bytes) else IDP_KEY.encode(), password=None
+    )
+    sig = key.sign(query.encode(), padding.PKCS1v15(), hashes.SHA256())
+    stale_q = query + "&Signature=" + quote(base64.b64encode(sig).decode(), safe="")
+    with pytest.raises(AppError) as e:
+        await svc.handle_slo_request(connection_id=conn.id, raw_query=stale_q)
+    assert e.value.code == "SSO_ASSERTION_INVALID"

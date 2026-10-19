@@ -627,18 +627,38 @@ class BulkImportService:
                 )
             ).scalars()
             member_ids.update(found_m)
+        from app.integrations.services.domains import OrgDomainService, normalized_email_domain
+
+        verified = await OrgDomainService(self.db).verified_domains(org_id)
+        kept: list[dict] = []
+        errors: list[dict] = []
         for row in rows:
             user = users_by_email.get(row["email"])
             if user is None:
                 creates += 1
+                kept.append(row)
                 continue
+            if user.id not in member_ids and normalized_email_domain(user.email) not in verified:
+                # R512 preview parity with _apply_row's foreign_account gate
+                errors.append(
+                    {
+                        "row_number": row["row_number"],
+                        "column": "email",
+                        "code": "foreign_account",
+                        "message": "email belongs to an existing account outside "
+                        "this organization's verified domains",
+                        "raw_row": {"email": row["email"]},
+                    }
+                )
+                continue
+            kept.append(row)
             if user.id not in member_ids or (
                 row["display_name"] and row["display_name"] != user.display_name
             ):
                 updates += 1
             else:
                 skips += 1
-        return rows, creates, updates, skips
+        return kept, creates, updates, skips, errors
 
     async def _resolve_roster_refs(self, org_id: str, row: dict):
         """(cohort, user, member?) for a roster row — or an error dict."""
@@ -792,7 +812,10 @@ class BulkImportService:
                 skips += outcome == "skipped"
             rows = kept
         else:
-            rows, creates, updates, skips = await self._preview_user_rows(job.org_id, rows)
+            rows, creates, updates, skips, foreign_errors = await self._preview_user_rows(
+                job.org_id, rows
+            )
+            errors.extend(foreign_errors)
         for e in errors[:MAX_ROW_ERRORS]:
             self.db.add(
                 ImportRowError(
@@ -934,10 +957,36 @@ class BulkImportService:
         await self.db.flush()
         return job
 
+    async def _foreign_existing_user(self, org_id: str, user, member) -> bool:
+        """R512: an EXISTING platform account with NO membership in this org
+        may only be touched when the org holds a verified claim on the
+        email's domain (same rule as SCIM create / identity.resolve)."""
+        if user is None or member is not None:
+            return False
+        from app.integrations.services.domains import org_controls_email
+
+        return not await org_controls_email(self.db, org_id, user.email)
+
     async def _apply_row(self, org_id: str, row: dict) -> str:
         user = (
             await self.db.execute(select(User).where(func.lower(User.email) == row["email"]))
         ).scalar_one_or_none()
+        member = None
+        if user is not None:
+            member = (
+                await self.db.execute(
+                    select(OrgMember).where(
+                        OrgMember.org_id == org_id, OrgMember.user_id == user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if await self._foreign_existing_user(org_id, user, member):
+                raise AppError(
+                    "IMPORT_ROW_INVALID",
+                    "foreign_account: email belongs to an existing account outside "
+                    "this organization's verified domains",
+                    422,
+                )
         outcome = "skipped"
         if user is None:
             user = User(
@@ -954,11 +1003,6 @@ class BulkImportService:
         elif row["display_name"] and row["display_name"] != user.display_name:
             user.display_name = row["display_name"]
             outcome = "updated"
-        member = (
-            await self.db.execute(
-                select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user.id)
-            )
-        ).scalar_one_or_none()
         # NOTE (R189, known gap — deliberately NOT enforced here): adding/
         # reactivating a member consumes a billable seat, and the interactive
         # OrgMemberService.add_member funnels through a §2.5 seat-quota check

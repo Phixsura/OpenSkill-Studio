@@ -931,6 +931,29 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R513 (thirty-fifth window, SECURITY — SAML SLO verify-one-parse-another
+  bypass + replay)**: the security-review pass found the Redirect-binding
+  SLO handler took the FIRST SAMLRequest occurrence for parsing (parse_qs)
+  but the LAST for the rebuilt signed string (raw-segment map) — duplicate
+  parameters let a captured signed request authorize a FORGED LogoutRequest
+  naming any NameID (session-revocation weapon). Fixed three ways:
+  duplicate SAMLRequest/RelayState/SigAlg/Signature refused outright; the
+  XML is decoded from the EXACT raw segment the signature covered; and the
+  request gains IssueInstant freshness (±5 min) + single-use ID through the
+  assertion replay cache. Regression tests drive the actual forged-first
+  query shape, replay, and staleness.
+- **R512 (thirty-fifth window, SECURITY — foreign-account binding gates)**:
+  SCIM create and bulk import matched userName/email against the GLOBAL
+  user table and attached any pre-existing platform account to the org as
+  an active member — with no verified-domain check (the takeover guard
+  identity.resolve applies to SSO). An org admin could conscript a foreign
+  account, then deprovision it (sweeping the victim's sessions
+  platform-wide, repeatably) or rewrite its GLOBAL display_name via
+  PUT/CSV. Both paths now require a VERIFIED claim on the email's domain
+  before touching an existing account with no prior org membership
+  (reactivation of the org's own members unaffected): SCIM 403, import
+  foreign_account row error in preview AND commit. Negative pins: the
+  victim is never renamed, never conscripted.
 - **R511 (thirty-fifth window, AUDIT — error-arm totality)**: the R510 scan
   generalized to ERROR codes: of 104 AppError codes the fabric can raise,
   16 were never asserted by code string in any test (mostly junk-id 404s

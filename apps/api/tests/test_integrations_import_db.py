@@ -120,6 +120,9 @@ async def test_preview_commit_and_idempotent_reupload(db):
     db.add(existing)
     await db.flush()
     fresh = f"new-{uuid.uuid4().hex[:6]}@x.edu"
+    # R512: touching the EXISTING non-member account requires the org to hold
+    # a verified claim on x.edu (otherwise the row errors as foreign_account).
+    await _verify_domain(db, org.id, "x.edu")
     data = _csv(
         [
             f"{fresh},Newbie,student",
@@ -1566,3 +1569,60 @@ async def test_upload_enforces_json_cap_during_chunked_read(db, monkeypatch):
             headers=h,
         )
         assert r.json().get("error", {}).get("code") != "IMPORT_TOO_LARGE", r.text
+
+
+async def _verify_domain(db, org_id: str, domain: str) -> None:
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dtt
+
+    from app.integrations.models import OrgDomain
+
+    db.add(
+        OrgDomain(
+            org_id=org_id,
+            domain=domain,
+            verification_token="ok-test",
+            status="verified",
+            verified_at=_dtt.now(_UTC),
+        )
+    )
+    await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_import_refuses_foreign_existing_accounts(db):
+    """R512 (security review): a CSV row naming an EXISTING platform account
+    whose domain the org has NOT verified is a row error in preview AND a
+    clean row failure at commit — never a rename or a conscripted
+    membership."""
+    org, owner = await _org(db)
+    victim = User(
+        email=f"victim-{uuid.uuid4().hex[:6]}@other-company.example.com",
+        password_hash=hash_password("Test123!"),
+        display_name="Victim Name",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(victim)
+    await db.flush()
+    data = _csv([f"{victim.email},Defaced,student"])
+    svc = BulkImportService(db, file_loader=None)
+    job = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="kf",
+        created_by=owner.id,
+    )
+    assert job.dry_stats["valid"] == 0 and job.dry_stats["errors"] == 1
+    job = await svc.commit(org.id, job.id, file_bytes=data)
+    assert job.stats["applied"] == 0
+    await db.refresh(victim)
+    assert victim.display_name == "Victim Name"  # never renamed
+    member = (
+        await db.execute(
+            select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == victim.id)
+        )
+    ).scalar_one_or_none()
+    assert member is None  # never conscripted

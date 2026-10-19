@@ -174,6 +174,16 @@ class SamlService:
         conn = await self._connection(connection_id)
         params = parse_qs(raw_query, keep_blank_values=True)
 
+        # R513 (security review): DUPLICATE parameters let an attacker have
+        # the signature verified over one SAMLRequest segment while a
+        # different (forged, unsigned) one is decompressed and acted on —
+        # parse_qs takes the FIRST occurrence, the raw-segment map took the
+        # LAST. Refuse duplicates outright, and below decode the XML from
+        # the EXACT raw segment the signature covered.
+        for name in ("SAMLRequest", "RelayState", "SigAlg", "Signature"):
+            if len(params.get(name, [])) > 1:
+                raise _invalid("slo_duplicate_parameter")
+
         def _one(name: str) -> str | None:
             vals = params.get(name)
             return vals[0] if vals else None
@@ -221,7 +231,10 @@ class SamlService:
             raise _invalid("slo_signature_invalid")
 
         try:
-            xml_bytes = zlib.decompress(base64.b64decode(saml_request, validate=True), -15)
+            # R513: decode from the SIGNED raw segment, never the parse_qs
+            # view — verified bytes and consumed bytes must be the same.
+            signed_request_b64 = unquote(raw_parts["SAMLRequest"].split("=", 1)[1])
+            xml_bytes = zlib.decompress(base64.b64decode(signed_request_b64, validate=True), -15)
         except Exception as exc:
             raise _invalid("slo_request_invalid") from exc
         parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False)
@@ -239,6 +252,22 @@ class SamlService:
         name_id = (root.findtext(f"{{{NS['saml']}}}NameID") or "").strip()
         if not name_id:
             raise _invalid("slo_no_name_id")
+
+        # R513: freshness + single-use. A captured signed LogoutRequest must
+        # not stay replayable forever — IssueInstant within ±5 min, and the
+        # request ID goes through the same single-use cache as assertions.
+        issue_instant = root.get("IssueInstant") or ""
+        try:
+            issued = datetime.fromisoformat(issue_instant.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise _invalid("slo_issue_instant_invalid") from exc
+        now = datetime.now(UTC)
+        if abs((now - issued).total_seconds()) > 300:
+            raise _invalid("slo_request_stale")
+        request_id = root.get("ID") or ""
+        if not request_id:
+            raise _invalid("slo_request_invalid")
+        await self._assert_id_unseen(conn.id, f"slo:{request_id}", now + timedelta(minutes=10))
 
         from app.integrations.models import ExternalIdentityLink
 
