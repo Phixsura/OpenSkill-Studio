@@ -2817,3 +2817,85 @@ async def test_strict_schema_gate_catches_type_violations(db):
         )
     ).scalar_one_or_none()
     assert staged is None
+
+
+# ── R497: inbound sync-trigger webhook (CDC-lite change notification) ──
+
+
+@pytest.mark.asyncio
+async def test_webhook_trigger_secret_lifecycle(db):
+    """Mint (shown once, hash at rest), authenticate by hashed lookup,
+    enqueue trigger="webhook" idempotently, rotate invalidates the old
+    secret, clear turns the hook off — all mismatches a UNIFORM 401."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "w-1", "title": "T"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+
+    raw = await svc.mint_trigger_secret(org.id, profile.id)
+    assert raw.startswith("sth_") and len(raw) > 40
+    await db.refresh(profile)
+    assert profile.trigger_secret_hash is not None and raw not in profile.trigger_secret_hash
+
+    run = await svc.webhook_trigger(profile.id, raw)
+    assert run.trigger == "webhook" and run.status == "queued"
+    # idempotent: a second notification while the run is live reuses it
+    run2 = await svc.webhook_trigger(profile.id, raw)
+    assert run2.id == run.id
+
+    # uniform 401s: wrong secret, wrong id, oversized, empty
+    for bad_id, bad_secret in [
+        (profile.id, "sth_wrong"),
+        ("0" * 26, raw),
+        (profile.id, "x" * 200),
+        (profile.id, ""),
+    ]:
+        with pytest.raises(AppError) as e:
+            await svc.webhook_trigger(bad_id, bad_secret)
+        assert e.value.code == "SYNC_TRIGGER_UNAUTHORIZED" and e.value.status_code == 401
+
+    # rotation: old secret dies, new works
+    raw2 = await svc.mint_trigger_secret(org.id, profile.id)
+    with pytest.raises(AppError) as e:
+        await svc.webhook_trigger(profile.id, raw)
+    assert e.value.code == "SYNC_TRIGGER_UNAUTHORIZED"
+    await execute_run(db, run.id)  # clear the live run so a new one can queue
+    run3 = await svc.webhook_trigger(profile.id, raw2)
+    assert run3.trigger == "webhook" and run3.id != run.id
+
+    # authenticated caller with a DISABLED profile gets the real signal
+    profile.enabled = False
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.webhook_trigger(profile.id, raw2)
+    assert e.value.code == "SYNC_PROFILE_DISABLED" and e.value.status_code == 409
+
+    # clear: hook off, uniform 401 again
+    profile.enabled = True
+    await svc.clear_trigger_secret(org.id, profile.id)
+    with pytest.raises(AppError) as e:
+        await svc.webhook_trigger(profile.id, raw2)
+    assert e.value.code == "SYNC_TRIGGER_UNAUTHORIZED"
+
+
+@pytest.mark.asyncio
+async def test_webhook_triggered_run_executes_incrementally(db):
+    """A webhook-triggered run is a normal incremental run: it reads from
+    the last cursor (never an implicit backfill) and completes."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector(
+        [[{"external_id": "inc-1", "title": "A"}], [{"external_id": "inc-2", "title": "B"}]]
+    )
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+    run1 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run1.id)
+
+    raw = await svc.mint_trigger_secret(org.id, profile.id)
+    run2 = await svc.webhook_trigger(profile.id, raw)
+    await db.commit()
+    assert run2.cursor_in != {}  # incremental: resumes from run1's cursor
+    await execute_run(db, run2.id)
+    await db.refresh(run2)
+    assert run2.status == "succeeded" and run2.trigger == "webhook"

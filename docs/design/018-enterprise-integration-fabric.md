@@ -931,6 +931,23 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R497 (thirty-fourth window, FEATURE — inbound sync-trigger webhook,
+  CDC-lite)**: trigger="webhook" sat in RUN_TRIGGERS with NOTHING able to
+  produce it (the R11 never-driven-enum class) — and it is the honest
+  reading of the remaining "CDC sources" benchmark gap: change
+  NOTIFICATION instead of poll-only schedules. Admins mint a per-profile
+  trigger secret (shown once, sha256 at rest — ScimToken pattern, intg24
+  migration, rotation + clear, audited); the external system POSTs
+  /integrations/sync-hooks/{profile_id} with it (tight 30/60 limit) and
+  the fabric enqueues an INCREMENTAL run via the existing idempotent
+  trigger() (live run reused; cursor from the last run — the request body
+  is deliberately ignored: cursors stay destination-confirmed, untrusted
+  payloads must not steer them). Auth is hashed-secret LOOKUP with a
+  UNIFORM 401 for wrong id/secret/unset (no existence oracle on the
+  unauthenticated surface); an authenticated caller against a disabled
+  profile gets the real 409. True log-based CDC (reading vendor
+  changelogs) remains out of scope — vendor connectors are issue #44
+  marketplace territory. Live E2E grown to 90 checks.
 - **R496 (thirty-fourth window, CONFORMANCE — scim2-tester run; the
   deferred dependency earned its keep)**: first run scored 15 SUCCESS / 31
   ERROR; final run 48 SUCCESS / 0 hard / 12 dispositioned. Server fixes:

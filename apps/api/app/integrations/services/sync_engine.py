@@ -301,6 +301,49 @@ class SyncProfileService:
         await self.db.flush()
         return profile
 
+    # ── R497: inbound trigger webhook (CDC-lite change notification) ──
+
+    async def mint_trigger_secret(self, org_id: str, profile_id: str) -> str:
+        """Mint (or rotate) the inbound trigger secret. Shown ONCE; only the
+        sha256 is stored (ScimToken pattern). The external system POSTs
+        /integrations/sync-hooks/{profile_id} with it when source data
+        changes, replacing poll-only schedules with change notification."""
+        import secrets as _secrets
+
+        from app.integrations.services.scim import hash_token
+
+        profile = await self.get(org_id, profile_id)
+        raw = f"sth_{_secrets.token_hex(24)}"
+        profile.trigger_secret_hash = hash_token(raw)
+        await self.db.flush()
+        return raw
+
+    async def clear_trigger_secret(self, org_id: str, profile_id: str) -> None:
+        profile = await self.get(org_id, profile_id)
+        profile.trigger_secret_hash = None
+        await self.db.flush()
+
+    async def webhook_trigger(self, profile_id: str, raw_secret: str) -> SyncRun:
+        """Authenticate by hashed-secret LOOKUP (no per-byte compare on the
+        raw) and enqueue trigger="webhook". UNIFORM 401 on any mismatch —
+        wrong id, wrong secret, secret unset — no existence oracle on an
+        unauthenticated surface."""
+        from app.integrations.services.scim import hash_token
+
+        if not raw_secret or len(raw_secret) > 128:
+            raise AppError("SYNC_TRIGGER_UNAUTHORIZED", "Invalid trigger credentials", 401)
+        profile = (
+            await self.db.execute(
+                select(SyncProfile).where(
+                    SyncProfile.id == profile_id,
+                    SyncProfile.trigger_secret_hash == hash_token(raw_secret),
+                )
+            )
+        ).scalar_one_or_none()
+        if profile is None:
+            raise AppError("SYNC_TRIGGER_UNAUTHORIZED", "Invalid trigger credentials", 401)
+        return await self.trigger(profile.org_id, profile.id, trigger="webhook")
+
     async def trigger(self, org_id: str, profile_id: str, *, trigger: str = "manual") -> SyncRun:
         """Idempotent: a live run is returned instead of a second one."""
         profile = await self.get(org_id, profile_id)

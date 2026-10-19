@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,8 @@ from app.models.user import User
 from app.schemas.base import DataResponse
 
 router = APIRouter(prefix="/orgs/{org_id}/integrations", tags=["Integrations"])
+# R497: unauthenticated-path inbound trigger hooks (bearer-secret authed).
+hook_router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
 
 async def _admin(org_id: str, user: User, db: AsyncSession) -> None:
@@ -506,3 +508,56 @@ async def resolve_sync_conflict(
     )
     await db.commit()
     return {"data": resp}
+
+
+# ── R497: inbound sync-trigger webhook (CDC-lite) ──
+
+
+@router.post("/sync-profiles/{profile_id}/trigger-secret", status_code=201)
+async def mint_sync_trigger_secret(
+    org_id: str,
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Mint/rotate the inbound trigger secret — SHOWN ONCE (hash at rest)."""
+    await _admin(org_id, user, db)
+    raw = await SyncProfileService(db).mint_trigger_secret(org_id, profile_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sync_trigger_secret.minted", "sync_profile", profile_id
+    )
+    await db.commit()
+    return {"data": {"secret": raw}}
+
+
+@router.delete("/sync-profiles/{profile_id}/trigger-secret", status_code=204)
+async def clear_sync_trigger_secret(
+    org_id: str,
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _admin(org_id, user, db)
+    await SyncProfileService(db).clear_trigger_secret(org_id, profile_id)
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sync_trigger_secret.cleared", "sync_profile", profile_id
+    )
+    await db.commit()
+
+
+@hook_router.post("/sync-hooks/{profile_id}", status_code=202)
+async def inbound_sync_hook(
+    profile_id: str,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    """External change notification: the source system POSTs here (bearer =
+    the minted trigger secret) when its data changes; we enqueue an
+    incremental run (idempotent — a live run is reused). The body is
+    deliberately IGNORED: cursors stay destination-confirmed (§11.3), an
+    untrusted payload must not steer them."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise AppError("SYNC_TRIGGER_UNAUTHORIZED", "Invalid trigger credentials", 401)
+    run = await SyncProfileService(db).webhook_trigger(profile_id, authorization[7:].strip())
+    await db.commit()
+    return {"data": {"run_id": run.id, "status": run.status, "trigger": run.trigger}}

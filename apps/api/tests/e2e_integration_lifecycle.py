@@ -360,6 +360,38 @@ async def main() -> int:
         )
         check("sync-profile PATCH back to manual", r.status_code == 200, r.text[:120])
 
+        # ── R497: inbound sync-trigger hook (CDC-lite) ──
+        r = await c.post(f"{base}/sync-profiles/{profile_id}/trigger-secret", headers=h)
+        hook_secret = r.json().get("data", {}).get("secret", "")
+        check(
+            "trigger secret minted once",
+            r.status_code == 201 and hook_secret.startswith("sth_"),
+            r.text[:160],
+        )
+        r = await c.post(
+            f"{API}/integrations/sync-hooks/{profile_id}",
+            headers={"Authorization": "Bearer sth_wrong"},
+        )
+        check("hook wall: wrong secret -> 401", r.status_code == 401, r.text[:120])
+        r = await c.post(f"{API}/integrations/sync-hooks/{profile_id}")
+        check("hook wall: no bearer -> 401", r.status_code == 401, r.text[:120])
+        r = await c.post(
+            f"{API}/integrations/sync-hooks/{profile_id}",
+            headers={"Authorization": f"Bearer {hook_secret}"},
+        )
+        check(
+            "hook enqueues a webhook-triggered run",
+            r.status_code == 202 and r.json()["data"]["trigger"] == "webhook",
+            r.text[:200],
+        )
+        r = await c.delete(f"{base}/sync-profiles/{profile_id}/trigger-secret", headers=h)
+        check("trigger secret cleared", r.status_code == 204, r.text[:120])
+        r = await c.post(
+            f"{API}/integrations/sync-hooks/{profile_id}",
+            headers={"Authorization": f"Bearer {hook_secret}"},
+        )
+        check("cleared secret -> uniform 401", r.status_code == 401, r.text[:120])
+
         r = await c.post(f"{base}/sync-profiles/{profile_id}/run", headers=h)
         check("run queued (202)", r.status_code == 202, r.text[:200])
         run_id = r.json()["data"]["id"]

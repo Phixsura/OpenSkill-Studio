@@ -257,6 +257,10 @@ class SyncProfile(Base):
     # {"<field>": "ours|theirs|most_recent|prefer_ours_unless_blank", "_default": ...}
     field_policy: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     options: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # R497 (CDC-lite): sha256 of the inbound trigger secret — the external
+    # system POSTs /integrations/sync-hooks/{profile_id} with it to request
+    # an incremental run (trigger="webhook"). NULL = inbound trigger off.
+    trigger_secret_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
