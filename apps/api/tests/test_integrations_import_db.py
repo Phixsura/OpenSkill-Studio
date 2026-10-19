@@ -1667,3 +1667,23 @@ async def test_import_can_retouch_own_member_without_verified_domain(db):
     assert job.stats["applied"] == 1
     await db.refresh(member_user)
     assert member_user.display_name == "Renamed"
+
+
+def test_every_template_parses_cleanly_through_its_own_validator():
+    """R522 (self-consistency pin): the downloadable template for every
+    kind×format must sail through that kind's validator with exactly one
+    valid row and zero errors — a template/validator drift ships admins a
+    broken starting file."""
+    from app.integrations.services.bulk_import import (
+        KIND_SPECS,
+        detect_format,
+        parse_users,
+        template_for,
+    )
+
+    for kind in KIND_SPECS:
+        for fmt in ("csv", "json"):
+            content, _ctype = template_for(kind, fmt)
+            rows, errors = parse_users(content, detect_format(content), {}, kind=kind)
+            assert errors == [], (kind, fmt, errors)
+            assert len(rows) == 1, (kind, fmt)

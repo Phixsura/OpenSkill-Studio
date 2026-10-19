@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R522 (thirty-sixth window, SELF-CONSISTENCY pin)**: every downloadable
+  import template (kind × format) must parse through its own validator
+  with one valid row and zero errors — template/validator drift can no
+  longer ship admins a broken starting file.
 - **R521 (thirty-sixth window, DIFFERENTIAL + doc accuracy)**: SCIM
   .search's response must byte-equal GET /Users with the same filter
   (remap drift pin); the §20a acceptance table's stale check counts
