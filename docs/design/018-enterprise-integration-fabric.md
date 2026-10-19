@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R499 (thirty-fourth window, VERIFY — regression sweep over the new
+  surfaces)**: both fuzzers rerun against the R496-R498 code (fabric 961
+  reqs seeds 43+97; app-wide 4,129 reqs) — zero fives; storm suite 8/8;
+  ops-doc contract guard green; research-doc closing assessment v2 added
+  (every v1 gap now shipped / dispositioned / explicitly #44 scope).
 - **R498 (thirty-fourth window, UI — webhook-trigger admin controls)**:
   sync-page profile rows gain "Webhook trigger" (mint/rotate; shown-once
   panel with the exact hook URL + bearer) and "Disable hook"; ops guide

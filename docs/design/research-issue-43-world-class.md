@@ -607,6 +607,31 @@ admin mapping/connection mutation.
 10. Export field filtering as a denylist or applied downstream of serialization
     (new fields leak by default — R82's `_card_fields` lesson at warehouse scale).
 
+## Closing assessment v2 (2026-10-19, window 34 / R486-R499)
+
+Re-scored after the thirty-fourth window. Every gap the v1 table left open
+is now shipped, dispositioned, or explicitly out of this epic's scope:
+
+| v1 remaining gap                    | Status now                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SCIM event feed                     | shipped (R86-R96 window); scim2-tester conformance run added R496: 48 SUCCESS / 0 hard / 12 dispositioned-by-design                              |
+| LTI Dynamic Registration            | shipped (R86-R96 window)                                                                                                                         |
+| endpoint-scoped signing keys        | per-subscription secrets ARE endpoint-scoped; co-signed rotation ladder                                                                          |
+| full delivery payload archive       | shipped (intg13, byte-exact)                                                                                                                     |
+| CDC sources                         | CDC-lite shipped R497: per-profile inbound trigger webhook (change notification → incremental run). Log-based vendor CDC = #44 marketplace scope |
+| full JSONSchema per model           | shipped R487: MODEL_SCHEMAS catalog + strict_schema type enforcement + GET /integrations/models (Airbyte discover shape)                         |
+| bulk import mapping UI widget       | shipped R489: dry-run mapped-sample table (Flatfile-parity confirmation)                                                                         |
+| streaming >50MB files               | shipped R488: streamed CSV decode, format-aware caps (CSV 200MB / JSON 50MB; 100k-row bound is the true memory cap)                              |
+| Parquet                             | shipped R486: format=parquet streams (optional pyarrow extra, typed-infer + utf8 fallback)                                                       |
+| warehouse-native (Snowflake share)  | out of scope — parts land in the tenant's bucket (documented §19)                                                                                |
+| more SIS vendors (Clever/ClassLink) | out of scope — issue #44 connector-marketplace territory (Connector SDK boundary is ready: declared, versioned, permission-scoped)               |
+
+New verification layers this window: migration downgrade round-trip over all
+114 revisions (R490), pagination-under-mutation (R491), OpenAPI-driven fuzz
+— fabric phase 15 and the app-wide sweep, 961 + 4,129 requests, two seeds,
+zero unexplained 5xx (R492/R493/R499), scim2-tester conformance (R496),
+browser journey at 69 checks, live-HTTP E2E at 90 checks.
+
 ## Closing assessment (post-implementation, 2026-10-11)
 
 Scored against the eight streams above after the two marathon windows
