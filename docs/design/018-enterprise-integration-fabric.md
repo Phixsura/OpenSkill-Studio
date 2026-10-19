@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R514 (thirty-fifth window, FEATURE — event payload schemas in the
+  catalog, Svix parity)**: /event-catalog now publishes the fixed
+  CloudEvents `envelope` schema plus machine-readable `payloads` schemas
+  for every DIRECTLY-emitted mesh type (19 types incl. the internal
+  alertables; legacy-mirrored webhook events stay open objects carrying
+  their legacy payloads). A drift guard harvests every emit_event call
+  site in app code and fails when a site's data keys are not covered by
+  its published schema — plus an advertised-types coherence pin and live
+  E2E checks (92 checks). Drills 10/10 OK this window (slow-sink confirms
+  the R492 typed EgressUpstreamError in delivery results).
 - **R513 (thirty-fifth window, SECURITY — SAML SLO verify-one-parse-another
   bypass + replay)**: the security-review pass found the Redirect-binding
   SLO handler took the FIRST SAMLRequest occurrence for parsing (parse_qs)

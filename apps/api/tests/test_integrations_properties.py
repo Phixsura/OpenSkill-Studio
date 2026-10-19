@@ -775,3 +775,62 @@ def test_fabric_registries_have_no_never_driven_values():
             if n <= 1:  # only its own definition
                 dead.append(f"{reg_name}:{v}")
     assert not dead, f"registry values nothing drives: {dead}"
+
+
+def test_event_payload_schemas_cover_every_emit_site():
+    """R514: harvest every emit_event call site in app code; a type emitted
+    with a literal data dict must have a payload schema whose properties
+    cover the emitted keys — the published catalog cannot silently drift
+    from the emitters. (Legacy-mirrored webhook events are exempt: they
+    carry their legacy payloads, documented as open objects.)"""
+    import pathlib
+    import re
+
+    from app.integrations.api.events import EVENT_PAYLOAD_SCHEMAS
+
+    pat = re.compile(
+        r"emit_event\(\s*[^,]+,\s*[^,]+,\s*\n?\s*"
+        r"""(?:f?["']([a-zA-Z._{}]+)["'])"""
+        r""".*?data=\{(.*?)\}\s*[,)]""",
+        re.S,
+    )
+    missing: list[str] = []
+    for f in pathlib.Path("app").rglob("*.py"):
+        text = f.read_text()
+        if "emit_event(" not in text:
+            continue
+        for m in pat.finditer(text):
+            etype = m.group(1)
+            if "{" in etype:  # f-string: resolve the known internal prefix
+                etype = etype.replace("{INTERNAL_EVENT_PREFIX}", "integration.")
+            keys = set(re.findall(r"[\"']([a-z_]+)[\"']\s*:", m.group(2)))
+            schema = EVENT_PAYLOAD_SCHEMAS.get(etype)
+            if schema is None:
+                missing.append(f"{f.name}: {etype} has no payload schema")
+                continue
+            uncovered = keys - set(schema.get("properties", {}))
+            if uncovered:
+                missing.append(f"{f.name}: {etype} schema missing {sorted(uncovered)}")
+    assert not missing, missing
+    # dynamic-type emitters the regex cannot resolve: the SCIM audit events
+    # share one shape — pinned here explicitly.
+    for scim_type in ("org.scim.provisioned", "org.scim.deprovisioned", "org.scim.reactivated"):
+        assert set(EVENT_PAYLOAD_SCHEMAS[scim_type]["properties"]) == {"user_id", "token_id"}
+
+
+def test_event_catalog_payload_keys_are_canonical_members():
+    """Every published payload schema key must be a type the catalog itself
+    advertises (canonical or internal) — no orphan documentation."""
+    from app.integrations.api.events import (
+        _INTERNAL_ALERTABLE,
+        DIRECT_EMISSIONS,
+        EVENT_PAYLOAD_SCHEMAS,
+    )
+    from app.services.webhook import _MESH_NAME_MAP, VALID_EVENT_TYPES
+
+    canonical = {f"com.openskill.{_MESH_NAME_MAP.get(n, n)}.v1" for n in VALID_EVENT_TYPES} | {
+        f"com.openskill.{n}.v1" for n in DIRECT_EMISSIONS
+    }
+    advertised = canonical | set(_INTERNAL_ALERTABLE)
+    for name in EVENT_PAYLOAD_SCHEMAS:
+        assert f"com.openskill.{name}.v1" in advertised, name

@@ -111,6 +111,115 @@ def _delivery_response(
     )
 
 
+# R514 (Svix parity): machine-readable payload schemas for the `data`
+# member of each mesh event the platform emits DIRECTLY via emit_event
+# (legacy-mirrored webhook events carry their legacy payloads and are
+# documented as open objects). Bounded subset like the R487 model catalog;
+# a guard test harvests every emit_event call site and fails when a site's
+# keys are not covered here — the schemas cannot silently drift from the
+# emitters.
+_PS = {"type": "string"}
+_PB = {"type": "boolean"}
+_PO = {"type": "object"}
+EVENT_PAYLOAD_SCHEMAS: dict[str, dict] = {
+    "project.approved": {
+        "type": "object",
+        "properties": {
+            "submission_id": _PS,
+            "project_id": _PS,
+            "user_id": _PS,
+            "final_score": {"type": "number"},
+        },
+    },
+    "skill.completed": {"type": "object", "properties": {"skill_id": _PS, "user_id": _PS}},
+    "learner.enrolled": {"type": "object", "properties": {"cohort_id": _PS, "user_id": _PS}},
+    "brief.created": {
+        "type": "object",
+        "properties": {"brief_id": _PS, "title": _PS, "client_name": _PS, "status": _PS},
+    },
+    "org.sso.login": {
+        "type": "object",
+        "properties": {"user_id": _PS, "jit": _PB, "via": _PS},
+    },
+    "org.breakglass.login": {
+        "type": "object",
+        "properties": {"user_id": _PS, "ip_address": _PS, "user_agent": _PS},
+    },
+    "org.import.committed": {
+        "type": "object",
+        "properties": {"kind": _PS, "status": _PS, "stats": _PO},
+    },
+    "org.scim.provisioned": {
+        "type": "object",
+        "properties": {"user_id": _PS, "token_id": _PS},
+    },
+    "org.scim.deprovisioned": {
+        "type": "object",
+        "properties": {"user_id": _PS, "token_id": _PS},
+    },
+    "org.scim.reactivated": {
+        "type": "object",
+        "properties": {"user_id": _PS, "token_id": _PS},
+    },
+    "integration.sync.completed": {
+        "type": "object",
+        "properties": {"profile_id": _PS, "status": _PS, "stats": _PO},
+    },
+    "integration.connection.unhealthy": {
+        "type": "object",
+        "properties": {"connection_id": _PS, "status": _PS, "error_class": _PS},
+    },
+    "integration.sso.cert_expiring": {
+        "type": "object",
+        "properties": {
+            "sso_connection_id": _PS,
+            "not_after": _PS,
+            "days_left": {"type": "integer"},
+        },
+    },
+    "integration.sso.backchannel_logout": {
+        "type": "object",
+        "properties": {"sso_connection_id": _PS},
+    },
+    "integration.sso.single_logout": {
+        "type": "object",
+        "properties": {"sso_connection_id": _PS},
+    },
+    "integration.subscription.auto_disabled": {
+        "type": "object",
+        "properties": {"subscription_id": _PS, "reason": _PS},
+    },
+    "integration.delivery.exhausted": {
+        "type": "object",
+        "properties": {"subscription_id": _PS, "event_id": _PS, "last_error": _PS},
+    },
+    "client.accepted": {
+        "type": "object",
+        "properties": {"submission_id": _PS, "project_id": _PS, "brief_completed": _PB},
+    },
+    # privacy-safe by design (§19): ids only, never amounts
+    "invoice.finalized": {
+        "type": "object",
+        "properties": {"invoice_id": _PS, "tenant_id": _PS},
+    },
+}
+
+# CloudEvents envelope every delivery wraps the data member in (fixed).
+EVENT_ENVELOPE_SCHEMA = {
+    "type": "object",
+    "required": ["id", "type", "source", "subject", "time", "data"],
+    "properties": {
+        "specversion": {"type": "string"},
+        "id": _PS,
+        "type": _PS,
+        "source": _PS,
+        "subject": _PS,
+        "time": {"type": "string", "format": "date-time"},
+        "data": _PO,
+    },
+}
+
+
 # R93: the alertable fabric-internal events (exact-match only — §12).
 _INTERNAL_ALERTABLE = {
     "com.openskill.integration.delivery.exhausted.v1": "A delivery exhausted its retry ladder (dead-letter)",
@@ -163,12 +272,21 @@ async def event_catalog(
         | {f"com.openskill.{name}.v1" for name in direct}
     )
     prefixes = sorted({t.rsplit(".", 2)[0] + ".*" for t in canonical})
+    payloads = {
+        f"com.openskill.{name}.v1": schema for name, schema in EVENT_PAYLOAD_SCHEMAS.items()
+    }
     return {
         "data": {
             "legacy": legacy,
             "canonical": canonical,
             "wildcards": prefixes,
             "internal": _INTERNAL_ALERTABLE,
+            # R514: machine-readable payload docs — the envelope is fixed
+            # CloudEvents; `payloads` covers directly-emitted types; a
+            # canonical type absent here carries its legacy webhook payload
+            # (open object).
+            "envelope": EVENT_ENVELOPE_SCHEMA,
+            "payloads": payloads,
         }
     }
 

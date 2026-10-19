@@ -583,10 +583,26 @@ async def main() -> int:
 
         # ── R93/R94: event catalog + payload archive over HTTP ──
         r = await c.get(f"{base}/event-catalog", headers=h)
+        cat = r.json().get("data", {}) if r.status_code == 200 else {}
         check(
             "event catalog served",
-            r.status_code == 200 and "canonical" in r.json()["data"],
+            r.status_code == 200 and "canonical" in cat,
             r.text[:200],
+        )
+        # R514: payload schemas + envelope published; every schema key is an
+        # advertised type
+        check(
+            "catalog publishes payload schemas",
+            isinstance(cat.get("payloads"), dict)
+            and "com.openskill.project.approved.v1" in cat["payloads"]
+            and cat.get("envelope", {}).get("required", []) != [],
+            str(cat.get("payloads", {}))[:120],
+        )
+        advertised = set(cat.get("canonical", [])) | set(cat.get("internal", {}))
+        check(
+            "payload schema keys are advertised types",
+            set(cat.get("payloads", {})) <= advertised,
+            str(set(cat.get("payloads", {})) - advertised)[:150],
         )
         if ok_rows:
             r = await c.get(f"{base}/deliveries/{ok_rows[0]['id']}/payload", headers=h)
