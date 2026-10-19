@@ -290,17 +290,27 @@ async def handle_backchannel_logout(
     import hashlib
 
     from app.integrations.models import ExternalIdentityLink, SsoLoginState
+    from app.integrations.security import EgressUpstreamError
 
     svc = service or OidcService(db)
     conn = await svc._connection(sso_connection_id)  # noqa: SLF001
-    doc = await svc._discovery(conn)  # noqa: SLF001
+    try:
+        doc = await svc._discovery(conn)  # noqa: SLF001
+    except EgressUpstreamError as exc:
+        # R492: an unreachable IdP mid-validation is a logout FAILURE in
+        # BCL terms (spec: 400), not a gateway error — the token is the
+        # untrusted input here and stays unverifiable.
+        raise _invalid("idp_unreachable") from exc
     try:
         header = pyjwt.get_unverified_header(logout_token)
     except pyjwt.PyJWTError as exc:
         raise _invalid("jwt_header_invalid") from exc
     if header.get("alg") != "RS256":
         raise _invalid("alg_not_rs256")
-    keys = await svc._jwks_keys(conn, doc["jwks_uri"], kid=header.get("kid", ""))  # noqa: SLF001
+    try:
+        keys = await svc._jwks_keys(conn, doc["jwks_uri"], kid=header.get("kid", ""))  # noqa: SLF001
+    except EgressUpstreamError as exc:
+        raise _invalid("idp_unreachable") from exc
     key = keys.get(header.get("kid", ""))
     if key is None:
         raise _invalid("kid_unknown")

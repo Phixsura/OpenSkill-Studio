@@ -48,6 +48,19 @@ class EgressBlockedError(AppError):
         super().__init__("EGRESS_BLOCKED", message, 422)
 
 
+class EgressUpstreamError(AppError):
+    """R492: the outbound dial/read FAILED (connect refused, TLS error,
+    timeout, protocol error). Distinct from EgressBlockedError (we refused)
+    and from a 500 (our fault): the UPSTREAM is unreachable — 502. Raised
+    by the shared request() helper so every API-triggered egress (ping, LTI
+    JWKS, OIDC token, dynreg, NRPS) degrades identically instead of each
+    call site rediscovering raw httpx.ConnectError as a 500 (found by the
+    phase-15 OpenAPI sweep: live ping against a dead host 500'd)."""
+
+    def __init__(self, message: str):
+        super().__init__("UPSTREAM_UNREACHABLE", message, 502)
+
+
 def _is_forbidden_ip(ip_str: str) -> bool:
     """True when the address must never be dialed (private/reserved/meta)."""
     try:
@@ -172,6 +185,35 @@ class EgressClient:
             extensions["sni_hostname"] = host
 
         timeout = httpx.Timeout(connect=CONNECT_TIMEOUT, read=read_timeout, write=10.0, pool=5.0)
+        try:
+            return await self._send(
+                method,
+                pinned_url,
+                host=host,
+                send_headers=send_headers,
+                content=content,
+                extensions=extensions,
+                timeout=timeout,
+                discard_body=discard_body,
+            )
+        except httpx.HTTPError as exc:
+            # Transport failures normalize to ONE typed error (502), never a
+            # raw httpx exception escaping a route as a 500. The message is
+            # the exception CLASS plus a bounded snippet — never the body.
+            raise EgressUpstreamError(f"{type(exc).__name__}: {str(exc)[:120]}") from exc
+
+    async def _send(
+        self,
+        method: str,
+        pinned_url: str,
+        *,
+        host: str,
+        send_headers: dict,
+        content: bytes | None,
+        extensions: dict,
+        timeout: httpx.Timeout,
+        discard_body: bool,
+    ) -> httpx.Response:
         async with httpx.AsyncClient(
             follow_redirects=False,
             timeout=timeout,

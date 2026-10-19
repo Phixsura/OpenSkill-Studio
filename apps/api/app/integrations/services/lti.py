@@ -31,6 +31,7 @@ from app.integrations.models import (
     LtiResourceLink,
 )
 from app.integrations.security import EgressClient, validate_egress_url
+from app.integrations.security import EgressUpstreamError as _EgressUpstreamError
 from app.integrations.services.identity import (
     IdentityService,
     ResolutionResult,
@@ -281,7 +282,12 @@ class LtiService:
             raise _invalid("jwt_header_invalid") from exc
         if header.get("alg") != "RS256":
             raise _invalid("alg_not_rs256")
-        keys = await self._jwks_keys(reg, kid=header.get("kid", ""))
+        try:
+            keys = await self._jwks_keys(reg, kid=header.get("kid", ""))
+        except _EgressUpstreamError as exc:
+            # R492: platform JWKS unreachable -> the launch token stays
+            # unverifiable; protocol-shaped 401, not a 502 gateway error.
+            raise _invalid("platform_jwks_unreachable") from exc
         key = keys.get(header.get("kid", ""))
         if key is None:
             raise _invalid("kid_unknown")

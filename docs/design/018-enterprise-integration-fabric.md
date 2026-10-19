@@ -931,6 +931,33 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R492 (thirty-fourth window, FUZZ phase 15 — OpenAPI-driven totality
+  sweep; THREE defect classes)**: hand-written fuzz phases cover the routes
+  someone thought about; phase 15 walks the LIVE OpenAPI spec (hostile path
+  params + hostile query values on every fabric-marked route, ~500 extra
+  requests) so an un-phased route is still swept. First run found:
+  (1) raw httpx transport errors ESCAPED the shared egress helper — a ping
+  against a dead host, LTI JWKS fetch, OIDC token call all 500'd
+  (latent: the R485 fake-IP DNS had masked it behind 422 EGRESS_BLOCKED;
+  normal DNS exposed it). Fix at the one shared point: request() now
+  normalizes every httpx.HTTPError into typed EgressUpstreamError
+  (UPSTREAM_UNREACHABLE, 502) — ping state machine and sync-run failure
+  arms consume it as AppError like everything else.
+  (2) The two PROTOCOL surfaces map that 502 back to their spec shape:
+  BCL logout_token and LTI launch return their uniform 401 invalid-token
+  error when the IdP/platform JWKS is unreachable mid-validation (the
+  token stays unverifiable; no gateway-error oracle on protocol routes).
+  (3) talent epic (base branch): 33 routes declared `body: AnalyticsBody`
+  then called `body.get(...)` — BaseModel has no .get, so ALL of them
+  500'd AttributeError on ANY request (production-dead, not merely
+  hostile-input fragile). One shared fix: dict-style get over declared +
+  extra fields (falsy-zero preserved). Fuzzer now 936 requests, 0 fives.
+- **R491 (thirty-fourth window, PROBE — pagination under mutation)**: the
+  events keyset walk is probed with inserts BETWEEN page pulls — new heads
+  must never duplicate, shift or skip the rows being walked (an offset-
+  paging regression fails this immediately); new rows appear on a fresh
+  first page only. (The delivery list shares the same `id < before`
+  construction.)
 - **R490 (thirty-fourth window, PROBE — migration downgrade round-trip)**:
   every downgrade() body is production-never-driven code (the R11/R16 gap
   class) discovered exactly at emergency-rollback time. New standing probe

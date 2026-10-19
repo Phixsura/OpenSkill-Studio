@@ -792,10 +792,21 @@ async def main() -> None:
         # transform chains; create validates, preview applies them to samples.
         mapping_docs = [
             {"fields": [{"target": "x", "path": "a" * 10000}]},
-            {"fields": [{"target": "x", "path": "a[[[[[[", }]},
+            {
+                "fields": [
+                    {
+                        "target": "x",
+                        "path": "a[[[[[[",
+                    }
+                ]
+            },
             {"fields": [{"target": "x", "path": "a", "transform": ["eval", "exec", "__import__"]}]},
             {"fields": [{"target": "x", "path": "a", "transform": ["to_int"] * 500}]},
-            {"fields": [{"target": "x", "path": "a", "enum_map": {str(i): i for i in range(5000)}}]},
+            {
+                "fields": [
+                    {"target": "x", "path": "a", "enum_map": {str(i): i for i in range(5000)}}
+                ]
+            },
             {"fields": "not-a-list"},
             {"fields": [{"no_target": "x"}]},
             {"fields": [{"target": "\x00", "path": "a"}]},
@@ -836,7 +847,9 @@ async def main() -> None:
                 total += 1
                 if pr.status_code >= 500:
                     n_5xx += 1
-                    check("5xx: hostile mapping preview", False, f"{pr.status_code} {pr.text[:120]}")
+                    check(
+                        "5xx: hostile mapping preview", False, f"{pr.status_code} {pr.text[:120]}"
+                    )
 
         # ── phase 12: hostile admin-surface bodies (roster provisioning,
         # credentials/upgrade/ping, sync-run records+resolve, delivery
@@ -852,11 +865,7 @@ async def main() -> None:
             },
             headers=h,
         )
-        conn12 = (
-            rr.json().get("data", {}).get("id", "0" * 26)
-            if rr.status_code < 300
-            else "0" * 26
-        )
+        conn12 = rr.json().get("data", {}).get("id", "0" * 26) if rr.status_code < 300 else "0" * 26
         prov_valid = {
             "auto_create_cohorts": True,
             "jit_users": False,
@@ -957,7 +966,10 @@ async def main() -> None:
         )
         patch_surfaces = []
         patch_surfaces.append(
-            (f"{base}/connections/{conn12}", {"name": "n2", "config": {}, "base_url": "https://y.example.com"})
+            (
+                f"{base}/connections/{conn12}",
+                {"name": "n2", "config": {}, "base_url": "https://y.example.com"},
+            )
         )
         if sso13:
             patch_surfaces.append(
@@ -1015,9 +1027,67 @@ async def main() -> None:
             total += 1
             if rr.status_code >= 500:
                 n_5xx += 1
-                check(
-                    f"5xx: {method14} {url14[-45:]}", False, f"{rr.status_code} {rr.text[:140]}"
-                )
+                check(f"5xx: {method14} {url14[-45:]}", False, f"{rr.status_code} {rr.text[:140]}")
+
+        # ── phase 15 (R492): OpenAPI-driven totality sweep — hand-written
+        # phases cover the routes someone THOUGHT about; this walks the
+        # live spec so a route added without a fuzz phase is still swept.
+        # Hostile path params + hostile query values on every fabric route,
+        # one skeletal body on writers (body shapes are phases 1-14's job).
+        from app.main import app as _app
+
+        spec_paths = _app.openapi()["paths"]
+        hostile_params = ["0" * 26, "..%2f..%2fetc", "‮" * 12, "x" * 300, "%00"]
+        hostile_queries = [
+            {"limit": "-1"},
+            {"limit": "999999999999999999999"},
+            {"before": "\x00junk"},
+            {"outcome": ["a", "b"]},
+        ]
+        fabric_markers = ("/integrations", "/scim/", "/sso/", "/lti/", "/webhooks")
+        n15 = 0
+        for raw_path, methods in sorted(spec_paths.items()):
+            if not any(m in raw_path for m in fabric_markers):
+                continue
+            for method15, _op in methods.items():
+                if method15 not in ("get", "post", "patch", "put", "delete"):
+                    continue
+                for hostile in hostile_params:
+                    url15 = raw_path.replace("{org_id}", org)
+                    if "{" in url15:
+                        import re as _re
+
+                        url15 = _re.sub(r"\{[^}]+\}", hostile, url15)
+                    elif hostile != hostile_params[0]:
+                        break  # no free params — one pass is enough
+                    full = f"http://localhost:8443{url15}"
+                    kwargs: dict = {"headers": sh if "/scim/" in url15 else h}
+                    if method15 in ("post", "patch", "put"):
+                        kwargs["json"] = {"a": None}
+                    rr = await getattr(c, method15)(full, **kwargs)
+                    total += 1
+                    n15 += 1
+                    if rr.status_code >= 500:
+                        n_5xx += 1
+                        check(
+                            f"5xx(p15): {method15} {url15[-60:]}",
+                            False,
+                            f"{rr.status_code} {rr.text[:140]}",
+                        )
+                if method15 == "get" and "{" not in raw_path:
+                    for q15 in hostile_queries:
+                        full = f"http://localhost:8443{raw_path.replace('{org_id}', org)}"
+                        rr = await c.get(full, params=q15, headers=h)
+                        total += 1
+                        n15 += 1
+                        if rr.status_code >= 500:
+                            n_5xx += 1
+                            check(
+                                f"5xx(p15q): {raw_path[-60:]} {q15}",
+                                False,
+                                f"{rr.status_code} {rr.text[:140]}",
+                            )
+        check(f"phase 15 swept the spec ({n15} requests over fabric routes)", n15 > 150, str(n15))
 
         check(f"no 5xx across {total} hostile requests", n_5xx == 0, f"n_5xx={n_5xx}")
         check(

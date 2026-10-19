@@ -1445,3 +1445,50 @@ async def test_delivery_http_success_range_boundaries(db, monkeypatch):
     assert await attempt_with(299) == "succeeded"  # top of the 2xx range
     assert await attempt_with(300) != "succeeded"  # 3xx is a failure -> retry
     assert await attempt_with(199) != "succeeded"  # below 2xx -> retry
+
+
+async def test_events_keyset_pagination_stable_under_concurrent_inserts(db, egress):
+    """R491 (pagination-under-mutation): events EMITTED BETWEEN page pulls
+    must never shift, duplicate or skip the older rows an admin is walking —
+    the ULID keyset (`id < before`) pins the window by construction; this
+    probes it stays true (an offset-paging regression would fail here:
+    new heads would push old rows across page boundaries → duplicates)."""
+    from app.integrations.api.events import list_events
+    from app.models.user import User as _User
+
+    org = await _org(db)
+    for i in range(7):
+        await emit_event(db, org.id, "project.approved", subject=f"mut-{i}", data={})
+    await db.commit()
+
+    owner_row = (
+        (await db.execute(select(OrgMember).where(OrgMember.org_id == org.id))).scalars().first()
+    )
+    user = await db.get(_User, owner_row.user_id)
+
+    out = await list_events(org.id, type_prefix=None, limit=3, before=None, db=db, user=user)
+    page1 = [e.id for e in out["data"]]
+    original = None  # capture the full original set AFTER page1 for the union check
+    all_now = await list_events(org.id, type_prefix=None, limit=200, before=None, db=db, user=user)
+    original = {e.id for e in all_now["data"]}
+
+    # mutation between pulls: two NEW events land at the head
+    await emit_event(db, org.id, "project.approved", subject="mut-new-a", data={})
+    await emit_event(db, org.id, "project.approved", subject="mut-new-b", data={})
+    await db.commit()
+
+    seen = list(page1)
+    cursor = out["meta"]["next_cursor"]
+    while cursor:
+        out = await list_events(org.id, type_prefix=None, limit=3, before=cursor, db=db, user=user)
+        ids = [e.id for e in out["data"]]
+        assert not set(ids) & set(seen), "insert shifted the window: duplicate rows"
+        seen.extend(ids)
+        cursor = out["meta"]["next_cursor"]
+
+    # every ORIGINAL row seen exactly once; the two new heads correctly absent
+    assert set(seen) == original, "insert caused a skip"
+    assert len(seen) == len(original)
+    fresh = await list_events(org.id, type_prefix=None, limit=200, before=None, db=db, user=user)
+    subjects = {e.subject for e in fresh["data"]}
+    assert {"mut-new-a", "mut-new-b"} <= subjects  # visible on a fresh walk

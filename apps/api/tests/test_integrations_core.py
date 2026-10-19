@@ -1298,9 +1298,7 @@ def test_validate_user_rows_reject_disjuncts_and_truncation_boundaries():
     assert errors == [] and rows[0]["display_name"] == "d" * 100
 
     # Rejected-row echo truncates every raw value at exactly 200 chars.
-    rows, errors = _validate_user_rows(
-        [(1, {"email": "bad", "notes": "n" * 300})]
-    )
+    rows, errors = _validate_user_rows([(1, {"email": "bad", "notes": "n" * 300})])
     assert rows == [] and errors[0]["raw_row"]["notes"] == "n" * 200
 
 
@@ -1340,7 +1338,13 @@ async def test_oneroster_ping_and_map_record_defaults():
 
     # ping: base_url is required before any egress validation runs.
     with pytest.raises(AppError) as exc:
-        await c.ping(ConnCtx(connection_id="cx-test", base_url="", config={"token_url": "https://x.example.com/t"}))
+        await c.ping(
+            ConnCtx(
+                connection_id="cx-test",
+                base_url="",
+                config={"token_url": "https://x.example.com/t"},
+            )
+        )
     assert exc.value.code == "CONNECTION_CONFIG_INVALID"
 
     # ping: both URLs run the egress gate (private sinks allowed in test env).
@@ -1354,14 +1358,36 @@ async def test_oneroster_ping_and_map_record_defaults():
 
     m = OneRosterConnector._map_record
 
-    term = m("roster.term", {"sourcedId": "t1", "title": "Fall", "startDate": "2026-08-01",
-                             "endDate": "2026-12-20", "schoolYear": "2026"})
-    assert term == {"external_id": "t1", "name": "Fall", "start_date": "2026-08-01",
-                    "end_date": "2026-12-20", "school_year": "2026"}
+    term = m(
+        "roster.term",
+        {
+            "sourcedId": "t1",
+            "title": "Fall",
+            "startDate": "2026-08-01",
+            "endDate": "2026-12-20",
+            "schoolYear": "2026",
+        },
+    )
+    assert term == {
+        "external_id": "t1",
+        "name": "Fall",
+        "start_date": "2026-08-01",
+        "end_date": "2026-12-20",
+        "school_year": "2026",
+    }
 
-    cls = m("roster.class", {"sourcedId": "c1", "title": "Algebra", "classCode": "ALG-1",
-                             "terms": [{"sourcedId": "t1"}], "school": {"sourcedId": "s1"},
-                             "subjects": ["math"], "grades": ["09"]})
+    cls = m(
+        "roster.class",
+        {
+            "sourcedId": "c1",
+            "title": "Algebra",
+            "classCode": "ALG-1",
+            "terms": [{"sourcedId": "t1"}],
+            "school": {"sourcedId": "s1"},
+            "subjects": ["math"],
+            "grades": ["09"],
+        },
+    )
     assert cls["term_external_id"] == "t1" and cls["school_external_id"] == "s1"
     assert cls["subjects"] == ["math"] and cls["grades"] == ["09"]
 
@@ -1370,9 +1396,18 @@ async def test_oneroster_ping_and_map_record_defaults():
     assert bare["term_external_id"] is None and bare["school_external_id"] is None
     assert bare["subjects"] == [] and bare["grades"] == []
 
-    enr = m("roster.enrollment", {"sourcedId": "e1", "class": {"sourcedId": "c1"},
-                                  "user": {"sourcedId": "u1"}, "role": "student",
-                                  "beginDate": "2026-08-01", "endDate": None, "primary": True})
+    enr = m(
+        "roster.enrollment",
+        {
+            "sourcedId": "e1",
+            "class": {"sourcedId": "c1"},
+            "user": {"sourcedId": "u1"},
+            "role": "student",
+            "beginDate": "2026-08-01",
+            "endDate": None,
+            "primary": True,
+        },
+    )
     assert enr["class_external_id"] == "c1" and enr["user_external_id"] == "u1"
     assert enr["role"] == "student" and enr["primary"] is True
 
@@ -1380,8 +1415,17 @@ async def test_oneroster_ping_and_map_record_defaults():
     e2 = m("roster.enrollment", {"sourcedId": "e2", "class": None, "user": None})
     assert e2["class_external_id"] is None and e2["user_external_id"] is None
 
-    usr = m("roster.user", {"sourcedId": "u1", "email": "a@x.com", "givenName": "Ada",
-                            "familyName": "L", "role": "student", "username": "ada"})
+    usr = m(
+        "roster.user",
+        {
+            "sourcedId": "u1",
+            "email": "a@x.com",
+            "givenName": "Ada",
+            "familyName": "L",
+            "role": "student",
+            "username": "ada",
+        },
+    )
     assert usr["display_name"] == "Ada L" and usr["email"] == "a@x.com"
 
     # No given/family name -> falls back to username.
@@ -1405,9 +1449,7 @@ def test_validate_roster_rows_reject_arms():
     rows, errors = _validate_roster_rows([(1, {"email": "a@x.com", "cohort_slug": ""})])
     assert rows == [] and errors[0]["code"] == "invalid_cohort_slug"
 
-    rows, errors = _validate_roster_rows(
-        [(1, {"email": "a@x.com", "cohort_slug": "x" * 201})]
-    )
+    rows, errors = _validate_roster_rows([(1, {"email": "a@x.com", "cohort_slug": "x" * 201})])
     assert rows == [] and errors[0]["code"] == "invalid_cohort_slug"
 
     rows, errors = _validate_roster_rows(
@@ -1446,14 +1488,10 @@ def test_validate_opportunity_rows_reject_arms():
     _, codes = one({"title": "Dev", "opportunity_type": "internship", "description": "a\x00b"})
     assert "control_chars" in codes
 
-    _, codes = one(
-        {"title": "Dev", "opportunity_type": "internship", "location_mode": "mars"}
-    )
+    _, codes = one({"title": "Dev", "opportunity_type": "internship", "location_mode": "mars"})
     assert "invalid_location_mode" in codes
 
-    _, codes = one(
-        {"title": "Dev", "opportunity_type": "internship", "openings": "lots"}
-    )
+    _, codes = one({"title": "Dev", "opportunity_type": "internship", "openings": "lots"})
     assert "invalid_openings" in codes
     _, codes = one({"title": "Dev", "opportunity_type": "internship", "openings": "1000"})
     assert "invalid_openings" in codes
@@ -1479,8 +1517,10 @@ def test_crm_map_record_all_models_and_id_fallback():
     assert acct == {"external_id": "a1", "name": "Acme", "domain": "acme.com"}
 
     # external_id fallback when no "id"; contact uses full_name alt key.
-    contact = m("crm.contact", {"external_id": "c9", "full_name": "Ada L",
-                                "email": "a@x.com", "account_id": "a1"})
+    contact = m(
+        "crm.contact",
+        {"external_id": "c9", "full_name": "Ada L", "email": "a@x.com", "account_id": "a1"},
+    )
     assert contact["external_id"] == "c9" and contact["name"] == "Ada L"
     assert contact["email"] == "a@x.com" and contact["account_external_id"] == "a1"
 
@@ -1568,7 +1608,9 @@ def test_audit_calls_reference_real_attributes():
                         and sub.value.id not in ("user", "body", "payload", "req")
                         and sub.attr not in known
                     ):
-                        flagged.append(f"{os.path.basename(f)}:{sub.lineno} {sub.value.id}.{sub.attr}")
+                        flagged.append(
+                            f"{os.path.basename(f)}:{sub.lineno} {sub.value.id}.{sub.attr}"
+                        )
     assert not flagged, f"audit payloads read unknown attributes: {flagged}"
 
 
@@ -1595,7 +1637,11 @@ def test_no_structlog_event_kwarg_collision_anywhere():
         for m in pattern.finditer(text):
             # event_type=/event_id= etc. are fine — only a bare `event=` collides.
             tail = text[m.end() - 6 : m.end() + 1]
-            if re.search(r"\bevent\s*=", tail) and "event_type" not in tail and "event_id" not in tail:
+            if (
+                re.search(r"\bevent\s*=", tail)
+                and "event_type" not in tail
+                and "event_id" not in tail
+            ):
                 line = text[: m.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(app_root.parent)}:{line}")
     assert not offenders, "structlog event= collision(s): " + ", ".join(offenders)
@@ -1688,6 +1734,37 @@ async def test_oneroster_read_tolerates_nonobject_response_body():
 
     # Proper shape still maps.
     out = await run(
-        lambda r: httpx.Response(200, json={"users": [{"sourcedId": "u1", "email": "a@x.com"}]}, request=r)
+        lambda r: httpx.Response(
+            200, json={"users": [{"sourcedId": "u1", "email": "a@x.com"}]}, request=r
+        )
     )
     assert out[0]["records"][0]["external_id"] == "u1"
+
+
+# ── R492: transport failures normalize to UPSTREAM_UNREACHABLE (502) ──
+
+
+@pytest.mark.asyncio
+async def test_egress_transport_failure_is_typed_502_not_raw_httpx(monkeypatch):
+    """Found by the phase-15 OpenAPI sweep: a live ping against a DEAD host
+    let httpx.ConnectError escape the shared egress helper — every
+    API-triggered egress (ping, LTI JWKS, OIDC token) became a 500. The
+    helper must normalize every transport failure into ONE typed AppError
+    (UPSTREAM_UNREACHABLE, 502) that call sites and the ping state machine
+    already understand."""
+    from app.config import settings
+    from app.exceptions import AppError
+    from app.integrations.security import EgressClient, EgressUpstreamError
+
+    monkeypatch.setattr(settings, "egress_allow_private", True)
+    # 127.0.0.1:9 (discard) — nothing listens; connect is refused instantly.
+    with pytest.raises(EgressUpstreamError) as e:
+        await EgressClient().request("GET", "http://127.0.0.1:8080/dead-sink-nope")
+    assert isinstance(e.value, AppError)
+    assert e.value.code == "UPSTREAM_UNREACHABLE" and e.value.status_code == 502
+    assert "ConnectError" in e.value.message
+    # The SSRF refusal path stays 422 EGRESS_BLOCKED — distinct from 502.
+    monkeypatch.setattr(settings, "egress_allow_private", False)
+    with pytest.raises(AppError) as e2:
+        await EgressClient().request("GET", "http://127.0.0.1:8080/x")
+    assert e2.value.code == "EGRESS_BLOCKED" and e2.value.status_code == 422
