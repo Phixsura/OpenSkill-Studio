@@ -33,7 +33,7 @@ interface ImportJob {
   kind: string;
   mode: string;
   status: string;
-  dry_stats: Record<string, number>;
+  dry_stats: Record<string, number> & { sample?: Record<string, string | null>[] };
   stats: Record<string, number>;
 }
 
@@ -332,6 +332,35 @@ export default function DataIntegrationsPage() {
             {Object.keys(job.stats ?? {}).length > 0 && (
               <div className="font-mono text-xs">
                 committed — applied: {job.stats?.applied ?? 0}, errors: {job.stats?.errors ?? 0}
+              </div>
+            )}
+            {(job.dry_stats?.sample?.[0] ?? null) && (
+              <div className="mt-2 overflow-x-auto">
+                <div className="text-muted-foreground text-xs">
+                  Mapped sample (confirm your header mapping before committing):
+                </div>
+                <table className="mt-1 text-xs" aria-label="Mapped sample rows">
+                  <thead>
+                    <tr>
+                      {Object.keys(job.dry_stats.sample![0]!).map((c) => (
+                        <th key={c} className="border px-2 py-1 text-left font-mono">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {job.dry_stats.sample!.map((row, i) => (
+                      <tr key={i}>
+                        {Object.keys(job.dry_stats.sample![0]!).map((c) => (
+                          <td key={c} className="border px-2 py-1">
+                            {row[c] ?? ""}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             <div className="mt-2 flex gap-2">

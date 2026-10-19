@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R489 (thirty-fourth window, FEATURE — import mapping confirmation
+  widget)**: the Flatfile-parity "mapping UI widget" gap. The dry run now
+  returns `dry_stats.sample` — up to 5 rows AS THE HEADER MAP PRODUCED
+  them (canonical columns only, values 200-char capped, all-errors file ⇒
+  empty), and the data page renders them as a table between preview and
+  commit so a mis-aliased column is visible before any write. Bounded and
+  org-admin-scoped like the import file itself.
 - **R488 (thirty-fourth window, FEATURE — streaming CSV imports past
   50MB)**: the benchmark table's ">50MB files" gap. The CSV parse now
   decodes as a STREAM (TextIOWrapper over the byte buffer — no second

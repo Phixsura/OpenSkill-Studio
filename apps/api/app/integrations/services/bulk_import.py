@@ -538,9 +538,7 @@ class BulkImportService:
         # the whole document in memory for stdlib parse and keeps 50MB.
         cap = MAX_IMPORT_BYTES_CSV if detect_format(file_bytes) == "csv" else MAX_IMPORT_BYTES
         if len(file_bytes) > cap:
-            raise AppError(
-                "IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422
-            )
+            raise AppError("IMPORT_TOO_LARGE", f"file exceeds {cap // (1024 * 1024)}MB", 422)
         header_map = header_map or {}
         if len(header_map) > 20:
             raise AppError("IMPORT_HEADER_MAP_INVALID", "too many mappings", 422)
@@ -757,6 +755,18 @@ class BulkImportService:
         rows, errors = parse_users(
             file_bytes, detect_format(file_bytes), job.header_map or {}, kind=job.kind
         )
+        # R489 (Flatfile parity): a bounded sample of what the HEADER MAPPING
+        # produced, so the admin can confirm columns landed right before
+        # commit. Canonical columns only, values truncated — the raw file
+        # stays the source of truth.
+        sample = [
+            {
+                c: (str(row[c])[:200] if row.get(c) is not None else None)
+                for c in KIND_SPECS[job.kind].columns
+                if c in row
+            }
+            for row in rows[:5]
+        ]
         creates = updates = skips = 0
         if job.kind == "opportunities":
             kept2: list[dict] = []
@@ -800,6 +810,7 @@ class BulkImportService:
             "creates": creates,
             "updates": updates,
             "skips": skips,
+            "sample": sample,
         }
         job.status = "previewed"
         await self.db.flush()

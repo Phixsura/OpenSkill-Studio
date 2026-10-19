@@ -17,6 +17,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: { getState: () => ({ accessToken: "test-token" }) },
+}));
 vi.mock("@/lib/api", () => ({
   apiWithAuth: vi.fn(),
   ApiError: class extends Error {
@@ -683,6 +686,47 @@ describe("data page", () => {
         }),
       ),
     );
+  });
+
+  it("R489: dry-run renders the mapped sample table for mapping confirmation", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/export-streams": { data: [] },
+    });
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: "job1",
+          kind: "users",
+          mode: "partial",
+          status: "previewed",
+          dry_stats: {
+            valid: 2,
+            errors: 0,
+            creates: 2,
+            updates: 0,
+            skips: 0,
+            sample: [
+              { email: "a@x.edu", display_name: "Alice", role: "student" },
+              { email: "b@x.edu", display_name: "Bob", role: null },
+            ],
+          },
+          stats: {},
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DataPage />, { wrapper: wrapper() });
+    const fileInput = (await screen.findByLabelText("Import file")) as HTMLInputElement;
+    const file = new File(["email,display_name\na@x.edu,Alice\n"], "u.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.click(screen.getByText("Upload & preview"));
+    await waitFor(() => expect(screen.getByLabelText("Mapped sample rows")).toBeTruthy());
+    expect(screen.getByText("a@x.edu")).toBeTruthy();
+    expect(screen.getByText("Bob")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 
   it("R132: kind selector drives header-map fields and accepts JSON files", async () => {

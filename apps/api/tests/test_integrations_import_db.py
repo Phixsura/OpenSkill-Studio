@@ -137,7 +137,13 @@ async def test_preview_commit_and_idempotent_reupload(db):
         idempotency_key="idem-1",
     )
     assert job.status == "previewed"
-    assert job.dry_stats == {"valid": 2, "errors": 0, "creates": 1, "updates": 1, "skips": 0}
+    assert {k: v for k, v in job.dry_stats.items() if k != "sample"} == {
+        "valid": 2,
+        "errors": 0,
+        "creates": 1,
+        "updates": 1,
+        "skips": 0,
+    }
     # idempotent re-upload returns the SAME job
     again = await svc.create_job(
         org.id,
@@ -447,7 +453,13 @@ async def test_header_map_aliases_and_validation(db):
         idempotency_key=f"r92-{uuid.uuid4().hex[:8]}",
         header_map={"email": "E-mail Address", "display_name": "Full Name", "role": "Role"},
     )
-    assert job.dry_stats == {"valid": 1, "errors": 0, "creates": 1, "updates": 0, "skips": 0}
+    assert {k: v for k, v in job.dry_stats.items() if k != "sample"} == {
+        "valid": 1,
+        "errors": 0,
+        "creates": 1,
+        "updates": 0,
+        "skips": 0,
+    }
     committed = await svc.commit(org.id, job.id, file_bytes=data)
     assert committed.stats["created"] == 1
     u = (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one()
@@ -1350,15 +1362,25 @@ async def test_create_job_bad_mode_and_oversized_header_map(db):
 
     with pytest.raises(AppError) as e:
         await svc.create_job(
-            org.id, kind="users", mode="sideways", file_bytes=b"email\n",
-            file_key="k", created_by=owner.id, idempotency_key=f"m-{uuid.uuid4()}",
+            org.id,
+            kind="users",
+            mode="sideways",
+            file_bytes=b"email\n",
+            file_key="k",
+            created_by=owner.id,
+            idempotency_key=f"m-{uuid.uuid4()}",
         )
     assert e.value.code == "IMPORT_MODE_INVALID"
 
     with pytest.raises(AppError) as e:
         await svc.create_job(
-            org.id, kind="users", mode="partial", file_bytes=b"email\n",
-            file_key="k", created_by=owner.id, idempotency_key=f"h-{uuid.uuid4()}",
+            org.id,
+            kind="users",
+            mode="partial",
+            file_bytes=b"email\n",
+            file_key="k",
+            created_by=owner.id,
+            idempotency_key=f"h-{uuid.uuid4()}",
             header_map={f"k{i}": f"v{i}" for i in range(21)},
         )
     assert e.value.code == "IMPORT_HEADER_MAP_INVALID"
@@ -1446,3 +1468,56 @@ async def test_create_job_format_aware_cap(db, monkeypatch):
             created_by=owner.id,
         )
     assert e.value.code == "IMPORT_TOO_LARGE"
+
+
+# ── R489: dry-run mapped-row sample (Flatfile-parity mapping confirmation) ──
+
+
+@pytest.mark.asyncio
+async def test_dry_run_sample_shows_mapped_rows(db):
+    """dry_stats.sample carries <=5 canonical-column rows AS MAPPED (aliases
+    applied), values truncated to 200 chars — the admin confirms the header
+    map produced the right columns before committing."""
+    org, owner = await _org(db)
+    svc = BulkImportService(db, file_loader=None)
+    lines = "\r\n".join(
+        [f"u{i}-{uuid.uuid4().hex[:6]}@x.edu,Name{i}" + ",student" for i in range(8)]
+    )
+    content = ("E-Mail,Full Name,role\r\n" + lines + "\r\n").encode()
+    job = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=content,
+        file_key="k-sample",
+        created_by=owner.id,
+        header_map={"email": "E-Mail", "display_name": "Full Name"},
+    )
+    sample = job.dry_stats["sample"]
+    assert len(sample) == 5  # bounded
+    assert all(set(r) <= {"email", "display_name", "role"} for r in sample)
+    assert sample[0]["display_name"] == "Name0" and "@x.edu" in sample[0]["email"]
+
+    # long values truncate; an all-errors file yields an empty sample
+    long_name = "L" * 500
+    content2 = f"email,display_name\r\nt-{uuid.uuid4().hex[:6]}@x.edu,{long_name}\r\n".encode()
+    job2 = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=content2,
+        file_key="k2",
+        created_by=owner.id,
+    )
+    # the kind validator already clips display_name (100); the sample layer
+    # guarantees its own 200-char ceiling on top for any column
+    assert len(job2.dry_stats["sample"][0]["display_name"]) <= 200
+    job3 = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=b"email,display_name\r\nnot-an-email,X\r\n",
+        file_key="k3",
+        created_by=owner.id,
+    )
+    assert job3.dry_stats["sample"] == []
