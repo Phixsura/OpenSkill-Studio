@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R523 (thirty-sixth window, GUARD — SP metadata ↔ routes)**: every URL
+  the SAML SP metadata advertises to IdP admins (entityID, ACS, SLO) must
+  resolve to a registered route — the R69 lesson (an advertised path that
+  never existed) turned into a standing guard over the OpenAPI spec.
 - **R522 (thirty-sixth window, SELF-CONSISTENCY pin)**: every downloadable
   import template (kind × format) must parse through its own validator
   with one valid row and zero errors — template/validator drift can no

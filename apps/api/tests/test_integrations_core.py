@@ -1778,3 +1778,30 @@ async def test_egress_transport_failure_is_typed_502_not_raw_httpx(monkeypatch):
     with pytest.raises(AppError) as e2:
         await EgressClient().request("GET", "http://127.0.0.1:8080/x")
     assert e2.value.code == "EGRESS_BLOCKED" and e2.value.status_code == 422
+
+
+def test_sp_metadata_urls_resolve_to_registered_routes():
+    """R523 (metadata↔route drift guard): every URL the SP metadata
+    advertises to IdP admins (entityID/metadata, ACS, SLO) must map to a
+    route the app actually registers — the R69 lesson (/auth/sso-complete
+    advertised a path that never existed) applied to the SAML surface."""
+    import re
+
+    from app.integrations.services.sso_saml import sp_metadata_xml
+    from app.main import app
+
+    paths = list(app.openapi()["paths"])
+
+    def registered(path: str) -> bool:
+        probe = re.sub(r"\{[^}]+\}", "X", path)
+        for p in paths:
+            if re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", p), probe):
+                return True
+        return False
+
+    xml = sp_metadata_xml("{connection_id}")
+    urls = re.findall(r'(?:Location|entityID)="([^"]+)"', xml)
+    assert len(urls) == 3
+    for u in urls:
+        path = "/" + u.split("://", 1)[1].split("/", 1)[1]
+        assert registered(path), f"metadata advertises unregistered path: {path}"
