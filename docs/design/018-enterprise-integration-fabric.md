@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R524 (thirty-sixth window, R523 class — LTI side)**: every URL the
+  Dynamic Registration payload advertises to the LMS (login, launch
+  redirects, jwks, target links) is guarded against the registered routes
+  the same way.
 - **R523 (thirty-sixth window, GUARD — SP metadata ↔ routes)**: every URL
   the SAML SP metadata advertises to IdP admins (entityID, ACS, SLO) must
   resolve to a registered route — the R69 lesson (an advertised path that

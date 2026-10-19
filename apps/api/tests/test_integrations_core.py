@@ -1805,3 +1805,29 @@ def test_sp_metadata_urls_resolve_to_registered_routes():
     for u in urls:
         path = "/" + u.split("://", 1)[1].split("/", 1)[1]
         assert registered(path), f"metadata advertises unregistered path: {path}"
+
+
+def test_lti_dynreg_advertised_urls_resolve_to_registered_routes():
+    """R524 (R523 class, LTI side): every URL the Dynamic Registration
+    payload hands the LMS (login, launch redirect, jwks, target links) must
+    map to a registered route."""
+    import re
+
+    from app.integrations.services.lti_dynreg import TOOL_CONFIG_CLAIM, _tool_registration_payload
+    from app.main import app
+
+    paths = list(app.openapi()["paths"])
+
+    def registered(path: str) -> bool:
+        probe = re.sub(r"\{[^}]+\}", "X", path)
+        return any(re.fullmatch(re.sub(r"\{[^}]+\}", "[^/]+", p), probe) for p in paths)
+
+    payload = _tool_registration_payload()
+    cfg = payload[TOOL_CONFIG_CLAIM]
+    urls = [payload["initiate_login_uri"], payload["jwks_uri"], *payload["redirect_uris"]]
+    urls.append(cfg["target_link_uri"])
+    urls.extend(m["target_link_uri"] for m in cfg["messages"])
+    assert len(urls) >= 5
+    for u in urls:
+        path = "/" + u.split("://", 1)[1].split("/", 1)[1]
+        assert registered(path), f"dynreg advertises unregistered path: {path}"
