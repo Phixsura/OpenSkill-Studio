@@ -1626,3 +1626,44 @@ async def test_import_refuses_foreign_existing_accounts(db):
         )
     ).scalar_one_or_none()
     assert member is None  # never conscripted
+
+
+@pytest.mark.asyncio
+async def test_import_can_retouch_own_member_without_verified_domain(db):
+    """R515 (mutation survivor pin): the R512 foreign-account gate applies
+    only to NON-members — an org re-importing its OWN existing member (any
+    email domain) still updates/skips normally."""
+    org, owner = await _org(db)
+    member_user = User(
+        email=f"own-{uuid.uuid4().hex[:6]}@legacy-domain.example.com",
+        password_hash=hash_password("Test123!"),
+        display_name="Old",
+        role=UserRole.STUDENT,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(member_user)
+    await db.flush()
+    db.add(
+        OrgMember(
+            org_id=org.id,
+            user_id=member_user.id,
+            role=OrgRole.STUDENT,
+            status=MemberStatus.ACTIVE,
+        )
+    )
+    await db.flush()
+    data = _csv([f"{member_user.email},Renamed,student"])
+    svc = BulkImportService(db, file_loader=None)
+    job = await svc.create_job(
+        org.id,
+        kind="users",
+        mode="partial",
+        file_bytes=data,
+        file_key="km",
+        created_by=owner.id,
+    )
+    assert job.dry_stats["errors"] == 0 and job.dry_stats["valid"] == 1
+    job = await svc.commit(org.id, job.id, file_bytes=data)
+    assert job.stats["applied"] == 1
+    await db.refresh(member_user)
+    assert member_user.display_name == "Renamed"

@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R515 (thirty-fifth window, MUTATION over the security fixes)**:
+  AST-harness over handle_slo_request (26 mutants), org_controls_email and
+  _foreign_existing_user. Two true survivors killed with pins: SigAlg-
+  without-Signature (and the reverse) each refuse on their own, and the
+  R512 gate must NOT apply to the org's own existing members (re-import in
+  an unverified legacy domain still updates). The remaining 8 SLO
+  survivors are verified equivalents: the unsigned guard is TRIPLE-layered
+  (or→and still refuses via the SigAlg allowlist / signature-decode arms),
+  split maxsplit variants are identical on percent-encoded values, ±1
+  boundary cosmetics, and the replay-cache expiry horizon does not affect
+  the existence check.
 - **R514 (thirty-fifth window, FEATURE — event payload schemas in the
   catalog, Svix parity)**: /event-catalog now publishes the fixed
   CloudEvents `envelope` schema plus machine-readable `payloads` schemas

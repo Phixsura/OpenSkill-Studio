@@ -1507,3 +1507,20 @@ async def test_slo_request_replay_and_staleness_refused(db):
     with pytest.raises(AppError) as e:
         await svc.handle_slo_request(connection_id=conn.id, raw_query=stale_q)
     assert e.value.code == "SSO_ASSERTION_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_slo_partial_signature_params_refused(db):
+    """R515 (mutation survivor): SigAlg present without Signature (and the
+    reverse) must each refuse — the unsigned guard is an OR, not an AND."""
+    org, owner, domain = await _org(db)
+    conn = await _saml_conn(db, org)
+    svc = SamlService(db)
+    signed = _signed_slo_query(f"p-{uuid.uuid4().hex[:6]}@{domain}")
+    base_part, sig_part = signed.rsplit("&Signature=", 1)
+    no_signature = base_part  # SAMLRequest + SigAlg only
+    no_sigalg = "&".join(seg for seg in signed.split("&") if not seg.startswith("SigAlg="))
+    for q in (no_signature, no_sigalg):
+        with pytest.raises(AppError) as e:
+            await svc.handle_slo_request(connection_id=conn.id, raw_query=q)
+        assert e.value.code == "SSO_ASSERTION_INVALID"
