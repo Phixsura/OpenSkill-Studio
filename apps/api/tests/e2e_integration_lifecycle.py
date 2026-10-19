@@ -293,6 +293,20 @@ async def main() -> int:
             r.status_code == 401 and "urn:ietf:params:scim" in r.text,
         )
 
+        # ── canonical model catalog (R487) ──
+        r = await c.get(f"{base}/models", headers=h)
+        models_ok = r.status_code == 200 and {m["model"] for m in r.json().get("data", [])} >= {
+            "roster.user",
+            "crm.deal",
+            "talent.application",
+        }
+        schema_ok = models_ok and all(
+            m["json_schema"]["type"] == "object"
+            and set(m["required"]) <= set(m["json_schema"]["properties"])
+            for m in r.json()["data"]
+        )
+        check("canonical model catalog served with schemas", bool(schema_ok), r.text[:200])
+
         # ── mapping + push sync profile ──
         r = await c.post(
             f"{base}/mapping-profiles",

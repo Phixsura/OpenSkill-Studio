@@ -114,6 +114,39 @@ class ResolveConflictRequest(BaseModel):
     action: str = Field(pattern="^(accept_theirs|keep_ours|dismiss)$")
 
 
+# ── canonical model catalog (R487, Airbyte discover parity) ──
+
+
+class CanonicalModelResponse(BaseModel):
+    model: str
+    required: list[str]
+    json_schema: dict
+
+
+@router.get("/models", response_model=DataResponse[list[CanonicalModelResponse]])
+async def list_canonical_models(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The canonical models the sync engine understands, each with its full
+    JSON Schema (type/format/enum/maxLength) and required keys. Static
+    content, but org-member gated like every fabric surface."""
+    await _admin(org_id, user, db)
+    from app.integrations.models.sync import MODEL_REQUIRED_KEYS, MODEL_SCHEMAS
+
+    return {
+        "data": [
+            CanonicalModelResponse(
+                model=m,
+                required=sorted(MODEL_REQUIRED_KEYS.get(m, frozenset())),
+                json_schema=MODEL_SCHEMAS[m],
+            )
+            for m in sorted(MODEL_SCHEMAS)
+        ]
+    }
+
+
 # ── mapping profiles ──
 
 

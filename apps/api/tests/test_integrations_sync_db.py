@@ -2163,9 +2163,7 @@ async def test_trigger_live_run_race_recovers_winner(db, monkeypatch):
         if state["armed"]:
             state["armed"] = False
             async with AsyncSessionLocal() as rival:
-                r = SyncRun(
-                    profile_id=profile.id, status="queued", trigger="manual", cursor_in={}
-                )
+                r = SyncRun(profile_id=profile.id, status="queued", trigger="manual", cursor_in={})
                 rival.add(r)
                 await rival.commit()
                 state["rival_id"] = r.id
@@ -2220,8 +2218,12 @@ async def test_execute_push_model_unsupported_mapping_drift_and_crash(db, monkey
 
     # (2) mapping version drift.
     mp = MappingProfile(
-        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", model="talent.application",
-        direction="push", document={"fields": {}}, version=5,
+        org_id=org.id,
+        name=f"m-{uuid.uuid4().hex[:6]}",
+        model="talent.application",
+        direction="push",
+        document={"fields": {}},
+        version=5,
     )
     db.add(mp)
     await db.flush()
@@ -2238,14 +2240,18 @@ async def test_execute_push_model_unsupported_mapping_drift_and_crash(db, monkey
 
     # (3) schema_invalid conflict: a mapping that errors on the row.
     mp.version = 4  # align so we pass the drift gate
-    mp.document = {
-        "fields": [{"target": "stage", "path": "stage", "transform": ["to_int"]}]
-    }
+    mp.document = {"fields": [{"target": "stage", "path": "stage", "transform": ["to_int"]}]}
     await db.flush()
 
     async def extract_bad(_db, _org):
-        return [{"external_id": "app-bad", "candidate_user_id": "u", "stage": "not-an-int",
-                 "_consented": True}]
+        return [
+            {
+                "external_id": "app-bad",
+                "candidate_user_id": "u",
+                "stage": "not-an-int",
+                "_consented": True,
+            }
+        ]
 
     monkeypatch.setattr(se, "_extract_push_applications", extract_bad)
     run3 = SyncRun(profile_id=profile.id, status="running", trigger="manual")
@@ -2262,8 +2268,9 @@ async def test_execute_push_model_unsupported_mapping_drift_and_crash(db, monkey
     await db.flush()
 
     async def extract_ok(_db, _org):
-        return [{"external_id": "app-x", "candidate_user_id": "u", "stage": "s",
-                 "_consented": True}]
+        return [
+            {"external_id": "app-x", "candidate_user_id": "u", "stage": "s", "_consented": True}
+        ]
 
     monkeypatch.setattr(se, "_extract_push_applications", extract_ok)
 
@@ -2299,9 +2306,7 @@ async def test_resolve_conflict_reject_arms(db):
     await db.flush()
 
     # (1) result that isn't a conflict -> 422.
-    upd = SyncRecordResult(
-        run_id=run.id, external_id="x1", model=profile.model, outcome="updated"
-    )
+    upd = SyncRecordResult(run_id=run.id, external_id="x1", model=profile.model, outcome="updated")
     db.add(upd)
     await db.flush()
     with pytest.raises(AppError) as e:
@@ -2310,8 +2315,12 @@ async def test_resolve_conflict_reject_arms(db):
 
     # (2) invalid action on a real conflict -> 422.
     conf = SyncRecordResult(
-        run_id=run.id, external_id="x2", model=profile.model, outcome="conflict",
-        conflict_class="schema_invalid", detail={"errors": []},
+        run_id=run.id,
+        external_id="x2",
+        model=profile.model,
+        outcome="conflict",
+        conflict_class="schema_invalid",
+        detail={"errors": []},
     )
     db.add(conf)
     await db.flush()
@@ -2329,12 +2338,19 @@ async def test_resolve_conflict_reject_arms(db):
     # (4) staleness guard: a clock_unresolvable conflict whose recorded "ours"
     # no longer matches the staged field (a later run moved it).
     staged = StagedRecord(
-        connection_id=conn.id, model="roster.class", external_id="c1",
-        payload={"timed": "MOVED_SINCE"}, raw_hash="h", status="active",
+        connection_id=conn.id,
+        model="roster.class",
+        external_id="c1",
+        payload={"timed": "MOVED_SINCE"},
+        raw_hash="h",
+        status="active",
     )
     db.add(staged)
     clock = SyncRecordResult(
-        run_id=run.id, external_id="c1", model="roster.class", outcome="conflict",
+        run_id=run.id,
+        external_id="c1",
+        model="roster.class",
+        outcome="conflict",
         conflict_class="clock_unresolvable",
         detail={"field": "timed", "ours": "OLD_LOCAL", "theirs": "REMOTE"},
     )
@@ -2363,8 +2379,11 @@ async def test_sync_profile_create_reject_arms(db):
 
     async def mk(**over):
         base = dict(
-            connection_id=conn.id, name=f"p-{uuid.uuid4().hex[:6]}",
-            model="roster.class", direction="pull", mapping_profile_id=None,
+            connection_id=conn.id,
+            name=f"p-{uuid.uuid4().hex[:6]}",
+            model="roster.class",
+            direction="pull",
+            mapping_profile_id=None,
         )
         base.update(over)
         return await svc.create(org.id, **base)
@@ -2387,8 +2406,12 @@ async def test_sync_profile_create_reject_arms(db):
 
     # mapping exists but for a DIFFERENT model -> mismatch 422.
     mp = MappingProfile(
-        org_id=org.id, name=f"m-{uuid.uuid4().hex[:6]}", direction="inbound",
-        model="roster.user", document={"fields": []}, version=1,
+        org_id=org.id,
+        name=f"m-{uuid.uuid4().hex[:6]}",
+        direction="inbound",
+        model="roster.user",
+        document={"fields": []},
+        version=1,
     )
     db.add(mp)
     await db.flush()
@@ -2428,14 +2451,24 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
         staged = None
         if staged_payload is not None:
             staged = StagedRecord(
-                connection_id=conn.id, model=profile.model, external_id=raw["external_id"],
-                payload=staged_payload, raw_hash="prev", status="active",
+                connection_id=conn.id,
+                model=profile.model,
+                external_id=raw["external_id"],
+                payload=staged_payload,
+                raw_hash="prev",
+                status="active",
                 last_outbound=last_outbound,
             )
             db.add(staged)
             await db.flush()
         counter, _ = await se._apply_record(
-            db, run, profile, conn, None, dict(raw), seen if seen is not None else set(),
+            db,
+            run,
+            profile,
+            conn,
+            None,
+            dict(raw),
+            seen if seen is not None else set(),
             staged_map={raw["external_id"]: staged} if staged is not None else {},
         )
         # NOTE: _apply_record mutates staged.payload in-session (no flush),
@@ -2455,14 +2488,16 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
     # rule "ours": inbound never overwrites the owned field.
     c, st = await apply(
         {"external_id": "r-ours", "title": "THEIRS"},
-        policy={"title": "ours"}, staged_payload={"title": "OURS"},
+        policy={"title": "ours"},
+        staged_payload={"title": "OURS"},
     )
     assert c == "updated" and st.payload["title"] == "OURS"
 
     # rule "theirs": inbound wins.
     c, st = await apply(
         {"external_id": "r-theirs", "title": "THEIRS"},
-        policy={"title": "theirs", "_default": "ours"}, staged_payload={"title": "OURS"},
+        policy={"title": "theirs", "_default": "ours"},
+        staged_payload={"title": "OURS"},
     )
     assert c == "updated" and st.payload["title"] == "THEIRS"
 
@@ -2501,8 +2536,12 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
 
     matched = {"external_id": "r-match", "title": "M"}
     stm = StagedRecord(
-        connection_id=conn.id, model=profile.model, external_id="r-match",
-        payload={"title": "M"}, raw_hash=_payload_hash(matched), status="active",
+        connection_id=conn.id,
+        model=profile.model,
+        external_id="r-match",
+        payload={"title": "M"},
+        raw_hash=_payload_hash(matched),
+        status="active",
     )
     db.add(stm)
     await db.flush()
@@ -2515,8 +2554,12 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
     # Same hash but status NOT active (tombstoned) -> NOT unchanged (revives).
     matched2 = {"external_id": "r-tomb", "title": "T"}
     stt = StagedRecord(
-        connection_id=conn.id, model=profile.model, external_id="r-tomb",
-        payload={"title": "T"}, raw_hash=_payload_hash(matched2), status="tombstoned",
+        connection_id=conn.id,
+        model=profile.model,
+        external_id="r-tomb",
+        payload={"title": "T"},
+        raw_hash=_payload_hash(matched2),
+        status="tombstoned",
     )
     db.add(stt)
     await db.flush()
@@ -2533,7 +2576,6 @@ async def test_apply_record_field_policy_and_echo_matrix(db):
         last_outbound={"fields_hash": "nope", "written_at": datetime.now(UTC).isoformat()},
     )
     assert c == "updated"
-
 
     mapped_echo = {"external_id": "r-echo", "title": "ECHOED"}
     h = _payload_hash(mapped_echo)
@@ -2736,3 +2778,42 @@ async def test_finish_swallows_mesh_emit_failure(db, monkeypatch):
     await se._finish(db, run, "succeeded")  # must not raise
     await db.refresh(run)
     assert run.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_strict_schema_gate_catches_type_violations(db):
+    """R487: strict_schema now validates TYPES against the canonical
+    catalog, not just required-key presence — a title mapped to a list
+    becomes a schema_invalid conflict with schema_errors detail; a
+    compliant record in the same chunk stages normally."""
+    org, owner = await _org(db)
+    fake = FakeRosterConnector(
+        [
+            [
+                {"external_id": "ok-1", "title": "Fine"},
+                {"external_id": "bad-type", "title": ["not", "a", "string"]},
+            ]
+        ]
+    )
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    profile.options = {"strict_schema": True}
+    await db.commit()
+    svc = SyncProfileService(db)
+    run = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run.id)
+    await db.refresh(run)
+    assert run.stats["created"] == 1 and run.stats["conflicts"] == 1
+    rows = await svc.run_records(org.id, run.id, outcome="conflict")
+    assert rows[0].external_id == "bad-type"
+    assert rows[0].conflict_class == "schema_invalid"
+    assert rows[0].detail == {"schema_errors": ["title: expected string"]}
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id,
+                StagedRecord.external_id == "bad-type",
+            )
+        )
+    ).scalar_one_or_none()
+    assert staged is None

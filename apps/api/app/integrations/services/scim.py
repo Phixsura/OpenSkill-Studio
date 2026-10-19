@@ -486,10 +486,7 @@ class ScimUserService:
         # become a platform account.
         if not username or len(username) > 255 or not _EMAIL_RE.fullmatch(username):
             raise ScimError(400, "userName must be an email address", "invalidValue")
-        display = str(
-            _scim_display_name(payload)
-            or username.split("@", 1)[0]
-        )[:100]
+        display = str(_scim_display_name(payload) or username.split("@", 1)[0])[:100]
         active = _coerce_active(payload.get("active", True))
         external_id = payload.get("externalId")
 
@@ -798,9 +795,7 @@ class ScimGroupService:
         if not isinstance(initial, list):
             initial = []
         added = [
-            m["value"]
-            for m in initial
-            if isinstance(m, dict) and isinstance(m.get("value"), str)
+            m["value"] for m in initial if isinstance(m, dict) and isinstance(m.get("value"), str)
         ]
         if added:
             await self._apply_member_delta(group, add=added, remove=[])

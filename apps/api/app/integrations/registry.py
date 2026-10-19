@@ -358,7 +358,9 @@ class OneRosterConnector:
                     "course_code": item.get("classCode"),
                     "term_external_id": _first_sourced_id(item.get("terms")),
                     "school_external_id": _sourced_id(item.get("school")),
-                    "subjects": item.get("subjects") if isinstance(item.get("subjects"), list) else [],
+                    "subjects": item.get("subjects")
+                    if isinstance(item.get("subjects"), list)
+                    else [],
                     "grades": item.get("grades") if isinstance(item.get("grades"), list) else [],
                 }
             )

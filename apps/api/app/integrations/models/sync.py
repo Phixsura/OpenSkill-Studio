@@ -50,6 +50,135 @@ CANONICAL_MODELS = frozenset(
     }
 )
 
+# R487 (Airbyte parity: "full JSONSchema per model"): the canonical catalog.
+# Each entry is a bounded JSON-Schema subset ({type, format, enum, maxLength}
+# on properties; required mirrors MODEL_REQUIRED_KEYS — pinned by test).
+# `additionalProperties` stays true everywhere: mappings may carry extra
+# fields and provisioning ignores them (the R99 contract). Enforcement is
+# the same opt-in strict_schema gate; discovery is GET /integrations/models.
+_S = {"type": "string", "maxLength": 500}
+_DATE = {"type": "string", "format": "date", "maxLength": 50}
+MODEL_SCHEMAS: dict[str, dict] = {
+    "roster.term": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["name"],
+        "properties": {
+            "external_id": _S,
+            "name": _S,
+            "start_date": _DATE,
+            "end_date": _DATE,
+            "school_year": _S,
+        },
+    },
+    "roster.class": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["title"],
+        "properties": {
+            "external_id": _S,
+            "title": _S,
+            "course_code": _S,
+            "term_external_id": _S,
+            "school_external_id": _S,
+            "subjects": {"type": "array"},
+            "grades": {"type": "array"},
+        },
+    },
+    "roster.enrollment": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["class_external_id", "user_external_id"],
+        "properties": {
+            "external_id": _S,
+            "class_external_id": _S,
+            "user_external_id": _S,
+            "role": _S,
+            "begin_date": _DATE,
+            "end_date": _DATE,
+            "primary": {"type": "boolean"},
+        },
+    },
+    "roster.user": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["email"],
+        "properties": {
+            "external_id": _S,
+            "email": {"type": "string", "format": "email", "maxLength": 320},
+            "display_name": _S,
+            "role": _S,
+            "username": _S,
+        },
+    },
+    "talent.candidate": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["email"],
+        "properties": {
+            "external_id": _S,
+            "email": {"type": "string", "format": "email", "maxLength": 320},
+            "display_name": _S,
+            "phone": _S,
+        },
+    },
+    "talent.application": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["candidate_external_id"],
+        "properties": {
+            "external_id": _S,
+            "candidate_external_id": _S,
+            "job_external_id": _S,
+            "status": _S,
+            "applied_at": {"type": "string", "format": "date-time", "maxLength": 50},
+        },
+    },
+    "talent.job": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["title"],
+        "properties": {
+            "external_id": _S,
+            "title": _S,
+            "description": {"type": "string", "maxLength": 20000},
+            "location": _S,
+            "status": _S,
+        },
+    },
+    "crm.account": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["name"],
+        "properties": {"external_id": _S, "name": _S, "domain": _S},
+    },
+    "crm.contact": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["email"],
+        "properties": {
+            "external_id": _S,
+            "email": {"type": "string", "format": "email", "maxLength": 320},
+            "name": _S,
+            "account_external_id": _S,
+        },
+    },
+    "crm.deal": {
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["name"],
+        "properties": {
+            "external_id": _S,
+            "name": _S,
+            "stage": _S,
+            "account_external_id": _S,
+            "amount": {"type": "number"},
+            "currency": {"type": "string", "maxLength": 3},
+            "close_date": _DATE,
+        },
+    },
+}
+
 SYNC_DIRECTIONS = frozenset({"pull", "push", "bidirectional"})
 SYNC_SCHEDULES = frozenset({"manual", "hourly", "daily"})
 RUN_STATUSES = frozenset({"queued", "running", "succeeded", "failed", "cancelled", "partial"})

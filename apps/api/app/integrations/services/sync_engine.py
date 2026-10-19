@@ -687,6 +687,7 @@ async def _apply_record(
     # a schema_invalid conflict, never staged junk.
     if (profile.options or {}).get("strict_schema"):
         from app.integrations.models.sync import MODEL_REQUIRED_KEYS
+        from app.integrations.services.model_schema import validate_model_payload
 
         required = MODEL_REQUIRED_KEYS.get(profile.model, frozenset())
         missing_req = [k for k in required if mapped.get(k) in (None, "")]
@@ -699,6 +700,22 @@ async def _apply_record(
                     outcome="conflict",
                     conflict_class="schema_invalid",
                     detail={"missing": sorted(missing_req)},
+                )
+            )
+            return "conflicts", {}
+        # R487: full type/format/enum validation against the canonical
+        # catalog — a mis-mapped payload (email mapped to a list, a date
+        # that isn't one) conflicts here instead of staging junk.
+        schema_errors = validate_model_payload(profile.model, mapped)
+        if schema_errors:
+            db.add(
+                SyncRecordResult(
+                    run_id=run.id,
+                    external_id=external_id,
+                    model=profile.model,
+                    outcome="conflict",
+                    conflict_class="schema_invalid",
+                    detail={"schema_errors": schema_errors[:10]},
                 )
             )
             return "conflicts", {}
@@ -1071,9 +1088,7 @@ async def _finish(
             )
             await db.commit()
         except Exception:
-            log.warning(
-                "mesh_emit_failed", event_type="integration.sync.completed", run_id=run.id
-            )
+            log.warning("mesh_emit_failed", event_type="integration.sync.completed", run_id=run.id)
 
 
 async def sweep_scheduled_profiles(db: AsyncSession) -> int:

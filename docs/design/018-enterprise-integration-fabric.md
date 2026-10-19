@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R487 (thirty-fourth window, FEATURE — full JSON Schema per canonical
+  model)**: the benchmark table's Airbyte-parity gap closed. MODEL_SCHEMAS
+  gives every canonical model a bounded JSON-Schema subset (type / format
+  email|date|date-time / enum / maxLength per property; required mirrors
+  MODEL_REQUIRED_KEYS — drift pinned by a catalog-consistency test;
+  additionalProperties stays true per the R99 extras-pass-through
+  contract). Enforcement extends the SAME opt-in strict_schema gate: after
+  the required-key check, validate_model_payload (hand-rolled total walker,
+  no jsonschema dependency) turns type/format violations into
+  schema_invalid conflicts with schema_errors detail — never staged junk.
+  Discovery: GET /integrations/models (org-admin gated, Airbyte
+  "discover" shape), covered in the live E2E.
 - **R486 (thirty-fourth window, FEATURE — parquet export format)**: the
   benchmark table's "Parquet" gap closed. `ExportStream.format`
   (ndjson|parquet, intg23 migration, UI select, PATCH-editable);

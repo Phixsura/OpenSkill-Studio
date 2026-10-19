@@ -532,3 +532,81 @@ def test_json_obj_total(body):
     out = _json_obj(_FakeResp(body))
     assert isinstance(out, dict)
     assert _json_obj(_FakeResp(None, raises=True)) == {}
+
+
+# ── R487: canonical model JSON-Schema catalog ──
+
+
+def test_model_schema_catalog_total_and_consistent():
+    """Every canonical model has a full schema; schema.required mirrors
+    MODEL_REQUIRED_KEYS exactly (two registries that would drift); every
+    required key is a declared property; property specs use only the
+    bounded subset the walker implements."""
+    from app.integrations.models.sync import (
+        CANONICAL_MODELS,
+        MODEL_REQUIRED_KEYS,
+        MODEL_SCHEMAS,
+    )
+
+    assert set(MODEL_SCHEMAS) == CANONICAL_MODELS
+    allowed_spec_keys = {"type", "format", "enum", "maxLength"}
+    allowed_types = {"string", "boolean", "integer", "number", "array", "object"}
+    for model, schema in MODEL_SCHEMAS.items():
+        assert schema["type"] == "object" and schema["additionalProperties"] is True
+        assert sorted(schema["required"]) == sorted(MODEL_REQUIRED_KEYS[model])
+        props = schema["properties"]
+        assert "external_id" in props
+        for key in schema["required"]:
+            assert key in props, f"{model}: required {key} undeclared"
+        for key, spec in props.items():
+            assert set(spec) <= allowed_spec_keys, f"{model}.{key}: {set(spec)}"
+            assert spec.get("type") in allowed_types, f"{model}.{key}"
+
+
+def test_validate_model_payload_matrix():
+    """The bounded walker: type/format/enum/maxLength violations caught;
+    None and absent keys equivalent; unknown keys pass; non-object payload
+    is a single total error (R87 totality); detail is bounded."""
+    from app.integrations.services.model_schema import validate_model_payload
+
+    ok = {
+        "external_id": "u1",
+        "email": "a@b.c",
+        "display_name": "A",
+        "role": "student",
+    }
+    assert validate_model_payload("roster.user", ok) == []
+    assert validate_model_payload("roster.user", {"email": None}) == []
+    assert validate_model_payload("roster.user", {"unknown_extra": object()}) == []
+    assert validate_model_payload("unknown.model", {"x": 1}) == []
+    assert validate_model_payload("roster.user", "not-an-object") == ["payload is not an object"]
+    assert validate_model_payload("roster.user", {"email": ["a@b.c"]}) == ["email: expected string"]
+    assert validate_model_payload("roster.user", {"email": "not-an-email"}) == ["email: bad email"]
+    assert validate_model_payload("roster.user", {"email": "@half"}) == ["email: bad email"]
+    assert validate_model_payload("roster.user", {"email": "a@b.c", "display_name": "x" * 501}) == [
+        "display_name: longer than 500"
+    ]
+    assert validate_model_payload("roster.term", {"name": "T", "start_date": "2026-13-99"}) == [
+        "start_date: bad date"
+    ]
+    assert validate_model_payload("roster.term", {"name": "T", "start_date": "2026-01-15"}) == []
+    assert (
+        validate_model_payload(
+            "talent.application",
+            {"candidate_external_id": "c", "applied_at": "2026-01-15T10:00:00Z"},
+        )
+        == []
+    )
+    assert validate_model_payload(
+        "talent.application", {"candidate_external_id": "c", "applied_at": "junk"}
+    ) == ["applied_at: bad date-time"]
+    assert validate_model_payload("roster.enrollment", {"primary": "yes"}) == [
+        "primary: expected boolean"
+    ]
+    assert validate_model_payload("crm.deal", {"amount": "12.5"}) == ["amount: expected number"]
+    assert validate_model_payload("crm.deal", {"amount": 12.5}) == []
+    # bool is an int subclass — must not pass as number
+    assert validate_model_payload("crm.deal", {"amount": True}) == ["amount: expected number"]
+    # bounded detail: many violations never exceed 10 entries
+    bad = {k: 123 for k in ("external_id", "class_external_id", "user_external_id", "role")}
+    assert len(validate_model_payload("roster.enrollment", bad)) <= 10
