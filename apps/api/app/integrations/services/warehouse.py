@@ -435,6 +435,7 @@ class WarehouseExportService:
         since = (stream.cursor or {}).get("last_id")
         total = 0
         parts: list[str] = []
+        checksums: dict[str, dict] = {}  # R518: per-part integrity for consumers
         part_no = 0
         last_cursor = since
         base = f"exports/{org_id}/{stream.dataset}/{run.id}"
@@ -471,6 +472,10 @@ class WarehouseExportService:
                     content = ("\n".join(lines) + "\n").encode()
                 await self.writer.write(part_key, content)
                 parts.append(part_key)
+                checksums[part_key] = {
+                    "bytes": len(content),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                }
                 total += len(rows)
                 part_no += 1
                 if len(rows) < EXPORT_PAGE_ROWS:
@@ -486,6 +491,9 @@ class WarehouseExportService:
                 "cursor_to": {"last_id": last_cursor},
                 "row_count": total,
                 "parts": parts,
+                # R518: loaders verify what they fetched (Stripe-pipeline
+                # style) — byte size + sha256 per part.
+                "checksums": checksums,
                 "generated_at": datetime.now(UTC).isoformat(),
             }
             await self.writer.write(manifest_key, json.dumps(manifest, indent=2).encode())

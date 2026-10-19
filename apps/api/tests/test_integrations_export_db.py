@@ -903,3 +903,24 @@ async def test_parquet_run_all_parts_share_one_schema(db, monkeypatch):
     assert run.status == "succeeded" and len(run.parts) >= 2
     schemas = [pq.read_table(io.BytesIO(writer.files[p])).schema for p in run.parts]
     assert all(sc.equals(schemas[0]) for sc in schemas[1:]), "parts disagree on schema"
+
+
+@pytest.mark.asyncio
+async def test_manifest_carries_per_part_checksums(db):
+    """R518: the manifest's checksums map covers every part with the exact
+    byte size and sha256 of what the writer stored — a warehouse loader can
+    verify its fetch."""
+    org, owner = await _org(db)
+    for i in range(3):
+        await emit_event(db, org.id, "project.approved", subject=f"ck-{i}", data={})
+    await db.flush()
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    stream = await svc.create_stream(org.id, name=f"ck-{ULID()}", dataset="events")
+    run = await svc.run_export(org.id, stream.id)
+    manifest = json.loads(writer.files[run.manifest_key])
+    assert set(manifest["checksums"]) == set(run.parts) and run.parts
+    for key, meta in manifest["checksums"].items():
+        blob = writer.files[key]
+        assert meta["bytes"] == len(blob)
+        assert meta["sha256"] == hashlib.sha256(blob).hexdigest()

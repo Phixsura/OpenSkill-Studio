@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R518 (thirty-sixth window, FEATURE — manifest part checksums)**: export
+  manifests gain a `checksums` map (byte size + sha256 per part,
+  Stripe-pipeline style) so warehouse loaders verify their fetches;
+  round-trip pinned against the writer's exact bytes. The R513
+  hand-parsed-query class was swept: the SLO handler is the only such
+  surface in the app.
 - **R517 (thirty-sixth window, UI — payload schema hints)**: the events
   page pattern box now shows the R514 payload keys inline when the typed
   pattern exactly matches a documented type (hint disappears for
