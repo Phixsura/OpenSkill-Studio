@@ -180,6 +180,59 @@ async def main() -> None:
             h,
         )
 
+        # 8) R505: trigger-secret mint race (same-row UPDATE — last write
+        # wins, every call 2xx) and concurrent hook ticks (storm coalesces
+        # onto ONE live run; every tick 202, zero 5xx).
+        r = await c.post(
+            f"{base}/connections",
+            json={
+                "provider_key": "generic_ats",
+                "name": f"race-ats-{u}",
+                "config": {},
+                "base_url": "https://race-ats.example.com/api",
+            },
+            headers=h,
+        )
+        ats_conn = r.json()["data"]["id"]
+        r = await c.post(
+            f"{base}/sync-profiles",
+            json={
+                "connection_id": ats_conn,
+                "name": f"race-push-{u}",
+                "model": "talent.application",
+                "direction": "push",
+                "mapping_profile_id": None,
+            },
+            headers=h,
+        )
+        prof_id = r.json()["data"]["id"]
+        rs = await race(
+            c,
+            "trigger-secret mint storm",
+            "POST",
+            f"{base}/sync-profiles/{prof_id}/trigger-secret",
+            None,
+            h,
+            min_wins=N,
+        )
+        # settle on one known secret, then storm the hook with it
+        r = await c.post(f"{base}/sync-profiles/{prof_id}/trigger-secret", headers=h)
+        hook_secret = r.json()["data"]["secret"]
+        hook_rs = await asyncio.gather(
+            *[
+                c.post(
+                    f"{API}/integrations/sync-hooks/{prof_id}",
+                    headers={"Authorization": f"Bearer {hook_secret}"},
+                )
+                for _ in range(N)
+            ]
+        )
+        hcodes = sorted(r2.status_code for r2 in hook_rs)
+        check("hook tick storm: zero 5xx", all(s2 < 500 for s2 in hcodes), f"codes={hcodes}")
+        check("hook tick storm: every tick accepted", all(s2 == 202 for s2 in hcodes), f"codes={hcodes}")
+        run_ids = {r2.json()["data"]["run_id"] for r2 in hook_rs if r2.status_code == 202}
+        check("hook tick storm coalesced onto one run", len(run_ids) == 1, f"runs={len(run_ids)}")
+
     print("\n".join(RESULTS))
     print(f"\nPASSED {PASS}  FAILED {FAIL}")
     raise SystemExit(0 if FAIL == 0 else 1)

@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R505 (thirty-fourth window, CONCURRENCY — R484 probe extended to the
+  R497 surfaces)**: trigger-secret mint storm (8 parallel rotations of the
+  same row — every call 2xx, zero 5xx, last write wins) and hook tick
+  storm (8 parallel change notifications with one secret — every tick 202
+  and ALL coalesce onto ONE run id, proving the live-run dedup holds under
+  the unauthenticated surface's natural burst pattern). Probe 21/21.
 - **R503 (thirty-fourth window, UI — sync-profile create form)**: the sync
   page literally said "create one via the API" — the LAST admin create
   without a form (Part N parity). Form drives connection (live list),
