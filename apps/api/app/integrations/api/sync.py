@@ -513,7 +513,15 @@ async def resolve_sync_conflict(
 # ── R497: inbound sync-trigger webhook (CDC-lite) ──
 
 
-@router.post("/sync-profiles/{profile_id}/trigger-secret", status_code=201)
+class TriggerSecretResponse(BaseModel):
+    secret: str
+
+
+@router.post(
+    "/sync-profiles/{profile_id}/trigger-secret",
+    response_model=DataResponse[TriggerSecretResponse],
+    status_code=201,
+)
 async def mint_sync_trigger_secret(
     org_id: str,
     profile_id: str,

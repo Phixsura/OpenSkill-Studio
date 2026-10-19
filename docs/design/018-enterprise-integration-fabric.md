@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R500 (thirty-fourth window, VERIFY + CI)**: app-wide sweep and
+  scim2-tester conformance wired as make targets + CI steps. Full-battery
+  rerun tripped the three ROUTE-CONTRACT guards on R497's new surfaces —
+  the guards doing their job: audit actions registered, the hook route's
+  bearer-secret auth posture declared (SCIM-style exemption with reason),
+  mint endpoint gained its response_model, hook ticks exempted from the
+  per-route audit rule (runs are their own trail, like schedules). Final:
+  fabric battery 497 green, talent 3,366 green, web 769 + tsc green,
+  browser 69/69, a11y 7/7, scale smoke 37/37, storm 8/8, live E2E 90/90,
+  fuzz 961×2 seeds + 4,129 app-wide zero-5xx, conformance 48/0, migration
+  round-trip green.
 - **R499 (thirty-fourth window, VERIFY — regression sweep over the new
   surfaces)**: both fuzzers rerun against the R496-R498 code (fabric 961
   reqs seeds 43+97; app-wide 4,129 reqs) — zero fives; storm suite 8/8;

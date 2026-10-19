@@ -39,6 +39,9 @@ AUDIT_ACTIONS = frozenset(
         "intg.scim_token.group_map_updated",
         "intg.sso.deleted",
         "intg.sync_run.triggered",
+        # R497: inbound sync-trigger webhook secret lifecycle
+        "intg.sync_trigger_secret.minted",
+        "intg.sync_trigger_secret.cleared",
         "intg.sync_run.cancelled",
         "intg.import.created",
         "intg.import.committed",

@@ -1058,8 +1058,14 @@ def test_fabric_route_contract():
     assert len(fabric) >= 60, f"route collection broke: only {len(fabric)} fabric routes found"
 
     raw_response_ok = ("/errors.csv", "/imports/template", "/payload")
+    # Bearer-SECRET authed machine surfaces (SCIM-style): no platform user
+    # exists on these calls by design; auth happens inside the handler via
+    # hashed-secret lookup with a uniform 401 (R497).
+    secret_authed = ("/integrations/sync-hooks/",)
     unauthed, unmodeled = [], []
     for r in fabric:
+        if any(m in r.path for m in secret_authed):
+            continue
         names = dep_names(r.dependant, set())
         if not any("get_current_user" in x for x in names):
             unauthed.append(f"{sorted(r.methods)} {r.path}")
@@ -1116,6 +1122,10 @@ def test_every_mutating_fabric_route_audits_or_is_exempt():
         "POST /orgs/{org_id}/integrations/lti/registrations/{reg_id}/resource-links",
         "POST /orgs/{org_id}/integrations/lti/resource-links/{link_id}/nrps-sync",
         "POST /orgs/{org_id}/integrations/lti/deep-link/select",
+        # R497: machine-driven change notification — the MINT/CLEAR of its
+        # secret is audited (admin actions); each inbound tick only enqueues
+        # a run (run rows are their own observable trail, like schedules).
+        "POST /integrations/sync-hooks/{profile_id}",
     }
     uncovered = []
     for r in collect(app.routes, []):
