@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R493 (thirty-fourth window, FUZZ — app-wide OpenAPI sweep)**: phase
+  15's finding implied the class exists outside fabric markers. New
+  companion script (tests/e2e_fuzz_appwide.py) walks EVERY /api/v1 spec
+  path (4,104 requests: hostile path params, hostile query values,
+  skeletal bodies) asserting never-a-5xx except the typed
+  UPSTREAM_UNREACHABLE 502. Result: ZERO unexplained 5xx app-wide — the
+  R88 global backstop + per-epic hardening held everywhere beyond the 33
+  AnalyticsBody routes R492 already revived.
 - **R492 (thirty-fourth window, FUZZ phase 15 — OpenAPI-driven totality
   sweep; THREE defect classes)**: hand-written fuzz phases cover the routes
   someone thought about; phase 15 walks the LIVE OpenAPI spec (hostile path
