@@ -374,6 +374,24 @@ ULIDs are time-ordered; stable under concurrent inserts) and return
 Playwright job) run axe-core WCAG 2.1 A/AA over the five fabric pages as
 an authenticated admin; any serious/critical violation fails.
 
+## 8a. Production web serving topology (R528 — read before deploying)
+
+The web app is `output: standalone`. Three rules the hard way:
+
+1. **Serve with `node .next/standalone/apps/web/server.js`** (after copying
+   `.next/static` → `.next/standalone/apps/web/.next/` and `public/`).
+   `next start` is UNSUPPORTED on standalone builds — it boots but silently
+   drops rewrite-proxy responses.
+2. **Same-origin API via the rewrite proxy.** CSP is `connect-src 'self'`,
+   so the browser must call relative `/api/v1/*`. Set `API_PROXY_URL`
+   (server-only, read at BUILD time by the rewrite) to the API origin —
+   never bake `NEXT_PUBLIC_API_URL`, which both violates CSP and inlines
+   the origin into the bundle. Prefer an explicit IP/hostname the Node
+   process can dial (`localhost` can resolve ::1 while uvicorn binds v4).
+3. **Monorepo checkouts need `outputFileTracingRoot`** (pinned in
+   next.config) — without it a worktree/second-lockfile checkout produces
+   an EMPTY standalone directory and there is no server.js at all.
+
 ## 8. Security posture (what to tell the auditor)
 
 Single-egress SSRF discipline (resolve → validate every IP → dial pinned

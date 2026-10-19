@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R531 (thirty-eighth window, AST-mutation — SAML ACS core)**: 20 mutants
+  over handle_acs/_verify_signature/_assert_id_unseen against the full SAML
+  suite: 16 killed; the 4 survivors are one-instant boundaries (exact
+  MAX_RESPONSE_BYTES size and the ±CLOCK_SKEW window edges) — equivalent.
+  Ops guide gains §8a: the production web-serving topology rules R528
+  earned (standalone server command, same-origin proxy via build-time
+  API_PROXY_URL, outputFileTracingRoot).
 - **R530 (thirty-eighth window, SYMBOLIC proofs — R206 discipline applied
   to the fabric)**: six CrossHair contracts PROVEN by the SMT solver (not
   sampled): email-format accepts exactly one @ with non-empty halves (for
