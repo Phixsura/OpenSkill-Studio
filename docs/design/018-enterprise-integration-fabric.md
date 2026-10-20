@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R567 (forty-eighth window — one meta-target encodes the serialization
+  rule)**: `make e2e-intg-all` chains all nine fabric live-HTTP suites
+  strictly sequentially. The shared-dev-DB concurrency hazard (51 phantom
+  failures when a battery overlapped a live suite) is now encoded in the
+  build system instead of tribal memory; ops §7a1b documents it.
 - **R566 (forty-eighth window — adversarial battery joins the Makefile)**:
   same treatment as the race probes (R562): the 178-check hostile-actor
   battery had a hardcoded :8000 URL and manual invocation — now

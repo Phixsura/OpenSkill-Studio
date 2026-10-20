@@ -363,6 +363,14 @@ registration refuses a configuration whose issuer lives on a different
 origin than the admin-pasted URL. Conflict adjudication now also verifies
 the result row belongs to the addressed run (uniform 404 otherwise).
 
+## 7a1b. Live-suite meta-target (R567)
+
+`make e2e-intg-all` runs every fabric live-HTTP suite (lifecycle, scale,
+fuzz x2, SCIM conformance, latency, storm, races, adversarial) strictly
+sequentially. They share the dev database — running any two of them, or any
+of them against the pytest battery, concurrently produces phantom failures.
+The meta-target encodes that rule; use it instead of ad-hoc parallel runs.
+
 ## 7a2. Drills (`make drills`, R399)
 
 `make drills` (infra up, ~10 min) runs every operational drill in

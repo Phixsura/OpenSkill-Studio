@@ -122,6 +122,18 @@ e2e-intg-latency: ## Hot-endpoint latency tripwire (p95 ceiling; uvicorn :8443)
 		status=$$?; kill $$(cat /tmp/intg-lat-uvicorn.pid) 2>/dev/null; \
 		rm -f /tmp/intg-lat-uvicorn.pid; exit $$status)
 
+e2e-intg-all: ## Every fabric live-HTTP suite, SEQUENTIALLY (shared dev DB — never run these concurrently)
+	$(MAKE) e2e-intg
+	$(MAKE) e2e-intg-scale
+	$(MAKE) e2e-intg-fuzz
+	$(MAKE) e2e-intg-appwide
+	$(MAKE) e2e-intg-scim-conformance
+	$(MAKE) e2e-intg-latency
+	$(MAKE) e2e-intg-storm
+	$(MAKE) e2e-intg-races
+	$(MAKE) e2e-intg-adversarial
+	@echo "ALL FABRIC LIVE SUITES OK"
+
 e2e-intg-adversarial: ## Hostile-actor battery: 178 checks, strict zero-5xx (uvicorn :8443, NO egress flag)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
 		APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8443 & \
