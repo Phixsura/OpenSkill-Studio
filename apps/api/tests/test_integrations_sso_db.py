@@ -2669,3 +2669,43 @@ async def test_queue_link_refuses_inactive_member(db):
             org.id, item.id, action="link", user_id=archived.id, actor_id=owner.id
         )
     assert e.value.code == "IDENTITY_QUEUE_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_sso_update_audit_names_changed_fields(db):
+    """R603: the intg.sso.updated payload carries WHICH fields changed —
+    an enforce_sso flip must be distinguishable from a cosmetic edit; the
+    client secret never appears (boolean marker only)."""
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.integrations.api.sso import SsoUpdateRequest, update_sso_connection
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    conn = SsoConnection(
+        org_id=org.id, protocol="oidc", status="active", oidc_issuer=ISSUER, oidc_client_id="c"
+    )
+    db.add(conn)
+    await db.flush()
+
+    await update_sso_connection(
+        org.id,
+        conn.id,
+        SsoUpdateRequest(allow_jit=True, oidc_client_secret="s3cr3t-value"),
+        db=db,
+        user=owner,
+    )
+    row = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.sso.updated",
+                    CommercialAuditEvent.target_id == conn.id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.after["allow_jit"] is True
+    assert row.after["oidc_client_secret"] == "<rotated>"
+    assert "s3cr3t-value" not in str(row.after)

@@ -273,7 +273,19 @@ async def update_sso_connection(
     await _admin(org_id, user, db)
     conn = await SsoAdminService(db).update(org_id, conn_id, **body.model_dump())
     resp = _sso_response(conn)
-    await record_fabric_audit(db, org_id, user.id, "intg.sso.updated", "sso_connection", conn.id)
+    # R603: the payload must say WHAT changed — flipping enforce_sso (locking
+    # the whole org to SSO, or dropping that protection) was previously
+    # indistinguishable from a cosmetic edit in the trail. Changed fields
+    # only; the client secret is reduced to a boolean marker, attribute_map
+    # to its size (config shape, never values).
+    changed = body.model_dump(exclude_none=True)
+    if "oidc_client_secret" in changed:
+        changed["oidc_client_secret"] = "<rotated>"
+    if "attribute_map" in changed:
+        changed["attribute_map"] = f"{len(changed['attribute_map'])} keys"
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.sso.updated", "sso_connection", conn.id, after=changed
+    )
     await db.commit()
     return {"data": resp}
 
