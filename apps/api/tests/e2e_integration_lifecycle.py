@@ -888,7 +888,14 @@ async def main() -> int:
                 seen_actions |= {row["action"] for row in rows}
                 if not r.json().get("meta", {}).get("has_more"):
                     break
-            expected = {"intg.connection.created", "intg.domain.claimed"}
+            # intg.scim.user_provisioned is a SYSTEM-actor row (IdP-driven,
+            # R592) — its presence proves system-actor records surface in the
+            # tenant feed too, not only human-actor ones.
+            expected = {
+                "intg.connection.created",
+                "intg.domain.claimed",
+                "intg.scim.user_provisioned",
+            }
             check(
                 "tenant audit feed shows the fabric actions this walk performed",
                 expected <= seen_actions,

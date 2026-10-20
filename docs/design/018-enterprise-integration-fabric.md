@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R605b (fifty-ninth window)**: the black-box expected set now includes
+  intg.scim.user_provisioned — a SYSTEM-actor row — proving IdP-driven
+  records surface in the tenant feed alongside human-actor ones. Periodic
+  re-verification this window: all 11 drills OK, fabric fuzz exit 0,
+  app-wide fuzz 4,132 requests FAIL=0, conformance 50/0, lifecycle 94,
+  scale 37 (~28s, no audit-overhead regression), latency p95 19ms,
+  adversarial 178, races 21.
 - **R605 (fifty-ninth window — the compliance chain, black-box)**: the
   lifecycle E2E now closes the loop over plain HTTP: after performing its
   fabric mutations it resolves the self-service tenant (/tenants/mine),
