@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R581 (fiftieth window — template drift contract + full live chain)**:
+  compose drill check #14: every ${VAR} docker-compose.prod.yml references
+  (11) must exist in .env.prod.example, so the operator template cannot
+  silently drift from the compose it documents. And the first full
+  `make e2e-live-all` chain (7 epic suites + 9 fabric suites, strictly
+  sequential) completed exit 0.
 - **R580 (fiftieth window — make help hid every e2e target)**: the help
   grep's `[a-zA-Z_-]+` excluded digits, so all 21 e2e-* targets (and
   anything else with a digit) were invisible in `make help` — exactly the

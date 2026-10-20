@@ -87,6 +87,24 @@ def main() -> int:
     redis_cmd = " ".join(services["redis"].get("command") or [])
     check("redis noeviction+AOF", "noeviction" in redis_cmd and "--appendonly yes" in redis_cmd)
 
+    # R581: every ${VAR} the compose references must exist in the operator
+    # template — otherwise .env.prod.example silently drifts from the file
+    # it exists to document.
+    with open(os.path.join(REPO, "docker-compose.prod.yml")) as fh:
+        compose_src = fh.read()
+    compose_vars = set(re.findall(r"\$\{([A-Z0-9_]+)[:}~]", compose_src))
+    with open(os.path.join(REPO, ".env.prod.example")) as fh:
+        template = fh.read()
+    template_vars = {
+        line.split("=", 1)[0].strip()
+        for line in template.splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    missing = sorted(compose_vars - template_vars)
+    check(f"env template covers all compose vars ({len(compose_vars)})", not missing)
+    if missing:
+        print(f"         missing from .env.prod.example: {missing}")
+
     for svc in ("api", "worker", "migrate"):
         env = {
             k: str(v)
