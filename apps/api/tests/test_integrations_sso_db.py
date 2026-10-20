@@ -538,7 +538,7 @@ async def test_enforce_sso_blocks_password_login_break_glass_passes(db):
     auth = AuthService(db)
     with pytest.raises(AppError) as e:
         await auth.login(email, "Test123!")
-    assert e.value.code == "SSO_REQUIRED" and e.value.status == 403
+    assert e.value.code == "SSO_REQUIRED" and e.value.status_code == 403
 
     member.is_break_glass = True
     await db.flush()
