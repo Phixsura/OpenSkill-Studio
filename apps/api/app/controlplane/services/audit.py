@@ -189,59 +189,6 @@ AUDIT_ACTIONS = frozenset(
         # R60[44]: listing lifecycle mutates the license gate — audited.
         "listing.activated",
         "listing.delisted",
-        # R597: EVERY integration-fabric action is a tenant-owned event — the
-        # tenant's own admins (or their IdP) configure connections/SSO/SCIM/
-        # domains/sync/exports and provision members. They were all hidden
-        # tenant-side, so the compliance records the fabric writes (incl. the
-        # IdP-driven access grants from R592-R595) were invisible to the very
-        # org they describe. All fabric actions are tenant-visible by
-        # construction; a guard below asserts no intg.* action is omitted.
-        "intg.break_glass.set",
-        "intg.conflict.resolved",
-        "intg.connection.created",
-        "intg.connection.deleted",
-        "intg.connection.updated",
-        "intg.connection.upgraded",
-        "intg.credential.set",
-        "intg.delivery.bulk_replayed",
-        "intg.delivery.replayed",
-        "intg.domain.claimed",
-        "intg.domain.deleted",
-        "intg.domain.verified",
-        "intg.export_run.triggered",
-        "intg.export_stream.created",
-        "intg.export_stream.deleted",
-        "intg.export_stream.updated",
-        "intg.identity.unlinked",
-        "intg.identity_queue.resolved",
-        "intg.import.committed",
-        "intg.import.created",
-        "intg.lti.nrps_synced",
-        "intg.lti_registration.created",
-        "intg.lti_registration.deleted",
-        "intg.mapping.created",
-        "intg.mapping.deleted",
-        "intg.mapping.updated",
-        "intg.roster.provisioned",
-        "intg.scim.group_deleted",
-        "intg.scim.user_deprovisioned",
-        "intg.scim.user_provisioned",
-        "intg.scim.user_reactivated",
-        "intg.scim_token.group_map_updated",
-        "intg.scim_token.minted",
-        "intg.scim_token.revoked",
-        "intg.sso.created",
-        "intg.sso.deleted",
-        "intg.sso.jit_provisioned",
-        "intg.sso.metadata_refreshed",
-        "intg.sso.updated",
-        "intg.sync_profile.created",
-        "intg.sync_profile.deleted",
-        "intg.sync_profile.updated",
-        "intg.sync_run.cancelled",
-        "intg.sync_run.triggered",
-        "intg.sync_trigger_secret.cleared",
-        "intg.sync_trigger_secret.minted",
     }
 )
 
