@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R601 (fifty-eighth window — break-glass USE + a fragile retention
+  coupling)**: the actual break-glass login (password bypass under enforced
+  SSO — THE security event the hatch exists for) wrote only the mesh event;
+  now also lands in the compliance trail as intg.break_glass.used,
+  attributed to the break-glass user with IP/UA. And the 90-day freshness
+  gate READS mesh events while the retention sweep deletes them at 180d —
+  safe today, but a future retention tightening below 90d would silently
+  delete the freshness signal and falsely block cert rotation. The window
+  is now a named constant (BREAK_GLASS_FRESHNESS_DAYS) and a guard test
+  pins RETAIN_EVENTS > freshness.
 - **R600 (fifty-seventh window — account BINDING joins the trail)**:
   binding an IdP subject to an EXISTING member account (verified-email
   match) means every future assertion for that subject logs in as that user

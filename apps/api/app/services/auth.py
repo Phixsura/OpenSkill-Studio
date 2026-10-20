@@ -556,6 +556,27 @@ class AuthService:
             )
         except Exception:
             log.warning("mesh_emit_failed", event_type="org.breakglass.login", user_id=user.id)
+        # R601: the mesh event feeds subscribers and the 90-day freshness
+        # gate; the COMPLIANCE trail must carry the hatch use too (the
+        # tenant's audit feed is where an auditor looks). Actor is the
+        # break-glass user themselves. Best-effort like every audit write.
+        try:
+            from app.integrations.facade import record_fabric_audit
+
+            await record_fabric_audit(
+                self.db,
+                org_id,
+                user.id,
+                "intg.break_glass.used",
+                "user",
+                user.id,
+                after={
+                    "ip_address": ip_address,
+                    "user_agent": (device_info or "")[:300] or None,
+                },
+            )
+        except Exception:
+            log.warning("audit_write_failed", action="intg.break_glass.used", user_id=user.id)
 
     async def _create_token_pair(
         self,

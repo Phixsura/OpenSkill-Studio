@@ -21,6 +21,7 @@ AUDIT_ACTIONS = frozenset(
         "intg.delivery.bulk_replayed",
         # R377: full audit coverage of fabric config mutations
         "intg.break_glass.set",
+        "intg.break_glass.used",
         "intg.connection.updated",
         "intg.connection.upgraded",
         "intg.connection.deleted",
@@ -296,6 +297,7 @@ TENANT_VISIBLE_ACTIONS = frozenset(
         # org they describe. All fabric actions are tenant-visible by
         # construction; a guard below asserts no intg.* action is omitted.
         "intg.break_glass.set",
+        "intg.break_glass.used",
         "intg.conflict.resolved",
         "intg.connection.created",
         "intg.connection.deleted",

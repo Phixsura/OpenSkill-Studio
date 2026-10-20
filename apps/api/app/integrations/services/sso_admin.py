@@ -196,6 +196,11 @@ class SsoAdminService:
                 409,
             )
 
+    # R601: must stay SHORTER than events.RETAIN_EVENTS — the freshness gate
+    # reads mesh events, and a retention horizon below this window would
+    # delete the signal before it expires (guard test pins the inequality).
+    BREAK_GLASS_FRESHNESS_DAYS = 90
+
     async def _assert_fresh_break_glass(self, org_id: str) -> None:
         """ADR §5.2 S1.3 (R311): under enforced SSO, the MANUAL cert-rotation
         endpoint refuses unless a break-glass login succeeded in the last 90
@@ -213,7 +218,7 @@ class SsoAdminService:
                 .where(
                     IntegrationEvent.org_id == org_id,
                     IntegrationEvent.type == "com.openskill.org.breakglass.login.v1",
-                    IntegrationEvent.time > datetime.now(UTC) - timedelta(days=90),
+                    IntegrationEvent.time > datetime.now(UTC) - timedelta(days=self.BREAK_GLASS_FRESHNESS_DAYS),
                 )
                 .limit(1)
             )

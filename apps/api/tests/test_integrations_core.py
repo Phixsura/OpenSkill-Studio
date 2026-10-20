@@ -1835,3 +1835,16 @@ def test_lti_dynreg_advertised_urls_resolve_to_registered_routes():
     for u in urls:
         path = "/" + u.split("://", 1)[1].split("/", 1)[1]
         assert registered(path), f"dynreg advertises unregistered path: {path}"
+
+
+def test_break_glass_freshness_window_within_event_retention():
+    """R601: the 90-day break-glass freshness gate READS mesh events — if the
+    event retention horizon ever drops below the freshness window, the
+    signal is deleted before it expires and cert rotation under enforced SSO
+    falsely blocks. Pin the inequality."""
+    from datetime import timedelta
+
+    from app.integrations.services.events import RETAIN_EVENTS
+    from app.integrations.services.sso_admin import SsoAdminService
+
+    assert RETAIN_EVENTS > timedelta(days=SsoAdminService.BREAK_GLASS_FRESHNESS_DAYS)

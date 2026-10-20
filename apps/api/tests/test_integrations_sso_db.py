@@ -1552,6 +1552,24 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
     assert ev is not None
     assert ev.data["ip_address"] == "198.51.100.7"
     assert ev.data["user_agent"] == "E2E-UA/1.0"
+    # R601: the hatch use also lands in the COMPLIANCE trail, attributed to
+    # the break-glass user (actor), with the same IP/UA.
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    row = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.break_glass.used",
+                    CommercialAuditEvent.target_id == emp.id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.actor_user_id == emp.id and row.actor_type == "tenant"
+    assert row.after["ip_address"] == "198.51.100.7"
 
 
 @pytest.mark.asyncio
