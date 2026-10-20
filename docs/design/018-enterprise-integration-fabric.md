@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R613 (sixty-second window — five class sweeps, all clean)**: applying
+  the arc method to five further defect classes found NO debt — recorded as
+  negative results so the next auditor doesn't re-walk them: (1) bare
+  scalar_one(): 9 sites, each either a count() or behind the
+  IntegrityError⇒winner-committed invariant / same-txn claim; (2)
+  unguarded .first() attribute access: zero (AST scan); (3) division: fabric
+  services contain no runtime division at all; (4) ReDoS: all four regexes
+  linear with upstream length caps; (5) func.lower(User.email) equality is
+  served by ix_users_email_lower (EXPLAIN: Index Scan, verified live).
 - **R612 (sixty-second window — closing assessment v5)**: research doc
   gains the v5 table: the five converging arcs of windows 47-61 (contract
   fidelity, serialization hostility, SSRF drift, compliance audit,
