@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R589 (fifty-third window — parity guard catches a THIRD SSRF gap)**:
+  rather than risk consolidating the three divergent SSRF classifiers,
+  added tests/test_ssrf_classifier_parity_db.py — one hostile-IP matrix fed
+  to all three, every must-block blocked by ALL and every public allowed by
+  ALL. It immediately caught a real drift the manual R587/R588 pass missed:
+  the webhook delivery classifier (_ip_blocked) did NOT block multicast
+  (224.0.0.0/4) or reserved ranges, which both other copies do. Fixed; the
+  parity guard now pins all three in lockstep so the next per-copy drift
+  fails CI.
 - **R588 (fifty-third window — same SSRF gap in the OTHER two egress
   guards)**: the codebase has THREE independent SSRF classifiers (fabric
   R587, the shared webhook delivery guard app/services/webhook.py, and
