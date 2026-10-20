@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R558 (forty-sixth window, DEPLOY — prod env template)**: operators had
+  to reverse-engineer the required variable set from compose errors one at
+  a time. `.env.prod.example` now enumerates every variable the prod
+  compose consumes with generation commands; proven in both directions —
+  as-is the empty required values make `compose config` refuse, and with
+  the empties filled it renders clean.
 - **R557 (forty-sixth window, CI — security gates stop being rituals)**: the
   gitleaks scan (R540), pip-audit (R539) and pnpm audit (R541) were
   local-only; nothing enforced them on a PR. New `security` CI job:

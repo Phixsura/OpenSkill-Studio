@@ -211,6 +211,10 @@ empirically); the one-shot `migrate` job disables the inherited check.
 
 ## 6c. Production compose required secrets (R549/R550)
 
+Start from the checked-in template: `cp .env.prod.example .env.prod`, fill
+every empty value, then `docker compose --env-file .env.prod -f docker-compose.prod.yml config --quiet`
+to fail fast before any container starts (R558).
+
 `docker compose -f docker-compose.prod.yml up` refuses to interpolate
 without: DB_PASSWORD, JWT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY and
 CREDENTIAL_ENCRYPTION_KEY (a REAL Fernet key — 32-byte urlsafe base64,
