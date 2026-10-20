@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R599 (fifty-seventh window — IdP role changes were silent privilege
+  changes)**: the SCIM group→role mapping (_apply_mapping) changes a
+  member's org role on group join/leave (student↔instructor: grading and
+  learner-data access) with no human actor and — until now — no audit. Role
+  CHANGES now record intg.scim.role_mapped (system actor, from→to +
+  token_id); unchanged roles (e.g. an owner joining a mapped group, which
+  sync never touches) record nothing, keeping the trail noise-free. Test
+  pins the join/leave pair in order and the owner no-op. This completes the
+  IdP-driven audit chain: access grants (R592-595), their visibility
+  (R597), and now privilege CHANGES.
 - **R598 (fifty-seventh window — audit retention/export posture
   documented)**: ops §7b now records the full R592-597 chain plus the
   deliberate posture: cp_audit_events is append-only and NEVER swept by the

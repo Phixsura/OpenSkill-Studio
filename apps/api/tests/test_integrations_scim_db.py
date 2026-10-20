@@ -403,6 +403,43 @@ async def test_group_role_mapping_with_ceiling_and_revert(ctx):
     )
     assert owner_member.role == OrgRole.OWNER
 
+    # R599: both actual role CHANGES above (student->instructor on join,
+    # instructor->student on leave) are IdP-driven privilege changes and land
+    # in the compliance trail as system-actor rows; the owner's no-op join
+    # (role unchanged) records nothing.
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    await db.flush()
+    rows = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent)
+                .where(
+                    CommercialAuditEvent.action == "intg.scim.role_mapped",
+                    CommercialAuditEvent.target_id == u["id"],
+                )
+                .order_by(CommercialAuditEvent.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.after["to"] for r in rows] == ["instructor", "student"]
+    assert all(r.actor_type == "system" and r.actor_user_id is None for r in rows)
+    owner_rows = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.scim.role_mapped",
+                    CommercialAuditEvent.target_id == ctx["owner"].id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert owner_rows == []  # unchanged role -> no audit noise
+
 
 @pytest.mark.asyncio
 async def test_group_cohort_mapping(ctx):

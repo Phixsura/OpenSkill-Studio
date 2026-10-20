@@ -1052,6 +1052,7 @@ class ScimGroupService:
             role = ROLE_MAP_ALLOWED.get(mapping.get("role", ""))
             if role is None:
                 return  # defensive: map validated at write, but re-check
+            old_role = member.role
             if joined:
                 # Never demote an owner/admin via group sync.
                 if member.role in (OrgRole.STUDENT, OrgRole.INSTRUCTOR):
@@ -1059,6 +1060,29 @@ class ScimGroupService:
             else:
                 if member.role == role and role != OrgRole.STUDENT:
                     member.role = OrgRole.STUDENT
+            if member.role != old_role:
+                # R599: an IdP group-membership change just CHANGED an org
+                # role (e.g. student -> instructor: grading + learner-data
+                # access). A privilege change with no human actor must still
+                # land in the compliance trail.
+                from app.integrations.facade import record_fabric_audit
+
+                await record_fabric_audit(
+                    self.db,
+                    self.org_id,
+                    None,
+                    "intg.scim.role_mapped",
+                    "user",
+                    member.user_id,
+                    after={
+                        "from": str(old_role.value if hasattr(old_role, "value") else old_role),
+                        "to": str(
+                            member.role.value if hasattr(member.role, "value") else member.role
+                        ),
+                        "token_id": self.token.id,
+                    },
+                    system_actor=True,
+                )
         elif mapping.get("kind") == "cohort":
             from app.models.cohort import CohortMember, CohortRole
             from app.services.cohort import CohortService
