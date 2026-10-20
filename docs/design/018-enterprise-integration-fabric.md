@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R626 (sixty-eighth window — extended soak)**: the soak drill run at
+  double depth (25 consecutive storms against one uvicorn process, now
+  exercising every audit-write hot path added since R592): RSS growth
+  -10MB over 24 storms (stable, below warm peak) — no leak introduced by
+  the compliance-trail work.
 - **R625 (sixty-seventh/eighth windows — seed diversification + second
   daily full chain)**: e2e-live-all re-run ALL OK with the enriched
   lifecycle (100 checks); fabric fuzz re-run under two FRESH seeds
