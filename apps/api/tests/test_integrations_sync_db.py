@@ -2929,3 +2929,35 @@ async def test_conflict_resolution_error_arms(db):
     with pytest.raises(AppError) as e:
         await svc.resolve_conflict(org.id, run.id, rows[0].id, action="dismiss", actor_id=owner.id)
     assert e.value.code == "SYNC_CONFLICT_RESOLVED" and e.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_default_policy_drops_keys_source_no_longer_sends(db):
+    """R535 (mutation survivor pin): with NO field policy (pure-theirs
+    default) a re-synced record REPLACES the staged payload wholesale —
+    keys the source stopped sending are dropped, never fossilized."""
+    from app.integrations import registry
+
+    org, owner = await _org(db)
+    fake = FakeRosterConnector([[{"external_id": "dk-1", "title": "T1", "course_code": "OLD-101"}]])
+    conn, profile = await _setup_profile(db, org, owner, fake)
+    svc = SyncProfileService(db)
+    run1 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run1.id)
+    # second source snapshot: title renamed, course_code GONE
+    registry.CONNECTORS["oneroster"] = FakeRosterConnector(
+        [[{"external_id": "dk-1", "title": "T1-renamed"}]], respect_state=False
+    )
+    run2 = await svc.trigger(org.id, profile.id)
+    await db.commit()
+    await execute_run(db, run2.id)
+    staged = (
+        await db.execute(
+            select(StagedRecord).where(
+                StagedRecord.connection_id == conn.id, StagedRecord.external_id == "dk-1"
+            )
+        )
+    ).scalar_one()
+    assert staged.payload.get("title") == "T1-renamed"
+    assert "course_code" not in staged.payload, "dropped key fossilized"

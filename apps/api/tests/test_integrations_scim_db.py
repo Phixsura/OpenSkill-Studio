@@ -1700,3 +1700,54 @@ async def test_scim_search_equals_get_list(ctx):
         posted = await c.post("/scim/v2/Users/.search", headers=sh, json={"filter": flt})
         assert got.status_code == posted.status_code == 200
         assert got.json() == posted.json()
+
+
+async def test_patch_no_path_active_object_deactivates(ctx):
+    """R535 (mutation survivor pin): the no-path Entra form
+    {"op":"replace","value":{"active":false}} must deactivate through the
+    SERVICE patch path (the or-arm of the active detector)."""
+    res, _ = await _usvc(ctx).create({"userName": f"np-{uuid.uuid4().hex[:8]}@corp.example.edu"})
+    out = await _usvc(ctx).patch(
+        res["id"], {"Operations": [{"op": "replace", "value": {"active": False}}]}
+    )
+    assert out["active"] is False
+
+
+async def test_patch_non_string_displayname_is_tolerant_noop(ctx):
+    """R535: a non-string displayName PATCH value must be a tolerant no-op —
+    the or-mutant of the type guard would call .strip() on a list (500)."""
+    res, _ = await _usvc(ctx).create(
+        {"userName": f"ns-{uuid.uuid4().hex[:8]}@corp.example.edu", "displayName": "Keep"}
+    )
+    out = await _usvc(ctx).patch(
+        res["id"],
+        {"Operations": [{"op": "replace", "path": "displayName", "value": ["x", 1]}]},
+    )
+    assert out["displayName"] == "Keep"
+
+
+async def test_patch_pathed_boolean_string_never_hijacks_active(ctx):
+    """R535: the no-path active detector requires BOTH no-path AND a
+    coercible value — the or-mutant lets a PATHED displayName op whose
+    value coerces ("false") silently DEACTIVATE the user."""
+    res, _ = await _usvc(ctx).create(
+        {"userName": f"bh-{uuid.uuid4().hex[:8]}@corp.example.edu", "displayName": "Old"}
+    )
+    out = await _usvc(ctx).patch(
+        res["id"],
+        {"Operations": [{"op": "replace", "path": "displayName", "value": "false"}]},
+    )
+    assert out["active"] is True, "pathed displayName op deactivated the user"
+    assert out["displayName"] == "false"
+
+
+async def test_patch_remove_other_path_keeps_external_link(ctx):
+    """R535: remove+externalId requires BOTH — the or-mutant made ANY remove
+    op (e.g. remove displayName) sever the identity link."""
+    res, _ = await _usvc(ctx).create(
+        {"userName": f"rm-{uuid.uuid4().hex[:8]}@corp.example.edu", "externalId": "idp-9"}
+    )
+    out = await _usvc(ctx).patch(
+        res["id"], {"Operations": [{"op": "remove", "path": "displayName"}]}
+    )
+    assert out["externalId"] == "idp-9", "unrelated remove severed the identity link"

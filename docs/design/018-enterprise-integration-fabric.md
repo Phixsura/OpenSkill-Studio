@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R535 (thirty-ninth window, AST-mutation — sync \_apply_record + SCIM
+  lifecycle)**: 74 mutants, 51 killed outright; THREE true survivors
+  pinned with killers — (1) the pure-theirs default must DROP keys the
+  source stopped sending (the fossilization mutant survived: no test
+  re-synced with a removed field); (2) the no-path active detector needs
+  BOTH conditions (the or-mutant let a pathed displayName op whose value
+  coerces, e.g. "false", silently DEACTIVATE the user); (3) remove +
+  externalId needs BOTH (the or-mutant made any remove op sever the
+  identity link). Remaining survivors are status-code/length/boundary
+  cosmetics and the echo-window instant.
 - **R532 (thirty-ninth window, AST-mutation — OIDC/LTI/signing cores)**:
   53 mutants over handle_callback, both _jwks_keys, handle_launch and
   sign_payload: 45 killed; one TRUE survivor pinned — a JWKS mixing EC/
