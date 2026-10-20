@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R628 (sixty-ninth window — connection-pool arithmetic)**: prod runs 5
+  DB-pooled processes (4 uvicorn workers + arq); defaults give 5×15=75
+  connections against Postgres' max_connections=100 — safe, but the
+  commented DB_POOL_SIZE=20 example in .env.example, if applied to prod,
+  yields 150>100 and the stack dies under load with "remaining connection
+  slots are reserved". Ops §7e2 states the formula with headroom; the
+  .env.example comment now carries the warning inline.
 - **R627 (sixty-eighth window — the WORKER gets its own soak)**: the API
   process was soak-proven but the arq worker runs 24/7 and had no RSS
   watch. New drill (worker_soak_drill, 12th in `make drills`): boots a REAL

@@ -465,6 +465,23 @@ weaken the `service_completed_successfully` / `service_healthy` conditions
 to the bare list form: that only orders container creation, and on a first
 deploy the API will serve against an empty database.
 
+## 7e2. Connection-pool arithmetic (R628)
+
+Postgres ships with `max_connections = 100`. Every API worker holds up to
+`DB_POOL_SIZE + DB_MAX_OVERFLOW` connections (defaults 5+10=15), and the
+prod compose runs **4 uvicorn workers + 1 arq worker = 5 pools**:
+
+```
+5 × (DB_POOL_SIZE + DB_MAX_OVERFLOW) ≤ max_connections − 20 (headroom
+for migrate, psql, backups, monitoring)
+```
+
+Defaults: 5×15 = 75 ≤ 80 ✓. The commented `DB_POOL_SIZE=20` example in
+.env.example is a DEV suggestion — applied to prod it yields 5×30 = 150 >
+100 and the stack falls over under load with
+`FATAL: remaining connection slots are reserved`. Raise `max_connections`
+(and RAM) before raising pool sizes.
+
 ## 7f. Backups (R564)
 
 The prod compose persists three volumes: `pgdata` (system of record),
