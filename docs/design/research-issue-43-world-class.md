@@ -607,6 +607,23 @@ admin mapping/connection mutation.
 10. Export field filtering as a denylist or applied downstream of serialization
     (new fields leak by default — R82's `_card_fields` lesson at warehouse scale).
 
+## Closing assessment v3 (2026-10-20, windows 34-43 / R486-R541)
+
+v2 closed the feature-parity table. Windows 35-43 closed everything AROUND
+the features — the layers an auditor, operator or attacker actually meets:
+
+| Layer                   | State after R541                                                                                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Security review         | 2 real vulns found & fixed: foreign-account binding gates on SCIM/import (R512), SAML SLO duplicate-param verify/parse split + replay window (R513)             |
+| Mutation testing        | EVERY fabric service core systematically AST-swept (~400 mutants across 9 sweeps); 11 real behaviors pinned; all other survivors individually dispositioned     |
+| Symbolic proofs         | 11 CrossHair contracts PROVEN (schema walker bounds, SCIM projection, drop-universe identity, signing shape/binding, CSV-injection sanitizer, IDNA idempotence) |
+| Error/registry totality | all 104 AppError codes test-asserted; zero never-driven registry values; standing guards on both                                                                |
+| Production topology     | standalone-server rules pinned (tracing root, API_PROXY_URL at build, body-drain fix); prod compose wiring fixed; API container fingerprint masked              |
+| Browser verification    | every journey green ON THE PRODUCTION ARTIFACT: e2e 31, commercial 19, talent 22, lifecycle 60, part2 42, fabric 74, a11y 7; Playwright sweeps 9/9              |
+| Live-HTTP verification  | lifecycle 92 checks; scim2-tester 50/0 hard; fuzz 964 + app-wide 4,132 reqs zero-5xx; race probes 21/21; drills 10/10; scale 37/37; storm 8/8                   |
+| Full-stack test base    | ~7,580 backend tests + 771 web units green; migration downgrade round-trip over all revisions                                                                   |
+| Supply chain            | pnpm audit + pip-audit CLEAN (next 15.5.28 self-hosted-ISR fix, pyjwt 2.15.1 x14 advisories); gitleaks full-history scan clean; licenses permissive             |
+
 ## Closing assessment v2 (2026-10-19, window 34 / R486-R499)
 
 Re-scored after the thirty-fourth window. Every gap the v1 table left open

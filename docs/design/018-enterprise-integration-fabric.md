@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R541 (forty-third window, LICENSE audit — never run)**: npm prod tree
+  is permissive throughout except sharp's prebuilt libvips (LGPL-3.0,
+  dynamically linked — the industry-standard Next image pipeline
+  situation); Python tree fully permissive (hypothesis MPL-2.0 is
+  dev-only). No copyleft obligations attach to the shipped services.
 - **R540 (forty-third window, SECRETS SCAN — another never-run layer)**:
   gitleaks over all 2,489 commits of history: ONE hit, triaged — a mock
   trigger secret in a web unit-test fixture (sth_abc123def456), not a
