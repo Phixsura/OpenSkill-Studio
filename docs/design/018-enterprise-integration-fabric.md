@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R598 (fifty-seventh window — audit retention/export posture
+  documented)**: ops §7b now records the full R592-597 chain plus the
+  deliberate posture: cp_audit_events is append-only and NEVER swept by the
+  retention cron (compliance records outlive operational data; purge
+  horizons are a legal decision), the feed is index-served
+  ((tenant_id, created_at) — growth does not degrade it), and export = page
+  the tenant feed API into the external compliance store. Verified the
+  platform audit UI renders intg.* actions as-is (raw monospace action
+  strings, no label map to go stale).
 - **R597 (fifty-sixth window — the audit READ side: tenant saw NONE of it)**:
   the write-side audit work (R592-R596) was only half the story — the tenant
   audit endpoint filters by `action.in_(TENANT_VISIBLE_ACTIONS)`, and NOT ONE

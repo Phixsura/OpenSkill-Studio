@@ -417,6 +417,25 @@ no-op), every mutating route must call-or-declare (structural test), and
 a DB test proves a row actually lands. Break-glass (`intg.break_glass.set`)
 is the headline entry an auditor will ask for.
 
+R592–R597 completed the chain end to end:
+
+- **IdP-driven events are audited too** — SCIM provision/reactivate/
+  deprovision/group-delete and SSO JIT provisioning record a `system`-actor
+  row (no human performed them); the NRPS bulk pull records the operation
+  under the admin who ran it. Guard: any fabric `OrgMember(` construction
+  without an audit trail fails `test_access_grant_audit_guard_db.py`.
+- **Tenant-visible** — all 46 `intg.*` actions are in
+  `TENANT_VISIBLE_ACTIONS`, so the org's own audit feed
+  (`GET /tenants/{id}/audit-events`, owner/billing_admin) shows the full
+  integration history; a guard fails if a new fabric action is omitted.
+- **Retention & export posture** — `cp_audit_events` is append-only and is
+  deliberately NEVER swept by the retention cron (compliance records
+  outlive operational data; a purge horizon is a business/legal decision,
+  not an engineering default). The feed query is served by
+  `(tenant_id, created_at)`, so growth does not degrade it. Export = page
+  the feed API (`page`/`per_page≤200`, optional `action` filter) into the
+  external compliance store; payloads are config-shape only, never secrets.
+
 ## 7c. Admin list pagination (R375/R376)
 
 `GET .../events` and `.../deliveries` take `before=<last id>` (keyset —
