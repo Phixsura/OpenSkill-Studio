@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R547 (forty-fifth window, DEPLOY — worker healthcheck)**: the R533/
+  R534 compose-audit class continued: the worker service inherits the API
+  image's HTTP healthcheck and so reported permanently UNHEALTHY (false
+  operational alarm; anything gated on its health never starts). It now
+  checks the key a live arq worker actually maintains
+  (arq:queue:health-check — verified against a running worker, not the
+  docs); the one-shot migrate job disables the inherited check.
 - **R546 (forty-fourth window, DRIFT guard earns its keep)**: the R545
   indexes landed migration-only — the model↔migration zero-drift guard
   caught it on the next battery (exactly its job); Index declarations with

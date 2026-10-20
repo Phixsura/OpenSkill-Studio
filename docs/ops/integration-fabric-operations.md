@@ -201,6 +201,14 @@ notify the fabric that its data changed:
 
 All registered names are pinned by `test_every_fabric_sweep_has_a_registered_cron`.
 
+## 6b. Worker health in production compose (R547)
+
+The worker container reuses the API image, whose HEALTHCHECK curls
+:8000/health — a worker serves no HTTP, so it reported permanently
+UNHEALTHY. The compose service now checks the key a live arq worker
+actually maintains (`arq:queue:health-check` in redis, verified
+empirically); the one-shot `migrate` job disables the inherited check.
+
 ## 7. Health and alerting
 
 `GET /orgs/{org}/integrations/health` (the hub strip polls it): connection

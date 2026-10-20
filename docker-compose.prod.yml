@@ -114,6 +114,23 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     command: ["uv", "run", "arq", "app.controlplane.worker.WorkerSettings"]
+    # R547: the api image's HEALTHCHECK curls :8000/health — a worker serves
+    # no HTTP, so it reported permanently UNHEALTHY (operational false
+    # alarm; anything gated on its health never starts). A live arq worker
+    # maintains its redis health key; check THAT.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "uv",
+          "run",
+          "python",
+          "-c",
+          "import asyncio, sys; from redis.asyncio import from_url; from app.config import settings; sys.exit(0 if asyncio.run(from_url(settings.redis_url).exists('arq:queue:health-check')) else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Run migrations on deploy
   migrate:
@@ -126,6 +143,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-openskill}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-openskill}
     command: ["uv", "run", "alembic", "upgrade", "head"]
     restart: "no"
+    # R547: one-shot job — the inherited HTTP healthcheck is meaningless.
+    healthcheck:
+      disable: true
 
 volumes:
   pgdata:
