@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R587 (fifty-third window — SSRF: deprecated IPv6 site-local allowed)**:
+  the egress forbidden-IP classifier passed `fec0::/10` (deprecated IPv6
+  site-local) — it is NOT `is_private`, yet some stacks still route it, so
+  it was a usable internal-SSRF carrier. Added `is_site_local` to the block
+  set. Audited the full edge matrix: 6to4 (2002::) and NAT64 (64:ff9b::)
+  embeddings of 127.0.0.1 were already caught (is_private / is_reserved) —
+  now pinned explicitly in the classification matrix test to prevent
+  regression. IPv4-mapped, CGNAT, link-local/cloud-metadata, loopback all
+  still blocked; real public v4/v6 still allowed.
 - **R586 (fifty-second window — same NaN hazard in warehouse export)**:
   the NDJSON export path used default json.dumps (allow_nan=True), so a
   non-finite float in source data (Postgres float columns CAN hold 'NaN')

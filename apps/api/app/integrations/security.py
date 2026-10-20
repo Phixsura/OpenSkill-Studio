@@ -77,6 +77,9 @@ def _is_forbidden_ip(ip_str: str) -> bool:
         or ip.is_multicast
         or ip.is_reserved
         or ip.is_unspecified
+        # R587: deprecated IPv6 site-local (fec0::/10) is NOT is_private and
+        # some stacks still route it — a usable internal-SSRF carrier.
+        or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
         # Carrier-grade NAT (100.64/10) — not covered by is_private.
         or (isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.ip_network("100.64.0.0/10"))
     )

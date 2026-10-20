@@ -329,6 +329,9 @@ def test_forbidden_ip_classification_matrix():
         "fe80::1",  # v6 link-local
         "ff02::1",  # v6 multicast
         "fc00::1",  # v6 ULA (private)
+        "fec0::1",  # R587: deprecated v6 site-local (not is_private)
+        "2002:7f00:1::",  # R587: 6to4 embedding 127.0.0.1 (is_private-caught)
+        "64:ff9b::7f00:1",  # R587: NAT64 embedding 127.0.0.1 (is_reserved-caught)
         "::ffff:10.0.0.1",  # IPv4-mapped v6 smuggling a private v4
         "::ffff:127.0.0.1",  # IPv4-mapped loopback
         "not-an-ip",  # unparseable is forbidden, not ignored
