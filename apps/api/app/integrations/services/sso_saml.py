@@ -286,6 +286,21 @@ class SamlService:
 
             await AuthService(self.db)._revoke_all_user_tokens(link.user_id)  # noqa: SLF001
             swept = 1
+            # R602: an IdP-initiated SLO just revoked EVERY session of this
+            # user platform-wide — a forced-logout security event that had no
+            # trail at all (back-channel at least emitted a mesh event).
+            from app.integrations.facade import record_fabric_audit
+
+            await record_fabric_audit(
+                self.db,
+                conn.org_id,
+                None,
+                "intg.sso.sessions_revoked",
+                "user",
+                link.user_id,
+                after={"via": "saml_slo", "connection_ref": conn.id},
+                system_actor=True,
+            )
         return conn, swept, _one("RelayState")
 
     def build_slo_response_redirect(

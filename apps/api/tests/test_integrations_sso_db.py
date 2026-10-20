@@ -986,6 +986,22 @@ async def test_backchannel_logout_revokes_sessions_and_rejects_bad_tokens(db):
         .all()
     )
     assert live == []
+    # R602: the forced logout lands in the compliance trail (system actor).
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    bk_row = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.sso.sessions_revoked",
+                    CommercialAuditEvent.target_id == user_id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert bk_row.actor_type == "system" and bk_row.after["via"] == "oidc_backchannel"
 
     # jti replay refused.
     with pytest.raises(AppError):

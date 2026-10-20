@@ -375,6 +375,19 @@ async def handle_backchannel_logout(
     from app.services.auth import AuthService
 
     await AuthService(db)._revoke_all_user_tokens(link.user_id)  # noqa: SLF001
+    # R602: same forced-logout security event as SAML SLO — compliance trail.
+    from app.integrations.facade import record_fabric_audit
+
+    await record_fabric_audit(
+        db,
+        conn.org_id,
+        None,
+        "intg.sso.sessions_revoked",
+        "user",
+        link.user_id,
+        after={"via": "oidc_backchannel", "connection_ref": conn.id},
+        system_actor=True,
+    )
     try:
         from app.integrations.facade import emit_event
 

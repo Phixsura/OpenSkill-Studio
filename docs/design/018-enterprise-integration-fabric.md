@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R602 (fifty-eighth window — forced logouts join the trail)**: an
+  IdP-initiated session revocation (SAML SLO / OIDC back-channel logout)
+  kills EVERY session of the target user platform-wide — SAML SLO had NO
+  trail at all and back-channel only a mesh event. Both now record
+  intg.sso.sessions_revoked (system actor, via=saml_slo|oidc_backchannel +
+  connection_ref). With R601 this completes the session-lifecycle trail:
+  hatch use, forced revocation, deprovision sweep — all reconstructible.
 - **R601 (fifty-eighth window — break-glass USE + a fragile retention
   coupling)**: the actual break-glass login (password bypass under enforced
   SSO — THE security event the hatch exists for) wrote only the mesh event;

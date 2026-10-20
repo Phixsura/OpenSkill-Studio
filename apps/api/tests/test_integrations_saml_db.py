@@ -748,6 +748,22 @@ async def test_slo_signed_request_revokes_sessions(db):
         .all()
     )
     assert live == []
+    # R602: the forced logout lands in the compliance trail (system actor).
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    row = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.sso.sessions_revoked",
+                    CommercialAuditEvent.target_id == result.user.id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.actor_type == "system" and row.after["via"] == "saml_slo"
     redirect = svc.build_slo_response_redirect(conn2, in_response_to=None, relay_state=relay)
     assert redirect.startswith("https://idp.example.com/slo?SAMLResponse=")
     assert "RelayState=r-1" in redirect
