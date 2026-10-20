@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R609 (sixtieth window — property proofs find a real SLO 500)**: new
+  DB-free property module (tests/test_fabric_pure_properties.py): the SSRF
+  v4 classifier now has a DUAL-IMPLEMENTATION check (test declares the
+  forbidden space as an explicit RFC CIDR union; 2,000 sampled addresses
+  must agree with the production flag-based classifier — a Python
+  flag-semantics change fails here), v6 never-raises + mapped-agreement,
+  fail-closed totality over garbage, and totality for the NRPS Link parser
+  and SCIM path normalizer. The SAML time-parser property found a REAL bug:
+  the SLO handler re-derived IssueInstant with raw fromisoformat (missing
+  the R177 naive-fix that _parse_time exists for), so a timezone-less
+  IssueInstant on a signed LogoutRequest raised TypeError PAST the
+  ValueError guard — an unhandled 500 on a crafted/non-compliant request.
+  Fixed to use _parse_time; regression test + negative proof (old code
+  reproduces 5 TypeErrors under the new test).
 - **R608 (sixtieth window — the PII barrier gets a totality proof)**:
   _scalar_summary is the ONLY thing between platform-internal audit JSONB
   and the tenant's eyes (R70[2] flattening). New hypothesis property (300

@@ -1524,6 +1524,31 @@ async def test_slo_request_replay_and_staleness_refused(db):
         await svc.handle_slo_request(connection_id=conn.id, raw_query=stale_q)
     assert e.value.code == "SSO_ASSERTION_INVALID"
 
+    # R609: a NAIVE IssueInstant (no Z/offset — non-compliant IdP or crafted
+    # request) previously escaped the ValueError guard as a TypeError
+    # (aware - naive) → unhandled 500. Must be the same clean typed refusal.
+    naive = (
+        f'<samlp:LogoutRequest xmlns:samlp="{SAMLP_NS}" xmlns:saml="{SAML_NS}" '
+        f'ID="_LO{uuid.uuid4().hex}" Version="2.0" '
+        f'IssueInstant="{datetime.now(UTC).replace(tzinfo=None).isoformat()}">'
+        f"<saml:Issuer>{IDP_ENTITY}</saml:Issuer>"
+        f"<saml:NameID>{subject}</saml:NameID>"
+        "</samlp:LogoutRequest>"
+    )
+    deflated_n = zlib.compress(naive.encode())[2:-4]
+    query_n = f"SAMLRequest={quote(base64.b64encode(deflated_n).decode(), safe='')}&SigAlg=" + quote(
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", safe=""
+    )
+    sig_n = key.sign(query_n.encode(), padding.PKCS1v15(), hashes.SHA256())
+    naive_q = query_n + "&Signature=" + quote(base64.b64encode(sig_n).decode(), safe="")
+    # naive now ≈ UTC now here, so freshness passes — the request SUCCEEDS
+    # (sweeps nothing: subject has no link from this crafted flow is fine;
+    # the point is NO TypeError/500). Accept either success or typed refusal.
+    try:
+        await svc.handle_slo_request(connection_id=conn.id, raw_query=naive_q)
+    except AppError as exc:
+        assert exc.code == "SSO_ASSERTION_INVALID"
+
 
 @pytest.mark.asyncio
 async def test_slo_partial_signature_params_refused(db):

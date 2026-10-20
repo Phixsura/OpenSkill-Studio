@@ -258,7 +258,12 @@ class SamlService:
         # request ID goes through the same single-use cache as assertions.
         issue_instant = root.get("IssueInstant") or ""
         try:
-            issued = datetime.fromisoformat(issue_instant.replace("Z", "+00:00"))
+            # R609: MUST go through _parse_time — this path previously
+            # duplicated the raw fromisoformat without the R177 naive-fix, so
+            # a timezone-less IssueInstant made `now - issued` raise TypeError
+            # (aware - naive) PAST the ValueError guard: an unhandled 500 on
+            # a crafted/non-compliant LogoutRequest.
+            issued = _parse_time(issue_instant)
         except ValueError as exc:
             raise _invalid("slo_issue_instant_invalid") from exc
         now = datetime.now(UTC)
