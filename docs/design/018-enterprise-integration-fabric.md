@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R564 (forty-eighth window — backup story)**: the prod stack persisted
+  three volumes with zero backup documentation. Ops §7f: pg_dump -Fc
+  (restore flow verified against the live dev stack — 1.03GB dump,
+  pg_restore -l lists clean), MinIO mc mirror, and the explicit redis
+  disposition (AOF survives restarts; a lost hour of usage counters is the
+  accepted DR exposure per R92[H2]). Also fixed a section-number collision
+  the R552 entry introduced (two §7c) — startup ordering is now §7e.
 - **R563 (forty-seventh window — the health summary says WHY things
   stall)**: fabric_health counted pending deliveries/syncs but never said
   the one thing that makes them all stall — a dead arq worker. The summary

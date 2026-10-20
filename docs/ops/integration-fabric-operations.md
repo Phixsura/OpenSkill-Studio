@@ -395,7 +395,7 @@ ULIDs are time-ordered; stable under concurrent inserts) and return
 Playwright job) run axe-core WCAG 2.1 A/AA over the five fabric pages as
 an authenticated admin; any serious/critical violation fails.
 
-## 7c. Production startup ordering (R552)
+## 7e. Production startup ordering (R552)
 
 `docker compose -f docker-compose.prod.yml up` enforces:
 `postgres/redis/minio healthy` → `migrate` exits 0 (`alembic upgrade head`,
@@ -404,6 +404,32 @@ healthy (image HEALTHCHECK on `GET /api/v1/health`) → `web` starts. Do not
 weaken the `service_completed_successfully` / `service_healthy` conditions
 to the bare list form: that only orders container creation, and on a first
 deploy the API will serve against an empty database.
+
+## 7f. Backups (R564)
+
+The prod compose persists three volumes: `pgdata` (system of record),
+`miniodata` (uploaded artifacts/export parts), `redisdata` (billing
+counters, AOF). Nothing backs them up automatically — schedule this on the
+host (cron/systemd timer):
+
+```bash
+# Postgres — custom-format dump, restorable table-by-table (verified R564)
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc -Z6 > "backup-$(date +%F).dump"
+
+# Restore (into a fresh database; stop api/worker first)
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists < backup-YYYY-MM-DD.dump
+
+# MinIO — mirror the bucket out of the container
+docker compose -f docker-compose.prod.yml exec -T minio \
+  sh -c 'mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mirror local/openskill /backup'
+```
+
+Redis is derived + billing-counter state: the AOF in `redisdata` survives
+restarts; for disaster recovery a lost hour of API-usage counters is the
+accepted exposure (metering fails open by design, R92[H2]). Test the
+restore path with `make drills` (backup_restore_drill) before relying on it.
 
 ## 8a. Production web serving topology (R528 — read before deploying)
 

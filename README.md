@@ -85,7 +85,7 @@ The stack self-orders: infra health → migrations → API (4 uvicorn workers)
 default/weak secrets, a non-Fernet `CREDENTIAL_ENCRYPTION_KEY`, wildcard
 CORS or the mock domain verifier. Operational runbook:
 [docs/ops/integration-fabric-operations.md](docs/ops/integration-fabric-operations.md)
-(required secrets §6c, startup ordering §7c, web serving topology §8a).
+(required secrets §6c, startup ordering §7e, backups §7f, web serving topology §8a).
 
 ## Project Structure
 
