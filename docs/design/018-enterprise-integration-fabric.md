@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R604 (fifty-eighth window — the other two blank update payloads)**:
+  swept every record_fabric_audit call for missing `after` payloads (AST,
+  17 hits). Deletes/mints/revokes are legitimately payload-less (target_id
+  is the fact; credential.set must stay body-less by design). The two
+  remaining UPDATE actions got the R603 treatment: intg.sync_profile.updated
+  now names the changed knobs (an enabled/schedule flip — pausing a data
+  sync — was indistinguishable from a field-policy tweak) and
+  intg.mapping.updated carries the new document version + field count
+  (never the document body).
+- **R603 (fifty-eighth window — sso.updated payload)**: see commit; the
+  changed-fields payload with secret reduced to a marker.
 - **R602 (fifty-eighth window — forced logouts join the trail)**: an
   IdP-initiated session revocation (SAML SLO / OIDC back-channel logout)
   kills EVERY session of the target user platform-wide — SAML SLO had NO

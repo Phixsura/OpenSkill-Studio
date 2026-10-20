@@ -216,8 +216,16 @@ async def update_mapping(
     await _admin(org_id, user, db)
     row = await MappingService(db).update_document(org_id, profile_id, body.document)
     resp = MappingResponse.model_validate(row, from_attributes=True)
+    # R604 (R603 class): say WHAT changed — the new document version and its
+    # shape, never the document body (it may reference tenant field names).
     await record_fabric_audit(
-        db, org_id, user.id, "intg.mapping.updated", "mapping_profile", row.id
+        db,
+        org_id,
+        user.id,
+        "intg.mapping.updated",
+        "mapping_profile",
+        row.id,
+        after={"version": row.version, "fields": len(body.document or {})},
     )
     await db.commit()
     return {"data": resp}
@@ -305,8 +313,29 @@ async def update_sync_profile(
         repin_mapping=body.repin_mapping,
     )
     resp = SyncProfileResponse.model_validate(profile, from_attributes=True)
+    # R604 (R603 class): an enabled/schedule flip (pausing or re-cadencing a
+    # data sync) must be distinguishable from a field-policy tweak.
+    changed = {
+        k: v
+        for k, v in {
+            "schedule": body.schedule,
+            "enabled": body.enabled,
+            "field_policy": f"{len(body.field_policy)} fields"
+            if body.field_policy is not None
+            else None,
+            "mapping_profile_id": body.mapping_profile_id,
+            "repin_mapping": body.repin_mapping or None,
+        }.items()
+        if v is not None
+    }
     await record_fabric_audit(
-        db, org_id, user.id, "intg.sync_profile.updated", "sync_profile", profile.id
+        db,
+        org_id,
+        user.id,
+        "intg.sync_profile.updated",
+        "sync_profile",
+        profile.id,
+        after=changed,
     )
     await db.commit()
     return {"data": resp}
