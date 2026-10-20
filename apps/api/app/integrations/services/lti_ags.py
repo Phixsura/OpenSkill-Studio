@@ -10,6 +10,7 @@ they never break the domain write that produced the grade (fail-safe).
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import time
 from datetime import UTC, datetime
@@ -151,6 +152,25 @@ async def push_score(
 ) -> bool:
     """POST one AGS Score for a mapped launch user. Returns success."""
     if not link.grade_sync_enabled or not link.ags_lineitem_url:
+        return False
+    # R585: a non-finite score (an upstream eval bug, division by zero) would
+    # serialize to the invalid JSON token `NaN`/`Infinity` (json.dumps emits
+    # them unquoted) — the LMS rejects the body or stores garbage. Refuse at
+    # the boundary: finite, non-negative, and within [0, scoreMaximum].
+    if (
+        not math.isfinite(score_given)
+        or not math.isfinite(score_maximum)
+        or score_maximum <= 0
+        or score_given < 0
+        or score_given > score_maximum
+    ):
+        log.warning(
+            "ags_score_refused_out_of_range",
+            link_id=link.id,
+            user_id=user_id,
+            score_given=score_given,
+            score_maximum=score_maximum,
+        )
         return False
     reg = await db.get(LtiRegistration, link.registration_id)
     if reg is None or reg.status != "active":

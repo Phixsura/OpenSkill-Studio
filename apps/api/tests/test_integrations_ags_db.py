@@ -222,6 +222,35 @@ async def test_push_score_guards(db):
 
 
 @pytest.mark.asyncio
+async def test_push_score_refuses_non_finite_and_out_of_range(db):
+    """R585: a non-finite or out-of-range score must never reach the LMS —
+    json.dumps emits NaN/Infinity as invalid JSON tokens, and a score above
+    scoreMaximum or below 0 violates the AGS spec."""
+    org, user = await _org(db)
+    reg, link = await _setup(db, org, user)
+    jwks = await tool_jwks(db)
+    platform = FakeAgsPlatform(jwks)
+    for bad in (float("nan"), float("inf"), float("-inf"), -1.0, 150.0):
+        assert (
+            await push_score(
+                db, link, user_id=user.id, score_given=bad, score_maximum=100.0, egress=platform
+            )
+            is False
+        ), bad
+    # a zero scoreMaximum is also refused (no valid ratio)
+    assert (
+        await push_score(
+            db, link, user_id=user.id, score_given=0.0, score_maximum=0.0, egress=platform
+        )
+        is False
+    )
+    assert platform.scores == []
+    # boundary values are accepted
+    assert await push_score(db, link, user_id=user.id, score_given=0.0, egress=platform) is True
+    assert await push_score(db, link, user_id=user.id, score_given=100.0, egress=platform) is True
+
+
+@pytest.mark.asyncio
 async def test_gradeable_event_hook_pushes_clamped_score(db, monkeypatch):
     org, user = await _org(db)
     reg, link = await _setup(db, org, user)

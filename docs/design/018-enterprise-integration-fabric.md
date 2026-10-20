@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R585 (fifty-second window — AGS score could emit invalid JSON)**:
+  push_score did `float(score_given)` with no finiteness check, so an
+  upstream eval bug producing NaN/Inf would serialize to the invalid JSON
+  tokens `NaN`/`Infinity` (json.dumps emits them unquoted) — the LMS
+  rejects the body or stores a garbage grade. Now refuses non-finite,
+  negative, zero-maximum and above-maximum scores at the boundary (logs
+  ags_score_refused_out_of_range, returns False); 0 and scoreMaximum still
+  accepted. Tests pin all five bad cases + both boundaries.
 - **R584 (fifty-first window — applications detail drawer: two dead
   panels)**: the same contract-audit method (prompted by R583) found the
   applications detail drawer reading `messages` and `timeline` off the
