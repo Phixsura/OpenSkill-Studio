@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -39,8 +37,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY required}
     volumes:
       - miniodata:/data
     healthcheck:
@@ -65,10 +63,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-openskill}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-openskill}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY required}
       S3_BUCKET: ${S3_BUCKET:-openskill}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      # R549: webhook/connection secrets-at-rest key — config refuses to
+      # boot production without it, but the compose never passed it through.
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY required}
       CORS_ORIGINS: '["${FRONTEND_URL:-http://localhost:3000}"]'
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     ports:
@@ -108,10 +109,13 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-openskill}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-openskill}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY required}
       S3_BUCKET: ${S3_BUCKET:-openskill}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      # R549: webhook/connection secrets-at-rest key — config refuses to
+      # boot production without it, but the compose never passed it through.
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY required}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     command: ["uv", "run", "arq", "app.controlplane.worker.WorkerSettings"]
     # R547: the api image's HEALTHCHECK curls :8000/health — a worker serves

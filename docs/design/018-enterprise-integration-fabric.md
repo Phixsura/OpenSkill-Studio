@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R549 (forty-sixth window, DEPLOY — prod compose secrets)**: two more
+  compose-audit findings: (1) MinIO root credentials DEFAULTED to
+  minioadmin/minioadmin in production — a stack brought up without
+  explicit S3 vars served every export/import object on textbook creds;
+  now `:?required` like DB_PASSWORD/JWT_SECRET. (2) CREDENTIAL_ENCRYPTION_KEY
+  was never plumbed into the api/worker services at all — config
+  fail-closes production boot without it, so the shipped compose could
+  not start (fail-closed, but broken); now passed through as required.
+  `docker compose config` validates with the full var set.
 - **R548 (forty-fifth window, LATENCY tripwire — first perf baseline)**:
   tests/e2e_latency_smoke.py measures warmed p50/p95 over seven hot reads
   (health, providers, connections, events, both catalogs, health summary)
