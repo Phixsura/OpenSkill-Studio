@@ -84,3 +84,35 @@ def export_drop_universe_rule(allow_a: bool, allow_b: bool, drop_a: bool, drop_b
         raised = True
     exported = [f for f in allowlist if anonymize.get(f) != "drop"]
     return raised == (len(exported) == 0)
+
+
+def signature_shape_and_determinism(secret: str, message_id: str, timestamp: int) -> bool:
+    """Standard-Webhooks signature: always 'v1,'-prefixed 44-char-b64 of a
+    32-byte HMAC, and deterministic for identical inputs.
+
+    pre: len(secret) <= 64 and len(message_id) <= 26 and 0 <= timestamp <= 2**31
+    post: __return__ is True
+    """
+    from app.integrations.services.events import sign_payload
+
+    a = sign_payload(secret, message_id, timestamp, b"{}")
+    b = sign_payload(secret, message_id, timestamp, b"{}")
+    return a == b and a.startswith("v1,") and len(a) == 3 + 44
+
+
+def signature_binds_every_input(secret: str, message_id: str, timestamp: int) -> bool:
+    """Flipping ANY of secret, id, timestamp or body changes the signature
+    (second-preimage sanity over the signed-string construction).
+
+    pre: len(secret) <= 32 and len(message_id) <= 20 and 0 <= timestamp < 2**31 - 1
+    post: __return__ is True
+    """
+    from app.integrations.services.events import sign_payload
+
+    base = sign_payload(secret, message_id, timestamp, b"x")
+    return (
+        base != sign_payload(secret + "A", message_id, timestamp, b"x")
+        and base != sign_payload(secret, message_id + "A", timestamp, b"x")
+        and base != sign_payload(secret, message_id, timestamp + 1, b"x")
+        and base != sign_payload(secret, message_id, timestamp, b"y")
+    )

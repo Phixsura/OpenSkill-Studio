@@ -2519,3 +2519,84 @@ async def test_jwks_mixed_kty_tolerates_non_rsa_entries(db):
     keys = await svc._jwks_keys(conn, "https://idp/jwks", kid="rsa-good")
     assert "rsa-good" in keys
     assert "ec-1" not in keys  # never stored under a non-RSA kty
+
+
+@pytest.mark.asyncio
+async def test_resolution_single_verified_email_member_links(db):
+    """R536 (mutation survivor pin): exactly ONE active member with the
+    verified-domain verified email MUST match and link (the >= mutant would
+    queue the happy path of the whole email-match rung)."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "acme.edu")
+    member = await _user(db, email=f"one-{uuid.uuid4().hex[:8]}@acme.edu")
+    db.add(
+        OrgMember(
+            org_id=org.id, user_id=member.id, role=OrgRole.STUDENT, status=MemberStatus.ACTIVE
+        )
+    )
+    await db.flush()
+    svc = IdentityService(db)
+    result = await svc.resolve(
+        _ident(org, subject=f"em-{uuid.uuid4().hex[:6]}", email=member.email, verified=True)
+    )
+    assert result.user.id == member.id
+    assert result.jit_created is False
+    assert result.link is not None and result.link.user_id == member.id
+
+
+@pytest.mark.asyncio
+async def test_resolution_zero_members_jits_not_queues(db):
+    """R536 (the TRUE L131 mutant): verified in-domain email with ZERO
+    member matches must fall through to JIT (when allowed) — the >= mutant
+    queued it as "multiple_member_matches"."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    await _verified_domain(db, org, "acme.edu")
+    svc = IdentityService(db)
+    fresh = f"jit-{uuid.uuid4().hex[:8]}@acme.edu"
+    result = await svc.resolve(
+        _ident(org, subject=f"jz-{uuid.uuid4().hex[:6]}", email=fresh, verified=True),
+        allow_jit=True,
+    )
+    assert result.jit_created is True
+    assert result.user.email == fresh
+
+
+@pytest.mark.asyncio
+async def test_queue_link_refuses_inactive_member(db):
+    """R536 (mutation survivor pin): admin adjudication may only link a
+    queue item to an ACTIVE member — an archived member is a clean 422
+    (the != mutant would link ONLY archived members)."""
+    owner = await _user(db)
+    org = await _org(db, owner)
+    svc = IdentityService(db)
+    with pytest.raises(AppError):
+        await svc.resolve(_ident(org, subject=f"qq-{uuid.uuid4().hex[:6]}", email=None))
+    item = (
+        (
+            await db.execute(
+                select(IdentityMatchQueue).where(
+                    IdentityMatchQueue.org_id == org.id,
+                    IdentityMatchQueue.status == "pending",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )[-1]
+    archived = await _user(db, email=f"arch-{uuid.uuid4().hex[:8]}@acme.edu")
+    db.add(
+        OrgMember(
+            org_id=org.id,
+            user_id=archived.id,
+            role=OrgRole.STUDENT,
+            status=MemberStatus.ARCHIVED,
+        )
+    )
+    await db.flush()
+    with pytest.raises(AppError) as e:
+        await svc.resolve_queue_item(
+            org.id, item.id, action="link", user_id=archived.id, actor_id=owner.id
+        )
+    assert e.value.code == "IDENTITY_QUEUE_INVALID"
