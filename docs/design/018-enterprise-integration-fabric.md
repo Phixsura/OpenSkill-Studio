@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R557 (forty-sixth window, CI — security gates stop being rituals)**: the
+  gitleaks scan (R540), pip-audit (R539) and pnpm audit (R541) were
+  local-only; nothing enforced them on a PR. New `security` CI job:
+  gitleaks-action over full history (uses the standing .gitleaks.toml),
+  pip-audit over the synced env, and `scripts/audit-gate.mjs` — pnpm audit
+  has no ignore list, so the gate wraps `pnpm audit --prod --json` and
+  fails on any advisory not explicitly dispositioned (currently only the
+  unpatched braces ReDoS, dev-tooling path). Verified locally: gate passes,
+  pip-audit clean, gitleaks clean.
 - **R556 (forty-sixth window — same race in tenant-export bucket)**: the
   R555 bug class also lived in provisioning's private export bucket: two
   first-ever tenant exports racing head→create left the loser's export

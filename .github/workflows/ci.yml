@@ -11,6 +11,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # R557: supply-chain + secrets gates — all three were local-only rituals
+  # (R539/R540); nothing stopped a leaked key or a new advisory at the PR.
+  security:
+    name: Security (gitleaks + dependency audits)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # gitleaks scans history
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: pnpm audit gate (dispositions in scripts/audit-gate.mjs)
+        run: node scripts/audit-gate.mjs
+      - uses: astral-sh/setup-uv@v5
+      - run: cd apps/api && uv sync --extra dev
+      - name: pip-audit
+        run: cd apps/api && uv run --with pip-audit pip-audit
+
   lint-frontend:
     name: Lint (Frontend)
     runs-on: ubuntu-latest
