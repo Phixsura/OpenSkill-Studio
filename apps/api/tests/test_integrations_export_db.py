@@ -970,3 +970,39 @@ async def test_ndjson_and_parquet_exports_agree_row_for_row(db):
         pq_rows.extend(pq.read_table(io.BytesIO(writer.files[p])).to_pylist())
     key = lambda r: r["id"]  # noqa: E731
     assert sorted(nd_rows, key=key) == sorted(pq_rows, key=key)
+
+
+@pytest.mark.asyncio
+async def test_dropped_fields_absent_from_manifest_and_parquet_columns(db):
+    """R537 (mutation survivor pin): a drop-anonymized field must be absent
+    from the manifest's `fields`, the checksummed parquet COLUMN SET and the
+    NDJSON keys — the or-mutant leaked dropped column NAMES back into the
+    exported schema."""
+    import io
+
+    import pyarrow.parquet as pq
+
+    org, owner = await _org(db)
+    from app.models.cohort import CohortMember
+    from app.services.cohort import CohortService
+
+    cohort = await CohortService(db).create_cohort(
+        org_id=org.id, name=f"DropC {ULID()}", description=None, created_by=owner.id
+    )
+    db.add(CohortMember(cohort_id=cohort.id, user_id=owner.id, role=CohortRole.LEARNER))
+    await db.flush()
+    writer = MemWriter()
+    svc = WarehouseExportService(db, writer=writer)
+    stream = await svc.create_stream(
+        org.id,
+        name=f"drp-{ULID()}",
+        dataset="enrollments",
+        anonymize={"user_id": "drop"},
+        part_format="parquet",
+    )
+    run = await svc.run_export(org.id, stream.id)
+    assert run.status == "succeeded" and run.row_count >= 1
+    manifest = json.loads(writer.files[run.manifest_key])
+    assert "user_id" not in manifest["fields"]
+    table = pq.read_table(io.BytesIO(writer.files[run.parts[0]]))
+    assert "user_id" not in table.column_names

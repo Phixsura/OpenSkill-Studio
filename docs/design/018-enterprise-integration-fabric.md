@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R537 (forty-first window, AST-mutation — the five remaining service
+  cores + 3 more proofs)**: 74 mutants over apply_mapping, domains
+  verify/claim, _maybe_auto_disable, run_export and import commit — 41
+  killed; ONE behavioral survivor pinned: a drop-anonymized field's NAME
+  leaked back into the manifest `fields` and the parquet column set under
+  the or-mutant (privacy metadata). The rest dispositioned: status-code/
+  threshold/length literals, stats counters, and FOR-UPDATE lock
+  predicates whose effect is concurrency-only (sequential suites cannot
+  observe them; the live race probes cover the unique-index side).
+  Symbolic contracts grew to ELEVEN proven: + CSV-injection sanitizer
+  never emits formula-leading cells (for ALL strings), IDNA email-domain
+  normalization is idempotent, and _coerce_active is total/exact over the
+  string domain.
 - **R536 (fortieth window, AST-mutation — identity + roster, the last
   unswept cores)**: 54 mutants, 45 killed (two apparent takeover-guard
   survivors were -k FILTER artifacts — full-suite reruns killed them; a
