@@ -67,3 +67,36 @@ def test_all_classifiers_block(ip_str):
 def test_all_classifiers_allow_public(ip_str):
     blockers = [name for name, fn in CLASSIFIERS.items() if fn(ip_str)]
     assert not blockers, f"{ip_str} BLOCKED by {blockers} (over-blocks real public traffic)"
+
+
+# ── URL-level scheme/userinfo rejection (fabric + ecosystem validators) ──
+# These two expose a full URL validator that must reject non-http(s) schemes
+# and embedded credentials. (The shared webhook service validates scheme at
+# send time and IPs at create time; its URL-level parity is tracked in ADR
+# R589 as a separate hardening item for the #27/#35 epics.)
+
+import pytest as _pytest
+
+from app.ecosystem.security import EcoSecurityError, validate_external_url
+from app.integrations.security import EgressBlockedError, validate_egress_url
+
+_URL_VALIDATORS = {
+    "integrations": (validate_egress_url, EgressBlockedError),
+    "ecosystem": (lambda u: validate_external_url(u, resolve_dns=False), EcoSecurityError),
+}
+
+_BAD_URLS = [
+    "file:///etc/passwd",
+    "gopher://evil/x",
+    "ftp://host/x",
+    "javascript:alert(1)",
+    "https://user:pass@example.com/hook",  # embedded userinfo
+]
+
+
+@_pytest.mark.parametrize("name,pair", list(_URL_VALIDATORS.items()))
+@_pytest.mark.parametrize("url", _BAD_URLS)
+def test_url_validators_reject_bad_schemes_and_userinfo(name, pair, url):
+    fn, exc = pair
+    with _pytest.raises(exc):
+        fn(url)

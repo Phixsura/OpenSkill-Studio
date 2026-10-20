@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R590 (fifty-third window — parity guard extended to URL level + in
+  CI)**: the SSRF parity guard joins `make test-intg`, and gained URL-level
+  assertions: the fabric and ecosystem URL validators must reject
+  non-http(s) schemes (file/gopher/ftp/javascript) and embedded userinfo.
+  Confirmed the fabric event mesh dials exclusively through
+  integrations.EgressClient (full scheme/userinfo/IP screen + resolve-pin),
+  so the fabric side is fully covered; the shared webhook service's
+  URL-level hardening is tracked as a separate #27/#35 item.
 - **R589 (fifty-third window — parity guard catches a THIRD SSRF gap)**:
   rather than risk consolidating the three divergent SSRF classifiers,
   added tests/test_ssrf_classifier_parity_db.py — one hostile-IP matrix fed

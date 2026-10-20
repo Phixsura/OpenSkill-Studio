@@ -240,7 +240,7 @@ test-intg: ## Run the integration-fabric suites (ADR-018, needs infra-up + db-mi
 		tests/test_integrations_health_db.py tests/test_integrations_push_db.py \
 		tests/test_integrations_races_db.py tests/test_integrations_properties.py \
 		tests/test_integrations_acceptance_db.py tests/test_web_api_contract.py \
-		tests/test_schema_drift_guard_db.py \
+		tests/test_schema_drift_guard_db.py tests/test_ssrf_classifier_parity_db.py \
 		tests/test_ops_doc_contract.py -q
 
 e2e-exp: ## Live-API E2E for the experimentation platform (starts its own uvicorn on :8442)
