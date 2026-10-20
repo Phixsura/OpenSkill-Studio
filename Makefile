@@ -224,7 +224,7 @@ e2e-intg-a11y: ## Fabric axe-core WCAG 2.1 A/AA audit (needs web :3000 + api :80
 drills: ## Run every fabric operational drill sequentially (infra up required; ~15 min)
 	cd apps/api && for f in redis_drill minio_drill crash_drill migration_drill \
 		ratelimit_drill slow_sink_drill backup_restore_drill explain_audit soak_drill \
-		idempotency_drill compose_env_drill; do \
+		idempotency_drill compose_env_drill worker_soak_drill; do \
 		echo "== $$f =="; uv run python tests/drills/$$f.py || exit 1; \
 	done
 	@echo "ALL DRILLS OK"

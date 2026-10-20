@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R627 (sixty-eighth window — the WORKER gets its own soak)**: the API
+  process was soak-proven but the arq worker runs 24/7 and had no RSS
+  watch. New drill (worker_soak_drill, 12th in `make drills`): boots a REAL
+  worker, pumps 8 waves of 120 mesh events through the outbox, samples the
+  worker child's RSS per wave. First run exposed a measurement trap worth
+  recording: `uv run` does not exec, so sampling the wrapper PID reads
+  ~20MB of uv — the drill resolves the CHILD pid (pgrep -P). Real curve:
+  warm 70MB → peak 123MB mid-drain → settles 64MB (below warm) — healthy
+  working-set behavior, no leak in the outbox/cron/audit paths.
 - **R626 (sixty-eighth window — extended soak)**: the soak drill run at
   double depth (25 consecutive storms against one uvicorn process, now
   exercising every audit-write hot path added since R592): RSS growth
