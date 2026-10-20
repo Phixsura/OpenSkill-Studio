@@ -394,14 +394,14 @@ async def test_fabric_audit_system_actor_lands(db):
         (
             await db.execute(
                 _select(CommercialAuditEvent).where(
-                    CommercialAuditEvent.action == "intg.scim.user_deprovisioned"
+                    CommercialAuditEvent.action == "intg.scim.user_deprovisioned",
+                    CommercialAuditEvent.target_id == user.id,  # scope to THIS test's row
                 )
             )
         )
         .scalars()
-        .first()
+        .one()
     )
-    assert row is not None, "system-actor deprovision audit was dropped"
     assert row.actor_user_id is None
     assert row.actor_type == "system"
-    assert row.target_id == user.id and row.after == {"token_id": "tok1"}
+    assert row.after == {"token_id": "tok1"}
