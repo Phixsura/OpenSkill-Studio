@@ -931,12 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
-- **R606 (fifty-ninth window — subscriber symmetry for forced logouts)**:
-  a tenant SIEM subscribing to integration.sso.backchannel_logout learned
-  about OIDC forced logouts but NOT SAML SLO ones (same event, zero mesh
-  emit). SLO now emits the SAME event type with protocol=saml_slo so one
-  subscription covers both protocols; test pins the mesh row + protocol
-  tag; catalog guard stays green (existing type reused, no new name).
+- **R606 (fifty-ninth window — corrected: the mesh side was already
+  symmetric)**: initially added a service-layer SLO mesh emit on the belief
+  SAML SLO was subscriber-invisible — then found the ROUTE layer already
+  emits integration.sso.single_logout per SLO (and org.sso.login carries a
+  jit flag covering JIT visibility), so the addition would have
+  double-signaled every SLO. Reverted the emit; the mesh catalog was
+  complete all along. The genuine gaps were the COMPLIANCE-trail writes
+  (R601/R602/R594), which stand. Lesson recorded: check the route layer
+  before concluding a service-layer signal is missing.
 - **R605b (fifty-ninth window)**: the black-box expected set now includes
   intg.scim.user_provisioned — a SYSTEM-actor row — proving IdP-driven
   records surface in the tenant feed alongside human-actor ones. Periodic
