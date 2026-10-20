@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R584 (fifty-first window — applications detail drawer: two dead
+  panels)**: the same contract-audit method (prompted by R583) found the
+  applications detail drawer reading `messages` and `timeline` off the
+  `/applications/{id}` payload — but that route returns only
+  ApplicationResponse (evidence_bundle, no messages/timeline). Both
+  collections have their OWN endpoints with DIFFERENT field names
+  (`/timeline` → stage/timestamp, not status/changed_at; `/messages` →
+  read_at, not created_at). Optional chaining hid it as two permanently
+  empty panels rather than a crash. Drawer rewired to the three correct
+  endpoints with corrected field names; vitest drives the expand and pins
+  all three. Audited the rest of the talent pages (opportunity detail,
+  passport) against their backend schemas — those match; matches + this
+  drawer were the only two fabricated contracts.
 - **R583 (fifty-first window — matches page read a non-existent contract)**:
   the talent browser suite's React-key warning led to a real production
   defect: /dashboard/opportunities/matches declared MatchResult as

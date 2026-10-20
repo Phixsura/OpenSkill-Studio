@@ -304,10 +304,34 @@ function ApplicationCard({
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // Fetch detail data when expanded
+  // R584: evidence_bundle, the status timeline and the message thread each
+  // come from their OWN endpoint — the detail route returns only
+  // ApplicationResponse (evidence_bundle, no messages/timeline), and the two
+  // collections live at /timeline and /messages with their own field names.
+  // The drawer previously read messages/timeline off the detail payload, so
+  // both panels were permanently empty (dead feature, not a crash).
   const { data: detailData } = useQuery({
     queryKey: ["application-detail", app.id],
-    queryFn: () => apiWithAuth<{ data: { messages: Array<{ id: string; content: string; sender_role: string; created_at: string }>; evidence_bundle: Record<string, unknown>; timeline: Array<{ status: string; changed_at: string }> } }>(`/talent/applications/${app.id}`),
+    queryFn: () =>
+      apiWithAuth<{ data: { evidence_bundle: Record<string, unknown> } }>(
+        `/talent/applications/${app.id}`,
+      ),
+    enabled: expanded,
+  });
+  const { data: timelineData } = useQuery({
+    queryKey: ["application-timeline", app.id],
+    queryFn: () =>
+      apiWithAuth<{
+        data: Array<{ stage: string; timestamp: string | null; actor: string | null }>;
+      }>(`/talent/applications/${app.id}/timeline`),
+    enabled: expanded,
+  });
+  const { data: messagesData } = useQuery({
+    queryKey: ["application-messages", app.id],
+    queryFn: () =>
+      apiWithAuth<{
+        data: Array<{ id: string; content: string; sender_role: string; read_at: string | null }>;
+      }>(`/talent/applications/${app.id}/messages`),
     enabled: expanded,
   });
 
@@ -439,19 +463,21 @@ function ApplicationCard({
           )}
 
           {/* Timeline */}
-          {detailData?.data?.timeline && detailData.data.timeline.length > 0 && (
+          {timelineData?.data && timelineData.data.length > 0 && (
             <div>
               <h4 className="mb-2 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
                 Timeline
               </h4>
               <div className="space-y-1.5">
-                {detailData.data.timeline.map((event, i) => (
+                {timelineData.data.map((event, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="w-2 h-2 rounded-full bg-[hsl(var(--primary))]" />
-                    <span className="capitalize font-medium">{event.status.replace(/_/g, " ")}</span>
-                    <span className="text-[hsl(var(--muted-foreground))]">
-                      {new Date(event.changed_at).toLocaleDateString()}
-                    </span>
+                    <span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" />
+                    <span className="font-medium capitalize">{event.stage.replace(/_/g, " ")}</span>
+                    {event.timestamp && (
+                      <span className="text-[hsl(var(--muted-foreground))]">
+                        {new Date(event.timestamp).toLocaleDateString()}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -459,18 +485,22 @@ function ApplicationCard({
           )}
 
           {/* Messages */}
-          {detailData?.data?.messages && detailData.data.messages.length > 0 && (
+          {messagesData?.data && messagesData.data.length > 0 && (
             <div>
               <h4 className="mb-2 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
-                Messages ({detailData.data.messages.length})
+                Messages ({messagesData.data.length})
               </h4>
               <div className="space-y-2">
-                {detailData.data.messages.slice(0, 5).map((msg) => (
+                {messagesData.data.slice(0, 5).map((msg) => (
                   <div key={msg.id} className="rounded-md border bg-[hsl(var(--card))] p-2.5">
                     <div className="mb-1 flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
-                      <span className="capitalize font-medium">{msg.sender_role}</span>
-                      <span>·</span>
-                      <span>{new Date(msg.created_at).toLocaleDateString()}</span>
+                      <span className="font-medium capitalize">{msg.sender_role}</span>
+                      {msg.read_at && (
+                        <>
+                          <span>·</span>
+                          <span>read {new Date(msg.read_at).toLocaleDateString()}</span>
+                        </>
+                      )}
                     </div>
                     <p className="text-xs">{msg.content}</p>
                   </div>
@@ -480,19 +510,20 @@ function ApplicationCard({
           )}
 
           {/* Evidence bundle */}
-          {detailData?.data?.evidence_bundle && Object.keys(detailData.data.evidence_bundle).length > 0 && (
-            <div>
-              <h4 className="mb-1 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
-                Evidence Bundle
-              </h4>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                {Object.keys(detailData.data.evidence_bundle).length} items attached
-              </p>
-            </div>
-          )}
+          {detailData?.data?.evidence_bundle &&
+            Object.keys(detailData.data.evidence_bundle).length > 0 && (
+              <div>
+                <h4 className="mb-1 text-xs font-semibold uppercase text-[hsl(var(--muted-foreground))]">
+                  Evidence Bundle
+                </h4>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {Object.keys(detailData.data.evidence_bundle).length} items attached
+                </p>
+              </div>
+            )}
 
           {/* Empty state */}
-          {!detailData?.data?.timeline?.length && !detailData?.data?.messages?.length && !app.cover_note && (
+          {!timelineData?.data?.length && !messagesData?.data?.length && !app.cover_note && (
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
               No additional details available yet.
             </p>
