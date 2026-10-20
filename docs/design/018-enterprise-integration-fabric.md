@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R612 (sixty-second window — closing assessment v5)**: research doc
+  gains the v5 table: the five converging arcs of windows 47-61 (contract
+  fidelity, serialization hostility, SSRF drift, compliance audit,
+  verification infra), the 20+ real defects they produced, and the method
+  note — every arc started from one found defect, swept its class
+  exhaustively, and left a guard that in two cases caught the next real
+  gap itself.
 - **R611 (sixty-first window — the cheap suites join CI)**: the fabric CI
   job ran lifecycle/fuzz/appwide/conformance; the race probes (21), the
   adversarial battery (178, real egress walls) and the latency tripwire —

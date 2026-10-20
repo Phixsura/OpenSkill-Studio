@@ -607,6 +607,24 @@ admin mapping/connection mutation.
 10. Export field filtering as a denylist or applied downstream of serialization
     (new fields leak by default — R82's `_card_fields` lesson at warehouse scale).
 
+## Closing assessment v5 (2026-10-21, windows 47-61 / R559-R611)
+
+v4 closed the deploy artifact. Windows 47-61 ran five converging arcs over
+everything that was already "done", each producing real defects:
+
+| Arc                                              | Real defects found & fixed                                                                                                                                                                      | Standing guard left behind                                                                                                                |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract fidelity (R572-R584)                    | missing column migration = passport ORM 500s; cache JSON round-trip str-datetimes; two swapped response_models; two web pages reading fields the API never returns                              | repo-wide severe-drift guard; per-page vitest contracts                                                                                   |
+| Serialization hostility (R585-R586, R609-R610)   | AGS NaN → invalid JSON to the LMS; warehouse NaN → broken NDJSON; SLO naive-IssueInstant TypeError 500                                                                                          | non-finite normalization at both boundaries; defect classes generalized into the 4,840-request app-wide sweep                             |
+| SSRF drift (R587-R590)                           | fec0::/10 allowed by all three independent classifiers; webhook copy also missed multicast/reserved                                                                                             | cross-classifier parity matrix + URL-level assertions in test-intg; v4 dual-implementation property vs an RFC CIDR reference              |
+| Compliance audit (R591-R605)                     | SCIM lifecycle, SSO JIT, role mapping, account binding, break-glass use, forced logouts — ALL unaudited; 46 intg actions invisible to the tenant feed; two silent-drop bugs in the audit writer | access-grant audit guard (AST); action-registration guard widened; tenant-visibility guard; black-box feed check inside the lifecycle E2E |
+| Verification infra (R559-R567, R578, R580, R611) | make help hid every e2e target; talent suite unrun for weeks (hardcoded port, no target)                                                                                                        | every epic suite a make target; e2e-live-all chain; 7 fabric suites on every PR                                                           |
+
+Method note: each arc began as a SINGLE found defect whose class was then
+swept exhaustively (grep/AST/property) and locked with a guard — the guards
+themselves caught two further real gaps (parity matrix → webhook multicast;
+time-parser property → SLO TypeError).
+
 ## Closing assessment v4 (2026-10-20, windows 44-46 / R544-R558)
 
 v3 closed the layers around the features. Windows 44-46 closed the layer
