@@ -17,6 +17,8 @@ Benign legacy classes (modify_nullable, FK restatements, index diffs) are
 deliberately ignored here — tightening those is a separate cleanup.
 """
 
+import pathlib
+
 import pytest
 
 SEVERE = {"add_table", "remove_table", "add_column", "remove_column", "modify_type"}
@@ -52,3 +54,21 @@ async def test_no_severe_model_migration_drift_repo_wide():
         f"{len(severe)} severe model/migration drift(s) — a model changed "
         f"without a migration (or the reverse): {severe[:5]}"
     )
+
+
+def test_single_migration_head():
+    """R618: two sessions adding migrations concurrently (this repo runs
+    parallel worktrees) can each branch off the same parent — `alembic
+    upgrade head` then FAILS at deploy time with 'multiple heads'. Catch the
+    branch at test time, where the fix (a merge revision or re-parenting) is
+    cheap."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config(str(pathlib.Path(__file__).resolve().parent.parent / "alembic.ini"))
+    cfg.set_main_option(
+        "script_location",
+        str(pathlib.Path(__file__).resolve().parent.parent / "migrations"),
+    )
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    assert len(heads) == 1, f"branched migration history — multiple heads: {heads}"

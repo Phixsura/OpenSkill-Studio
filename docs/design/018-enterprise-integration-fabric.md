@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R618 (sixty-fourth window — single-migration-head guard)**: this repo
+  runs parallel worktree sessions; two of them adding migrations off the
+  same parent produces a branched history that only explodes at DEPLOY
+  time ('multiple heads'). New guard in the schema-drift module asserts
+  exactly one alembic head, so the branch fails at test time where a merge
+  revision is cheap.
 - **R617 (sixty-fourth window — overnight advisory patched)**: the daily
   supply-chain refresh caught PYSEC-2026-4320 (certifi 2026.7.22, published
   overnight) — upgraded to 2026.10.19, pip-audit clean again; certifi is
