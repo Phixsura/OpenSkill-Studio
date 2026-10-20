@@ -4,6 +4,10 @@ import type { NextConfig } from "next";
 
 const config: NextConfig = {
   output: "standalone",
+  // R544: the web-side twin of the API's --no-server-header rule (R355) —
+  // the prod server leaked `x-powered-by: Next.js` while every other
+  // fingerprint was masked.
+  poweredByHeader: false,
   // R528: the standalone build NEEDS an explicit monorepo tracing root — in a
   // checkout where Next infers the wrong workspace root (git worktrees see
   // two pnpm lockfiles) the standalone output came out EMPTY (bare

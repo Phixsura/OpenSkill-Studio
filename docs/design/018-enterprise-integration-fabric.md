@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R544 (forty-fourth window, HEADERS — live web audit)**: first live
+  header audit of the production web server: the full hardening set
+  (XFO/nosniff/CSP/HSTS/Referrer/Permissions) is served correctly on pages
+  AND through the API proxy — except `x-powered-by: Next.js`, the web-side
+  twin of the R355 fingerprint rule. `poweredByHeader: false` added;
+  verified gone on the standalone server; fabric journey re-run green.
 - **R541 (forty-third window, LICENSE audit — never run)**: npm prod tree
   is permissive throughout except sharp's prebuilt libvips (LGPL-3.0,
   dynamically linked — the industry-standard Next image pipeline
