@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R617 (sixty-fourth window — overnight advisory patched)**: the daily
+  supply-chain refresh caught PYSEC-2026-4320 (certifi 2026.7.22, published
+  overnight) — upgraded to 2026.10.19, pip-audit clean again; certifi is
+  the TLS trust anchor for every outbound dial, so the TLS-touching suites
+  (egress/events/LTI/SSO, 195) and the live lifecycle (94) were re-run
+  green. npm gate still one dispositioned advisory; gitleaks full-history
+  still clean.
 - **R616 (sixty-fourth window — production artifact, full browser family,
   STRICT)**: rebuilt the standalone production bundle (all session web
   changes compile) and served it per the §8a topology; all seven browser
