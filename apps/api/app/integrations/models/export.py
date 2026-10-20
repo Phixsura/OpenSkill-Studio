@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +19,11 @@ EXPORT_PAGE_ROWS = 1000
 
 class ExportStream(Base):
     __tablename__ = "intg_export_streams"
-    __table_args__ = (Index("uq_intg_export_org_name", "org_id", "name", unique=True),)
+    __table_args__ = (
+        Index("uq_intg_export_org_name", "org_id", "name", unique=True),
+        # R545: the hourly fleet-wide sweep (enabled AND schedule IN ...)
+        Index("ix_intg_export_sweep", "schedule", postgresql_where=text("enabled")),
+    )
 
     id: Mapped[str] = ulid_pk()
     org_id: Mapped[str] = mapped_column(

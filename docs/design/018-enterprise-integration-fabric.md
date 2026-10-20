@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R546 (forty-fourth window, DRIFT guard earns its keep)**: the R545
+  indexes landed migration-only — the model↔migration zero-drift guard
+  caught it on the next battery (exactly its job); Index declarations with
+  postgresql_where added to both models, drift guard + downgrade
+  round-trip green.
 - **R545 (forty-fourth window, EXPLAIN audit extended — one real index
   gap)**: the drill grew queries for the window-34+ paths (hook secret
   lookup, both keyset pages, the sweeps) and FLAGGED the export-stream

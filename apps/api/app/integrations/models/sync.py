@@ -8,7 +8,7 @@ cover roster/talent/CRM uniformly; provisioning passes read it by model.
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -238,6 +238,8 @@ class SyncProfile(Base):
     __table_args__ = (
         Index("uq_intg_syncprof", "connection_id", "model", "direction", unique=True),
         Index("ix_intg_syncprof_org", "org_id", "enabled"),
+        # R545: the hourly fleet-wide sweep (enabled AND schedule IN ...)
+        Index("ix_intg_syncprof_sweep", "schedule", postgresql_where=text("enabled")),
     )
 
     id: Mapped[str] = ulid_pk()
