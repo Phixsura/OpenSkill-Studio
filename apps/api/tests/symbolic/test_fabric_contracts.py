@@ -116,3 +116,54 @@ def signature_binds_every_input(secret: str, message_id: str, timestamp: int) ->
         and base != sign_payload(secret, message_id, timestamp + 1, b"x")
         and base != sign_payload(secret, message_id, timestamp, b"y")
     )
+
+
+def sanitize_cell_never_formula_leading(value: str) -> bool:
+    """CSV-injection guard: the OUTPUT never starts with a formula trigger,
+    and non-formula inputs pass through untouched (S8.3, proven for all
+    strings rather than the sampled matrix).
+
+    post: __return__ is True
+    """
+    from app.integrations.services.bulk_import import _sanitize_cell
+
+    out = _sanitize_cell(value)
+    safe = not out or out[0] not in ("=", "+", "-", "@", "\t")
+    untouched = (not value or value[0] not in ("=", "+", "-", "@", "\t")) <= (out == value)
+    return safe and untouched
+
+
+def email_domain_normalization_is_idempotent(local: str, domain: str) -> bool:
+    """normalized_email_domain is idempotent: re-normalizing its output
+    (as a domain of a synthetic address) yields itself — the property the
+    R319 claim/compare split depends on.
+
+    pre: "@" not in local and "@" not in domain and len(domain) <= 30
+    post: __return__ is True
+    """
+    from app.integrations.services.domains import normalized_email_domain
+
+    once = normalized_email_domain(f"{local}@{domain}")
+    if once == "":
+        return True
+    twice = normalized_email_domain(f"x@{once}")
+    return twice == once
+
+
+def coerce_active_string_domain(value: str, wrap: bool) -> bool:
+    """_coerce_active over ALL strings (and the dict-wrapped Entra form):
+    returns a bool exactly for case/space-insensitive "true"/"false",
+    None otherwise — total, never raises. (An `object` domain crashes the
+    CrossHair proxy machinery on this import graph; bool/dict arms are
+    further covered by the DB suites.)
+
+    post: __return__ is True
+    """
+    from app.integrations.services.scim import _coerce_active
+
+    arg = {"active": value} if wrap else value
+    out = _coerce_active(arg)
+    low = value.strip().lower()
+    if low in ("true", "false"):
+        return out == (low == "true")
+    return out is None
