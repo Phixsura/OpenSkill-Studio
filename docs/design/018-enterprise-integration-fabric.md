@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R568 (forty-eighth window — fabric_health filters were never pinned)**:
+  mutation sweep on fabric_health (21 mutants) exposed that EVERY status /
+  24h-window filter survived ==/≥ flips — the existing test only asserted
+  zeros. New test_health_counts_pin_their_filters puts rows on BOTH sides
+  of every filter, with TWO rows on each excluded side (1-vs-1 is
+  symmetric: an ==→!= flip still counts 1 and survives) and a 24.5h-stale
+  row (kills the 24→25 window widening). Result 19/21 killed; the two
+  `created_at >= day_ago`→`>` survivors are measure-zero timestamp-boundary
+  equivalents — dispositioned. Also hardened the liveness test's
+  stale-singleton reset (aclose on a closed loop raises RuntimeError).
 - **R567 (forty-eighth window — one meta-target encodes the serialization
   rule)**: `make e2e-intg-all` chains all nine fabric live-HTTP suites
   strictly sequentially. The shared-dev-DB concurrency hazard (51 phantom

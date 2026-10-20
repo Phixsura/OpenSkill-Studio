@@ -123,14 +123,182 @@ async def test_health_counts_are_org_scoped(db):
 
 
 @pytest.mark.asyncio
+async def test_health_counts_pin_their_filters(db):
+    """R568: mutation sweep showed every status/window filter in
+    fabric_health survived == / >= flips — the org-scoped test only asserts
+    zeros. One row on EACH side of every filter pins them behaviorally."""
+    import uuid as _uuid
+    from datetime import UTC, datetime, timedelta
+
+    from app.integrations.models import (
+        EventDelivery,
+        IdentityMatchQueue,
+        IntegrationEvent,
+        SsoConnection,
+        SyncProfile,
+        SyncRun,
+    )
+    from app.integrations.services.connections import ConnectionService
+    from app.models.webhook import WebhookSubscription
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    csvc = ConnectionService(db)
+    await csvc.sync_provider_catalog()
+    await db.flush()
+    conn = await csvc.create(
+        org.id,
+        provider_key="generic_webhook",
+        name=f"hp-{_uuid.uuid4().hex[:6]}",
+        config={},
+        base_url="https://x.example.com",
+        created_by=owner.id,
+    )
+    sub = WebhookSubscription(
+        org_id=org.id,
+        url="https://hooks.example.com/hp",
+        events=["com.openskill.project.*"],
+        secret="a" * 64,
+        active=True,
+    )
+    db.add(sub)
+    await db.flush()
+    ev = IntegrationEvent(
+        org_id=org.id, type="com.openskill.project.approved.v1", source="/t", subject="hp"
+    )
+    db.add(ev)
+    await db.flush()
+    now = datetime.now(UTC)
+    # 24.5h ago: inside a 25h window, outside the real 24h one (kills 24->25)
+    stale = now - timedelta(hours=24, minutes=30)
+    db.add_all(
+        [
+            EventDelivery(
+                event_id=ev.id, subscription_id=sub.id, status="pending", attempt_count=0
+            ),
+            EventDelivery(
+                event_id=ev.id,
+                subscription_id=sub.id,
+                status="succeeded",
+                attempt_count=1,
+                replay_of="a",
+            ),
+            EventDelivery(
+                event_id=ev.id,
+                subscription_id=sub.id,
+                status="exhausted",
+                attempt_count=5,
+                replay_of="b",
+            ),
+            EventDelivery(
+                event_id=ev.id,
+                subscription_id=sub.id,
+                status="exhausted",
+                attempt_count=5,
+                created_at=stale,
+                replay_of="c",
+            ),
+            IdentityMatchQueue(
+                org_id=org.id,
+                source="scim",
+                connection_ref="c",
+                subject=f"s-{_uuid.uuid4().hex[:6]}",
+                email="hp@x.edu",
+                reason="ambiguous",
+                payload={},
+                status="pending",
+            ),
+            IdentityMatchQueue(
+                org_id=org.id,
+                source="scim",
+                connection_ref="c",
+                subject=f"s-{_uuid.uuid4().hex[:6]}",
+                email="hp2@x.edu",
+                reason="ambiguous",
+                payload={},
+                status="dismissed",
+            ),
+            # TWO rows on the excluded side of each status filter: with
+            # 1-vs-1 an ==→!= flip still counts 1 and survives (symmetry).
+            IdentityMatchQueue(
+                org_id=org.id,
+                source="scim",
+                connection_ref="c",
+                subject=f"s-{_uuid.uuid4().hex[:6]}",
+                email="hp3@x.edu",
+                reason="ambiguous",
+                payload={},
+                status="resolved",
+            ),
+            SsoConnection(org_id=org.id, protocol="saml", status="active"),
+            SsoConnection(org_id=org.id, protocol="oidc", status="draft"),
+            SsoConnection(org_id=org.id, protocol="oidc", status="disabled"),
+        ]
+    )
+    prof = SyncProfile(
+        org_id=org.id,
+        connection_id=conn.id,
+        name="hp-prof",
+        model="roster.class",
+        direction="pull",
+        schedule="manual",
+        field_policy={},
+        options={},
+    )
+    db.add(prof)
+    await db.flush()
+    db.add_all(
+        [
+            SyncRun(
+                profile_id=prof.id, status="failed", trigger="manual", cursor_in={}, cursor_out={}
+            ),
+            SyncRun(
+                profile_id=prof.id,
+                status="failed",
+                trigger="manual",
+                cursor_in={},
+                cursor_out={},
+                created_at=stale,
+            ),
+            SyncRun(
+                profile_id=prof.id,
+                status="succeeded",
+                trigger="manual",
+                cursor_in={},
+                cursor_out={},
+            ),
+            SyncRun(
+                profile_id=prof.id,
+                status="running",
+                trigger="manual",
+                cursor_in={},
+                cursor_out={},
+            ),
+        ]
+    )
+    await db.flush()
+
+    out = await fabric_health(org.id, db=db, user=owner)
+    data = out["data"]
+    assert data["deliveries"] == {"pending": 1, "exhausted_24h": 1}
+    assert data["identity_queue_pending"] == 1
+    assert data["sync"] == {"profiles": 1, "failed_runs_24h": 1}
+    assert data["sso_connections_active"] == 1
+
+
+@pytest.mark.asyncio
 async def test_health_reports_worker_liveness(db):
     """R563: worker_alive mirrors the arq health key (61s TTL since R553) —
     present=True, absent=False; the summary never 500s on redis trouble."""
     import app.core.redis as redis_mod
 
-    # the singleton pool may be bound to a previous test's event loop
+    # the singleton pool may be bound to a previous test's (closed) event
+    # loop — aclose() then raises "Event loop is closed"; just drop it.
     if redis_mod._redis is not None:
-        await redis_mod._redis.aclose()
+        try:
+            await redis_mod._redis.aclose()
+        except RuntimeError:
+            pass
         redis_mod._redis = None
 
     owner = await _user(db)
