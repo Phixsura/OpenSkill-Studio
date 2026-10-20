@@ -173,6 +173,32 @@ async def test_duplicate_409_and_reactivation(ctx):
     res2, _ = await _usvc(ctx).create({"userName": email})
     assert res2["id"] == res["id"] and res2["active"] is True
 
+    # R593: each lifecycle event writes the compliance audit trail as a
+    # 'system' actor (IdP-driven, no human). Provision + deprovision +
+    # reactivation must ALL be present for this user.
+    from sqlalchemy import select as _sel
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    await ctx["db"].flush()
+    actions = set(
+        (
+            await ctx["db"].execute(
+                _sel(CommercialAuditEvent.action).where(
+                    CommercialAuditEvent.target_id == res["id"],
+                    CommercialAuditEvent.actor_type == "system",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {
+        "intg.scim.user_provisioned",
+        "intg.scim.user_deprovisioned",
+        "intg.scim.user_reactivated",
+    } <= actions, actions
+
 
 @pytest.mark.asyncio
 async def test_membership_only_provision_for_existing_platform_user(ctx):

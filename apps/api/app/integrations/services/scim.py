@@ -516,10 +516,12 @@ class ScimUserService:
                         "userName belongs to an existing account outside this "
                         "organization's verified domains",
                     )
+            reactivated = False
             if member is not None and member.status == MemberStatus.ACTIVE:
                 raise ScimError(409, "User already exists", "uniqueness")
             if member is not None:
                 member.status = MemberStatus.ACTIVE  # reactivation, not 409
+                reactivated = True
             else:
                 member = OrgMember(
                     org_id=self.org_id,
@@ -529,6 +531,7 @@ class ScimUserService:
                 )
                 self.db.add(member)
         else:
+            reactivated = False
             # R167: two concurrent POST /Users (or a retried /Bulk) for the
             # same new userName race to INSERT users.email. The INSERT runs
             # inside a savepoint; the unique-violation loser rolls back just
@@ -560,7 +563,9 @@ class ScimUserService:
         await self._upsert_link(user.id, external_id)
         if active is False:
             await self._deprovision(user, member)
-        await self._audit("org.scim.provisioned", user.id)
+        await self._audit(
+            "org.scim.reactivated" if reactivated else "org.scim.provisioned", user.id
+        )
         return _user_resource(user, member, await self._link_for(user.id)), True
 
     async def _upsert_link(self, user_id: str, external_id) -> None:
@@ -690,27 +695,21 @@ class ScimUserService:
         await AuthService(self.db)._revoke_all_user_tokens(user.id)  # noqa: SLF001
         await self.db.flush()
         await self._audit("org.scim.deprovisioned", user.id)
-        # R592: emit_event is an integration NOTIFICATION, not the compliance
-        # audit trail. An IdP-driven deprovision (archives membership + revokes
-        # every session) is exactly the kind of event an auditor must see —
-        # record it (system actor: no human performed it).
-        from app.integrations.facade import record_fabric_audit
 
-        await record_fabric_audit(
-            self.db,
-            self.org_id,
-            None,
-            "intg.scim.user_deprovisioned",
-            "user",
-            user.id,
-            after={"token_id": self.token.id},
-            system_actor=True,
-        )
+    # R593: every SCIM user-lifecycle event is BOTH an integration
+    # notification (event mesh, for subscribers) AND an access-control event
+    # the compliance audit trail must retain. The mesh event name maps to a
+    # registered audit action; IdP-driven => system actor.
+    _AUDIT_ACTION = {
+        "org.scim.provisioned": "intg.scim.user_provisioned",
+        "org.scim.reactivated": "intg.scim.user_reactivated",
+        "org.scim.deprovisioned": "intg.scim.user_deprovisioned",
+    }
 
     async def _audit(self, event: str, user_id: str) -> None:
-        try:
-            from app.integrations.facade import emit_event
+        from app.integrations.facade import emit_event, record_fabric_audit
 
+        try:
             await emit_event(
                 self.db,
                 self.org_id,
@@ -720,6 +719,18 @@ class ScimUserService:
             )
         except Exception:
             log.warning("mesh_emit_failed", event_type=event, user_id=user_id)
+        action = self._AUDIT_ACTION.get(event)
+        if action is not None:
+            await record_fabric_audit(
+                self.db,
+                self.org_id,
+                None,
+                action,
+                "user",
+                user_id,
+                after={"token_id": self.token.id},
+                system_actor=True,
+            )
 
 
 # ── group resource logic ──

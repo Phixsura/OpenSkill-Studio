@@ -60,6 +60,8 @@ AUDIT_ACTIONS = frozenset(
         "intg.credential.set",
         "intg.scim_token.minted",
         "intg.scim_token.revoked",
+        "intg.scim.user_provisioned",
+        "intg.scim.user_reactivated",
         "intg.scim.user_deprovisioned",
         "intg.scim.group_deleted",
         "webhook.created",

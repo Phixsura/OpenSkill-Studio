@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R593 (fifty-fourth window — the audit gap was wider; unify + fix a
+  mislabel)**: R592 covered deprovision/group-delete, but SCIM user
+  PROVISION and REACTIVATION (both access-control events) still wrote only
+  the event-mesh notification. Rather than scatter calls, `_audit` now
+  writes BOTH the mesh event AND the compliance trail (system actor) for
+  every user-lifecycle event via an event→action map. Found while adding
+  the end-to-end test: create()'s reactivation branch (ARCHIVED→ACTIVE
+  member) was mislabeled `org.scim.provisioned` — a reactivation recorded
+  as a brand-new provision. Now correctly `org.scim.reactivated`. Two more
+  actions registered; the lifecycle test asserts all three
+  (provisioned/deprovisioned/reactivated) land as system-actor rows for the
+  same user.
 - **R592 (fifty-fourth window — SCIM deprovision had no compliance audit)**:
   an AST scan of every destructive/sensitive fabric route for a
   record_fabric_audit call found SCIM delete_user (≡ deprovision: archives
