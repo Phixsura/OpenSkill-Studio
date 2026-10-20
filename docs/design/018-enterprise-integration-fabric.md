@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R569 (forty-eighth window — banner pinned in web units)**: the R563
+  worker-down banner gets three vitest pins: false → banner, null
+  (redis-unknown) → no banner, omitted/true → no banner. Hub test file
+  23/23.
 - **R568 (forty-eighth window — fabric_health filters were never pinned)**:
   mutation sweep on fabric_health (21 mutants) exposed that EVERY status /
   24h-window filter survived ==/≥ flips — the existing test only asserted

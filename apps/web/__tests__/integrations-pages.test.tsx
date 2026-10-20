@@ -633,6 +633,50 @@ describe("fabric health strip", () => {
     expect(screen.getByText(/1 disabled/)).toBeTruthy();
     expect(screen.getByText(/2 exhausted 24h/)).toBeTruthy();
     expect(screen.getByText("5")).toBeTruthy();
+    // worker_alive omitted/true → no banner
+    expect(screen.queryByText(/Worker down/)).toBeNull();
+  });
+
+  it("R563: shows the worker-down banner only when worker_alive is false", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/health": {
+        data: {
+          connections: { total: 0, by_status: {} },
+          subscriptions: { total: 0, disabled: 0 },
+          deliveries: { pending: 3, exhausted_24h: 0 },
+          identity_queue_pending: 0,
+          sync: { profiles: 0, failed_runs_24h: 0 },
+          sso_connections_active: 0,
+          worker_alive: false,
+        },
+      },
+      "/orgs/ORG1234567890123456789012/integrations/providers": { data: [] },
+      "/orgs/ORG1234567890123456789012/integrations/connections": { data: [] },
+    });
+    render(<IntegrationsHubPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText(/Worker down/)).toBeTruthy());
+    expect(screen.getByText(/deliveries and syncs are/)).toBeTruthy();
+  });
+
+  it("R563: redis-unknown (null) does not show the banner", async () => {
+    route({
+      "/orgs/ORG1234567890123456789012/integrations/health": {
+        data: {
+          connections: { total: 0, by_status: {} },
+          subscriptions: { total: 0, disabled: 0 },
+          deliveries: { pending: 0, exhausted_24h: 0 },
+          identity_queue_pending: 0,
+          sync: { profiles: 0, failed_runs_24h: 0 },
+          sso_connections_active: 0,
+          worker_alive: null,
+        },
+      },
+      "/orgs/ORG1234567890123456789012/integrations/providers": { data: [] },
+      "/orgs/ORG1234567890123456789012/integrations/connections": { data: [] },
+    });
+    render(<IntegrationsHubPage />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText(/Active SSO/)).toBeTruthy());
+    expect(screen.queryByText(/Worker down/)).toBeNull();
   });
 });
 
