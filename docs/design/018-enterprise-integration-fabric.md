@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R551 (forty-sixth window, DEPLOY — drill ends the whack-a-mole)**:
+  DOMAIN_VERIFIER was the LAST missing prod env (mock always verifies =
+  domain-ownership bypass; production boot refuses it) — set to dns on
+  api/worker/migrate. The empirical method became a standing drill
+  (tests/drills/compose_env_drill.py, in `make drills`): render the prod
+  compose with placeholder secrets, import app settings under EXACTLY each
+  backend service's env — every production boot validator runs per
+  service, so env drift fails in the drill, not at deploy time. All three
+  services now import clean.
 - **R550 (forty-sixth window, DEPLOY — migrate was dead on arrival)**: the
   migrate service passed ONLY DATABASE_URL, but alembic env.py imports
   app settings whose production validators raise on default JWT/S3 and a
