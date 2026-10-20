@@ -58,6 +58,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # R552: on a FIRST deploy api/worker raced the migration job — the API
+      # would start serving (and the worker ticking crons) against a database
+      # with no tables. Gate both on the one-shot migrate exiting 0.
+      migrate:
+        condition: service_completed_successfully
     environment:
       APP_ENV: production
       # R551: the mock verifier always verifies (domain-ownership bypass);
@@ -91,7 +96,12 @@ services:
         API_PROXY_URL: http://api:8000
     restart: unless-stopped
     depends_on:
-      - api
+      # R552: the bare form only orders container CREATION — web came up (and
+      # its own healthcheck went green: / renders without the API) while every
+      # proxied /api/* call 502'd. Wait for the api image HEALTHCHECK
+      # (GET /api/v1/health) instead.
+      api:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-3000}:3000"
 
@@ -107,6 +117,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # R552: same first-deploy race as api — crons against missing tables.
+      migrate:
+        condition: service_completed_successfully
     environment:
       APP_ENV: production
       # R551: the mock verifier always verifies (domain-ownership bypass);

@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R552 (forty-sixth window, DEPLOY — first-deploy startup ordering)**:
+  nothing ordered api/worker against the one-shot migration job: on a first
+  deploy both raced `alembic upgrade head` and started serving/ticking crons
+  against a database with no tables. Both now gate on
+  `migrate: service_completed_successfully`. web's bare `depends_on: [api]`
+  only orders container CREATION (web's own healthcheck goes green without
+  the API), so it now waits for the api image HEALTHCHECK
+  (`service_healthy` on GET /api/v1/health). Rendered dependency graph
+  verified via `docker compose config --format json`; compose-env drill
+  still green.
 - **R551 (forty-sixth window, DEPLOY — drill ends the whack-a-mole)**:
   DOMAIN_VERIFIER was the LAST missing prod env (mock always verifies =
   domain-ownership bypass; production boot refuses it) — set to dns on

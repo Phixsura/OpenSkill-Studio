@@ -391,6 +391,16 @@ ULIDs are time-ordered; stable under concurrent inserts) and return
 Playwright job) run axe-core WCAG 2.1 A/AA over the five fabric pages as
 an authenticated admin; any serious/critical violation fails.
 
+## 7c. Production startup ordering (R552)
+
+`docker compose -f docker-compose.prod.yml up` enforces:
+`postgres/redis/minio healthy` → `migrate` exits 0 (`alembic upgrade head`,
+idempotent — it re-runs on every up) → `api`/`worker` start → `api` reports
+healthy (image HEALTHCHECK on `GET /api/v1/health`) → `web` starts. Do not
+weaken the `service_completed_successfully` / `service_healthy` conditions
+to the bare list form: that only orders container creation, and on a first
+deploy the API will serve against an empty database.
+
 ## 8a. Production web serving topology (R528 — read before deploying)
 
 The web app is `output: standalone`. Three rules the hard way:
