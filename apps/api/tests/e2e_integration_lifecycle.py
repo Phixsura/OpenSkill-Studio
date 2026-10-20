@@ -617,6 +617,19 @@ async def main() -> int:
         check("sso connection activated", r.status_code == 200, r.text[:300])
         r = await c.get(f"/sso/login?email=nobody@{domain}")
         disc = r.json()["data"]
+        # ── R622: SP metadata as an IdP admin consumes it ──
+        r = await c.get("/sso/saml/metadata")
+        md_ok = False
+        if r.status_code == 200 and "samlmetadata+xml" in r.headers.get("content-type", ""):
+            from xml.etree import ElementTree as _etree
+
+            try:
+                md_root = _etree.fromstring(r.content)
+                md_ok = md_root.tag.endswith("EntityDescriptor") and "AssertionConsumerService" in r.text
+            except Exception:
+                md_ok = False
+        check("SAML SP metadata serves well-formed XML with ACS", md_ok, r.text[:160])
+
         check(
             "discovery routes to oidc authorize",
             r.status_code == 200

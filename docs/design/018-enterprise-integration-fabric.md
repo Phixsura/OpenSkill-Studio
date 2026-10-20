@@ -931,6 +931,10 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R622 (sixty-fifth window — SP metadata on the wire)**: the walk now
+  fetches /sso/saml/metadata the way an IdP admin does — 200,
+  application/samlmetadata+xml, well-formed XML, EntityDescriptor root,
+  ACS present. Lifecycle reaches 100 checks.
 - **R621 (sixty-fourth window — co-signed rotation on the wire)**: the
   walk now rotates the live sink subscription, emits again, and verifies
   the next delivery carries TWO v1 signatures with the NEW and the OLD
