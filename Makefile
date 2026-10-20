@@ -111,6 +111,17 @@ e2e-intg-scim-conformance: ## scim2-tester conformance run, zero hard failures (
 		status=$$?; kill $$(cat /tmp/intg-scimconf-uvicorn.pid) 2>/dev/null; \
 		rm -f /tmp/intg-scimconf-uvicorn.pid; exit $$status)
 
+e2e-intg-latency: ## Hot-endpoint latency tripwire (p95 ceiling; uvicorn :8443)
+	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
+		APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8443 & \
+		echo $$! > /tmp/intg-lat-uvicorn.pid; \
+		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
+			! kill -0 $$(cat /tmp/intg-lat-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
+		APP_ENV=test E2E_INTG_API=http://localhost:8443/api/v1 \
+			PYTHONPATH=. uv run python tests/e2e_latency_smoke.py; \
+		status=$$?; kill $$(cat /tmp/intg-lat-uvicorn.pid) 2>/dev/null; \
+		rm -f /tmp/intg-lat-uvicorn.pid; exit $$status)
+
 e2e-intg-storm: ## Fabric concurrency storm: 20 workers mixed CRUD, zero 5xx (uvicorn :8443)
 	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
 		APP_ENV=test uv run uvicorn app.main:app --no-server-header --port 8443 & \

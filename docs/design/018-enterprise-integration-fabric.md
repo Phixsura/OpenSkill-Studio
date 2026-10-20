@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R548 (forty-fifth window, LATENCY tripwire — first perf baseline)**:
+  tests/e2e_latency_smoke.py measures warmed p50/p95 over seven hot reads
+  (health, providers, connections, events, both catalogs, health summary)
+  against a generous 750ms p95 ceiling — a regression tripwire, not a
+  benchmark. First baseline: every endpoint p95 ≤ 22ms locally. Make
+  target e2e-intg-latency. Storm 8/8 and scale 37/37 re-validated on the
+  R545 indexes.
 - **R547 (forty-fifth window, DEPLOY — worker healthcheck)**: the R533/
   R534 compose-audit class continued: the worker service inherits the API
   image's HTTP healthcheck and so reported permanently UNHEALTHY (false
