@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R588 (fifty-third window — same SSRF gap in the OTHER two egress
+  guards)**: the codebase has THREE independent SSRF classifiers (fabric
+  R587, the shared webhook delivery guard app/services/webhook.py, and
+  ecosystem app/ecosystem/security.py) — the other two had the identical
+  `fec0::/10` site-local gap. Both patched to block IPv6 site-local
+  (defense-in-depth for the #27/#35 epics, same library, same fix). 218
+  SSRF/webhook tests green. (Noted: three divergent copies of this logic is
+  itself a risk — a future consolidation into one shared validator would
+  prevent the next per-copy drift.)
 - **R587 (fifty-third window — SSRF: deprecated IPv6 site-local allowed)**:
   the egress forbidden-IP classifier passed `fec0::/10` (deprecated IPv6
   site-local) — it is NOT `is_private`, yet some stacks still route it, so

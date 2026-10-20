@@ -157,6 +157,9 @@ def _ip_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     # link-local, or private address regardless of CIDR list gaps
     if ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_private:
         return True
+    # R588: deprecated IPv6 site-local (fec0::/10) is not is_private.
+    if ip.version == 6 and ip.is_site_local:
+        return True
     return any(ip in network for network in _BLOCKED_NETWORKS)
 
 
