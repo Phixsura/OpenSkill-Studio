@@ -405,3 +405,18 @@ async def test_fabric_audit_system_actor_lands(db):
     assert row.actor_user_id is None
     assert row.actor_type == "system"
     assert row.after == {"token_id": "tok1"}
+
+
+def test_every_fabric_audit_action_is_tenant_visible():
+    """R597: an integration-fabric audit action records a tenant-owned event
+    (their admins/IdP configuring connections/SSO/SCIM/domains/sync/exports,
+    provisioning members). If it is written to the audit trail but omitted
+    from TENANT_VISIBLE_ACTIONS, the tenant audit endpoint hides it — the
+    compliance record exists but is invisible to the org it describes (how
+    all 46 intg.* actions were hidden until R597). Every intg.* action MUST
+    be tenant-visible."""
+    from app.controlplane.services.audit import AUDIT_ACTIONS, TENANT_VISIBLE_ACTIONS
+
+    intg_actions = {a for a in AUDIT_ACTIONS if a.startswith("intg.")}
+    hidden = intg_actions - TENANT_VISIBLE_ACTIONS
+    assert not hidden, f"fabric audit actions hidden from the tenant: {sorted(hidden)}"

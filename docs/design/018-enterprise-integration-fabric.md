@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R597 (fifty-sixth window — the audit READ side: tenant saw NONE of it)**:
+  the write-side audit work (R592-R596) was only half the story — the tenant
+  audit endpoint filters by `action.in_(TENANT_VISIBLE_ACTIONS)`, and NOT ONE
+  of the 46 intg.* actions was in that set. Every fabric compliance record
+  (connection/SSO/SCIM/domain/sync/export config AND the new IdP-driven
+  access grants) was written but INVISIBLE to the very org it describes. All
+  46 are tenant-owned events → all added to TENANT_VISIBLE_ACTIONS. Two
+  guards: every intg.* action must be tenant-visible (wiring), and a DB test
+  proves fabric actions actually surface in the tenant feed. (Insert
+  gotcha: the anchor appeared mid-function; placed the new test at the real
+  function boundary after a git-revert.)
 - **R596 (fifty-fifth window — lock the access-grant audit invariant)**:
   R592-R595 closed the access-grant audit gaps one path at a time; this
   guard (tests/test_access_grant_audit_guard_db.py, in make test-intg)

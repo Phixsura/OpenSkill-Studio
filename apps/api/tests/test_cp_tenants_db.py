@@ -1309,6 +1309,41 @@ async def test_tenants_api_handlers_direct(db):
     assert (ok_data.get("data") or ok_data)["id"]
 
 
+@pytest.mark.asyncio
+async def test_fabric_audit_actions_visible_in_tenant_feed(db):
+    """R597: integration-fabric audit records (SSO/SCIM/connection config,
+    IdP-driven access grants) must appear in the tenant's OWN audit feed —
+    they were written but hidden because no intg.* action was in
+    TENANT_VISIBLE_ACTIONS. Write a few and confirm the tenant sees them."""
+    from app.controlplane.api.tenants import tenant_audit_events
+    from app.controlplane.services.audit import record_audit
+
+    owner = await _mk_user(db)
+    t = await _mk_tenant(db, owner)
+    for action, ttype in (
+        ("intg.sso.jit_provisioned", "user"),
+        ("intg.scim.user_deprovisioned", "user"),
+        ("intg.connection.created", "connection"),
+    ):
+        await record_audit(
+            db,
+            actor=_actor(owner),
+            action=action,
+            target_type=ttype,
+            target_id=str(ULID()),
+            tenant_id=t.id,
+        )
+    await db.flush()
+
+    feed = await tenant_audit_events(t.id, action=None, page=1, per_page=50, user=owner, db=db)
+    seen = {e.action for e in feed.data}
+    assert {
+        "intg.sso.jit_provisioned",
+        "intg.scim.user_deprovisioned",
+        "intg.connection.created",
+    } <= seen
+
+
 async def test_has_platform_role_with_multiple_matching_roles(db):
     """R514 mutation kill: has_platform_role uses .limit(1) before
     scalar_one_or_none — a user holding TWO of the queried roles must still
