@@ -296,6 +296,13 @@ async def nrps_sync(
 
     await require_org_member(org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     report = await sync_memberships(db, org_id, link_id)
+    # R595: an admin-triggered NRPS roster pull pre-provisions members
+    # (JIT-creates accounts, adds memberships) — an auditable bulk access
+    # operation. Individual JIT creations are system-actor audited (R594);
+    # this records the OPERATION (who ran it) with the counts only.
+    await record_fabric_audit(
+        db, org_id, user.id, "intg.lti.nrps_synced", "lti_resource_link", link_id, after=report
+    )
     await db.commit()
     return {"data": report}
 

@@ -35,6 +35,7 @@ AUDIT_ACTIONS = frozenset(
         "intg.identity_queue.resolved",
         "intg.lti_registration.created",
         "intg.lti_registration.deleted",
+        "intg.lti.nrps_synced",
         "intg.roster.provisioned",
         "intg.scim_token.group_map_updated",
         "intg.sso.deleted",

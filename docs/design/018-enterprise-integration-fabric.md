@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R595 (fifty-fifth window — NRPS roster pull operation unaudited)**: the
+  admin-triggered LTI NRPS sync pre-provisions members in bulk (JIT-creates
+  accounts + memberships). The individual JIT creations are now system-actor
+  audited (R594), but the OPERATION itself (which admin ran the bulk pull,
+  with what result counts) was not — added intg.lti.nrps_synced (user actor,
+  report counts only). Completes the access-grant audit sweep: SCIM
+  lifecycle, SSO JIT, and the NRPS bulk operation all now leave a trail.
 - **R594 (fifty-fifth window — SSO JIT provisioning had no audit either)**:
   the SCIM audit work (R592/593) pointed at its SSO twin: identity.resolve()
   JIT-provisions a brand-new user + org membership from a verified SAML/OIDC
