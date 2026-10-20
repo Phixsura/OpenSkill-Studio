@@ -834,3 +834,59 @@ def test_event_catalog_payload_keys_are_canonical_members():
     advertised = canonical | set(_INTERNAL_ALERTABLE)
     for name in EVENT_PAYLOAD_SCHEMAS:
         assert f"com.openskill.{name}.v1" in advertised, name
+
+
+# ── R608: tenant-feed PII barrier is TOTAL over hostile payloads ──
+
+_hostile_values = st.recursive(
+    st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(),
+        st.floats(allow_nan=True, allow_infinity=True),
+        st.text(max_size=400),
+        st.binary(max_size=40),
+        st.dates(),
+    ),
+    lambda children: st.one_of(
+        st.lists(children, max_size=4),
+        st.dictionaries(st.text(max_size=80), children, max_size=4),
+        st.tuples(children),
+        st.sets(st.integers(), max_size=3),
+    ),
+    max_leaves=12,
+)
+
+
+_hashable_keys = st.one_of(
+    st.text(max_size=120),
+    st.integers(),
+    st.booleans(),
+    st.none(),
+    st.dates(),
+    st.binary(max_size=20),
+    st.tuples(st.integers(), st.text(max_size=20)),
+)
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.dictionaries(_hashable_keys, _hostile_values, max_size=30))
+def test_scalar_summary_total_and_flat(blob):
+    """R608: _scalar_summary is the only thing between platform-internal
+    audit JSONB and the tenant's eyes. For ANY dict — hostile keys, nested
+    structures, bytes, dates — it must (1) never raise, (2) emit at most 20
+    entries, (3) keys as str ≤60, (4) values ONLY None/bool/int/float or
+    str ≤200 — every structure collapses to the '[…]' marker, so nothing
+    nested can ever leak through verbatim."""
+    from app.controlplane.api.tenants import _scalar_summary
+
+    out = _scalar_summary(blob)
+    assert isinstance(out, dict) and len(out) <= 20
+    for k, v in out.items():
+        assert isinstance(k, str) and len(k) <= 60
+        if isinstance(v, str):
+            assert len(v) <= 200
+        else:
+            assert v is None or isinstance(v, (bool, int, float))
+    # no value is ever a container
+    assert not any(isinstance(v, (dict, list, tuple, set, bytes)) for v in out.values())

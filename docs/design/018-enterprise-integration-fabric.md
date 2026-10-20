@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R608 (sixtieth window — the PII barrier gets a totality proof)**:
+  _scalar_summary is the ONLY thing between platform-internal audit JSONB
+  and the tenant's eyes (R70[2] flattening). New hypothesis property (300
+  hostile examples: nested dicts/lists/tuples/sets, bytes, dates, NaN/Inf,
+  non-string keys): never raises, ≤20 entries, str keys ≤60, values only
+  scalar-or-'[…]' — no container can ever reach the tenant verbatim.
 - **R607 (sixtieth window — browser family re-run + a dev-only warning
   dispositioned)**: all seven suites re-run (fabric 74, a11y 7, talent 22,
   core 31, lifecycle 60, part2 42); commercial flagged one console error —
