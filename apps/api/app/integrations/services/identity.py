@@ -123,11 +123,24 @@ class IdentityService:
         )
 
         if len(members) == 1:
-            return ResolutionResult(
-                user=members[0],
-                link=await self._link(ident, members[0].id),
-                jit_created=False,
+            link = await self._link(ident, members[0].id)
+            # R600: binding an IdP subject to an EXISTING member account means
+            # every future assertion for that subject logs in as this user —
+            # the account-binding event R512's domain gate protects. It must
+            # be reconstructible from the trail (unlink already is).
+            from app.integrations.facade import record_fabric_audit
+
+            await record_fabric_audit(
+                self.db,
+                ident.org_id,
+                None,
+                "intg.identity.linked",
+                "user",
+                members[0].id,
+                after={"source": ident.source, "connection_ref": ident.connection_ref},
+                system_actor=True,
             )
+            return ResolutionResult(user=members[0], link=link, jit_created=False)
         if len(members) > 1:
             await self._queue(ident, reason="multiple_member_matches")
             raise AppError("IDENTITY_AMBIGUOUS", "Identity requires admin confirmation", 403)

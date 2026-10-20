@@ -251,6 +251,26 @@ async def test_resolution_links_then_sticks_to_subject(db):
         .all()
     )
     assert {link.subject for link in links} == {"sub-1", "sub-OTHER"}
+    # R600: each NEW binding of an IdP subject to this EXISTING account left a
+    # system-actor trail entry (two: sub-1's first login, sub-OTHER's). The
+    # re-login under an existing link (r2) records nothing.
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    await db.flush()
+    bind_rows = (
+        (
+            await db.execute(
+                select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.identity.linked",
+                    CommercialAuditEvent.target_id == member.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(bind_rows) == 2
+    assert all(r.actor_type == "system" for r in bind_rows)
 
 
 @pytest.mark.asyncio

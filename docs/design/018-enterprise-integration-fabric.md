@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R600 (fifty-seventh window — account BINDING joins the trail)**:
+  binding an IdP subject to an EXISTING member account (verified-email
+  match) means every future assertion for that subject logs in as that user
+  — the exact event R512's domain gate protects, and unlink was already
+  audited while the bind was not. New intg.identity.linked (system actor,
+  source + connection_ref, no raw email) on each NEW binding; re-logins
+  under an existing link record nothing. Test pins two bindings (original
+  subject + IdP-migration re-subject) and the silent re-login. The
+  IdP-driven trail is now symmetric: grant/bind/privilege-change/revoke all
+  reconstructible.
 - **R599 (fifty-seventh window — IdP role changes were silent privilege
   changes)**: the SCIM group→role mapping (_apply_mapping) changes a
   member's org role on group join/leave (student↔instructor: grading and
