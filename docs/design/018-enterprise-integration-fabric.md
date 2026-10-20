@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R596 (fifty-fifth window — lock the access-grant audit invariant)**:
+  R592-R595 closed the access-grant audit gaps one path at a time; this
+  guard (tests/test_access_grant_audit_guard_db.py, in make test-intg)
+  makes the invariant permanent — every fabric module that constructs an
+  OrgMember(...) must carry an audit trail, either in-file
+  (SCIM/identity: per-event system actor) or in its mapped route layer
+  (bulk import commit, roster provision: per-operation user actor). A new
+  unaudited OrgMember creation fails the guard (negative-tested: it names
+  the offending module). Four creation sites, all covered.
 - **R595 (fifty-fifth window — NRPS roster pull operation unaudited)**: the
   admin-triggered LTI NRPS sync pre-provisions members in bulk (JIT-creates
   accounts + memberships). The individual JIT creations are now system-actor
