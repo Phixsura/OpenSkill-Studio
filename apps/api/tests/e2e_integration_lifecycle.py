@@ -867,6 +867,36 @@ async def main() -> int:
                 r.text[:200],
             )
 
+        # ── R605: compliance trail, end to end over HTTP ──
+        # Every fabric mutation this walk performed must be visible in the
+        # TENANT's own audit feed (R597): resolve the self-service tenant,
+        # page its audit events, and require the fabric actions we know we
+        # caused. This exercises write (record_fabric_audit) AND read
+        # (TENANT_VISIBLE_ACTIONS) in one black-box pass.
+        r = await c.get("/tenants/mine", headers=h)
+        tenants = (r.json().get("data") or []) if r.status_code == 200 else []
+        tid = next((t["id"] for t in tenants if t.get("my_role") in ("owner", "billing_admin")), None)
+        if tid:
+            seen_actions: set[str] = set()
+            for page in (1, 2, 3):
+                r = await c.get(
+                    f"/tenants/{tid}/audit-events", params={"page": page, "per_page": 200}, headers=h
+                )
+                if r.status_code != 200:
+                    break
+                rows = r.json().get("data") or []
+                seen_actions |= {row["action"] for row in rows}
+                if not r.json().get("meta", {}).get("has_more"):
+                    break
+            expected = {"intg.connection.created", "intg.domain.claimed"}
+            check(
+                "tenant audit feed shows the fabric actions this walk performed",
+                expected <= seen_actions,
+                f"missing={sorted(expected - seen_actions)} seen={len(seen_actions)} actions",
+            )
+        else:
+            check("tenant resolvable for audit-feed check", False, r.text[:200])
+
         # ── cleanup (best effort) ──
         await c.delete(f"{base}/connections/{conn_id}", headers=h)
         await c.delete(f"{base}/domains/{domain_id}", headers=h)

@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R605 (fifty-ninth window — the compliance chain, black-box)**: the
+  lifecycle E2E now closes the loop over plain HTTP: after performing its
+  fabric mutations it resolves the self-service tenant (/tenants/mine),
+  pages the tenant audit feed, and requires the actions it knows it caused
+  (connection.created, domain.claimed) to be visible — exercising
+  record_fabric_audit (write), action registration, AND
+  TENANT_VISIBLE_ACTIONS (read) in one pass that no unit-level guard can
+  fake. Lifecycle now 94 checks.
 - **R604 (fifty-eighth window — the other two blank update payloads)**:
   swept every record_fabric_audit call for missing `after` payloads (AST,
   17 hits). Deletes/mints/revokes are legitimately payload-less (target_id
