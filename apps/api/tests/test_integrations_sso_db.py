@@ -2462,3 +2462,60 @@ async def test_oidc_discovery_and_token_nonobject_body_rejected(db):
             state_value=qs2["state"][0], code="c", redirect_uri="https://app.test/cb"
         )
     assert e.value.code == "SSO_ASSERTION_INVALID"
+
+
+async def test_jwks_mixed_kty_tolerates_non_rsa_entries(db):
+    """R532 (mutation survivor pin): a JWKS mixing EC/OKP entries with the
+    RSA signing key (Entra and Google both publish mixed sets) must still
+    serve the RSA key — non-RSA and kid-less entries are SKIPPED, never
+    allowed to fail the whole parse."""
+    import app.integrations.services.sso_oidc as oidc_mod
+    from app.integrations.services.sso_oidc import OidcService
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    conn = await SsoAdminService(db).create(
+        org.id,
+        protocol="oidc",
+        oidc_issuer=f"https://mix-{uuid.uuid4().hex[:6]}.example.com",
+        oidc_client_id="c",
+    )
+
+    from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
+
+    jwk_key = _rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub = jwk_key.public_key().public_numbers()
+
+    def _b64u(i, length):
+        import base64 as _b
+
+        return _b.urlsafe_b64encode(i.to_bytes(length, "big")).rstrip(b"=").decode()
+
+    class _Egress:
+        async def request(self, method, url, **kw):
+            return httpx.Response(
+                200,
+                json={
+                    "keys": [
+                        # EC entry first (would explode RSAAlgorithm.from_jwk)
+                        {"kty": "EC", "kid": "ec-1", "crv": "P-256", "x": "AA", "y": "AA"},
+                        # kid-less RSA entry (unaddressable — skipped)
+                        {"kty": "RSA", "n": _b64u(pub.n, 256), "e": _b64u(pub.e, 3)},
+                        {
+                            "kty": "RSA",
+                            "kid": "rsa-good",
+                            "use": "sig",
+                            "n": _b64u(pub.n, 256),
+                            "e": _b64u(pub.e, 3),
+                        },
+                    ]
+                },
+                request=httpx.Request(method, url),
+            )
+
+    svc = OidcService(db)
+    svc.egress = _Egress()
+    oidc_mod._jwks_cache.pop(conn.id, None)
+    keys = await svc._jwks_keys(conn, "https://idp/jwks", kid="rsa-good")
+    assert "rsa-good" in keys
+    assert "ec-1" not in keys  # never stored under a non-RSA kty

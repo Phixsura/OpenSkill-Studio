@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R532 (thirty-ninth window, AST-mutation — OIDC/LTI/signing cores)**:
+  53 mutants over handle_callback, both _jwks_keys, handle_launch and
+  sign_payload: 45 killed; one TRUE survivor pinned — a JWKS mixing EC/
+  kid-less entries with the RSA signing key must still serve the RSA key
+  (Entra/Google publish mixed sets; the mutant failed the whole parse).
+  Remaining 7 are equivalents: refetch-floor one-instant boundaries, the
+  AGS/NRPS/log truncation caps, and a client_id branch dead by the create-
+  time non-null rule.
 - **R534 (thirty-ninth window, DEPLOY — API container fingerprint)**: the
   shipped API container's CMD was the one uvicorn invocation in the repo
   WITHOUT --no-server-header (R355 rule) — the production deployment
