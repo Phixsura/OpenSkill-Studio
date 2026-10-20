@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R571 (forty-eighth window — deploy contract in CI)**: the compose-env
+  drill (13 checks: per-service production settings import + the R552/R554/
+  R533 structural pins) now runs in the CI security job — it renders the
+  compose config without starting containers, so it is cheap and catches a
+  deploy-contract regression at the PR instead of at deploy.
 - **R570 (forty-eighth window — worker_alive on the wire)**: the live
   lifecycle E2E now asserts the health summary carries `worker_alive` as
   bool-or-null (never missing). Lifecycle at 93 checks, green.

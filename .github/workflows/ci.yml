@@ -37,6 +37,10 @@ jobs:
       - run: cd apps/api && uv sync --extra dev
       - name: pip-audit
         run: cd apps/api && uv run --with pip-audit pip-audit
+      # R571: deploy contract — renders docker-compose.prod.yml (no containers)
+      # and imports production settings under each backend service's exact env.
+      - name: prod compose contract (compose_env_drill)
+        run: cd apps/api && uv run python tests/drills/compose_env_drill.py
 
   lint-frontend:
     name: Lint (Frontend)
