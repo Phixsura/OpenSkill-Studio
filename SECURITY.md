@@ -14,7 +14,7 @@ If you discover a security vulnerability, please report it responsibly:
 ## Supported Versions
 
 | Version | Supported |
-|---------|-----------|
+| ------- | --------- |
 | main    | ✅        |
 
 ## Security Measures
@@ -30,3 +30,13 @@ If you discover a security vulnerability, please report it responsibly:
 - SSRF protection on webhook URLs (private IP rejection)
 - Cookie security flags (httpOnly, secure, sameSite)
 - Content Security Policy headers
+- Secrets encrypted at rest (Fernet; key rotation runbook + re-encrypt sweep:
+  `python -m app.cli reencrypt-credentials`, docs/ops §6d)
+- CI security gates on every PR: gitleaks full-history scan, pip-audit,
+  npm audit with explicit dispositions (scripts/audit-gate.mjs), and the
+  production-compose boot contract drill
+- Production boot refuses default/weak secrets, non-Fernet encryption keys,
+  wildcard CORS and the mock domain verifier (apps/api/app/config.py)
+- Webhook signatures: Standard-Webhooks HMAC with co-signed rotation window
+- SAML: XSW-hardened verification, single-use assertion/request IDs,
+  IssueInstant freshness window
