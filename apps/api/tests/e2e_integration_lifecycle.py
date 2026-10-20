@@ -621,10 +621,10 @@ async def main() -> int:
         r = await c.get("/sso/saml/metadata")
         md_ok = False
         if r.status_code == 200 and "samlmetadata+xml" in r.headers.get("content-type", ""):
-            from xml.etree import ElementTree as _etree
+            from xml.etree import ElementTree
 
             try:
-                md_root = _etree.fromstring(r.content)
+                md_root = ElementTree.fromstring(r.content)
                 md_ok = md_root.tag.endswith("EntityDescriptor") and "AssertionConsumerService" in r.text
             except Exception:
                 md_ok = False
