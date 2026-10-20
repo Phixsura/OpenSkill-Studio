@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R559 (forty-sixth window — closing assessment v4)**: research doc gains
+  the v4 table: the windows 44-46 deploy-artifact audit (R533-R558), its
+  method (boot each service's exact rendered env, never trust the YAML) and
+  the two standing guards it left behind (compose-env drill, npm audit
+  gate). Full drill suite re-run: 11/11 OK including the new drill.
 - **R558 (forty-sixth window, DEPLOY — prod env template)**: operators had
   to reverse-engineer the required variable set from compose errors one at
   a time. `.env.prod.example` now enumerates every variable the prod

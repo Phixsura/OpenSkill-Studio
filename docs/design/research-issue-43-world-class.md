@@ -607,6 +607,32 @@ admin mapping/connection mutation.
 10. Export field filtering as a denylist or applied downstream of serialization
     (new fields leak by default — R82's `_card_fields` lesson at warehouse scale).
 
+## Closing assessment v4 (2026-10-20, windows 44-46 / R544-R558)
+
+v3 closed the layers around the features. Windows 44-46 closed the layer
+around THOSE: the shipped deploy artifact itself, audited empirically (boot
+each service's exact env, not read the YAML) until first-deploy works.
+
+| Deploy defect (all shipped in docker-compose.prod.yml / Dockerfiles)    | Fix                                                                                      |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| web proxy target defaulted to localhost inside the container            | R533 build-arg API_PROXY_URL=http://api:8000 (rewrite reads it at BUILD time)            |
+| API container leaked `server: uvicorn`, 1-worker, no keep-alive         | R534 --no-server-header --workers 4 --timeout-keep-alive 75                              |
+| worker reported permanently UNHEALTHY (inherited HTTP healthcheck)      | R547 arq health-key EXISTS check; migrate healthcheck disabled                           |
+| MinIO root + app S3 creds defaulted to minioadmin                       | R549 `:?required`; CREDENTIAL_ENCRYPTION_KEY plumbed (real Fernet key)                   |
+| migrate crashed before alembic ran (prod validators, env was DB-only)   | R550 full secret set on migrate                                                          |
+| every service failed boot on DOMAIN_VERIFIER (default mock = bypass)    | R551 DOMAIN_VERIFIER=dns everywhere + standing compose-env drill (per-service import)    |
+| api/worker raced the migration job on first deploy; web raced api       | R552 service_completed_successfully / service_healthy dependency chain                   |
+| dead worker looked healthy for 1h (arq TTL = interval+1s, default 3600) | R553 health_check_interval=60 (proven: key PTTL 55s)                                     |
+| 10s stop grace SIGKILLed the 15s/30s shutdown drains                    | R554 stop_grace_period 30s/45s                                                           |
+| 4-worker lifespan raced bucket create → losers crashed production boot  | R555 BucketAlreadyOwnedByYou is success (R556: same class in tenant-export bucket)       |
+| security scans were local rituals                                       | R557 CI security job: gitleaks (SHA-pinned, read-only token), pip-audit, pnpm audit gate |
+| required env reverse-engineered from errors                             | R558 .env.prod.example, proven in both directions                                        |
+
+Standing guards added: tests/drills/compose_env_drill.py (in `make drills`,
+all 11 drills green) renders the prod compose and imports production
+settings under each backend service's exact env; scripts/audit-gate.mjs
+fails CI on any undispositioned npm advisory.
+
 ## Closing assessment v3 (2026-10-20, windows 34-43 / R486-R541)
 
 v2 closed the feature-parity table. Windows 35-43 closed everything AROUND
