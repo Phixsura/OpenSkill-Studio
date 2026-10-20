@@ -180,7 +180,9 @@ async def test_ensure_bucket_create_race_is_success():
 
     # any OTHER create failure still propagates
     client.create_bucket = AsyncMock(
-        side_effect=ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "CreateBucket")
+        side_effect=ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "CreateBucket"
+        )
     )
     with pytest.raises(ClientError):
         await ensure_bucket(client)
