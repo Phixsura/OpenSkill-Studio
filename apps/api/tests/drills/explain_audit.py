@@ -39,6 +39,12 @@ QUERIES = {
     "connections sweep slice": "SELECT * FROM intg_connections WHERE status IN ('active','degraded') ORDER BY updated_at LIMIT 100",
     "domains by org+domain": "SELECT * FROM intg_org_domains WHERE org_id='x' AND domain='d'",
     "domains discovery": "SELECT org_id FROM intg_org_domains WHERE domain='d' AND status='verified'",
+    # R545: window-34+ additions
+    "sync hook secret lookup": "SELECT * FROM intg_sync_profiles WHERE id='x' AND trigger_secret_hash='h'",
+    "deliveries keyset page": "SELECT * FROM intg_event_deliveries WHERE id < 'x' ORDER BY id DESC LIMIT 50",
+    "events keyset page": "SELECT * FROM intg_events WHERE org_id='x' AND id < 'y' ORDER BY time DESC LIMIT 50",
+    "export streams sweep": "SELECT * FROM intg_export_streams WHERE enabled AND schedule IN ('hourly','daily')",
+    "sync profiles sweep": "SELECT * FROM intg_sync_profiles WHERE enabled AND schedule IN ('hourly','daily')",
 }
 
 

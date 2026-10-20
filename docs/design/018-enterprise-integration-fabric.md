@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R545 (forty-fourth window, EXPLAIN audit extended — one real index
+  gap)**: the drill grew queries for the window-34+ paths (hook secret
+  lookup, both keyset pages, the sweeps) and FLAGGED the export-stream
+  sweep as a 34k-row Seq Scan — the hourly fleet-wide sweeps
+  (`enabled AND schedule IN`) had no usable index (sync profiles same
+  class). intg25 adds partial indexes (schedule WHERE enabled); drill
+  clean, downgrade round-trip green.
 - **R544 (forty-fourth window, HEADERS — live web audit)**: first live
   header audit of the production web server: the full hardening set
   (XFO/nosniff/CSP/HSTS/Referrer/Permissions) is served correctly on pages
