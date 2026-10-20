@@ -1,15 +1,18 @@
-"""Full adversarial battery against a LIVE API at localhost:8000.
+"""Full adversarial battery against a LIVE API (default localhost:8000).
 
 Hostile-actor simulation: a registered attacker probes every isolation
 boundary, escalation path, token weakness, and parser edge. PASS criteria are
 strict: any 5xx anywhere, or any 2xx on a forbidden action, fails the check.
 Monitor the API log for tracebacks alongside (issue §12.4 rule).
 
-Usage: APP_ENV=test API on :8000, then
+Usage: `make e2e-intg-adversarial` (own uvicorn on :8443 WITHOUT
+EGRESS_ALLOW_PRIVATE — the SSRF arms require real egress walls), or against
+a running APP_ENV=test API:
   cd apps/api && PYTHONPATH=. uv run python tests/e2e_adversarial.py
 """
 
 import asyncio
+import os
 import uuid
 
 import httpx
@@ -22,7 +25,7 @@ def _exp():
     return (datetime.now(UTC) + timedelta(days=7)).isoformat()
 
 
-API = "http://localhost:8000/api/v1"
+API = os.environ.get("E2E_INTG_API", "http://localhost:8000/api/v1")
 PASS = 0
 FAIL = 0
 RESULTS: list[str] = []

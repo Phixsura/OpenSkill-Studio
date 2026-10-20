@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R566 (forty-eighth window — adversarial battery joins the Makefile)**:
+  same treatment as the race probes (R562): the 178-check hostile-actor
+  battery had a hardcoded :8000 URL and manual invocation — now
+  E2E_INTG_API-overridable with `make e2e-intg-adversarial` (own uvicorn,
+  deliberately WITHOUT EGRESS_ALLOW_PRIVATE so the SSRF arms face real
+  walls). Target re-run green 178/178.
 - **R565 (forty-eighth window — full verification re-sweep)**: after the
   window-46/47 runtime changes (worker interval, ensure_bucket race,
   provisioning race), EVERY verification layer was re-run green in this
