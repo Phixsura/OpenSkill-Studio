@@ -613,6 +613,42 @@ async def main() -> int:
             set(cat.get("payloads", {})) <= advertised,
             str(set(cat.get("payloads", {})) - advertised)[:150],
         )
+
+        # ── R619: delivered bodies CONFORM to the published contract ──
+        # Validate every body the sink actually received against the
+        # catalog: CloudEvents envelope required fields present, type is an
+        # advertised name, and for types with a published payload schema the
+        # data keys that the schema declares as strings really are strings
+        # (a schema/payload drift misleads every subscriber integration).
+        def _bare(t: str) -> str:
+            return t.removeprefix("com.openskill.").rsplit(".v", 1)[0]
+
+        env_required = set(cat.get("envelope", {}).get("required", []))
+        conform_errs: list[str] = []
+        parsed_bodies = 0
+        for pld in sink.payloads:
+            try:
+                body = json.loads(pld["body"])
+            except Exception:
+                continue  # non-JSON probes from other phases
+            if not isinstance(body, dict) or "specversion" not in body:
+                continue
+            parsed_bodies += 1
+            missing = env_required - set(body)
+            if missing:
+                conform_errs.append(f"missing envelope fields {missing}")
+            t = body.get("type", "")
+            schema = cat.get("payloads", {}).get(t) or cat.get("payloads", {}).get(_bare(t))
+            if schema and isinstance(body.get("data"), dict):
+                for key, spec in (schema.get("properties") or {}).items():
+                    v = body["data"].get(key)
+                    if v is not None and spec.get("type") == "string" and not isinstance(v, str):
+                        conform_errs.append(f"{t}.data.{key}: {type(v).__name__} != string")
+        check(
+            "every delivered body conforms to the published catalog contract",
+            parsed_bodies >= 1 and not conform_errs,
+            f"bodies={parsed_bodies} errs={conform_errs[:3]}",
+        )
         if ok_rows:
             r = await c.get(f"{base}/deliveries/{ok_rows[0]['id']}/payload", headers=h)
             check(

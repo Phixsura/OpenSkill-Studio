@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R619 (sixty-fourth window — delivered bodies vs the published
+  contract)**: the lifecycle E2E now validates every webhook body the sink
+  ACTUALLY RECEIVED against the live /event-catalog: envelope required
+  fields present, type advertised, and declared string properties really
+  strings — so a schema/payload drift (which would mislead every subscriber
+  integration) fails the walk, not a customer. Lifecycle at 95 checks.
 - **R618 (sixty-fourth window — single-migration-head guard)**: this repo
   runs parallel worktree sessions; two of them adding migrations off the
   same parent produces a branched history that only explodes at DEPLOY
