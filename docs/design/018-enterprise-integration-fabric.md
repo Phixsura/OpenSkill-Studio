@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R623 (sixty-sixth window — personal-data inventory of the audit
+  trail)**: ops §7b now declares the audit rows' personal-data posture
+  honestly: users appear as ULIDs only (pseudonymous), no email ever lands
+  in a payload, with the ONE sanctioned exception — intg.break_glass.used
+  carries IP + capped UA for security attribution. New guard
+  (test_audit_payloads_carry_no_direct_identifiers): every
+  record_fabric_audit after= literal is scanned; forbidden identifier keys
+  (email/userName/subject/display_name) fail, and ip/ua anywhere OUTSIDE
+  the sanctioned action fails — negative-proven (an injected email key is
+  named per call site). This makes the §7b claim a tested invariant, and
+  gives a future DPO review the exact IP-bearing category.
 - **R622 (sixty-fifth window — SP metadata on the wire)**: the walk now
   fetches /sso/saml/metadata the way an IdP admin does — 200,
   application/samlmetadata+xml, well-formed XML, EntityDescriptor root,

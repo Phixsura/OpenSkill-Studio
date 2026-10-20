@@ -431,7 +431,13 @@ R592–R597 completed the chain end to end:
 - **Retention & export posture** — `cp_audit_events` is append-only and is
   deliberately NEVER swept by the retention cron (compliance records
   outlive operational data; a purge horizon is a business/legal decision,
-  not an engineering default). The feed query is served by
+  not an engineering default). **Personal-data inventory (R623)**: audit
+  rows reference users only by ULID (pseudonymous; no email ever lands in a
+  payload — tested), with ONE deliberate exception: `intg.break_glass.used`
+  carries the client IP and a 300-char-capped User-Agent, because a password
+  bypass under enforced SSO must be attributable (security legitimate
+  interest). A data-protection review deciding a purge horizon should treat
+  that single action as the IP-bearing category. The feed query is served by
   `(tenant_id, created_at)`, so growth does not degrade it. Export = page
   the feed API (`page`/`per_page≤200`, optional `action` filter) into the
   external compliance store; payloads are config-shape only, never secrets.

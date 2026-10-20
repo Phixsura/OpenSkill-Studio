@@ -52,3 +52,32 @@ def test_every_orgmember_creation_site_is_audited():
         "record_fabric_audit (system_actor=True for IdP-driven) or map the "
         "route layer in ROUTE_FOR."
     )
+
+
+def test_audit_payloads_carry_no_direct_identifiers():
+    """R623: audit rows are pseudonymous — users appear as ULIDs only. The
+    `after=` literals across every record_fabric_audit call site must never
+    include an email (or a raw subject) key; the ONE sanctioned
+    personal-data exception is intg.break_glass.used's ip_address/user_agent
+    (security attribution, documented in ops §7b)."""
+    import re
+
+    FORBIDDEN_KEYS = {"email", "userName", "user_name", "subject", "display_name"}
+    ALLOWED_PII = {("intg.break_glass.used", "ip_address"), ("intg.break_glass.used", "user_agent")}
+    offenders = []
+    for f in list(INTG.rglob("*.py")) + [APP / "services" / "auth.py"]:
+        text = f.read_text()
+        for m in re.finditer(r"record_fabric_audit\((.*?)\)\n", text, re.DOTALL):
+            call = m.group(1)
+            am = re.search(r'"((?:intg|org)\.[a-z_.]+)"', call)
+            action = am.group(1) if am else "?"
+            after = re.search(r"after=\{(.*?)\}", call, re.DOTALL)
+            if not after:
+                continue
+            for key in re.finditer(r'"([a-z_]+)":', after.group(1)):
+                k = key.group(1)
+                if k in FORBIDDEN_KEYS:
+                    offenders.append(f"{f.name}: {action} carries '{k}'")
+                if k in ("ip_address", "user_agent") and (action, k) not in ALLOWED_PII:
+                    offenders.append(f"{f.name}: {action} carries unsanctioned '{k}'")
+    assert not offenders, offenders
