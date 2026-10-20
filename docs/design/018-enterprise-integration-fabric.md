@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R534 (thirty-ninth window, DEPLOY — API container fingerprint)**: the
+  shipped API container's CMD was the one uvicorn invocation in the repo
+  WITHOUT --no-server-header (R355 rule) — the production deployment
+  leaked `server: uvicorn` while every test runner masked it. Added, plus
+  --timeout-keep-alive 75 (upstream > proxy/browser keep-alive).
 - **R533 (thirty-ninth window, DEPLOY — prod compose web↔API wiring)**: the
   R528 topology rules applied to the shipped artifacts: the web Dockerfile
   never passed API_PROXY_URL at BUILD time, so the baked /api/* rewrite
