@@ -51,6 +51,20 @@ def _fernet() -> MultiFernet:
     return MultiFernet(fernets)
 
 
+def current_key_generation() -> int:
+    """R574: how many Fernet keys are configured (1 for the dev fallback).
+
+    Rotations PREPEND a key, so this count grows monotonically; a stored
+    credential's key_version < current generation means it was encrypted
+    before the latest rotation and decrypts via an OLD key — re-save it to
+    re-encrypt under the newest one.
+    """
+    raw = settings.credential_encryption_key
+    if not raw:
+        return 1
+    return len([k for k in raw.split(",") if k.strip()])
+
+
 def encrypt_secret(value: str) -> str:
     """Encrypt a single secret string (webhook signing secrets, R371)."""
     return _fernet().encrypt(value.encode()).decode()

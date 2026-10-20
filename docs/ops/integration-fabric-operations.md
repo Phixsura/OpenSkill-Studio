@@ -222,6 +222,22 @@ CREDENTIAL_ENCRYPTION_KEY (a REAL Fernet key — 32-byte urlsafe base64,
 not a passphrase). The migrate job needs the same set: settings import runs
 the production boot validators before alembic does anything.
 
+## 6d. Credential key rotation (R574)
+
+Rotate by PREPENDING the new Fernet key:
+`CREDENTIAL_ENCRYPTION_KEY=<new>,<old>` — new writes encrypt under the new
+key, old rows keep decrypting. Each stored connection credential records
+the key GENERATION (count of configured keys) it was encrypted under in
+`key_version`; rows with `key_version` below the current generation are the
+re-encrypt worklist — re-saving a credential (same values is fine)
+re-encrypts it under the newest key and advances its version. Drop the old
+key from the env only once no row is below the current generation:
+
+```sql
+SELECT connection_id, key_version FROM intg_connection_credentials
+WHERE key_version < <current generation>;
+```
+
 ## 7. Health and alerting
 
 `GET /orgs/{org}/integrations/health` (the hub strip polls it): connection

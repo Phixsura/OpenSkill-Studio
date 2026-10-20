@@ -226,6 +226,42 @@ async def test_credential_roundtrip_encrypted_and_write_only(ctx):
 
 
 @pytest.mark.asyncio
+async def test_credential_key_version_tracks_key_generation(ctx, monkeypatch):
+    """R574: key_version records how many Fernet keys were configured when a
+    row was (re)encrypted. After a rotation (prepend a key), rows with
+    key_version < current generation are the ones still on an OLD key —
+    that is the operator's re-encrypt worklist, and a re-save advances it."""
+    from cryptography.fernet import Fernet
+
+    from app.config import settings
+    from app.core import crypto
+
+    svc, org = ctx["svc"], ctx["org"]
+    conn = await _mk_conn(ctx)
+    k1 = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "credential_encryption_key", k1)
+    cred = await svc.set_credential(
+        org.id, conn.id, kind="api_key", values={"api_key": "sk-v1"}, expires_at=None
+    )
+    assert cred.key_version == 1 == crypto.current_key_generation()
+
+    # Rotation: PREPEND a new key — old rows stay decryptable but stale.
+    k2 = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "credential_encryption_key", f"{k2},{k1}")
+    assert crypto.current_key_generation() == 2
+    assert cred.key_version < crypto.current_key_generation()  # stale -> re-encrypt me
+    loader = await svc._secret_loader(conn.id)
+    assert (await loader())["api_key"] == "sk-v1"  # old key still decrypts
+
+    cred2 = await svc.set_credential(
+        org.id, conn.id, kind="api_key", values={"api_key": "sk-v2"}, expires_at=None
+    )
+    assert cred2.id == cred.id
+    assert cred2.key_version == 2
+    assert (await loader())["api_key"] == "sk-v2"
+
+
+@pytest.mark.asyncio
 async def test_credential_bad_kind_and_oversize_rejected(ctx):
     svc, org = ctx["svc"], ctx["org"]
     conn = await _mk_conn(ctx)

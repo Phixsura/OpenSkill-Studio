@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import decrypt_credentials, encrypt_credentials
+from app.core.crypto import current_key_generation, decrypt_credentials, encrypt_credentials
 from app.exceptions import AppError
 from app.integrations.models import (
     CONNECTION_TRANSITIONS,
@@ -384,6 +384,9 @@ class ConnectionService:
                 kind=kind,
                 ciphertext=ciphertext,
                 expires_at=expires_at,
+                # R574: which key GENERATION encrypted this row — rows below
+                # the current generation predate the latest rotation.
+                key_version=current_key_generation(),
             )
             # R212 (R110 class): connection_id is UNIQUE (1:1 envelope) and
             # this is a check-then-add — a concurrent first-time set's loser
@@ -407,10 +410,12 @@ class ConnectionService:
                 cred.kind = kind
                 cred.ciphertext = ciphertext
                 cred.expires_at = expires_at
+                cred.key_version = current_key_generation()
         else:
             cred.kind = kind
             cred.ciphertext = ciphertext
             cred.expires_at = expires_at
+            cred.key_version = current_key_generation()
         # Replacing credentials on an errored connection re-opens it for a
         # fresh ping (§4.2: error -> pending).
         if conn.status == "error":

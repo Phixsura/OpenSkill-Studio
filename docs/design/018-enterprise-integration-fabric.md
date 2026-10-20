@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R574 (forty-ninth window — key_version was a dead column)**: a
+  246-field dead-field scan over the fabric models found
+  IntegrationConnectionCredential.key_version written by nobody (always
+  default 1), making "which rows still sit on an old Fernet key?"
+  unanswerable after a rotation. It now records the key GENERATION (count
+  of configured keys) on every credential write; rows below the current
+  generation are the re-encrypt worklist. Ops §6d documents the full
+  rotation flow. Test drives a real rotation (prepend key → old row reads
+  stale + still decrypts → re-save advances generation). The other scan hit
+  (StagedRecord.first_seen_run_id) was a scanner false positive (kwarg-only
+  usage).
 - **R573 (forty-ninth window — severe-drift guard, repo-wide)**: the R572
   class gets a standing guard: tests/test_schema_drift_guard_db.py runs
   autogenerate comparison over the WHOLE schema and fails on the drift
