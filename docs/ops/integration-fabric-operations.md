@@ -482,6 +482,20 @@ Defaults: 5×15 = 75 ≤ 80 ✓. The commented `DB_POOL_SIZE=20` example in
 `FATAL: remaining connection slots are reserved`. Raise `max_connections`
 (and RAM) before raising pool sizes.
 
+## 7e3. Redis capacity drivers (R628)
+
+The prod redis runs `maxmemory 256mb` with **noeviction** (R92[H2]: billing
+counters must fail loudly, never silently evict). What lives there and how
+it's bounded: arq job payloads (small, drained continuously), the arq
+health key (61s TTL), rate-limit buckets (TTL = their window), hourly
+`cp:apireq:*` billing buckets (flushed to Postgres hourly, 48h TTL
+backstop), and OIDC/SAML login-state (10-min TTL + sweeper). Nothing
+unbounded lives in redis — events, deliveries and payload archives are
+Postgres rows. At maxmemory, WRITES fail loudly (metering fails open by
+design; a stuck queue shows as worker_alive + deliveries.pending in the
+health summary). If `INFO memory` shows sustained >200MB, raise maxmemory
+and RAM together — do not switch the eviction policy.
+
 ## 7f. Backups (R564)
 
 The prod compose persists three volumes: `pgdata` (system of record),
