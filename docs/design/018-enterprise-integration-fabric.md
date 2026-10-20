@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R594 (fifty-fifth window — SSO JIT provisioning had no audit either)**:
+  the SCIM audit work (R592/593) pointed at its SSO twin: identity.resolve()
+  JIT-provisions a brand-new user + org membership from a verified SAML/OIDC
+  identity — an IdP-driven access GRANT, the single most important SSO
+  compliance event — and wrote NOTHING to the audit trail. Now records
+  intg.sso.jit_provisioned (system actor, carrying source + connection_ref
+  but never the subject's raw email/attrs). Test asserts the row lands with
+  system actor and no PII leak. This closes the IdP-driven access-grant
+  audit gap across BOTH provisioning protocols (SCIM + SSO JIT).
 - **R593b (fifty-fourth window — catalog-drift guard missed ternary
   emits)**: making create() choose its _audit event via a ternary
   (`"org.scim.reactivated" if reactivated else "org.scim.provisioned"`)

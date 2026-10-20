@@ -273,6 +273,21 @@ async def test_resolution_jit_creates_and_respects_role_ceiling(db):
         )
     ).scalar_one()
     assert member.role == OrgRole.STUDENT and member.is_break_glass is False
+    # R594: JIT provisioning writes the compliance trail as a system actor
+    # (IdP-driven access grant), carrying the connection ref but NO raw email.
+    from app.controlplane.models.audit import CommercialAuditEvent
+
+    await db.flush()
+    audit = (
+        await db.execute(
+            select(CommercialAuditEvent).where(
+                CommercialAuditEvent.action == "intg.sso.jit_provisioned",
+                CommercialAuditEvent.target_id == r.user.id,
+            )
+        )
+    ).scalar_one()
+    assert audit.actor_type == "system" and audit.actor_user_id is None
+    assert audit.after.get("source") and "email" not in audit.after
     # owner role can never be JIT-minted
     with pytest.raises(AppError) as e2:
         await svc.resolve(

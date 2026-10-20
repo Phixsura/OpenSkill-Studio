@@ -137,7 +137,25 @@ class IdentityService:
             await self._queue(ident, reason="no_member_match")
             raise AppError("SSO_NO_ACCOUNT", "No account for this identity", 403)
         user = await self._jit_provision(ident, jit_role)
-        return ResolutionResult(user=user, link=await self._link(ident, user.id), jit_created=True)
+        link = await self._link(ident, user.id)
+        # R594: JIT provisioning is an IdP-driven access GRANT — the single
+        # most important SSO compliance event ("who was auto-created into
+        # this org by which connection, and when"). It had NO audit trail.
+        # system actor: no human performed it. Never carries the subject's
+        # raw email/attrs — only the connection + source + new user id.
+        from app.integrations.facade import record_fabric_audit
+
+        await record_fabric_audit(
+            self.db,
+            ident.org_id,
+            None,
+            "intg.sso.jit_provisioned",
+            "user",
+            user.id,
+            after={"source": ident.source, "connection_ref": ident.connection_ref},
+            system_actor=True,
+        )
+        return ResolutionResult(user=user, link=link, jit_created=True)
 
     async def _link(self, ident: VerifiedExternalIdentity, user_id: str) -> ExternalIdentityLink:
         link = ExternalIdentityLink(
