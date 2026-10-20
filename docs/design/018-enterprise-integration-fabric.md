@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R536 (fortieth window, AST-mutation — identity + roster, the last
+  unswept cores)**: 54 mutants, 45 killed (two apparent takeover-guard
+  survivors were -k FILTER artifacts — full-suite reruns killed them; a
+  lesson for harness configs: filtered selections under-report). Pinned
+  with new killers: the single-verified-email member match LINKS (the
+  whole email rung's happy path had no direct test), zero-member +
+  verified email JITs rather than queues, and admin queue-adjudication
+  refuses ARCHIVED targets (manual mutant verification — the harness's
+  only_descs line-matching mis-attributed this one). L131 proven
+  equivalent (shadowed by the ==1 early return); roster's lone survivor a
+  status-code literal. Symbolic contracts extended: signature shape/
+  determinism and every-input binding of the Standard-Webhooks signer,
+  both PROVEN.
 - **R535 (thirty-ninth window, AST-mutation — sync \_apply_record + SCIM
   lifecycle)**: 74 mutants, 51 killed outright; THREE true survivors
   pinned with killers — (1) the pure-theirs default must DROP keys the
