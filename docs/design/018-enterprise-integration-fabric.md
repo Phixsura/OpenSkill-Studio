@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R583 (fifty-first window — matches page read a non-existent contract)**:
+  the talent browser suite's React-key warning led to a real production
+  defect: /dashboard/opportunities/matches declared MatchResult as
+  opportunity_id/title/employer_name/match_score, but the API returns the
+  TalentMatchResult dataclass (entity_id/display_name/score) — so every
+  match card rendered an empty title, NaN%, a dead "View & Apply" link, and
+  the undefined key that surfaced it. Page aligned to the real contract; new
+  vitest pins the shape (entity_id, 82% not NaN, entity_id detail link);
+  talent browser suite now ALL 22 CHECKS PASSED.
+- **R582 (fifty-first window — key warning + brittle 500 check)**: the
+  ecosystem overview's trending map keyed on a field a mock-fidelity bug
+  left undefined (fixed the mock + a defensive key fallback), and the talent
+  suite's "No API 500" check scanned body TEXT (false-positive on any page
+  containing "500"/"Internal Server Error") — rewritten to assert on actual
+  > =500 response status.
 - **R581 (fiftieth window — template drift contract + full live chain)**:
   compose drill check #14: every ${VAR} docker-compose.prod.yml references
   (11) must exist in .env.prod.example, so the operator template cannot

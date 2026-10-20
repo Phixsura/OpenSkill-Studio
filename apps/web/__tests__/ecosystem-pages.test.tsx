@@ -56,6 +56,23 @@ describe("Ecosystem Intelligence pages (issue #35 Part S)", () => {
   it("overview renders operator health stats and change feed", async () => {
     api.mockImplementation((path: string) => {
       if (path === "/ecosystem/dashboard") return Promise.resolve({ data: OVERVIEW });
+      // Trending has its own shape (keyed by entity_id) — returning the
+      // change-feed shape here gave the trending map key=undefined and a
+      // React key warning (R582: a mock-fidelity bug, not a page bug).
+      if (path.startsWith("/ecosystem/dashboard/trending")) {
+        return Promise.resolve({
+          data: [
+            {
+              entity_id: "E1",
+              entity_kind: "model",
+              canonical_name: "GPT-X",
+              observations: 9,
+              distinct_sources: 3,
+              velocity: 2,
+            },
+          ],
+        });
+      }
       return Promise.resolve({
         data: [
           {

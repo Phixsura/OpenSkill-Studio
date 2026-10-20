@@ -137,13 +137,20 @@ try {
   // Open in a NEW context (no auth cookies) to verify it's truly public
   const publicContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const publicPage = await publicContext.newPage();
+  // R582: assert on ACTUAL response status, not body-text scanning — the
+  // verify page legitimately renders copy/markup that contains "500" or
+  // "Internal Server Error" (Next error-boundary strings), which made the
+  // old substring check a false positive even on a clean 404.
+  const serverErrors = [];
+  publicPage.on("response", (resp) => {
+    if (resp.url().includes("/api/v1/") && resp.status() >= 500) {
+      serverErrors.push(`${resp.status()} ${resp.url()}`);
+    }
+  });
   await publicPage.goto(`${BASE}/verify/passport/nonexistent-token-test`, { waitUntil: "load", timeout: 15000 });
   await publicPage.waitForTimeout(3000);
-  const verifyUrl = publicPage.url();
-  const verifyContent = await publicPage.textContent("body");
-  // The verify page either renders content or redirects to login (dashboard layout wraps it)
   check("Verify page accessible", true);  // If it loaded at all
-  check("No API 500 on verify", !verifyContent.includes("500") && !verifyContent.includes("Internal Server Error"), "");
+  check("No API 5xx on verify", serverErrors.length === 0, serverErrors.join("; "));
   await publicPage.close();
   await publicContext.close();
 

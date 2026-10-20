@@ -182,9 +182,9 @@ export default function EcosystemOverviewPage() {
             <div>
               <h2 className="mb-3 text-lg font-semibold">Trending (7d observation velocity)</h2>
               <div className="flex flex-wrap gap-2">
-                {(trending.data?.data ?? []).map((t) => (
+                {(trending.data?.data ?? []).map((t, ti) => (
                   <span
-                    key={t.entity_id}
+                    key={t.entity_id ?? `trend-${ti}`}
                     className="rounded-full border bg-[hsl(var(--card))] px-3 py-1 text-xs shadow-sm"
                     title={`${t.observations} observations from ${t.distinct_sources} sources`}
                   >

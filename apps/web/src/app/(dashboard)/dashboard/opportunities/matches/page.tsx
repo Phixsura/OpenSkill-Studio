@@ -7,13 +7,16 @@ import { apiWithAuth } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface MatchResult {
-  opportunity_id: string;
-  title: string;
-  employer_name: string;
-  opportunity_type: string;
-  match_score: number;
+  // R583: aligned to the backend TalentMatchResult dataclass — the page
+  // previously read opportunity_id/title/employer_name/match_score, none of
+  // which the API returns, so every card rendered an empty title, NaN% and
+  // an undefined React key.
+  entity_id: string;
+  entity_type: string;
+  display_name: string;
+  score: number;
   tier: string;
-  reasons: { code: string; label: string; evidence: string }[];
+  reasons: { code: string; label: string; evidence?: string }[];
   gaps: { code: string; label: string }[];
 }
 
@@ -67,13 +70,13 @@ export default function OpportunityMatchesPage() {
       <div className="space-y-4">
         {matches.map((match) => (
           <div
-            key={match.opportunity_id}
+            key={match.entity_id}
             className="rounded-lg border bg-[hsl(var(--card))] p-6 shadow-sm"
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold">{match.title}</h3>
+                  <h3 className="text-lg font-semibold">{match.display_name}</h3>
                   <span
                     className={cn(
                       "rounded-full px-2.5 py-0.5 text-xs font-medium",
@@ -83,12 +86,10 @@ export default function OpportunityMatchesPage() {
                     {match.tier}
                   </span>
                 </div>
-                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-                  {match.employer_name} · {(match.opportunity_type ?? "").replace(/_/g, " ")}
-                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Opportunity</p>
               </div>
               <div className="ml-4 text-right">
-                <div className="text-2xl font-bold">{Math.round(match.match_score * 100)}%</div>
+                <div className="text-2xl font-bold">{Math.round(match.score * 100)}%</div>
                 <div className="text-xs text-[hsl(var(--muted-foreground))]">match</div>
               </div>
             </div>
@@ -129,7 +130,7 @@ export default function OpportunityMatchesPage() {
 
             <div className="mt-4 flex gap-3">
               <Link
-                href={`/dashboard/opportunities/${match.opportunity_id}`}
+                href={`/dashboard/opportunities/${match.entity_id}`}
                 className="rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))]"
               >
                 View & Apply
