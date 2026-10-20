@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R538 (forty-second window, SUPPLY CHAIN — first dependency audit)**:
+  pnpm audit had never been run (and errors against the configured npm
+  mirror — use --registry=https://registry.npmjs.org). Found 8 advisories;
+  fixed 7: next 15.5.24 → ^15.5.27 (resolves 15.5.28 — the two advisories
+  are cache poisoning of SSG/ISR in SELF-HOSTED deployments, exactly our
+  topology), sharp ≥0.35.5, source-map-js ≥1.2.2, brace-expansion v1+v5
+  ranges via pnpm overrides. The one remaining is `braces` ReDoS with NO
+  upstream patch (dev-tooling path via eslint/fast-glob; DoS-class).
+  Patched stack verified: tsc, 771 web units, prod build + standalone
+  boot, fabric browser journey 74/74.
 - **R537 (forty-first window, AST-mutation — the five remaining service
   cores + 3 more proofs)**: 74 mutants over apply_mapping, domains
   verify/claim, _maybe_auto_disable, run_export and import commit — 41
