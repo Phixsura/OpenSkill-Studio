@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R614 (sixty-third window — mutation sweep on the audit arc finds a
+  LOGIN 500)**: AST-mutated record_fabric_audit (2/2 killed) and
+  _enforce_sso_gate (14 mutants). Strengthening the kill suite for the five
+  survivors (UA-truncation boundary + audit-payload or/and) required a
+  351-char User-Agent — which immediately exposed a REAL bug far older than
+  the audit arc: RefreshToken.device_info is varchar(255) and login wrote
+  the RAW User-Agent into it, so ANY login with a UA over 255 chars
+  (real-world UAs reach 300+) failed 500 with
+  StringDataRightTruncationError. Boundary-truncated at the single ctor;
+  ip_address (varchar(45)) audited safe (socket host only, never raw XFF).
+  Tests now pin exact 300-char truncation in BOTH the mesh event and the
+  audit payload, and SSO_REQUIRED pins status 403.
 - **R613 (sixty-second window — five class sweeps, all clean)**: applying
   the arc method to five further defect classes found NO debt — recorded as
   negative results so the next auditor doesn't re-walk them: (1) bare

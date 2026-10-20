@@ -592,7 +592,11 @@ class AuthService:
             token_hash=sha256(jti.encode()).hexdigest(),
             expires_at=expires_at,
             ip_address=ip_address,
-            device_info=device_info,
+            # R614: device_info is the raw User-Agent and the column is
+            # varchar(255) — real-world UAs exceed that, and an oversized
+            # value made EVERY login with a long UA 500 with
+            # StringDataRightTruncationError. Truncate at the boundary.
+            device_info=device_info[:255] if device_info else None,
         )
         self.db.add(token_record)
 

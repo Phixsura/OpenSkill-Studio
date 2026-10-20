@@ -538,7 +538,7 @@ async def test_enforce_sso_blocks_password_login_break_glass_passes(db):
     auth = AuthService(db)
     with pytest.raises(AppError) as e:
         await auth.login(email, "Test123!")
-    assert e.value.code == "SSO_REQUIRED"
+    assert e.value.code == "SSO_REQUIRED" and e.value.status == 403
 
     member.is_break_glass = True
     await db.flush()
@@ -1549,8 +1549,9 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
         )
     )
     await db.flush()
+    long_ua = "E2E-UA/1.0 " + "x" * 340  # 351 chars: probes the 300-char cap
     result = await AuthService(db).login(
-        email, "Test123!", ip_address="198.51.100.7", device_info="E2E-UA/1.0"
+        email, "Test123!", ip_address="198.51.100.7", device_info=long_ua
     )
     assert result.access_token
     ev = (
@@ -1567,7 +1568,8 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
     )
     assert ev is not None
     assert ev.data["ip_address"] == "198.51.100.7"
-    assert ev.data["user_agent"] == "E2E-UA/1.0"
+    # exact 300-char truncation (kills the 300→301 boundary mutants)
+    assert ev.data["user_agent"] == long_ua[:300] and len(ev.data["user_agent"]) == 300
     # R601: the hatch use also lands in the COMPLIANCE trail, attributed to
     # the break-glass user (actor), with the same IP/UA.
     from app.controlplane.models.audit import CommercialAuditEvent
@@ -1586,6 +1588,9 @@ async def test_break_glass_login_event_carries_ip_and_ua(db):
     )
     assert row.actor_user_id == emp.id and row.actor_type == "tenant"
     assert row.after["ip_address"] == "198.51.100.7"
+    # the audit copy carries the SAME truncated UA (kills the or/and + cap
+    # mutants on the audit-payload branch, which the mesh asserts missed)
+    assert row.after["user_agent"] == long_ua[:300]
 
 
 @pytest.mark.asyncio
