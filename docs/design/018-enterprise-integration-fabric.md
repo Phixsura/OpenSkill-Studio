@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R576 (fiftieth window — talent live E2E exposes three production
+  500s)**: re-ran the talent lifecycle E2E after R572 and 6 checks failed
+  with REAL server errors (the suite's unit tests never touch these paths):
+  (1) the capability-profile Redis cache round-trips through JSON, so on a
+  cache HIT CapabilityScore carried ISO _strings_ in its datetime fields —
+  any profile view within 5 minutes before a snapshot create made the
+  create 500 on .isoformat(); cache-hit branch now rehydrates datetimes
+  (unit pin added). (2) GET /talent/users/{id}/profile declared
+  DataResponse[dict] but its primary branch returns a LIST → 500 on every
+  own-profile request. (3) POST /opportunities/{id}/match declared
+  list[dict] but the service returns {results, fairness} → 500 on every
+  successful match. Talent lifecycle now ALL 64 CHECKS PASSED with zero
+  API tracebacks.
 - **R575 (forty-ninth window — rotation gets a sweep)**: `python -m
 app.cli reencrypt-credentials` re-encrypts every encrypted-at-rest row
   under the newest Fernet key (connection credentials + key_version bump,

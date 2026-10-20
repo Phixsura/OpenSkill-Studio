@@ -196,3 +196,41 @@ def test_migration_has_correct_revision():
     spec.loader.exec_module(mod)
     assert mod.revision == "talent15a00015"
     assert mod.down_revision == "talent14a00014"
+
+
+@pytest.mark.asyncio
+async def test_profile_cache_hit_rehydrates_datetimes():
+    """R576: the cache round-trips through JSON, so datetime fields come back
+    as ISO strings — the cache-hit branch must hand consumers real datetimes
+    (snapshot create 500'd on .isoformat() whenever a profile view had warmed
+    the cache within the previous 5 minutes)."""
+    from datetime import datetime
+
+    from app.talent.services.scoring import compute_capability_profile
+
+    row = {
+        "capability_id": "C1",
+        "capability_name": "Design",
+        "level": 3,
+        "level_label": "Independent production",
+        "score": 0.6,
+        "depth": 0.5,
+        "breadth": 0.0,
+        "recency": 1.0,
+        "velocity": 1.0,
+        "confidence": 0.7,
+        "evidence_count": 6,
+        "substantial_evidence_count": 5,
+        "last_verified_at": "2026-10-20T09:10:23.912078+00:00",
+        "verification_mix": {"instructor_verified": 5},
+        "scoring_version": "2.0.0",
+        "computed_at": "2026-10-20T09:10:23.945305+00:00",
+    }
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=json.dumps([row]))
+    with patch("app.talent.services.cache._redis", return_value=mock_redis):
+        scores = await compute_capability_profile(None, "U1")
+    assert len(scores) == 1
+    assert isinstance(scores[0].last_verified_at, datetime)
+    assert isinstance(scores[0].computed_at, datetime)
+    assert scores[0].last_verified_at.isoformat().startswith("2026-10-20T09:10:23")

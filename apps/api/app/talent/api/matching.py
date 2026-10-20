@@ -21,7 +21,9 @@ router = APIRouter(prefix="/talent", tags=["Talent — Matching"])
 
 @router.post(
     "/opportunities/{opp_id}/match",
-    response_model=DataResponse[list[dict]],
+    # R576: the service returns {results, fairness} — the list annotation
+    # made FastAPI 500 on every successful match.
+    response_model=DataResponse[dict],
     summary="Match candidates to opportunity",
     description="Generate a ranked shortlist of candidates for an opportunity. Uses 4-dimensional scoring (depth, breadth, recency, velocity) with adjacent skill inference via CapabilityEdge. Employer org member only.",
 )

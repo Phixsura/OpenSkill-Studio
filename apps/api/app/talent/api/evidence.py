@@ -187,7 +187,9 @@ async def get_provenance(
     "/users/{user_id}/profile",
     summary="Get user capability profile",
     description="Returns computed capability scores for a user aggregated from all verified evidence.",
-    response_model=DataResponse[dict],
+    # R576: the own-profile branch returns a LIST of score dicts — the dict
+    # annotation made FastAPI 500 on the route's primary path.
+    response_model=DataResponse[list[dict] | dict],
 )
 async def get_capability_profile(
     user_id: str,

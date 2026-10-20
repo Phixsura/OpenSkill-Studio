@@ -246,7 +246,24 @@ async def compute_capability_profile(
     if cache_key:
         cached = await get_cached(cache_key)
         if cached is not None:
-            return [CapabilityScore(**row) for row in cached]
+            # R576: the cache round-trips through JSON, so datetime fields
+            # come back as ISO STRINGS — CapabilityScore(**row) then handed
+            # str where every consumer expects datetime (.isoformat() crashes
+            # inside the 5-min cache window: snapshot create 500'd whenever a
+            # profile view preceded it). Rehydrate them.
+            def _dt(v):
+                return datetime.fromisoformat(v) if isinstance(v, str) else v
+
+            return [
+                CapabilityScore(
+                    **{
+                        **row,
+                        "last_verified_at": _dt(row.get("last_verified_at")),
+                        "computed_at": _dt(row.get("computed_at")),
+                    }
+                )
+                for row in cached
+            ]
 
     now = datetime.now(UTC)
 
