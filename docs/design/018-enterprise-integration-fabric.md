@@ -931,6 +931,9 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R570 (forty-eighth window — worker_alive on the wire)**: the live
+  lifecycle E2E now asserts the health summary carries `worker_alive` as
+  bool-or-null (never missing). Lifecycle at 93 checks, green.
 - **R569 (forty-eighth window — banner pinned in web units)**: the R563
   worker-down banner gets three vitest pins: false → banner, null
   (redis-unknown) → no banner, omitted/true → no banner. Hub test file

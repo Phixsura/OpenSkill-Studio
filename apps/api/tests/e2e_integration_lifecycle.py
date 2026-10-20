@@ -562,6 +562,15 @@ async def main() -> int:
             r.status_code == 200 and "connections" in r.json()["data"],
             r.text[:200],
         )
+        # R563: worker-liveness key is always present (bool from the arq
+        # health key, or null when redis is unreachable — never missing).
+        check(
+            "health summary reports worker_alive",
+            r.status_code == 200
+            and "worker_alive" in r.json()["data"]
+            and r.json()["data"]["worker_alive"] in (True, False, None),
+            r.text[:200],
+        )
         bulk_email = f"bulk-{uid()}@{domain}"
         r = await c.post(
             "/scim/v2/Bulk",
