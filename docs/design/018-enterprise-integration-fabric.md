@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R562 (forty-seventh window — race probes join the Makefile)**: the
+  duplicate-create race probe (R484, 21 checks) was a manual ritual with a
+  hardcoded :8000 URL — now E2E_INTG_API-overridable with a standard
+  `make e2e-intg-races` target (own uvicorn on :8443). Re-run green 21/21;
+  storm re-run green 8/8 (zero 5xx).
 - **R561 (forty-seventh window — compose drill becomes the full deploy
   contract)**: compose_env_drill now also pins the structural half of the
   deploy audit: R552 dependency conditions (api/worker on migrate

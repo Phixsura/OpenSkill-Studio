@@ -6,16 +6,18 @@ a clean 4xx (409/422) — a 23505 unique-violation leaking as a 500 means the
 create path has no race recovery (sequential pre-checks pass the battery but
 lose the TOCTOU window under concurrency).
 
-Usage: APP_ENV=test API on :8000, then
+Usage: `make e2e-intg-races` (own uvicorn on :8443), or against a running
+APP_ENV=test API:
   cd apps/api && PYTHONPATH=. uv run python tests/e2e_race_probe.py
 """
 
 import asyncio
+import os
 import uuid
 
 import httpx
 
-API = "http://localhost:8000/api/v1"
+API = os.environ.get("E2E_INTG_API", "http://localhost:8000/api/v1")
 PASS = 0
 FAIL = 0
 RESULTS: list[str] = []
