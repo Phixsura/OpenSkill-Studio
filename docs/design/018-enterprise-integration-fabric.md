@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R607 (sixtieth window — browser family re-run + a dev-only warning
+  dispositioned)**: all seven suites re-run (fabric 74, a11y 7, talent 22,
+  core 31, lifecycle 60, part2 42); commercial flagged one console error —
+  a React missing-key warning with an EMPTY component stack and a
+  react-dom-internal JS stack on two pages. Traced exhaustively (URL
+  tagging, in-page console hook via exposeFunction, JS stack capture,
+  static scan of every .map, vitest renders): every app list render is
+  keyed; the warning is a Next DEV-mode framework artifact absent from the
+  production artifact (where this suite runs 19/19). Suite now takes
+  E2E_DEV_SERVER=1 to exempt exactly that message on dev runs while staying
+  strict against production builds.
 - **R606 (fifty-ninth window — corrected: the mesh side was already
   symmetric)**: initially added a service-layer SLO mesh emit on the belief
   SAML SLO was subscriber-invisible — then found the ROUTE layer already
