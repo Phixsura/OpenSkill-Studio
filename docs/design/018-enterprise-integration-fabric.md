@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R572 (forty-ninth window — repo-wide drift audit finds a
+  production-dead surface)**: ran alembic autogenerate comparison over the
+  WHOLE schema (the fabric guard is intg_*-scoped by design): 237 diffs,
+  mostly legacy nullable/FK-ondelete noise — but THREE were real:
+  `skill_passports.alumni_mode` existed in the model with NO migration, so
+  every ORM SELECT of SkillPassport raised UndefinedColumnError on a
+  migrated database (the passport surface was production-dead; unit suites
+  never touch the DB so 3,368 talent tests were green through it), plus two
+  talent scorecard columns JSONB-in-model/JSON-in-db. Migration
+  intg26a00026 fixes all three with a clean downgrade; empirically proven
+  (SELECT fails → upgrade → SELECT ok; drift re-scan: 0 column/type diffs
+  remain repo-wide). Migration roundtrip + full talent suite green.
 - **R571 (forty-eighth window — deploy contract in CI)**: the compose-env
   drill (13 checks: per-service production settings import + the R552/R554/
   R533 structural pins) now runs in the CI security job — it renders the
