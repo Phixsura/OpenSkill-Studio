@@ -95,6 +95,9 @@ def main() -> int:
         }
         env.setdefault("APP_ENV", "production")  # Dockerfile ENV
         env["PATH"] = os.environ["PATH"]
+        # uv resolves its cache/python under HOME — required on CI runners
+        if "HOME" in os.environ:
+            env["HOME"] = os.environ["HOME"]
         r = subprocess.run(
             ["uv", "run", "python", "-c", "from app.config import settings; print('OK')"],
             capture_output=True,
