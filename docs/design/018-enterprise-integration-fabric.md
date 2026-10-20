@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R580 (fiftieth window — make help hid every e2e target)**: the help
+  grep's `[a-zA-Z_-]+` excluded digits, so all 21 e2e-* targets (and
+  anything else with a digit) were invisible in `make help` — exactly the
+  discoverability failure that let suites go unrun (R578's root cause had
+  two layers). Regex fixed; 21 e2e targets now listed.
+- **R579 (fiftieth window — SECURITY.md caught up)**: the security policy
+  now lists what actually shipped: at-rest Fernet encryption + rotation
+  sweep, the CI security gates, production boot refusals, Standard-Webhooks
+  signing and the hardened SAML posture.
 - **R578 (fiftieth window — every epic's live E2E joins the Makefile)**:
   the R576 defects survived because the talent suite was a manual ritual
   with a hardcoded :8000 (nothing ever re-ran it). All six epic suites are
