@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R533 (thirty-ninth window, DEPLOY — prod compose web↔API wiring)**: the
+  R528 topology rules applied to the shipped artifacts: the web Dockerfile
+  never passed API_PROXY_URL at BUILD time, so the baked /api/* rewrite
+  pointed at http://localhost:8000 — INSIDE the container that is the web
+  process itself: every proxied API call in docker-compose.prod was dead.
+  The compose service also set runtime NEXT_PUBLIC_API_URL=http://api:8000,
+  wrong twice over (NEXT_PUBLIC_* is inert at runtime; the address is
+  neither browser-reachable nor connect-src-'self' legal). Dockerfile now
+  takes ARG API_PROXY_URL (default http://api:8000) before the build;
+  compose passes it as a build arg and drops the misleading env. (Full
+  image-build verification blocked locally by VPN fake-IP DNS inside
+  docker build — the serving behavior itself was proven in R528's local
+  standalone runs.)
 - **R531 (thirty-eighth window, AST-mutation — SAML ACS core)**: 20 mutants
   over handle_acs/_verify_signature/_assert_id_unseen against the full SAML
   suite: 16 killed; the 4 survivors are one-instant boundaries (exact

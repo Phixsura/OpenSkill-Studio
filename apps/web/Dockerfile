@@ -18,6 +18,13 @@ COPY --from=deps /app/packages ./packages
 COPY apps/web/ apps/web/
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# R533: the /api/* rewrite destination is read at BUILD time. Without it the
+# default is http://localhost:8000 — INSIDE the container that is the web
+# process itself, so every proxied API call in the prod compose was dead.
+# Browser code stays relative (CSP connect-src 'self'); only this server-side
+# proxy target varies per deployment.
+ARG API_PROXY_URL=http://api:8000
+ENV API_PROXY_URL=$API_PROXY_URL
 RUN pnpm --filter web build
 
 # Production

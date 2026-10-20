@@ -78,12 +78,16 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      # R533: build-time proxy target for the /api/* rewrite (same-origin
+      # topology; see docs/ops/integration-fabric-operations.md §8a). The old
+      # runtime NEXT_PUBLIC_API_URL was doubly wrong: NEXT_PUBLIC_* is inert
+      # at runtime, and http://api:8000 is neither browser-reachable nor
+      # allowed by the connect-src 'self' CSP.
+      args:
+        API_PROXY_URL: http://api:8000
     restart: unless-stopped
     depends_on:
       - api
-    environment:
-      NEXT_PUBLIC_API_URL: http://api:8000
-      API_URL: http://api:8000
     ports:
       - "${WEB_PORT:-3000}:3000"
 
