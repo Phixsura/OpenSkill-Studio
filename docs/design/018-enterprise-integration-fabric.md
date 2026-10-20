@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R555 (forty-sixth window, DEPLOY — multi-worker bucket-create race)**:
+  the prod container runs uvicorn --workers 4 and the lifespan runs in
+  EVERY worker — on a fresh MinIO volume all four race
+  head_bucket(404) → create_bucket, the losers get
+  BucketAlreadyOwnedByYou, and the production lifespan re-raises → workers
+  crash on the very first deploy. ensure_bucket now treats
+  BucketAlreadyOwnedByYou/BucketAlreadyExists as success (any other create
+  failure still propagates); unit tests pin both directions.
 - **R554 (forty-sixth window, DEPLOY — graceful shutdown was a fiction)**:
   docker's default stop_grace_period is 10s, but the api lifespan drains
   in-flight workflow tasks for up to 15s and the worker's on_shutdown for

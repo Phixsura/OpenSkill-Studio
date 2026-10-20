@@ -159,6 +159,33 @@ async def test_ensure_bucket_creates():
     client.create_bucket.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_ensure_bucket_create_race_is_success():
+    """R555: multi-worker lifespan race — a loser's create_bucket returning
+    BucketAlreadyOwnedByYou must not fail production boot."""
+    from botocore.exceptions import ClientError
+
+    from app.core.storage import ensure_bucket
+
+    client = AsyncMock()
+    client.head_bucket = AsyncMock(
+        side_effect=ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket")
+    )
+    client.create_bucket = AsyncMock(
+        side_effect=ClientError(
+            {"Error": {"Code": "BucketAlreadyOwnedByYou", "Message": "owned"}}, "CreateBucket"
+        )
+    )
+    await ensure_bucket(client)  # must not raise
+
+    # any OTHER create failure still propagates
+    client.create_bucket = AsyncMock(
+        side_effect=ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "CreateBucket")
+    )
+    with pytest.raises(ClientError):
+        await ensure_bucket(client)
+
+
 # ── Config ───────────────────────────────────────────────
 
 

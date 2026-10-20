@@ -47,7 +47,16 @@ async def ensure_bucket(client) -> None:  # noqa: ANN001
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
         if error_code in ("404", "NoSuchBucket"):
-            await client.create_bucket(Bucket=settings.s3_bucket)
-            log.info("s3_bucket_created", bucket=settings.s3_bucket)
+            # R555: every uvicorn worker runs the lifespan — on a fresh
+            # volume all of them race head(404) -> create, and the losers
+            # get BucketAlreadyOwnedByYou/BucketAlreadyExists. That is
+            # success (the bucket exists), not a boot failure.
+            try:
+                await client.create_bucket(Bucket=settings.s3_bucket)
+                log.info("s3_bucket_created", bucket=settings.s3_bucket)
+            except ClientError as create_exc:
+                create_code = create_exc.response.get("Error", {}).get("Code", "")
+                if create_code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                    raise
         else:
             raise
