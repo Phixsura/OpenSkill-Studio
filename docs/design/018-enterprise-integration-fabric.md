@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R586 (fifty-second window — same NaN hazard in warehouse export)**:
+  the NDJSON export path used default json.dumps (allow_nan=True), so a
+  non-finite float in source data (Postgres float columns CAN hold 'NaN')
+  would write the invalid tokens NaN/Infinity into every part and break
+  downstream warehouse parsers. _project_row now normalizes any non-finite
+  float to null (covers both NDJSON and parquet, since both consume the
+  projection); test pins NaN/±Inf → null with a strict allow_nan=False
+  re-serialization.
 - **R585 (fifty-second window — AGS score could emit invalid JSON)**:
   push_score did `float(score_given)` with no finiteness check, so an
   upstream eval bug producing NaN/Inf would serialize to the invalid JSON

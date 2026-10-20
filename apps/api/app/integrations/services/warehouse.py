@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -404,6 +405,12 @@ class WarehouseExportService:
                 value = row.get(field)
             if anon.get(field) == "hash" and value is not None:
                 value = hashlib.sha256(f"{salt}:{value}".encode()).hexdigest()[:32]
+            # R586: a non-finite float (NaN/±Inf — Postgres float columns can
+            # hold 'NaN') serializes to the invalid JSON tokens NaN/Infinity
+            # in NDJSON parts (json.dumps allows them by default), breaking
+            # every downstream warehouse parser; normalize to null.
+            if isinstance(value, float) and not math.isfinite(value):
+                value = None
             out[field] = value
         return out
 

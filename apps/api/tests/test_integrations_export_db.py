@@ -1006,3 +1006,30 @@ async def test_dropped_fields_absent_from_manifest_and_parquet_columns(db):
     assert "user_id" not in manifest["fields"]
     table = pq.read_table(io.BytesIO(writer.files[run.parts[0]]))
     assert "user_id" not in table.column_names
+
+
+@pytest.mark.asyncio
+async def test_project_row_normalizes_non_finite_floats_to_null(db):
+    """R586: a NaN/Inf float in source data would serialize to the invalid
+    JSON tokens NaN/Infinity in NDJSON parts; the projection normalizes any
+    non-finite float to null so every part stays valid JSON."""
+    from app.integrations.models.export import ExportStream
+
+    org, owner = await _org(db)
+    svc = WarehouseExportService(db, writer=None)
+    # construct a stream object directly: _project_row only reads
+    # field_allowlist/anonymize, and the dataset-universe check is a
+    # create-time concern unrelated to non-finite normalization.
+    stream = ExportStream(
+        org_id=org.id,
+        name="nf",
+        dataset="events",
+        field_allowlist=["id", "a", "b", "c", "d"],
+        anonymize={},
+    )
+    row = {"id": "X", "a": float("nan"), "b": float("inf"), "c": float("-inf"), "d": 1.5}
+    out = svc._project_row(stream, row, salt="s")
+    assert out["a"] is None and out["b"] is None and out["c"] is None
+    assert out["d"] == 1.5
+    # the normalized row must be valid strict JSON (no NaN/Infinity tokens)
+    assert json.dumps(out, allow_nan=False)
