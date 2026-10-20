@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R610 (sixty-first window — defect classes generalized into the
+  app-wide fuzz)**: every defect class found in windows 52-60 is now a
+  standing hostile-query family in the app-wide OpenAPI sweep — naive ISO
+  timestamps (R609 aware-naive TypeError class), NaN/Infinity tokens
+  (R585/586), 1e309 float overflow, and deprecated-site-local /
+  cloud-metadata hosts in URL-ish params (R587). Sweep grew 4,132 → 4,840
+  requests, zero 5xx — none of these classes recurs anywhere else in the
+  API surface.
 - **R609 (sixtieth window — property proofs find a real SLO 500)**: new
   DB-free property module (tests/test_fabric_pure_properties.py): the SSRF
   v4 classifier now has a DUAL-IMPLEMENTATION check (test declares the

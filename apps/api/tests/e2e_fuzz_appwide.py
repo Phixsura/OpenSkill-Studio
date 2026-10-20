@@ -41,6 +41,15 @@ HOSTILE_QUERIES = [
     {"limit": "999999999999999999999"},
     {"cursor": "\x00junk"},
     {"status": ["a", "b"]},
+    # R610: defect classes found in windows 52-60, generalized app-wide —
+    # naive ISO timestamp (R609: aware-naive TypeError past ValueError
+    # guards), non-finite float tokens (R585/586: NaN leaking into
+    # serialization or arithmetic), float overflow to inf, and a
+    # deprecated-site-local host (R587 class) in any URL-ish param.
+    {"since": "2026-10-21T10:00:00", "before": "2026-10-21T10:00:00"},
+    {"limit": "NaN", "score": "Infinity"},
+    {"amount": "1e309", "value": "-1e309"},
+    {"url": "https://[fec0::1]/x", "endpoint": "http://169.254.169.254/"},
 ]
 # Paths that mutate global/auth state in ways that would break the probe
 # account itself mid-run.
