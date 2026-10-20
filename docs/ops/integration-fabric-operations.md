@@ -230,8 +230,19 @@ key, old rows keep decrypting. Each stored connection credential records
 the key GENERATION (count of configured keys) it was encrypted under in
 `key_version`; rows with `key_version` below the current generation are the
 re-encrypt worklist — re-saving a credential (same values is fine)
-re-encrypts it under the newest key and advances its version. Drop the old
-key from the env only once no row is below the current generation:
+re-encrypts it under the newest key and advances its version. Instead of re-saving by hand, run the sweep (R575):
+
+```bash
+docker compose -f docker-compose.prod.yml exec api uv run python -m app.cli reencrypt-credentials
+```
+
+It re-encrypts every encrypted-at-rest row (connection credentials incl.
+key_version bump, webhook signing secrets current+prev, OIDC client
+secrets, LTI tool private keys, workflow org credentials) under the newest
+key, prints per-table counts, lists any UNDECRYPTABLE rows (a key that is
+no longer configured — those credentials must be re-entered by their
+owners) and exits 2 when any exist. Drop the old key from the env only
+after a clean run:
 
 ```sql
 SELECT connection_id, key_version FROM intg_connection_credentials

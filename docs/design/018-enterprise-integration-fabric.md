@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R575 (forty-ninth window — rotation gets a sweep)**: `python -m
+app.cli reencrypt-credentials` re-encrypts every encrypted-at-rest row
+  under the newest Fernet key (connection credentials + key_version bump,
+  webhook secrets current+prev, OIDC client secrets, LTI private keys,
+  workflow org credentials) with per-row tolerance: rows encrypted under a
+  key that is no longer configured are reported as UNDECRYPTABLE (exit 2),
+  never a sweep-stopping crash — proven against the dev DB, which carries
+  exactly that debris from per-test random keys (78k rows re-encrypted, the
+  debris listed). Ops §6d now documents rotate → sweep → verify → drop-key.
 - **R574 (forty-ninth window — key_version was a dead column)**: a
   246-field dead-field scan over the fabric models found
   IntegrationConnectionCredential.key_version written by nobody (always
