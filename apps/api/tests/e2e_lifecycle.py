@@ -7,12 +7,13 @@ Tests the full Skill Pack Registry workflow:
 import asyncio
 import io
 import json
+import os
 import uuid
 import zipfile
 
 import httpx
 
-API = "http://localhost:8000/api/v1"
+API = os.environ.get("E2E_API", "http://localhost:8000/api/v1")
 
 
 def uid():

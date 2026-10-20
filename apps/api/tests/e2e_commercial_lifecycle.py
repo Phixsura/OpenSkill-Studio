@@ -17,12 +17,13 @@ Usage: make infra-up && make dev-api, then:
 """
 
 import asyncio
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
 
-API = "http://localhost:8000/api/v1"
+API = os.environ.get("E2E_API", "http://localhost:8000/api/v1")
 
 
 def uid():

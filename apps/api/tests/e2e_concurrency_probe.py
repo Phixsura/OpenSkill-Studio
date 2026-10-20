@@ -9,12 +9,13 @@ Needs:  make dev-api running on :8000 (real Postgres/Redis).
 """
 
 import asyncio
+import os
 import sys
 import uuid
 
 import httpx
 
-BASE = "http://localhost:8000/api/v1"
+BASE = os.environ.get("E2E_API", "http://localhost:8000/api/v1")
 PASS: list[str] = []
 FAIL: list[str] = []
 

@@ -16,13 +16,14 @@ Usage: make infra-up && make dev-api, then:
 """
 
 import asyncio
+import os
 import subprocess
 import sys
 import uuid
 
 import httpx
 
-API = "http://localhost:8000/api/v1"
+API = os.environ.get("E2E_API", "http://localhost:8000/api/v1")
 DB_DSN = "postgresql://postgres:postgres@localhost:5432/openskill"
 
 

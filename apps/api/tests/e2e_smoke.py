@@ -6,6 +6,7 @@ Requires: uvicorn running on :8000 + Docker infra
 """
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -15,7 +16,7 @@ import uuid
 # local API calls — same class as the httpx trust_env=False rule).
 urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
 
-BASE = "http://localhost:8000/api/v1"
+BASE = os.environ.get("E2E_API", "http://localhost:8000/api/v1")
 PASS = 0
 FAIL = 0
 

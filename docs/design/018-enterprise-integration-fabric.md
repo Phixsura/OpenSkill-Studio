@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R578 (fiftieth window — every epic's live E2E joins the Makefile)**:
+  the R576 defects survived because the talent suite was a manual ritual
+  with a hardcoded :8000 (nothing ever re-ran it). All six epic suites are
+  now E2E_API-overridable with standard targets via one shared recipe
+  (`run_e2e`): e2e-core/smoke/commercial/workflow/experiments/talent/
+  concurrency, plus `e2e-live-all` chaining every epic suite AND the nine
+  fabric suites sequentially. e2e-talent (64/64) and e2e-concurrency
+  (17/17) proven through the new recipe.
 - **R577 (fiftieth window — cross-epic live sweep + dead-field census)**:
   applied the R576 method to every epic's live E2E on one APP_ENV=test
   server: core lifecycle ALL PASSED, smoke 148/0, commercial 52/0, workflow

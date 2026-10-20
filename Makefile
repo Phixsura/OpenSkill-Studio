@@ -122,6 +122,54 @@ e2e-intg-latency: ## Hot-endpoint latency tripwire (p95 ceiling; uvicorn :8443)
 		status=$$?; kill $$(cat /tmp/intg-lat-uvicorn.pid) 2>/dev/null; \
 		rm -f /tmp/intg-lat-uvicorn.pid; exit $$status)
 
+# R578: shared recipe for epic live-E2E suites (own uvicorn on :8443).
+# EGRESS=1 adds EGRESS_ALLOW_PRIVATE=true (suites that create webhook sinks;
+# on VPN fake-IP DNS even example.com resolves private).
+define run_e2e
+	cd apps/api && (lsof -tiTCP:8443 -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 0.3; \
+		APP_ENV=test $(2) uv run uvicorn app.main:app --no-server-header --port 8443 & \
+		echo $$! > /tmp/e2e-epic-uvicorn.pid; \
+		until curl -sf http://localhost:8443/api/v1/health >/dev/null 2>&1 || \
+			! kill -0 $$(cat /tmp/e2e-epic-uvicorn.pid) 2>/dev/null; do sleep 0.5; done; \
+		APP_ENV=test $(2) E2E_INTG_API=http://localhost:8443/api/v1 \
+			E2E_EXP_API=http://localhost:8443/api/v1 E2E_API=http://localhost:8443/api/v1 \
+			PYTHONPATH=. uv run python tests/$(1).py; \
+		status=$$?; kill $$(cat /tmp/e2e-epic-uvicorn.pid) 2>/dev/null; \
+		rm -f /tmp/e2e-epic-uvicorn.pid; exit $$status)
+endef
+
+e2e-talent: ## Talent lifecycle live E2E (64 checks; uvicorn :8443)
+	$(call run_e2e,e2e_talent_lifecycle,)
+
+e2e-commercial: ## Commercialization lifecycle live E2E (uvicorn :8443)
+	$(call run_e2e,e2e_commercial_lifecycle,)
+
+e2e-core: ## Core platform lifecycle live E2E (uvicorn :8443)
+	$(call run_e2e,e2e_lifecycle,)
+
+e2e-smoke: ## App-wide smoke live E2E (148 checks; uvicorn :8443)
+	$(call run_e2e,e2e_smoke,)
+
+e2e-workflow: ## Workflow-pack lifecycle live E2E (uvicorn :8443)
+	$(call run_e2e,e2e_workflow_lifecycle,)
+
+e2e-experiments: ## Experimentation lifecycle live E2E (uvicorn :8443; private egress for sinks)
+	$(call run_e2e,e2e_experiment_lifecycle,EGRESS_ALLOW_PRIVATE=true)
+
+e2e-concurrency: ## Cross-epic concurrency probe (uvicorn :8443)
+	$(call run_e2e,e2e_concurrency_probe,)
+
+e2e-live-all: ## EVERY epic's live E2E + all fabric suites, sequentially (shared dev DB)
+	$(MAKE) e2e-core
+	$(MAKE) e2e-smoke
+	$(MAKE) e2e-commercial
+	$(MAKE) e2e-workflow
+	$(MAKE) e2e-experiments
+	$(MAKE) e2e-talent
+	$(MAKE) e2e-concurrency
+	$(MAKE) e2e-intg-all
+	@echo "ALL LIVE E2E SUITES OK"
+
 e2e-intg-all: ## Every fabric live-HTTP suite, SEQUENTIALLY (shared dev DB — never run these concurrently)
 	$(MAKE) e2e-intg
 	$(MAKE) e2e-intg-scale
