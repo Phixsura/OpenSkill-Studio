@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R611 (sixty-first window — the cheap suites join CI)**: the fabric CI
+  job ran lifecycle/fuzz/appwide/conformance; the race probes (21), the
+  adversarial battery (178, real egress walls) and the latency tripwire —
+  all ~1-2 min each since R562/R566/R548 made them targets — now run on
+  every PR too (job timeout 20→35 min; stale "62 checks" label corrected to
+  94).
 - **R610 (sixty-first window — defect classes generalized into the
   app-wide fuzz)**: every defect class found in windows 52-60 is now a
   standing hostile-query family in the app-wide OpenAPI sweep — naive ISO

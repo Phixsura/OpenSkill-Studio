@@ -166,7 +166,8 @@ jobs:
   e2e-integration-fabric:
     name: E2E (Integration Fabric live-HTTP)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # R611: four suites grew to seven — headroom for CI-speed runners.
+    timeout-minutes: 35
     needs: [test-backend]
     services:
       postgres:
@@ -221,7 +222,7 @@ jobs:
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
-      - name: Run fabric live-HTTP lifecycle (62 checks)
+      - name: Run fabric live-HTTP lifecycle (94 checks incl. compliance-trail black-box)
         run: make e2e-intg
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
@@ -247,6 +248,31 @@ jobs:
           S3_SECRET_KEY: minioadmin
       - name: Run scim2-tester conformance (zero hard failures)
         run: make e2e-intg-scim-conformance
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+      # R611: the remaining cheap high-signal suites join CI (~1-2 min each).
+      - name: Duplicate-create race probes (losers must 4xx)
+        run: make e2e-intg-races
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+      - name: Adversarial battery (178 checks, real egress walls)
+        run: make e2e-intg-adversarial
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
+          REDIS_URL: redis://localhost:6379/0
+          S3_ENDPOINT: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+      - name: Hot-endpoint latency tripwire (p95 ceiling)
+        run: make e2e-intg-latency
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/openskill_test
           REDIS_URL: redis://localhost:6379/0
