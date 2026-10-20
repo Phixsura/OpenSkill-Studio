@@ -818,6 +818,12 @@ class WorkerSettings:
     """arq worker settings: outbox poll loop + cron jobs."""
 
     redis_settings = _redis_settings()
+    # R553: arq writes its health key with TTL = health_check_interval + 1s.
+    # The default is 3600s, so the prod compose healthcheck (R547: EXISTS
+    # arq:queue:health-check) kept reporting a DEAD worker healthy for up to
+    # an hour. At 60s a hung/dead worker flips unhealthy within ~2.5 min
+    # (61s key TTL + 3 x 30s check retries).
+    health_check_interval = 60
 
     @staticmethod
     async def on_startup(ctx: dict) -> None:

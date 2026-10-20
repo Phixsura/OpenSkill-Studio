@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R553 (forty-sixth window, DEPLOY — dead worker looked healthy for an
+  hour)**: arq writes its health key with TTL = health_check_interval + 1s
+  and the default interval is 3600s — so the R547 compose healthcheck
+  (EXISTS arq:queue:health-check) kept reporting a dead/hung worker healthy
+  for up to an hour. WorkerSettings now pins health_check_interval=60
+  (detection ≤ ~2.5 min: 61s key TTL + 3×30s retries). Empirically proven:
+  booted a real worker, PTTL of the key = 55.4s after 6s (was ~3600s).
 - **R552 (forty-sixth window, DEPLOY — first-deploy startup ordering)**:
   nothing ordered api/worker against the one-shot migration job: on a first
   deploy both raced `alembic upgrade head` and started serving/ticking crons
