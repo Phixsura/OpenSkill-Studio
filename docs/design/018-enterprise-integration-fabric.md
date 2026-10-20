@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R615 (sixty-third window — varchar-overflow class swept, fabric
+  clean)**: generalized R614's finding: cross-checked every fabric REQUEST
+  model string field against its target column. Three max_length "hits"
+  were scanner false-positives (name-based matching picked the shortest
+  same-named column of a DIFFERENT model — the real targets are
+  String(200)); the eight unbounded request strs (protocol/direction/model/
+  kind/status/default_role) are ALL allowlist-gated in the service layer
+  before any write (verified each gate), and the fabric fuzz randomly fires
+  4,000-char values at every body key with zero 5xx. device_info (R614) was
+  the lone genuine overflow in the codebase — in the auth layer, outside
+  every fabric guard.
 - **R614 (sixty-third window — mutation sweep on the audit arc finds a
   LOGIN 500)**: AST-mutated record_fabric_audit (2/2 killed) and
   _enforce_sso_gate (14 mutants). Strengthening the kill suite for the five
