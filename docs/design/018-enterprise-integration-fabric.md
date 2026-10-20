@@ -931,6 +931,23 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R592 (fifty-fourth window — SCIM deprovision had no compliance audit)**:
+  an AST scan of every destructive/sensitive fabric route for a
+  record_fabric_audit call found SCIM delete_user (≡ deprovision: archives
+  membership + revokes ALL sessions) and delete_group wrote only an
+  integration event (emit_event, a NOTIFICATION) — NOT the append-only
+  compliance audit trail. An IdP-driven deprovision is exactly what an
+  auditor must see. Root cause of the silence: record_fabric_audit returned
+  early whenever actor_user_id was None (SCIM has no human actor), AND it
+  swallows the ValueError that record_audit raises for an UNREGISTERED
+  action. Fixes: (1) record_fabric_audit gains system_actor=True to record
+  IdP-driven actions as a 'system' actor; (2) SCIM deprovision + group
+  delete now call it; (3) two new actions registered in AUDIT_ACTIONS; (4)
+  the R24 action-literal drift guard WIDENED — it only scanned
+  controlplane/services for keyword `action="x.y"`, missing
+  app/integrations entirely (record_fabric_audit uses a POSITIONAL arg) and
+  3-segment actions; now covers both, and a negative test proves it names
+  an unregistered action.
 - **R591 (fifty-third window — rate-limit the health poll endpoint)**:
   fabric_health (R563) is the operator-dashboard POLL endpoint — ~8
   aggregate COUNTs + a redis EXISTS per call — and had NO per-route

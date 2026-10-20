@@ -363,3 +363,45 @@ async def test_fabric_audit_fail_open_branches(db, monkeypatch):
     await record_fabric_audit(
         db, org.id, user.id, "intg.break_glass.set", "user", user.id
     )  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_fabric_audit_system_actor_lands(db):
+    """R592: an IdP-driven action (SCIM deprovision/group delete) has no human
+    actor but MUST still be audited. system_actor=True records a row with a
+    'system' actor instead of the actor-None no-op."""
+    from sqlalchemy import select as _select
+
+    from app.controlplane.models.audit import CommercialAuditEvent
+    from app.integrations.facade import record_fabric_audit
+
+    user = await _user(db)
+    org = await _org(db, user)
+
+    await record_fabric_audit(
+        db,
+        org.id,
+        None,
+        "intg.scim.user_deprovisioned",
+        "user",
+        user.id,
+        after={"token_id": "tok1"},
+        system_actor=True,
+    )
+    await db.flush()
+
+    row = (
+        (
+            await db.execute(
+                _select(CommercialAuditEvent).where(
+                    CommercialAuditEvent.action == "intg.scim.user_deprovisioned"
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is not None, "system-actor deprovision audit was dropped"
+    assert row.actor_user_id is None
+    assert row.actor_type == "system"
+    assert row.target_id == user.id and row.after == {"token_id": "tok1"}

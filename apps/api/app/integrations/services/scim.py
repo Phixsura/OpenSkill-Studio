@@ -690,6 +690,22 @@ class ScimUserService:
         await AuthService(self.db)._revoke_all_user_tokens(user.id)  # noqa: SLF001
         await self.db.flush()
         await self._audit("org.scim.deprovisioned", user.id)
+        # R592: emit_event is an integration NOTIFICATION, not the compliance
+        # audit trail. An IdP-driven deprovision (archives membership + revokes
+        # every session) is exactly the kind of event an auditor must see —
+        # record it (system actor: no human performed it).
+        from app.integrations.facade import record_fabric_audit
+
+        await record_fabric_audit(
+            self.db,
+            self.org_id,
+            None,
+            "intg.scim.user_deprovisioned",
+            "user",
+            user.id,
+            after={"token_id": self.token.id},
+            system_actor=True,
+        )
 
     async def _audit(self, event: str, user_id: str) -> None:
         try:
@@ -867,6 +883,19 @@ class ScimGroupService:
         # mirror must not strip roles/cohorts the org may now manage manually.
         await self.db.delete(group)
         await self.db.flush()
+        # R592: IdP-driven group removal is an auditable config change.
+        from app.integrations.facade import record_fabric_audit
+
+        await record_fabric_audit(
+            self.db,
+            self.org_id,
+            None,
+            "intg.scim.group_deleted",
+            "scim_group",
+            group_id,
+            after={"token_id": self.token.id},
+            system_actor=True,
+        )
 
     async def patch(self, group_id: str, payload: dict) -> dict:
         """Delta membership (never full-replace timeouts) + rename."""

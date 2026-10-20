@@ -88,17 +88,43 @@ async def test_record_audit_rejects_unregistered_action():
 
 
 def test_every_recorded_action_literal_is_registered():
-    """R24 drift guard: every `action="x.y"` literal passed to record_audit
-    across the control-plane services is in AUDIT_ACTIONS — a new call site
-    with an unregistered action would blow up at runtime, so catch it here."""
+    """R24 drift guard: every audit action literal in the codebase is in
+    AUDIT_ACTIONS — a new call site with an unregistered action blows up at
+    runtime (and record_fabric_audit SWALLOWS that ValueError, so the audit
+    row is silently dropped — exactly how the R592 SCIM deprovision audit
+    went missing). R592: widened from controlplane-only + keyword-only to
+    ALSO cover app/integrations (record_fabric_audit uses a POSITIONAL
+    action arg) and multi-segment actions like `intg.scim.user_deprovisioned`."""
     import pathlib
     import re
 
-    svc_dir = pathlib.Path(__file__).resolve().parent.parent / "app" / "controlplane" / "services"
+    app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
+    scan_dirs = [app_dir / "controlplane" / "services", app_dir / "integrations"]
+    # dotted lower_snake action with 2+ segments, as a bare string literal
+    lit_re = re.compile(r'"([a-z_]+(?:\.[a-z_]+)+)"')
+    # only strings that look like audit actions (start with a known prefix)
+    prefixes = ("intg.", "tenant.", "webhook.", "billing.", "listing.", "partner.")
     literals: set[str] = set()
-    for f in svc_dir.glob("*.py"):
-        for m in re.finditer(r'action="([a-z_]+\.[a-z_]+)"', f.read_text()):
-            literals.add(m.group(1))
+    for d in scan_dirs:
+        for f in d.rglob("*.py"):
+            text = f.read_text()
+            # consider only lines mentioning an audit recorder, to avoid
+            # sweeping up event-mesh type strings / unrelated dotted literals
+            for line in text.splitlines():
+                if "record_audit" not in line and "record_fabric_audit" not in line:
+                    continue
+                for m in lit_re.finditer(line):
+                    if m.group(1).startswith(prefixes):
+                        literals.add(m.group(1))
+    # multi-line calls: also scan a joined form for the positional pattern
+    for d in scan_dirs:
+        for f in d.rglob("*.py"):
+            text = f.read_text()
+            for m in re.finditer(
+                r'record_fabric_audit\([^)]*?"([a-z_]+(?:\.[a-z_]+)+)"', text, re.DOTALL
+            ):
+                if m.group(1).startswith(prefixes):
+                    literals.add(m.group(1))
     assert literals, "no action literals found — scan path wrong?"
     unregistered = literals - AUDIT_ACTIONS
     assert not unregistered, f"unregistered audit actions in call sites: {unregistered}"
