@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R593b (fifty-fourth window — catalog-drift guard missed ternary
+  emits)**: making create() choose its _audit event via a ternary
+  (`"org.scim.reactivated" if reactivated else "org.scim.provisioned"`)
+  exposed that the R231 catalog guard's `_audit("…"` regex only captured
+  the FIRST token, so it flagged org.scim.provisioned as phantom. Widened
+  to capture every `org.*` literal inside each _audit(...) call.
 - **R593 (fifty-fourth window — the audit gap was wider; unify + fix a
   mislabel)**: R592 covered deprovision/group-delete, but SCIM user
   PROVISION and REACTIVATION (both access-control events) still wrote only

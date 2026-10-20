@@ -916,8 +916,12 @@ def test_event_catalog_covers_every_emitted_name():
             found = name_re.search(window)
             if found:
                 emitted.add(found.group(1))
-        for m in re.finditer(r'_audit\(\s*"([a-z][a-z_.]+)"', text):
-            emitted.add(m.group(1))
+        # R593: self._audit(...) may pass the event via a ternary
+        # (`"a.b" if flag else "c.d"`), so capture EVERY mesh-event-shaped
+        # string inside each _audit(...) call, not just the first token.
+        for call in re.finditer(r"_audit\((.*?)\)", text, re.DOTALL):
+            for lit in re.finditer(r'"(org\.[a-z][a-z_.]+)"', call.group(1)):
+                emitted.add(lit.group(1))
         for m in re.finditer(r'f"\{INTERNAL_EVENT_PREFIX\}([a-z][a-z_.]+)"', text):
             emitted.add("integration." + m.group(1))
 
