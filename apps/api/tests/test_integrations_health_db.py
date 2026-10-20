@@ -123,6 +123,30 @@ async def test_health_counts_are_org_scoped(db):
 
 
 @pytest.mark.asyncio
+async def test_health_reports_worker_liveness(db):
+    """R563: worker_alive mirrors the arq health key (61s TTL since R553) —
+    present=True, absent=False; the summary never 500s on redis trouble."""
+    import app.core.redis as redis_mod
+
+    # the singleton pool may be bound to a previous test's event loop
+    if redis_mod._redis is not None:
+        await redis_mod._redis.aclose()
+        redis_mod._redis = None
+
+    owner = await _user(db)
+    org = await _org(db, owner)
+    r = redis_mod.redis_pool()
+
+    await r.set("arq:queue:health-check", "drill", ex=61)
+    out = await fabric_health(org.id, db=db, user=owner)
+    assert out["data"]["worker_alive"] is True
+
+    await r.delete("arq:queue:health-check")
+    out = await fabric_health(org.id, db=db, user=owner)
+    assert out["data"]["worker_alive"] is False
+
+
+@pytest.mark.asyncio
 async def test_webhook_test_send_reports_status_and_signs(db, monkeypatch):
     """R37: /webhooks/{id}/test dispatches a sample SIGNED CloudEvent
     synchronously, reports delivered/status/latency, 404s cross-org, and

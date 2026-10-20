@@ -144,6 +144,19 @@ async def fabric_health(
         .select_from(SsoConnection)
         .where(SsoConnection.org_id == org_id, SsoConnection.status == "active")
     )
+
+    # R563: pending counts stall silently when the arq worker is down — the
+    # one summary operators poll must say WHY. The worker refreshes its
+    # health key every 60s with a 61s TTL (R553), so plain existence means
+    # "ticked within the last minute". Redis being unreachable reports
+    # unknown (None) rather than failing the whole summary.
+    try:
+        from app.core.redis import redis_pool
+
+        worker_alive: bool | None = bool(await redis_pool().exists("arq:queue:health-check"))
+    except Exception:  # noqa: BLE001 — health summary must not 500 on a redis blip
+        worker_alive = None
+
     return {
         "data": {
             "connections": {
@@ -158,6 +171,7 @@ async def fabric_health(
             "identity_queue_pending": queue_pending,
             "sync": {"profiles": sync_profiles, "failed_runs_24h": sync_failed_24h},
             "sso_connections_active": sso_active,
+            "worker_alive": worker_alive,
         }
     }
 

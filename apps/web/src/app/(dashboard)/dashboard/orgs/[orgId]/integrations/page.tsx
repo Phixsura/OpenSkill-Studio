@@ -21,6 +21,8 @@ interface FabricHealth {
   identity_queue_pending: number;
   sync: { profiles: number; failed_runs_24h: number };
   sso_connections_active: number;
+  /** R563: arq worker ticked within the last minute; null = redis unknown */
+  worker_alive?: boolean | null;
 }
 
 interface Provider {
@@ -215,6 +217,12 @@ export default function IntegrationsHubPage() {
           <span>
             Active SSO: <strong>{health.sso_connections_active}</strong>
           </span>
+          {health.worker_alive === false && (
+            <span>
+              <strong className="text-red-700">Worker down</strong> — deliveries and syncs are
+              stalled
+            </span>
+          )}
         </div>
       )}
 

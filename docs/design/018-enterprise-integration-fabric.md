@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R563 (forty-seventh window — the health summary says WHY things
+  stall)**: fabric_health counted pending deliveries/syncs but never said
+  the one thing that makes them all stall — a dead arq worker. The summary
+  now reports `worker_alive` by checking the arq health key (existence =
+  ticked within the last minute, meaningful because of R553's 61s TTL;
+  redis trouble reports null, never a 500). Admin hub shows a red "Worker
+  down — deliveries and syncs are stalled" line when false. DB tests pin
+  present→true / absent→false (plus the singleton-pool stale-loop reset
+  gotcha); web 771 units + type-check green.
 - **R562 (forty-seventh window — race probes join the Makefile)**: the
   duplicate-create race probe (R484, 21 checks) was a manual ritual with a
   hardcoded :8000 URL — now E2E_INTG_API-overridable with a standard
