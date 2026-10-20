@@ -54,6 +54,39 @@ def main() -> int:
         ).stdout
     )
     failed = 0
+
+    # R561: structural contract — pin the rest of the deploy-audit series so
+    # a compose edit can't silently regress it.
+    def check(label: str, ok: bool) -> None:
+        nonlocal failed
+        if ok:
+            print(f"  ok   {label}")
+        else:
+            failed += 1
+            print(f"  FAIL {label}")
+
+    services = cfg["services"]
+
+    def dep(svc: str, on: str) -> str:
+        return ((services[svc].get("depends_on") or {}).get(on) or {}).get("condition", "")
+
+    # R552: first-deploy ordering
+    check("api gates on migrate", dep("api", "migrate") == "service_completed_successfully")
+    check("worker gates on migrate", dep("worker", "migrate") == "service_completed_successfully")
+    check("web gates on api health", dep("web", "api") == "service_healthy")
+    # R554: shutdown drains must outlive the grace period
+    check("api stop_grace_period 30s", services["api"].get("stop_grace_period") == "30s")
+    check("worker stop_grace_period 45s", services["worker"].get("stop_grace_period") == "45s")
+    # R533: web rewrite proxy target is a BUILD arg
+    web_args = (services["web"].get("build") or {}).get("args") or {}
+    check("web build-arg API_PROXY_URL", web_args.get("API_PROXY_URL") == "http://api:8000")
+    # Backing stores are not host-exposed
+    for store in ("postgres", "redis", "minio"):
+        check(f"{store} publishes no host ports", not services[store].get("ports"))
+    # R92[H2]: billing counters need noeviction + AOF
+    redis_cmd = " ".join(services["redis"].get("command") or [])
+    check("redis noeviction+AOF", "noeviction" in redis_cmd and "--appendonly yes" in redis_cmd)
+
     for svc in ("api", "worker", "migrate"):
         env = {
             k: str(v)

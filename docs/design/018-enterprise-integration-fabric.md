@@ -931,6 +931,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R561 (forty-seventh window — compose drill becomes the full deploy
+  contract)**: compose_env_drill now also pins the structural half of the
+  deploy audit: R552 dependency conditions (api/worker on migrate
+  completion, web on api health), R554 grace periods, the R533 web
+  API_PROXY_URL build arg, no host ports on postgres/redis/minio, and the
+  R92[H2] redis noeviction+AOF flags. 13 checks green; mutant-kill proven
+  (doctored grace period → DRILL FAILED (1), exit 1).
+- **R560 (forty-seventh window — operator docs)**: README gains a
+  Production deployment section (template → fail-fast config → up, boot
+  refusal list, runbook pointers); CHANGELOG gains the deploy-hardening
+  entry. Window verification: lifecycle E2E green, latency tripwire PASS,
+  app-wide fuzz 4,132 requests FAIL=0, all 11 drills OK, web 771 units +
+  lint + type-check, secret-in-log scan clean.
 - **R559 (forty-sixth window — closing assessment v4)**: research doc gains
   the v4 table: the windows 44-46 deploy-artifact audit (R533-R558), its
   method (boot each service's exact rendered env, never trust the YAML) and
