@@ -58,7 +58,14 @@ async def _to_response(db: AsyncSession, conn: IntegrationConnection) -> Connect
     )
 
 
-@router.get("/health", response_model=DataResponse[dict])
+@router.get(
+    "/health",
+    response_model=DataResponse[dict],
+    # R591: an operator-dashboard POLL endpoint running ~8 aggregate COUNTs +
+    # a redis EXISTS — unthrottled, a tight poll loop both hammers the DB and
+    # burns the org's daily API quota. 120/min is generous for a dashboard.
+    dependencies=[Depends(rate_limit(120, 60))],
+)
 async def fabric_health(
     org_id: str,
     db: AsyncSession = Depends(get_db),

@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R591 (fifty-third window — rate-limit the health poll endpoint)**:
+  fabric_health (R563) is the operator-dashboard POLL endpoint — ~8
+  aggregate COUNTs + a redis EXISTS per call — and had NO per-route
+  rate_limit (relying only on the global metering middleware). A tight poll
+  loop would both hammer the DB and burn the org's daily API quota. Added
+  rate_limit(120, 60) (generous for a dashboard); confirmed the dependency
+  is wired on the route. (Broader connections.py rate-limit coverage is
+  uneven but the authenticated org-scoped routes sit behind
+  require_org_member + global metering; health is the one true polling
+  hotspot.)
 - **R590 (fifty-third window — parity guard extended to URL level + in
   CI)**: the SSRF parity guard joins `make test-intg`, and gained URL-level
   assertions: the fabric and ecosystem URL validators must reject
