@@ -764,7 +764,16 @@ async def build_export(db: AsyncSession, tenant_id: str, *, actor: Actor) -> Ten
             try:
                 await client.head_bucket(Bucket=app_settings.s3_export_bucket)
             except Exception:  # noqa: BLE001 — first use creates it
-                await client.create_bucket(Bucket=app_settings.s3_export_bucket)
+                # R556: two first-ever exports can race here — the loser's
+                # BucketAlreadyOwnedByYou is success, not a failed export.
+                from botocore.exceptions import ClientError
+
+                try:
+                    await client.create_bucket(Bucket=app_settings.s3_export_bucket)
+                except ClientError as create_exc:
+                    code = create_exc.response.get("Error", {}).get("Code", "")
+                    if code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                        raise
             await client.put_object(
                 Bucket=app_settings.s3_export_bucket,
                 Key=file_key,

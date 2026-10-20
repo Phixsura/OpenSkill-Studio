@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R556 (forty-sixth window — same race in tenant-export bucket)**: the
+  R555 bug class also lived in provisioning's private export bucket: two
+  first-ever tenant exports racing head→create left the loser's export
+  marked `failed` on BucketAlreadyOwnedByYou. Same tolerance applied (other
+  create failures still fail the export).
 - **R555 (forty-sixth window, DEPLOY — multi-worker bucket-create race)**:
   the prod container runs uvicorn --workers 4 and the lifespan runs in
   EVERY worker — on a fresh MinIO volume all four race
