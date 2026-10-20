@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R577 (fiftieth window — cross-epic live sweep + dead-field census)**:
+  applied the R576 method to every epic's live E2E on one APP_ENV=test
+  server: core lifecycle ALL PASSED, smoke 148/0, commercial 52/0, workflow
+  49/49, concurrency 17/17, experiments 161/0 (needs EGRESS_ALLOW_PRIVATE
+  on this VPN — example.com resolves into fake-IP private space), talent
+  64/64 — zero API tracebacks across all of them. The kwarg-aware
+  dead-field census over all 2,256 mapped columns: the fabric is CLEAN
+  (R574 fixed its only one); 26 dead nullable informational columns remain
+  in other epics (user oauth token_expires_at, provider health_status,
+  tenant-domain tls_expires_at, ecosystem catalog descriptors, experiment
+  metric percentile, …) — none production-breaking, inventoried here for
+  their epics' owners.
 - **R576 (fiftieth window — talent live E2E exposes three production
   500s)**: re-ran the talent lifecycle E2E after R572 and 6 checks failed
   with REAL server errors (the suite's unit tests never touch these paths):
