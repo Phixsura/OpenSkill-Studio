@@ -9,14 +9,14 @@
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 15, React 19, Tailwind CSS 4, TanStack Query |
-| Backend | FastAPI, Python 3.12+, SQLAlchemy 2.0, asyncpg |
-| Database | PostgreSQL 16 |
-| Cache/Queue | Redis 7 |
-| Object Storage | MinIO (S3-compatible) |
-| Monorepo | Turborepo + pnpm |
+| Layer          | Technology                                           |
+| -------------- | ---------------------------------------------------- |
+| Frontend       | Next.js 15, React 19, Tailwind CSS 4, TanStack Query |
+| Backend        | FastAPI, Python 3.12+, SQLAlchemy 2.0, asyncpg       |
+| Database       | PostgreSQL 16                                        |
+| Cache/Queue    | Redis 7                                              |
+| Object Storage | MinIO (S3-compatible)                                |
+| Monorepo       | Turborepo + pnpm                                     |
 
 ## Local Development
 
@@ -71,6 +71,21 @@ make lint                 # Lint all code
 make test                 # Run all tests
 make build                # Build for production
 ```
+
+## Production deployment
+
+```bash
+cp .env.prod.example .env.prod   # fill every empty value (generation commands inside)
+docker compose --env-file .env.prod -f docker-compose.prod.yml config --quiet  # fail fast
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+```
+
+The stack self-orders: infra health → migrations → API (4 uvicorn workers)
+→ web (Next.js standalone). The API refuses to boot in production with
+default/weak secrets, a non-Fernet `CREDENTIAL_ENCRYPTION_KEY`, wildcard
+CORS or the mock domain verifier. Operational runbook:
+[docs/ops/integration-fabric-operations.md](docs/ops/integration-fabric-operations.md)
+(required secrets §6c, startup ordering §7c, web serving topology §8a).
 
 ## Project Structure
 

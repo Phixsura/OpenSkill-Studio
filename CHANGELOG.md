@@ -30,6 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     confirmation, error reports) and governed warehouse export (NDJSON/Parquet,
     allowlists, org-salted hashing, per-part checksums, incremental cursors)
   - Admin UI: hub, identity, sync, events and data pages with every create form
+  - Production deployment hardening: audited prod compose (secrets required at
+    interpolation, migrate→API→web startup ordering, worker arq healthcheck,
+    graceful-shutdown grace periods), `.env.prod.example`, per-service
+    settings-import drill, CI security job (gitleaks + pip-audit + npm audit gate)
   - Security: single-egress SSRF discipline, verified-domain gates on
     foreign-account binding, uniform-404 IDOR walls, write-only encrypted
     credentials, protocol rate limits, audit trail
