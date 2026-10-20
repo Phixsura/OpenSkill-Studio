@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R550 (forty-sixth window, DEPLOY — migrate was dead on arrival)**: the
+  migrate service passed ONLY DATABASE_URL, but alembic env.py imports
+  app settings whose production validators raise on default JWT/S3 and a
+  missing encryption key — the shipped deploy pipeline crashed before
+  running a single migration. Required env now plumbed; the full prod
+  settings import verified empirically (incl. that
+  CREDENTIAL_ENCRYPTION_KEY must be a REAL Fernet key, not a passphrase —
+  worth knowing before a 2am deploy).
 - **R549 (forty-sixth window, DEPLOY — prod compose secrets)**: two more
   compose-audit findings: (1) MinIO root credentials DEFAULTED to
   minioadmin/minioadmin in production — a stack brought up without

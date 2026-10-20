@@ -209,6 +209,15 @@ UNHEALTHY. The compose service now checks the key a live arq worker
 actually maintains (`arq:queue:health-check` in redis, verified
 empirically); the one-shot `migrate` job disables the inherited check.
 
+## 6c. Production compose required secrets (R549/R550)
+
+`docker compose -f docker-compose.prod.yml up` refuses to interpolate
+without: DB_PASSWORD, JWT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY and
+CREDENTIAL_ENCRYPTION_KEY (a REAL Fernet key — 32-byte urlsafe base64,
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` —
+not a passphrase). The migrate job needs the same set: settings import runs
+the production boot validators before alembic does anything.
+
 ## 7. Health and alerting
 
 `GET /orgs/{org}/integrations/health` (the hub strip polls it): connection
