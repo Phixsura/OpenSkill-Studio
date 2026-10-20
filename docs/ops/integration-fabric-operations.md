@@ -487,10 +487,10 @@ Defaults: 5×15 = 75 ≤ 80 ✓. The commented `DB_POOL_SIZE=20` example in
 The prod redis runs `maxmemory 256mb` with **noeviction** (R92[H2]: billing
 counters must fail loudly, never silently evict). What lives there and how
 it's bounded: arq job payloads (small, drained continuously), the arq
-health key (61s TTL), rate-limit buckets (TTL = their window), hourly
+health key (61s TTL), rate-limit buckets (TTL = their window), and hourly
 `cp:apireq:*` billing buckets (flushed to Postgres hourly, 48h TTL
-backstop), and OIDC/SAML login-state (10-min TTL + sweeper). Nothing
-unbounded lives in redis — events, deliveries and payload archives are
+backstop). SSO/LTI login-state and replay caches are POSTGRES tables (with
+their own sweepers), not redis. Nothing unbounded lives in redis — events, deliveries and payload archives are
 Postgres rows. At maxmemory, WRITES fail loudly (metering fails open by
 design; a stuck queue shows as worker_alive + deliveries.pending in the
 health summary). If `INFO memory` shows sustained >200MB, raise maxmemory
