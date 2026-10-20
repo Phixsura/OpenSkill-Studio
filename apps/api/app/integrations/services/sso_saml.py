@@ -301,6 +301,22 @@ class SamlService:
                 after={"via": "saml_slo", "connection_ref": conn.id},
                 system_actor=True,
             )
+            # R606: subscriber symmetry — OIDC back-channel logout emits a
+            # mesh event a tenant SIEM can subscribe to; a SAML SLO is the
+            # same forced logout and emitted nothing. Reuse the same event
+            # type so one subscription covers both protocols.
+            try:
+                from app.integrations.facade import emit_event
+
+                await emit_event(
+                    self.db,
+                    conn.org_id,
+                    "integration.sso.backchannel_logout",
+                    subject=link.user_id,
+                    data={"sso_connection_id": conn.id, "protocol": "saml_slo"},
+                )
+            except Exception:
+                log.warning("slo_event_emit_failed", connection_id=conn.id)
         return conn, swept, _one("RelayState")
 
     def build_slo_response_redirect(

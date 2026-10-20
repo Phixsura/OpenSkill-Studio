@@ -764,6 +764,24 @@ async def test_slo_signed_request_revokes_sessions(db):
         .one()
     )
     assert row.actor_type == "system" and row.after["via"] == "saml_slo"
+    # R606: subscriber symmetry — the SAME mesh event type as OIDC
+    # back-channel logout, tagged with the SAML protocol.
+    from app.integrations.models import IntegrationEvent
+
+    mesh = (
+        (
+            await db.execute(
+                select(IntegrationEvent).where(
+                    IntegrationEvent.type
+                    == "com.openskill.integration.sso.backchannel_logout.v1",
+                    IntegrationEvent.subject == result.user.id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert mesh.data["protocol"] == "saml_slo"
     redirect = svc.build_slo_response_redirect(conn2, in_response_to=None, relay_state=relay)
     assert redirect.startswith("https://idp.example.com/slo?SAMLResponse=")
     assert "RelayState=r-1" in redirect
