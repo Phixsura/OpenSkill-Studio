@@ -529,3 +529,32 @@ refuses duplicate signed query parameters, parses exactly the signed
 segment, and enforces an IssueInstant freshness window with single-use
 request IDs (a captured logout redirect is not a replayable
 session-revocation weapon).
+
+## 9. Release checklist (R624)
+
+Run top-to-bottom before cutting a release; every step is one command and
+every failure is a stop-ship. Never run two DB-touching steps concurrently
+(shared dev database — phantom failures otherwise).
+
+1. `make test-intg` — fabric suites + every standing guard (severe schema
+   drift, single alembic head, SSRF parity, access-grant audit, PII-payload,
+   pure-property proofs, web-route contract, ops-doc contract).
+2. `make drills` — 11 operational drills incl. the prod-compose boot
+   contract (per-service settings import + structural pins + env-template
+   coverage).
+3. `make e2e-live-all` — every epic's live-HTTP suite plus all nine fabric
+   suites, strictly sequential (lifecycle alone is 100 checks incl. the
+   compliance-trail black-box, delivered-body contract conformance,
+   subscriber-side HMAC and the co-signed rotation window).
+4. Browser family against the PRODUCTION artifact (§8a topology: build,
+   copy static+public into standalone, `node apps/web/server.js`): the
+   seven suites must pass with the STRICT console check (no
+   E2E_DEV_SERVER exemption).
+5. Supply chain + secrets: `node scripts/audit-gate.mjs`, `cd apps/api &&
+uv run --with pip-audit pip-audit`, `gitleaks detect --source . --redact`
+   — advisories published overnight are routine (R617); patch, re-run the
+   TLS-touching suites, continue.
+6. `pnpm --filter web test && pnpm --filter web type-check && make lint`.
+7. Deploy per §6c/§7e/§8a: `.env.prod` from the template, `compose config
+--quiet` fail-fast, `up -d --build`, then §7 health checks and the §7b
+   audit feed spot-check.

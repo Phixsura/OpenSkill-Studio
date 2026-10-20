@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R624 (sixty-sixth window — release checklist)**: ops §9 operationalizes
+  everything the last twenty windows built into a seven-step, one-command-
+  per-step release gate (guards battery → drills → full live chain →
+  browser family vs the PRODUCTION artifact strict → supply-chain/secrets →
+  web units/lint → deploy per §6c/§7e/§8a), with the serialization rule
+  stated inline.
 - **R623 (sixty-sixth window — personal-data inventory of the audit
   trail)**: ops §7b now declares the audit rows' personal-data posture
   honestly: users appear as ULIDs only (pseudonymous), no email ever lands
