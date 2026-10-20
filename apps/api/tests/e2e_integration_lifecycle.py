@@ -414,6 +414,7 @@ async def main() -> int:
         )
         check("mesh-pattern subscription accepted", r.status_code == 201, r.text[:300])
         sub_id = r.json()["data"]["id"] if r.status_code == 201 else None
+        sub_secret = r.json()["data"].get("secret", "") if r.status_code == 201 else ""
         event_id = await emit_mesh_event(org_id, {"project_id": "p-e2e", "user_id": "u"})
         await drive_outbox()
         await asyncio.sleep(0.2)
@@ -424,6 +425,33 @@ async def main() -> int:
                 "standard-webhooks headers present",
                 "webhook-id:" in headers_blob.lower()
                 and "webhook-signature:" in headers_blob.lower(),
+            )
+            # R620: VERIFY the signature the way a real subscriber must —
+            # recompute base64(HMAC-SHA256(secret, id.ts.body)) from the
+            # shown-once secret and require an exact v1 match. Proves the
+            # whole chain (secret shown at create == secret used to sign ==
+            # verifiable per the Standard Webhooks algorithm), not just that
+            # a header exists.
+            import base64 as _b64
+            import hashlib as _hl
+            import hmac as _hmac
+
+            def _hdr(name: str) -> str:
+                for line in headers_blob.splitlines():
+                    if line.lower().startswith(name + ":"):
+                        return line.split(":", 1)[1].strip()
+                return ""
+
+            wid, wts = _hdr("webhook-id"), _hdr("webhook-timestamp")
+            wsig = _hdr("webhook-signature")
+            signed = f"{wid}.{wts}.".encode() + sink.payloads[0]["body"]
+            expected = "v1," + _b64.b64encode(
+                _hmac.new(sub_secret.encode(), signed, _hl.sha256).digest()
+            ).decode()
+            check(
+                "subscriber-side HMAC verification succeeds",
+                bool(sub_secret) and expected in wsig.split(),
+                f"id={wid} ts={wts} sig={wsig[:40]}",
             )
 
         r = await c.get(f"{base}/deliveries?status=succeeded", headers=h)

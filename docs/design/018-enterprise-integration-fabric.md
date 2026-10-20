@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R620 (sixty-fourth window — subscriber-side signature verification)**:
+  the walk only checked that signature HEADERS exist; it now verifies the
+  signature the way a real subscriber must — recomputes
+  base64(HMAC-SHA256(secret, id.ts.body)) from the shown-once secret and
+  requires an exact v1 match against webhook-signature. Proves the full
+  chain: the secret shown at create is the secret that signs, and the
+  Standard-Webhooks recipe verifies it. Lifecycle at 96 checks.
 - **R619 (sixty-fourth window — delivered bodies vs the published
   contract)**: the lifecycle E2E now validates every webhook body the sink
   ACTUALLY RECEIVED against the live /event-catalog: envelope required
