@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R540 (forty-third window, SECRETS SCAN — another never-run layer)**:
+  gitleaks over all 2,489 commits of history: ONE hit, triaged — a mock
+  trigger secret in a web unit-test fixture (sth_abc123def456), not a
+  credential. .gitleaks.toml added (test/docs/example allowlist) so
+  `gitleaks detect --source . --redact` is now a standing CLEAN gate
+  ("no leaks found").
 - **R539 (forty-second window, SUPPLY CHAIN — Python side)**: pip-audit
   (also never run) found pyjwt 2.13 carrying FOURTEEN advisories — the
   library every OIDC/LTI/BCL token validation rides — plus urllib3/

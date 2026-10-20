@@ -1,0 +1,20 @@
+# R540: secrets-scan configuration (gitleaks). The git-history scan is the
+# authoritative gate: `gitleaks detect --source . --redact`.
+# One historical hit triaged 2026-10-20: a MOCK trigger secret in a web unit
+# test (sth_abc123def456) — fixture, not a credential.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and documentation examples"
+paths = [
+  '''apps/web/__tests__/.*''',
+  '''apps/api/tests/.*''',
+  '''docs/design/.*\.md''',
+  '''\.env\.example''',
+]
+regexes = [
+  # fabricated example tokens in docs (truncated JWT prefix)
+  '''eyJhbGciOiJIUzI1NiIs\.\.\.''',
+]
