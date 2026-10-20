@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R573 (forty-ninth window — severe-drift guard, repo-wide)**: the R572
+  class gets a standing guard: tests/test_schema_drift_guard_db.py runs
+  autogenerate comparison over the WHOLE schema and fails on the drift
+  classes that break production (add/remove table, add/remove column,
+  modify_type), while ignoring the ~230 benign legacy diffs
+  (nullable/FK-restatement/index naming) that forced the fabric guard's
+  intg_* scoping. Proven in both directions: green at head, 1 failed on a
+  downgraded database, green again after re-upgrade. Added to `make
+test-intg`.
 - **R572 (forty-ninth window — repo-wide drift audit finds a
   production-dead surface)**: ran alembic autogenerate comparison over the
   WHOLE schema (the fabric guard is intg_*-scoped by design): 237 diffs,
