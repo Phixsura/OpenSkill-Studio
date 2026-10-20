@@ -931,6 +931,11 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R621 (sixty-fourth window — co-signed rotation on the wire)**: the
+  walk now rotates the live sink subscription, emits again, and verifies
+  the next delivery carries TWO v1 signatures with the NEW and the OLD
+  secret each verifying one — the mid-rollover receiver guarantee proven
+  subscriber-side on real HTTP, not in-process. Lifecycle at 99 checks.
 - **R620 (sixty-fourth window — subscriber-side signature verification)**:
   the walk only checked that signature HEADERS exist; it now verifies the
   signature the way a real subscriber must — recomputes

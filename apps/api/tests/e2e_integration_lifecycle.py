@@ -463,6 +463,48 @@ async def main() -> int:
             await drive_outbox()
             check("replay redelivered to sink", len(sink.payloads) >= 2)
 
+        # ── R621: co-signed rotation window, verified SUBSCRIBER-side ──
+        # Rotate the sink subscription's secret, emit again: the next
+        # delivery must carry TWO v1 signatures — one verifying with the NEW
+        # secret, one with the OLD — so a receiver mid-rollover never drops a
+        # delivery (Svix-parity semantics proven on the wire, not in-process).
+        if sub_id and sub_secret:
+            r = await c.post(f"/orgs/{org_id}/webhooks/{sub_id}/rotate-secret", headers=h)
+            new_secret = r.json().get("data", {}).get("secret", "")
+            check("sink subscription rotated", r.status_code == 200 and bool(new_secret))
+            before_n = len(sink.payloads)
+            await emit_mesh_event(org_id, {"project_id": "p-rot", "user_id": "u"})
+            await drive_outbox()
+            await asyncio.sleep(0.2)
+            check("post-rotation delivery arrived", len(sink.payloads) > before_n)
+            if len(sink.payloads) > before_n:
+                import base64 as _b64
+                import hashlib as _hl
+                import hmac as _hmac
+
+                pay = sink.payloads[-1]
+
+                def _hdr2(name: str) -> str:
+                    for line in pay["headers"].splitlines():
+                        if line.lower().startswith(name + ":"):
+                            return line.split(":", 1)[1].strip()
+                    return ""
+
+                wid2, wts2 = _hdr2("webhook-id"), _hdr2("webhook-timestamp")
+                sigs = _hdr2("webhook-signature").split()
+                signed2 = f"{wid2}.{wts2}.".encode() + pay["body"]
+
+                def _sig(secret: str) -> str:
+                    return "v1," + _b64.b64encode(
+                        _hmac.new(secret.encode(), signed2, _hl.sha256).digest()
+                    ).decode()
+
+                check(
+                    "co-signed: BOTH old and new secrets verify one signature each",
+                    len(sigs) >= 2 and _sig(new_secret) in sigs and _sig(sub_secret) in sigs,
+                    f"sigs={len(sigs)}",
+                )
+
         # ── R348 (R344 class): live walls for flush-then-serialize routes
         # the suites only ever hit in-process ──
         # SCIM Groups full live cycle
