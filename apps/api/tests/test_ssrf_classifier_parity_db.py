@@ -16,7 +16,15 @@ import ipaddress
 
 import pytest
 
+from app.ecosystem.security import (
+    EcoSecurityError,
+    validate_external_url,
+)
 from app.ecosystem.security import _is_forbidden_ip as eco_forbidden
+from app.integrations.security import (
+    EgressBlockedError,
+    validate_egress_url,
+)
 from app.integrations.security import _is_forbidden_ip as intg_forbidden
 from app.services.webhook import _ip_blocked as webhook_blocked
 
@@ -75,11 +83,6 @@ def test_all_classifiers_allow_public(ip_str):
 # send time and IPs at create time; its URL-level parity is tracked in ADR
 # R589 as a separate hardening item for the #27/#35 epics.)
 
-import pytest as _pytest
-
-from app.ecosystem.security import EcoSecurityError, validate_external_url
-from app.integrations.security import EgressBlockedError, validate_egress_url
-
 _URL_VALIDATORS = {
     "integrations": (validate_egress_url, EgressBlockedError),
     "ecosystem": (lambda u: validate_external_url(u, resolve_dns=False), EcoSecurityError),
@@ -94,9 +97,9 @@ _BAD_URLS = [
 ]
 
 
-@_pytest.mark.parametrize("name,pair", list(_URL_VALIDATORS.items()))
-@_pytest.mark.parametrize("url", _BAD_URLS)
+@pytest.mark.parametrize("name,pair", list(_URL_VALIDATORS.items()))
+@pytest.mark.parametrize("url", _BAD_URLS)
 def test_url_validators_reject_bad_schemes_and_userinfo(name, pair, url):
     fn, exc = pair
-    with _pytest.raises(exc):
+    with pytest.raises(exc):
         fn(url)
