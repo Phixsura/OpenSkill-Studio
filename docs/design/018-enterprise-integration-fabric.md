@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R554 (forty-sixth window, DEPLOY — graceful shutdown was a fiction)**:
+  docker's default stop_grace_period is 10s, but the api lifespan drains
+  in-flight workflow tasks for up to 15s and the worker's on_shutdown for
+  up to 30s (the R89[M15] fix) — every `compose down`/redeploy SIGKILLed
+  them mid-drain, re-creating exactly the cancelled-mid-provider-call
+  problem that drain exists to prevent. stop_grace_period now 30s (api) /
+  45s (worker).
 - **R553 (forty-sixth window, DEPLOY — dead worker looked healthy for an
   hour)**: arq writes its health key with TTL = health_check_interval + 1s
   and the default interval is 3600s — so the R547 compose healthcheck

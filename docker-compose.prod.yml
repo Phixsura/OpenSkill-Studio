@@ -51,6 +51,11 @@ services:
     build:
       context: apps/api
     restart: unless-stopped
+    # R554: lifespan shutdown drains in-flight workflow tasks for up to 15s
+    # (plus uvicorn finishing in-flight requests) — docker's default 10s
+    # grace SIGKILLed it mid-drain, cancelling provider calls and leaving
+    # RUNNING steps for the sweeper.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,6 +117,9 @@ services:
     build:
       context: apps/api
     restart: unless-stopped
+    # R554: on_shutdown drains fire-and-forget advance_run tasks for up to
+    # 30s (R89[M15]) — the default 10s grace defeated exactly that fix.
+    stop_grace_period: 45s
     depends_on:
       postgres:
         condition: service_healthy
