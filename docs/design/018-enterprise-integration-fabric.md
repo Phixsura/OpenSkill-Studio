@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R616 (sixty-fourth window — production artifact, full browser family,
+  STRICT)**: rebuilt the standalone production bundle (all session web
+  changes compile) and served it per the §8a topology; all seven browser
+  suites green against the REAL deploy artifact with the strict console
+  check — commercial 19/19 with ZERO key warnings, empirically confirming
+  R607's dev-only disposition. 255 browser checks total on the artifact
+  (e2e 31, lifecycle 60, part2 42, a11y 7, commercial 19, fabric 74,
+  talent 22).
 - **R615 (sixty-third window — varchar-overflow class swept, fabric
   clean)**: generalized R614's finding: cross-checked every fabric REQUEST
   model string field against its target column. Three max_length "hits"
