@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R539 (forty-second window, SUPPLY CHAIN — Python side)**: pip-audit
+  (also never run) found pyjwt 2.13 carrying FOURTEEN advisories — the
+  library every OIDC/LTI/BCL token validation rides — plus urllib3/
+  aiohttp/multidict. Upgraded (pyjwt 2.15.1, urllib3 2.8.0, aiohttp
+  3.14.5, multidict 6.9.1): pip-audit now clean; the full token-validation
+  battery (sso/lti/saml/scim/events/core, 283 tests) green on the new
+  pins.
 - **R538 (forty-second window, SUPPLY CHAIN — first dependency audit)**:
   pnpm audit had never been run (and errors against the configured npm
   mirror — use --registry=https://registry.npmjs.org). Found 8 advisories;
