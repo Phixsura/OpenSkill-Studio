@@ -931,6 +931,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R642 (seventy-eighth window — reverse audit-registry guard)**: the
+  forward guard (every recorded action literal ∈ AUDIT_ACTIONS, R24/R592)
+  had no mirror: a REGISTERED action with zero emit sites passes every
+  test while making the compliance registry claim coverage it does not
+  have. This class shipped twice historically (R101 removed
+  `tenant.currency_changed`/`revshare.entry_adjusted` as dead entries;
+  R60[41] found `revshare.rule_retired` registered but never recorded).
+  New guard scans all of app/ (excluding the registry file itself) and
+  fails on any registered action absent as a literal; negative-proofed by
+  injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
+  (guard passes). Current registry: 0 dead entries across all 50 intg.*
+  and every cp/eco action.
 - **R641 (seventy-seventh window — pure-helper mutation closeout)**:
   sequential sweep (R640 rule: nothing booting the app) over the last
   unswept fabric pure helpers: `_org_salt`, `_parse_header_map`,

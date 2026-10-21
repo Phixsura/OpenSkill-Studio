@@ -968,3 +968,27 @@ def test_convert_minor_exact_across_minor_multipliers():
     # exact keeps the fraction (sum-then-round, R75)
     assert convert_exact(Decimal(1), Decimal("0.005"), "JPY", "USD") == Decimal("0.5")
     assert convert_exact(Decimal(10000), Decimal("150"), "USD", "JPY") == Decimal("15000")
+
+
+def test_every_registered_action_has_an_emit_site():
+    """R642 (reverse of the R24 guard): every action REGISTERED in
+    AUDIT_ACTIONS must appear as a literal somewhere in app/ outside the
+    registry itself. Dead registry entries have shipped twice before
+    (R101: tenant.currency_changed / revshare.entry_adjusted had zero emit
+    sites; R60[41]: revshare.rule_retired was registered but never
+    recorded) — a dead entry makes the audit trail LOOK like it covers an
+    operation it does not, which is worse for compliance review than no
+    entry at all. The forward guard (above) catches unregistered call
+    sites; this closes the other direction."""
+    import pathlib
+
+    app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
+    registry = app_dir / "controlplane" / "services" / "audit.py"
+    corpus = "\n".join(
+        f.read_text() for f in app_dir.rglob("*.py") if f.resolve() != registry.resolve()
+    )
+    dead = sorted(a for a in AUDIT_ACTIONS if f'"{a}"' not in corpus)
+    assert not dead, (
+        f"{len(dead)} registered audit action(s) with NO emit site in app/ — "
+        f"remove from AUDIT_ACTIONS or wire the recorder: {dead}"
+    )
