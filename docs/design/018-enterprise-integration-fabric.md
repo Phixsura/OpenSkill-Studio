@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R633 (seventy-second window — SLO handler swept, 18/26, 8 evidenced-
+  equivalent)**: full-file sweep of handle_slo_request (confirmed not a -k
+  artifact — same 8 under the whole SAML suite). All eight are equivalent or
+  unpinnable-by-construction: `split("=", 1)` vs `2` is identical whenever
+  the segment has one `=` (it always does); the L196 unsigned-guard Or→And
+  still REFUSES (the partial-sig request fails signature-decode one step
+  later — observationally equivalent, manually verified against R515's
+  test); the 300s staleness and 10-min replay-TTL are timing boundaries;
+  the +timedelta direction mutant on the replay-cache expiry is unobservable
+  (the ID is already stored; expiry only drives the purge sweep). No
+  false-confidence assertions added.
 - **R632 (seventy-first window — backchannel pinned, survivors evidenced)**:
   new stale-iat probe (700s > the 600s window) kills the freshness-widening
   mutant; the four remaining survivors are each dispositioned WITH evidence:
