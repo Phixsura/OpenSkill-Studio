@@ -168,6 +168,14 @@ def test_event_matches_rules():
     assert not event_matches(["com.openskill.integration.*"], it)
     assert event_matches([it], it)
     assert not event_matches([42, None], t)  # junk-tolerant
+    # R644 channel-separation pin: a LEGACY bare-name subscription
+    # ("pack.published") must NOT match the mirrored mesh event — legacy
+    # subscribers are served by the legacy hex-signed path; the mesh mirror
+    # serves only com.openskill.* patterns. If event_matches ever accepts
+    # bare names, every legacy subscriber double-receives each event
+    # (legacy X-Webhook-Signature + mesh webhook-signature deliveries).
+    assert not event_matches(["project.approved"], t)
+    assert not event_matches(["pack.published"], "com.openskill.pack.published.v1")
 
 
 # ── emit + fan-out + happy-path delivery ──

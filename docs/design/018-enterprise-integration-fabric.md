@@ -947,6 +947,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R644 (window 78 cont. — channel-separation pin + subscriber-facing
+  signing contract)**: audited the three signing implementations (mesh
+  Standard Webhooks; legacy `X-Webhook-Signature` hex-HMAC body-only;
+  talent channel's own HMAC) against the dual-delivery mirror (P2b): the
+  separation is correct — `event_matches` requires the FULL
+  `com.openskill.…vN` type (or wildcard), so a legacy bare-name
+  subscription never matches the mirrored mesh event and no subscriber
+  double-receives — but the invariant was unpinned. If event_matches ever
+  "helpfully" accepted bare names, every legacy subscriber would receive
+  each event twice under two different signature schemes. Pinned both
+  directions in test_event_matches_rules. Ops doc §4 now states the
+  two-channel contract explicitly (which header/scheme a receiver must
+  verify per subscription style, and that migration = flip name +
+  verification together).
 - **R643 (window 78 cont. — alertable-catalog phantom guard + ADR drift
   fix)**: extended the R231 catalog-drift guard with the missing reverse
   direction for `_INTERNAL_ALERTABLE`: a phantom entry in that map has an

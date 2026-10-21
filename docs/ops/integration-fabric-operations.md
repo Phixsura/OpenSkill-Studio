@@ -70,6 +70,16 @@ each break-glass login emits `org.breakglass.login`).
   exact name only (no feedback loops into failing endpoints).
 - Signature: Standard Webhooks — `v1,base64(HMAC-SHA256(secret, id.ts.body))`
   in `webhook-signature`; verify with the shown-once secret.
+- **Two delivery channels, two signatures (R644)**: a subscription on an
+  exact LEGACY name (`pack.published`, `credential.issued`, …) is served by
+  the legacy fire-and-forget path and signed `X-Webhook-Signature:
+hex(HMAC-SHA256(secret, body))` — body only, no id/timestamp binding, no
+  retry ladder. A subscription on a `com.openskill.*.vN` type (or `prefix.*`
+  wildcard) is served by the mesh (persistent, retried, replayable) with the
+  Standard-Webhooks header above. The same event never arrives on both: the
+  matcher refuses bare legacy names against mesh types by construction (a
+  pinned invariant). Migrating a receiver = switch the subscription to the
+  canonical type and the verification code to Standard Webhooks in one step.
 - Retry ladder: 0s, 5s, 5m, 30m, 2h, 5h, 10h, 10h → `exhausted`
   (dead-letter) + `integration.delivery.exhausted` event. Five days of
   consistent failure auto-disables the endpoint
