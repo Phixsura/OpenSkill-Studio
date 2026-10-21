@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import re
 import secrets
 import socket
@@ -51,6 +52,18 @@ VALID_EVENT_TYPES = frozenset(
         "experiment.decision_recorded",
     }
 )
+
+def _scrub_nonfinite(obj):
+    """R645: replace NaN/Infinity floats with None, recursively — json.dumps
+    would otherwise emit bare NaN/Infinity tokens (invalid JSON)."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: _scrub_nonfinite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_scrub_nonfinite(v) for v in obj]
+    return obj
+
 
 # Blocked IP ranges for SSRF protection
 _BLOCKED_NETWORKS = [
@@ -579,15 +592,24 @@ class WebhookService:
             log.warning("webhook_invalid_scheme", webhook_id=webhook_id, url=url)
             return
 
-        body = json.dumps(
-            {
-                "event": event_type,
-                "payload": payload,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "webhook_id": webhook_id,
-            },
-            default=str,
-        )
+        envelope = {
+            "event": event_type,
+            "payload": payload,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "webhook_id": webhook_id,
+        }
+        try:
+            # R645 (R585/R586 class, at the shared boundary): json.dumps
+            # happily emits NaN/Infinity tokens — INVALID JSON that every
+            # spec-compliant receiver refuses to parse. The mesh path gates
+            # this (EVENT_DATA_INVALID); the legacy path serves ~20 emit
+            # sites and must never ship an unparseable body. default=str
+            # keeps datetimes/Decimals readable, allow_nan=False trips on
+            # non-finite floats; the fallback scrubs them to null and
+            # re-serializes rather than dropping the delivery.
+            body = json.dumps(envelope, default=str, allow_nan=False)
+        except ValueError:
+            body = json.dumps(_scrub_nonfinite(envelope), default=str, allow_nan=False)
         signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
 
         # Defect #91: retry transient failures (429/5xx/network error) on the

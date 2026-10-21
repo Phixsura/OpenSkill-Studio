@@ -947,6 +947,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R645 (window 78 cont. — legacy delivery body validity)**: the mesh
+  emit gate (R211, `allow_nan=False` → `EVENT_DATA_INVALID`) had no legacy
+  counterpart: `WebhookService._deliver_background` serialized every legacy
+  payload (talent, packs, experiments — ~20 emit sites funnel into this one
+  dumps call) with default `allow_nan=True`, so a non-finite float anywhere
+  (e.g. an experiment-guardrail metric) shipped a bare `NaN`/`Infinity`
+  token — INVALID JSON every spec-compliant receiver refuses, burning the
+  whole retry ladder on an unparseable body. Fix at the shared boundary:
+  `allow_nan=False` with a `_scrub_nonfinite` fallback (NaN/±Inf → null,
+  recursive over dict/list) so the delivery ships valid JSON instead of
+  being dropped. `default=str` keeps datetimes/Decimals as before. Pinned
+  by a transport-capture test asserting no NaN/Infinity tokens and
+  null-scrubbed values arrive.
 - **R644 (window 78 cont. — channel-separation pin + subscriber-facing
   signing contract)**: audited the three signing implementations (mesh
   Standard Webhooks; legacy `X-Webhook-Signature` hex-HMAC body-only;

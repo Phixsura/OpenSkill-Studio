@@ -1594,3 +1594,49 @@ def test_rotation_window_boundary_is_inclusive():
     sub.secret_rotated_at = now - SECRET_PREV_WINDOW - timedelta(seconds=1)
     h2 = build_delivery_headers(sub, "evt_edge", b"{}", now)
     assert len(h2["webhook-signature"].split(" ")) == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_delivery_body_is_always_valid_json(monkeypatch):
+    """R645 (R585/R586 class at the shared legacy boundary): json.dumps emits
+    bare NaN/Infinity tokens — invalid JSON every spec-compliant receiver
+    refuses. All ~20 legacy emit sites (talent, packs, experiments) funnel
+    into WebhookService's single dumps call; a non-finite float anywhere in a
+    payload must arrive as null, never as an unparseable body or a dropped
+    delivery."""
+    import json as _json
+
+    from app.integrations.security import EgressClient
+    from app.services import webhook as webhook_mod
+
+    captured = {}
+
+    async def fake_request(self, method, url, **kw):
+        captured["body"] = kw.get("content")
+
+        class _R:
+            status_code = 200
+
+        return _R()
+
+    monkeypatch.setattr(EgressClient, "request", fake_request)
+
+    async def not_blocked(url):
+        return False
+
+    monkeypatch.setattr(webhook_mod, "_is_blocked_url_async", not_blocked)
+
+    await webhook_mod.WebhookService._deliver_background(
+        "https://receiver.example.com/hook",
+        "sekrit",
+        "wh_1",
+        "experiment.guardrail_breach",
+        {"observed": float("nan"), "deltas": [1.5, float("inf")], "n": 3},
+    )
+    assert captured.get("body"), "delivery never reached the transport"
+    doc = _json.loads(captured["body"])  # strict: NaN tokens would raise here? no —
+    # python's json.loads ACCEPTS NaN by default; assert the tokens are absent
+    assert "NaN" not in captured["body"] and "Infinity" not in captured["body"]
+    assert doc["payload"]["observed"] is None
+    assert doc["payload"]["deltas"] == [1.5, None]
+    assert doc["payload"]["n"] == 3
