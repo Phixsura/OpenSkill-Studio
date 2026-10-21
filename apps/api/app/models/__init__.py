@@ -26,6 +26,30 @@ from app.models.composer import (  # noqa: F401
     CreatorCapabilityEvidence,
     SolutionDraft,
 )
+from app.models.developer import (  # noqa: F401
+    AppApiKey,
+    AppAutomationRule,
+    AppCategory,
+    AppEventSubscription,
+    AppInstallation,
+    AppReviewSubmission,
+    AppSecret,
+    AppSigningKey,
+    AppStatus,
+    AppUiExtension,
+    AppVersion,
+    AppVersionReviewStatus,
+    AppVisibility,
+    AutomationActionType,
+    DeveloperAccount,
+    DeveloperApp,
+    DeveloperStatus,
+    InstallationStatus,
+    RateLimitTier,
+    SandboxExecution,
+    SandboxExecutionStatus,
+    UiSurface,
+)
 from app.models.discussion import PackDiscussion  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,

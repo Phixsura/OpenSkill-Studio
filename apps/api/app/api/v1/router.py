@@ -2,11 +2,16 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin,
+    app_installations,
+    app_marketplace,
+    app_review,
     auth,
     certificates,
     client_briefs,
     cohorts,
     composer,
+    developer_accounts,
+    developer_apps,
     discussions,
     duplicate,
     evaluation,
@@ -85,6 +90,13 @@ api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
 api_v1_router.include_router(requirement_profiles.router)
 api_v1_router.include_router(matching.router)
+
+# ── Developer Platform (Issue #44) ──
+api_v1_router.include_router(developer_accounts.router)
+api_v1_router.include_router(developer_apps.router)
+api_v1_router.include_router(app_installations.router)
+api_v1_router.include_router(app_review.router)
+api_v1_router.include_router(app_marketplace.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)
