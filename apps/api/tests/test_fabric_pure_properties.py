@@ -10,6 +10,8 @@ totality (never raise, bounded output).
 
 import ipaddress
 
+import pytest
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -107,3 +109,90 @@ def test_scim_path_normalizer_total(p):
 
     out = _normalize_path(p)
     assert isinstance(out, str)
+
+
+# ── R636: eco fetcher resolve-pin (DNS-rebinding defense) ──
+
+
+@pytest.mark.asyncio
+async def test_eco_fetcher_blocks_rebound_dns(monkeypatch):
+    """A registry whose DNS flips to a private IP between validation and
+    fetch must be refused AT DIAL TIME (the R636 pin), not only at the
+    earlier validate_external_url check."""
+    import socket as _socket
+
+    from app.ecosystem.security import EcoSecurityError
+    from app.ecosystem.services import sync as eco_sync
+
+    def rebound(host, port, proto=0):
+        return [(2, 1, 6, "", ("10.66.0.1", port))]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", rebound)
+    with pytest.raises(EcoSecurityError):
+        await eco_sync._default_fetcher(
+            "https://registry.example.com/models.json",
+            etag=None,
+            last_modified=None,
+            timeout=5,
+            max_bytes=1024,
+        )
+
+
+@pytest.mark.asyncio
+async def test_eco_fetcher_pins_ip_and_sends_host_header(monkeypatch):
+    """The pinned dial must hit the RESOLVED ip while presenting the original
+    hostname in the Host header (so vhosted registries still route)."""
+    import asyncio as _aio
+    import socket as _socket
+
+    from app.ecosystem.services import sync as eco_sync
+
+    seen = {}
+
+    async def handle(reader, writer):
+        data = await reader.read(2048)
+        head = data.decode(errors="replace")
+        seen["host"] = next(
+            (ln.split(":", 1)[1].strip() for ln in head.splitlines() if ln.lower().startswith("host:")),
+            "",
+        )
+        body = b'{"ok": true}'
+        writer.write(
+            b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: "
+            + str(len(body)).encode()
+            + b"\r\nconnection: close\r\n\r\n"
+            + body
+        )
+        await writer.drain()
+        writer.close()
+
+    server = await _aio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    real_gai = _socket.getaddrinfo
+
+    def to_local(host, p, proto=0):
+        if host == "vhost.example.com":
+            return [(2, 1, 6, "", ("127.0.0.1", p))]
+        return real_gai(host, p, proto=proto)
+
+    monkeypatch.setattr(_socket, "getaddrinfo", to_local)
+    # loopback is normally forbidden — allow it for THIS plumbing test only
+    monkeypatch.setattr(eco_sync, "_pin_forbidden", lambda a: False, raising=False)
+    from app.ecosystem import security as eco_sec
+
+    monkeypatch.setattr(eco_sec, "_is_forbidden_ip", lambda a: False)
+
+    try:
+        res = await eco_sync._default_fetcher(
+            f"http://vhost.example.com:{port}/models.json",
+            etag=None,
+            last_modified=None,
+            timeout=5,
+            max_bytes=4096,
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert res.status_code == 200 and res.body == b'{"ok": true}'
+    assert seen["host"] == f"vhost.example.com:{port}"

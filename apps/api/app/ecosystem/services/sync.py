@@ -56,10 +56,39 @@ async def _default_fetcher(
         headers["If-None-Match"] = etag
     if last_modified:
         headers["If-Modified-Since"] = last_modified
+    # R636 (fabric R27 technique): validate-then-dial leaves a DNS-rebinding
+    # TOCTOU window — a compromised registry can flip its record to an
+    # internal IP between our check and httpx's own resolution. Resolve NOW,
+    # validate every address, then dial the literal IP with Host/SNI set to
+    # the hostname so the client never re-resolves.
+    from urllib.parse import urlsplit
+
+    from app.ecosystem.security import _is_forbidden_ip
+
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    import asyncio
+    import socket as _socket
+
+    infos = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: _socket.getaddrinfo(host, port, proto=_socket.IPPROTO_TCP)
+    )
+    addrs = [i[4][0] for i in infos]
+    if not addrs or any(_is_forbidden_ip(a) for a in addrs):
+        raise EcoSecurityError("ECO_SSRF_BLOCKED", "Hostname resolves to a forbidden address")
+    ip_literal = f"[{addrs[0]}]" if ":" in addrs[0] else addrs[0]
+    pinned = f"{parts.scheme}://{ip_literal}:{port}{parts.path or '/'}"
+    if parts.query:
+        pinned += f"?{parts.query}"
+    headers["Host"] = host if port in (80, 443) else f"{host}:{port}"
+    extensions = {"sni_hostname": host} if parts.scheme == "https" else {}
     async with httpx.AsyncClient(
         timeout=timeout, follow_redirects=False, trust_env=False
     ) as client:
-        async with client.stream("GET", url, headers=headers) as resp:
+        req = client.build_request("GET", pinned, headers=headers, extensions=extensions)
+        resp = await client.send(req, stream=True)
+        try:
             if resp.status_code == 304:
                 return FetchResult(304, b"")
             chunks: list[bytes] = []
@@ -77,6 +106,8 @@ async def _default_fetcher(
                 etag=resp.headers.get("ETag"),
                 last_modified=resp.headers.get("Last-Modified"),
             )
+        finally:
+            await resp.aclose()
 
 
 def _parse_iso(value: str | None) -> datetime | None:

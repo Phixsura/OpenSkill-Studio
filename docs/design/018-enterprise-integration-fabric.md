@@ -931,6 +931,17 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R636 (seventy-third window — eco fetcher gets the resolve-pin)**: the
+  ecosystem registry fetcher was validate-then-dial — a compromised
+  registry flipping its DNS to an internal IP between the check and httpx's
+  own resolution would make the platform's 15-minute sync crawl internal
+  services (platform-admin-curated sources, so supply-chain tier rather
+  than tenant-reachable — but the fabric solved exactly this with the
+  pinned dial, R27). Ported the technique: resolve now, validate EVERY
+  address, dial the IP literal with Host/SNI set to the hostname. Two
+  direct tests: a rebound-to-10.x resolution refuses AT DIAL TIME, and a
+  local vhost server proves the pinned request carries the original Host
+  header. Eco suites 368 green.
 - **R635 (seventy-third window — three-way URL parity)**: with R634 the
   shared webhook service finally has a URL-level screen, so the SSRF parity
   module now asserts the scheme/userinfo rejections across ALL THREE
