@@ -764,7 +764,7 @@ async def test_resolution_two_members_same_email_queue_not_takeover(db):
     svc = IdentityService(db)
     with pytest.raises(AppError) as exc:
         await svc.resolve(_ident(org, subject="dup-sub", email=shared))
-    assert exc.value.code == "IDENTITY_AMBIGUOUS"
+    assert exc.value.code == "IDENTITY_AMBIGUOUS" and exc.value.status_code == 403
     q = await svc.list_queue(org.id)
     assert any(i.subject == "dup-sub" and i.reason == "multiple_member_matches" for i in q)
 

@@ -931,6 +931,21 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R631 (seventy-first window — resolve() fully pinned, 27/28)**: full-file
+  mutation sweep of identity.resolve (28 mutants; the earlier -k run
+  under-reported as predicted — 7 of its 13 "survivors" die under the full
+  suite). The six REAL gaps were every input-sanitization boundary: new
+  tests/test_identity_boundaries_db.py (in test-intg) pins subject-500/501
+  (403 + status), email-255/256 (sanitize→queue reason vs survive-to-JIT),
+  display-name truncation at exactly 100 + empty→fallback, the
+  INACTIVE-linked-user wall (an Or→And there would let a suspended account
+  complete SSO), refusal statuses all-403, and single-member email match;
+  the two-member ambiguity test gains its status pin. Final survivor L144
+  (>1→>=1) manually proven EQUIVALENT — shadowed by the ==1 early return
+  (same class as the documented R131 equivalent). _deprovision 6/6,
+  backchannel 8/13 with the five dispositioned (stale-window boundary pins
+  pending; replay-cache expiry mutants unobservable under the 1-day purge
+  grace).
 - **R630 (seventieth window — a mutation survivor exposes an untested
   demotion wall)**: _apply_mapping's And→Or survivor revealed the test gap:
   an OWNER leaving a role-mapped group was never exercised — the Or-mutant
