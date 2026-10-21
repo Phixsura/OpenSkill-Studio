@@ -947,6 +947,28 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R646 (window 78 cont. — core dispatch mutation sweep, 30/30)**:
+  mutation-tested `trigger_event` + `_deliver_background` (the shared
+  legacy dispatcher every talent/pack/eco/experiment emit funnels into) —
+  the first sweep of this pre-fabric core. 16+14 mutants, 5 survivors → all
+  real pins: (1) **retry cadence off-by-one family** (`attempt > 1`→`>= 1`
+  would sleep schedule[-1] before the FIRST attempt; `> 2` and
+  `[attempt-3]` shift the backoff ladder) — existing tests patched sleep
+  without asserting it; new test pins "attempt 1 immediate, then exactly
+  WEBHOOK_RETRY_SCHEDULE in order". (2) **429-retry contract** (`!= 429`
+  survived as `== 429` and `!= 430`): 429 is the one 4xx that retries;
+  any other 4xx stops after exactly one attempt. Both halves pinned
+  (429→200 = 2 requests; 404 = 1 request). Final: 30/30 killed.
+- **R646a (window 78 cont. — dead signing scheme removed)**: the R644
+  audit counted three signing implementations; the third
+  (`app/talent/services/webhook_delivery.py`, `WebhookDeliveryService` with
+  its own hex-HMAC, retry and stats logic) turned out to be DEAD code —
+  zero call sites outside its own unit tests; talent events actually route
+  through `emit_talent_event → WebhookService.trigger_event` (the legacy
+  channel). Its `SUPPORTED_EVENTS` even carried `offer.accepted`/
+  `offer.declined`, names that exist in no catalog — test-green code
+  nothing runs, misleading every signing audit (including R644's own
+  wording, corrected). Deleted module + its test file (297 lines).
 - **R645 (window 78 cont. — legacy delivery body validity)**: the mesh
   emit gate (R211, `allow_nan=False` → `EVENT_DATA_INVALID`) had no legacy
   counterpart: `WebhookService._deliver_background` serialized every legacy
@@ -963,7 +985,8 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 - **R644 (window 78 cont. — channel-separation pin + subscriber-facing
   signing contract)**: audited the three signing implementations (mesh
   Standard Webhooks; legacy `X-Webhook-Signature` hex-HMAC body-only;
-  talent channel's own HMAC) against the dual-delivery mirror (P2b): the
+  and what LOOKED like a third talent scheme) against the dual-delivery
+  mirror (P2b): the
   separation is correct — `event_matches` requires the FULL
   `com.openskill.…vN` type (or wildcard), so a legacy bare-name
   subscription never matches the mirrored mesh event and no subscriber

@@ -1640,3 +1640,97 @@ async def test_legacy_delivery_body_is_always_valid_json(monkeypatch):
     assert doc["payload"]["observed"] is None
     assert doc["payload"]["deltas"] == [1.5, None]
     assert doc["payload"]["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_legacy_retry_cadence_pinned(monkeypatch):
+    """R646: the retry CADENCE is the contract (defect #91): attempt 1 fires
+    immediately (no sleep — a sleep before the first attempt would delay
+    every webhook by the last backoff slot), then exactly
+    WEBHOOK_RETRY_SCHEDULE between subsequent attempts, in order. Mutation
+    survivors showed nothing pinned the off-by-one family here
+    (`attempt > 1` → `>= 1` / `> 2`, `[attempt - 2]` → `[attempt - 3]`)."""
+    from app.integrations.security import EgressClient
+    from app.services import webhook as webhook_mod
+    from app.services.webhook import WEBHOOK_RETRY_SCHEDULE
+
+    calls = {"requests": 0}
+    sleeps: list[float] = []
+
+    async def fake_request(self, method, url, **kw):
+        calls["requests"] += 1
+
+        class _R:
+            status_code = 500  # transient — retries the full ladder
+
+        return _R()
+
+    async def fake_sleep(secs):
+        sleeps.append(secs)
+
+    async def not_blocked(url):
+        return False
+
+    monkeypatch.setattr(EgressClient, "request", fake_request)
+    monkeypatch.setattr(webhook_mod, "_is_blocked_url_async", not_blocked)
+    monkeypatch.setattr(webhook_mod.asyncio, "sleep", fake_sleep)
+
+    await webhook_mod.WebhookService._deliver_background(
+        "https://receiver.example.com/hook", "sekrit", "wh_r646", "pack.published", {"x": 1}
+    )
+    assert calls["requests"] == 1 + len(WEBHOOK_RETRY_SCHEDULE)
+    assert sleeps == list(WEBHOOK_RETRY_SCHEDULE)
+
+
+@pytest.mark.asyncio
+async def test_legacy_429_retries_but_4xx_stops(monkeypatch):
+    """R646: 429 is the ONE 4xx that retries (rate-limited receiver — the
+    event is fine, the moment is wrong); any other 4xx is a deterministic
+    rejection and must stop after exactly one attempt (retrying is abuse).
+    Mutation showed both halves unpinned (`!= 429` → `== 429` / `!= 430`)."""
+    from app.integrations.security import EgressClient
+    from app.services import webhook as webhook_mod
+
+    async def not_blocked(url):
+        return False
+
+    async def fake_sleep(secs):
+        return None
+
+    monkeypatch.setattr(webhook_mod, "_is_blocked_url_async", not_blocked)
+    monkeypatch.setattr(webhook_mod.asyncio, "sleep", fake_sleep)
+
+    # 429 then 200: must retry once and succeed (2 requests total)
+    seq = iter([429, 200])
+    count = {"n": 0}
+
+    async def rate_limited(self, method, url, **kw):
+        count["n"] += 1
+
+        class _R:
+            status_code = next(seq)
+
+        return _R()
+
+    monkeypatch.setattr(EgressClient, "request", rate_limited)
+    await webhook_mod.WebhookService._deliver_background(
+        "https://receiver.example.com/hook", "s", "wh_429", "pack.published", {}
+    )
+    assert count["n"] == 2
+
+    # 404: deterministic rejection — exactly one attempt
+    count["n"] = 0
+
+    async def gone(self, method, url, **kw):
+        count["n"] += 1
+
+        class _R:
+            status_code = 404
+
+        return _R()
+
+    monkeypatch.setattr(EgressClient, "request", gone)
+    await webhook_mod.WebhookService._deliver_background(
+        "https://receiver.example.com/hook", "s", "wh_404", "pack.published", {}
+    )
+    assert count["n"] == 1
