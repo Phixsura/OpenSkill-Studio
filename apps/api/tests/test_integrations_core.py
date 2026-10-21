@@ -1854,4 +1854,4 @@ def test_break_glass_freshness_window_within_event_retention():
     from app.integrations.services.events import RETAIN_EVENTS
     from app.integrations.services.sso_admin import SsoAdminService
 
-    assert RETAIN_EVENTS > timedelta(days=SsoAdminService.BREAK_GLASS_FRESHNESS_DAYS)
+    assert timedelta(days=SsoAdminService.BREAK_GLASS_FRESHNESS_DAYS) < RETAIN_EVENTS

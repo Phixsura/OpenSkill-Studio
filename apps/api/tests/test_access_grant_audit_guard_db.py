@@ -62,8 +62,8 @@ def test_audit_payloads_carry_no_direct_identifiers():
     (security attribution, documented in ops §7b)."""
     import re
 
-    FORBIDDEN_KEYS = {"email", "userName", "user_name", "subject", "display_name"}
-    ALLOWED_PII = {("intg.break_glass.used", "ip_address"), ("intg.break_glass.used", "user_agent")}
+    forbidden_keys = {"email", "userName", "user_name", "subject", "display_name"}
+    allowed_pii = {("intg.break_glass.used", "ip_address"), ("intg.break_glass.used", "user_agent")}
     offenders = []
     for f in list(INTG.rglob("*.py")) + [APP / "services" / "auth.py"]:
         text = f.read_text()
@@ -76,8 +76,8 @@ def test_audit_payloads_carry_no_direct_identifiers():
                 continue
             for key in re.finditer(r'"([a-z_]+)":', after.group(1)):
                 k = key.group(1)
-                if k in FORBIDDEN_KEYS:
+                if k in forbidden_keys:
                     offenders.append(f"{f.name}: {action} carries '{k}'")
-                if k in ("ip_address", "user_agent") and (action, k) not in ALLOWED_PII:
+                if k in ("ip_address", "user_agent") and (action, k) not in allowed_pii:
                     offenders.append(f"{f.name}: {action} carries unsanctioned '{k}'")
     assert not offenders, offenders

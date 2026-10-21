@@ -295,10 +295,10 @@ async def test_health_reports_worker_liveness(db):
     # the singleton pool may be bound to a previous test's (closed) event
     # loop — aclose() then raises "Event loop is closed"; just drop it.
     if redis_mod._redis is not None:
-        try:
+        import contextlib
+
+        with contextlib.suppress(RuntimeError):
             await redis_mod._redis.aclose()
-        except RuntimeError:
-            pass
         redis_mod._redis = None
 
     owner = await _user(db)
