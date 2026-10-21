@@ -1734,3 +1734,89 @@ async def test_legacy_429_retries_but_4xx_stops(monkeypatch):
         "https://receiver.example.com/hook", "s", "wh_404", "pack.published", {}
     )
     assert count["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_events_validation_boundaries(db):
+    """R647: update()'s events-list validation boundaries, pinned exactly:
+    [] refused 422; MAX_EVENTS_PER_WEBHOOK accepted; MAX+1 refused 422;
+    unknown name refused 422 (mutation: Or→And, Gt→GtE, 422→423 all
+    survived the suites — none of these edges had a direct test)."""
+    from app.services.webhook import MAX_EVENTS_PER_WEBHOOK, WebhookService
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    svc = WebhookService(db)
+
+    for bad, why in (
+        ([], "empty list"),
+        (["com.openskill.project.*"] * (MAX_EVENTS_PER_WEBHOOK + 1), "over cap"),
+        (["definitely.not.a.real_event"], "unknown name"),
+    ):
+        try:
+            await svc.update(sub.id, org.id, events=bad)
+            raise AssertionError(f"must refuse: {why}")
+        except AppError as e:
+            assert e.code == "INVALID_EVENT" and e.status_code == 422, why
+
+    # exactly MAX is allowed (Gt not GtE)
+    ok = [f"com.openskill.project.p{i}.*" for i in range(MAX_EVENTS_PER_WEBHOOK)]
+    out = await svc.update(sub.id, org.id, events=ok)
+    assert len(out.events) == MAX_EVENTS_PER_WEBHOOK
+
+
+@pytest.mark.asyncio
+async def test_delete_is_a_uniform_404_oracle(db):
+    """R647: delete() must 404 BOTH for a missing id and for another org's
+    subscription (the 403-vs-404 existence-oracle class, R88-91) — and the
+    Or in `sub is None or sub.org_id != org_id` must not decay to And
+    (which would let a cross-tenant delete through)."""
+    from app.services.webhook import WebhookService
+
+    org = await _org(db)
+    other = await _org(db)
+    sub = await _sub(db, org)
+    svc = WebhookService(db)
+
+    for target_id, as_org, why in (
+        ("01JUNKJUNKJUNKJUNKJUNKJUNK", org.id, "missing id"),
+        (sub.id, other.id, "cross-tenant"),
+    ):
+        try:
+            await svc.delete(target_id, as_org)
+            raise AssertionError(f"must 404: {why}")
+        except AppError as e:
+            assert e.code == "WEBHOOK_NOT_FOUND" and e.status_code == 404, why
+    # victim subscription still present after the cross-tenant attempt
+    assert await db.get(type(sub), sub.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_update_404_and_url_change_screened(db):
+    """R647b: update() must 404 (pinned status) on a missing/foreign sub,
+    and a CHANGED url must be screened AND persisted (mutation `url !=
+    sub.url` → `==` survived: it would skip both the SSRF screen and the
+    assignment, silently ignoring the new URL)."""
+    from app.services.webhook import WebhookService
+
+    org = await _org(db)
+    sub = await _sub(db, org)
+    svc = WebhookService(db)
+
+    try:
+        await svc.update("01NOPENOPENOPENOPENOPENOPE", org.id, active=False)
+        raise AssertionError("must 404")
+    except AppError as e:
+        assert e.code == "WEBHOOK_NOT_FOUND" and e.status_code == 404
+
+    # a new, clean URL is persisted
+    out = await svc.update(sub.id, org.id, url="https://hooks.example.com/v2")
+    assert out.url == "https://hooks.example.com/v2"
+
+    # a new, blocked URL is refused (screen actually ran on the CHANGED url)
+    try:
+        await svc.update(sub.id, org.id, url="https://127.0.0.1/evil")
+        raise AssertionError("blocked url must refuse")
+    except AppError:
+        pass
+    assert (await db.get(type(sub), sub.id)).url == "https://hooks.example.com/v2"

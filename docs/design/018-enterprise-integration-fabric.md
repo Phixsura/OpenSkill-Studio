@@ -947,6 +947,22 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R647 (window 78 cont. — WebhookService CRUD sweep, 55 mutants)**:
+  swept create/update/rotate_secret/delete/list/_record_webhook_audit.
+  Survivor pins (all real test gaps): update()'s events-list boundaries
+  (empty→422, MAX_EVENTS_PER_WEBHOOK accepted, MAX+1→422, unknown
+  name→422 — Or→And / Gt→GtE / 422→423 all survived); delete() and
+  update() must 404 with pinned status for missing-id AND cross-tenant
+  (the R88-91 existence-oracle class — Or→And on the delete predicate
+  would have let cross-tenant deletes through); update() with a CHANGED
+  url must screen AND persist it (`!=`→`==` survived — would silently
+  ignore new URLs, skipping the SSRF screen with them). Dispositioned:
+  `token_hex(32)`→33 (secret entropy constant, no length contract);
+  create()'s FOR-UPDATE lock predicate Eq→NotEq is concurrency-only
+  observable — the R113 races test exercises it but a probabilistic race
+  cannot deterministically kill it; the lock's purpose is documented at
+  the site. Final: update 10/10, delete 7/7, trigger/deliver 30/30.
+  Also deleted (R646a) the dead WebhookDeliveryService module.
 - **R646 (window 78 cont. — core dispatch mutation sweep, 30/30)**:
   mutation-tested `trigger_event` + `_deliver_background` (the shared
   legacy dispatcher every talent/pack/eco/experiment emit funnels into) —
