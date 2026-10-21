@@ -2,9 +2,9 @@
 
 import hashlib
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -50,9 +50,25 @@ async def authorize(
     if not app:
         return DataResponse(data={"error": "invalid_client", "state": state})
 
-    # Validate redirect_uri
-    if app.redirect_uris and redirect_uri not in app.redirect_uris:
+    # Fail closed: redirect_uri must always be registered and match
+    if not app.redirect_uris or redirect_uri not in app.redirect_uris:
         return DataResponse(data={"error": "invalid_redirect_uri", "state": state})
+
+    # Validate requested scopes against app's manifest permissions
+    requested_scopes = scope.split() if scope else []
+    manifest_permissions = (
+        app.manifest.get("permissions", []) if app.manifest else []
+    )
+    if manifest_permissions:
+        invalid = [s for s in requested_scopes if s not in manifest_permissions]
+        if invalid:
+            return DataResponse(
+                data={
+                    "error": "invalid_scope",
+                    "message": f"Scopes not in app manifest: {', '.join(invalid)}",
+                    "state": state,
+                }
+            )
 
     # Generate authorization code
     code = secrets.token_urlsafe(32)
@@ -61,6 +77,7 @@ async def authorize(
         "user_id": user.id,
         "redirect_uri": redirect_uri,
         "scope": scope,
+        "scopes": requested_scopes,
         "app_id": app.id,
         "created_at": datetime.now(UTC),
     }
@@ -79,15 +96,17 @@ async def authorize(
     dependencies=[Depends(rate_limit(20, 60))],
 )
 async def token(
-    grant_type: str = Query(...),
-    code: str | None = None,
-    client_id: str = Query(...),
-    client_secret: str = Query(...),
-    redirect_uri: str | None = None,
-    refresh_token: str | None = None,
+    grant_type: str = Form(...),
+    code: str | None = Form(None),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    redirect_uri: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """OAuth2 token endpoint — exchange authorization code for tokens."""
+    """OAuth2 token endpoint — exchange authorization code for tokens.
+
+    Accepts client credentials via application/x-www-form-urlencoded body.
+    """
     # Validate client credentials
     app = await dev_svc.get_app_by_client_id(db, client_id)
     if not app:
@@ -100,7 +119,9 @@ async def token(
 
     if grant_type == "authorization_code":
         if not code:
-            return DataResponse(data={"error": "invalid_request", "message": "code required"})
+            return DataResponse(
+                data={"error": "invalid_request", "message": "code required"}
+            )
 
         # Look up and validate authorization code
         code_data = _AUTH_CODES.pop(code, None)
@@ -110,21 +131,25 @@ async def token(
         # Check expiry
         elapsed = (datetime.now(UTC) - code_data["created_at"]).total_seconds()
         if elapsed > CODE_EXPIRY_SECONDS:
-            return DataResponse(data={"error": "invalid_grant", "message": "code expired"})
+            return DataResponse(
+                data={"error": "invalid_grant", "message": "code expired"}
+            )
 
         # Validate client_id matches
         if code_data["client_id"] != client_id:
             return DataResponse(data={"error": "invalid_grant"})
 
-        # Validate redirect_uri matches
-        if redirect_uri and code_data["redirect_uri"] != redirect_uri:
+        # Require redirect_uri match when one was used at /authorize
+        if code_data["redirect_uri"] != redirect_uri:
             return DataResponse(data={"error": "invalid_grant"})
 
-        # Generate tokens
+        # Generate OAuth access token scoped to user
+        # TODO: Extend create_access_token to embed app_id + scopes
+        # so auth middleware can enforce scope boundaries per-request
         access_token = create_access_token(
             user_id=code_data["user_id"],
+            email="",  # Not needed in JWT payload
             role="user",
-            expires_delta=timedelta(hours=1),
         )
         new_refresh_token = secrets.token_urlsafe(48)
 
