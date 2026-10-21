@@ -39,6 +39,11 @@ async def submit_for_review(
     if account.owner_user_id != user.id:
         raise dev_svc.PermissionDeniedError()
 
+    # Validate version belongs to this app
+    version = await dev_svc.get_app_version(db, body.app_version_id)
+    if version.app_id != app_id:
+        raise dev_svc.AppVersionNotFoundError()
+
     review = await dev_svc.submit_for_review(
         db,
         app_id=app_id,
@@ -63,7 +68,11 @@ async def list_reviews(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List review submissions for an app."""
+    """List review submissions for an app (owner only)."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
     reviews, total = await dev_svc.list_review_submissions(
         db, app_id=app_id, status=status, page=page, per_page=per_page
     )

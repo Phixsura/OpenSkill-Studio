@@ -24,6 +24,17 @@ interface AppDetail {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+/** Only allow http(s) URLs to prevent javascript: XSS */
+function safeUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const p = new URL(u);
+    return p.protocol === "https:" || p.protocol === "http:" ? p.href : null;
+  } catch {
+    return null;
+  }
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   connector: "🔌 Connector",
   workflow_adapter: "⚡ Workflow Adapter",
@@ -134,9 +145,9 @@ export default function AppDetailPublicPage() {
 
       {/* Links */}
       <div className="mb-8 grid grid-cols-2 gap-4">
-        {app.homepage_url && (
+        {safeUrl(app.homepage_url) && (
           <a
-            href={app.homepage_url}
+            href={safeUrl(app.homepage_url)!}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-lg border p-3 text-sm transition-colors hover:border-blue-500 dark:border-gray-700"
@@ -145,9 +156,9 @@ export default function AppDetailPublicPage() {
             <p className="mt-1 truncate text-xs text-gray-400">{app.homepage_url}</p>
           </a>
         )}
-        {app.privacy_policy_url && (
+        {safeUrl(app.privacy_policy_url) && (
           <a
-            href={app.privacy_policy_url}
+            href={safeUrl(app.privacy_policy_url)!}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-lg border p-3 text-sm transition-colors hover:border-blue-500 dark:border-gray-700"

@@ -50,6 +50,14 @@ async def authorize(
     if not app:
         return DataResponse(data={"error": "invalid_client", "state": state})
 
+    # Reject revoked/deprecated/draft apps from minting tokens
+    from app.models.developer import AppStatus
+
+    allowed_states = {AppStatus.PUBLISHED, AppStatus.APPROVED, AppStatus.TESTING}
+    app_status = app.status if isinstance(app.status, AppStatus) else AppStatus(app.status)
+    if app_status not in allowed_states:
+        return DataResponse(data={"error": "invalid_client", "state": state})
+
     # Fail closed: redirect_uri must always be registered and match
     if not app.redirect_uris or redirect_uri not in app.redirect_uris:
         return DataResponse(data={"error": "invalid_redirect_uri", "state": state})
@@ -110,6 +118,14 @@ async def token(
     # Validate client credentials
     app = await dev_svc.get_app_by_client_id(db, client_id)
     if not app:
+        return DataResponse(data={"error": "invalid_client"})
+
+    # Reject revoked/deprecated/draft apps
+    from app.models.developer import AppStatus
+
+    allowed_states = {AppStatus.PUBLISHED, AppStatus.APPROVED, AppStatus.TESTING}
+    app_status = app.status if isinstance(app.status, AppStatus) else AppStatus(app.status)
+    if app_status not in allowed_states:
         return DataResponse(data={"error": "invalid_client"})
 
     # Verify client secret
