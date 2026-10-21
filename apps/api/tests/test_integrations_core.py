@@ -563,6 +563,18 @@ def test_request_with_retry_honors_retry_after_and_caps():
         resp = await request_with_retry(s, "GET", "https://x/", retry_cap_s=0.01)
         assert resp.status_code == 503 and s.calls == 3
 
+        # R648: retry-after "nan"/"inf" PARSE as floats but min/max do not
+        # order NaN — before the guard, delay=nan made asyncio.sleep(nan)
+        # never return (one hostile header = a worker parked forever).
+        for hostile in ("nan", "inf", "-inf"):
+            s = Scripted([(429, {"retry-after": hostile}), (200, {})])
+            t0 = _time.monotonic()
+            resp = await asyncio.wait_for(
+                request_with_retry(s, "GET", "https://x/", retry_cap_s=0.05), timeout=5.0
+            )
+            assert resp.status_code == 200, hostile
+            assert _time.monotonic() - t0 < 3.0, hostile
+
         # Unparseable (HTTP-date) Retry-After falls back to a short beat.
         s = Scripted([(429, {"retry-after": "Sat, 11 Oct 2026 10:00:00 GMT"}), (200, {})])
         t0 = _time.monotonic()

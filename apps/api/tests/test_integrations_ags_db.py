@@ -585,3 +585,39 @@ async def test_gradeable_event_missing_score_key_defaults_full(db, monkeypatch):
     pushed = await handle_gradeable_event(db, event)
     assert pushed == 1
     assert platform.scores[0]["scoreGiven"] == 100.0  # default, not 0.0
+
+
+@pytest.mark.asyncio
+async def test_gradeable_event_nan_score_never_becomes_perfect(db, monkeypatch):
+    """R648 (defense-in-depth): Python's min/max do not order NaN — before
+    the guard, max(0.0, min(100.0, nan)) returned 100.0, i.e. a NaN score
+    became a PERFECT grade, sailing past the R585 push_score non-finite
+    gate because 100.0 is finite. The STORED-event path cannot carry NaN
+    (JSONB refuses it; emit_event gates it as EVENT_DATA_INVALID), so this
+    pins the guard against any future in-memory/direct caller: non-finite
+    degrades to 0.0 (same as unparseable), never 100.0."""
+    org, user = await _org(db)
+    reg, link = await _setup(db, org, user)
+    jwks = await tool_jwks(db)
+    platform = FakeAgsPlatform(jwks)
+    import app.integrations.services.lti_ags as mod
+
+    monkeypatch.setattr(mod, "EgressClient", lambda: platform)
+
+    for hostile in (float("nan"), float("inf"), float("-inf")):
+        # in-memory event, NOT flushed: JSONB would refuse NaN at the
+        # column, so the hostile value can only arrive via a direct caller
+        event = IntegrationEvent(
+            org_id=org.id,
+            type="com.openskill.project.approved.v1",
+            source=f"/orgs/{org.id}",
+            subject="sub-nan",
+            data={
+                "submission_id": "s-nan",
+                "project_id": "01PROJXXXXXXXXXXXXXXXXXXXX",
+                "user_id": user.id,
+                "final_score": hostile,
+            },
+        )
+        assert await handle_gradeable_event(db, event) == 1
+        assert platform.scores[-1]["scoreGiven"] == 0.0, repr(hostile)

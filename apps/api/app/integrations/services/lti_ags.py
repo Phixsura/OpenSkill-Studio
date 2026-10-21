@@ -303,7 +303,15 @@ async def handle_gradeable_event(db: AsyncSession, event) -> int:
         score = 100.0
         if score_key is not None and data.get(score_key) is not None:
             try:
-                score = max(0.0, min(100.0, float(data[score_key])))
+                raw_score = float(data[score_key])
+                # R648: min/max do not order NaN — max(0, min(100, nan))
+                # returns 100.0, so a NaN score would land in the LMS
+                # gradebook as a PERFECT grade, sailing past the R585
+                # push_score non-finite gate (100.0 is finite). Treat a
+                # non-finite score like an unparseable one.
+                if not math.isfinite(raw_score):
+                    raise ValueError("non-finite score")
+                score = max(0.0, min(100.0, raw_score))
             except (TypeError, ValueError):
                 score = 0.0
         try:

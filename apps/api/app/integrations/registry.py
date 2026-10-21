@@ -158,8 +158,15 @@ async def request_with_retry(
         if resp.status_code == 429 and attempt < max_retries:
             raw = resp.headers.get("retry-after", "1")
             try:
-                delay = min(max(float(raw), 0.0), retry_cap_s)
-            except ValueError:  # HTTP-date form — just take a beat
+                parsed = float(raw)
+                # R648: float("nan") PARSES — and min/max do not order NaN,
+                # so the clamp passes it through and asyncio.sleep(nan)
+                # never returns: one hostile header parks the worker
+                # forever, precisely what the cap exists to prevent.
+                if parsed != parsed or parsed in (float("inf"), float("-inf")):
+                    raise ValueError("non-finite retry-after")
+                delay = min(max(parsed, 0.0), retry_cap_s)
+            except ValueError:  # HTTP-date form / non-finite — take a beat
                 delay = 1.0
             await asyncio.sleep(delay)
             attempt += 1

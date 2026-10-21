@@ -947,6 +947,23 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R648 (window 79 — the NaN-ordering class: two fixes)**: Python's
+  min/max do not order NaN, so clamp idioms pass it straight through.
+  Swept every fabric `float()` on external/loose data and found two:
+  (1) **LIVE**: `request_with_retry` parsed `retry-after` with
+  `min(max(float(raw), 0), cap)` — `float("nan")` parses, defeats both
+  bounds, and `asyncio.sleep(nan)` NEVER RETURNS (verified): one hostile
+  header from a rate-limited server parked an arq worker forever —
+  precisely what the cap exists to prevent. Non-finite now falls into the
+  1-second ValueError beat; pinned for nan/inf/-inf under wait_for.
+  (2) **Defense-in-depth**: the AGS gradeable fan-out's
+  `max(0.0, min(100.0, score))` folded NaN to **100.0** — a perfect LMS
+  grade — sailing past the R585 push_score gate (100.0 is finite). The
+  stored-event path cannot carry NaN (JSONB + emit_event gate), so this
+  is unreachable today; guarded anyway (non-finite → 0.0, like
+  unparseable) and pinned via an in-memory event. Class rule recorded:
+  never clamp untrusted floats without an isfinite check — min/max are
+  not a validator.
 - **R647 (window 78 cont. — WebhookService CRUD sweep, 55 mutants)**:
   swept create/update/rotate_secret/delete/list/_record_webhook_audit.
   Survivor pins (all real test gaps): update()'s events-list boundaries
