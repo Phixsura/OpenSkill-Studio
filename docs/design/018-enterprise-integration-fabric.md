@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R638 (seventy-fifth window — the never-visited talent pages)**: a scan
+  for dashboard pages with API calls but NO vitest AND not walked by any
+  browser suite found 19 — the exact blind spot that hid the R583/R584
+  fabricated-contract defects. The six highest-API-usage talent-intelligence
+  pages (career-goals, learning-plan, credential-pathways, endorsements,
+  supply, demand) are now walked by the talent browser suite (22→28
+  checks): each renders with its real marker text and NO "Internal Server
+  Error"/"NaN%" — none carries a matches-class contract defect.
 - **R637 (seventy-fourth window — the FOURTH SSRF screen unified)**: the
   talent webhook-endpoint registration carried its own hand-rolled IP
   screen — the exact drift class R587-R589 fixed three times — missing

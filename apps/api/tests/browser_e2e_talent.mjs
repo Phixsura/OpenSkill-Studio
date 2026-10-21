@@ -132,6 +132,28 @@ try {
   check("Snapshots page loads", page.url().includes("/snapshots"));
   check("Shows snapshot content", snapContent.includes("Snapshot") || snapContent.includes("snapshot") || snapContent.includes("Share"));
 
+  // ── R638: the six never-visited talent intelligence pages ──
+  // (career-goals, learning-plan, credential-pathways, endorsements,
+  // supply, demand) — the matches-page class (R583: a page reading fields
+  // the API never returns) lived exactly in this unvisited set.
+  for (const [path, marker] of [
+    ["/dashboard/career-goals", /goal|Goal/],
+    ["/dashboard/learning-plan", /learn|Learn|plan|Plan/],
+    ["/dashboard/credential-pathways", /pathway|Pathway|credential|Credential/],
+    ["/dashboard/endorsements", /endorse|Endorse/],
+    ["/dashboard/talent/supply", /supply|Supply|capab|Capab/],
+    ["/dashboard/talent/demand", /demand|Demand|capab|Capab/],
+  ]) {
+    await page.goto(`${BASE}${path}`, { waitUntil: "load", timeout: 15000 });
+    await page.waitForTimeout(1500);
+    const txt = await page.textContent("body");
+    check(
+      `page renders: ${path}`,
+      page.url().includes(path) && marker.test(txt) && !/Internal Server Error|NaN%/.test(txt),
+      txt.slice(0, 120),
+    );
+  }
+
   // ── 9. Public passport verification (no auth required) ──
   section("9. Public passport verification");
   // Open in a NEW context (no auth cookies) to verify it's truly public
