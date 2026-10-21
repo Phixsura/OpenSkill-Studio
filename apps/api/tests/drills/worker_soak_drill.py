@@ -8,8 +8,11 @@ Usage: uv run python tests/drills/worker_soak_drill.py [waves=8]
 
 import asyncio
 import os
+import pathlib
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # apps/api root
 
 WAVES = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 EVENTS_PER_WAVE = 120
