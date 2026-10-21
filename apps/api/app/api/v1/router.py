@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     app_installations,
     app_marketplace,
     app_review,
+    adapter_registry,
     app_sandbox,
     auth,
     certificates,
@@ -100,6 +101,7 @@ api_v1_router.include_router(app_installations.router)
 api_v1_router.include_router(app_review.router)
 api_v1_router.include_router(app_marketplace.router)
 api_v1_router.include_router(app_sandbox.router)
+api_v1_router.include_router(adapter_registry.router)
 api_v1_router.include_router(oauth.router)
 
 # ── Control plane (Issue #27) ──
