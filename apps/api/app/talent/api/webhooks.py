@@ -42,24 +42,22 @@ async def register_webhook(
     host = (parsed.hostname or "").rstrip(".").lower()
     if not host:
         raise HTTPException(422, "Invalid webhook URL")
-    # Resolve hostname and reject private/loopback/link-local/reserved IPs
+    # R637: this was the FOURTH hand-rolled SSRF screen (the drift class
+    # R587-R589 fixed three times) — it lacked site-local, CGNAT and the
+    # userinfo screen. Reuse the shared, parity-guard-covered classifier.
+    if parsed.username is not None or parsed.password is not None:
+        raise HTTPException(422, "Credentials in webhook URLs are not allowed")
     import ipaddress
     import socket
+
+    from app.services.webhook import _ip_blocked
 
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
         raise HTTPException(422, "Cannot resolve webhook hostname")  # noqa: B904
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
+        if _ip_blocked(ipaddress.ip_address(info[4][0])):
             raise HTTPException(422, "Webhook URL resolves to a disallowed address")
     ep = WebhookEndpointConfig(
         org_id=org_id,

@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R637 (seventy-fourth window — the FOURTH SSRF screen unified)**: the
+  talent webhook-endpoint registration carried its own hand-rolled IP
+  screen — the exact drift class R587-R589 fixed three times — missing
+  site-local, CGNAT and any userinfo check. Replaced with the shared,
+  parity-guarded _ip_blocked (which sits OUTSIDE the egress_allow_private
+  test bypass, preserving talent's unconditional wall) plus the
+  embedded-credentials refusal. Talent suites 68 + live E2E green. Every
+  known egress screen in the codebase now flows through a parity-tested
+  classifier.
 - **R636 (seventy-third window — eco fetcher gets the resolve-pin)**: the
   ecosystem registry fetcher was validate-then-dial — a compromised
   registry flipping its DNS to an internal IP between the check and httpx's
