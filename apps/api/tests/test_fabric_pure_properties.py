@@ -11,7 +11,6 @@ totality (never raise, bounded output).
 import ipaddress
 
 import pytest
-
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
