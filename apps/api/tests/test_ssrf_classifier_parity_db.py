@@ -83,6 +83,23 @@ def test_all_classifiers_allow_public(ip_str):
 # send time and IPs at create time; its URL-level parity is tracked in ADR
 # R589 as a separate hardening item for the #27/#35 epics.)
 
+def _webhook_screen(url: str):
+    """R634 gave the shared webhook service a URL screen too — parity-test
+    its scheme/userinfo arms (the async SSRF arm is covered elsewhere)."""
+    import asyncio
+
+    from app.exceptions import AppError
+    from app.services.webhook import _screen_url
+
+    async def run():
+        try:
+            await _screen_url(url)
+        except AppError as exc:
+            raise exc
+
+    asyncio.run(run())
+
+
 _URL_VALIDATORS = {
     "integrations": (validate_egress_url, EgressBlockedError),
     "ecosystem": (lambda u: validate_external_url(u, resolve_dns=False), EcoSecurityError),
@@ -103,3 +120,11 @@ def test_url_validators_reject_bad_schemes_and_userinfo(name, pair, url):
     fn, exc = pair
     with pytest.raises(exc):
         fn(url)
+
+
+@pytest.mark.parametrize("url", _BAD_URLS)
+def test_webhook_screen_rejects_bad_schemes_and_userinfo(url):
+    from app.exceptions import AppError
+
+    with pytest.raises(AppError):
+        _webhook_screen(url)

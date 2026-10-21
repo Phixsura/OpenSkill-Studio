@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R635 (seventy-third window — three-way URL parity)**: with R634 the
+  shared webhook service finally has a URL-level screen, so the SSRF parity
+  module now asserts the scheme/userinfo rejections across ALL THREE
+  families (fabric validate_egress_url, ecosystem validate_external_url,
+  webhook _screen_url) — the same lockstep that caught multicast drift at
+  the IP level now guards the URL level too. Parity module at 31 checks.
 - **R634 (seventy-third window — webhook URL screen unified at the
   boundary)**: the shared webhook service accepted ftp:// and
   credential-embedding URLs at CREATE/UPDATE (only delivery-time refused the
