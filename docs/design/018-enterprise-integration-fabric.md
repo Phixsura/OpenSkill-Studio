@@ -931,6 +931,15 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R632 (seventy-first window — backchannel pinned, survivors evidenced)**:
+  new stale-iat probe (700s > the 600s window) kills the freshness-widening
+  mutant; the four remaining survivors are each dispositioned WITH evidence:
+  the sub-type guard sits behind pyjwt's own InvalidSubjectError (verified
+  live — "Subject must be a string" — unreachable defense-in-depth), the
+  exact-600s GtE boundary is timing-unpinnable, and the replay-cache expiry
+  mutants are unobservable under the purge sweep's 1-day grace (replay
+  check is existence-based, expiry only drives cleanup). backchannel 9/13
+  killed + 4 evidenced-equivalent.
 - **R631 (seventy-first window — resolve() fully pinned, 27/28)**: full-file
   mutation sweep of identity.resolve (28 mutants; the earlier -k run
   under-reported as predicted — 7 of its 13 "survivors" die under the full

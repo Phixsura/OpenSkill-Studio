@@ -2714,3 +2714,29 @@ async def test_sso_update_audit_names_changed_fields(db):
     assert row.after["allow_jit"] is True
     assert row.after["oidc_client_secret"] == "<rotated>"
     assert "s3cr3t-value" not in str(row.after)
+
+
+@pytest.mark.asyncio
+async def test_backchannel_stale_iat_and_nonstring_sub_refused(db):
+    """R632 (mutation survivors): the logout_token freshness window is
+    CLOCK_SKEW_S*2 (600s) — an iat 700s old must be refused (a *3 mutant
+    would accept it), and a non-string sub (e.g. an int from a sloppy IdP)
+    must be the typed refusal, not a silent 0-swept pass."""
+    import time as _time
+
+    import app.integrations.services.sso_oidc as mod
+    from app.integrations.services.sso_oidc import handle_backchannel_logout
+
+    org, conn = await _oidc_setup(db)
+    svc = mod.OidcService(db)
+    svc.egress = FakeIdp(lambda form: "")  # jwks served by the fake
+
+    stale = _mint_logout_token(sub="stale-sub", iat=int(_time.time()) - 700)
+    with pytest.raises(AppError) as e1:
+        await handle_backchannel_logout(db, conn.id, stale, service=svc)
+    assert "stale" in str(e1.value.message).lower() or e1.value.code == "SSO_ASSERTION_INVALID"
+
+    bad_sub = _mint_logout_token(sub=12345)
+    with pytest.raises(AppError) as e2:
+        await handle_backchannel_logout(db, conn.id, bad_sub, service=svc)
+    assert e2.value.code == "SSO_ASSERTION_INVALID"
