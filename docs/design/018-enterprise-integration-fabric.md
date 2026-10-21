@@ -947,6 +947,18 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R650 (window 80 — userName caseExact=false pins)**: RFC 7643 marks
+  userName caseExact=false and IdPs rely on it (Entra sends UPNs in AAD's
+  stored case; Okta lowercases). The implementation was already correct
+  (`func.lower(email) == value.lower()` on filter; lowercased create
+  dedup) but only the OPERATOR case was pinned (R78) — the VALUE side had
+  no test, so a "simplifying" revert to exact match would ship silently:
+  the IdP's nightly reconcile filter would miss the user and re-provision
+  (duplicate accounts / 409 loops). Pinned: SHOUTED-value filter finds the
+  user; SHOUTED-value re-create 409s (uniqueness catches it
+  case-insensitively — never a duplicate mint). Note: 409-on-active-POST
+  is the conformant answer (IdP then filters + PATCHes); created=False is
+  reserved for the draft-ansari reactivation path.
 - **R649 (window 79 close)**: NaN-ordering class sweep over every
   min/max clamp repo-wide: fabric fully guarded (registry + AGS fixed
   R648; SCIM count is int-typed); eco's LLM-confidence clamp already

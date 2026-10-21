@@ -1859,3 +1859,32 @@ async def test_group_patch_with_schema_prefixed_path(ctx):
         },
     )
     assert out2["displayName"] == "GSP renamed"
+
+
+@pytest.mark.asyncio
+async def test_username_value_case_insensitive(ctx):
+    """R650 (RFC 7643: userName caseExact=false): Entra sends UPNs in
+    whatever case AAD stores, Okta lowercases — the VALUE side of the
+    filter and create-dedup must both be case-insensitive or an IdP's
+    nightly reconcile sees "no such user" and re-provisions (duplicate
+    members / 409 loops). Operator case was pinned (R78); value case was
+    not."""
+    email = f"vc-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u1, created = await _usvc(ctx).create({"userName": email})
+    assert created
+
+    # filter with SHOUTED value finds the lowercased user
+    lst = await _usvc(ctx).list(
+        filter_expr=f'userName eq "{email.upper()}"', start_index=1, count=10
+    )
+    assert lst["totalResults"] == 1
+    assert lst["Resources"][0]["id"] == u1["id"]
+
+    # re-create with SHOUTED case: the case-insensitive dedup must catch it
+    # and 409 uniqueness (the SCIM answer that stops the IdP re-provisioning)
+    # — a case-sensitive match would mint a DUPLICATE account instead.
+    try:
+        await _usvc(ctx).create({"userName": email.upper()})
+        raise AssertionError("mixed-case duplicate must 409")
+    except ScimError as e:
+        assert e.status == 409
