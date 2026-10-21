@@ -947,6 +947,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R649 (window 79 close)**: NaN-ordering class sweep over every
+  min/max clamp repo-wide: fabric fully guarded (registry + AGS fixed
+  R648; SCIM count is int-typed); eco's LLM-confidence clamp already
+  carries a self-comparison NaN guard (inf clamps correctly — only NaN is
+  unordered). Window verification: 21-file battery 587/587 green;
+  full sequential `make e2e-live-all` (core, smoke, commercial, workflow,
+  experiments, talent, concurrency + every fabric live suite) exit 0.
 - **R648 (window 79 — the NaN-ordering class: two fixes)**: Python's
   min/max do not order NaN, so clamp idioms pass it straight through.
   Swept every fabric `float()` on external/loose data and found two:
