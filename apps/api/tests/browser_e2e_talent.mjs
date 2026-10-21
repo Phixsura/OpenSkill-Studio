@@ -143,6 +143,10 @@ try {
     ["/dashboard/endorsements", /endorse|Endorse/],
     ["/dashboard/talent/supply", /supply|Supply|capab|Capab/],
     ["/dashboard/talent/demand", /demand|Demand|capab|Capab/],
+    ["/dashboard/offers", /offer|Offer/],
+    ["/dashboard/bookmarks", /bookmark|Bookmark|saved|Saved/],
+    ["/dashboard/activity", /activit|Activit/],
+    ["/dashboard/capabilities", /capab|Capab/],
   ]) {
     await page.goto(`${BASE}${path}`, { waitUntil: "load", timeout: 15000 });
     await page.waitForTimeout(1500);

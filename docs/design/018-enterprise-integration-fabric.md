@@ -931,6 +931,12 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R639 (seventy-fifth window — four more unwalked pages)**: extended the
+  talent browser walk to offers, bookmarks, activity and capabilities (all
+  had .map renders + untested contracts); each endpoint confirmed to exist
+  with matching field names (offers' role_title/compensation_text, etc.) and
+  renders clean. Talent browser suite 28→32; the remaining unwalked pages
+  are workflow-pack/comfyui editors outside the talent surface.
 - **R638 (seventy-fifth window — the never-visited talent pages)**: a scan
   for dashboard pages with API calls but NO vitest AND not walked by any
   browser suite found 19 — the exact blind spot that hid the R583/R584
