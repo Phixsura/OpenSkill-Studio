@@ -931,6 +931,16 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R630 (seventieth window — a mutation survivor exposes an untested
+  demotion wall)**: _apply_mapping's And→Or survivor revealed the test gap:
+  an OWNER leaving a role-mapped group was never exercised — the Or-mutant
+  would demote every admin/owner to student on any mapped-group departure.
+  Test now pins owner-leave stays OWNER; _apply_mapping 10/10 killed.
+  webhook_trigger's three survivors (secret-length guard boundary and
+  empty-vs-oversize or/and) are OBSERVATIONALLY equivalent under the
+  uniform-401 contract — every path returns the same 401 to the caller by
+  design (no existence oracle), so no black-box test can distinguish them;
+  dispositioned.
 - **R629 (seventieth window — mutate the serialization-arc code)**:
   push_score 16/17 killed (the one survivor, rsplit maxsplit 1→2 under a
   [-1] index, is mathematically equivalent — the last segment is the last

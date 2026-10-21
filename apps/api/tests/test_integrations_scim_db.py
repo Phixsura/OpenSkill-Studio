@@ -402,6 +402,15 @@ async def test_group_role_mapping_with_ceiling_and_revert(ctx):
         {"Operations": [{"op": "add", "path": "members", "value": [{"value": ctx["owner"].id}]}]},
     )
     assert owner_member.role == OrgRole.OWNER
+    # R630 (mutation survivor And→Or): the owner LEAVING the mapped group
+    # must also never be demoted — the demote-on-leave branch requires
+    # role==mapped AND mapped!=student; an Or there would turn every mapped
+    # group departure into a student demotion for admins/owners.
+    await _gsvc(ctx).patch(
+        g["id"],
+        {"Operations": [{"op": "remove", "path": f'members[value eq "{ctx["owner"].id}"]'}]},
+    )
+    assert owner_member.role == OrgRole.OWNER
 
     # R599: both actual role CHANGES above (student->instructor on join,
     # instructor->student on leave) are IdP-driven privilege changes and land
