@@ -938,6 +938,13 @@ def test_event_catalog_covers_every_emitted_name():
     assert not uncatalogued, f"emitted but not in the catalog: {sorted(uncatalogued)}"
     phantom = set(DIRECT_EMISSIONS) - emitted
     assert not phantom, f"catalogued but nothing emits them: {sorted(phantom)}"
+    # R643: the internal-alertable map is the catalog an admin reads to wire
+    # exact-match alert subscriptions — a phantom entry there has them
+    # subscribing to an event the platform never fires (silent no-alert).
+    alert_phantom = {
+        t.removeprefix("com.openskill.").removesuffix(".v1") for t in _INTERNAL_ALERTABLE
+    } - emitted
+    assert not alert_phantom, f"alertable-catalogued but never emitted: {sorted(alert_phantom)}"
 
 
 @pytest.mark.asyncio

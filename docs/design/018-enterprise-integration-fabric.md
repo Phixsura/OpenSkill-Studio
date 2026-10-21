@@ -577,7 +577,11 @@ subject, data)` inserts the row **and** a `cp_outbox` message (`topic=
 'intg.event.created'`) in the caller's transaction — reuses ADR-014 outbox verbatim.
 Initial catalog (issue Part F list): `learner.enrolled, skill.completed,
 project.approved, brief.created, client.accepted, credential.issued,
-placement.started, invoice.finalized, ecosystem.change_verified` (each `.v1`), plus
+placement.started, invoice.finalized, ecosystem.change` (each `.v1`; the
+credential/placement/ecosystem names shipped on the legacy talent/eco webhook
+channel — same subscription table, legacy payloads — rather than as direct
+mesh emissions; R643 corrected the original `ecosystem.change_verified`
+spelling, which nothing ever emitted), plus
 fabric-internal `integration.connection.unhealthy, integration.sync.completed,
 integration.delivery.exhausted, org.sso.login, org.breakglass.login,
 org.scim.deprovisioned`.
@@ -943,6 +947,19 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R643 (window 78 cont. — alertable-catalog phantom guard + ADR drift
+  fix)**: extended the R231 catalog-drift guard with the missing reverse
+  direction for `_INTERNAL_ALERTABLE`: a phantom entry in that map has an
+  admin wiring an exact-match alert subscription for an event the platform
+  never fires — a silent no-alert, the worst failure mode an alert catalog
+  can have. (DIRECT_EMISSIONS already had its phantom check; the alertable
+  map did not.) All 7 current entries verified live. Also fixed ADR §12.1
+  drift: the initial-catalog text said `ecosystem.change_verified`, but the
+  shipped legacy event is `ecosystem.change` — and annotated that the
+  credential/placement/ecosystem names deliver via the legacy talent/eco
+  webhook channel rather than direct mesh emissions. Full parity scan
+  (emit sites ↔ VALID_EVENT_TYPES ↔ DIRECT_EMISSIONS ↔ alertable map ↔
+  payload schemas) now guarded in every direction.
 - **R641 (seventy-seventh window — pure-helper mutation closeout)**:
   sequential sweep (R640 rule: nothing booting the app) over the last
   unswept fabric pure helpers: `_org_salt`, `_parse_header_map`,
