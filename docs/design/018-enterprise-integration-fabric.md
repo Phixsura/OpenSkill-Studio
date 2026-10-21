@@ -931,6 +931,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R641 (seventy-seventh window — pure-helper mutation closeout)**:
+  sequential sweep (R640 rule: nothing booting the app) over the last
+  unswept fabric pure helpers: `_org_salt`, `_parse_header_map`,
+  `template_for`, `sign_payload`/`build_delivery_headers`. 11 mutants, 6
+  initial survivors → 3 real test gaps pinned, 2 equivalent dispositioned.
+  Pins: (1) **rotation window edge is inclusive** — `LtE→Lt` survived
+  because the existing co-sign test used days=2/days=8, fuzzy around the
+  7-day edge; new test constructs `rotated_at = now - SECRET_PREV_WINDOW`
+  exactly and asserts 2 signatures, one second past → 1 (a subscriber on a
+  7-day rotation cron must not race the edge). (2) `_parse_header_map`
+  422s were unpinned (`422→423` ×2): both refusal branches (non-JSON,
+  non-object incl. list/str/int) now assert `.status_code == 422` +
+  `IMPORT_HEADER_MAP_INVALID`. (3) `template_for` unknown-kind status
+  pinned (code was checked, status was not). Equivalents with evidence:
+  `_org_salt` `[:16]→[:17]` (internal salt-entropy length; per-org hash
+  deterministic either way, no external contract sees salt length) and
+  `template_for` `indent=2→3` (cosmetic; test proves the template still
+  round-trips through the parser). 9/11 killed — every fabric pure helper
+  is now mutation-covered.
 - **R640 (seventy-sixth window — pure-helper sweep + a NEW concurrency
   rule)**: attempting the pure-function mutation sweep IN PARALLEL with the
   live chain produced a phantom lifecycle failure — the harness rotates

@@ -1560,3 +1560,29 @@ async def test_deliveries_keyset_pagination_stable_under_concurrent_inserts(db, 
     assert all(d.status == "delivered" for d in out["data"])
     out2 = await page(before=out["meta"]["next_cursor"], status="delivered")
     assert not {d.id for d in out2["data"]} & {d.id for d in out["data"]}
+
+
+def test_rotation_window_boundary_is_inclusive():
+    """R641: a rotation at EXACTLY now - SECRET_PREV_WINDOW still co-signs
+    (<= not <). The boundary matters: a subscriber that rotates on a 7-day
+    cron sees its last pre-cutover delivery signed by both secrets instead
+    of racing the window edge. Mutation LtE→Lt survived the fuzzy-window
+    tests; this pins the edge deterministically by constructing it."""
+    from app.integrations.services.events import SECRET_PREV_WINDOW
+
+    now = datetime.now(UTC)
+    sub = WebhookSubscription(
+        org_id="o",
+        url="https://x.example.com/h",
+        events=[],
+        secret="new" * 10,
+        secret_prev="old" * 10,
+        secret_rotated_at=now - SECRET_PREV_WINDOW,
+        active=True,
+    )
+    h = build_delivery_headers(sub, "evt_edge", b"{}", now)
+    assert len(h["webhook-signature"].split(" ")) == 2
+    # one tick past the window: single signature
+    sub.secret_rotated_at = now - SECRET_PREV_WINDOW - timedelta(seconds=1)
+    h2 = build_delivery_headers(sub, "evt_edge", b"{}", now)
+    assert len(h2["webhook-signature"].split(" ")) == 1

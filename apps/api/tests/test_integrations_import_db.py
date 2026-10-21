@@ -1113,6 +1113,9 @@ def test_import_template_generator():
         raise AssertionError("unknown kind must raise")
     except AppError as e:
         assert e.code == "IMPORT_KIND_INVALID"
+        # R641: the HTTP status is part of the contract — a 423/500 would
+        # change client retry semantics. Pin 422 (validation error).
+        assert e.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1687,3 +1690,22 @@ def test_every_template_parses_cleanly_through_its_own_validator():
             rows, errors = parse_users(content, detect_format(content), {}, kind=kind)
             assert errors == [], (kind, fmt, errors)
             assert len(rows) == 1, (kind, fmt)
+
+
+def test_parse_header_map_statuses():
+    """R641: both _parse_header_map refusal branches (non-JSON, non-object)
+    must surface as 422 — the form-field parse error is a client validation
+    failure, never a server error. Mutation sweep showed the 422 literals
+    were unpinned (422→423 survived)."""
+    from app.integrations.api.imports import _parse_header_map
+
+    assert _parse_header_map(None) == {}
+    assert _parse_header_map("") == {}
+    assert _parse_header_map('{"email": "E-mail"}') == {"email": "E-mail"}
+    for bad in ("{not json", '["a", "b"]', '"str"', "17"):
+        try:
+            _parse_header_map(bad)
+            raise AssertionError(f"must refuse: {bad!r}")
+        except AppError as e:
+            assert e.code == "IMPORT_HEADER_MAP_INVALID"
+            assert e.status_code == 422
