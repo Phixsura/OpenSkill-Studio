@@ -2740,3 +2740,165 @@ async def test_backchannel_stale_iat_and_nonstring_sub_refused(db):
     with pytest.raises(AppError) as e2:
         await handle_backchannel_logout(db, conn.id, bad_sub, service=svc)
     assert e2.value.code == "SSO_ASSERTION_INVALID"
+
+
+# ── R652: domains.py mutation-survivor pins ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_domain_claim_statuses_and_list_scoping(db):
+    """R652: claim()'s refusal statuses pinned (public mailbox 422;
+    verified-by-another-org 409) and list() is org-scoped (Eq→NotEq on the
+    WHERE survived — it would return every org's domains)."""
+    u = await _user(db)
+    org_a = await _org(db, u)
+    org_b = await _org(db, u)
+    svc = OrgDomainService(db)
+
+    try:
+        await svc.claim(org_a.id, "gmail.com")
+        raise AssertionError("public mailbox domain must refuse")
+    except AppError as e:
+        assert e.code == "DOMAIN_NOT_ELIGIBLE" and e.status_code == 422
+
+    d = f"r652-{uuid.uuid4().hex[:10]}.example.edu"
+    row_a = await svc.claim(org_a.id, d)
+    row_a.status = "verified"
+    await db.flush()
+    try:
+        await svc.claim(org_b.id, d)
+        raise AssertionError("another org's verified domain must 409")
+    except AppError as e:
+        assert e.code == "DOMAIN_ALREADY_VERIFIED" and e.status_code == 409
+
+    d_b = f"r652b-{uuid.uuid4().hex[:10]}.example.edu"
+    await svc.claim(org_b.id, d_b)
+    a_domains = {r.domain for r in await svc.list(org_a.id)}
+    assert d in a_domains and d_b not in a_domains
+
+
+@pytest.mark.asyncio
+async def test_domain_verify_statuses(db, monkeypatch):
+    """R652: verify()'s two refusal statuses pinned — TXT mismatch 422;
+    losing the partial-unique race to another org 409 (deterministic: B
+    claimed while pending, A verified first, B's flush then violates)."""
+    import app.integrations.services.domains as mod
+
+    class Yep:
+        async def verify(self, h, t):
+            return True
+
+    class Nope:
+        async def verify(self, h, t):
+            return False
+
+    u = await _user(db)
+    org_a = await _org(db, u)
+    org_b = await _org(db, u)
+    svc = OrgDomainService(db)
+    d = f"r652v-{uuid.uuid4().hex[:10]}.example.edu"
+    row_a = await svc.claim(org_a.id, d)
+    row_b = await svc.claim(org_b.id, d)  # both pending — allowed
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Nope())
+    try:
+        await svc.verify(org_a.id, row_a.id)
+        raise AssertionError("TXT mismatch must 422")
+    except AppError as e:
+        assert e.code == "DOMAIN_VERIFY_FAILED" and e.status_code == 422
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
+    assert (await svc.verify(org_a.id, row_a.id)).status == "verified"
+    try:
+        await svc.verify(org_b.id, row_b.id)
+        raise AssertionError("unique-race loser must 409")
+    except AppError as e:
+        assert e.code == "DOMAIN_ALREADY_VERIFIED" and e.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_domain_sweep_expiry_crossorg_and_success(db, monkeypatch):
+    """R652: sweep_pending()'s three arms with EXACT changed counts —
+    (1) expiry boundary is >= expire_days (a row created exactly 7 days
+    ago fails); (2) a domain another org verified meanwhile is marked
+    failed via the PRE-CHECK (NotEq→Eq there would push it into the
+    exception arm and lose the changed count); (3) a clean pending row
+    verifies. Counts pin the three `changed += 1` sites."""
+    from datetime import timedelta
+
+    import app.integrations.services.domains as mod
+
+    class Yep:
+        async def verify(self, h, t):
+            return True
+
+    monkeypatch.setattr(mod, "get_verifier", lambda: Yep())
+    u = await _user(db)
+    org_a = await _org(db, u)
+    org_b = await _org(db, u)
+    svc = OrgDomainService(db)
+
+    # (1) expired: claimed exactly expire_days ago -> failed
+    d1 = f"r652s1-{uuid.uuid4().hex[:10]}.example.edu"
+    row1 = await svc.claim(org_a.id, d1)
+    row1.created_at = datetime.now(UTC) - timedelta(days=7)
+    # (2) cross-org: B pending on a domain A has since VERIFIED
+    d2 = f"r652s2-{uuid.uuid4().hex[:10]}.example.edu"
+    row2a = await svc.claim(org_a.id, d2)
+    row2b = await svc.claim(org_b.id, d2)  # B claims while A is still pending
+    row2a.status = "verified"  # A wins verification before the sweep runs
+    # (3) clean pending
+    d3 = f"r652s3-{uuid.uuid4().hex[:10]}.example.edu"
+    row3 = await svc.claim(org_a.id, d3)
+    await db.flush()
+
+    changed = await svc.sweep_pending()
+    assert changed == 3
+    assert row1.status == "failed"
+    assert row2b.status == "failed"
+    assert row3.status == "verified"
+
+
+@pytest.mark.asyncio
+async def test_freemail_never_routes_discovery_even_if_verified_row_exists(db):
+    """R652 (Or→And survivor — a security pin): org_for_email_domain must
+    refuse freemail domains UNCONDITIONALLY. Even if a verified gmail.com
+    row somehow exists (legacy data, manual insert), discovery must not
+    route every Gmail user on the planet into that org."""
+    u = await _user(db)
+    org = await _org(db, u)
+    db.add(
+        OrgDomain(
+            org_id=org.id,
+            domain="gmail.com",
+            status="verified",
+            verification_token="osks-verify-r652",
+            verified_at=datetime.now(UTC),
+        )
+    )
+    await db.flush()
+    svc = OrgDomainService(db)
+    assert await svc.org_for_email_domain("victim@gmail.com") is None
+    # org_controls_email: truthy for a real verified domain, robustly False
+    # for a None/empty email (`email or ""` must stay an Or)
+    from app.integrations.services.domains import org_controls_email
+
+    d_ok = f"r652f-{uuid.uuid4().hex[:10]}.example.edu"
+    row = OrgDomain(
+        org_id=org.id,
+        domain=d_ok,
+        status="verified",
+        verification_token="osks-verify-r652b",
+        verified_at=datetime.now(UTC),
+    )
+    db.add(row)
+    await db.flush()
+    assert await org_controls_email(db, org.id, f"alice@{d_ok}") is True
+    assert await org_controls_email(db, org.id, None) is False
+    assert await org_controls_email(db, org.id, "") is False
+    # positive discovery: the verified non-free domain routes to THIS org,
+    # and a merely-PENDING domain routes nowhere (both WHERE arms pinned)
+    assert await svc.org_for_email_domain(f"alice@{d_ok}") == org.id
+    d_pend = f"r652p-{uuid.uuid4().hex[:10]}.example.edu"
+    await svc.claim(org.id, d_pend)
+    assert await svc.org_for_email_domain(f"bob@{d_pend}") is None

@@ -947,6 +947,25 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R652 (window 80 cont. — domains.py full mutation, 41/44)**: the
+  takeover-guard module (`org_controls_email` is the R512 gate; discovery
+  routes IdP logins) had NO dedicated unit tests — 19/44 mutants survived
+  the first pass. Pinned: claim refusal statuses (public mailbox 422,
+  verified-by-another-org 409); list() org-scoping (Eq→NotEq would leak
+  every org's domains); verify() TXT-fail 422 and the DETERMINISTIC
+  unique-race 409 (B claims while A pending, A verifies first, B's flush
+  hits the partial unique index); sweep_pending's three arms with exact
+  changed counts (expiry >= at exactly 7 days; cross-org pre-check marks
+  failed; clean verify) — the NotEq→Eq pre-check mutant loses the changed
+  count by falling into the exception arm; **freemail hard-stop**
+  (security pin: even with a verified gmail.com row present, discovery
+  must route nobody); org_controls_email truthy/None/empty; positive
+  discovery for a verified domain and None for pending (both WHERE arms).
+  Dispositioned: rsplit maxsplit 1→2 (last-segment extraction identical),
+  token_hex entropy const, FOR-UPDATE lock predicate + IntegrityError
+  recovery lookups + exception-arm recovery guard (all concurrency-only
+  observable — the savepoint belt for true races), sweep batch limit 200
+  (perf bound, not a contract).
 - **R651 (window 80 cont. — mapping.py full-file mutation, 37/38)**: the
   mapping engine had only spot probes (R210 apply_mapping fix, "mapping
   4/4"); the full sweep (47 mutants via sync suites, then 38 via dedicated
