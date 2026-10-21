@@ -947,6 +947,23 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
   injecting `intg.fake.dead_entry` (guard fails naming it) then reverting
   (guard passes). Current registry: 0 dead entries across all 50 intg.*
   and every cp/eco action.
+- **R651 (window 80 cont. — mapping.py full-file mutation, 37/38)**: the
+  mapping engine had only spot probes (R210 apply_mapping fix, "mapping
+  4/4"); the full sweep (47 mutants via sync suites, then 38 via dedicated
+  pure pins) exposed that NO limit sat on a tested edge. Pinned: ±2^53
+  int range exclusive both ends (beyond IEEE-754 exact range a warehouse
+  roundtrip silently corrupts); doc 64KB cap at exactly 65,536; path
+  length == MAX_EXPR_LEN; transform count == MAX_TRANSFORMS; enum_map
+  == 200 keys + non-dict + non-scalar-value + non-str-key refusals;
+  fields non-list AND empty each refuse; == MAX_FIELDS ok; target 100/101;
+  record cap at exactly 256KB; default applies only when path yields None
+  (present values never overwritten); transform chains actually RUN
+  (`or []`→`and []` would silently skip every transform); depth gate >=
+  (== MAX_RESULT_DEPTH refused); _t_to_int(bool/None) refused;
+  _depth arithmetic exact. One equivalent survivor dispositioned: the
+  None/bool early-exit in _t_to_int (Or→And) — both operands still land
+  in _TransformError via int()'s ValueError; the guard is intent
+  documentation.
 - **R650 (window 80 — userName caseExact=false pins)**: RFC 7643 marks
   userName caseExact=false and IdPs rely on it (Entra sends UPNs in AAD's
   stored case; Okta lowercases). The implementation was already correct
