@@ -931,6 +931,20 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R640 (seventy-sixth window — pure-helper sweep + a NEW concurrency
+  rule)**: attempting the pure-function mutation sweep IN PARALLEL with the
+  live chain produced a phantom lifecycle failure — the harness rotates
+  MUTANTS ON DISK while each live suite boots a fresh uvicorn, so a server
+  can IMPORT a transient mutant (the DB-free kill suite is irrelevant; the
+  race is file-vs-import). Hard rule recorded: NEVER mutate production
+  files while anything that boots the app is running; lifecycle re-ran solo
+  100/100. The sequential sweep then paid off: _normalize_path's
+  Group-schema strip offset was UNTESTED (Entra-style
+  urn:...:Group:members PATCH paths — real gap, now pinned for add+rename;
+  7/7 killed), _parse_next_link gets the malformed-segment exactness pin
+  (4/4), and validate_egress_url's two default-port survivors are
+  equivalent-in-context (EgressClient re-derives the port; 80/443 both
+  allowlisted).
 - **R639 (seventy-fifth window — four more unwalked pages)**: extended the
   talent browser walk to offers, bookmarks, activity and capabilities (all
   had .map renders + untested contracts); each endpoint confirmed to exist

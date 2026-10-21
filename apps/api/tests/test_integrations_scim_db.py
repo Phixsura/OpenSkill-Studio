@@ -1823,3 +1823,39 @@ async def test_patch_remove_other_path_keeps_external_link(ctx):
         res["id"], {"Operations": [{"op": "remove", "path": "displayName"}]}
     )
     assert out["externalId"] == "idp-9", "unrelated remove severed the identity link"
+
+
+@pytest.mark.asyncio
+async def test_group_patch_with_schema_prefixed_path(ctx):
+    """R640 (mutation survivors on the Group-schema strip): Entra-style
+    PATCH paths carry the full schema URN prefix — the strip offset must be
+    exact or the path never normalizes and the op is silently unsupported."""
+    email = f"gsp-{uuid.uuid4().hex[:8]}@corp.example.edu"
+    u, _ = await _usvc(ctx).create({"userName": email})
+    g = await _gsvc(ctx).create({"displayName": f"GSP {uuid.uuid4().hex[:6]}"})
+    out = await _gsvc(ctx).patch(
+        g["id"],
+        {
+            "Operations": [
+                {
+                    "op": "add",
+                    "path": "urn:ietf:params:scim:schemas:core:2.0:Group:members",
+                    "value": [{"value": u["id"]}],
+                }
+            ]
+        },
+    )
+    assert any(m["value"] == u["id"] for m in out["members"])
+    out2 = await _gsvc(ctx).patch(
+        g["id"],
+        {
+            "Operations": [
+                {
+                    "op": "replace",
+                    "path": "urn:ietf:params:scim:schemas:core:2.0:Group:displayName",
+                    "value": "GSP renamed",
+                }
+            ]
+        },
+    )
+    assert out2["displayName"] == "GSP renamed"

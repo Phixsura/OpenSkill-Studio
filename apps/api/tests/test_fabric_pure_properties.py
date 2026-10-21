@@ -82,6 +82,15 @@ def test_nrps_next_link_parser_total(header):
     assert out is None or isinstance(out, str)
 
 
+def test_nrps_next_link_rejects_malformed_segment():
+    """R640: a segment not wrapped in <...> must be SKIPPED, not partially
+    parsed into a garbage URL (the Or→And mutant would return '<junk')."""
+    from app.integrations.services.lti_nrps import _parse_next_link
+
+    assert _parse_next_link('x<junk>; rel="next"') is None
+    assert _parse_next_link('<https://ok/next>; rel="next"') == "https://ok/next"
+
+
 @settings(max_examples=500, deadline=None)
 @given(st.text(max_size=120))
 def test_saml_time_parser_contract(s):
