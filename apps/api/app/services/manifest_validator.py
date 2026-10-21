@@ -51,12 +51,11 @@ VALID_RUNTIMES = frozenset({
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")
 
-# Prohibited network destinations
-BLOCKED_HOSTS = frozenset({
-    "localhost", "127.0.0.1", "0.0.0.0", "::1",
-    "169.254.169.254",  # AWS metadata
-    "metadata.google.internal",  # GCP metadata
+# Prohibited network destinations (name-based blocklist)
+_BLOCKED_HOST_NAMES = frozenset({
+    "localhost", "metadata.google.internal",
 })
+_BLOCKED_SUFFIXES = (".localhost", ".internal")
 
 
 # ── Validation result ────────────────────────────────────
@@ -167,8 +166,25 @@ def validate_manifest(manifest: dict) -> ValidationResult:
         if isinstance(network, dict):
             allowed_hosts = network.get("allowed_hosts", [])
             for host in allowed_hosts:
-                if host.lower() in BLOCKED_HOSTS:
-                    result.error(f"Blocked network destination: '{host}' (internal/metadata)")
+                if not isinstance(host, str):
+                    result.error(f"allowed_hosts entry must be a string, got {type(host).__name__}")
+                    continue
+                normalized = host.strip().rstrip(".").lower()
+                if not normalized:
+                    result.error("Empty host in allowed_hosts")
+                    continue
+                # Check name-based blocklist
+                if normalized in _BLOCKED_HOST_NAMES or normalized.endswith(_BLOCKED_SUFFIXES):
+                    result.error(f"Blocked network destination: '{host}' (internal)")
+                    continue
+                # Check IP-based blocklist
+                import ipaddress
+                try:
+                    ip = ipaddress.ip_address(normalized)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified or ip.is_multicast:
+                        result.error(f"Blocked network destination: '{host}' (private/reserved IP)")
+                except ValueError:
+                    pass  # Not an IP — hostname is fine
 
             egress = network.get("egress_policy")
             if egress and egress not in ("allowlist", "deny_all"):
