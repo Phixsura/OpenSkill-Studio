@@ -25,6 +25,41 @@ from app.models.developer import (
 
 log = structlog.get_logger()
 
+
+# ── SSRF protection ─────────────────────────────────────
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject URLs targeting private/loopback/metadata addresses."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Block known metadata endpoints
+        blocked = {
+            "localhost", "metadata.google.internal",
+            "169.254.169.254",
+        }
+        if hostname.lower() in blocked:
+            return False
+
+        # Resolve and check all addresses
+        addrs = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+        for _, _, _, _, sockaddr in addrs:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+    except (ValueError, socket.gaierror, OSError):
+        return False
+    return True
+
+
 # ── Canonical Event Types ────────────────────────────────
 
 CANONICAL_EVENTS = frozenset({
@@ -138,9 +173,11 @@ class EventDispatcher:
             )
         )
 
-        # Scope to org if event is org-scoped
-        if event.org_id:
-            q = q.where(AppInstallation.org_id == event.org_id)
+        # Fail closed: always scope to org. If no org_id, skip dispatch.
+        if not event.org_id:
+            log.debug("event_skip_no_org", event_type=event.event_type)
+            return 0
+        q = q.where(AppInstallation.org_id == event.org_id)
 
         result = await db.execute(q)
         rows = result.all()
@@ -218,7 +255,19 @@ class EventDispatcher:
         installation: AppInstallation,
         event: PlatformEvent,
     ) -> None:
-        """Deliver event via HMAC-signed webhook HTTP POST with retry."""
+        """Deliver event via HMAC-signed webhook HTTP POST with retry.
+
+        SSRF protection: require https, reject private/loopback addresses.
+        """
+        # SSRF: require https
+        if not app.webhook_url or not app.webhook_url.startswith("https://"):
+            log.warning("webhook_rejected_not_https", app_id=app.id)
+            return
+
+        # SSRF: reject private/loopback hosts
+        if not _is_safe_url(app.webhook_url):
+            log.warning("webhook_rejected_ssrf", app_id=app.id, url=app.webhook_url)
+            return
         payload = json.dumps({
             "event": event.to_dict(),
             "installation_id": installation.id,
@@ -301,8 +350,10 @@ class EventDispatcher:
             )
         )
 
-        if event.org_id:
-            q = q.where(AppInstallation.org_id == event.org_id)
+        # Fail closed: always scope to org
+        if not event.org_id:
+            return 0
+        q = q.where(AppInstallation.org_id == event.org_id)
 
         result = await db.execute(q)
         rows = result.all()
@@ -360,7 +411,10 @@ class EventDispatcher:
 
         if action_type == "webhook":
             url = config.get("url")
-            if not url:
+            if not url or not url.startswith("https://"):
+                return
+            if not _is_safe_url(url):
+                log.warning("rule_webhook_rejected_ssrf", rule_id=rule.id, url=url)
                 return
             method = config.get("method", "POST").upper()
 

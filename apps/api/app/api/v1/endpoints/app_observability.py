@@ -1,0 +1,213 @@
+"""App observability endpoints — usage, errors, health dashboards."""
+
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user, get_db, require_org_member
+from app.core.rate_limit import rate_limit
+from app.models.developer import (
+    AppApiKey,
+    AppInstallation,
+    AppVersion,
+    InstallationStatus,
+    SandboxExecution,
+    SandboxExecutionStatus,
+)
+from app.models.user import User
+from app.schemas.base import DataResponse
+from app.services import developer as dev_svc
+
+router = APIRouter(tags=["App Observability"])
+
+
+# ── Developer Dashboard ─────────────────────────────────
+
+
+@router.get(
+    "/developer/apps/{app_id}/stats",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_app_stats(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get app stats — installs, versions, API keys, executions."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    # Active installs
+    install_count = (
+        await db.execute(
+            select(func.count()).where(
+                AppInstallation.app_id == app_id,
+                AppInstallation.status == InstallationStatus.ACTIVE,
+            )
+        )
+    ).scalar() or 0
+
+    # Total installs (all time)
+    total_installs = (
+        await db.execute(
+            select(func.count()).where(AppInstallation.app_id == app_id)
+        )
+    ).scalar() or 0
+
+    # Version count
+    version_count = (
+        await db.execute(
+            select(func.count()).where(AppVersion.app_id == app_id)
+        )
+    ).scalar() or 0
+
+    # API key count
+    key_count = (
+        await db.execute(
+            select(func.count()).where(
+                AppApiKey.app_id == app_id,
+                AppApiKey.revoked_at.is_(None),
+            )
+        )
+    ).scalar() or 0
+
+    # Sandbox execution stats (last 24h)
+    since = datetime.now(UTC) - timedelta(hours=24)
+    exec_q = (
+        select(
+            func.count().label("total"),
+            func.count()
+            .filter(SandboxExecution.status == SandboxExecutionStatus.COMPLETED)
+            .label("completed"),
+            func.count()
+            .filter(SandboxExecution.status == SandboxExecutionStatus.FAILED)
+            .label("failed"),
+            func.count()
+            .filter(SandboxExecution.status == SandboxExecutionStatus.TIMEOUT)
+            .label("timeout"),
+            func.avg(SandboxExecution.duration_ms).label("avg_duration_ms"),
+            func.max(SandboxExecution.duration_ms).label("max_duration_ms"),
+        )
+        .select_from(SandboxExecution)
+        .join(AppInstallation, SandboxExecution.installation_id == AppInstallation.id)
+        .where(
+            AppInstallation.app_id == app_id,
+            SandboxExecution.created_at >= since,
+        )
+    )
+    exec_result = (await db.execute(exec_q)).one()
+
+    return DataResponse(
+        data={
+            "app_id": app_id,
+            "status": app.status.value if hasattr(app.status, "value") else app.status,
+            "active_installs": install_count,
+            "total_installs": total_installs,
+            "versions": version_count,
+            "active_api_keys": key_count,
+            "executions_24h": {
+                "total": exec_result.total or 0,
+                "completed": exec_result.completed or 0,
+                "failed": exec_result.failed or 0,
+                "timeout": exec_result.timeout or 0,
+                "avg_duration_ms": round(exec_result.avg_duration_ms or 0, 1),
+                "max_duration_ms": exec_result.max_duration_ms or 0,
+            },
+        }
+    )
+
+
+@router.get(
+    "/developer/apps/{app_id}/installs/breakdown",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_install_breakdown(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get installation breakdown by status."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    result = await db.execute(
+        select(
+            AppInstallation.status,
+            func.count().label("count"),
+        )
+        .where(AppInstallation.app_id == app_id)
+        .group_by(AppInstallation.status)
+    )
+    breakdown = {
+        row.status.value if hasattr(row.status, "value") else row.status: row.count
+        for row in result.all()
+    }
+
+    return DataResponse(data={"app_id": app_id, "breakdown": breakdown})
+
+
+# ── Tenant/Org Dashboard ────────────────────────────────
+
+
+@router.get(
+    "/orgs/{org_id}/apps/stats",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_org_app_stats(
+    org_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get aggregate app stats for an organization."""
+    await require_org_member(org_id, user, db)
+
+    # Count installed apps
+    installed_count = (
+        await db.execute(
+            select(func.count()).where(
+                AppInstallation.org_id == org_id,
+                AppInstallation.status == InstallationStatus.ACTIVE,
+            )
+        )
+    ).scalar() or 0
+
+    # Execution stats (last 24h)
+    since = datetime.now(UTC) - timedelta(hours=24)
+    exec_result = (
+        await db.execute(
+            select(
+                func.count().label("total"),
+                func.count()
+                .filter(SandboxExecution.status == SandboxExecutionStatus.FAILED)
+                .label("failed"),
+                func.avg(SandboxExecution.duration_ms).label("avg_duration_ms"),
+            )
+            .select_from(SandboxExecution)
+            .join(
+                AppInstallation,
+                SandboxExecution.installation_id == AppInstallation.id,
+            )
+            .where(
+                AppInstallation.org_id == org_id,
+                SandboxExecution.created_at >= since,
+            )
+        )
+    ).one()
+
+    return DataResponse(
+        data={
+            "org_id": org_id,
+            "installed_apps": installed_count,
+            "executions_24h": {
+                "total": exec_result.total or 0,
+                "failed": exec_result.failed or 0,
+                "avg_duration_ms": round(exec_result.avg_duration_ms or 0, 1),
+            },
+        }
+    )

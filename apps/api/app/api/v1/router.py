@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     app_marketplace,
     app_review,
     adapter_registry,
+    app_observability,
     app_sandbox,
     auth,
     certificates,
@@ -15,6 +16,7 @@ from app.api.v1.endpoints import (
     developer_accounts,
     developer_apps,
     discussions,
+    manifest_validation,
     oauth,
     duplicate,
     evaluation,
@@ -101,7 +103,9 @@ api_v1_router.include_router(app_installations.router)
 api_v1_router.include_router(app_review.router)
 api_v1_router.include_router(app_marketplace.router)
 api_v1_router.include_router(app_sandbox.router)
+api_v1_router.include_router(app_observability.router)
 api_v1_router.include_router(adapter_registry.router)
+api_v1_router.include_router(manifest_validation.router)
 api_v1_router.include_router(oauth.router)
 
 # ── Control plane (Issue #27) ──
