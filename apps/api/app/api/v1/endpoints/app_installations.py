@@ -295,6 +295,24 @@ async def delete_event_subscription(
 ):
     """Remove an event subscription."""
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    installation = await dev_svc.get_installation(db, installation_id)
+    if installation.org_id != org_id:
+        raise dev_svc.InstallationNotFoundError()
+    # Verify subscription belongs to this installation
+    from sqlalchemy import select
+
+    from app.models.developer import AppEventSubscription
+
+    result = await db.execute(
+        select(AppEventSubscription).where(
+            AppEventSubscription.id == subscription_id,
+            AppEventSubscription.installation_id == installation_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        from app.exceptions import AppError
+
+        raise AppError("SUBSCRIPTION_NOT_FOUND", "Event subscription not found", 404)
     await dev_svc.delete_event_subscription(db, subscription_id)
     await db.commit()
     return DataResponse(data={"status": "deleted"})
@@ -367,6 +385,24 @@ async def delete_automation_rule(
 ):
     """Delete an automation rule."""
     await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    installation = await dev_svc.get_installation(db, installation_id)
+    if installation.org_id != org_id:
+        raise dev_svc.InstallationNotFoundError()
+    # Verify rule belongs to this installation
+    from sqlalchemy import select
+
+    from app.models.developer import AppAutomationRule
+
+    result = await db.execute(
+        select(AppAutomationRule).where(
+            AppAutomationRule.id == rule_id,
+            AppAutomationRule.installation_id == installation_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        from app.exceptions import AppError
+
+        raise AppError("RULE_NOT_FOUND", "Automation rule not found", 404)
     await dev_svc.delete_automation_rule(db, rule_id)
     await db.commit()
     return DataResponse(data={"status": "deleted"})

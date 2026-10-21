@@ -203,6 +203,10 @@ async def revoke_app(
     user: User = Depends(get_current_user),
 ):
     """Emergency revoke — suspends all installations."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
     app = await dev_svc.revoke_app(db, app_id, reason="developer_initiated")
     await db.commit()
     return DataResponse(data=AppResponse.model_validate(app))

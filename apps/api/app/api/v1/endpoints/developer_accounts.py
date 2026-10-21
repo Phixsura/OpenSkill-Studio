@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -28,6 +28,11 @@ async def create_developer_account(
     user: User = Depends(get_current_user),
 ):
     """Register a new developer account."""
+    # Validate org membership if org_id provided
+    if body.org_id:
+        from app.models.organization import OrgRole
+
+        await require_org_member(body.org_id, user, db, OrgRole.OWNER, OrgRole.ADMIN)
     account = await dev_svc.create_developer_account(
         db,
         owner_user_id=user.id,
