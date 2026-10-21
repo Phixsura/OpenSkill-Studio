@@ -931,6 +931,13 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R629 (seventieth window — mutate the serialization-arc code)**:
+  push_score 16/17 killed (the one survivor, rsplit maxsplit 1→2 under a
+  [-1] index, is mathematically equivalent — the last segment is the last
+  segment); _project_row 8/8 killed (the R586 non-finite normalization and
+  allowlist/hash branches are all load-bearing). Ops §7e4 records the
+  uv-wrapper metric-sampling trap (child PID for metrics, wrapper fine for
+  signals).
 - **R628 (sixty-ninth window — connection-pool arithmetic)**: prod runs 5
   DB-pooled processes (4 uvicorn workers + arq); defaults give 5×15=75
   connections against Postgres' max_connections=100 — safe, but the

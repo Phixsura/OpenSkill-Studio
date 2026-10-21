@@ -496,6 +496,14 @@ design; a stuck queue shows as worker_alive + deliveries.pending in the
 health summary). If `INFO memory` shows sustained >200MB, raise maxmemory
 and RAM together — do not switch the eviction policy.
 
+## 7e4. Process-metric sampling trap (R627)
+
+`uv run <cmd>` does NOT exec — the real service is a CHILD of the uv
+wrapper. Any RSS/CPU sampling, `kill -0` liveness probe, or cgroup metric
+keyed on the spawned PID reads the ~20MB wrapper, not the service. Resolve
+the child first (`pgrep -P <wrapper-pid>`); signals are fine (uv forwards
+SIGTERM — R554-verified), metrics are not.
+
 ## 7f. Backups (R564)
 
 The prod compose persists three volumes: `pgdata` (system of record),
