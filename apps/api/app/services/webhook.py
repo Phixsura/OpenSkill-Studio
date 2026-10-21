@@ -181,6 +181,26 @@ async def _is_blocked_url_async(url: str) -> bool:
     return await asyncio.to_thread(_is_blocked_url, url)
 
 
+async def _screen_url(url: str) -> None:
+    """R634: one URL screen for create AND update — scheme http(s) only,
+    no embedded credentials (Standard-Webhooks auth is the signature, and a
+    userinfo URL would park secrets in a plain config column), and the SSRF
+    resolve check. 422 with WEBHOOK_URL_BLOCKED on any failure."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise AppError("WEBHOOK_URL_BLOCKED", f"Scheme not allowed: {parts.scheme!r}", 422)
+    if parts.username is not None or parts.password is not None:
+        raise AppError("WEBHOOK_URL_BLOCKED", "Credentials in webhook URLs are not allowed", 422)
+    if await _is_blocked_url_async(url):
+        raise AppError(
+            "WEBHOOK_URL_BLOCKED",
+            "Webhook URL must not point to internal or private addresses",
+            422,
+        )
+
+
 class WebhookService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -219,14 +239,8 @@ class WebhookService:
         *,
         actor_user_id: str | None = None,
     ) -> WebhookSubscription:
-        # SSRF: validate URL doesn't point to internal services
-        # (R171: async wrapper — DNS resolution must not block the event loop)
-        if await _is_blocked_url_async(url):
-            raise AppError(
-                "WEBHOOK_URL_BLOCKED",
-                "Webhook URL must not point to internal or private addresses",
-                422,
-            )
+        # R634: one shared screen (scheme/userinfo/SSRF) — see _screen_url.
+        await _screen_url(url)
 
         # Validate event types: legacy names from the fixed set, OR canonical
         # mesh patterns (ADR-018 §12 — exact type or 'prefix.*' wildcard).
@@ -308,12 +322,7 @@ class WebhookService:
         if sub is None:
             raise AppError("WEBHOOK_NOT_FOUND", "Webhook not found", 404)
         if url is not None and url != sub.url:
-            if await _is_blocked_url_async(url):
-                raise AppError(
-                    "WEBHOOK_URL_BLOCKED",
-                    "Webhook URL must not point to internal or private addresses",
-                    422,
-                )
+            await _screen_url(url)  # R634: same scheme/userinfo/SSRF screen
             sub.url = url
         if events is not None:
             if not events or len(events) > MAX_EVENTS_PER_WEBHOOK:

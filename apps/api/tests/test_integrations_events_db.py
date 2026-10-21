@@ -805,6 +805,14 @@ async def test_webhook_update_in_place(db):
     with pytest.raises(AppError) as e1:
         await svc.update(sub.id, org.id, url="http://169.254.169.254/x")
     assert e1.value.code == "WEBHOOK_URL_BLOCKED"
+    # R634: scheme and embedded-credential screens on BOTH create and update
+    for bad in ("ftp://sink.example.com/x", "https://u:p@sink.example.com/x"):
+        with pytest.raises(AppError) as eb:
+            await svc.update(sub.id, org.id, url=bad)
+        assert eb.value.code == "WEBHOOK_URL_BLOCKED", bad
+        with pytest.raises(AppError) as ec:
+            await svc.create(org.id, bad, ["project.approved"])
+        assert ec.value.code == "WEBHOOK_URL_BLOCKED", bad
     with pytest.raises(AppError) as e2:
         await svc.update(sub.id, org.id, events=["totally.unknown"])
     assert e2.value.code == "INVALID_EVENT"

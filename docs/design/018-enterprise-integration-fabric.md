@@ -931,6 +931,14 @@ first-class (Stripe Data Pipeline). Tenant boundary enforced in the extraction q
 
 ## 20. Implementation log (newest-first; marathon rounds R7+ on 2026-10-11)
 
+- **R634 (seventy-third window — webhook URL screen unified at the
+  boundary)**: the shared webhook service accepted ftp:// and
+  credential-embedding URLs at CREATE/UPDATE (only delivery-time refused the
+  scheme), parking a never-deliverable subscription — or a secret inside a
+  plain config column — until deliveries exhausted days later. One shared
+  _screen_url (scheme http(s), no userinfo — Standard-Webhooks auth is the
+  signature — plus the SSRF resolve) now gates both paths; tests pin all
+  four arms. Closes the last R590 cross-epic item.
 - **R633 (seventy-second window — SLO handler swept, 18/26, 8 evidenced-
   equivalent)**: full-file sweep of handle_slo_request (confirmed not a -k
   artifact — same 8 under the whole SAML suite). All eight are equivalent or
