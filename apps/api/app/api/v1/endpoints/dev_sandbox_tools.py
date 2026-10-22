@@ -8,14 +8,19 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, require_org_member
 from app.core.rate_limit import rate_limit
+from app.exceptions import AppError
+from app.models.organization import OrgRole
 from app.models.user import User
 from app.schemas.base import DataResponse
+from app.services import developer as dev_svc
 from app.services.event_dispatch import CANONICAL_EVENTS, emit_event
 from app.services.manifest_validator import validate_manifest
 
 router = APIRouter(tags=["Developer Tools"])
+
+ADMIN_ROLES = (OrgRole.OWNER, OrgRole.ADMIN)
 
 
 # ── Test Event Sender ────────────────────────────────────
@@ -24,7 +29,7 @@ router = APIRouter(tags=["Developer Tools"])
 class SendTestEventRequest(BaseModel):
     event_type: str
     data: dict = {}
-    org_id: str | None = None
+    org_id: str
 
 
 @router.post(
@@ -38,8 +43,27 @@ async def send_test_event(
 ):
     """Send a test event to trigger subscribed app webhooks/automation.
 
-    Useful for local development and testing event handling.
+    Requires a developer account and org membership. Only delivers to
+    installations of apps owned by the caller's developer account.
     """
+    # Require developer account
+    account = await dev_svc.get_developer_account_by_user(db, user.id)
+    if not account:
+        raise dev_svc.DeveloperNotFoundError(
+            message="You must create a developer account to use dev tools"
+        )
+
+    # Require org membership
+    await require_org_member(body.org_id, user, db, *ADMIN_ROLES)
+
+    # Validate event type
+    if body.event_type not in CANONICAL_EVENTS:
+        raise AppError(
+            "INVALID_EVENT_TYPE",
+            f"Unknown event type: {body.event_type}",
+            422,
+        )
+
     deliveries = await emit_event(
         db,
         event_type=body.event_type,
