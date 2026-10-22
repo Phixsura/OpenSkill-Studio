@@ -23,4 +23,4 @@ def test_requires_app_id(func):
 
 def test_auto_upgrade_has_target_version():
     params = inspect.signature(auto_upgrade_installations).parameters
-    assert "target_version_id" in params or "version_id" in params
+    assert "new_version_id" in params
