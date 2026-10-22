@@ -27,7 +27,7 @@ def build_webhook_headers(
         "Content-Type": "application/json",
         "X-OpenSkill-Event": event_type,
         "X-OpenSkill-Delivery": delivery_id,
-        "X-OpenSkill-Signature": f"sha256={signature}",
+        "X-OpenSkill-Signature": signature,
         "X-OpenSkill-Timestamp": ts,
         "User-Agent": "OpenSkill-Webhooks/1.0",
     }
