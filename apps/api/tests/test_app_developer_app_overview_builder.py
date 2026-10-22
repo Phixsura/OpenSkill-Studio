@@ -2,7 +2,7 @@ from app.services.app_developer_app_overview_builder import build_app_overview
 
 def test_overview():
     o = build_app_overview(
-        app={"name": "X", "webhook_url": "https://x.com", "manifest": {"sandbox": {}, "ui_extensions": [{}]}},
+        app={"name": "X", "webhook_url": "https://x.com", "manifest": {"sandbox": {"runtime": "python3.12"}, "ui_extensions": [{"surface": "card"}]}},
         version={"version": "2.0", "review_status": "approved"},
         stats={"installs": 50}, health={"score": 95},
         permissions=["read:cohorts"], badges=[{"label": "Popular"}])
