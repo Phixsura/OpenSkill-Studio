@@ -11,7 +11,7 @@ ENUM_CASES = [
     (AppStatus, ["DRAFT", "TESTING", "SUBMITTED", "APPROVED", "PUBLISHED", "DEPRECATED", "REVOKED"]),
     (AppVersionReviewStatus, ["PENDING", "APPROVED", "REJECTED"]),
     (InstallationStatus, ["ACTIVE", "SUSPENDED", "UNINSTALLED"]),
-    (SandboxExecutionStatus, ["PENDING", "RUNNING", "COMPLETED", "FAILED", "TIMEOUT"]),
+    (SandboxExecutionStatus, ["RUNNING", "COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"]),
     (DeveloperStatus, ["ACTIVE"]),
     (AppCategory, ["connector", "automation", "analytics"]),
     (AppVisibility, ["PRIVATE", "PUBLIC"]),
