@@ -14,7 +14,7 @@ def test_adr_has_content():
     assert len(content) > 1000, "ADR is too short"
 
 EXPECTED_SECTIONS = [
-    "Developer Accounts",
+    "Developer Organization",
     "App Model",
     "OAuth",
     "SDK",
