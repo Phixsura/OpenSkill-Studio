@@ -194,6 +194,27 @@ async def get_app_health(
     return DataResponse(data={"app_id": app_id, **health})
 
 
+@router.get(
+    "/developer/apps/{app_id}/usage",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_app_usage(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get usage metering summary for an app."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_usage import get_app_usage_summary
+
+    usage = await get_app_usage_summary(db, app_id=app_id)
+    return DataResponse(data=usage)
+
+
 # ── Tenant/Org Dashboard ────────────────────────────────
 
 
