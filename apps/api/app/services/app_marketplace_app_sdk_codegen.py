@@ -1,15 +1,40 @@
 """SDK codegen — generate typed SDK clients from app API definitions."""
 
+import re
+
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_PATH_RE = re.compile(r'^/[A-Za-z0-9_\-./{}]*$')
+_VALID_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+
+def _safe_identifier(name: str) -> str:
+    clean = re.sub(r'[^A-Za-z0-9_]', '_', name)
+    if not clean or clean[0].isdigit():
+        clean = f"fn_{clean}"
+    return clean
+
+
+def _safe_path(path: str) -> str:
+    if not _PATH_RE.match(path):
+        return "/invalid"
+    return path
+
+
+def _safe_method(method: str) -> str:
+    m = method.upper()
+    return m if m in _VALID_METHODS else "GET"
+
 
 def generate_typescript_client(*, app: dict, endpoints: list[dict]) -> str:
-    lines = [f"// Auto-generated SDK for {app['name']}", f"// Version: {app.get('version', '1.0.0')}", "",
+    app_name = re.sub(r'[^\w\s-]', '', app.get('name', 'App'))
+    lines = [f"// Auto-generated SDK for {app_name}", f"// Version: {app.get('version', '1.0.0')}", "",
              "export class AppClient {", "  constructor(private baseUrl: string, private token: string) {}", ""]
     for ep in endpoints:
-        method = ep.get("method", "GET").upper()
-        name = ep.get("operation_id", ep.get("path", "").replace("/", "_").strip("_"))
-        path = ep.get("path", "/")
+        method = _safe_method(ep.get("method", "GET"))
+        name = _safe_identifier(ep.get("operation_id", ep.get("path", "").replace("/", "_").strip("_")))
+        path = repr(_safe_path(ep.get("path", "/")))
         lines.append(f"  async {name}(): Promise<any> {{")
-        lines.append(f'    const res = await fetch(`${{this.baseUrl}}{path}`, {{')
+        lines.append(f'    const res = await fetch(this.baseUrl + {path}, {{')
         lines.append(f'      method: "{method}",')
         lines.append(f'      headers: {{ Authorization: `Bearer ${{this.token}}`, "Content-Type": "application/json" }},')
         lines.append(f"    }});")
@@ -21,16 +46,17 @@ def generate_typescript_client(*, app: dict, endpoints: list[dict]) -> str:
 
 
 def generate_python_client(*, app: dict, endpoints: list[dict]) -> str:
-    lines = [f'"""Auto-generated SDK for {app["name"]}"""', "", "import httpx", "",
+    app_name = re.sub(r'[^\w\s-]', '', app.get('name', 'App'))
+    lines = [f'"""Auto-generated SDK for {app_name}"""', "", "import httpx", "",
              "class AppClient:", '    def __init__(self, base_url: str, token: str) -> None:',
              "        self._base = base_url", "        self._token = token",
              '        self._headers = {"Authorization": f"Bearer {token}"}', ""]
     for ep in endpoints:
-        method = ep.get("method", "GET").lower()
-        name = ep.get("operation_id", ep.get("path", "").replace("/", "_").strip("_"))
-        path = ep.get("path", "/")
+        method = _safe_method(ep.get("method", "GET")).lower()
+        name = _safe_identifier(ep.get("operation_id", ep.get("path", "").replace("/", "_").strip("_")))
+        path = repr(_safe_path(ep.get("path", "/")))
         lines.append(f'    def {name}(self) -> dict:')
-        lines.append(f'        r = httpx.{method}(f"{{self._base}}{path}", headers=self._headers)')
+        lines.append(f'        r = httpx.{method}(self._base + {path}, headers=self._headers)')
         lines.append(f'        return r.json()')
         lines.append("")
     return "\n".join(lines)
