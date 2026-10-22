@@ -15,7 +15,7 @@ def test_signature_matches_payload():
     payload = b'{"event":"test"}'
     secret = "my-secret"
     h = build_webhook_headers(event_type="t", delivery_id="d", payload=payload, webhook_secret=secret)
-    sig = h["X-OpenSkill-Signature"].removeprefix("sha256=")
+    sig = h["X-OpenSkill-Signature"]
     assert verify_signature(payload, sig, secret)
 
 def test_extract_headers():
