@@ -16,7 +16,6 @@ VALID = [
     ("1.0.0+build", (1, 0, 0)),
 ]
 
-INVALID = ["", "abc", "1.0", "1", "a.b.c", "1.0.0.0", "v1.0.0"]
 
 @pytest.mark.parametrize("version,expected", VALID)
 def test_valid_semver(version, expected):
