@@ -44,8 +44,7 @@ def test_validate_required_scope_missing():
     assert result["reason"] == "insufficient_scope"
 
 def test_validate_expired_token():
-    token = generate_scoped_token(**BASE, ttl_seconds=0)
-    time.sleep(0.1)
+    token = generate_scoped_token(**BASE, ttl_seconds=-1)
     result = validate_scoped_token(token)
     assert result["valid"] is False
     assert result["reason"] == "token_expired"
