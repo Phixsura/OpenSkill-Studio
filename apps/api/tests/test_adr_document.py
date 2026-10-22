@@ -3,7 +3,7 @@
 import os
 import pytest
 
-ADR_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "design", "016-developer-platform-sdk.md")
+ADR_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "design", "016-developer-platform-sdk.md")
 
 def test_adr_exists():
     assert os.path.isfile(ADR_PATH), f"ADR not found at {ADR_PATH}"
