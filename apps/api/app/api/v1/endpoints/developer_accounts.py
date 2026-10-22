@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, require_org_member
+from app.api.deps import get_current_user_or_app, get_db, require_org_member
 from app.core.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.base import DataResponse, ListResponse, PaginationMeta
@@ -25,7 +25,7 @@ router = APIRouter(tags=["Developer Accounts"])
 async def create_developer_account(
     body: CreateDeveloperAccountRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_app),
 ):
     """Register a new developer account."""
     # Validate org membership if org_id provided
@@ -53,7 +53,7 @@ async def create_developer_account(
 )
 async def get_my_developer_account(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_app),
 ):
     """Get the current user's developer account."""
     account = await dev_svc.get_developer_account_by_user(db, user.id)
@@ -70,7 +70,7 @@ async def get_my_developer_account(
 async def get_developer_account(
     account_id: str,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_app),
 ):
     """Get a developer account by ID."""
     account = await dev_svc.get_developer_account(db, account_id)
@@ -86,7 +86,7 @@ async def update_developer_account(
     account_id: str,
     body: UpdateDeveloperAccountRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_app),
 ):
     """Update a developer account (owner only)."""
     account = await dev_svc.get_developer_account(db, account_id)
@@ -108,7 +108,7 @@ async def list_developer_accounts(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_or_app),
 ):
     """List developer accounts (platform visibility)."""
     accounts, total = await dev_svc.list_developer_accounts(db, page=page, per_page=per_page)

@@ -1,6 +1,6 @@
 """Shared FastAPI dependencies."""
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,3 +139,58 @@ async def require_cohort_member(
     if roles and member.role not in roles:
         raise HTTPException(status_code=403, detail="Insufficient cohort permissions")
     return member
+
+
+async def get_current_user_or_app(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Authenticate via JWT token or app API key (osk_app_ prefix).
+
+    API keys resolve to the app owner's user for permission checking.
+    The resolved AppApiKey is stored in request.state.app_api_key.
+    """
+    # Check for API key in Authorization header
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer osk_app_"):
+        raw_key = auth_header.removeprefix("Bearer ").strip()
+        from app.services.developer import authenticate_api_key
+
+        api_key = await authenticate_api_key(db, raw_key)
+        if api_key is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired API key")
+
+        # Check the app is in a valid state
+        from sqlalchemy import select
+
+        from app.models.developer import AppStatus, DeveloperApp
+        app_result = await db.execute(
+            select(DeveloperApp).where(DeveloperApp.id == api_key.app_id)
+        )
+        app = app_result.scalar_one_or_none()
+        if not app or app.status in (AppStatus.REVOKED, AppStatus.DEPRECATED):
+            raise HTTPException(status_code=401, detail="App is revoked or deprecated")
+
+        # Resolve the app owner as the acting user
+        from app.models.developer import DeveloperAccount
+        dev_result = await db.execute(
+            select(DeveloperAccount).where(DeveloperAccount.id == app.developer_id)
+        )
+        dev_account = dev_result.scalar_one_or_none()
+        if not dev_account:
+            raise HTTPException(status_code=401, detail="Developer account not found")
+
+        user = await db.get(User, dev_account.owner_user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+
+        # Store API key context for scope checking
+        request.state.app_api_key = api_key
+        request.state.app_scopes = api_key.scopes or []
+        return user
+
+    # Fall back to JWT auth
+    if token is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await get_current_user(token, db)

@@ -140,6 +140,39 @@ async def update_installation(
     return DataResponse(data=AppInstallationResponse.model_validate(installation))
 
 
+@router.post(
+    "/orgs/{org_id}/apps/installations/{installation_id}/upgrade",
+    response_model=DataResponse[AppInstallationResponse],
+    dependencies=[Depends(rate_limit(10, 60))],
+)
+async def upgrade_installation(
+    org_id: str,
+    installation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upgrade an installation to the latest app version."""
+    await require_org_member(org_id, user, db, *ADMIN_ROLES)
+    installation = await dev_svc.get_installation(db, installation_id)
+    if installation.org_id != org_id:
+        raise dev_svc.InstallationNotFoundError()
+
+    # Find latest version for the app
+    versions, _ = await dev_svc.list_app_versions(db, installation.app_id, per_page=1)
+    if not versions:
+        raise dev_svc.AppVersionNotFoundError(message="No versions available")
+    latest = versions[0]
+
+    if installation.app_version_id == latest.id:
+        return DataResponse(data=AppInstallationResponse.model_validate(installation))
+
+    installation = await dev_svc.update_installation(
+        db, installation, app_version_id=latest.id
+    )
+    await db.commit()
+    return DataResponse(data=AppInstallationResponse.model_validate(installation))
+
+
 @router.delete(
     "/orgs/{org_id}/apps/installations/{installation_id}",
     dependencies=[Depends(rate_limit(10, 60))],

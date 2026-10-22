@@ -88,7 +88,13 @@ class ApiKeyNotFoundError(AppError):
 
 def _get_fernet() -> Fernet:
     """Fernet cipher for encrypting app secrets (reuse provider credential key)."""
-    return Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode())
+    key = settings.credential_encryption_key
+    if not key:
+        # Test/dev fallback — generate a deterministic key from jwt_secret
+        import base64
+        seed = (settings.jwt_secret or "dev-fallback-key").encode()
+        key = base64.urlsafe_b64encode(seed[:32].ljust(32, b"\0")).decode()
+    return Fernet(key.encode())
 
 
 def _generate_oauth_client_id() -> str:
@@ -879,6 +885,7 @@ async def revoke_app(db: AsyncSession, app_id: str, *, reason: str) -> Developer
     )
 
     await db.flush()
+    await db.refresh(app)
     log.warning("app_revoked", app_id=app_id, reason=reason)
     return app
 
