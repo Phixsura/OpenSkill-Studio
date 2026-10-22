@@ -38,10 +38,20 @@ async def batch_upgrade_installations(
     if account.owner_user_id != user.id:
         raise dev_svc.PermissionDeniedError()
 
-    # Verify version exists and belongs to this app
+    # Verify version exists, belongs to this app, and is approved
     version = await dev_svc.get_app_version(db, body.version_id)
     if version.app_id != app_id:
         raise dev_svc.AppVersionNotFoundError()
+
+    from app.exceptions import AppError
+
+    review_status = version.review_status.value if hasattr(version.review_status, "value") else version.review_status
+    if review_status != "APPROVED":
+        raise AppError("VERSION_NOT_APPROVED", "Only approved versions can be rolled out", 422)
+
+    app_status = app.status.value if hasattr(app.status, "value") else app.status
+    if app_status not in ("PUBLISHED", "DEPRECATED"):
+        raise AppError("APP_NOT_PUBLISHED", "App must be published to batch upgrade", 422)
 
     count = await auto_upgrade_installations(db, app_id, body.version_id)
     await db.commit()
