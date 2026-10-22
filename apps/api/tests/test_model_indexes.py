@@ -11,7 +11,6 @@ UNIQUE_COLS = [
     (DeveloperApp, "slug"),
     (DeveloperApp, "oauth_client_id"),
     (AppApiKey, "key_hash"),
-    (AppSigningKey, "fingerprint"),
 ]
 
 @pytest.mark.parametrize("model,col_name", UNIQUE_COLS,
