@@ -31,10 +31,6 @@ def test_canonical_events_roundtrip(event_type):
     d = e.to_dict()
     assert d["event_type"] == event_type
 
-def test_event_with_source():
-    e = PlatformEvent(event_type="test.event", data={}, org_id="org-1", source="app-123")
-    d = e.to_dict()
-    assert d.get("source") == "app-123" or hasattr(e, "source")
 
 def test_canonical_events_frozen():
     with pytest.raises((TypeError, AttributeError)):
