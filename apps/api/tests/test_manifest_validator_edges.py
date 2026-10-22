@@ -1,7 +1,7 @@
 """Manifest validator edge cases."""
 
 import pytest
-from app.services.manifest_validator import validate_manifest, VALID_PERMISSIONS, VALID_SURFACES, VALID_CATEGORIES, BLOCKED_HOSTS
+from app.services.manifest_validator import validate_manifest, VALID_PERMISSIONS, VALID_SURFACES, VALID_CATEGORIES, _BLOCKED_HOST_NAMES
 
 
 def test_valid_permissions_count():
@@ -14,8 +14,8 @@ def test_valid_categories_count():
     assert len(VALID_CATEGORIES) >= 7
 
 def test_blocked_hosts_exist():
-    assert len(BLOCKED_HOSTS) > 0
-    assert "localhost" in BLOCKED_HOSTS or "127.0.0.1" in BLOCKED_HOSTS
+    assert len(_BLOCKED_HOST_NAMES) > 0
+    assert "localhost" in _BLOCKED_HOST_NAMES or "127.0.0.1" in _BLOCKED_HOST_NAMES
 
 # --- Edge cases ---
 
