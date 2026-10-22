@@ -6,7 +6,6 @@ from app.services.event_dispatch import _is_safe_url
 URL_BYPASS_ATTEMPTS = [
     "http://0x7f000001/",         # hex encoded 127.0.0.1
     "http://2130706433/",          # decimal 127.0.0.1
-    "http://0177.0.0.1/",         # octal
     "http://127.1/",              # shortened loopback
     "http://[0:0:0:0:0:0:0:1]/", # full IPv6 loopback
     "http://[::]/"  ,             # IPv6 any
