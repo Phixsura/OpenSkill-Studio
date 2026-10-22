@@ -20,7 +20,7 @@ def test_valid_content_types():
         assert validate_request(content_type=ct)["valid"] is True
 
 def test_missing_header():
-    r = validate_request(required_headers={"X-Api-Key": ""}, actual_headers={})
+    r = validate_request(required_headers={"X-Api-Key": "key123"}, actual_headers={})
     assert r["valid"] is False
 
 def test_invalid_json():
