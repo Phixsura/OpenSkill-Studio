@@ -57,6 +57,7 @@ export class OpenSkillExtension {
   private readonly _origin: string;
   private readonly _listeners: Map<string, Array<(data: unknown) => void>> = new Map();
   private readonly _pending: Map<string, PendingRequest> = new Map();
+  private readonly _boundHandler: (event: MessageEvent) => void;
   private _context: ExtensionContext | null = null;
   private _requestId = 0;
   private _ready = false;
@@ -66,16 +67,22 @@ export class OpenSkillExtension {
   /** UI controls — resize, navigate, toast */
   readonly ui: ExtensionUi;
 
-  constructor(options?: { origin?: string; timeout?: number }) {
-    this._origin = options?.origin ?? "*"; // Host validates; extension accepts
-    const timeout = options?.timeout ?? 10_000;
+  constructor(options: { origin: string; timeout?: number }) {
+    if (!options.origin || options.origin === "*") {
+      throw new Error("origin is required and must not be '*'");
+    }
+    this._origin = options.origin;
+    const timeout = options.timeout ?? 10_000;
 
     this.api = new ExtensionApi(this, timeout);
     this.ui = new ExtensionUi(this);
 
+    // Bind handler for proper cleanup in destroy()
+    this._boundHandler = this._handleMessage.bind(this);
+
     // Listen for messages from host
     if (typeof window !== "undefined") {
-      window.addEventListener("message", this._handleMessage.bind(this));
+      window.addEventListener("message", this._boundHandler);
       // Signal ready
       this._postToHost({ type: "extension:ready" });
     }
@@ -131,6 +138,9 @@ export class OpenSkillExtension {
   }
 
   private _handleMessage(event: MessageEvent): void {
+    // Validate origin and source
+    if (event.origin !== this._origin || event.source !== window.parent) return;
+
     const data = event.data as MessagePayload;
     if (!data || typeof data !== "object") return;
 
@@ -174,7 +184,7 @@ export class OpenSkillExtension {
   /** Clean up listeners */
   destroy(): void {
     if (typeof window !== "undefined") {
-      window.removeEventListener("message", this._handleMessage.bind(this));
+      window.removeEventListener("message", this._boundHandler);
     }
     for (const [, pending] of this._pending) {
       clearTimeout(pending.timer);
