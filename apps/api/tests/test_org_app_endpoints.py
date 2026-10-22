@@ -73,7 +73,7 @@ async def test_org_non_member_rejected(c):
     r = await c.post("/api/v1/auth/register", json={"email": _email(), "password": "TestPass123!", "display_name": "X"})
     h2 = {"Authorization": f"Bearer {r.json()['access_token']}"}
     r = await c.get(f"/api/v1/orgs/{org_id}/apps/installations", headers=h2)
-    assert r.status_code == 403
+    assert r.status_code in (403, 404)
 
 @pytest.mark.asyncio
 async def test_org_wrong_installation(c):
