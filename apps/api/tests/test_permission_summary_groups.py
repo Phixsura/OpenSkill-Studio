@@ -11,8 +11,8 @@ def test_groups_by_action():
 def test_all_permissions_counted():
     perms = ["read:cohorts", "write:projects", "subscribe:events"]
     summary = get_permission_summary(perms)
-    total = sum(len(v) if isinstance(v, list) else v for v in summary.values())
-    assert total >= len(perms) or len(summary) > 0
+    total = summary.get("total", 0)
+    assert total == 3
 
 def test_empty_permissions():
     summary = get_permission_summary([])
