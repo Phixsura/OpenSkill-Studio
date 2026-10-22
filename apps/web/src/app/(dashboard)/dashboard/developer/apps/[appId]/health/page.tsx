@@ -51,7 +51,7 @@ export default function AppHealthPage() {
     );
   }
 
-  const config = STATUS_CONFIG[data.status] ?? STATUS_CONFIG.unknown;
+  const config = STATUS_CONFIG[data.status] ?? { color: "text-gray-500", icon: "❓", bg: "bg-gray-50 dark:bg-gray-800" };
 
   return (
     <div className="max-w-4xl p-8">
