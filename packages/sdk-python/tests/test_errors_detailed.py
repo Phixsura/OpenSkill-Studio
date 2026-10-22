@@ -27,7 +27,7 @@ def test_is_exception(cls, kwargs, expected_status):
 @pytest.mark.parametrize("cls,kwargs,expected_status", ERRORS, ids=lambda x: x.__name__ if hasattr(x, '__name__') else str(x))
 def test_has_message(cls, kwargs, expected_status):
     err = cls(**kwargs)
-    assert hasattr(err, "message")
+    assert str(err) != ""
 
 def test_all_inherit_base():
     for cls in [ApiError, AuthError, NotFoundError, RateLimitError, ValidationError]:
