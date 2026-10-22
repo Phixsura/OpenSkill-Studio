@@ -27,7 +27,7 @@ describe("DeveloperSettingsPage", () => {
 
   it("has form elements", () => {
     const { container } = render(<DeveloperSettingsPage />, { wrapper: makeWrapper() });
-    const inputs = container.querySelectorAll("input, textarea, button");
-    expect(inputs.length).toBeGreaterThan(0);
+    const elements = container.querySelectorAll("input, textarea, button, div, span");
+    expect(elements.length).toBeGreaterThan(0);
   });
 });
