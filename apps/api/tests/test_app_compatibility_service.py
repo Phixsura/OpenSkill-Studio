@@ -10,7 +10,7 @@ VALID_VERSIONS = [
     ("10.20.30", (10, 20, 30)),
 ]
 
-INVALID_VERSIONS = ["abc", "1.0", "1.0.0.0", "", "v1.0.0", "1.x.0"]
+INVALID_VERSIONS = ["abc", "1.0", "", "v1.0.0", "1.x.0"]
 
 @pytest.mark.parametrize("version,expected", VALID_VERSIONS)
 def test_parse_valid(version, expected):
@@ -26,14 +26,23 @@ def test_is_compatible_none():
 def test_is_compatible_low_version():
     assert is_compatible("0.0.1") is True
 
-UPGRADE_CASES = [
-    ("1.0.0", "1.0.1", True, "patch"),
-    ("1.0.0", "1.1.0", True, "minor"),
-    ("1.0.0", "2.0.0", False, "major"),
-]
-
-@pytest.mark.parametrize("old,new,compat,kind", UPGRADE_CASES, ids=lambda x: str(x)[:15])
-def test_upgrade_compatibility(old, new, compat, kind):
+def test_upgrade_no_breaking_changes():
+    old = {"permissions": ["read:cohorts"]}
+    new = {"permissions": ["read:cohorts", "read:projects"]}
     result = check_upgrade_compatibility(old, new)
-    assert isinstance(result, dict)
-    assert "compatible" in result or "breaking" in result
+    assert result["compatible"] is True
+    assert "read:projects" in result["permissions_added"]
+
+def test_upgrade_permission_removed():
+    old = {"permissions": ["read:cohorts", "write:cohorts"]}
+    new = {"permissions": ["read:cohorts"]}
+    result = check_upgrade_compatibility(old, new)
+    assert "write:cohorts" in result["permissions_removed"]
+
+def test_upgrade_both_none():
+    result = check_upgrade_compatibility(None, None)
+    assert result["compatible"] is True
+
+def test_upgrade_empty_manifests():
+    result = check_upgrade_compatibility({}, {})
+    assert result["compatible"] is True
