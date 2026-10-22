@@ -7,11 +7,11 @@ from openskill_sdk.client import OpenSkillClient
 
 def test_init_defaults():
     c = OpenSkillClient(api_key="test_key")
-    assert c.api_key == "test_key"
+    assert c._api_key == "test_key"
 
 def test_init_custom_base_url():
     c = OpenSkillClient(api_key="k", base_url="https://custom.api.com")
-    assert "custom.api.com" in c.base_url
+    assert "custom.api.com" in c._base_url
 
 def test_has_http_methods():
     for method in ["get", "post", "patch", "delete"]:
