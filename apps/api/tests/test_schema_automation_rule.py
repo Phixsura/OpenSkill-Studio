@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from app.schemas.developer import CreateAutomationRuleRequest
 
-VALID_ACTIONS = ["webhook", "sandbox_function", "email_notification"]
+VALID_ACTIONS = ["webhook", "sandbox_function", "api_call", "notification"]
 
 @pytest.mark.parametrize("action", VALID_ACTIONS)
 def test_valid_action_types(action):
@@ -46,6 +46,6 @@ def test_with_filter():
         trigger_event="submission.completed",
         action_type="webhook",
         action_config={"url": "https://example.com"},
-        filter_expression={"field": "status", "operator": "eq", "value": "graded"},
+        trigger_filter={"field": "status", "operator": "eq", "value": "graded"},
     )
-    assert r.filter_expression is not None
+    assert r.trigger_filter is not None
