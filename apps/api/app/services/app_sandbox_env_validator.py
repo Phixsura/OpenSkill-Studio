@@ -1,20 +1,20 @@
-"""Sandbox environment validator — validate env vars before injection."""
+"""Sandbox environment validator — allowlist-based env var validation.
+
+Only keys matching OPENSKILL_ or APP_ prefixes are allowed.
+This prevents injection of dangerous env vars like LD_PRELOAD, PATH, etc.
+"""
 
 import re
 
+_ALLOWED_KEY_RE = re.compile(r"^(OPENSKILL_|APP_)[A-Z0-9_]{1,120}$")
 _SAFE_VALUE_RE = re.compile(r"^[\x20-\x7E]{0,10000}$")  # printable ASCII only
-_SAFE_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
-
-FORBIDDEN_ENV_PREFIXES = ("PATH", "HOME", "USER", "SHELL", "LD_", "DYLD_", "PYTHONPATH", "NODE_PATH")
 
 
 def validate_env_var(key: str, value: str) -> list[str]:
-    """Validate a single env var for sandbox injection."""
+    """Validate a single env var — allowlist approach."""
     errors = []
-    if not _SAFE_KEY_RE.match(key):
-        errors.append(f"Key '{key}' must be UPPER_SNAKE_CASE, 1-128 chars")
-    if any(key.startswith(p) for p in FORBIDDEN_ENV_PREFIXES):
-        errors.append(f"Key '{key}' uses a forbidden prefix")
+    if not _ALLOWED_KEY_RE.match(key):
+        errors.append(f"Key '{key}' must start with OPENSKILL_ or APP_ and be UPPER_SNAKE_CASE")
     if not _SAFE_VALUE_RE.match(value):
         errors.append(f"Value for '{key}' contains invalid characters or is too long")
     return errors
