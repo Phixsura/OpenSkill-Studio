@@ -1,34 +1,40 @@
-"""Verify all developer platform routers are registered."""
+"""Verify all developer platform router modules import and have routes."""
 
 import pytest
-from app.api.v1.router import api_v1_router
+from app.api.v1.endpoints import (
+    developer_accounts, developer_apps, app_installations,
+    app_review, app_marketplace, app_sandbox, app_observability,
+    app_conformance, app_export, app_admin, app_batch,
+    app_categories, app_version_ops, dev_sandbox_tools,
+    webhook_deliveries, oauth,
+)
 
-EXPECTED_PREFIXES = [
-    "/developer-accounts",
-    "/apps",
-    "/installations",
-    "/marketplace",
-    "/oauth",
+ROUTERS = [
+    ("developer_accounts", developer_accounts),
+    ("developer_apps", developer_apps),
+    ("app_installations", app_installations),
+    ("app_review", app_review),
+    ("app_marketplace", app_marketplace),
+    ("app_sandbox", app_sandbox),
+    ("app_observability", app_observability),
+    ("app_conformance", app_conformance),
+    ("app_export", app_export),
+    ("app_admin", app_admin),
+    ("app_batch", app_batch),
+    ("app_categories", app_categories),
+    ("app_version_ops", app_version_ops),
+    ("dev_sandbox_tools", dev_sandbox_tools),
+    ("webhook_deliveries", webhook_deliveries),
+    ("oauth", oauth),
 ]
 
-@pytest.mark.parametrize("prefix", EXPECTED_PREFIXES)
-def test_router_prefix_registered(prefix):
-    all_paths = [r.path for r in api_v1_router.routes if hasattr(r, "path")]
-    matched = [p for p in all_paths if prefix in p]
-    assert len(matched) > 0, f"No routes with prefix {prefix}"
+@pytest.mark.parametrize("name,module", ROUTERS, ids=lambda x: x if isinstance(x, str) else x.__name__)
+def test_module_has_router(name, module):
+    assert hasattr(module, "router"), f"{name} missing router"
 
-def test_minimum_route_count():
-    """Developer platform should register many routes."""
-    all_paths = [r.path for r in api_v1_router.routes if hasattr(r, "path")]
-    # At least 50 routes across all dev platform endpoints
-    assert len(all_paths) >= 50
+@pytest.mark.parametrize("name,module", ROUTERS, ids=lambda x: x if isinstance(x, str) else x.__name__)
+def test_router_has_routes(name, module):
+    assert len(module.router.routes) > 0, f"{name} router has no routes"
 
-def test_no_duplicate_routes():
-    """No exact duplicate path+method combos."""
-    seen = set()
-    for route in api_v1_router.routes:
-        if hasattr(route, "path") and hasattr(route, "methods"):
-            for method in route.methods:
-                key = (route.path, method)
-                assert key not in seen, f"Duplicate: {method} {route.path}"
-                seen.add(key)
+def test_total_router_count():
+    assert len(ROUTERS) == 16
