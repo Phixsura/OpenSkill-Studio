@@ -18,7 +18,7 @@ export function PrivacyOverviewCard({ dataAccess, networkHosts, sandboxed, secre
         <p>📊 Accesses {dataAccess.length} resource{dataAccess.length !== 1 ? "s" : ""}</p>
         <p>🌐 {networkHosts.length > 0 ? `${networkHosts.length} external host${networkHosts.length !== 1 ? "s" : ""}` : "No network access"}</p>
         <p>🔐 {secretsCount} secret{secretsCount !== 1 ? "s" : ""} stored</p>
-        {privacyUrl ? <a href={privacyUrl} className="text-blue-600 underline">Privacy Policy →</a> : <p className="text-yellow-600">⚠️ No privacy policy</p>}
+        {privacyUrl && /^https?:/.test(privacyUrl) ? <a href={privacyUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Privacy Policy →</a> : <p className="text-yellow-600">⚠️ No privacy policy</p>}
       </div>
     </div>
   );
