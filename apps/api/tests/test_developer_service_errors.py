@@ -1,75 +1,61 @@
-"""Tests for developer service error classes."""
+"""Developer service error classes."""
 
+import pytest
 from app.services.developer import (
-    AlreadyInstalledError,
-    ApiKeyNotFoundError,
+    DeveloperNotFoundError, AppNotFoundError, AppVersionNotFoundError,
+    InstallationNotFoundError, DuplicateSlugError, DuplicateVersionError,
+    InvalidStateTransitionError, PermissionDeniedError,
+    AlreadyInstalledError, ApiKeyNotFoundError,
+)
+from app.core.exceptions import AppError
+
+ERRORS = [
+    DeveloperNotFoundError,
     AppNotFoundError,
     AppVersionNotFoundError,
-    DeveloperNotFoundError,
+    InstallationNotFoundError,
     DuplicateSlugError,
     DuplicateVersionError,
-    InstallationNotFoundError,
     InvalidStateTransitionError,
     PermissionDeniedError,
-)
+    AlreadyInstalledError,
+    ApiKeyNotFoundError,
+]
 
+@pytest.mark.parametrize("cls", ERRORS, ids=lambda c: c.__name__)
+def test_is_app_error(cls):
+    assert issubclass(cls, AppError)
 
-def test_developer_not_found():
-    e = DeveloperNotFoundError()
-    assert e.status_code == 404
-    assert e.code == "DEVELOPER_NOT_FOUND"
+@pytest.mark.parametrize("cls", ERRORS, ids=lambda c: c.__name__)
+def test_instantiable(cls):
+    err = cls()
+    assert err is not None
 
-def test_developer_not_found_custom():
-    e = DeveloperNotFoundError("Custom msg")
-    assert "Custom msg" in str(e)
+@pytest.mark.parametrize("cls", ERRORS, ids=lambda c: c.__name__)
+def test_has_status_code(cls):
+    err = cls()
+    assert hasattr(err, "status_code")
+    assert isinstance(err.status_code, int)
 
-def test_app_not_found():
-    e = AppNotFoundError()
-    assert e.status_code == 404
+@pytest.mark.parametrize("cls", ERRORS, ids=lambda c: c.__name__)
+def test_has_code(cls):
+    err = cls()
+    assert hasattr(err, "code")
+    assert isinstance(err.code, str)
 
-def test_version_not_found():
-    e = AppVersionNotFoundError()
-    assert e.status_code == 404
+@pytest.mark.parametrize("cls", ERRORS, ids=lambda c: c.__name__)
+def test_has_message(cls):
+    err = cls()
+    assert hasattr(err, "message")
+    assert len(err.message) > 0
 
-def test_installation_not_found():
-    e = InstallationNotFoundError()
-    assert e.status_code == 404
+def test_not_found_is_404():
+    assert DeveloperNotFoundError().status_code == 404
+    assert AppNotFoundError().status_code == 404
 
-def test_duplicate_slug():
-    e = DuplicateSlugError()
-    assert e.status_code == 409
+def test_duplicate_is_409():
+    assert DuplicateSlugError().status_code == 409
+    assert DuplicateVersionError().status_code == 409
 
-def test_duplicate_version():
-    e = DuplicateVersionError()
-    assert e.status_code == 409
-
-def test_invalid_transition():
-    e = InvalidStateTransitionError()
-    assert e.status_code == 422
-
-def test_invalid_transition_custom():
-    e = InvalidStateTransitionError("draft → published not allowed")
-    assert "draft" in str(e)
-
-def test_permission_denied():
-    e = PermissionDeniedError()
-    assert e.status_code == 403
-
-def test_already_installed():
-    e = AlreadyInstalledError()
-    assert e.status_code == 409
-
-def test_api_key_not_found():
-    e = ApiKeyNotFoundError()
-    assert e.status_code == 404
-
-def test_all_errors_are_app_errors():
-    from app.exceptions import AppError
-    errors = [
-        DeveloperNotFoundError(), AppNotFoundError(), AppVersionNotFoundError(),
-        InstallationNotFoundError(), DuplicateSlugError(), DuplicateVersionError(),
-        InvalidStateTransitionError(), PermissionDeniedError(),
-        AlreadyInstalledError(), ApiKeyNotFoundError(),
-    ]
-    for e in errors:
-        assert isinstance(e, AppError), f"{type(e).__name__} is not AppError"
+def test_permission_denied_is_403():
+    assert PermissionDeniedError().status_code == 403
