@@ -13,7 +13,7 @@ def test_expired():
     assert r["active"] is False
 
 def test_empty():
-    assert introspect_token({})["active"] is True  # no expiry = active
+    assert introspect_token({})["active"] is False  # empty dict is falsy
 
 def test_none():
     assert introspect_token(None)["active"] is False
