@@ -218,6 +218,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         Talent
       </NavLink>
+      <NavLink
+        href="/dashboard/developer"
+        active={pathname.startsWith("/dashboard/developer")}
+        onClick={closeSidebar}
+      >
+        🧩 Developer
+      </NavLink>
       {/* R101[L8]: only memberships[0] got a link — users on multiple tenants
           or partners could never reach the others from the nav. One link per
           membership, labelled by name so they're tellable apart.
