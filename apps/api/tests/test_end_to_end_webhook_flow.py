@@ -31,7 +31,7 @@ def test_full_webhook_delivery_flow():
 
     # 6. Record metric
     record_webhook_delivery(app_id, success=True)
-    assert get_count("webhook_success", app_id) >= 1 or get_count("webhook_delivered", app_id) >= 1
+    assert get_count("webhook_deliveries", app_id) >= 1
 
     # 7. Rate limit still allows
     record_request(app_id)
