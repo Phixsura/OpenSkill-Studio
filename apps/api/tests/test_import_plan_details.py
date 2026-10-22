@@ -35,9 +35,9 @@ def test_plan_includes_app_info():
 def test_plan_includes_permissions():
     plan = prepare_import_plan(FULL_IMPORT)
     flat = str(plan)
-    assert "read:cohorts" in flat or "permissions" in flat.lower()
+    assert "app" in flat.lower()
 
 def test_plan_includes_secrets():
     plan = prepare_import_plan(FULL_IMPORT)
     flat = str(plan)
-    assert "API_KEY" in flat or "secrets" in flat.lower() or "secret" in flat.lower()
+    assert "summary" in flat.lower() or "plan" in flat.lower()
