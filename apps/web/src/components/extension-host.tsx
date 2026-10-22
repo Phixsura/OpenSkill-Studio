@@ -98,27 +98,57 @@ export function ExtensionHost({
           });
           break;
 
-        case "api_call":
-          // Proxy API call through the host (scoped to permissions)
+        case "api_call": {
+          // Scoped API proxy — enforce path allowlist and method restrictions
+          const ALLOWED_METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
+          const method = String(data.method ?? "GET").toUpperCase();
+          const path = String(data.path ?? "");
+
+          // Reject invalid method
+          if (!ALLOWED_METHODS.has(method)) {
+            sendToExtension({ type: "error", id: data.id, message: "Method not allowed" });
+            break;
+          }
+
+          // Reject path traversal and non-API paths
+          if (path.includes("..") || !path.startsWith("/")) {
+            sendToExtension({ type: "error", id: data.id, message: "Invalid path" });
+            break;
+          }
+
+          // Enforce permission scope — map path prefix to required permission
+          const pathPermMap: Record<string, string> = {
+            "/cohorts": "read:cohorts",
+            "/projects": "read:projects",
+            "/submissions": "read:submissions",
+            "/skills": "read:skills",
+            "/packs": "read:packs",
+            "/workflows": "read:workflows",
+            "/talent": "read:talent",
+            "/evaluations": "read:evaluations",
+          };
+          const requiredPerm = Object.entries(pathPermMap).find(([prefix]) =>
+            path.startsWith(prefix),
+          )?.[1];
+          if (requiredPerm && !permissions.includes(requiredPerm)) {
+            sendToExtension({ type: "error", id: data.id, message: "Insufficient permissions" });
+            break;
+          }
+
           try {
-            const res = await fetch(`${apiBaseUrl}/api/v1${data.path}`, {
-              method: (data.method as string) ?? "GET",
-              headers: {
-                "Content-Type": "application/json",
-                // Use the host's auth token (scoped)
-              },
-              body: data.body ? JSON.stringify(data.body) : undefined,
+            const res = await fetch(`${apiBaseUrl}/api/v1${path}`, {
+              method,
+              headers: { "Content-Type": "application/json" },
+              credentials: "omit",  // Don't send ambient cookies
+              body: data.body && method !== "GET" ? JSON.stringify(data.body) : undefined,
             });
             const result = await res.json();
             sendToExtension({ type: "response", id: data.id, result });
           } catch (err) {
-            sendToExtension({
-              type: "error",
-              id: data.id,
-              message: String(err),
-            });
+            sendToExtension({ type: "error", id: data.id, message: String(err) });
           }
           break;
+        }
 
         case "ui:resize":
           if (typeof data.height === "number" && data.height > 0 && data.height <= 2000) {
