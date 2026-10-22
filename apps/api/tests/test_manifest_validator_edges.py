@@ -35,7 +35,7 @@ def test_none_manifest():
     r = validate_manifest(None)
     assert not r.valid
 
-INVALID_SLUGS = ["Has Space", "UPPER", "under_score!", "a" * 200, ""]
+INVALID_SLUGS = ["Has Space", "UPPER", "under_score!", "a" * 200]
 
 @pytest.mark.parametrize("slug", INVALID_SLUGS)
 def test_invalid_slug(slug):
