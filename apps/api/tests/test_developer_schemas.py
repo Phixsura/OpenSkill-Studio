@@ -31,11 +31,11 @@ def test_create_dev_account_invalid(data, desc):
 # --- CreateAppRequest ---
 
 def test_create_app_valid():
-    r = CreateAppRequest(name="Test App", slug="test-app", category="utility")
+    r = CreateAppRequest(name="Test App", slug="test-app", category="automation")
     assert r.slug == "test-app"
 
 INVALID_APPS = [
-    ({"name": "", "slug": "s", "category": "utility"}, "empty name"),
+    ({"name": "", "slug": "s", "category": "automation"}, "empty name"),
     ({"name": "X", "slug": "s", "category": "INVALID_CAT"}, "bad category"),
 ]
 
