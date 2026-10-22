@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     adapter_registry,
     app_admin,
     app_batch,
+    app_version_ops,
     app_conformance,
     app_observability,
     app_sandbox,
@@ -113,6 +114,7 @@ api_v1_router.include_router(app_observability.router)
 api_v1_router.include_router(app_conformance.router)
 api_v1_router.include_router(app_admin.router)
 api_v1_router.include_router(app_batch.router)
+api_v1_router.include_router(app_version_ops.router)
 api_v1_router.include_router(adapter_registry.router)
 api_v1_router.include_router(manifest_validation.router)
 api_v1_router.include_router(dev_sandbox_tools.router)
