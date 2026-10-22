@@ -15,6 +15,7 @@ export default function AppDetailLayout({ children }: { children: React.ReactNod
     { href: `${base}/versions`, label: "Versions" },
     { href: `${base}/stats`, label: "Dashboard" },
     { href: `${base}/events`, label: "Events" },
+    { href: `${base}/webhooks`, label: "Webhooks" },
     { href: `${base}/settings`, label: "Settings" },
   ];
 

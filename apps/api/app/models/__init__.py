@@ -51,6 +51,7 @@ from app.models.developer import (  # noqa: F401
     UiSurface,
 )
 from app.models.discussion import PackDiscussion  # noqa: F401
+from app.models.webhook_delivery import AppWebhookDelivery, DeliveryStatus  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
     EvalType,
