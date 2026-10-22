@@ -21,16 +21,23 @@ def create_auth_code(*, client_id: str, redirect_uri: str, scopes: list[str], us
     return code
 
 
-def consume_auth_code(code: str, *, client_id: str) -> dict | None:
-    """Consume an authorization code (one-time use)."""
+def consume_auth_code(code: str, *, client_id: str, redirect_uri: str) -> dict | None:
+    """Consume an authorization code (one-time use, expiry enforced, redirect_uri bound)."""
     entry = _auth_codes.get(code)
     if not entry:
         return None
     if entry["used"]:
+        _auth_codes.pop(code, None)
         return None
-    if entry["client_id"] != client_id:
+    # Enforce expiry
+    if datetime.fromisoformat(entry["expires_at"]) < datetime.now(UTC):
+        _auth_codes.pop(code, None)
         return None
-    entry["used"] = True
+    # Bind client_id + redirect_uri
+    if entry["client_id"] != client_id or entry["redirect_uri"] != redirect_uri:
+        return None
+    # Delete rather than flag (prevent replay)
+    _auth_codes.pop(code, None)
     return entry
 
 
