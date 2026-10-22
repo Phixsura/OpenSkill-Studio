@@ -25,7 +25,11 @@ def build_deprecation_email(*, notice: dict, install_count: int) -> dict:
 
 def check_deprecation_status(*, sunset_date: str) -> dict:
     try:
-        sunset = datetime.fromisoformat(sunset_date.replace("Z", "+00:00"))
+        # Parse date string (YYYY-MM-DD or ISO)
+        if "T" in sunset_date:
+            sunset = datetime.fromisoformat(sunset_date.replace("Z", "+00:00"))
+        else:
+            sunset = datetime.strptime(sunset_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except (ValueError, AttributeError):
         return {"phase": "unknown", "days_remaining": None}
     now = datetime.now(timezone.utc)
