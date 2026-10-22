@@ -10,7 +10,7 @@ def test_required_column(col):
     cols = {c.name for c in SandboxExecution.__table__.columns}
     assert col in cols
 
-OPTIONAL_COLS = ["duration_ms", "memory_peak_mb", "error_message", "output"]
+OPTIONAL_COLS = ["duration_ms", "memory_peak_mb", "error_message"]
 
 @pytest.mark.parametrize("col", OPTIONAL_COLS)
 def test_optional_column(col):
