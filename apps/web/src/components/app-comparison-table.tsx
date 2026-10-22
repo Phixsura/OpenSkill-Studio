@@ -1,28 +1,32 @@
 "use client";
 
 interface AppComparisonTableProps {
-  appA: { name: string }; appB: { name: string };
-  differences: Record<string, { a: unknown; b: unknown }>;
-  installA: number; installB: number;
+  apps: { id: string; name: string }[];
+  matrix: { feature: string; [appId: string]: boolean | string }[];
 }
 
-export function AppComparisonTable({ appA, appB, differences, installA, installB }: AppComparisonTableProps) {
+export function AppComparisonTable({ apps, matrix }: AppComparisonTableProps) {
+  if (apps.length < 2) return <p className="text-sm text-gray-500">Select at least 2 apps to compare.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead><tr className="border-b"><th className="px-3 py-2">Field</th><th className="px-3 py-2">{appA.name}</th><th className="px-3 py-2">{appB.name}</th></tr></thead>
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b dark:border-gray-700">
+            <th className="px-4 py-2 text-left font-medium">Feature</th>
+            {apps.map(a => <th key={a.id} className="px-4 py-2 text-center font-medium">{a.name}</th>)}
+          </tr>
+        </thead>
         <tbody>
-          {Object.entries(differences).map(([field, { a, b }]) => (
-            <tr key={field} className="border-b dark:border-gray-800">
-              <td className="px-3 py-2 font-medium capitalize">{field}</td>
-              <td className="px-3 py-2">{String(a)}</td>
-              <td className="px-3 py-2">{String(b)}</td>
+          {matrix.map(row => (
+            <tr key={row.feature} className="border-b dark:border-gray-700">
+              <td className="px-4 py-2">{row.feature}</td>
+              {apps.map(a => (
+                <td key={a.id} className="px-4 py-2 text-center">
+                  {row[a.id] ? <span className="text-green-600">✓</span> : <span className="text-gray-300">—</span>}
+                </td>
+              ))}
             </tr>
           ))}
-          <tr className="border-b dark:border-gray-800">
-            <td className="px-3 py-2 font-medium">Installs</td>
-            <td className="px-3 py-2">{installA}</td><td className="px-3 py-2">{installB}</td>
-          </tr>
         </tbody>
       </table>
     </div>
