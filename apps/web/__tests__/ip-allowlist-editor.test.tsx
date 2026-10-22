@@ -14,7 +14,8 @@ describe("IpAllowlistEditor", () => {
   it("calls onRemove", () => {
     const fn = vi.fn();
     const { container } = render(<IpAllowlistEditor entries={["1.2.3.4"]} onAdd={vi.fn()} onRemove={fn} />);
-    fireEvent.click(container.querySelector("button:last-child")!);
+    const removeBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Remove")!;
+    fireEvent.click(removeBtn);
     expect(fn).toHaveBeenCalledWith("1.2.3.4");
   });
 });
