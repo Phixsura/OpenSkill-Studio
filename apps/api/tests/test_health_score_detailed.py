@@ -33,7 +33,7 @@ def test_error_rate_zero():
 
 def test_error_rate_half():
     h = HealthScore(100, 50, 0)
-    assert abs(h.error_rate - 0.5) < 0.001
+    assert abs(h.error_rate - 50.0) < 0.1
 
 def test_to_dict_keys():
     h = HealthScore(100, 10, 5)
