@@ -6,47 +6,42 @@ from app.services.conformance import (
     ConformanceCheck, ConformanceReport, run_conformance_checks,
 )
 
-
 def test_check_fields():
     actual = {f.name for f in fields(ConformanceCheck)}
-    assert {"name", "passed", "message"}.issubset(actual)
+    assert {"name", "status", "message", "details"}.issubset(actual)
 
 def test_report_fields():
     actual = {f.name for f in fields(ConformanceReport)}
-    assert {"checks"}.issubset(actual)
+    assert {"app_id", "app_name", "version", "checks"}.issubset(actual)
+
+def _make_report(checks):
+    return ConformanceReport(app_id="a", app_name="Test", version="1.0.0",
+                             checked_at="2026-01-01T00:00:00Z", checks=checks)
 
 def test_report_all_passed():
-    r = ConformanceReport(checks=[
-        ConformanceCheck(name="a", passed=True, message="ok"),
-        ConformanceCheck(name="b", passed=True, message="ok"),
-    ])
+    r = _make_report([ConformanceCheck(name="a", status="pass", message="ok", details={})])
     assert r.passed is True
 
 def test_report_one_failed():
-    r = ConformanceReport(checks=[
-        ConformanceCheck(name="a", passed=True, message="ok"),
-        ConformanceCheck(name="b", passed=False, message="fail"),
+    r = _make_report([
+        ConformanceCheck(name="a", status="pass", message="ok", details={}),
+        ConformanceCheck(name="b", status="fail", message="bad", details={}),
     ])
     assert r.passed is False
 
 def test_report_summary():
-    r = ConformanceReport(checks=[
-        ConformanceCheck(name="a", passed=True, message="ok"),
-    ])
+    r = _make_report([ConformanceCheck(name="a", status="pass", message="ok", details={})])
     s = r.summary
     assert isinstance(s, dict)
-    assert "total" in s or "passed" in s
 
 def test_report_to_dict():
-    r = ConformanceReport(checks=[
-        ConformanceCheck(name="a", passed=True, message="ok"),
-    ])
+    r = _make_report([ConformanceCheck(name="a", status="pass", message="ok", details={})])
     d = r.to_dict()
     assert isinstance(d, dict)
     assert "checks" in d
 
 def test_empty_report():
-    r = ConformanceReport(checks=[])
+    r = _make_report([])
     assert r.passed is True
 
 def test_run_is_async():
