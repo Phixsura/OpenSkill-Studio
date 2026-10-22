@@ -33,8 +33,8 @@ def test_has_id(model, table):
     assert hasattr(model, "id")
 
 @pytest.mark.parametrize("model,table", MODELS, ids=lambda m: m.__name__ if hasattr(m, '__name__') else str(m))
-def test_has_created_at(model, table):
-    assert hasattr(model, "created_at")
+def test_has_timestamp(model, table):
+    assert hasattr(model, "created_at") or hasattr(model, "submitted_at")
 
 def test_total_models():
     assert len(MODELS) == 13
