@@ -10,7 +10,8 @@ def route_event(*, event_type: str, org_id: str, subscriptions: list[dict]) -> l
         if not sub.get("enabled", True):
             continue
         # Org scope: subscription's installation must belong to this org
-        if sub.get("org_id") and sub["org_id"] != org_id:
+        sub_org = sub.get("org_id")
+        if not sub_org or not org_id or sub_org != org_id:
             continue
         matched.append(sub)
     return matched
