@@ -661,6 +661,7 @@ async def set_secret(
         if description is not None:
             existing.description = description
         await db.flush()
+        await db.refresh(existing)
         return existing
 
     secret = AppSecret(
@@ -671,6 +672,7 @@ async def set_secret(
     )
     db.add(secret)
     await db.flush()
+    await db.refresh(secret)
     return secret
 
 
