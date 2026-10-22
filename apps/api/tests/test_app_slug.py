@@ -33,7 +33,7 @@ GENERATE_CASES = [
     ("My Cool App", "my-cool-app"),
     ("LMS Connector v2", "lms-connector-v2"),
     ("  Spaces  ", "spaces"),
-    ("Under_Score", "under-score"),
+    ("Under_Score", "underscore"),
 ]
 
 @pytest.mark.parametrize("name,expected", GENERATE_CASES)
