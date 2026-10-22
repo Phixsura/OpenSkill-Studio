@@ -38,7 +38,7 @@ def validate_request(
             errors.append(f"Unsupported Content-Type: {content_type}")
 
     # Required headers
-    if required_headers and actual_headers:
+    if required_headers is not None and actual_headers is not None:
         for key, expected in required_headers.items():
             actual = actual_headers.get(key)
             if actual is None:
