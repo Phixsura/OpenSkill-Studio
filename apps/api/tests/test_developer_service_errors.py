@@ -7,7 +7,7 @@ from app.services.developer import (
     InvalidStateTransitionError, PermissionDeniedError,
     AlreadyInstalledError, ApiKeyNotFoundError,
 )
-from app.core.exceptions import AppError
+from app.exceptions import AppError
 
 ERRORS = [
     DeveloperNotFoundError,
