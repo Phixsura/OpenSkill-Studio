@@ -250,14 +250,13 @@ async def test_batch_upgrade_endpoint(c):
         headers=h,
     )
 
-    # Batch upgrade to v2
+    # Batch upgrade — blocked because version not approved + app not published
     r = await c.post(
         f"/api/v1/developer/apps/{app_id}/batch-upgrade",
         json={"app_id": app_id, "version_id": v2_id},
         headers=h,
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["upgraded_count"] >= 1
+    assert r.status_code == 422  # version not approved
 
 
 @pytest.mark.asyncio

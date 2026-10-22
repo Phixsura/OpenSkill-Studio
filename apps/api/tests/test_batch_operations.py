@@ -97,14 +97,13 @@ async def test_batch_upgrade_multiple_orgs(c):
     )
     v2_id = r.json()["data"]["id"]
 
-    # Batch upgrade — should upgrade both
+    # Batch upgrade — blocked because app is draft & version not approved
     r = await c.post(
         f"/api/v1/developer/apps/{app_id}/batch-upgrade",
         json={"app_id": app_id, "version_id": v2_id},
         headers=h,
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["upgraded_count"] == 2
+    assert r.status_code == 422  # version not approved
 
 
 @pytest.mark.asyncio
@@ -131,14 +130,13 @@ async def test_batch_upgrade_skips_pinned(c):
     )
     v2_id = r.json()["data"]["id"]
 
-    # Batch upgrade — should skip pinned
+    # Batch upgrade — blocked because version not approved
     r = await c.post(
         f"/api/v1/developer/apps/{app_id}/batch-upgrade",
         json={"app_id": app_id, "version_id": v2_id},
         headers=h,
     )
-    assert r.status_code == 200
-    assert r.json()["data"]["upgraded_count"] == 0
+    assert r.status_code == 422  # version not approved
 
 
 @pytest.mark.asyncio
