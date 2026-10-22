@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     composer,
     dev_sandbox_tools,
     developer_accounts,
+    openapi_docs,
     webhook_deliveries,
     developer_apps,
     discussions,
@@ -114,6 +115,7 @@ api_v1_router.include_router(adapter_registry.router)
 api_v1_router.include_router(manifest_validation.router)
 api_v1_router.include_router(dev_sandbox_tools.router)
 api_v1_router.include_router(webhook_deliveries.router)
+api_v1_router.include_router(openapi_docs.router)
 api_v1_router.include_router(oauth.router)
 
 # ── Control plane (Issue #27) ──
