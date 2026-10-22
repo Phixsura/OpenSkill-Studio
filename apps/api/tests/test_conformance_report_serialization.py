@@ -32,7 +32,7 @@ def test_summary_counts():
     s = r.summary
     assert isinstance(s, dict)
     # Should have pass/fail counts
-    total = s.get("total", 0)
+    total = s.get("total_checks", 0)
     assert total == 3
 
 def test_passed_all_pass():
