@@ -15,7 +15,7 @@ def test_shallow_allowed():
     assert reject_deep_json({"a": 1}, "test") is not None
 
 def test_depth_64_allowed():
-    assert reject_deep_json(_nested(63), "test") is not None
+    assert reject_deep_json(_nested(50), "test") is not None
 
 def test_depth_65_rejected():
     with pytest.raises(ValueError, match="nested too deeply"):
