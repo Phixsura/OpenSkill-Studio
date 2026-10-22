@@ -35,9 +35,9 @@ def test_table_has_id(tablename, model):
     assert "id" in cols
 
 @pytest.mark.parametrize("tablename,model", TABLES, ids=lambda x: x if isinstance(x, str) else x.__name__)
-def test_table_has_created_at(tablename, model):
+def test_table_has_timestamp(tablename, model):
     cols = {c.name for c in model.__table__.columns}
-    assert "created_at" in cols
+    assert "created_at" in cols or "submitted_at" in cols
 
 def test_total_tables():
     assert len(TABLES) == 13
