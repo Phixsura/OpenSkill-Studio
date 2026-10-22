@@ -68,8 +68,8 @@ def test_dispatcher_has_emit():
 
 def test_dispatcher_filter_matching():
     d = EventDispatcher()
-    assert d._matches_filter({"status": "active"}, {"status": "active"}) is True
-    assert d._matches_filter({"status": "active"}, {"status": "inactive"}) is False
+    assert d._matches_filter({"status": "active"}, {"field": "status", "operator": "eq", "value": "active"}) is True
+    assert d._matches_filter({"status": "active"}, {"field": "status", "operator": "eq", "value": "inactive"}) is False
 
 def test_dispatcher_flatten():
     d = EventDispatcher()
