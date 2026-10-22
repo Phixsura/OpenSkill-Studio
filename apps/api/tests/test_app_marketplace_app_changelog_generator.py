@@ -1,15 +1,22 @@
-from app.services.app_marketplace_app_changelog_generator import auto_generate_changelog
+from app.services.app_marketplace_app_changelog_generator import generate_changelog_entry, render_changelog_markdown, compare_versions_for_changelog
 
-def test_initial():
-    cl = auto_generate_changelog(old_manifest=None, new_manifest={}, version="1.0.0")
-    assert "Initial release" in cl
+def test_entry():
+    e = generate_changelog_entry(version="2.0.0", changes=[
+        {"type": "added", "description": "Dark mode"},
+        {"type": "fixed", "description": "Login bug"},
+    ])
+    assert e["total_changes"] == 2
+    assert "Dark mode" in e["categories"]["added"]
 
-def test_with_changes():
-    old = {"permissions": ["read:cohorts"]}
-    new = {"permissions": ["read:cohorts", "write:cohorts"]}
-    cl = auto_generate_changelog(old_manifest=old, new_manifest=new, version="2.0.0")
-    assert "write:cohorts" in cl
+def test_markdown():
+    entries = [generate_changelog_entry(version="1.0", changes=[{"type": "added", "description": "Initial"}])]
+    md = render_changelog_markdown(entries=entries)
+    assert "# Changelog" in md
+    assert "## 1.0" in md
 
-def test_no_changes():
-    cl = auto_generate_changelog(old_manifest={"permissions": ["read:cohorts"]}, new_manifest={"permissions": ["read:cohorts"]}, version="1.1")
-    assert "Minor" in cl
+def test_compare():
+    changes = compare_versions_for_changelog(
+        old_manifest={"permissions": ["read"], "entry_point": "old.js"},
+        new_manifest={"permissions": ["read", "write"], "entry_point": "new.js"})
+    assert any("write" in c["description"] for c in changes)
+    assert any("Entry point" in c["description"] for c in changes)
