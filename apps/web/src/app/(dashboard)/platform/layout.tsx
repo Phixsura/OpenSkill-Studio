@@ -32,6 +32,7 @@ const TABS: { slug: string; label: string; roles: string[] | null }[] = [
   // R113[M22]: audit-events allows all three platform roles server-side.
   { slug: "audit", label: "Audit", roles: ["platform_admin", "platform_support", "billing_admin"] },
   { slug: "app-reviews", label: "App Reviews", roles: ["platform_admin"] },
+  { slug: "developer-platform", label: "Dev Platform", roles: ["platform_admin"] },
 ];
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {

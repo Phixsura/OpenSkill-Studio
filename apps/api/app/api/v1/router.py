@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     app_marketplace,
     app_review,
     adapter_registry,
+    app_admin,
     app_conformance,
     app_observability,
     app_sandbox,
@@ -108,6 +109,7 @@ api_v1_router.include_router(app_marketplace.router)
 api_v1_router.include_router(app_sandbox.router)
 api_v1_router.include_router(app_observability.router)
 api_v1_router.include_router(app_conformance.router)
+api_v1_router.include_router(app_admin.router)
 api_v1_router.include_router(adapter_registry.router)
 api_v1_router.include_router(manifest_validation.router)
 api_v1_router.include_router(dev_sandbox_tools.router)
