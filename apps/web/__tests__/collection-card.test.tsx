@@ -3,17 +3,20 @@ import { describe, expect, it } from "vitest";
 import { CollectionCard } from "@/components/collection-card";
 
 describe("CollectionCard", () => {
-  it("shows title and description", () => {
-    const { container } = render(<CollectionCard title="Best Apps" description="Top rated" appCount={10} slug="best" />);
-    expect(container.textContent).toContain("Best Apps");
-    expect(container.textContent).toContain("Top rated");
+  it("renders collection info", () => {
+    const { container } = render(
+      <CollectionCard title="Best Tools" description="Top picks" appCount={5} slug="best-tools"
+        previewApps={[{ name: "App1", icon: "🔧" }, { name: "App2" }]} />
+    );
+    expect(container.textContent).toContain("Best Tools");
+    expect(container.textContent).toContain("5 apps");
+    expect(container.textContent).toContain("+3");
   });
-  it("shows app count", () => {
-    const { container } = render(<CollectionCard title="X" description="Y" appCount={42} slug="x" />);
-    expect(container.textContent).toContain("42 apps");
-  });
-  it("has link", () => {
-    const { container } = render(<CollectionCard title="X" description="Y" appCount={0} slug="my-collection" />);
-    expect(container.querySelector("a")?.getAttribute("href")).toContain("my-collection");
+  it("links to collection page", () => {
+    const { container } = render(
+      <CollectionCard title="T" description="D" appCount={3} slug="my-col" previewApps={[]} />
+    );
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("/marketplace/collections/my-col");
   });
 });
