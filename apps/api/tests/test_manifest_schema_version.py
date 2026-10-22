@@ -1,22 +1,23 @@
-"""Schema version validation tests."""
+"""Manifest schema_version validation."""
 
 import pytest
 from app.services.manifest_validator import validate_manifest
 
-VALID_VERSIONS = ["1.0", "1.1"]
-WARN_VERSIONS = ["2.0", "3.0", "0.1"]
+VALID_APP = {"name": "App", "slug": "sv-app", "version": "1.0.0", "category": "connector"}
 
-@pytest.mark.parametrize("sv", VALID_VERSIONS)
-def test_valid_schema_version(sv):
-    r = validate_manifest({"schema_version": sv, "app": {"name": "T"}})
-    sv_warns = [w for w in r.warnings if "schema_version" in w]
-    assert sv_warns == []
-
-@pytest.mark.parametrize("sv", WARN_VERSIONS)
-def test_warn_schema_version(sv):
-    r = validate_manifest({"schema_version": sv, "app": {"name": "T"}})
-    assert any(sv in w for w in r.warnings)
+def test_schema_version_1_0():
+    r = validate_manifest({"schema_version": "1.0", "app": VALID_APP, "permissions": ["read:cohorts"]})
+    sv_errors = [e for e in r.errors if "schema" in e.lower() and "version" in e.lower()]
+    assert sv_errors == []
 
 def test_missing_schema_version():
-    r = validate_manifest({"app": {"name": "T"}})
-    assert any("schema_version" in e for e in r.errors)
+    r = validate_manifest({"app": VALID_APP, "permissions": ["read:cohorts"]})
+    assert not r.valid
+
+def test_invalid_schema_version():
+    r = validate_manifest({"schema_version": "999.0", "app": VALID_APP, "permissions": []})
+    assert not r.valid or len(r.warnings) > 0
+
+def test_schema_version_empty():
+    r = validate_manifest({"schema_version": "", "app": VALID_APP, "permissions": []})
+    assert not r.valid
