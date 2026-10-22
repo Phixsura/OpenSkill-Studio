@@ -152,6 +152,48 @@ async def get_install_breakdown(
     return DataResponse(data={"app_id": app_id, "breakdown": breakdown})
 
 
+@router.get(
+    "/developer/apps/{app_id}/version-adoption",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_version_adoption(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get version adoption stats — what % of installs use each version."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_lifecycle import get_version_adoption as _get_adoption
+
+    adoption = await _get_adoption(db, app_id)
+    return DataResponse(data={"app_id": app_id, "versions": adoption})
+
+
+@router.get(
+    "/developer/apps/{app_id}/health",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_app_health(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Aggregate health check — execution error rate + version adoption."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_lifecycle import check_app_health
+
+    health = await check_app_health(db, app_id)
+    return DataResponse(data={"app_id": app_id, **health})
+
+
 # ── Tenant/Org Dashboard ────────────────────────────────
 
 
