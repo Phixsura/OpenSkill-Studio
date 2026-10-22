@@ -9,6 +9,8 @@ from app.services.adapter_sdk import (
 
 
 class TestAdapter(ProviderAdapterSDK):
+    name = "test-adapter"
+    display_name = "Test Adapter"
     async def execute(self, capability, input_data, config, credentials):
         return {"result": "ok"}
 
