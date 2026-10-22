@@ -181,17 +181,15 @@ export default function DeveloperPortalPage() {
           </p>
         </Link>
 
-        <a
-          href="https://docs.openskill.dev/developer"
-          target="_blank"
-          rel="noopener noreferrer"
+        <Link
+          href="/dashboard/developer/docs"
           className="block rounded-lg border p-6 transition-colors hover:border-blue-500 dark:border-gray-700"
         >
           <h3 className="mb-2 text-lg font-semibold">📖 Documentation</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400">
             SDK guides, API reference, and best practices
           </p>
-        </a>
+        </Link>
       </div>
 
       <div className="text-sm text-gray-500 dark:text-gray-400">
