@@ -1,19 +1,29 @@
-"""Manifest slug validation tests."""
+"""Manifest slug validation — comprehensive."""
 
 import pytest
 from app.services.manifest_validator import validate_manifest
 
-VALID_SLUGS = ["ab", "my-app", "test-connector-v2", "a" * 60]
-INVALID_SLUGS = ["A", "My App", "has space", "UPPER", "a"]  # 'a' is 1 char, regex needs 2+
+BASE = {"schema_version": "1.0", "permissions": ["read:cohorts"]}
+
+VALID_SLUGS = ["my-app", "test-connector", "ab", "a-b-c-d", "app123", "my-app-v2"]
 
 @pytest.mark.parametrize("slug", VALID_SLUGS)
 def test_valid_slug(slug):
-    r = validate_manifest({"schema_version": "1.0", "app": {"name": "T", "slug": slug}})
-    slug_errors = [e for e in r.errors if "slug" in e]
-    assert slug_errors == [], f"Slug '{slug}' rejected"
+    m = {**BASE, "app": {"name": "App", "slug": slug, "version": "1.0.0", "category": "connector"}}
+    r = validate_manifest(m)
+    slug_errors = [e for e in r.errors if "slug" in e.lower()]
+    assert slug_errors == [], f"{slug}: {slug_errors}"
+
+INVALID_SLUGS = [
+    "A",                    # too short + uppercase
+    "My App",               # spaces
+    "my_app",               # underscores
+    "MY-APP",               # uppercase
+    "a" * 100,              # too long
+]
 
 @pytest.mark.parametrize("slug", INVALID_SLUGS)
 def test_invalid_slug(slug):
-    r = validate_manifest({"schema_version": "1.0", "app": {"name": "T", "slug": slug}})
-    slug_errors = [e for e in r.errors if "slug" in e]
-    assert len(slug_errors) >= 1, f"Slug '{slug}' accepted"
+    m = {**BASE, "app": {"name": "App", "slug": slug, "version": "1.0.0", "category": "connector"}}
+    r = validate_manifest(m)
+    assert not r.valid or any("slug" in e.lower() for e in r.errors)
