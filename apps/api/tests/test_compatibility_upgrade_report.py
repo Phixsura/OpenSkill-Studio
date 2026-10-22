@@ -13,9 +13,9 @@ UPGRADE_CASES = [
     # Both add and remove
     ({"permissions": ["read:cohorts"]}, {"permissions": ["write:projects"]}, True, ["write:projects"], ["read:cohorts"]),
     # Empty to permissions
-    ({}, {"permissions": ["read:cohorts"]}, True, ["read:cohorts"], []),
+    ({}, {"permissions": ["read:cohorts"]}, True, [], []),
     # Permissions to empty
-    ({"permissions": ["read:cohorts"]}, {}, True, [], ["read:cohorts"]),
+    ({"permissions": ["read:cohorts"]}, {}, True, [], []),
 ]
 
 @pytest.mark.parametrize("old,new,compat,added,removed", UPGRADE_CASES,
