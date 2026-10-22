@@ -25,9 +25,13 @@ def _safe_method(method: str) -> str:
     return m if m in _VALID_METHODS else "GET"
 
 
+def _safe_version(v: str) -> str:
+    s = str(v)
+    return s if re.fullmatch(r"[0-9A-Za-z.+\-]{1,32}", s) else "1.0.0"
+
 def generate_typescript_client(*, app: dict, endpoints: list[dict]) -> str:
-    app_name = re.sub(r'[^\w\s-]', '', app.get('name', 'App'))
-    lines = [f"// Auto-generated SDK for {app_name}", f"// Version: {app.get('version', '1.0.0')}", "",
+    app_name = re.sub(r'[^w -]', '', str(app.get('name', 'App')))[:50]
+    lines = [f"// Auto-generated SDK for {app_name}", f"// Version: {_safe_version(app.get('version', '1.0.0'))}", "",
              "export class AppClient {", "  constructor(private baseUrl: string, private token: string) {}", ""]
     for ep in endpoints:
         method = _safe_method(ep.get("method", "GET"))
@@ -46,7 +50,7 @@ def generate_typescript_client(*, app: dict, endpoints: list[dict]) -> str:
 
 
 def generate_python_client(*, app: dict, endpoints: list[dict]) -> str:
-    app_name = re.sub(r'[^\w\s-]', '', app.get('name', 'App'))
+    app_name = re.sub(r'[^w -]', '', str(app.get('name', 'App')))[:50]
     lines = [f'"""Auto-generated SDK for {app_name}"""', "", "import httpx", "",
              "class AppClient:", '    def __init__(self, base_url: str, token: str) -> None:',
              "        self._base = base_url", "        self._token = token",
