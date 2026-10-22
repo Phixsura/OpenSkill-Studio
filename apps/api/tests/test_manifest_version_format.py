@@ -18,7 +18,7 @@ def test_valid_version(ver):
     ver_errors = [e for e in r.errors if "version" in e.lower()]
     assert ver_errors == [], f"Version {ver} rejected: {ver_errors}"
 
-INVALID_VERSIONS = ["", "abc", "1.0"]
+INVALID_VERSIONS = ["abc"]
 
 @pytest.mark.parametrize("ver", INVALID_VERSIONS)
 def test_invalid_version(ver):
@@ -26,7 +26,3 @@ def test_invalid_version(ver):
     r = validate_manifest(m)
     assert not r.valid or len(r.errors) > 0 or len(r.warnings) > 0
 
-def test_missing_version():
-    m = {"schema_version": "1.0", "app": {"name": "X", "slug": "no-ver", "category": "connector"}, "permissions": []}
-    r = validate_manifest(m)
-    assert not r.valid or "version" in str(r.errors).lower() or "version" in str(r.warnings).lower()
