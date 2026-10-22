@@ -86,3 +86,49 @@ async def list_categories(
         })
 
     return DataResponse(data=categories)
+
+
+@router.get(
+    "/marketplace/featured",
+    dependencies=[Depends(rate_limit(120, 60))],
+)
+async def get_featured_apps(
+    limit: int = 6,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get featured apps by install count (public, no auth)."""
+    from app.services.app_discovery import get_featured_apps as _featured
+
+    apps = await _featured(db, limit=min(limit, 20))
+    return DataResponse(data=apps)
+
+
+@router.get(
+    "/marketplace/recent",
+    dependencies=[Depends(rate_limit(120, 60))],
+)
+async def get_recent_apps(
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get recently published apps (public, no auth)."""
+    from app.services.app_discovery import get_recent_apps as _recent
+
+    apps = await _recent(db, limit=min(limit, 20))
+    return DataResponse(data=apps)
+
+
+@router.get(
+    "/marketplace/trending",
+    dependencies=[Depends(rate_limit(120, 60))],
+)
+async def get_trending_apps(
+    days: int = 7,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get trending apps by recent installs (public, no auth)."""
+    from app.services.app_discovery import get_trending_apps as _trending
+
+    apps = await _trending(db, days=min(days, 30), limit=min(limit, 20))
+    return DataResponse(data=apps)
