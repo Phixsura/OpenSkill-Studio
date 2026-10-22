@@ -3,15 +3,22 @@ import { describe, expect, it } from "vitest";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 
 describe("OnboardingChecklist", () => {
-  it("shows steps", () => {
-    const { container } = render(<OnboardingChecklist steps={["Step 1", "Step 2"]} completed={["Step 1"]} />);
-    expect(container.textContent).toContain("Step 1");
-    expect(container.textContent).toContain("Step 2");
-    expect(container.textContent).toContain("50%");
+  const steps = [
+    { key: "profile", title: "Complete profile", required: true, completed: true },
+    { key: "app", title: "Create app", required: true, completed: false },
+    { key: "docs", title: "Add docs", required: false, completed: false },
+  ];
+  it("renders progress", () => {
+    const { container } = render(<OnboardingChecklist steps={steps} progressPct={33} canPublish={false} />);
+    expect(container.textContent).toContain("33%");
+    expect(container.textContent).toContain("Complete profile");
   });
-  it("marks completed", () => {
-    const { container } = render(<OnboardingChecklist steps={["A", "B"]} completed={["A"]} />);
-    expect(container.textContent).toContain("✅");
-    expect(container.textContent).toContain("⬜");
+  it("shows required badge", () => {
+    const { container } = render(<OnboardingChecklist steps={steps} progressPct={33} canPublish={false} />);
+    expect(container.textContent).toContain("Required");
+  });
+  it("shows publish ready", () => {
+    const { container } = render(<OnboardingChecklist steps={steps} progressPct={100} canPublish={true} />);
+    expect(container.textContent).toContain("publish apps");
   });
 });
