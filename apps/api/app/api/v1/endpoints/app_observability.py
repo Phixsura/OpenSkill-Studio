@@ -195,6 +195,71 @@ async def get_app_health(
 
 
 @router.get(
+    "/developer/apps/{app_id}/analytics/installs",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_install_analytics(
+    app_id: str,
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get daily install/uninstall timeline for the last N days."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_analytics import get_install_timeline
+
+    timeline = await get_install_timeline(db, app_id, days=min(days, 90))
+    return DataResponse(data={"app_id": app_id, "days": days, "timeline": timeline})
+
+
+@router.get(
+    "/developer/apps/{app_id}/analytics/executions",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def get_execution_analytics(
+    app_id: str,
+    days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get hourly execution timeline for the last N days."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_analytics import get_execution_timeline
+
+    timeline = await get_execution_timeline(db, app_id, days=min(days, 30))
+    return DataResponse(data={"app_id": app_id, "days": days, "timeline": timeline})
+
+
+@router.get(
+    "/developer/apps/{app_id}/analytics/summary",
+    dependencies=[Depends(rate_limit(60, 60))],
+)
+async def get_analytics_summary(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get comprehensive summary metrics."""
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    from app.services.app_analytics import get_app_summary_metrics
+
+    metrics = await get_app_summary_metrics(db, app_id)
+    return DataResponse(data={"app_id": app_id, **metrics})
+
+
+@router.get(
     "/developer/apps/{app_id}/usage",
     dependencies=[Depends(rate_limit(60, 60))],
 )
