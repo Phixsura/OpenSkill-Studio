@@ -5,21 +5,34 @@ from app.services.app_permissions import (
     check_permission,
     get_missing_permissions,
     get_permission_summary,
+    PATH_PERMISSION_MAP,
+    WRITE_PERMISSION_MAP,
 )
 
-VALID_PERMISSIONS = [
-    "read:cohorts", "write:cohorts", "read:projects", "write:projects",
-    "read:submissions", "write:evaluations", "read:skills", "read:analytics",
-    "subscribe:events", "extend:ui", "run:background_jobs", "read:talent",
-]
+RESOURCES = list(PATH_PERMISSION_MAP.keys())
 
-@pytest.mark.parametrize("perm", VALID_PERMISSIONS)
-def test_check_valid_permission(perm):
-    assert check_permission([perm], perm) is True
+@pytest.mark.parametrize("resource", RESOURCES)
+def test_read_granted(resource):
+    perm = PATH_PERMISSION_MAP[resource]
+    assert check_permission([perm], resource) is True
 
-@pytest.mark.parametrize("perm", VALID_PERMISSIONS)
-def test_check_missing_permission(perm):
-    assert check_permission([], perm) is False
+@pytest.mark.parametrize("resource", RESOURCES)
+def test_read_denied(resource):
+    assert check_permission(["unrelated:scope"], resource) is False
+
+WRITE_RESOURCES = list(WRITE_PERMISSION_MAP.keys())
+
+@pytest.mark.parametrize("resource", WRITE_RESOURCES)
+def test_write_granted(resource):
+    perm = WRITE_PERMISSION_MAP[resource]
+    assert check_permission([perm], resource, is_write=True) is True
+
+@pytest.mark.parametrize("resource", WRITE_RESOURCES)
+def test_write_denied(resource):
+    assert check_permission([], resource, is_write=True) is False
+
+def test_unknown_resource_allowed():
+    assert check_permission([], "nonexistent_resource") is True
 
 MISSING_CASES = [
     (["read:cohorts"], ["read:cohorts", "write:cohorts"], ["write:cohorts"]),
@@ -32,11 +45,10 @@ def test_get_missing_permissions(granted, required, expected_missing):
     result = get_missing_permissions(granted, required)
     assert set(result) == set(expected_missing)
 
-def test_permission_summary_groups():
-    perms = ["read:cohorts", "write:projects", "subscribe:events", "extend:ui"]
+def test_permission_summary():
+    perms = ["read:cohorts", "write:projects", "subscribe:events"]
     summary = get_permission_summary(perms)
     assert isinstance(summary, dict)
 
 def test_permission_summary_empty():
-    summary = get_permission_summary([])
-    assert isinstance(summary, dict)
+    assert isinstance(get_permission_summary([]), dict)
