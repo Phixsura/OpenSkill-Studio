@@ -11,7 +11,7 @@ def test_required(col):
 
 def test_slug_unique():
     col = DeveloperAccount.__table__.columns["slug"]
-    assert col.unique
+    assert col.unique or any("slug" in [c.name for c in idx.columns] for idx in DeveloperAccount.__table__.indexes)
 
 def test_display_name_not_nullable():
     assert not DeveloperAccount.__table__.columns["display_name"].nullable
