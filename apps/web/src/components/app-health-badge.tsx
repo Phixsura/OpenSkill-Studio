@@ -37,7 +37,7 @@ export function AppHealthBadge({ appId, showLabel = false }: AppHealthBadgeProps
   }
 
   const status = data?.status ?? "unknown";
-  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.unknown;
+  const config = STATUS_CONFIG[status] ?? { icon: "⚪", color: "text-gray-400", label: "Unknown" };
 
   return (
     <span className={`inline-flex items-center gap-1 ${config.color}`} title={config.label}>
