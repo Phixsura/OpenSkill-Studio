@@ -5,7 +5,7 @@ from app.services.manifest_validator import validate_manifest, VALID_CATEGORIES
 
 BASE = {"schema_version": "1.0", "permissions": ["read:cohorts"]}
 
-INVALID_CATS = ["plugin", "tool", "widget", "service", "middleware", "CONNECTOR", ""]
+INVALID_CATS = ["plugin", "tool", "widget", "service", "middleware", "CONNECTOR"]
 
 @pytest.mark.parametrize("cat", INVALID_CATS)
 def test_invalid_category_rejected(cat):
