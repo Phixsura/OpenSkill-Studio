@@ -55,6 +55,49 @@ async def batch_upgrade_installations(
     )
 
 
+class CompatibilityCheckRequest(BaseModel):
+    current_version_id: str
+    new_version_id: str
+
+
+@router.post(
+    "/developer/apps/{app_id}/check-compatibility",
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+async def check_version_compatibility(
+    app_id: str,
+    body: CompatibilityCheckRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Check compatibility between two app versions.
+
+    Reports breaking changes, permission diffs, and upgrade safety.
+    """
+    app = await dev_svc.get_app(db, app_id)
+    account = await dev_svc.get_developer_account(db, app.developer_id)
+    if account.owner_user_id != user.id:
+        raise dev_svc.PermissionDeniedError()
+
+    current_ver = await dev_svc.get_app_version(db, body.current_version_id)
+    new_ver = await dev_svc.get_app_version(db, body.new_version_id)
+
+    if current_ver.app_id != app_id or new_ver.app_id != app_id:
+        raise dev_svc.AppVersionNotFoundError()
+
+    from app.services.app_compatibility import check_upgrade_compatibility
+
+    report = check_upgrade_compatibility(current_ver.manifest, new_ver.manifest)
+    return DataResponse(
+        data={
+            "app_id": app_id,
+            "from_version": current_ver.version,
+            "to_version": new_ver.version,
+            **report,
+        }
+    )
+
+
 class DeprecationNoticeRequest(BaseModel):
     message: str | None = None
     sunset_date: str | None = None
