@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     client_briefs,
     cohorts,
     composer,
+    dev_sandbox_tools,
     developer_accounts,
     developer_apps,
     discussions,
@@ -108,6 +109,7 @@ api_v1_router.include_router(app_observability.router)
 api_v1_router.include_router(app_conformance.router)
 api_v1_router.include_router(adapter_registry.router)
 api_v1_router.include_router(manifest_validation.router)
+api_v1_router.include_router(dev_sandbox_tools.router)
 api_v1_router.include_router(oauth.router)
 
 # ── Control plane (Issue #27) ──
