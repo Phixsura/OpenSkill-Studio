@@ -7,7 +7,7 @@ def test_report():
     assert len(r["highlights"]) >= 3
 
 def test_no_highlights():
-    h = build_highlights({"api_calls": 100})
+    h = build_highlights({"api_calls": 100, "uptime_pct": 90, "error_count": 5})
     assert "No notable" in h[0]
 
 def test_compare():
