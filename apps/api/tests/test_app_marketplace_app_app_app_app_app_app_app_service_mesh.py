@@ -1,19 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_service_mesh import build_mesh
+from app.services.app_marketplace_app_app_app_app_app_app_app_service_mesh import create_mesh, find_dependencies
 
 def test_mesh():
-    services = [
-        {"id": "gateway", "name": "API Gateway", "status": "healthy", "rps": 5000},
-        {"id": "auth", "name": "Auth Service", "status": "healthy", "rps": 2000},
-        {"id": "users", "name": "User Service", "status": "degraded", "rps": 1500},
-        {"id": "billing", "name": "Billing", "status": "healthy", "rps": 500},
-    ]
-    connections = [
-        {"from": "gateway", "to": "auth"}, {"from": "gateway", "to": "users"},
-        {"from": "gateway", "to": "billing"}, {"from": "users", "to": "auth"},
-    ]
-    r = build_mesh(services, connections)
-    assert r["total_services"] == 4
-    assert r["total_connections"] == 4
-    assert r["unhealthy_count"] == 1
-    assert r["mesh_health"] == "degraded"
-    assert r["critical_path"][0] == "gateway"
+    m = create_mesh([
+        {"name": "api", "port": 8080, "depends_on": ["auth", "db"]},
+        {"name": "auth", "port": 8081, "depends_on": ["db"]},
+        {"name": "db", "port": 5432, "healthy": True},
+    ])
+    assert m["node_count"] == 3
+    assert m["connection_count"] == 3
+    assert m["healthy"] == 3
+
+def test_deps():
+    m = create_mesh([
+        {"name": "api", "depends_on": ["auth", "db"]},
+        {"name": "auth", "depends_on": ["db"]},
+        {"name": "db"},
+    ])
+    d = find_dependencies(m, "auth")
+    assert "db" in d["depends_on"]
+    assert "api" in d["depended_by"]
+    assert not d["is_leaf"]  # has deps
+    assert not d["is_root"]  # has dependents

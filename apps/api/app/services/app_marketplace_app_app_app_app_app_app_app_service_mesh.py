@@ -1,30 +1,26 @@
-"""Service mesh topology — map service dependencies and health."""
+"""Service mesh config — manage service-to-service communication."""
 from __future__ import annotations
 
 
-def build_mesh(services: list[dict], connections: list[dict]) -> dict:
-    nodes = {}
-    for s in services:
-        sid = s["id"]
-        nodes[sid] = {"id": sid, "name": s.get("name", sid), "status": s.get("status", "healthy"),
-                      "latency_ms": s.get("latency_ms", 0), "rps": s.get("rps", 0),
-                      "upstream": [], "downstream": []}
-    for c in connections:
-        src, dst = c["from"], c["to"]
-        if src in nodes:
-            nodes[src]["downstream"].append(dst)
-        if dst in nodes:
-            nodes[dst]["upstream"].append(src)
-    unhealthy = [n for n in nodes.values() if n["status"] != "healthy"]
-    critical_path = _find_critical(nodes)
-    return {"nodes": list(nodes.values()), "total_services": len(nodes),
-            "total_connections": len(connections),
-            "unhealthy_count": len(unhealthy),
-            "mesh_health": "degraded" if unhealthy else "healthy",
-            "critical_path": critical_path}
+def create_mesh(services: list[dict]) -> dict:
+    nodes = []
+    connections = []
+    for svc in services:
+        nodes.append({"name": svc["name"], "port": svc.get("port", 8080),
+                       "replicas": svc.get("replicas", 1), "healthy": svc.get("healthy", True)})
+        for dep in svc.get("depends_on", []):
+            connections.append({"from": svc["name"], "to": dep,
+                                "protocol": svc.get("protocol", "http"),
+                                "timeout_ms": svc.get("timeout_ms", 5000)})
+    healthy = sum(1 for n in nodes if n["healthy"])
+    return {"nodes": nodes, "connections": connections,
+            "node_count": len(nodes), "connection_count": len(connections),
+            "healthy": healthy, "unhealthy": len(nodes) - healthy}
 
 
-def _find_critical(nodes: dict) -> list[str]:
-    """Find the service with most downstream deps (highest blast radius)."""
-    ranked = sorted(nodes.values(), key=lambda n: len(n["downstream"]), reverse=True)
-    return [n["id"] for n in ranked[:3] if n["downstream"]]
+def find_dependencies(mesh: dict, service_name: str) -> dict:
+    direct = [c["to"] for c in mesh["connections"] if c["from"] == service_name]
+    dependents = [c["from"] for c in mesh["connections"] if c["to"] == service_name]
+    return {"service": service_name, "depends_on": direct,
+            "depended_by": dependents, "is_leaf": len(direct) == 0,
+            "is_root": len(dependents) == 0}

@@ -1,34 +1,35 @@
 "use client";
 
-interface MeshService { name: string; port: number; protocol: string; health: string; depCount: number; hasSidecar: boolean; }
-interface MeshPolicy { source: string; destination: string; allowed: boolean; mtls: boolean; }
-interface ServiceMeshDiagramProps { services: MeshService[]; policies: MeshPolicy[];
-  totalConnections: number; mtlsEnabled: boolean; }
+interface MeshNode { name: string; port: number; replicas: number; healthy: boolean; }
+interface MeshConnection { from: string; to: string; protocol: string; timeoutMs: number; }
+interface ServiceMeshDiagramProps { nodes: MeshNode[]; connections: MeshConnection[];
+  healthy: number; unhealthy: number; }
 
-const healthDot: Record<string, string> = { healthy: "bg-green-500", degraded: "bg-yellow-500", unhealthy: "bg-red-500" };
-
-export function ServiceMeshDiagram({ services, policies, totalConnections, mtlsEnabled }: ServiceMeshDiagramProps) {
+export function ServiceMeshDiagram({ nodes, connections, healthy, unhealthy }: ServiceMeshDiagramProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Service Mesh</h3>
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span>{services.length} services</span>
-          <span>{totalConnections} connections</span>
-          <span className={mtlsEnabled ? "text-green-600" : "text-yellow-600"}>
-            {mtlsEnabled ? "🔒 mTLS" : "⚠ No mTLS"}
-          </span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🕸️ Service Mesh</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="text-green-600">✓ {healthy} healthy</span>
+          {unhealthy > 0 && <span className="text-red-500">✗ {unhealthy} unhealthy</span>}
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {services.map(s => (
-          <div key={s.name} className="rounded-lg border p-3 dark:border-gray-700">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${healthDot[s.health] ?? "bg-gray-400"}`} />
-              <span className="text-sm font-semibold">{s.name}</span>
-              {s.hasSidecar && <span className="text-xs text-blue-500">🛡️</span>}
-            </div>
-            <p className="mt-1 text-xs text-gray-400">{s.protocol}://:{s.port} · {s.depCount} deps</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4">
+        {nodes.map(n => (
+          <div key={n.name} className={`rounded-lg border p-3 text-center ${n.healthy ? "border-green-300 dark:border-green-800" : "border-red-300 dark:border-red-800"}`}>
+            <div className="text-sm font-mono font-medium">{n.name}</div>
+            <div className="text-[10px] text-gray-400">:{n.port} · {n.replicas}x</div>
+          </div>
+        ))}
+      </div>
+      <div className="border-t dark:border-gray-700 divide-y dark:divide-gray-700">
+        {connections.map((c, i) => (
+          <div key={i} className="flex items-center gap-2 px-4 py-1.5 text-xs">
+            <span className="font-mono">{c.from}</span>
+            <span className="text-gray-400">→</span>
+            <span className="font-mono">{c.to}</span>
+            <span className="text-gray-400 ml-auto">{c.protocol} · {c.timeoutMs}ms</span>
           </div>
         ))}
       </div>
