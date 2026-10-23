@@ -5,7 +5,7 @@ def test_valid_endpoint():
     assert r["pass"]
     assert r["actual_status"] == 200
 
-def test_bad_scheme():
+def test_bad_ep_scheme():
     r = test_endpoint(url="ftp://bad.com")
     assert not r["pass"]
 
