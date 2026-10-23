@@ -1,30 +1,19 @@
 "use client";
 
-interface CollectionCardProps {
-  title: string;
-  description: string;
-  appCount: number;
-  previewApps: { name: string; icon?: string }[];
-  slug: string;
-}
+interface CollectionCardProps { title: string; description: string; curator: string;
+  appCount: number; featured: boolean; onClick: () => void; }
 
-export function CollectionCard({ title, description, appCount, previewApps, slug }: CollectionCardProps) {
+export function CollectionCard({ title, description, curator, appCount, featured, onClick }: CollectionCardProps) {
   return (
-    <a href={`/marketplace/collections/${slug}`}
-      className="block rounded-lg border border-gray-200 p-4 transition hover:shadow-md dark:border-gray-700">
-      <h3 className="font-semibold">{title}</h3>
-      <p className="mt-1 text-sm text-gray-500 line-clamp-2">{description}</p>
-      <div className="mt-3 flex items-center gap-2">
-        {previewApps.map((a, i) => (
-          <span key={i} className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-sm dark:bg-gray-700">
-            {a.icon || a.name[0]}
-          </span>
-        ))}
-        {appCount > previewApps.length && (
-          <span className="text-xs text-gray-400">+{appCount - previewApps.length}</span>
-        )}
+    <button onClick={onClick}
+      className={`w-full rounded-xl border p-4 text-left hover:shadow transition ${featured ? "border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10" : "dark:border-gray-700"}`}>
+      {featured && <span className="mb-1 inline-block text-xs text-yellow-600">⭐ Featured Collection</span>}
+      <h3 className="text-sm font-bold">{title}</h3>
+      <p className="mt-1 text-xs text-gray-500 line-clamp-2">{description}</p>
+      <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+        <span>by {curator}</span>
+        <span>{appCount} apps</span>
       </div>
-      <p className="mt-2 text-xs text-gray-400">{appCount} apps</p>
-    </a>
+    </button>
   );
 }
