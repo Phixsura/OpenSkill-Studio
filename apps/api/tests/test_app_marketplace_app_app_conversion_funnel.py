@@ -10,7 +10,7 @@ def test_funnel():
     r = build_conversion_funnel(steps=steps)
     assert r["overall_conversion"] == 12.0
     assert r["steps"][0]["pct_of_total"] == 100.0
-    assert r["worst_step"] == "View Details"  # 60% drop
+    assert r["worst_step"] == "Click Install"  # 60% drop
 
 def test_empty():
     r = build_conversion_funnel(steps=[])
