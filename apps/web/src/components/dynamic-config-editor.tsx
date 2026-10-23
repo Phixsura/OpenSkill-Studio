@@ -1,34 +1,36 @@
 "use client";
 
-interface ConfigEntry { key: string; value: unknown; value_type: string; description: string; environment: string; updated_at: string; }
-interface DynamicConfigEditorProps { configs: ConfigEntry[]; environment: string;
-  onUpdate: (key: string, value: string) => void; onDelete: (key: string) => void; }
+interface ConfigFlag { key: string; value: unknown; description: string; type: string; owner: string; }
+interface DynamicConfigEditorProps { flags: ConfigFlag[]; onUpdate: (key: string, value: unknown) => void; }
 
-const typeIcon: Record<string, string> = { string: "📝", number: "🔢", boolean: "✅", json: "📋" };
-
-export function DynamicConfigEditor({ configs, environment, onUpdate, onDelete }: DynamicConfigEditorProps) {
+export function DynamicConfigEditor({ flags, onUpdate }: DynamicConfigEditorProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Dynamic Config</h2>
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs capitalize dark:bg-gray-800">{environment}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🎛️ Dynamic Config</h3>
+        <span className="text-xs text-gray-400">{flags.length} flags</span>
       </div>
-      {configs.map(c => (
-        <div key={c.key} className="flex items-center justify-between rounded-lg border px-4 py-2.5 dark:border-gray-700">
-          <div className="flex items-center gap-2">
-            <span>{typeIcon[c.value_type] ?? "⚙️"}</span>
+      <div className="divide-y dark:divide-gray-700">
+        {flags.map(f => (
+          <div key={f.key} className="flex items-center justify-between px-4 py-2.5">
             <div>
-              <p className="font-mono text-sm font-medium">{c.key}</p>
-              {c.description && <p className="text-xs text-gray-400">{c.description}</p>}
+              <div className="text-sm font-mono font-medium">{f.key}</div>
+              <div className="text-[10px] text-gray-400">{f.description} · {f.owner}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              {f.type === "bool" ? (
+                <button onClick={() => onUpdate(f.key, !f.value)}
+                  className={`w-8 h-4 rounded-full ${f.value ? "bg-green-500" : "bg-gray-300"}`}>
+                  <span className={`block w-3 h-3 rounded-full bg-white transform ${f.value ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+              ) : (
+                <span className="text-xs font-mono text-gray-400">{String(f.value)}</span>
+              )}
+              <span className="text-[10px] text-gray-300">{f.type}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-blue-600">{String(c.value)}</span>
-            <button onClick={() => onDelete(c.key)} className="text-xs text-red-400">×</button>
-          </div>
-        </div>
-      ))}
-      {configs.length === 0 && <p className="text-center text-sm text-gray-400">No config entries</p>}
+        ))}
+      </div>
     </div>
   );
 }

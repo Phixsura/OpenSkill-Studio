@@ -3,22 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { DynamicConfigEditor } from "@/components/dynamic-config-editor";
 
 describe("DynamicConfigEditor", () => {
-  const configs = [
-    { key: "MAX_RETRIES", value: 3, value_type: "number", description: "Max retries",
-      environment: "production", updated_at: "2026-10-23" },
-    { key: "DEBUG", value: false, value_type: "boolean", description: "",
-      environment: "all", updated_at: "2026-10-22" },
-  ];
-  it("renders", () => {
+  it("renders flags", () => {
     const { container } = render(
-      <DynamicConfigEditor configs={configs} environment="production"
-        onUpdate={vi.fn()} onDelete={vi.fn()} />
+      <DynamicConfigEditor onUpdate={vi.fn()} flags={[
+        { key: "max_retries", value: 3, description: "Max retries", type: "int", owner: "platform" },
+        { key: "debug_mode", value: false, description: "Debug", type: "bool", owner: "dev" },
+      ]} />
     );
     expect(container.textContent).toContain("Dynamic Config");
-    expect(container.textContent).toContain("production");
-    expect(container.textContent).toContain("MAX_RETRIES");
+    expect(container.textContent).toContain("2 flags");
+    expect(container.textContent).toContain("max_retries");
     expect(container.textContent).toContain("3");
-    expect(container.textContent).toContain("🔢");
-    expect(container.textContent).toContain("DEBUG");
+    expect(container.textContent).toContain("debug_mode");
+    expect(container.textContent).toContain("platform");
   });
 });
