@@ -8,7 +8,7 @@ def test_profile():
     r = profile_endpoints(endpoints=eps)
     assert r["total"] == 2
     assert r["slow_endpoints"] == 1
-    assert r["endpoints"][0]["path"] == "/api/search"  # sorted by p95 desc
+    assert r["endpoints"][0]["endpoint"] == "/api/search"  # sorted by p95 desc
     assert r["overall_score"] == 85
 
 def test_all_fast():
