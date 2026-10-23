@@ -1,36 +1,29 @@
 "use client";
 
-import { useState } from "react";
+interface IpRule { cidr: string; label: string; valid: boolean; numHosts: number; }
+interface IpAllowlistEditorProps { rules: IpRule[]; onAdd: (cidr: string, label: string) => void;
+  onRemove: (cidr: string) => void; }
 
-interface IpEntry { entry: string; normalized: string; version: number; num_addresses: number; }
-interface IpAllowlistEditorProps { entries: IpEntry[]; onAdd: (entry: string) => void; onRemove: (entry: string) => void; }
-
-export function IpAllowlistEditor({ entries, onAdd, onRemove }: IpAllowlistEditorProps) {
-  const [newIp, setNewIp] = useState("");
+export function IpAllowlistEditor({ rules, onAdd, onRemove }: IpAllowlistEditorProps) {
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">IP Allowlist</h2>
-      <div className="flex gap-2">
-        <input value={newIp} onChange={e => setNewIp(e.target.value)} placeholder="e.g. 10.0.0.0/8"
-          className="flex-1 rounded border px-3 py-1.5 font-mono text-sm dark:border-gray-600 dark:bg-gray-700" />
-        <button onClick={() => { onAdd(newIp); setNewIp(""); }}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">Add</button>
-      </div>
-      {entries.length === 0 ? (
-        <p className="text-sm text-gray-400">No IP restrictions — all IPs allowed</p>
-      ) : (
-        <div className="space-y-1.5">
-          {entries.map(e => (
-            <div key={e.entry} className="flex items-center justify-between rounded border px-3 py-2 dark:border-gray-700">
-              <div>
-                <span className="font-mono text-sm">{e.normalized}</span>
-                <span className="ml-2 text-xs text-gray-400">IPv{e.version} · {e.num_addresses.toLocaleString()} addr</span>
+      <h3 className="text-sm font-semibold">IP Allowlist</h3>
+      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700">
+        {rules.map(r => (
+          <div key={r.cidr} className="flex items-center justify-between px-4 py-2.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <code className="text-sm font-mono">{r.cidr}</code>
+                {!r.valid && <span className="text-xs text-red-500">Invalid</span>}
               </div>
-              <button onClick={() => onRemove(e.entry)} className="text-xs text-red-500">Remove</button>
+              {r.label && <p className="text-xs text-gray-400">{r.label}</p>}
+              {r.valid && <p className="text-xs text-gray-400">{r.numHosts.toLocaleString()} hosts</p>}
             </div>
-          ))}
-        </div>
-      )}
+            <button onClick={() => onRemove(r.cidr)} className="text-xs text-red-600 hover:underline">Remove</button>
+          </div>
+        ))}
+        {rules.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No rules — all IPs allowed</p>}
+      </div>
     </div>
   );
 }
