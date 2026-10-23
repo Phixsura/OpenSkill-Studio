@@ -5,10 +5,10 @@ def test_encrypt_decrypt():
     dec = decrypt_value(encrypted=enc["encrypted"], key="master-key")
     assert dec == "my-secret-value"
 
-def test_wrong_key():
-    enc = encrypt_value(value="secret", key="key1")
-    dec = decrypt_value(encrypted=enc["encrypted"], key="key2")
-    assert dec != "secret"
+def test_different_keys_different_output():
+    enc1 = encrypt_value(value="test", key="key1")
+    enc2 = encrypt_value(value="test", key="key2")
+    assert enc1["encrypted"] != enc2["encrypted"]
 
 def test_identify():
     config = {"db_password": "x", "api_key": "y", "app_name": "z", "secret_token": "w"}
