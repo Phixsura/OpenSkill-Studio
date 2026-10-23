@@ -11,10 +11,10 @@ HMAC_KEY = secrets.token_bytes(32)
 
 def store_credential(*, name: str, value: str, rotation_days: int = 90) -> dict:
     cred_id = f"cred_{secrets.token_hex(8)}"
-    value_hash = hashlib.sha256(value.encode()).hexdigest()[:12]
+    value_hash = hmac.new(HMAC_KEY, value.encode(), hashlib.sha256).hexdigest()[:16]
     now = datetime.now(timezone.utc)
     return {"id": cred_id, "name": html.escape(name),
-            "value_hash": value_hash, "preview": value[:3] + "•" * 12,
+            "value_hash": value_hash, "preview": "•" * 16,
             "rotation_days": rotation_days,
             "created_at": now.isoformat(),
             "expires_at": (now + timedelta(days=rotation_days)).isoformat(),

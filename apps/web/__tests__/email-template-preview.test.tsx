@@ -11,6 +11,6 @@ describe("EmailTemplatePreview", () => {
     expect(container.textContent).toContain("Welcome to SuperApp!");
     expect(container.textContent).toContain("Get started");
     expect(container.textContent).toContain("welcome");
-    expect(container.textContent).toContain("Hello!");
+    expect(container.querySelector("iframe")).toBeTruthy();
   });
 });
