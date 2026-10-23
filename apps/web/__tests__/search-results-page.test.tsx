@@ -1,24 +1,19 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SearchResultsPage } from "@/components/search-results-page";
 
 describe("SearchResultsPage", () => {
+  const results = [{ id: "a1", name: "Editor", icon: "📝", tagline: "Code editor",
+    category: "tools", rating: 4.5, downloads: 5000, verified: true }];
   it("renders results", () => {
     const { container } = render(
-      <SearchResultsPage query="slack" results={[{ name: "Slack Bot", description: "A bot" }]}
-        total={1} page={1} totalPages={1} facets={{ categories: { comm: 1 } }} onPageChange={vi.fn()} />
+      <SearchResultsPage query="code" results={results} total={1} sortBy="relevance"
+        categories={{ tools: 1 }} hasResults={true}
+        onSort={vi.fn()} onFilterCategory={vi.fn()} onSelect={vi.fn()} />
     );
-    expect(container.textContent).toContain('Search: "slack"');
-    expect(container.textContent).toContain("Slack Bot");
-    expect(container.textContent).toContain("comm (1)");
-  });
-  it("pagination", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <SearchResultsPage query="app" results={[]} total={50} page={1} totalPages={3}
-        facets={{ categories: {} }} onPageChange={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "→")!);
-    expect(fn).toHaveBeenCalledWith(2);
+    expect(container.textContent).toContain("code");
+    expect(container.textContent).toContain("Editor");
+    expect(container.textContent).toContain("1 results");
+    expect(container.textContent).toContain("tools");
   });
 });
