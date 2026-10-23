@@ -1,23 +1,38 @@
 "use client";
+import { useState } from "react";
 
-interface TestResult { statusCode: number | null; durationMs: number; success: boolean; responseBody?: string; }
+interface WebhookTestResult { valid: boolean; reason?: string; timestamp?: number; }
+interface WebhookTestConsoleProps { onTest: (url: string, payload: string) => void;
+  result: WebhookTestResult | null; }
 
-interface WebhookTestConsoleProps { lastResult: TestResult | null; onTest: (eventType: string) => void; eventTypes: string[]; }
+export function WebhookTestConsole({ onTest, result }: WebhookTestConsoleProps) {
+  const [url, setUrl] = useState("https://example.com/webhook");
+  const [payload, setPayload] = useState('{"event": "test"}');
 
-export function WebhookTestConsole({ lastResult, onTest, eventTypes }: WebhookTestConsoleProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h4 className="mb-3 font-semibold">🧪 Webhook Test Console</h4>
-      <div className="mb-3 flex flex-wrap gap-2">
-        {eventTypes.slice(0, 4).map(et => (
-          <button key={et} onClick={() => onTest(et)} className="rounded border px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800">{et}</button>
-        ))}
-      </div>
-      {lastResult && (
-        <div className={`rounded p-3 text-sm ${lastResult.success ? "bg-green-50 dark:bg-green-900/20" : "bg-red-50 dark:bg-red-900/20"}`}>
-          <p>{lastResult.success ? "✅" : "❌"} HTTP {lastResult.statusCode ?? "—"} · {lastResult.durationMs}ms</p>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">🔐 Webhook Signature Test</h3>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Endpoint URL</label>
+          <input value={url} onChange={e => setUrl(e.target.value)}
+            className="w-full text-sm px-3 py-1.5 border rounded font-mono dark:bg-gray-800 dark:border-gray-600" />
         </div>
-      )}
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Payload</label>
+          <textarea value={payload} onChange={e => setPayload(e.target.value)} rows={3}
+            className="w-full text-xs px-3 py-2 border rounded font-mono dark:bg-gray-800 dark:border-gray-600" />
+        </div>
+        <button onClick={() => onTest(url, payload)}
+          className="w-full py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Send Test</button>
+        {result && (
+          <div className={`p-3 rounded-lg text-sm ${result.valid
+            ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400"
+            : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
+            {result.valid ? "✅ Signature verified" : `❌ Failed: ${result.reason}`}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
