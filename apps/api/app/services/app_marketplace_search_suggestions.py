@@ -1,26 +1,41 @@
-"""Marketplace search suggestions — autocomplete for app search."""
+"""Search suggestions — typeahead suggestions for marketplace search."""
 
-_index: dict[str, list[str]] = {}
+from collections import defaultdict
 
 
-def build_suggestion_index(apps: list[dict]) -> None:
-    """Build prefix index from app names and categories."""
-    global _index
-    _index.clear()
+def get_suggestions(*, query: str, apps: list[dict], categories: list[str],
+                      recent_searches: list[str], limit: int = 8) -> dict:
+    q = query.lower()
+    if len(q) < 2:
+        return {"suggestions": [], "recent": recent_searches[:3]}
+
+    results = []
+    # App name matches
     for app in apps:
-        for field in ["name", "category", "slug"]:
-            text = app.get(field, "").lower()
-            for i in range(1, len(text) + 1):
-                prefix = text[:i]
-                if prefix not in _index:
-                    _index[prefix] = []
-                if app.get("name") not in _index[prefix]:
-                    _index[prefix].append(app.get("name", ""))
+        name = app.get("name", "").lower()
+        if name.startswith(q):
+            results.append({"type": "app", "text": app["name"], "id": app.get("id"), "icon": "📦"})
+        elif q in name:
+            results.append({"type": "app", "text": app["name"], "id": app.get("id"), "icon": "📦"})
+    # Category matches
+    for cat in categories:
+        if q in cat.lower():
+            results.append({"type": "category", "text": cat, "icon": "📂"})
+    # Recent search matches
+    for rs in recent_searches:
+        if q in rs.lower() and not any(r["text"] == rs for r in results):
+            results.append({"type": "recent", "text": rs, "icon": "🕐"})
+
+    return {"suggestions": results[:limit], "total": len(results), "query": query}
 
 
-def get_suggestions(query: str, *, limit: int = 5) -> list[str]:
-    prefix = query.lower().strip()
-    if not prefix:
-        return []
-    matches = _index.get(prefix, [])
-    return sorted(set(matches))[:limit]
+def track_search(*, query: str, results_count: int, clicked_result: str | None = None) -> dict:
+    return {"query": query, "results_count": results_count, "clicked": clicked_result,
+            "has_results": results_count > 0, "converted": clicked_result is not None}
+
+
+def get_popular_searches(*, search_logs: list[dict], limit: int = 10) -> list[dict]:
+    counts = defaultdict(int)
+    for log in search_logs:
+        counts[log.get("query", "")] += 1
+    return [{"query": q, "count": c} for q, c in sorted(counts.items(), key=lambda x: -x[1])[:limit]]
