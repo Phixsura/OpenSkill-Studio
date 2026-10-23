@@ -1,30 +1,39 @@
-"""Access control — role-based permissions for app management."""
+"""App access control — RBAC for app management."""
+
 
 ROLES = {
-    "owner": {"can_edit", "can_delete", "can_publish", "can_transfer", "can_manage_team", "can_view_analytics"},
-    "admin": {"can_edit", "can_publish", "can_view_analytics", "can_manage_team"},
-    "developer": {"can_edit", "can_view_analytics"},
-    "viewer": {"can_view_analytics"},
+    "owner": {"level": 100, "permissions": ["*"]},
+    "admin": {"level": 80, "permissions": ["manage_settings", "manage_members", "publish", "edit", "view"]},
+    "developer": {"level": 60, "permissions": ["publish", "edit", "view"]},
+    "viewer": {"level": 20, "permissions": ["view"]},
 }
 
 
-def check_permission(*, user_role: str, permission: str) -> bool:
-    perms = ROLES.get(user_role, set())
-    return permission in perms
+def check_permission(*, role: str, permission: str) -> dict:
+    role_def = ROLES.get(role)
+    if not role_def:
+        return {"allowed": False, "error": f"Unknown role: {role}"}
+    allowed = "*" in role_def["permissions"] or permission in role_def["permissions"]
+    return {"allowed": allowed, "role": role, "permission": permission}
 
 
-def get_user_permissions(*, user_role: str) -> list[str]:
-    return sorted(ROLES.get(user_role, set()))
-
-
-def assign_role(*, app_id: str, user_id: str, role: str, assigned_by: str) -> dict:
+def assign_role(*, user_id: str, app_id: str, role: str, assigner_role: str) -> dict:
     if role not in ROLES:
-        return {"error": f"Invalid role. Use: {', '.join(sorted(ROLES.keys()))}"}
-    return {"app_id": app_id, "user_id": user_id, "role": role,
-            "assigned_by": assigned_by, "error": None}
+        return {"success": False, "error": f"Invalid role: {role}"}
+    assigner_level = ROLES.get(assigner_role, {}).get("level", 0)
+    target_level = ROLES[role]["level"]
+    if target_level >= assigner_level:
+        return {"success": False, "error": "Cannot assign role equal or higher than your own"}
+    return {"success": True, "user_id": user_id, "app_id": app_id, "role": role}
 
 
-def can_perform_action(*, user_role: str, action: str) -> dict:
-    allowed = check_permission(user_role=user_role, permission=action)
-    return {"allowed": allowed, "role": user_role, "action": action,
-            "reason": None if allowed else f"Role '{user_role}' lacks '{action}' permission"}
+def list_members(*, app_id: str) -> dict:
+    return {
+        "app_id": app_id,
+        "members": [
+            {"user_id": "u1", "display_name": "Alice", "role": "owner", "joined": "2026-01-01"},
+            {"user_id": "u2", "display_name": "Bob", "role": "developer", "joined": "2026-06-15"},
+            {"user_id": "u3", "display_name": "Carol", "role": "viewer", "joined": "2026-09-01"},
+        ],
+        "total": 3,
+    }
