@@ -1,31 +1,37 @@
 "use client";
 
-interface ComplianceCheck { check: string; pass: boolean; label: string; }
-interface ComplianceDashboardProps { framework: string; region: string;
-  checks: ComplianceCheck[]; score: number; compliant: boolean; passed: number; failed: number; }
+interface CheckResult { check: string; passed: boolean; }
+interface PolicyResult { policy: string; checks: CheckResult[]; passed: number;
+  total: number; compliant: boolean; compliancePct: number; }
+interface ComplianceDashboardProps { policies: Record<string, PolicyResult>; overall: boolean; }
 
-export function ComplianceDashboard({ framework, region, checks, score, compliant, passed, failed }: ComplianceDashboardProps) {
+export function ComplianceDashboard({ policies, overall }: ComplianceDashboardProps) {
+  const entries = Object.entries(policies);
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">{framework} Compliance</h3>
-          <p className="text-xs text-gray-400">{region}</p>
-        </div>
-        <div className="text-right">
-          <span className={`text-2xl font-bold ${compliant ? "text-green-600" : "text-red-600"}`}>{score}%</span>
-          <p className="text-xs text-gray-400">{compliant ? "✓ Compliant" : "✗ Non-compliant"}</p>
-        </div>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🏛️ Compliance</h3>
+        <span className={`text-xs font-medium ${overall ? "text-green-600" : "text-yellow-600"}`}>
+          {overall ? "✅ All Compliant" : "⚠ Action Required"}
+        </span>
       </div>
-      <div className="flex gap-2 text-xs">
-        <span className="text-green-600">{passed} passed</span>
-        <span className="text-red-600">{failed} failed</span>
-      </div>
-      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700">
-        {checks.map(c => (
-          <div key={c.check} className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-sm">{c.label}</span>
-            <span className={c.pass ? "text-green-600" : "text-red-600"}>{c.pass ? "✓" : "✗"}</span>
+      <div className="divide-y dark:divide-gray-700">
+        {entries.map(([id, p]) => (
+          <div key={id} className="px-4 py-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-sm font-medium">{p.policy}</span>
+              <span className={`text-xs ${p.compliant ? "text-green-600" : "text-yellow-600"}`}>
+                {p.passed}/{p.total} ({p.compliancePct}%)
+              </span>
+            </div>
+            <div className="flex gap-1">
+              {p.checks.map(c => (
+                <span key={c.check} title={c.check.replaceAll("_", " ")}
+                  className={`w-4 h-4 rounded text-center text-[8px] leading-4 ${c.passed ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-700"}`}>
+                  {c.passed ? "✓" : ""}
+                </span>
+              ))}
+            </div>
           </div>
         ))}
       </div>
