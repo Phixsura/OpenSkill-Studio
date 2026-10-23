@@ -1,32 +1,43 @@
-"""Deployment pipeline — manage staged rollout for app versions."""
+"""Deployment pipeline — manage staged rollout deployments."""
 
-from datetime import datetime, timezone
-
-
-def create_pipeline(*, app_id: str, version_id: str, stages: list[str] | None = None) -> dict:
-    default_stages = ["validation", "security_scan", "staging", "canary", "production"]
-    pipeline_stages = []
-    for s in (stages or default_stages):
-        pipeline_stages.append({"name": s, "status": "pending", "started_at": None, "completed_at": None})
-    return {"app_id": app_id, "version_id": version_id, "stages": pipeline_stages,
-            "current_stage": 0, "status": "created"}
+import secrets
+from datetime import datetime
 
 
-def advance_stage(*, pipeline: dict) -> dict:
-    idx = pipeline["current_stage"]
-    stages = list(pipeline["stages"])
-    if idx >= len(stages):
-        return {**pipeline, "status": "completed"}
-    now = datetime.now(timezone.utc).isoformat()
-    stages[idx] = {**stages[idx], "status": "completed", "completed_at": now}
-    new_idx = idx + 1
-    if new_idx < len(stages):
-        stages[new_idx] = {**stages[new_idx], "status": "running", "started_at": now}
-    status = "completed" if new_idx >= len(stages) else "running"
-    return {**pipeline, "stages": stages, "current_stage": new_idx, "status": status}
+def create_deployment(*, app_id: str, version: str, strategy: str = "rolling",
+                       rollout_pct: int = 10) -> dict:
+    valid_strategies = {"rolling", "blue_green", "canary", "all_at_once"}
+    if strategy not in valid_strategies:
+        return {"error": f"Invalid strategy. Valid: {', '.join(sorted(valid_strategies))}"}
+    if not 1 <= rollout_pct <= 100:
+        return {"error": "Rollout percentage must be 1-100"}
+    return {
+        "deployment_id": f"dep_{secrets.token_urlsafe(8)}",
+        "app_id": app_id,
+        "version": version,
+        "strategy": strategy,
+        "rollout_pct": rollout_pct,
+        "status": "pending",
+        "stages": [
+            {"name": "build", "status": "pending"},
+            {"name": "test", "status": "pending"},
+            {"name": "staging", "status": "pending"},
+            {"name": "production", "status": "pending"},
+        ],
+        "created_at": datetime.utcnow().isoformat(),
+    }
 
 
-def get_pipeline_progress(*, pipeline: dict) -> dict:
-    total = len(pipeline["stages"])
-    completed = sum(1 for s in pipeline["stages"] if s["status"] == "completed")
-    return {"completed": completed, "total": total, "pct": round(completed / max(total, 1) * 100)}
+def advance_deployment(*, deployment: dict, stage_name: str, success: bool) -> dict:
+    stages = deployment.get("stages", [])
+    for s in stages:
+        if s["name"] == stage_name:
+            s["status"] = "success" if success else "failed"
+            break
+    all_done = all(s["status"] == "success" for s in stages)
+    any_failed = any(s["status"] == "failed" for s in stages)
+    return {
+        "stages": stages,
+        "status": "completed" if all_done else "failed" if any_failed else "in_progress",
+        "completed": all_done,
+    }

@@ -1,25 +1,24 @@
-from app.services.app_marketplace_app_deployment_pipeline import create_pipeline, advance_stage, get_pipeline_progress
+from app.services.app_marketplace_app_deployment_pipeline import create_deployment, advance_deployment
 
 def test_create():
-    p = create_pipeline(app_id="a1", version_id="v1")
-    assert len(p["stages"]) == 5
-    assert p["status"] == "created"
+    r = create_deployment(app_id="a1", version="2.0.0", strategy="canary", rollout_pct=25)
+    assert r["deployment_id"].startswith("dep_")
+    assert r["strategy"] == "canary"
+    assert len(r["stages"]) == 4
+
+def test_invalid_strategy():
+    r = create_deployment(app_id="a1", version="1.0", strategy="yolo")
+    assert "error" in r
 
 def test_advance():
-    p = create_pipeline(app_id="a1", version_id="v1")
-    p = advance_stage(pipeline=p)
-    assert p["stages"][0]["status"] == "completed"
-    assert p["current_stage"] == 1
+    dep = create_deployment(app_id="a1", version="1.0", strategy="rolling")
+    r = advance_deployment(deployment=dep, stage_name="build", success=True)
+    assert r["status"] == "in_progress"
+    for s in ["test", "staging", "production"]:
+        r = advance_deployment(deployment={**dep, "stages": r["stages"]}, stage_name=s, success=True)
+    assert r["completed"]
 
-def test_complete():
-    p = create_pipeline(app_id="a1", version_id="v1", stages=["a", "b"])
-    p = advance_stage(pipeline=p)
-    p = advance_stage(pipeline=p)
-    assert p["status"] == "completed"
-
-def test_progress():
-    p = create_pipeline(app_id="a1", version_id="v1", stages=["a", "b", "c", "d"])
-    p = advance_stage(pipeline=p)
-    p = advance_stage(pipeline=p)
-    r = get_pipeline_progress(pipeline=p)
-    assert r["pct"] == 50
+def test_failure():
+    dep = create_deployment(app_id="a1", version="1.0", strategy="rolling")
+    r = advance_deployment(deployment=dep, stage_name="test", success=False)
+    assert r["status"] == "failed"
