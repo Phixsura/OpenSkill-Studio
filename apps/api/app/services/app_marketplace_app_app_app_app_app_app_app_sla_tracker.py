@@ -1,30 +1,25 @@
-"""SLA compliance tracker — monitor uptime and response time against targets."""
+"""SLA tracker — monitor service level agreement compliance."""
 from __future__ import annotations
 
 
-def check_sla_compliance(*, uptime_pct: float, target_uptime: float = 99.9,
-                          avg_response_ms: float, target_response_ms: float = 200,
-                          p99_response_ms: float = 0, target_p99_ms: float = 1000,
-                          incidents: int = 0, max_incidents: int = 3,
-                          period: str = "monthly") -> dict:
-    checks = [
-        {"metric": "uptime", "actual": uptime_pct, "target": target_uptime,
-         "unit": "%", "passed": uptime_pct >= target_uptime},
-        {"metric": "avg_response", "actual": avg_response_ms, "target": target_response_ms,
-         "unit": "ms", "passed": avg_response_ms <= target_response_ms},
-        {"metric": "p99_response", "actual": p99_response_ms, "target": target_p99_ms,
-         "unit": "ms", "passed": p99_response_ms <= target_p99_ms},
-        {"metric": "incidents", "actual": incidents, "target": max_incidents,
-         "unit": "count", "passed": incidents <= max_incidents},
-    ]
-    passed = sum(1 for c in checks if c["passed"])
-    total = len(checks)
-    compliant = all(c["passed"] for c in checks)
-    score = round(passed / total * 100)
-    return {
-        "compliant": compliant, "score": score, "score_display": f"{score}%",
-        "status": "compliant" if compliant else "breached",
-        "period": period, "checks": checks,
-        "passed": passed, "total": total,
-        "credit_due": not compliant and uptime_pct < target_uptime,
-    }
+def define_sla(name: str, target_pct: float, metric: str, window_days: int = 30) -> dict:
+    return {"name": name, "target_pct": target_pct, "metric": metric, "window_days": window_days}
+
+
+def check_sla(sla: dict, actual_pct: float) -> dict:
+    met = actual_pct >= sla["target_pct"]
+    gap = round(actual_pct - sla["target_pct"], 3)
+    budget_remaining = round(actual_pct - sla["target_pct"], 3) if met else 0
+    status = "met" if met else "breached"
+    return {"name": sla["name"], "target": sla["target_pct"], "actual": actual_pct,
+            "met": met, "status": status, "gap": gap,
+            "budget_remaining": budget_remaining}
+
+
+def summarize_slas(results: list[dict]) -> dict:
+    met_count = sum(1 for r in results if r["met"])
+    total = len(results)
+    breached = [r["name"] for r in results if not r["met"]]
+    return {"total": total, "met": met_count, "breached_count": total - met_count,
+            "breached_names": breached,
+            "compliance_pct": round(met_count / max(total, 1) * 100)}
