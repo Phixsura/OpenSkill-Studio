@@ -1,32 +1,21 @@
-from app.services.app_marketplace_app_error_tracking import classify_error, aggregate_errors, build_error_trend
+from app.services.app_marketplace_app_error_tracking import fingerprint_error, group_errors, get_error_trend
 
-def test_classify_500():
-    r = classify_error(status_code=500, message="Internal")
-    assert r["category"] == "server_error"
-    assert r["severity"] == "high"
+def test_fingerprint():
+    f1 = fingerprint_error(message="NullPointer", stack_trace="at Main.java:42\nat App.java:10")
+    f2 = fingerprint_error(message="NullPointer", stack_trace="at Main.java:42\nat App.java:20")
+    assert f1 == f2  # same first line of stack
 
-def test_classify_503():
-    r = classify_error(status_code=503, message="Unavailable")
-    assert r["severity"] == "critical"
+def test_group():
+    errors = [
+        {"message": "NPE", "stack_trace": "at A:1", "user_id": "u1", "timestamp": "t1"},
+        {"message": "NPE", "stack_trace": "at A:1", "user_id": "u2", "timestamp": "t2"},
+        {"message": "OOM", "stack_trace": "at B:5", "user_id": "u1", "timestamp": "t3"},
+    ]
+    r = group_errors(errors=errors)
+    assert r["unique_errors"] == 2
+    assert r["total_occurrences"] == 3
+    assert r["groups"][0]["count"] == 2
 
-def test_classify_429():
-    r = classify_error(status_code=429, message="Too many")
-    assert r["category"] == "rate_limit"
-
-def test_aggregate():
-    errors = [{"category": "server_error", "status_code": 500, "severity": "high"},
-              {"category": "server_error", "status_code": 503, "severity": "critical"},
-              {"category": "client_error", "status_code": 400, "severity": "low"}]
-    r = aggregate_errors(errors=errors)
-    assert r["total"] == 3
-    assert r["critical_count"] == 1
-
-def test_trend_stable():
-    hourly = [{"count": 5}] * 10
-    r = build_error_trend(hourly_counts=hourly)
-    assert r["trend"] == "stable"
-
-def test_trend_rising():
-    hourly = [{"count": 1}] * 7 + [{"count": 50}] * 3
-    r = build_error_trend(hourly_counts=hourly)
-    assert r["trend"] == "rising"
+def test_trend():
+    r = get_error_trend(error_counts=[5, 5, 5, 20, 25, 30])
+    assert r["trend"] == "increasing"
