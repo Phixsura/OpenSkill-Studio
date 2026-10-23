@@ -3,7 +3,6 @@
 interface BillingPlan { name: string; price: number; interval: string; }
 interface CurrentPeriod { baseCost: number; overage: number; total: number; }
 interface UsageSummary { apiCalls: number; apiLimit: number; apiPct: number; storageMb: number; }
-interface PaymentMethod { type: string; last4: string; brand: string; } | null
 interface BillingOverviewProps { plan: BillingPlan; currentPeriod: CurrentPeriod;
   usageSummary: UsageSummary; paymentMethod: { type: string; last4: string; brand: string } | null;
   onUpgrade: () => void; onManagePayment: () => void; }
