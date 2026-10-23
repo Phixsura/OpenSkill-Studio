@@ -3,18 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 import { SearchSuggestions } from "@/components/search-suggestions";
 
 describe("SearchSuggestions", () => {
-  it("shows suggestions", () => {
-    const { container } = render(<SearchSuggestions suggestions={["App A", "App B"]} onSelect={vi.fn()} visible={true} />);
-    expect(container.textContent).toContain("App A");
-  });
-  it("hidden when not visible", () => {
-    const { container } = render(<SearchSuggestions suggestions={["X"]} onSelect={vi.fn()} visible={false} />);
-    expect(container.innerHTML).toBe("");
-  });
-  it("calls onSelect", () => {
+  it("renders suggestions", () => {
     const onSelect = vi.fn();
-    const { container } = render(<SearchSuggestions suggestions={["Pick Me"]} onSelect={onSelect} visible={true} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(onSelect).toHaveBeenCalledWith("Pick Me");
+    const { container, getByText } = render(
+      <SearchSuggestions showTrending={false} onSelect={onSelect}
+        suggestions={["slack integration", "slack bot"]}
+        trending={[]} />
+    );
+    expect(container.textContent).toContain("slack integration");
+    fireEvent.click(getByText("slack integration"));
+    expect(onSelect).toHaveBeenCalledWith("slack integration");
+  });
+
+  it("renders trending", () => {
+    const { container } = render(
+      <SearchSuggestions showTrending={true} onSelect={vi.fn()}
+        suggestions={[]}
+        trending={[{ query: "analytics", trend: "🔥" }]} />
+    );
+    expect(container.textContent).toContain("Trending");
+    expect(container.textContent).toContain("analytics");
   });
 });
