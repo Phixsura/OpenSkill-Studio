@@ -1,34 +1,29 @@
 "use client";
 
-interface CostAnomaly { date: string; amount: number; expected: number;
-  deviationPct: number; service: string; display: string; }
-interface CostAnomalyAlertProps { anomalies: CostAnomaly[];
-  meanDaily: number; totalDisplay: string; hasAnomalies: boolean; }
+interface Anomaly { day: number; cost: number; zScore: number; direction: string; }
+interface CostAnomalyAlertProps { anomalies: Anomaly[]; mean: number; std: number;
+  hasAnomaly: boolean; potentialSavings: string; }
 
-export function CostAnomalyAlert({ anomalies, meanDaily, totalDisplay, hasAnomalies }: CostAnomalyAlertProps) {
+export function CostAnomalyAlert({ anomalies, mean, std, hasAnomaly, potentialSavings }: CostAnomalyAlertProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">💸 Cost Anomalies</h3>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          hasAnomalies ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
-        }`}>{hasAnomalies ? `⚠️ ${anomalies.length} spikes` : "✅ Normal"}</span>
+    <div className={`rounded-xl border overflow-hidden ${hasAnomaly ? "border-red-300 dark:border-red-800" : "border-gray-200 dark:border-gray-700"}`}>
+      <div className={`flex items-center justify-between p-4 border-b ${hasAnomaly ? "bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800" : "dark:border-gray-700"}`}>
+        <h3 className="font-semibold text-sm">💸 Cost Anomalies</h3>
+        <span className={`text-xs ${hasAnomaly ? "text-red-600" : "text-green-600"}`}>
+          {hasAnomaly ? `⚠ ${anomalies.length} detected` : "✅ Normal"}
+        </span>
       </div>
-      <div className="flex gap-4 text-sm mb-4">
-        <span>Avg daily: <strong>${meanDaily.toFixed(0)}</strong></span>
-        <span>Total: <strong>{totalDisplay}</strong></span>
+      <div className="p-3 text-xs text-gray-400 border-b dark:border-gray-700">
+        Mean: ${mean}/day · Std: ${std} · Potential savings: {potentialSavings}
       </div>
       {anomalies.length > 0 && (
-        <div className="space-y-2">
-          {anomalies.map(a => (
-            <div key={a.date} className="bg-red-50 dark:bg-red-900/10 rounded-lg px-4 py-3">
-              <div className="flex justify-between text-sm">
-                <span className="font-medium">{a.date}</span>
-                <span className="text-red-600 font-bold">{a.display}</span>
-              </div>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Expected ~${a.expected.toFixed(0)} · {a.service}
-              </p>
+        <div className="divide-y dark:divide-gray-700">
+          {anomalies.map((a, i) => (
+            <div key={i} className="flex items-center justify-between px-4 py-2 text-xs">
+              <span>Day {a.day}: <span className="font-bold">${a.cost}</span></span>
+              <span className={a.direction === "spike" ? "text-red-500" : "text-blue-500"}>
+                {a.direction === "spike" ? "📈" : "📉"} z={a.zScore}
+              </span>
             </div>
           ))}
         </div>

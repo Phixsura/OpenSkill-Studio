@@ -1,33 +1,27 @@
-"""Cost anomaly detector — flag unexpected cost spikes across services."""
+"""Cost anomaly detector — detect unusual spending patterns."""
 from __future__ import annotations
 import math
 
 
-def detect_cost_anomalies(daily_costs: list[dict], *, threshold_pct: float = 50) -> dict:
+def detect_anomalies(daily_costs: list[float], threshold_sigma: float = 2.0) -> dict:
     if len(daily_costs) < 3:
-        return {"anomalies": [], "error": "Need at least 3 days of data"}
-    amounts = [d.get("amount", 0) for d in daily_costs]
-    mean = sum(amounts) / len(amounts)
-    std = math.sqrt(sum((a - mean) ** 2 for a in amounts) / len(amounts))
+        return {"anomalies": [], "mean": 0, "std": 0, "checked": len(daily_costs)}
+    mean = sum(daily_costs) / len(daily_costs)
+    variance = sum((x - mean) ** 2 for x in daily_costs) / len(daily_costs)
+    std = math.sqrt(variance)
     anomalies = []
-    for d in daily_costs:
-        amt = d.get("amount", 0)
-        if mean > 0:
-            deviation_pct = abs(amt - mean) / mean * 100
-        else:
-            deviation_pct = 0
-        if deviation_pct >= threshold_pct and amt > mean:
-            anomalies.append({
-                "date": d.get("date", ""), "amount": amt,
-                "expected": round(mean, 2), "deviation_pct": round(deviation_pct, 1),
-                "service": d.get("service", ""),
-                "display": f"${amt:,.2f} (+{deviation_pct:.0f}%)",
-            })
-    total_spend = sum(amounts)
-    return {
-        "anomalies": anomalies, "count": len(anomalies),
-        "mean_daily": round(mean, 2), "std": round(std, 2),
-        "total_spend": round(total_spend, 2),
-        "total_display": f"${total_spend:,.2f}",
-        "has_anomalies": len(anomalies) > 0,
-    }
+    for i, cost in enumerate(daily_costs):
+        z_score = (cost - mean) / max(std, 0.01)
+        if abs(z_score) > threshold_sigma:
+            anomalies.append({"day": i, "cost": cost, "z_score": round(z_score, 2),
+                               "direction": "spike" if z_score > 0 else "drop"})
+    return {"anomalies": anomalies, "anomaly_count": len(anomalies),
+            "mean": round(mean, 2), "std": round(std, 2),
+            "checked": len(daily_costs), "has_anomaly": len(anomalies) > 0}
+
+
+def estimate_savings(anomalies: list[dict], mean: float) -> dict:
+    total_excess = sum(max(0, a["cost"] - mean) for a in anomalies if a["direction"] == "spike")
+    return {"potential_savings": round(total_excess, 2),
+            "spike_count": sum(1 for a in anomalies if a["direction"] == "spike"),
+            "display": f"${total_excess:,.2f}"}

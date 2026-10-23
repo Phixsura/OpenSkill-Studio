@@ -1,20 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_cost_anomaly import detect_cost_anomalies
+from app.services.app_marketplace_app_app_app_app_app_app_app_cost_anomaly import detect_anomalies, estimate_savings
 
-def test_anomaly():
-    data = [
-        {"date": "2026-10-20", "amount": 100, "service": "compute"},
-        {"date": "2026-10-21", "amount": 105, "service": "compute"},
-        {"date": "2026-10-22", "amount": 98, "service": "compute"},
-        {"date": "2026-10-23", "amount": 250, "service": "compute"},
-        {"date": "2026-10-24", "amount": 102, "service": "compute"},
-    ]
-    r = detect_cost_anomalies(data, threshold_pct=50)
-    assert r["has_anomalies"]
-    assert r["count"] == 1
-    assert r["anomalies"][0]["date"] == "2026-10-23"
-    assert r["anomalies"][0]["amount"] == 250
+def test_detect():
+    costs = [100, 102, 98, 101, 99, 500, 100, 101]  # 500 is anomaly
+    r = detect_anomalies(costs)
+    assert r["has_anomaly"]
+    assert r["anomaly_count"] >= 1
+    assert any(a["cost"] == 500 for a in r["anomalies"])
 
 def test_no_anomaly():
-    data = [{"date": f"d{i}", "amount": 100} for i in range(5)]
-    r = detect_cost_anomalies(data)
-    assert not r["has_anomalies"]
+    costs = [100, 101, 99, 100, 102]
+    r = detect_anomalies(costs)
+    assert not r["has_anomaly"]
+
+def test_savings():
+    anomalies = [{"cost": 500, "direction": "spike"}, {"cost": 20, "direction": "drop"}]
+    r = estimate_savings(anomalies, 100)
+    assert r["potential_savings"] == 400.0
+    assert r["spike_count"] == 1

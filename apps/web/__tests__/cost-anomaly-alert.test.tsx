@@ -5,14 +5,13 @@ import { CostAnomalyAlert } from "@/components/cost-anomaly-alert";
 describe("CostAnomalyAlert", () => {
   it("renders anomalies", () => {
     const { container } = render(
-      <CostAnomalyAlert meanDaily={131} totalDisplay="$655.00" hasAnomalies={true}
-        anomalies={[{ date: "2026-10-23", amount: 250, expected: 131,
-          deviationPct: 90.8, service: "compute", display: "$250.00 (+91%)" }]} />
+      <CostAnomalyAlert mean={100} std={5} hasAnomaly={true} potentialSavings="$400.00"
+        anomalies={[{ day: 5, cost: 500, zScore: 80, direction: "spike" }]} />
     );
     expect(container.textContent).toContain("Cost Anomalies");
-    expect(container.textContent).toContain("1 spikes");
-    expect(container.textContent).toContain("2026-10-23");
-    expect(container.textContent).toContain("$250.00 (+91%)");
-    expect(container.textContent).toContain("$655.00");
+    expect(container.textContent).toContain("1 detected");
+    expect(container.textContent).toContain("Day 5");
+    expect(container.textContent).toContain("$500");
+    expect(container.textContent).toContain("$400.00");
   });
 });
