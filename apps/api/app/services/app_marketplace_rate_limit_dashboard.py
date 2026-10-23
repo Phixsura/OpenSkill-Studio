@@ -6,7 +6,7 @@ from collections import defaultdict
 def compute_rate_limit_usage(*, endpoints: list[dict]) -> dict:
     total_capacity = sum(e.get("limit", 0) for e in endpoints)
     total_used = sum(e.get("current", 0) for e in endpoints)
-    hotspots = [e for e in endpoints if e.get("current", 0) / max(e.get("limit", 1), 1) > 0.8]
+    hotspots = [e for e in endpoints if e.get("current", 0) / max(e.get("limit", 1), 1) >=  0.8]
     return {"total_capacity": total_capacity, "total_used": total_used,
             "usage_pct": round(total_used / max(total_capacity, 1) * 100, 1),
             "hotspot_count": len(hotspots), "endpoint_count": len(endpoints)}
