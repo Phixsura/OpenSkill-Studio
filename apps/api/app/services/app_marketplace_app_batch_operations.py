@@ -1,30 +1,38 @@
-"""Batch operations — execute operations across multiple installations."""
+"""Batch operations — execute bulk actions on multiple resources."""
 
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime
 
 
-def create_batch_job(*, operation: str, target_ids: list[str], params: dict | None = None) -> dict:
-    valid_ops = {"update_config", "restart", "enable_flag", "disable_flag", "rotate_secrets"}
+def create_batch(*, operation: str, resource_ids: list[str],
+                   params: dict | None = None) -> dict:
+    valid_ops = {"update", "delete", "export", "tag", "archive", "restore"}
     if operation not in valid_ops:
-        return {"error": f"Invalid operation. Use: {', '.join(sorted(valid_ops))}"}
-    if not target_ids:
-        return {"error": "No targets specified"}
+        return {"error": f"Invalid operation. Valid: {', '.join(sorted(valid_ops))}"}
+    if not resource_ids:
+        return {"error": "No resources specified"}
+    if len(resource_ids) > 100:
+        return {"error": "Max 100 resources per batch"}
     return {
-        "operation": operation, "targets": target_ids, "params": params or {},
-        "total": len(target_ids), "status": "pending",
-        "created_at": datetime.now(timezone.utc).isoformat(), "error": None,
+        "batch_id": f"batch_{secrets.token_urlsafe(8)}",
+        "operation": operation,
+        "resource_count": len(resource_ids),
+        "resource_ids": resource_ids,
+        "params": params or {},
+        "status": "pending",
+        "created_at": datetime.utcnow().isoformat(),
     }
 
 
-def execute_batch(*, job: dict) -> dict:
-    results = []
-    for target_id in job["targets"]:
-        results.append({"target_id": target_id, "status": "success"})
-    succeeded = sum(1 for r in results if r["status"] == "success")
-    return {"results": results, "succeeded": succeeded, "failed": len(results) - succeeded,
-            "completed_at": datetime.now(timezone.utc).isoformat()}
-
-
-def get_batch_progress(*, total: int, completed: int) -> dict:
-    return {"total": total, "completed": completed, "remaining": total - completed,
-            "pct": round(completed / max(total, 1) * 100)}
+def get_batch_progress(*, total: int, completed: int, failed: int) -> dict:
+    remaining = total - completed - failed
+    pct = round(completed / max(total, 1) * 100, 1)
+    return {
+        "total": total,
+        "completed": completed,
+        "failed": failed,
+        "remaining": remaining,
+        "progress_pct": pct,
+        "status": "completed" if remaining == 0 else "in_progress",
+        "success_rate": round(completed / max(completed + failed, 1) * 100, 1),
+    }
