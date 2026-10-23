@@ -1,27 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
 
 describe("TeamActivityFeed", () => {
   const activities = [
-    { id: "a1", actor: "Alice", action: "published", target: "SDK v2", type: "release", timestamp: "2026-10-23T11:00:00" },
-    { id: "a2", actor: "Bob", action: "merged", target: "PR #42", type: "code", timestamp: "2026-10-23T09:00:00" },
+    { actor: "Alice", action: "deployed", icon: "🚀", target: "v2.0", timestamp: "2026-01-03" },
+    { actor: "Bob", action: "reviewed", icon: "⭐", target: "PR #42", timestamp: "2026-01-02" },
   ];
-  it("renders", () => {
+  const top = [{ name: "Alice", count: 5 }];
+  it("renders feed", () => {
     const { container } = render(
-      <TeamActivityFeed activities={activities} hasMore={false} onLoadMore={vi.fn()} />
+      <TeamActivityFeed activities={activities} topContributors={top} uniqueMembers={2} />
     );
     expect(container.textContent).toContain("Team Activity");
     expect(container.textContent).toContain("Alice");
-    expect(container.textContent).toContain("published");
-    expect(container.textContent).toContain("🚀");
-  });
-  it("load more", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <TeamActivityFeed activities={activities} hasMore={true} onLoadMore={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Load More")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("deployed");
+    expect(container.textContent).toContain("2 members active");
+    expect(container.textContent).toContain("5 actions");
   });
 });
