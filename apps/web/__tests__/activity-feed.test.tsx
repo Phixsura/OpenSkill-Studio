@@ -1,31 +1,23 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { ActivityFeed } from "@/components/activity-feed";
 
-const ACTIVITIES = [
-  { action: "create_app", resource: "app/my-app", details: "", timestamp: "2min ago" },
-  { action: "publish", resource: "app/my-app v2.0", details: "Published to marketplace", timestamp: "5min ago" },
-];
-
 describe("ActivityFeed", () => {
-  it("shows activities", () => {
-    const { container } = render(<ActivityFeed activities={ACTIVITIES} />);
-    expect(container.textContent).toContain("create app");
-    expect(container.textContent).toContain("publish");
+  const activities = [
+    { id: "1", actor: "Alice", verb: "installed", target: "MyApp", icon: "📦", timestamp: "2026-01-02T00:00:00Z" },
+    { id: "2", actor: "Bob", verb: "reviewed", target: "MyApp", icon: "⭐", timestamp: "2026-01-01T00:00:00Z" },
+  ];
+  it("renders activities", () => {
+    const { container } = render(<ActivityFeed activities={activities} hasMore={false} onLoadMore={vi.fn()} />);
+    expect(container.textContent).toContain("Alice");
+    expect(container.textContent).toContain("installed");
+    expect(container.textContent).toContain("MyApp");
   });
-
-  it("shows icons", () => {
-    const { container } = render(<ActivityFeed activities={ACTIVITIES} />);
-    expect(container.textContent).toContain("📦");
-  });
-
-  it("empty state", () => {
-    const { container } = render(<ActivityFeed activities={[]} />);
-    expect(container.textContent).toContain("No recent");
-  });
-
-  it("shows timestamp", () => {
-    const { container } = render(<ActivityFeed activities={ACTIVITIES} />);
-    expect(container.textContent).toContain("2min ago");
+  it("load more", () => {
+    const fn = vi.fn();
+    const { container } = render(<ActivityFeed activities={activities} hasMore={true} onLoadMore={fn} />);
+    const btn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Load more")!;
+    fireEvent.click(btn);
+    expect(fn).toHaveBeenCalled();
   });
 });

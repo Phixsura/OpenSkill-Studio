@@ -1,29 +1,30 @@
 "use client";
 
-interface Activity { action: string; resource: string; details: string; timestamp: string; }
+interface Activity { id: string; actor: string; verb: string; target: string; icon: string; timestamp: string; }
+interface ActivityFeedProps { activities: Activity[]; hasMore: boolean; onLoadMore: () => void; }
 
-interface ActivityFeedProps { activities: Activity[]; }
-
-const ACTION_ICONS: Record<string, string> = {
-  create_app: "📦", publish: "🚀", submit_review: "📝", create_version: "🏷️",
-  install: "📥", uninstall: "🗑️", edit: "✏️", delete: "❌", revoke: "🚫",
-};
-
-export function ActivityFeed({ activities }: ActivityFeedProps) {
-  if (activities.length === 0) return <p className="py-4 text-center text-sm text-gray-400">No recent activity</p>;
+export function ActivityFeed({ activities, hasMore, onLoadMore }: ActivityFeedProps) {
   return (
-    <div className="space-y-2">
-      {activities.map((a, i) => (
-        <div key={i} className="flex items-start gap-2 rounded border border-gray-200 p-2 text-sm dark:border-gray-700">
-          <span>{ACTION_ICONS[a.action] ?? "•"}</span>
-          <div className="flex-1">
-            <span className="font-medium">{a.action.replace(/_/g, " ")}</span>
-            <span className="ml-1 text-gray-500">{a.resource}</span>
-            {a.details && <p className="text-xs text-gray-400">{a.details}</p>}
+    <div className="space-y-1">
+      <h3 className="text-sm font-semibold mb-3">Activity</h3>
+      {activities.map(a => (
+        <div key={a.id} className="flex items-start gap-2.5 py-2">
+          <span className="mt-0.5 text-sm">{a.icon}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm">
+              <span className="font-medium">{a.actor}</span>{" "}
+              <span className="text-gray-500">{a.verb}</span>{" "}
+              <span className="font-medium">{a.target}</span>
+            </p>
+            <time className="text-xs text-gray-400">{new Date(a.timestamp).toLocaleString()}</time>
           </div>
-          <span className="text-xs text-gray-400">{a.timestamp}</span>
         </div>
       ))}
+      {hasMore && (
+        <button onClick={onLoadMore} className="w-full rounded border py-2 text-xs text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
+          Load more
+        </button>
+      )}
     </div>
   );
 }
