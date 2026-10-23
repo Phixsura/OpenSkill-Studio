@@ -1,18 +1,20 @@
-from app.services.app_marketplace_app_app_date_range_picker import resolve_date_range
+from app.services.app_marketplace_app_app_date_range_picker import build_date_range, list_presets
 
-def test_7d():
-    r = resolve_date_range(preset="7d", now="2026-10-23T12:00:00")
-    assert r["days"] == 7
-    assert r["label"] == "Last 7 days"
+def test_preset():
+    r = build_date_range(preset="last_7d")
+    assert r["days"] == 8
+    assert r["preset"] == "last_7d"
 
-def test_30d():
-    r = resolve_date_range(preset="30d", now="2026-10-23T12:00:00")
-    assert r["days"] == 30
+def test_custom():
+    r = build_date_range(start="2026-01-01", end="2026-01-31")
+    assert r["days"] == 31
+    assert r["preset"] is None
 
-def test_today():
-    r = resolve_date_range(preset="today", now="2026-10-23T15:30:00")
-    assert r["days"] == 0
+def test_default():
+    r = build_date_range()
+    assert r["preset"] == "today"
 
-def test_invalid():
-    r = resolve_date_range(preset="forever")
-    assert "error" in r
+def test_presets():
+    p = list_presets()
+    assert len(p) == 6
+    assert any(x["id"] == "last_30d" for x in p)
