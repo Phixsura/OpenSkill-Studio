@@ -1,25 +1,39 @@
 "use client";
 
-interface TeamMember { userId: string; displayName: string; role: string; email?: string; }
+interface TeamMember { name: string; email: string; role: string; avatarInitials: string; }
+interface TeamMemberListProps { members: TeamMember[]; canManage: boolean;
+  onChangeRole: (email: string, role: string) => void; onRemove: (email: string) => void; }
 
-interface TeamMemberListProps { members: TeamMember[]; onRemove?: (userId: string) => void; onChangeRole?: (userId: string, role: string) => void; }
+const ROLE_COLOR: Record<string, string> = {
+  owner: "bg-purple-100 text-purple-700", admin: "bg-blue-100 text-blue-700",
+  developer: "bg-green-100 text-green-700", viewer: "bg-gray-100 text-gray-600",
+};
 
-const ROLE_BADGES: Record<string, string> = { owner: "bg-purple-100 text-purple-800", admin: "bg-blue-100 text-blue-800", member: "bg-gray-100 text-gray-800", viewer: "bg-gray-100 text-gray-500" };
-
-export function TeamMemberList({ members, onRemove, onChangeRole }: TeamMemberListProps) {
-  if (members.length === 0) return <p className="py-3 text-center text-sm text-gray-400">No team members</p>;
+export function TeamMemberList({ members, canManage, onChangeRole, onRemove }: TeamMemberListProps) {
   return (
-    <div className="space-y-2">
-      {members.map(m => (
-        <div key={m.userId} className="flex items-center gap-3 rounded border border-gray-200 p-3 dark:border-gray-700">
-          <div className="flex-1">
-            <span className="font-medium">{m.displayName}</span>
-            {m.email && <span className="ml-2 text-xs text-gray-500">{m.email}</span>}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">👥 Team ({members.length})</h3>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
+        {members.map(m => (
+          <div key={m.email} className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center">{m.avatarInitials}</div>
+              <div>
+                <p className="text-sm font-medium">{m.name}</p>
+                <p className="text-xs text-gray-400">{m.email}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-2 py-0.5 rounded capitalize ${ROLE_COLOR[m.role] || ""}`}>{m.role}</span>
+              {canManage && m.role !== "owner" && (
+                <button onClick={() => onRemove(m.email)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+              )}
+            </div>
           </div>
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_BADGES[m.role] ?? ROLE_BADGES.member}`}>{m.role}</span>
-          {onRemove && m.role !== "owner" && <button onClick={() => onRemove(m.userId)} className="text-xs text-red-500">Remove</button>}
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

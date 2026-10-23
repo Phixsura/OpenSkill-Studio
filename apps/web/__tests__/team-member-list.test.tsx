@@ -1,30 +1,23 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TeamMemberList } from "@/components/team-member-list";
 
-const MEMBERS = [
-  { userId: "u1", displayName: "Alice", role: "owner", email: "alice@x.com" },
-  { userId: "u2", displayName: "Bob", role: "member" },
-];
-
 describe("TeamMemberList", () => {
-  it("shows members", () => {
-    const { container } = render(<TeamMemberList members={MEMBERS} />);
+  it("renders team", () => {
+    const onRemove = vi.fn();
+    const { container, getByText } = render(
+      <TeamMemberList canManage={true} onChangeRole={vi.fn()} onRemove={onRemove}
+        members={[
+          { name: "Alice", email: "a@t.com", role: "owner", avatarInitials: "A" },
+          { name: "Bob", email: "b@t.com", role: "developer", avatarInitials: "B" },
+        ]} />
+    );
+    expect(container.textContent).toContain("Team (2)");
     expect(container.textContent).toContain("Alice");
-    expect(container.textContent).toContain("Bob");
-  });
-  it("shows roles", () => {
-    const { container } = render(<TeamMemberList members={MEMBERS} />);
     expect(container.textContent).toContain("owner");
-    expect(container.textContent).toContain("member");
-  });
-  it("no remove for owner", () => {
-    const { container } = render(<TeamMemberList members={MEMBERS} onRemove={vi.fn()} />);
-    const removes = Array.from(container.querySelectorAll("button")).filter(b => b.textContent === "Remove");
-    assert(removes.length === 1); // only Bob can be removed
-  });
-  it("empty state", () => {
-    const { container } = render(<TeamMemberList members={[]} />);
-    expect(container.textContent).toContain("No team");
+    expect(container.textContent).toContain("Bob");
+    expect(container.textContent).toContain("developer");
+    fireEvent.click(getByText("Remove"));
+    expect(onRemove).toHaveBeenCalledWith("b@t.com");
   });
 });
