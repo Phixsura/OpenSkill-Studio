@@ -1,15 +1,16 @@
 from app.services.app_marketplace_app_app_comparison_table import build_comparison_table
 
-def test_compare():
-    apps = [
-        {"id": "a1", "name": "App A", "rating": 4.5, "installs": 5000, "has_api": True},
-        {"id": "a2", "name": "App B", "rating": 4.8, "installs": 3000, "has_api": False},
+def test_comparison():
+    plans = [{"id": "free", "name": "Free", "price": "$0"}, {"id": "pro", "name": "Pro", "price": "$29", "recommended": True}]
+    features = [
+        {"name": "API Access", "values": {"free": True, "pro": True}},
+        {"name": "Custom Domain", "values": {"free": False, "pro": True}},
+        {"name": "Support", "values": {"free": "Email", "pro": "Priority"}},
     ]
-    r = build_comparison_table(apps=apps, criteria=["rating", "installs", "has_api"])
-    assert len(r["rows"]) == 3
-    assert r["winner"] == "a1"  # higher total score
-    assert len(r["apps"]) == 2
-
-def test_too_few():
-    r = build_comparison_table(apps=[{"id": "a1"}], criteria=[])
-    assert "error" in r
+    r = build_comparison_table(plans=plans, features=features)
+    assert r["plan_count"] == 2
+    assert r["feature_count"] == 3
+    assert r["plans"][1]["recommended"]
+    assert r["features"][0]["values"]["free"]["display"] == "✓"
+    assert r["features"][1]["values"]["free"]["display"] == "✗"
+    assert r["features"][2]["values"]["pro"]["display"] == "Priority"

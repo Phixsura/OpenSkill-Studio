@@ -1,31 +1,24 @@
-"""App comparison table — side-by-side comparison of marketplace apps."""
+"""Comparison table — side-by-side plan/feature comparison."""
+
+import html
 
 
-def build_comparison_table(*, apps: list[dict], criteria: list[str]) -> dict:
-    if len(apps) < 2:
-        return {"error": "Need at least 2 apps to compare"}
+def build_comparison_table(*, plans: list[dict], features: list[dict]) -> dict:
+    cols = [{"id": p["id"], "name": html.escape(p.get("name", "")),
+             "price": p.get("price", "Free"), "recommended": p.get("recommended", False)}
+            for p in plans]
     rows = []
-    for criterion in criteria:
-        row = {"criterion": criterion}
-        for app in apps:
-            row[app["id"]] = app.get(criterion, "—")
+    for feat in features:
+        row = {"feature": html.escape(feat.get("name", "")),
+               "category": feat.get("category", "General"),
+               "values": {}}
+        for p in plans:
+            val = feat.get("values", {}).get(p["id"])
+            if isinstance(val, bool):
+                row["values"][p["id"]] = {"type": "bool", "value": val, "display": "✓" if val else "✗"}
+            elif val is None:
+                row["values"][p["id"]] = {"type": "null", "value": None, "display": "—"}
+            else:
+                row["values"][p["id"]] = {"type": "text", "value": val, "display": html.escape(str(val))}
         rows.append(row)
-    # Score each app
-    scores = {}
-    for app in apps:
-        score = 0
-        for c in criteria:
-            val = app.get(c, 0)
-            if isinstance(val, (int, float)):
-                score += val
-            elif isinstance(val, bool) and val:
-                score += 10
-        scores[app["id"]] = round(score, 1)
-    winner_id = max(scores, key=scores.get) if scores else None
-    return {
-        "apps": [{"id": a["id"], "name": a["name"]} for a in apps],
-        "rows": rows,
-        "criteria": criteria,
-        "scores": scores,
-        "winner": winner_id,
-    }
+    return {"plans": cols, "features": rows, "plan_count": len(cols), "feature_count": len(rows)}
