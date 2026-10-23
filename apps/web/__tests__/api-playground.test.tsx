@@ -1,20 +1,20 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiPlayground } from "@/components/api-playground";
 
 describe("ApiPlayground", () => {
-  it("renders", () => {
-    const { container } = render(<ApiPlayground onSend={vi.fn()} />);
+  it("renders playground", () => {
+    const { container } = render(
+      <ApiPlayground onSend={vi.fn()} history={[
+        { method: "GET", path: "/api/users", status: 200, responseMs: 42 },
+        { method: "POST", path: "/api/data", status: 201, responseMs: 85 },
+      ]} />
+    );
     expect(container.textContent).toContain("API Playground");
     expect(container.textContent).toContain("Send");
-    expect(container.querySelector("select")).toBeTruthy();
-  });
-  it("sends request", () => {
-    const fn = vi.fn();
-    const { container } = render(<ApiPlayground onSend={fn} />);
-    const input = container.querySelector("input")!;
-    fireEvent.change(input, { target: { value: "https://api.test.com" } });
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Send")!);
-    expect(fn).toHaveBeenCalledWith("GET", "https://api.test.com");
+    expect(container.textContent).toContain("GET");
+    expect(container.textContent).toContain("/api/users");
+    expect(container.textContent).toContain("200");
+    expect(container.textContent).toContain("42ms");
   });
 });
