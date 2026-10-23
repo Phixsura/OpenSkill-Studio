@@ -1,22 +1,18 @@
-from app.services.app_marketplace_app_performance_profiler import create_profile, analyze_slow_queries, suggest_optimizations
+from app.services.app_marketplace_app_performance_profiler import profile_endpoints
 
 def test_profile():
-    samples = [{"name": "db_query", "duration_ms": 500, "type": "db"},
-               {"name": "api_call", "duration_ms": 200, "type": "network"}]
-    p = create_profile(app_id="a1", duration_ms=800, samples=samples)
-    assert p["bottleneck"]["name"] == "db_query"
-    assert len(p["hotspots"]) == 2
+    eps = [
+        {"path": "/api/apps", "method": "GET", "p50_ms": 30, "p95_ms": 80, "p99_ms": 150, "requests_per_sec": 100},
+        {"path": "/api/search", "method": "GET", "p50_ms": 200, "p95_ms": 800, "p99_ms": 1500, "requests_per_sec": 50},
+    ]
+    r = profile_endpoints(endpoints=eps)
+    assert r["total"] == 2
+    assert r["slow_endpoints"] == 1
+    assert r["endpoints"][0]["path"] == "/api/search"  # sorted by p95 desc
+    assert r["overall_score"] == 85
 
-def test_slow_queries():
-    queries = [{"query": "SELECT *", "duration_ms": 200}, {"query": "INSERT", "duration_ms": 50}]
-    r = analyze_slow_queries(queries=queries, threshold_ms=100)
-    assert r["slow_count"] == 1
-
-def test_suggestions_slow():
-    s = suggest_optimizations(profile={"total_ms": 2000, "bottleneck": {"type": "db"}})
-    assert any("async" in x for x in s)
-    assert any("indexes" in x for x in s)
-
-def test_suggestions_ok():
-    s = suggest_optimizations(profile={"total_ms": 100, "bottleneck": None})
-    assert "good" in s[0]
+def test_all_fast():
+    eps = [{"path": "/health", "p50_ms": 5, "p95_ms": 10, "p99_ms": 20}]
+    r = profile_endpoints(endpoints=eps)
+    assert r["slow_endpoints"] == 0
+    assert r["overall_score"] == 100
