@@ -1,18 +1,23 @@
-from app.services.app_marketplace_app_content_delivery import generate_asset_url, compute_content_hash, build_asset_manifest, invalidate_cache
+from app.services.app_marketplace_app_content_delivery import configure_cdn, purge_cache, get_cdn_stats
 
-def test_url():
-    u = generate_asset_url(app_slug="my-app", version="2.0", path="main.js")
-    assert u == "https://cdn.openskill.dev/apps/my-app/2.0/main.js"
+def test_configure():
+    r = configure_cdn(app_id="a1", regions=["us-east", "eu-west"], cache_ttl_sec=7200)
+    assert len(r["regions"]) == 2
+    assert r["cache_ttl_sec"] == 7200
+    assert r["status"] == "active"
 
-def test_hash():
-    h = compute_content_hash(content=b"hello world")
-    assert len(h) == 16
+def test_no_valid():
+    r = configure_cdn(app_id="a1", regions=["mars"])
+    assert "error" in r
 
-def test_manifest():
-    m = build_asset_manifest(assets=[{"path": "app.js", "hash": "abc", "size": 1024, "content_type": "application/javascript"}], version="1.0")
-    assert m["version"] == "1.0"
-    assert m["total_size"] == 1024
+def test_purge():
+    r = purge_cache(app_id="a1", paths=["/assets/*"])
+    assert r["purge_type"] == "selective"
 
-def test_invalidate():
-    r = invalidate_cache(paths=["/app.js", "/style.css"], app_slug="my-app")
-    assert r["count"] == 2
+def test_full_purge():
+    r = purge_cache(app_id="a1")
+    assert r["purge_type"] == "full"
+
+def test_stats():
+    r = get_cdn_stats(app_id="a1")
+    assert r["cache_hit_rate"] == 94.5
