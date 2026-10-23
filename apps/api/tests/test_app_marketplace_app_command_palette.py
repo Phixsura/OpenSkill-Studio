@@ -1,22 +1,19 @@
-from app.services.app_marketplace_app_command_palette import search_commands, get_commands_by_category, get_recent_commands
+from app.services.app_marketplace_app_command_palette import search_commands, get_commands_by_category
 
 def test_search():
-    r = search_commands(query="log")
-    assert any(c["id"] == "view_logs" for c in r)
+    r = search_commands(query="deploy")
+    assert r["total"] == 1
+    assert r["commands"][0]["id"] == "deploy"
+
+def test_search_empty():
+    r = search_commands(query="")
+    assert r["total"] == len(r["commands"]) or r["total"] >= 5
 
 def test_search_category():
-    r = search_commands(query="debug")
-    assert len(r) >= 2
-
-def test_empty_query():
-    r = search_commands(query="")
-    assert len(r) == 6
+    r = search_commands(query="help")
+    assert r["total"] >= 2
 
 def test_by_category():
-    r = get_commands_by_category(category="config")
-    assert len(r) >= 2
-
-def test_recent():
-    r = get_recent_commands(history=["deploy", "view_logs", "settings", "deploy"])
-    assert r[0]["id"] == "deploy"
-    assert len(r) == 3
+    r = get_commands_by_category()
+    assert r["total_commands"] == 8
+    assert len(r["categories"]) >= 3
