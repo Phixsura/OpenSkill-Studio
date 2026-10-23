@@ -1,18 +1,24 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { SupportTicketList } from "@/components/support-ticket-list";
 
 describe("SupportTicketList", () => {
-  const tickets = [
-    { id: "TKT-ABC1", subject: "App crash", priority: "urgent", status: "open", createdAt: "2026-01-01" },
-    { id: "TKT-DEF2", subject: "Feature request", priority: "low", status: "resolved", createdAt: "2026-01-02" },
-  ];
   it("renders tickets", () => {
-    const { container } = render(<SupportTicketList tickets={tickets} openCount={1} hasUrgent={true} />);
-    expect(container.textContent).toContain("App crash");
-    expect(container.textContent).toContain("TKT-ABC1");
-    expect(container.textContent).toContain("urgent");
-    expect(container.textContent).toContain("Urgent");
-    expect(container.textContent).toContain("1 open");
+    const onSelect = vi.fn();
+    const { container, getAllByRole } = render(
+      <SupportTicketList openCount={2} onSelect={onSelect} onCreate={vi.fn()}
+        tickets={[
+          { id: "TKT-0001", title: "Login broken", priority: "high", status: "open", replies: 2 },
+          { id: "TKT-0002", title: "Slow API", priority: "medium", status: "open", replies: 0 },
+        ]} />
+    );
+    expect(container.textContent).toContain("Support Tickets");
+    expect(container.textContent).toContain("2 open");
+    expect(container.textContent).toContain("TKT-0001");
+    expect(container.textContent).toContain("Login broken");
+    expect(container.textContent).toContain("high");
+    const btns = getAllByRole("button");
+    fireEvent.click(btns[1]); // first ticket
+    expect(onSelect).toHaveBeenCalledWith("TKT-0001");
   });
 });
