@@ -1,29 +1,32 @@
 "use client";
 
-interface HeatmapRow { day: string; hours: number[]; total: number; }
-interface UsageHeatmapProps { rows: HeatmapRow[]; peakHour: number; }
+interface HeatmapCell { day: number; hour: number; count: number; intensity: number; }
+interface UsageHeatmapProps { cells: HeatmapCell[]; totalEvents: number; peakHour: number; peakDay: number; }
 
-export function UsageHeatmap({ rows, peakHour }: UsageHeatmapProps) {
-  const maxVal = Math.max(...rows.flatMap(r => r.hours), 1);
-  const intensity = (v: number) => {
-    const pct = v / maxVal;
-    return pct > 0.8 ? "bg-blue-700" : pct > 0.5 ? "bg-blue-500" : pct > 0.2 ? "bg-blue-300" : pct > 0 ? "bg-blue-100" : "bg-gray-50 dark:bg-gray-800";
-  };
+const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function UsageHeatmap({ cells, totalEvents, peakHour, peakDay }: UsageHeatmapProps) {
+  const grid = Array.from({ length: 7 }, (_, d) =>
+    cells.filter(c => c.day === d).sort((a, b) => a.hour - b.hour)
+  );
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">API Usage Heatmap</h3>
-        <span className="text-xs text-gray-400">Peak: {peakHour}:00</span>
+        <h3 className="text-sm font-semibold">Usage Heatmap</h3>
+        <span className="text-xs text-gray-400">{totalEvents.toLocaleString()} events · peak {days[peakDay]} {peakHour}:00</span>
       </div>
-      <div className="mt-3 space-y-1">
-        {rows.map(r => (
-          <div key={r.day} className="flex items-center gap-1">
-            <span className="w-8 text-xs text-gray-400">{r.day}</span>
-            {r.hours.map((v, h) => (
-              <div key={h} className={`h-3 w-3 rounded-sm ${intensity(v)}`} title={`${r.day} ${h}:00`} />
-            ))}
-            <span className="ml-1 text-xs text-gray-400">{r.total}</span>
+      <div className="space-y-1">
+        {grid.map((row, d) => (
+          <div key={d} className="flex items-center gap-1">
+            <span className="w-8 text-xs text-gray-400">{days[d]}</span>
+            <div className="flex gap-px">
+              {row.map(c => (
+                <div key={c.hour} title={`${days[c.day]} ${c.hour}:00 — ${c.count} events`}
+                  className="h-3 w-3 rounded-sm"
+                  style={{ backgroundColor: `rgba(59, 130, 246, ${c.intensity / 100})` }} />
+              ))}
+            </div>
           </div>
         ))}
       </div>
