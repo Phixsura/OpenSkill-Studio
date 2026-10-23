@@ -1,18 +1,23 @@
-from app.services.app_marketplace_app_gallery import build_category_gallery, build_developer_gallery
+from app.services.app_marketplace_app_gallery import build_gallery, get_sort_options, get_view_modes
 
-APPS = [{"name": "B", "install_count": 50, "category": "connector", "status": "published"},
-        {"name": "A", "install_count": 100, "category": "connector", "status": "published"}]
+def test_gallery():
+    apps = [{"name": "B", "install_count": 100}, {"name": "A", "install_count": 500}]
+    g = build_gallery(apps=apps, view_mode="grid", sort_by="popular")
+    assert g["apps"][0]["name"] == "A"  # most popular first
+    assert g["columns"] == 4
 
-def test_category_gallery():
-    g = build_category_gallery(category="connector", apps=APPS)
-    assert g["total"] == 2
-    assert g["apps"][0]["install_count"] == 100  # sorted by installs
+def test_list_mode():
+    g = build_gallery(apps=[], view_mode="list")
+    assert g["columns"] == 1
 
-def test_sort_by_name():
-    g = build_category_gallery(category="connector", apps=APPS, sort_by="name")
-    assert g["apps"][0]["name"] == "A"
+def test_pagination():
+    apps = [{"name": f"App{i}", "install_count": i} for i in range(50)]
+    g = build_gallery(apps=apps, page=2, per_page=20)
+    assert len(g["apps"]) == 20
+    assert g["total_pages"] == 3
 
-def test_developer_gallery():
-    g = build_developer_gallery(developer_name="Dev", apps=APPS)
-    assert g["developer"] == "Dev"
-    assert g["total"] == 2
+def test_sort_options():
+    assert len(get_sort_options()) == 4
+
+def test_view_modes():
+    assert len(get_view_modes()) == 2
