@@ -1,46 +1,46 @@
 "use client";
 
-interface LineItem { name: string; category: string; quantity: number; unit: string; unit_price: number; total: number; }
-interface CostBreakdownChartProps { lineItems: LineItem[]; total: number;
-  byCategory: Record<string, number>; largestCategory: string | null; }
+interface CostEntry { team?: string; service?: string; cost: number; pct: number; display: string; }
+interface CostBreakdownChartProps { totalDisplay: string; byTeam: CostEntry[]; byService: CostEntry[]; }
 
-const catColors: Record<string, string> = {
-  compute: "bg-blue-500", storage: "bg-green-500", network: "bg-purple-500",
-  database: "bg-orange-500", other: "bg-gray-500",
-};
+const COLORS = ["bg-blue-500", "bg-green-500", "bg-yellow-500", "bg-purple-500", "bg-red-500", "bg-pink-500"];
 
-export function CostBreakdownChart({ lineItems, total, byCategory, largestCategory }: CostBreakdownChartProps) {
+export function CostBreakdownChart({ totalDisplay, byTeam, byService }: CostBreakdownChartProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Cost Breakdown</h2>
-        <span className="text-xl font-bold">${total.toFixed(2)}</span>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">💸 Cost Allocation</h3>
+        <span className="text-lg font-bold">{totalDisplay}</span>
       </div>
-      <div className="flex h-4 overflow-hidden rounded-full">
-        {Object.entries(byCategory).map(([cat, cost]) => (
-          <div key={cat} className={`${catColors[cat] ?? catColors.other}`}
-            style={{ width: `${(cost / Math.max(total, 0.01)) * 100}%` }}
-            title={`${cat}: $${cost.toFixed(2)}`} />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-3">
-        {Object.entries(byCategory).map(([cat, cost]) => (
-          <div key={cat} className="flex items-center gap-1.5 text-xs">
-            <div className={`h-2.5 w-2.5 rounded-full ${catColors[cat] ?? catColors.other}`} />
-            <span className="capitalize">{cat}</span>
-            <span className="text-gray-400">${cost.toFixed(2)}</span>
-          </div>
-        ))}
-      </div>
-      <div className="space-y-1">
-        {lineItems.map(item => (
-          <div key={item.name} className="flex items-center justify-between text-sm">
-            <span>{item.name}</span>
-            <span className="text-gray-400">
-              {item.quantity.toLocaleString()} {item.unit} × ${item.unit_price} = <strong>${item.total.toFixed(2)}</strong>
-            </span>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">By Team</h4>
+          {byTeam.map((t, i) => (
+            <div key={t.team} className="mb-2">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="capitalize">{t.team}</span>
+                <span className="text-gray-500">{t.display} ({t.pct}%)</span>
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                <div className={`h-full rounded-full ${COLORS[i % COLORS.length]}`} style={{ width: `${t.pct}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">By Service</h4>
+          {byService.map((s, i) => (
+            <div key={s.service} className="mb-2">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="capitalize">{s.service}</span>
+                <span className="text-gray-500">{s.display} ({s.pct}%)</span>
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                <div className={`h-full rounded-full ${COLORS[(i + 2) % COLORS.length]}`} style={{ width: `${s.pct}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
