@@ -1,18 +1,29 @@
 "use client";
 
-interface UninstallDialogProps { appName: string; warnings: string[]; destructive: boolean; onConfirm: () => void; onCancel: () => void; }
+interface DataItem { type: string; label: string; sizeKb: number; }
+interface UninstallDialogProps { appName: string; dataToRemove: DataItem[];
+  totalSizeDisplay: string; warning: string;
+  onConfirm: () => void; onCancel: () => void; }
 
-export function UninstallDialog({ appName, warnings, destructive, onConfirm, onCancel }: UninstallDialogProps) {
+export function UninstallDialog({ appName, dataToRemove, totalSizeDisplay, warning, onConfirm, onCancel }: UninstallDialogProps) {
   return (
-    <div className="rounded-lg border border-red-200 p-5 dark:border-red-800">
-      <h3 className="text-lg font-semibold">Uninstall {appName}?</h3>
-      {warnings.length > 0 && (
-        <ul className="my-3 space-y-1">{warnings.map((w, i) => <li key={i} className="text-sm text-red-600">⚠️ {w}</li>)}</ul>
-      )}
-      <p className="mb-4 text-sm text-gray-500">This action cannot be undone.</p>
-      <div className="flex gap-3">
-        <button onClick={onCancel} className="rounded border px-4 py-2 text-sm">Cancel</button>
-        <button onClick={onConfirm} className="rounded bg-red-600 px-4 py-2 text-sm text-white">Uninstall</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-md rounded-xl border bg-white p-5 shadow-xl dark:bg-gray-900 dark:border-gray-700">
+        <h2 className="text-lg font-bold text-red-600">🗑️ Uninstall {appName}</h2>
+        <p className="mt-2 text-sm text-gray-500">{warning}</p>
+        <div className="mt-3 space-y-1">
+          <p className="text-xs font-semibold text-gray-400">Data to remove ({totalSizeDisplay})</p>
+          {dataToRemove.map(d => (
+            <div key={d.type} className="flex items-center justify-between text-sm">
+              <span>{d.label}</span>
+              <span className="text-xs text-gray-400">{d.sizeKb}KB</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex gap-3">
+          <button onClick={onCancel} className="flex-1 rounded border py-2 text-sm dark:border-gray-700">Keep App</button>
+          <button onClick={onConfirm} className="flex-1 rounded bg-red-600 py-2 text-sm text-white">Uninstall</button>
+        </div>
       </div>
     </div>
   );

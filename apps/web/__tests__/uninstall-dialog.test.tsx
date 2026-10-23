@@ -1,16 +1,27 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { UninstallDialog } from "@/components/uninstall-dialog";
 
 describe("UninstallDialog", () => {
-  it("shows app name", () => {
-    const { container } = render(<UninstallDialog appName="My App" warnings={["Data lost"]} destructive={true} onConfirm={vi.fn()} onCancel={vi.fn()} />);
-    expect(container.textContent).toContain("Uninstall My App");
-    expect(container.textContent).toContain("Data lost");
-  });
-  it("has buttons", () => {
-    const { container } = render(<UninstallDialog appName="X" warnings={[]} destructive={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
-    expect(container.textContent).toContain("Cancel");
+  const data = [{ type: "configuration", label: "Configuration", sizeKb: 10 }];
+  it("renders dialog", () => {
+    const { container } = render(
+      <UninstallDialog appName="SuperApp" dataToRemove={data} totalSizeDisplay="10KB"
+        warning="All data will be deleted" onConfirm={vi.fn()} onCancel={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Uninstall SuperApp");
+    expect(container.textContent).toContain("Configuration");
+    expect(container.textContent).toContain("10KB");
     expect(container.textContent).toContain("Uninstall");
+    expect(container.textContent).toContain("Keep App");
+  });
+  it("confirm click", () => {
+    const fn = vi.fn();
+    const { container } = render(
+      <UninstallDialog appName="X" dataToRemove={[]} totalSizeDisplay="0KB"
+        warning="w" onConfirm={fn} onCancel={vi.fn()} />
+    );
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Uninstall")!);
+    expect(fn).toHaveBeenCalled();
   });
 });
