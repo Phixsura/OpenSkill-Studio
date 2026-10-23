@@ -3,22 +3,22 @@ import { describe, expect, it, vi } from "vitest";
 import { PricingCards } from "@/components/pricing-cards";
 
 describe("PricingCards", () => {
-  const plans = [
-    { id: "free", price: 0, interval: "forever", features: ["5 apps"], featureCount: 1, recommended: false },
-    { id: "pro", price: 29, interval: "monthly", features: ["Unlimited", "Support"], featureCount: 2, recommended: true },
-  ];
   it("renders plans", () => {
-    const { container } = render(<PricingCards plans={plans} onSelect={vi.fn()} />);
-    expect(container.textContent).toContain("free");
-    expect(container.textContent).toContain("$0");
-    expect(container.textContent).toContain("pro");
-    expect(container.textContent).toContain("$29");
-    expect(container.textContent).toContain("Recommended");
-  });
-  it("select plan", () => {
-    const fn = vi.fn();
-    const { container } = render(<PricingCards plans={plans} onSelect={fn} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Subscribe")!);
-    expect(fn).toHaveBeenCalledWith("pro");
+    const onSelect = vi.fn();
+    const { container, getAllByText } = render(
+      <PricingCards currentPlan="starter" onSelect={onSelect} plans={[
+        { id: "free", priceDisplay: "$0/mo", apiCalls: 1000, apps: 3, teamSize: 1, features: ["basic"], isUnlimited: false },
+        { id: "starter", priceDisplay: "$29/mo", apiCalls: 50000, apps: 10, teamSize: 5, features: ["basic", "webhooks"], isUnlimited: false },
+        { id: "pro", priceDisplay: "$99/mo", apiCalls: 500000, apps: 50, teamSize: 25, features: ["basic", "sso"], isUnlimited: false },
+        { id: "enterprise", priceDisplay: "Custom", apiCalls: -1, apps: -1, teamSize: -1, features: ["all"], isUnlimited: true },
+      ]} />
+    );
+    expect(container.textContent).toContain("$29/mo");
+    expect(container.textContent).toContain("Current Plan");
+    expect(container.textContent).toContain("$99/mo");
+    expect(container.textContent).toContain("Custom");
+    expect(container.textContent).toContain("Unlimited");
+    fireEvent.click(getAllByText("Select")[0]);
+    expect(onSelect).toHaveBeenCalled();
   });
 });

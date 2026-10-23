@@ -1,32 +1,29 @@
 "use client";
 
-interface Plan { id: string; price: number; interval: string; features: string[];
-  featureCount: number; recommended: boolean; }
-interface PricingCardsProps { plans: Plan[]; onSelect: (id: string) => void; }
+interface PricingPlan { id: string; priceDisplay: string; apiCalls: number;
+  apps: number; teamSize: number; features: string[]; isUnlimited: boolean; }
+interface PricingCardsProps { plans: PricingPlan[]; currentPlan: string;
+  onSelect: (planId: string) => void; }
 
-export function PricingCards({ plans, onSelect }: PricingCardsProps) {
+export function PricingCards({ plans, currentPlan, onSelect }: PricingCardsProps) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-4 gap-4">
       {plans.map(p => (
-        <div key={p.id}
-          className={`rounded-xl border p-5 ${p.recommended ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-800" : "dark:border-gray-700"}`}>
-          {p.recommended && <span className="mb-2 inline-block rounded-full bg-blue-600 px-2.5 py-0.5 text-xs text-white">Recommended</span>}
-          <h3 className="text-lg font-bold capitalize">{p.id}</h3>
-          <div className="mt-2">
-            <span className="text-3xl font-bold">${p.price}</span>
-            <span className="text-sm text-gray-400">/{p.interval}</span>
-          </div>
-          <ul className="mt-4 space-y-2">
-            {p.features.map(f => (
-              <li key={f} className="flex items-center gap-2 text-sm">
-                <span className="text-green-500">✓</span>{f}
-              </li>
-            ))}
+        <div key={p.id} className={`rounded-xl border p-5 ${
+          p.id === currentPlan ? "border-blue-500 ring-2 ring-blue-200" : "dark:border-gray-700"
+        }`}>
+          <h3 className="font-bold capitalize mb-1">{p.id}</h3>
+          <p className="text-2xl font-bold mb-3">{p.priceDisplay}</p>
+          <ul className="text-xs text-gray-500 space-y-1 mb-4">
+            <li>{p.isUnlimited ? "Unlimited" : p.apiCalls.toLocaleString()} API calls</li>
+            <li>{p.isUnlimited ? "Unlimited" : p.apps} apps</li>
+            <li>{p.isUnlimited ? "Unlimited" : p.teamSize} team members</li>
           </ul>
+          <div className="text-xs text-gray-400 mb-3">{p.features.length} features</div>
           <button onClick={() => onSelect(p.id)}
-            className={`mt-4 w-full rounded-lg py-2 text-sm font-medium ${p.recommended ? "bg-blue-600 text-white" : "border dark:border-gray-700"}`}>
-            {p.price === 0 ? "Get Started" : "Subscribe"}
-          </button>
+            className={`w-full py-2 text-sm rounded-lg font-medium ${
+              p.id === currentPlan ? "bg-gray-200 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"
+            }`}>{p.id === currentPlan ? "Current Plan" : "Select"}</button>
         </div>
       ))}
     </div>
