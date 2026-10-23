@@ -16,7 +16,7 @@ def recommend_apps(*, user_interests: list[str], installed_apps: list[str],
         score = len(tags & set(user_interests)) * 3
         if cat in user_interests:
             score += 5
-        score += app.get("rating", 0)
+        if score > 0: score += app.get("rating", 0)
         if score > 0:
             scored.append({
                 "id": app["id"], "name": html.escape(app.get("name", "")),
