@@ -34,7 +34,7 @@ export function DependencyScannerTable({ results, healthDisplay, actionRequired 
               <td className="p-3 text-xs">{r.updateAvailable ? <strong>{r.latest}</strong> : r.latest}</td>
               <td className="p-3">
                 <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_STYLE[r.status] || ""}`}>
-                  {r.status.replace("_", " ")}
+                  {r.status.replaceAll("_", " ")}
                 </span>
               </td>
             </tr>
