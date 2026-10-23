@@ -1,18 +1,18 @@
 """App detail sidebar — metadata sidebar for app detail pages."""
 
 import html
+from datetime import datetime
 from urllib.parse import urlparse
 
 
 def _safe_url(url: str) -> str | None:
-    """Only allow http/https URLs with a hostname."""
     try:
         p = urlparse(url)
-        return url if p.scheme in ("http", "https") and p.hostname else None
+        if p.scheme in ("http", "https") and p.hostname:
+            return url
+        return None
     except Exception:
         return None
-
-from datetime import datetime
 
 
 def build_app_sidebar(*, app: dict) -> dict:
@@ -25,16 +25,14 @@ def build_app_sidebar(*, app: dict) -> dict:
         {"label": "Min SDK", "value": app.get("min_sdk", "—"), "icon": "🔧"},
     ]
     links = []
-    if app.get("website"):
-        safe = _safe_url(app["website"])
-    if safe:
-        links.append({"label": "Website", "url": safe, "icon": "🌐"})
-    if app.get("docs_url"):
-        links.append({"label": "Documentation", "url": app["docs_url"], "icon": "📚"})
-    if app.get("source_url"):
-        links.append({"label": "Source Code", "url": app["source_url"], "icon": "💻"})
+    for label, key, icon in [("Website", "website", "🌐"), ("Documentation", "docs_url", "📚"),
+                               ("Source Code", "source_url", "💻")]:
+        url = _safe_url(app.get(key, "") or "")
+        if url:
+            links.append({"label": label, "url": url, "icon": icon})
     if app.get("support_email"):
-        links.append({"label": "Support", "url": f"mailto:{html.escape(app['support_email'])}", "icon": "💬"})
+        mailto = f"mailto:{html.escape(app['support_email'])}"
+        links.append({"label": "Support", "url": mailto, "icon": "💬"})
     return {"info_items": info_items, "links": links,
             "permissions": app.get("permissions", []),
             "tags": app.get("tags", [])}
