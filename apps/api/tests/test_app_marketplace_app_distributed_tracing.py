@@ -1,23 +1,25 @@
-from app.services.app_marketplace_app_distributed_tracing import create_trace, add_span, compute_trace_summary
+from app.services.app_marketplace_app_distributed_tracing import create_trace, build_trace_tree
 
-def test_create():
-    t = create_trace()
-    assert len(t["trace_id"]) == 16
-    assert t["status"] == "active"
+def test_create_root():
+    r = create_trace(service="api-gateway", operation="GET /apps")
+    assert r["is_root"]
+    assert len(r["trace_id"]) == 32
+    assert len(r["span_id"]) == 16
 
-def test_add_spans():
-    t = create_trace(trace_id="abc123")
-    t = add_span(trace=t, service="api", operation="handle_request", duration_ms=50)
-    t = add_span(trace=t, service="webhook", operation="deliver", duration_ms=100, parent_span_id=t["spans"][0]["span_id"])
-    assert len(t["spans"]) == 2
+def test_create_child():
+    r = create_trace(trace_id="abc123", service="catalog", operation="list_apps", parent_span_id="parent1")
+    assert not r["is_root"]
+    assert r["trace_id"] == "abc123"
 
-def test_summary():
-    t = create_trace(trace_id="x")
-    t = add_span(trace=t, service="api", operation="req", duration_ms=50)
-    t = add_span(trace=t, service="db", operation="query", duration_ms=30)
-    t = add_span(trace=t, service="webhook", operation="send", duration_ms=100, status="error")
-    s = compute_trace_summary(trace=t)
-    assert s["span_count"] == 3
-    assert s["total_duration_ms"] == 180
-    assert s["has_errors"]
-    assert len(s["services"]) == 3
+def test_tree():
+    spans = [
+        {"span_id": "s1", "parent_span_id": None, "service": "gateway", "operation": "GET", "duration_ms": 100},
+        {"span_id": "s2", "parent_span_id": "s1", "service": "catalog", "operation": "list", "duration_ms": 60},
+        {"span_id": "s3", "parent_span_id": "s2", "service": "db", "operation": "query", "duration_ms": 20},
+    ]
+    r = build_trace_tree(spans=spans)
+    assert r["total_spans"] == 3
+    assert r["depth"] == 3
+    assert len(r["services"]) == 3
+    assert r["roots"][0]["span_id"] == "s1"
+    assert len(r["roots"][0]["children"]) == 1
