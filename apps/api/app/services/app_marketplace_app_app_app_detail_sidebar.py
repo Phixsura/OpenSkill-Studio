@@ -1,6 +1,17 @@
 """App detail sidebar — metadata sidebar for app detail pages."""
 
 import html
+from urllib.parse import urlparse
+
+
+def _safe_url(url: str) -> str | None:
+    """Only allow http/https URLs with a hostname."""
+    try:
+        p = urlparse(url)
+        return url if p.scheme in ("http", "https") and p.hostname else None
+    except Exception:
+        return None
+
 from datetime import datetime
 
 
@@ -15,7 +26,9 @@ def build_app_sidebar(*, app: dict) -> dict:
     ]
     links = []
     if app.get("website"):
-        links.append({"label": "Website", "url": app["website"], "icon": "🌐"})
+        safe = _safe_url(app["website"])
+    if safe:
+        links.append({"label": "Website", "url": safe, "icon": "🌐"})
     if app.get("docs_url"):
         links.append({"label": "Documentation", "url": app["docs_url"], "icon": "📚"})
     if app.get("source_url"):
