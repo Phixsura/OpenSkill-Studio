@@ -3,19 +3,22 @@ import { describe, expect, it } from "vitest";
 import { IncidentTimelineView } from "@/components/incident-timeline-view";
 
 describe("IncidentTimelineView", () => {
-  it("renders events", () => {
-    const events = [
-      { time: "2026-01-01T10:00:00Z", type: "opened", message: "API down" },
-      { time: "2026-01-01T10:10:00Z", type: "update", message: "Investigating", author: "alice" },
-      { time: "2026-01-01T10:30:00Z", type: "resolved", message: "Fixed" },
-    ];
-    const { container } = render(<IncidentTimelineView incidentId="inc1" events={events} durationMinutes={30} />);
-    expect(container.textContent).toContain("API down");
-    expect(container.textContent).toContain("alice");
-    expect(container.textContent).toContain("30 min");
-  });
-  it("shows ongoing", () => {
-    const { container } = render(<IncidentTimelineView incidentId="inc2" events={[]} durationMinutes={null} />);
-    expect(container.textContent).toContain("Ongoing");
+  it("renders incident", () => {
+    const { container } = render(
+      <IncidentTimelineView incidentId="INC-0001" title="DB Outage"
+        severity="sev1" status="resolved" commander="alice" affected={["database", "api"]}
+        events={[
+          { action: "declared", by: "alice" },
+          { action: "identified", note: "Disk full", by: "alice" },
+          { action: "resolved", note: "Expanded disk", by: "alice" },
+        ]} />
+    );
+    expect(container.textContent).toContain("INC-0001");
+    expect(container.textContent).toContain("DB Outage");
+    expect(container.textContent).toContain("sev1");
+    expect(container.textContent).toContain("resolved");
+    expect(container.textContent).toContain("declared");
+    expect(container.textContent).toContain("Disk full");
+    expect(container.textContent).toContain("Commander: alice");
   });
 });
