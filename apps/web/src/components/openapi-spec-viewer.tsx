@@ -1,37 +1,37 @@
 "use client";
 
-interface Endpoint { path: string; method: string; description: string; }
-interface OpenApiSpecViewerProps { appName: string; version: string; endpoints: Endpoint[];
-  pathCount: number; onDownload: () => void; }
+interface OpenApiSpecViewerProps { title: string; version: string; endpointCount: number;
+  pathCount: number; tags: string[]; byMethod: Record<string, number>; }
 
-const methodColor: Record<string, string> = {
-  get: "bg-green-100 text-green-700 dark:bg-green-900/30", post: "bg-blue-100 text-blue-700 dark:bg-blue-900/30",
-  put: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30", delete: "bg-red-100 text-red-700 dark:bg-red-900/30",
-  patch: "bg-purple-100 text-purple-700 dark:bg-purple-900/30",
+const METHOD_COLORS: Record<string, string> = {
+  get: "bg-green-500", post: "bg-blue-500", put: "bg-yellow-500",
+  patch: "bg-orange-500", delete: "bg-red-500",
 };
 
-export function OpenApiSpecViewer({ appName, version, endpoints, pathCount, onDownload }: OpenApiSpecViewerProps) {
+export function OpenApiSpecViewer({ title, version, endpointCount, pathCount, tags, byMethod }: OpenApiSpecViewerProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <div>
-          <h2 className="text-lg font-semibold">{appName} API</h2>
-          <p className="text-xs text-gray-400">v{version} · {pathCount} paths · {endpoints.length} operations</p>
+          <h3 className="font-semibold text-sm">{title}</h3>
+          <div className="text-xs text-gray-400">v{version} · OpenAPI 3.0</div>
         </div>
-        <button onClick={onDownload} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">
-          Download Spec
-        </button>
+        <span className="text-xs text-gray-400">{endpointCount} endpoints · {pathCount} paths</span>
       </div>
-      <div className="space-y-1.5">
-        {endpoints.map((ep, i) => (
-          <div key={i} className="flex items-center gap-2 rounded border px-3 py-2 dark:border-gray-700">
-            <span className={`rounded px-2 py-0.5 font-mono text-xs font-bold uppercase ${methodColor[ep.method.toLowerCase()] ?? ""}`}>
-              {ep.method}
-            </span>
-            <span className="font-mono text-sm">{ep.path}</span>
-            <span className="ml-auto text-xs text-gray-400">{ep.description}</span>
-          </div>
+      <div className="flex gap-2 px-4 py-2 border-b dark:border-gray-700 flex-wrap">
+        {Object.entries(byMethod).map(([method, count]) => (
+          <span key={method} className={`px-2 py-0.5 text-[10px] text-white rounded uppercase ${METHOD_COLORS[method] ?? "bg-gray-500"}`}>
+            {method} ×{count}
+          </span>
         ))}
+      </div>
+      <div className="p-4">
+        <div className="text-xs text-gray-400 mb-1">Tags</div>
+        <div className="flex flex-wrap gap-1">
+          {tags.map(t => (
+            <span key={t} className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 rounded">{t}</span>
+          ))}
+        </div>
       </div>
     </div>
   );
