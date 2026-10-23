@@ -3,14 +3,15 @@ import { describe, expect, it } from "vitest";
 import { AlertRulesPanel } from "@/components/alert-rules-panel";
 
 describe("AlertRulesPanel", () => {
-  it("renders rules", () => {
-    const rules = [{ name: "High CPU", metric: "cpu_usage", operator: "gt", threshold: 80, triggered: true }];
-    const { container } = render(<AlertRulesPanel rules={rules} activeCount={1} />);
+  const rules = [
+    { name: "High CPU", metric: "cpu_pct", operator: ">", threshold: 80, status: "firing", channel: "slack", severity: "critical" },
+    { name: "Low Disk", metric: "disk_pct", operator: "<", threshold: 10, status: "ok", channel: "email", severity: "warning" },
+  ];
+  it("renders alert rules", () => {
+    const { container } = render(<AlertRulesPanel rules={rules} firing={1} healthy={false} />);
     expect(container.textContent).toContain("High CPU");
-    expect(container.textContent).toContain("1 active");
-  });
-  it("empty state", () => {
-    const { container } = render(<AlertRulesPanel rules={[]} activeCount={0} />);
-    expect(container.textContent).toContain("No alert rules");
+    expect(container.textContent).toContain("cpu_pct > 80");
+    expect(container.textContent).toContain("firing");
+    expect(container.textContent).toContain("1 firing");
   });
 });
