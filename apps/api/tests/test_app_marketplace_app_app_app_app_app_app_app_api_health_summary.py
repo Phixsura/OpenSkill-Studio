@@ -8,7 +8,7 @@ def test_summary():
     ]
     r = summarize_api_health(eps)
     assert r["healthy"] == 2
-    assert r["overall"] == "degraded"
+    assert r["overall"] == "critical"  # 67% < 80% threshold
     assert r["slowest"]["endpoint"] == "/billing"
     assert r["most_errors"]["endpoint"] == "/billing"
     assert r["health_pct"] == 67
