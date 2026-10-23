@@ -3,20 +3,29 @@ import { describe, expect, it, vi } from "vitest";
 import { WebhookFilterBuilder } from "@/components/webhook-filter-builder";
 
 describe("WebhookFilterBuilder", () => {
-  it("renders conditions", () => {
-    const conditions = [{ field: "level", operator: "eq", value: "error" }];
-    const { container } = render(<WebhookFilterBuilder conditions={conditions} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("level eq error");
-  });
-  it("empty state", () => {
-    const { container } = render(<WebhookFilterBuilder conditions={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("No filters");
+  const conditions = [
+    { field: "data.amount", operator: "gt", value: 100 },
+    { field: "type", operator: "eq", value: "payment" },
+  ];
+  it("renders", () => {
+    const { container } = render(
+      <WebhookFilterBuilder name="High Value" conditions={conditions}
+        onAdd={vi.fn()} onRemove={vi.fn()} onSave={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Webhook Filter: High Value");
+    expect(container.textContent).toContain("data.amount");
+    expect(container.textContent).toContain(">");
+    expect(container.textContent).toContain("100");
+    expect(container.textContent).toContain("Save Filter");
   });
   it("remove", () => {
     const fn = vi.fn();
-    const conditions = [{ field: "x", operator: "eq", value: "y" }];
-    const { container } = render(<WebhookFilterBuilder conditions={conditions} onAdd={vi.fn()} onRemove={fn} />);
-    fireEvent.click(container.querySelector("button")!);
+    const { container } = render(
+      <WebhookFilterBuilder name="X" conditions={conditions}
+        onAdd={vi.fn()} onRemove={fn} onSave={vi.fn()} />
+    );
+    const removeBtns = Array.from(container.querySelectorAll("button")).filter(b => b.textContent === "×");
+    fireEvent.click(removeBtns[0]);
     expect(fn).toHaveBeenCalledWith(0);
   });
 });
