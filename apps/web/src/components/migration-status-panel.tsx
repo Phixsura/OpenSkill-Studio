@@ -1,35 +1,42 @@
 "use client";
 
-interface PendingMigration { version: string; description: string; }
-interface MigrationStatusPanelProps { currentVersion: string; total: number;
-  applied: number; pending: number; pendingList: PendingMigration[];
-  onApply: (version: string) => void; }
+interface Migration { id: string; destructive?: boolean; }
+interface MigrationStatusPanelProps { applied: number; pending: number;
+  latestApplied: string | null; upToDate: boolean; hasDestructive: boolean;
+  pendingMigrations: Migration[]; estimatedDisplay: string;
+  onRunMigrations: () => void; }
 
-export function MigrationStatusPanel({ currentVersion, total, applied, pending, pendingList, onApply }: MigrationStatusPanelProps) {
+export function MigrationStatusPanel({ applied, pending, latestApplied, upToDate, hasDestructive, pendingMigrations, estimatedDisplay, onRunMigrations }: MigrationStatusPanelProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">🗄️ Database Migrations</h3>
-        <span className="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">v{currentVersion}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🗄️ Migrations</h3>
+        <span className={`text-xs ${upToDate ? "text-green-600" : "text-yellow-600"}`}>
+          {upToDate ? "✅ Up to date" : `⚠ ${pending} pending`}
+        </span>
       </div>
-      <div className="grid grid-cols-3 gap-3 mb-4 text-center">
-        <div><p className="text-lg font-bold">{total}</p><p className="text-xs text-gray-400">Total</p></div>
-        <div><p className="text-lg font-bold text-green-600">{applied}</p><p className="text-xs text-gray-400">Applied</p></div>
-        <div><p className="text-lg font-bold text-yellow-600">{pending}</p><p className="text-xs text-gray-400">Pending</p></div>
+      <div className="grid grid-cols-3 gap-px bg-gray-200 dark:bg-gray-700 border-b dark:border-gray-700">
+        <div className="bg-white dark:bg-gray-900 p-3 text-center">
+          <div className="text-lg font-bold text-green-600">{applied}</div>
+          <div className="text-[10px] text-gray-400">Applied</div>
+        </div>
+        <div className="bg-white dark:bg-gray-900 p-3 text-center">
+          <div className="text-lg font-bold text-yellow-600">{pending}</div>
+          <div className="text-[10px] text-gray-400">Pending</div>
+        </div>
+        <div className="bg-white dark:bg-gray-900 p-3 text-center">
+          <div className="text-sm font-mono">{latestApplied ?? "—"}</div>
+          <div className="text-[10px] text-gray-400">Latest</div>
+        </div>
       </div>
-      {pendingList.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold text-gray-400 uppercase">Pending Migrations</h4>
-          {pendingList.map(m => (
-            <div key={m.version} className="flex items-center justify-between bg-yellow-50 dark:bg-yellow-900/10 rounded-lg px-3 py-2">
-              <div>
-                <span className="text-xs font-mono font-bold">{m.version}</span>
-                <span className="text-xs text-gray-500 ml-2">{m.description}</span>
-              </div>
-              <button onClick={() => onApply(m.version)}
-                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Apply</button>
-            </div>
-          ))}
+      {!upToDate && (
+        <div className="p-3 border-t dark:border-gray-700">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-400">ETA: {estimatedDisplay}</span>
+            {hasDestructive && <span className="text-xs text-red-500">⚠ Contains destructive migration</span>}
+          </div>
+          <button onClick={onRunMigrations}
+            className="w-full py-1.5 text-xs bg-blue-500 text-white rounded-lg">Run Migrations</button>
         </div>
       )}
     </div>

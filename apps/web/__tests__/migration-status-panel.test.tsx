@@ -1,18 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MigrationStatusPanel } from "@/components/migration-status-panel";
 
 describe("MigrationStatusPanel", () => {
-  it("renders and applies", () => {
-    const onApply = vi.fn();
-    const { container, getByText } = render(
-      <MigrationStatusPanel currentVersion="001" total={2} applied={1} pending={1}
-        pendingList={[{ version: "002", description: "Add email" }]} onApply={onApply} />
+  it("renders status", () => {
+    const { container } = render(
+      <MigrationStatusPanel applied={5} pending={2} latestApplied="005"
+        upToDate={false} hasDestructive={true} estimatedDisplay="2m 30s"
+        pendingMigrations={[{ id: "006" }, { id: "007", destructive: true }]}
+        onRunMigrations={vi.fn()} />
     );
-    expect(container.textContent).toContain("Database Migrations");
-    expect(container.textContent).toContain("v001");
-    expect(container.textContent).toContain("Add email");
-    fireEvent.click(getByText("Apply"));
-    expect(onApply).toHaveBeenCalledWith("002");
+    expect(container.textContent).toContain("Migrations");
+    expect(container.textContent).toContain("2 pending");
+    expect(container.textContent).toContain("5");
+    expect(container.textContent).toContain("005");
+    expect(container.textContent).toContain("2m 30s");
+    expect(container.textContent).toContain("destructive");
+    expect(container.textContent).toContain("Run Migrations");
   });
 });
