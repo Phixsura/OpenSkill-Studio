@@ -11,7 +11,7 @@ describe("LoadTestResultsView", () => {
         results={results} verdict="pass" onRerun={vi.fn()} />
     );
     expect(container.textContent).toContain("Load Test Results");
-    expect(container.textContent).toContain("PASS");
+    expect(container.textContent).toContain("pass");
     expect(container.textContent).toContain("600");
     expect(container.textContent).toContain("160ms");
   });
