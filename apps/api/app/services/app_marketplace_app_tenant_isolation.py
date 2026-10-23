@@ -1,24 +1,36 @@
-"""Tenant isolation — ensure data isolation between organizations using apps."""
+"""Tenant isolation — enforce data boundaries between organizations."""
 
 
-def validate_tenant_access(*, org_id: str, resource_org_id: str) -> dict:
-    if not org_id:
-        return {"allowed": False, "error": "Missing org_id"}
-    if org_id != resource_org_id:
-        return {"allowed": False, "error": "Cross-tenant access denied"}
-    return {"allowed": True, "error": None}
+ISOLATION_LEVELS = {
+    "shared": {"label": "Shared Infrastructure", "risk": "low", "cost_multiplier": 1.0,
+               "features": ["logical_separation", "row_level_security"]},
+    "dedicated": {"label": "Dedicated Resources", "risk": "minimal", "cost_multiplier": 2.5,
+                  "features": ["separate_compute", "separate_storage", "encryption_at_rest"]},
+    "isolated": {"label": "Fully Isolated", "risk": "none", "cost_multiplier": 5.0,
+                 "features": ["separate_vpc", "dedicated_keys", "audit_logging", "compliance_cert"]},
+}
 
 
-def build_tenant_context(*, org_id: str, user_id: str, app_id: str, installation_id: str) -> dict:
-    return {"org_id": org_id, "user_id": user_id, "app_id": app_id,
-            "installation_id": installation_id,
-            "namespace": f"org_{org_id}_app_{app_id}",
-            "data_prefix": f"data/{org_id}/{app_id}/"}
+def get_isolation_config(*, org_id: str, level: str = "shared") -> dict:
+    config = ISOLATION_LEVELS.get(level)
+    if not config:
+        return {"error": f"Invalid level. Valid: {', '.join(ISOLATION_LEVELS)}"}
+    return {
+        "org_id": org_id,
+        "level": level,
+        **config,
+        "data_residency": "us-east-1",
+        "encryption": level != "shared",
+        "cross_tenant_blocked": level in ("dedicated", "isolated"),
+    }
 
 
-def check_data_boundary(*, requested_path: str, allowed_prefix: str) -> dict:
-    if not requested_path.startswith(allowed_prefix):
-        return {"allowed": False, "error": f"Path outside tenant boundary: {requested_path}"}
-    if ".." in requested_path:
-        return {"allowed": False, "error": "Path traversal not allowed"}
-    return {"allowed": True, "error": None}
+def verify_tenant_access(*, requesting_org: str, target_org: str,
+                           resource_type: str) -> dict:
+    if requesting_org == target_org:
+        return {"allowed": True, "reason": "Same organization"}
+    shared_resources = {"public_apps", "marketplace_listings", "documentation"}
+    if resource_type in shared_resources:
+        return {"allowed": True, "reason": f"{resource_type} is a shared resource"}
+    return {"allowed": False, "reason": "Cross-tenant access denied",
+            "requesting_org": requesting_org, "target_org": target_org}
