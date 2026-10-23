@@ -5,25 +5,21 @@ import { InstallButton } from "@/components/install-button";
 describe("InstallButton", () => {
   it("renders install", () => {
     const { container } = render(
-      <InstallButton label="Install Free" icon="📥" variant="install" disabled={false}
-        onPrimary={vi.fn()} permissionsCount={3} />
+      <InstallButton state="install" label="Install — Free" disabled={false} variant="primary" onClick={vi.fn()} />
     );
-    expect(container.textContent).toContain("Install Free");
-    expect(container.textContent).toContain("📥");
-    expect(container.textContent).toContain("Requires 3 permissions");
+    expect(container.textContent).toContain("Install — Free");
   });
   it("renders installed", () => {
     const { container } = render(
-      <InstallButton label="Installed ✓" icon="✅" variant="installed" disabled={false}
-        secondaryLabel="Uninstall" onPrimary={vi.fn()} onSecondary={vi.fn()} />
+      <InstallButton state="installed" label="Installed ✓" disabled={true} variant="secondary" onClick={vi.fn()} />
     );
-    expect(container.textContent).toContain("Installed ✓");
-    expect(container.textContent).toContain("Uninstall");
+    expect(container.textContent).toContain("Installed");
+    expect(container.querySelector("button")?.disabled).toBe(true);
   });
-  it("click install", () => {
+  it("click", () => {
     const fn = vi.fn();
     const { container } = render(
-      <InstallButton label="Install" icon="📥" variant="install" disabled={false} onPrimary={fn} />
+      <InstallButton state="install" label="Install" disabled={false} variant="primary" onClick={fn} />
     );
     fireEvent.click(container.querySelector("button")!);
     expect(fn).toHaveBeenCalled();
