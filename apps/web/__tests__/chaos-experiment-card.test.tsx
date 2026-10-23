@@ -1,21 +1,18 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChaosExperimentCard } from "@/components/chaos-experiment-card";
 
 describe("ChaosExperimentCard", () => {
-  it("renders experiments", () => {
-    const onStart = vi.fn();
-    const { container, getByText } = render(
-      <ChaosExperimentCard onStart={onStart} experiments={[
-        { id: "c1", name: "Kill API", target: "api", faultType: "pod_kill", status: "created", blastRadiusPct: 25 },
-        { id: "c2", name: "Slow DB", target: "db", faultType: "latency", status: "completed", blastRadiusPct: 50 },
-      ]} />
+  it("renders experiment", () => {
+    const { container } = render(
+      <ChaosExperimentCard name="Latency Test" target="api" faultType="latency"
+        durationSec={120} magnitude={2} status="ready" resilient={null}
+        onRun={vi.fn()} onStop={vi.fn()} />
     );
-    expect(container.textContent).toContain("Chaos Experiments");
-    expect(container.textContent).toContain("Kill API");
-    expect(container.textContent).toContain("25% blast radius");
-    expect(container.textContent).toContain("completed");
-    fireEvent.click(getByText("Run"));
-    expect(onStart).toHaveBeenCalledWith("c1");
+    expect(container.textContent).toContain("Latency Test");
+    expect(container.textContent).toContain("api");
+    expect(container.textContent).toContain("latency");
+    expect(container.textContent).toContain("120s");
+    expect(container.textContent).toContain("Run");
   });
 });
