@@ -1,31 +1,20 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import MarketplaceLandingPage from "@/app/(public)/marketplace/page";
+import { describe, expect, it, vi } from "vitest";
+import { MarketplaceLanding } from "@/components/marketplace-landing";
 
-describe("MarketplaceLandingPage", () => {
-  it("renders without crashing", () => {
-    const { container } = render(<MarketplaceLandingPage />);
-    expect(container).toBeTruthy();
-  });
-
-  it("shows category links", () => {
-    const { container } = render(<MarketplaceLandingPage />);
-    const links = container.querySelectorAll("a");
-    expect(links.length).toBeGreaterThanOrEqual(5);
-  });
-
-  it("contains Connectors category", () => {
-    const { container } = render(<MarketplaceLandingPage />);
-    expect(container.textContent).toContain("Connectors");
-  });
-
-  it("contains Automation category", () => {
-    const { container } = render(<MarketplaceLandingPage />);
-    expect(container.textContent).toContain("Automation");
-  });
-
-  it("contains Analytics category", () => {
-    const { container } = render(<MarketplaceLandingPage />);
-    expect(container.textContent).toContain("Analytics");
+describe("MarketplaceLanding", () => {
+  const featured = [{ id: "a1", name: "SuperApp", icon: "🚀", tagline: "Do more" }];
+  const categories = [{ id: "tools", name: "Tools", icon: "🔧", appCount: 150 }];
+  const stats = { totalApps: 500, totalDevelopers: 200, totalDownloads: 1000000 };
+  it("renders landing page", () => {
+    const { container } = render(
+      <MarketplaceLanding featured={featured} categories={categories} stats={stats}
+        onSelectApp={vi.fn()} onSelectCategory={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Discover apps");
+    expect(container.textContent).toContain("SuperApp");
+    expect(container.textContent).toContain("Tools");
+    expect(container.textContent).toContain("500");
+    expect(container.textContent).toContain("1,000,000");
   });
 });
