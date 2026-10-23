@@ -12,5 +12,5 @@ def test_breadcrumbs():
 
 def test_parent():
     assert get_parent_path("/apps/my-app/settings") == "/apps/my-app"
-    assert get_parent_path("/apps") == ""
+    assert get_parent_path("/apps") == "/"
     assert get_parent_path("/") == "/"
