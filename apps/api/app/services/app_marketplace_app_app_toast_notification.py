@@ -1,24 +1,29 @@
-"""Toast notification — generate ephemeral toast messages."""
+"""Toast notification — ephemeral notification builder."""
 
+import html
 import secrets
+from datetime import datetime, timezone
 
-
-TOAST_TYPES = {
-    "success": {"icon": "✅", "color": "green", "duration_ms": 3000},
-    "error": {"icon": "❌", "color": "red", "duration_ms": 5000},
-    "warning": {"icon": "⚠️", "color": "yellow", "duration_ms": 4000},
-    "info": {"icon": "ℹ️", "color": "blue", "duration_ms": 3000},
+TYPES = {
+    "success": {"icon": "✅", "color": "green"},
+    "error": {"icon": "❌", "color": "red"},
+    "warning": {"icon": "⚠️", "color": "yellow"},
+    "info": {"icon": "ℹ️", "color": "blue"},
 }
 
 
-def create_toast(*, message: str, toast_type: str = "info",
+def create_toast(*, message: str, type: str = "info", duration_ms: int = 5000,
                    action_label: str | None = None) -> dict:
-    config = TOAST_TYPES.get(toast_type, TOAST_TYPES["info"])
-    return {
-        "toast_id": f"toast_{secrets.token_urlsafe(6)}",
-        "message": message,
-        "type": toast_type,
-        **config,
-        "action_label": action_label,
-        "dismissible": True,
-    }
+    info = TYPES.get(type, TYPES["info"])
+    return {"id": f"toast_{secrets.token_hex(4)}", "message": html.escape(message),
+            "type": type, "icon": info["icon"], "color": info["color"],
+            "duration_ms": duration_ms, "action_label": html.escape(action_label) if action_label else None,
+            "dismissible": True, "created_at": datetime.now(timezone.utc).isoformat()}
+
+
+def build_toast_queue(*, toasts: list[dict], max_visible: int = 3) -> dict:
+    visible = toasts[:max_visible]
+    queued = toasts[max_visible:]
+    return {"visible": visible, "queued": queued,
+            "visible_count": len(visible), "queued_count": len(queued),
+            "total": len(toasts)}

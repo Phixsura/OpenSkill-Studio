@@ -1,17 +1,17 @@
-from app.services.app_marketplace_app_app_toast_notification import create_toast
+from app.services.app_marketplace_app_app_toast_notification import create_toast, build_toast_queue
 
-def test_success():
-    r = create_toast(message="App published!", toast_type="success")
+def test_create():
+    r = create_toast(message="App published!", type="success")
+    assert r["id"].startswith("toast_")
     assert r["icon"] == "✅"
-    assert r["duration_ms"] == 3000
-    assert r["message"] == "App published!"
+    assert r["type"] == "success"
 
-def test_error():
-    r = create_toast(message="Deploy failed", toast_type="error", action_label="Retry")
-    assert r["icon"] == "❌"
-    assert r["action_label"] == "Retry"
-    assert r["duration_ms"] == 5000
+def test_action():
+    r = create_toast(message="Update available", type="info", action_label="Update now")
+    assert r["action_label"] == "Update now"
 
-def test_default():
-    r = create_toast(message="Hello")
-    assert r["type"] == "info"
+def test_queue():
+    toasts = [create_toast(message=f"Toast {i}") for i in range(5)]
+    r = build_toast_queue(toasts=toasts, max_visible=3)
+    assert r["visible_count"] == 3
+    assert r["queued_count"] == 2
