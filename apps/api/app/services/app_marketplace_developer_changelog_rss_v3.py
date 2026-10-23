@@ -17,11 +17,15 @@ def build_platform_rss(*, app_updates: list[dict], platform_updates: list[dict],
 
 
 def render_rss_xml(*, feed: dict) -> str:
+    from xml.sax.saxutils import escape
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<rss version="2.0">', '  <channel>',
-             f'    <title>{feed["title"]}</title>', f'    <link>{feed["link"]}</link>']
+             f'    <title>{escape(str(feed["title"]))}</title>',
+             f'    <link>{escape(str(feed["link"]))}</link>']
     for e in feed["entries"]:
-        lines.extend(['    <item>', f'      <title>{e["title"]}</title>',
-                       f'      <link>{e["link"]}</link>', f'      <pubDate>{e["date"]}</pubDate>',
+        lines.extend(['    <item>',
+                       f'      <title>{escape(str(e["title"]))}</title>',
+                       f'      <link>{escape(str(e["link"]))}</link>',
+                       f'      <pubDate>{escape(str(e["date"]))}</pubDate>',
                        '    </item>'])
     lines.extend(['  </channel>', '</rss>'])
     return '\n'.join(lines)
