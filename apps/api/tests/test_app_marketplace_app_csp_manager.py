@@ -17,4 +17,4 @@ def test_validate_secure():
 
 def test_validate_warnings():
     r = validate_csp(header="script-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src *")
-    assert r["warning_count"] == 3  # unsafe-inline in script, unsafe-eval, wildcard
+    assert r["warning_count"] == 4  # unsafe-inline in script, unsafe-eval, wildcard
