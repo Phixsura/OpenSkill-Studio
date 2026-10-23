@@ -1,28 +1,31 @@
-"""Activity heatmap — hourly/daily usage patterns for developer analytics."""
-
-from collections import defaultdict
+"""Activity heatmap — visualize user activity by hour and day of week."""
 
 
-def build_heatmap(*, events: list[dict]) -> dict:
-    grid = defaultdict(lambda: defaultdict(int))
-    for e in events:
-        ts = e.get("timestamp", "")
-        if len(ts) >= 13:
-            day = ts[:10]
-            hour = int(ts[11:13])
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def build_activity_heatmap(*, events: list[dict]) -> dict:
+    grid: dict[str, dict[int, int]] = {d: {h: 0 for h in range(24)} for d in DAYS}
+    for event in events:
+        day = event.get("day_of_week", "Mon")
+        hour = event.get("hour", 0)
+        if day in grid and 0 <= hour < 24:
             grid[day][hour] += 1
-    rows = []
-    for day in sorted(grid.keys()):
-        row = {"date": day, "hours": {str(h): grid[day][h] for h in range(24)}}
-        row["total"] = sum(grid[day].values())
-        rows.append(row)
-    return {"rows": rows, "total_events": sum(r["total"] for r in rows)}
-
-
-def find_peak_hours(*, heatmap: dict) -> list[dict]:
-    hourly = defaultdict(int)
-    for row in heatmap.get("rows", []):
-        for h, count in row.get("hours", {}).items():
-            hourly[int(h)] += count
-    sorted_hours = sorted(hourly.items(), key=lambda x: -x[1])
-    return [{"hour": h, "count": c} for h, c in sorted_hours[:5]]
+    max_val = max((v for row in grid.values() for v in row.values()), default=1) or 1
+    cells = []
+    for day in DAYS:
+        for hour in range(24):
+            count = grid[day][hour]
+            cells.append({
+                "day": day, "hour": hour, "count": count,
+                "intensity": round(count / max_val * 100, 1),
+            })
+    peak_cell = max(cells, key=lambda c: c["count"])
+    total = sum(c["count"] for c in cells)
+    return {
+        "cells": cells,
+        "total_events": total,
+        "peak": {"day": peak_cell["day"], "hour": peak_cell["hour"], "count": peak_cell["count"]},
+        "days": DAYS,
+        "hours": list(range(24)),
+    }
