@@ -1,26 +1,32 @@
 "use client";
 
-interface Delivery { delivery_id: string; event: string; url: string; status_code: number;
-  response_time_ms: number; success: boolean; timestamp: string; }
-interface WebhookDeliveryLogProps { deliveries: Delivery[]; successRate: number; }
+interface DeliveryEntry { id: string; eventType: string; statusCode: number;
+  durationMs: number; success: boolean; url: string; }
+interface WebhookDeliveryLogProps { entries: DeliveryEntry[]; totalDeliveries: number;
+  successRate: number; avgDurationMs: number; }
 
-export function WebhookDeliveryLog({ deliveries, successRate }: WebhookDeliveryLogProps) {
+export function WebhookDeliveryLog({ entries, totalDeliveries, successRate, avgDurationMs }: WebhookDeliveryLogProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Webhook Deliveries</h2>
-        <span className={`text-sm font-medium ${successRate >= 95 ? "text-green-600" : successRate >= 80 ? "text-yellow-600" : "text-red-600"}`}>
-          {successRate}% success
-        </span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📋 Delivery Log</h3>
+        <div className="flex gap-3 text-xs text-gray-400">
+          <span>{totalDeliveries} total</span>
+          <span>{successRate}% success</span>
+          <span>Avg {avgDurationMs}ms</span>
+        </div>
       </div>
-      <div className="space-y-1">
-        {deliveries.map(d => (
-          <div key={d.delivery_id} className="flex items-center gap-2 rounded border px-3 py-2 font-mono text-xs dark:border-gray-700">
-            <span className={d.success ? "text-green-500" : "text-red-500"}>{d.success ? "✓" : "✗"}</span>
-            <span className={`w-10 text-center font-bold ${d.success ? "text-green-600" : "text-red-600"}`}>{d.status_code}</span>
-            <span className="flex-1 truncate text-blue-500">{d.event}</span>
-            <span className="text-gray-400">{d.response_time_ms}ms</span>
-            <span className="text-gray-300">{new Date(d.timestamp).toLocaleTimeString()}</span>
+      <div className="max-h-64 overflow-y-auto divide-y dark:divide-gray-700">
+        {entries.map(e => (
+          <div key={e.id} className="flex items-center justify-between px-4 py-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span>{e.success ? "✅" : "❌"}</span>
+              <span className="font-mono text-xs">{e.eventType}</span>
+            </div>
+            <div className="flex gap-3 text-xs text-gray-400">
+              <span className={e.statusCode < 400 ? "text-green-600" : "text-red-500"}>{e.statusCode}</span>
+              <span>{e.durationMs}ms</span>
+            </div>
           </div>
         ))}
       </div>
