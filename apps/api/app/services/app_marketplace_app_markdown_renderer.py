@@ -16,7 +16,12 @@ def render_markdown(*, text: str) -> dict:
     # Code
     safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
     # Links
-    safe = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', safe)
+    def _safe_link(m):
+        label, url = m.group(1), m.group(2).strip()
+        if not re.match(r"^(https?://|mailto:|/|#)", html.unescape(url), re.I):
+            return label
+        return f'<a href="{url}" rel="noopener noreferrer nofollow">{label}</a>'
+    safe = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _safe_link, safe)
     # Lists
     safe = re.sub(r"^- (.+)$", r"<li>\1</li>", safe, flags=re.MULTILINE)
     # Paragraphs
