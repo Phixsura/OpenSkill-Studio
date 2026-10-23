@@ -23,7 +23,7 @@ def paginate_cursor(*, items: list, cursor: str | None = None,
     else:
         start_idx = 0
     page_items = items[start_idx:start_idx + limit]
-    next_cursor = str(page_items[-1][id_field]) if len(page_items) == limit else None
+    next_cursor = str(page_items[-1][id_field]) if start_idx + limit < len(items) else None
     return {"items": page_items, "next_cursor": next_cursor,
             "has_more": next_cursor is not None, "count": len(page_items)}
 
