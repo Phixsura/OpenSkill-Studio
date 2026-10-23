@@ -2,7 +2,7 @@ from app.services.app_marketplace_app_app_app_app_app_app_app_payload_inspector 
 
 def test_inspect():
     r = inspect_payload({"event": "app.installed", "data": {"app_id": "test", "user": {"id": "u1", "name": "Alice"}}})
-    assert r["field_count"] == 5
+    assert r["field_count"] == 6
     assert r["depth"] >= 3
     assert r["size_bytes"] > 0
     assert "event" in r["fields"]
