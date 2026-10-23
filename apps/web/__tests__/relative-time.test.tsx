@@ -3,14 +3,9 @@ import { describe, expect, it } from "vitest";
 import { RelativeTime } from "@/components/relative-time";
 
 describe("RelativeTime", () => {
-  it("renders old date", () => {
-    const { container } = render(<RelativeTime date="2020-01-01T00:00:00Z" />);
-    expect(container.textContent).toContain("y ago");
-  });
-  it("has time element", () => {
-    const { container } = render(<RelativeTime date="2026-01-01T00:00:00Z" />);
-    const time = container.querySelector("time");
-    expect(time).toBeTruthy();
-    expect(time?.getAttribute("dateTime")).toBe("2026-01-01T00:00:00Z");
+  it("renders relative time", () => {
+    const { container } = render(<RelativeTime relative="5m ago" absolute="2026-01-01 10:00 UTC" />);
+    expect(container.textContent).toContain("5m ago");
+    expect(container.querySelector("time")?.getAttribute("title")).toBe("2026-01-01 10:00 UTC");
   });
 });
