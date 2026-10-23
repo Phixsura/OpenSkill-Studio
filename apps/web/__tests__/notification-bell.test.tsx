@@ -3,23 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { NotificationBell } from "@/components/notification-bell";
 
 describe("NotificationBell", () => {
-  const notifs = [
-    { type: "info", title: "New Install", message: "App installed", read: false, created_at: "" },
-    { type: "info", title: "Review", message: "Got a review", read: true, created_at: "" },
-  ];
-  it("shows unread badge", () => {
-    const { container } = render(<NotificationBell notifications={notifs} onMarkAllRead={vi.fn()} />);
-    expect(container.textContent).toContain("1");
-  });
-  it("opens dropdown on click", () => {
-    const { container } = render(<NotificationBell notifications={notifs} onMarkAllRead={vi.fn()} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("New Install");
-    expect(container.textContent).toContain("Got a review");
-  });
-  it("empty state", () => {
-    const { container } = render(<NotificationBell notifications={[]} onMarkAllRead={vi.fn()} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("No notifications");
+  it("renders notifications", () => {
+    const onMarkAll = vi.fn();
+    const { container, getByText } = render(
+      <NotificationBell unreadCount={2} onMarkRead={vi.fn()} onMarkAllRead={onMarkAll}
+        notifications={[
+          { id: "n1", title: "Welcome!", body: "", category: "onboarding", read: false },
+          { id: "n2", title: "Deploy done", body: "v2.0", category: "deploy", read: false },
+        ]} />
+    );
+    expect(container.textContent).toContain("Notifications");
+    expect(container.textContent).toContain("2");
+    expect(container.textContent).toContain("Welcome!");
+    expect(container.textContent).toContain("Deploy done");
+    fireEvent.click(getByText("Mark all read"));
+    expect(onMarkAll).toHaveBeenCalled();
   });
 });

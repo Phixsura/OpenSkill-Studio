@@ -1,43 +1,42 @@
 "use client";
 
-import { useState } from "react";
+interface Notification { id: string; title: string; body: string; category: string; read: boolean; }
+interface NotificationBellProps { notifications: Notification[]; unreadCount: number;
+  onMarkRead: (id: string) => void; onMarkAllRead: () => void; }
 
-interface Notification { type: string; title: string; message: string; read: boolean; created_at: string; }
+const CAT_ICON: Record<string, string> = {
+  deploy: "🚀", onboarding: "👋", alert: "🚨", social: "👥", info: "ℹ️",
+};
 
-interface NotificationBellProps { notifications: Notification[]; onMarkAllRead: () => void; }
-
-export function NotificationBell({ notifications, onMarkAllRead }: NotificationBellProps) {
-  const [open, setOpen] = useState(false);
-  const unread = notifications.filter(n => !n.read).length;
-
+export function NotificationBell({ notifications, unreadCount, onMarkRead, onMarkAllRead }: NotificationBellProps) {
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(!open)} className="relative rounded-full p-2 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Notifications">
-        🔔
-        {unread > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
-            {unread > 9 ? "9+" : unread}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="absolute right-0 top-10 z-50 w-80 rounded-lg border bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex items-center justify-between border-b px-4 py-2 dark:border-gray-700">
-            <span className="text-sm font-semibold">Notifications</span>
-            {unread > 0 && <button onClick={onMarkAllRead} className="text-xs text-blue-600">Mark all read</button>}
-          </div>
-          <div className="max-h-64 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <p className="p-4 text-center text-sm text-gray-400">No notifications</p>
-            ) : notifications.map((n, i) => (
-              <div key={i} className={`border-b px-4 py-3 text-sm dark:border-gray-700 ${n.read ? "opacity-60" : ""}`}>
-                <p className="font-medium">{n.title}</p>
-                <p className="text-gray-500">{n.message}</p>
-              </div>
-            ))}
-          </div>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden w-80">
+      <div className="flex items-center justify-between p-3 border-b dark:border-gray-700">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🔔</span>
+          <span className="text-sm font-semibold">Notifications</span>
+          {unreadCount > 0 && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500 text-white font-bold">{unreadCount}</span>
+          )}
         </div>
-      )}
+        {unreadCount > 0 && (
+          <button onClick={onMarkAllRead} className="text-xs text-blue-600 hover:text-blue-700">Mark all read</button>
+        )}
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y dark:divide-gray-700">
+        {notifications.map(n => (
+          <button key={n.id} onClick={() => onMarkRead(n.id)}
+            className={`w-full text-left px-3 py-2.5 ${n.read ? "opacity-60" : "bg-blue-50/50 dark:bg-blue-900/10"}`}>
+            <div className="flex items-start gap-2">
+              <span>{CAT_ICON[n.category] || "📌"}</span>
+              <div>
+                <p className={`text-sm ${n.read ? "" : "font-medium"}`}>{n.title}</p>
+                {n.body && <p className="text-xs text-gray-400 line-clamp-1">{n.body}</p>}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
