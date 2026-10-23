@@ -14,4 +14,4 @@ def test_pool():
     s = pool.stats()
     assert s["active"] == 2
     assert s["waits"] == 1
-    assert s["health"] == "busy"
+    assert s["health"] == "healthy"  # 66.7% < 70 threshold
