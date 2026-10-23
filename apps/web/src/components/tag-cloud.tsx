@@ -1,25 +1,22 @@
 "use client";
 
-interface Tag { tag: string; count: number; }
-interface TagCloudProps { tags: Tag[]; onTagClick: (tag: string) => void; activeTag?: string; }
+interface Tag { tag: string; count: number; weight: number; size: number; }
+interface TagCloudProps { tags: Tag[]; onTagClick: (tag: string) => void; }
 
-export function TagCloud({ tags, onTagClick, activeTag }: TagCloudProps) {
-  const maxCount = Math.max(...tags.map(t => t.count), 1);
-  const getSize = (count: number) => {
-    const ratio = count / maxCount;
-    return ratio > 0.7 ? "text-lg font-bold" : ratio > 0.4 ? "text-base font-medium" : "text-sm";
-  };
+const colors = ["text-blue-500", "text-purple-500", "text-green-500", "text-orange-500",
+  "text-pink-500", "text-cyan-500", "text-indigo-500"];
 
+export function TagCloud({ tags, onTagClick }: TagCloudProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h3 className="text-sm font-semibold text-gray-500">Popular Tags</h3>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {tags.map(t => (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">Popular Tags</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        {tags.map((t, i) => (
           <button key={t.tag} onClick={() => onTagClick(t.tag)}
-            className={`rounded-full px-3 py-1 transition ${getSize(t.count)} ${activeTag === t.tag
-              ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300"}`}>
+            className={`rounded-full border px-3 py-1 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800 ${colors[i % colors.length]}`}
+            style={{ fontSize: `${t.size}px` }}>
             {t.tag}
-            <span className="ml-1 text-xs opacity-60">({t.count})</span>
+            <span className="ml-1 text-[10px] text-gray-400">({t.count})</span>
           </button>
         ))}
       </div>
