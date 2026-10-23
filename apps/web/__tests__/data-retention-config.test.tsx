@@ -3,16 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { DataRetentionConfig } from "@/components/data-retention-config";
 
 describe("DataRetentionConfig", () => {
-  it("renders presets", () => {
-    const { container } = render(<DataRetentionConfig activePreset="standard" onSave={vi.fn()} />);
-    expect(container.textContent).toContain("minimal");
-    expect(container.textContent).toContain("gdpr compliant");
-    expect(container.textContent).toContain("extended");
-  });
-  it("saves", () => {
-    const fn = vi.fn();
-    const { container } = render(<DataRetentionConfig activePreset="standard" onSave={fn} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent?.includes("Apply"))!);
-    expect(fn).toHaveBeenCalledWith("standard");
+  it("renders config", () => {
+    const onPreset = vi.fn();
+    const { container, getByText } = render(
+      <DataRetentionConfig currentPreset="standard" onPreset={onPreset}
+        presets={[{ id: "minimal", label: "Minimal", maxDays: 90 }, { id: "standard", label: "Standard", maxDays: 365 }]}
+        config={{ logs: 30, analytics: 90, user_data: 365 }} />
+    );
+    expect(container.textContent).toContain("Data Retention");
+    expect(container.textContent).toContain("30 days");
+    expect(container.textContent).toContain("365 days");
+    fireEvent.click(getByText("Minimal"));
+    expect(onPreset).toHaveBeenCalledWith("minimal");
   });
 });
