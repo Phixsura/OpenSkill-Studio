@@ -1,38 +1,39 @@
 "use client";
 
-interface TokenUsageMeterProps { totalTokens: number; inputTokens: number; outputTokens: number;
-  estimatedCost: number; budget: number; pctUsed: number; exceeded: boolean; warning: boolean; }
+interface TokenUsageMeterProps { totalConsumed: number; activeKeys: number;
+  avgPerKey: number; topEndpoints: { endpoint: string; count: number }[]; }
 
-export function TokenUsageMeter({ totalTokens, inputTokens, outputTokens, estimatedCost,
-  budget, pctUsed, exceeded, warning }: TokenUsageMeterProps) {
-  const barColor = exceeded ? "bg-red-500" : warning ? "bg-yellow-500" : "bg-green-500";
+export function TokenUsageMeter({ totalConsumed, activeKeys, avgPerKey, topEndpoints }: TokenUsageMeterProps) {
+  const maxCount = Math.max(...topEndpoints.map(e => e.count), 1);
   return (
-    <div className="space-y-3 rounded-lg border p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Token Usage</h3>
-        <span className="text-sm font-bold">${estimatedCost.toFixed(4)}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🎫 Token Usage</h3>
       </div>
-      <div>
-        <div className="flex justify-between text-xs text-gray-400">
-          <span>{totalTokens.toLocaleString()} / {budget.toLocaleString()}</span>
-          <span>{pctUsed}%</span>
-        </div>
-        <div className="mt-1 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700">
-          <div className={`h-full rounded-full ${barColor}`}
-            style={{ width: `${Math.min(pctUsed, 100)}%` }} />
-        </div>
+      <div className="grid grid-cols-3 gap-px bg-gray-200 dark:bg-gray-700 border-b dark:border-gray-700">
+        {[{ l: "Consumed", v: totalConsumed.toLocaleString() },
+          { l: "Active Keys", v: activeKeys },
+          { l: "Avg/Key", v: avgPerKey.toLocaleString() }].map(s => (
+          <div key={s.l} className="bg-white dark:bg-gray-900 p-3 text-center">
+            <div className="text-lg font-bold">{s.v}</div>
+            <div className="text-[10px] text-gray-400">{s.l}</div>
+          </div>
+        ))}
       </div>
-      <div className="grid grid-cols-2 gap-2 text-center text-xs">
-        <div className="rounded bg-gray-50 p-1.5 dark:bg-gray-800">
-          <p className="font-bold">{inputTokens.toLocaleString()}</p>
-          <p className="text-gray-400">Input</p>
-        </div>
-        <div className="rounded bg-gray-50 p-1.5 dark:bg-gray-800">
-          <p className="font-bold">{outputTokens.toLocaleString()}</p>
-          <p className="text-gray-400">Output</p>
-        </div>
+      <div className="p-4 space-y-1.5">
+        <div className="text-xs text-gray-400 mb-1">Top Endpoints</div>
+        {topEndpoints.map(e => (
+          <div key={e.endpoint}>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="font-mono">{e.endpoint}</span>
+              <span className="text-gray-400">{e.count}</span>
+            </div>
+            <div className="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(e.count / maxCount) * 100}%` }} />
+            </div>
+          </div>
+        ))}
       </div>
-      {exceeded && <p className="text-center text-xs text-red-500">⚠️ Token budget exceeded</p>}
     </div>
   );
 }
