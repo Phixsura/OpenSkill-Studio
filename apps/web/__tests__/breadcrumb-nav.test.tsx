@@ -1,23 +1,22 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
 
 describe("BreadcrumbNav", () => {
-  const crumbs = [
-    { label: "Home", path: "/", active: false },
-    { label: "Apps", path: "/apps", active: false },
-    { label: "Settings", path: "/apps/a1/settings", active: true },
+  const trail = [
+    { label: "Home", href: "/", is_current: false },
+    { label: "Marketplace", href: "/marketplace", is_current: false },
+    { label: "My App", href: null, is_current: true },
   ];
-  it("renders", () => {
-    const { container } = render(<BreadcrumbNav breadcrumbs={crumbs} onNavigate={vi.fn()} />);
-    expect(container.textContent).toContain("Home");
-    expect(container.textContent).toContain("Apps");
-    expect(container.textContent).toContain("Settings");
+  it("renders links and current", () => {
+    const { container } = render(<BreadcrumbNav trail={trail} />);
+    const links = container.querySelectorAll("a");
+    expect(links.length).toBe(2);
+    expect(links[0].getAttribute("href")).toBe("/");
+    expect(container.textContent).toContain("My App");
   });
-  it("navigate", () => {
-    const fn = vi.fn();
-    const { container } = render(<BreadcrumbNav breadcrumbs={crumbs} onNavigate={fn} />);
-    fireEvent.click(container.querySelectorAll("button")[0]);
-    expect(fn).toHaveBeenCalledWith("/");
+  it("shows separators", () => {
+    const { container } = render(<BreadcrumbNav trail={trail} />);
+    expect(container.textContent).toContain("/");
   });
 });
