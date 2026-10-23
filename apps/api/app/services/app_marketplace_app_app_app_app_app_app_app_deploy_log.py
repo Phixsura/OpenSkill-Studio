@@ -1,25 +1,32 @@
-"""Deployment log viewer — structured deploy logs with step tracking."""
+"""Deployment log streamer — capture and stream deploy logs."""
 from __future__ import annotations
+import time
 import html
 
+_logs: dict[str, list[dict]] = {}
 
-def build_deploy_log(steps: list[dict]) -> dict:
-    log_lines = []
-    total_duration = 0
-    for s in steps:
-        duration = s.get("duration_ms", 0)
-        total_duration += duration
-        status = s.get("status", "pending")
-        icon = {"success": "✅", "failed": "❌", "running": "🔄", "pending": "⬜"}.get(status, "⬜")
-        log_lines.append({
-            "step": html.escape(s.get("name", "")), "status": status, "icon": icon,
-            "duration_ms": duration, "output": s.get("output", ""),
-        })
-    failed = sum(1 for l in log_lines if l["status"] == "failed")
-    return {
-        "lines": log_lines, "total_steps": len(log_lines),
-        "completed": sum(1 for l in log_lines if l["status"] == "success"),
-        "failed": failed, "total_duration_ms": total_duration,
-        "duration_display": f"{total_duration / 1000:.1f}s",
-        "overall": "failed" if failed else "success" if all(l["status"] == "success" for l in log_lines) else "in_progress",
-    }
+
+def start_deploy(deploy_id: str) -> dict:
+    _logs[deploy_id] = []
+    return {"deploy_id": deploy_id, "started": True, "started_at": time.time()}
+
+
+def append_log(deploy_id: str, level: str, message: str) -> dict:
+    if deploy_id not in _logs:
+        return {"appended": False, "error": "deploy_not_found"}
+    entry = {"level": level, "message": html.escape(message),
+             "timestamp": time.time(), "seq": len(_logs[deploy_id])}
+    _logs[deploy_id].append(entry)
+    return {"appended": True, "seq": entry["seq"]}
+
+
+def get_logs(deploy_id: str, since_seq: int = 0) -> dict:
+    logs = _logs.get(deploy_id, [])
+    new_logs = [l for l in logs if l["seq"] >= since_seq]
+    error_count = sum(1 for l in logs if l["level"] == "error")
+    return {"deploy_id": deploy_id, "logs": new_logs, "total": len(logs),
+            "new_count": len(new_logs), "error_count": error_count}
+
+
+def clear_logs() -> None:
+    _logs.clear()

@@ -3,20 +3,19 @@ import { describe, expect, it } from "vitest";
 import { DeployLogViewer } from "@/components/deploy-log-viewer";
 
 describe("DeployLogViewer", () => {
-  it("renders log", () => {
+  it("renders logs", () => {
     const { container } = render(
-      <DeployLogViewer overall="success" durationDisplay="25.0s" completed={3} totalSteps={3}
-        lines={[
-          { step: "Build", status: "success", icon: "✅", durationMs: 5000, output: "Built OK" },
-          { step: "Test", status: "success", icon: "✅", durationMs: 12000, output: "" },
-          { step: "Deploy", status: "success", icon: "✅", durationMs: 8000, output: "" },
-        ]} />
+      <DeployLogViewer deployId="d1" total={3} errorCount={1} logs={[
+        { seq: 0, level: "info", message: "Building image..." },
+        { seq: 1, level: "info", message: "Pushing..." },
+        { seq: 2, level: "error", message: "Health check failed" },
+      ]} />
     );
-    expect(container.textContent).toContain("Deploy Log");
-    expect(container.textContent).toContain("3/3 steps");
-    expect(container.textContent).toContain("25.0s");
-    expect(container.textContent).toContain("success");
-    expect(container.textContent).toContain("Build");
-    expect(container.textContent).toContain("Built OK");
+    expect(container.textContent).toContain("Deploy Logs");
+    expect(container.textContent).toContain("d1");
+    expect(container.textContent).toContain("3 lines");
+    expect(container.textContent).toContain("1 errors");
+    expect(container.textContent).toContain("Building image...");
+    expect(container.textContent).toContain("Health check failed");
   });
 });
