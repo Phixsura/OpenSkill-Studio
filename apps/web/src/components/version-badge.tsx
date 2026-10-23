@@ -1,34 +1,22 @@
 "use client";
 
-interface VersionBadgeProps {
-  version: string;
-  reviewStatus?: string;
-  signed?: boolean;
-}
+interface ChannelInfo { color: string; icon: string; label: string; }
+interface VersionBadgeProps { display: string; channelInfo: ChannelInfo; isLatest: boolean; }
 
-const REVIEW_COLORS: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  PENDING: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  approved: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  APPROVED: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  rejected: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-  REJECTED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+const colorMap: Record<string, string> = {
+  green: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  yellow: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+  orange: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  blue: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
 };
 
-export function VersionBadge({ version, reviewStatus, signed }: VersionBadgeProps) {
+export function VersionBadge({ display, channelInfo, isLatest }: VersionBadgeProps) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <code className="rounded bg-gray-100 px-2 py-0.5 text-xs font-bold dark:bg-gray-700">
-        v{version}
-      </code>
-      {reviewStatus && (
-        <span className={`rounded px-1.5 py-0.5 text-xs ${REVIEW_COLORS[reviewStatus] ?? "bg-gray-100"}`}>
-          {reviewStatus.toLowerCase()}
-        </span>
-      )}
-      {signed && (
-        <span className="text-xs text-blue-600" title="Signed">✍️</span>
-      )}
-    </span>
+    <div className="inline-flex items-center gap-1.5">
+      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${colorMap[channelInfo.color] ?? colorMap.green}`}>
+        {channelInfo.icon} {display}
+      </span>
+      {isLatest && <span className="text-[10px] text-green-500">Latest</span>}
+    </div>
   );
 }
