@@ -3,7 +3,6 @@
 interface Plan { name: string; price: number; interval: string; apiLimit: number; }
 interface Usage { apiCalls: number; apiPct: number; storageMb: number; }
 interface Billing { base: number; overage: number; total: number; }
-interface Payment { brand: string; last4: string; } | null
 interface Invoice { id: string; amount: number; status: string; date: string; }
 interface BillingPageProps { orgName: string; plan: Plan; usage: Usage; billing: Billing;
   payment: { brand: string; last4: string } | null; invoices: Invoice[];
