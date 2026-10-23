@@ -1,19 +1,22 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_release_train import ReleaseTrainManager
+from app.services.app_marketplace_app_app_app_app_app_app_app_release_train import create_train, advance_service
 
-def test_release_train():
-    mgr = ReleaseTrainManager()
-    t = mgr.create_train(version="3.5.0", services=[
-        {"name": "api", "version": "3.5.0"},
-        {"name": "web", "version": "3.5.0"},
-        {"name": "worker", "version": "3.5.0"},
-    ])
-    mgr.approve_service(t["id"], "api")
-    mgr.approve_service(t["id"], "web")
-    r = mgr.approve_service(t["id"], "worker")
-    assert r["train_ready"]
-    s = mgr.status(t["id"])
-    assert s["status"] == "ready"
-    assert s["approved"] == 3
-    rel = mgr.release(t["id"])
-    assert rel["status"] == "released"
-    assert rel["services_released"] == 3
+def test_create():
+    t = create_train("Q4 Release", [
+        {"name": "api", "version": "3.0", "status": "ready"},
+        {"name": "web", "version": "3.0", "status": "pending"},
+        {"name": "worker", "version": "3.0", "status": "pending"},
+    ], "2024-12-15")
+    assert t["total"] == 3
+    assert t["ready"] == 1
+    assert t["pct_ready"] == 33
+
+def test_advance():
+    t = create_train("v2", [
+        {"name": "api", "version": "2.0", "status": "pending"},
+        {"name": "web", "version": "2.0", "status": "pending"},
+    ], "2024-11-01")
+    advance_service(t, "api", "ready")
+    assert t["ready"] == 1
+    advance_service(t, "web", "ready")
+    assert t["all_ready"]
+    assert t["pct_ready"] == 100

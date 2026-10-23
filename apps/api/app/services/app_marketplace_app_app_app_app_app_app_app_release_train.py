@@ -1,55 +1,28 @@
 """Release train manager — coordinate multi-service releases."""
 from __future__ import annotations
-import secrets
+import time
 
 
-class ReleaseTrainManager:
-    def __init__(self):
-        self._trains: dict[str, dict] = {}
+def create_train(name: str, services: list[dict], target_date: str) -> dict:
+    items = []
+    for s in services:
+        items.append({"service": s["name"], "version": s["version"],
+                       "status": s.get("status", "pending"),
+                       "owner": s.get("owner", "unassigned")})
+    ready = sum(1 for i in items if i["status"] == "ready")
+    return {"name": name, "target_date": target_date, "services": items,
+            "total": len(items), "ready": ready,
+            "all_ready": ready == len(items),
+            "pct_ready": round(ready / max(len(items), 1) * 100)}
 
-    def create_train(self, *, version: str, services: list[dict],
-                      target_date: str = "") -> dict:
-        tid = f"rt_{secrets.token_hex(4)}"
-        items = [{"service": s["name"], "version": s.get("version", ""),
-                   "status": "pending", "tests_passed": False}
-                  for s in services]
-        self._trains[tid] = {"id": tid, "version": version,
-                              "target_date": target_date, "items": items,
-                              "status": "planning"}
-        return {"id": tid, "version": version, "services": len(items)}
 
-    def approve_service(self, tid: str, service: str) -> dict:
-        train = self._trains.get(tid)
-        if not train:
-            return {"error": "Train not found"}
-        for item in train["items"]:
-            if item["service"] == service:
-                item["status"] = "approved"
-                item["tests_passed"] = True
-                break
-        all_approved = all(i["status"] == "approved" for i in train["items"])
-        if all_approved:
-            train["status"] = "ready"
-        return {"service": service, "status": "approved",
-                "train_ready": all_approved}
-
-    def release(self, tid: str) -> dict:
-        train = self._trains.get(tid)
-        if not train:
-            return {"error": "Train not found"}
-        if train["status"] != "ready":
-            return {"error": "Train not ready — not all services approved"}
-        train["status"] = "released"
-        for item in train["items"]:
-            item["status"] = "released"
-        return {"id": tid, "version": train["version"], "status": "released",
-                "services_released": len(train["items"])}
-
-    def status(self, tid: str) -> dict:
-        train = self._trains.get(tid)
-        if not train:
-            return {"error": "Train not found"}
-        approved = sum(1 for i in train["items"] if i["status"] in ("approved", "released"))
-        return {"id": tid, "version": train["version"], "status": train["status"],
-                "approved": approved, "total": len(train["items"]),
-                "items": train["items"]}
+def advance_service(train: dict, service_name: str, new_status: str) -> dict:
+    for s in train["services"]:
+        if s["service"] == service_name:
+            s["status"] = new_status
+            break
+    ready = sum(1 for s in train["services"] if s["status"] == "ready")
+    train["ready"] = ready
+    train["all_ready"] = ready == train["total"]
+    train["pct_ready"] = round(ready / max(train["total"], 1) * 100)
+    return train
