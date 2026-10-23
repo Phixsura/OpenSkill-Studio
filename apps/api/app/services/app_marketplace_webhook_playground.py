@@ -6,7 +6,7 @@ import time
 
 
 def create_test_endpoint() -> dict:
-    endpoint_id = hashlib.sha256(str(time.time()).encode()).hexdigest()[:12]
+    endpoint_id = __import__("secrets").token_urlsafe(16)
     return {"endpoint_id": endpoint_id,
             "url": f"https://webhook.openskill.dev/test/{endpoint_id}",
             "status": "active", "received_count": 0, "max_requests": 100}
