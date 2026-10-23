@@ -1,30 +1,33 @@
-"""Config drift detector — compare expected vs actual infrastructure config."""
+"""Config drift detector — detect config differences across environments."""
 from __future__ import annotations
 
 
-def detect_drift(expected: dict, actual: dict, *, path: str = "") -> list[dict]:
-    diffs = []
-    all_keys = set(list(expected.keys()) + list(actual.keys()))
+def detect_drift(envs: dict[str, dict]) -> dict:
+    if len(envs) < 2:
+        return {"drifts": [], "drift_count": 0, "has_drift": False}
+    env_names = list(envs.keys())
+    all_keys = set()
+    for config in envs.values():
+        all_keys.update(config.keys())
+    drifts = []
     for key in sorted(all_keys):
-        full_path = f"{path}.{key}" if path else key
-        if key not in actual:
-            diffs.append({"path": full_path, "type": "missing", "expected": expected[key], "actual": None})
-        elif key not in expected:
-            diffs.append({"path": full_path, "type": "extra", "expected": None, "actual": actual[key]})
-        elif isinstance(expected[key], dict) and isinstance(actual[key], dict):
-            diffs.extend(detect_drift(expected[key], actual[key], path=full_path))
-        elif expected[key] != actual[key]:
-            diffs.append({"path": full_path, "type": "changed", "expected": expected[key], "actual": actual[key]})
-    return diffs
+        values = {env: envs[env].get(key, "<missing>") for env in env_names}
+        unique = set(str(v) for v in values.values())
+        if len(unique) > 1:
+            drifts.append({"key": key, "values": values, "environments": len(unique)})
+    return {"drifts": drifts, "drift_count": len(drifts),
+            "total_keys": len(all_keys), "has_drift": len(drifts) > 0,
+            "environments": env_names}
 
 
-def summarize_drift(diffs: list[dict]) -> dict:
-    by_type = {"missing": 0, "extra": 0, "changed": 0}
-    for d in diffs:
-        by_type[d["type"]] = by_type.get(d["type"], 0) + 1
-    return {
-        "total_drifts": len(diffs), "by_type": by_type,
-        "has_drift": len(diffs) > 0,
-        "severity": "critical" if by_type["missing"] > 0 else "warning" if diffs else "clean",
-        "diffs": diffs,
-    }
+def suggest_fixes(drifts: list[dict], source_env: str) -> list[dict]:
+    fixes = []
+    for d in drifts:
+        source_val = d["values"].get(source_env)
+        if source_val is None:
+            continue
+        for env, val in d["values"].items():
+            if env != source_env and str(val) != str(source_val):
+                fixes.append({"key": d["key"], "environment": env,
+                              "current": val, "expected": source_val})
+    return fixes

@@ -1,17 +1,17 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_config_drift import detect_drift, summarize_drift
+from app.services.app_marketplace_app_app_app_app_app_app_app_config_drift import detect_drift, suggest_fixes
 
 def test_drift():
-    expected = {"replicas": 3, "image": "app:v2", "env": {"DB_HOST": "db.prod", "LOG_LEVEL": "info"}}
-    actual = {"replicas": 2, "image": "app:v2", "env": {"DB_HOST": "db.prod", "LOG_LEVEL": "debug", "DEBUG": "true"}}
-    diffs = detect_drift(expected, actual)
-    assert len(diffs) == 3  # replicas changed, LOG_LEVEL changed, DEBUG extra
-    s = summarize_drift(diffs)
-    assert s["has_drift"]
-    assert s["by_type"]["changed"] == 2
-    assert s["by_type"]["extra"] == 1
+    r = detect_drift({
+        "production": {"db_host": "prod-db", "cache": "redis", "debug": False},
+        "staging": {"db_host": "stg-db", "cache": "redis", "debug": True},
+        "development": {"db_host": "localhost", "cache": "memory", "debug": True},
+    })
+    assert r["has_drift"]
+    assert r["drift_count"] == 3  # db_host, cache, debug all differ
 
-def test_no_drift():
-    d = detect_drift({"a": 1}, {"a": 1})
-    assert len(d) == 0
-    s = summarize_drift(d)
-    assert s["severity"] == "clean"
+def test_fixes():
+    drifts = [{"key": "debug", "values": {"production": False, "staging": True}}]
+    fixes = suggest_fixes(drifts, "production")
+    assert len(fixes) == 1
+    assert fixes[0]["environment"] == "staging"
+    assert fixes[0]["expected"] is False
