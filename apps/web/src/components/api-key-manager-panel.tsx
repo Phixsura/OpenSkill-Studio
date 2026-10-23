@@ -1,41 +1,35 @@
 "use client";
 
-import { useState } from "react";
+interface ApiKey { name: string; prefix: string; scopes: string[]; revoked: boolean; }
+interface ApiKeyManagerPanelProps { keys: ApiKey[]; onCreate: () => void; onRevoke: (prefix: string) => void; }
 
-interface ApiKey { prefix: string; label: string; scopes: string[]; created_at: string; last_used: string | null; status: string; }
-interface ApiKeyManagerPanelProps { keys: ApiKey[]; onRevoke: (prefix: string) => void; onCreate: () => void; }
-
-export function ApiKeyManagerPanel({ keys, onRevoke, onCreate }: ApiKeyManagerPanelProps) {
+export function ApiKeyManagerPanel({ keys, onCreate, onRevoke }: ApiKeyManagerPanelProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">API Keys</h2>
-        <button onClick={onCreate} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">
-          Create Key
-        </button>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔑 API Keys</h3>
+        <button onClick={onCreate} className="px-3 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600">New Key</button>
       </div>
-      {keys.length === 0 ? (
-        <p className="text-sm text-gray-400">No API keys yet</p>
-      ) : (
-        <div className="space-y-2">
-          {keys.map(k => (
-            <div key={k.prefix} className="flex items-center justify-between rounded-lg border p-3 dark:border-gray-700">
-              <div>
-                <p className="font-medium">{k.label}</p>
-                <p className="font-mono text-xs text-gray-400">{k.prefix}••••••••</p>
-                <div className="mt-1 flex gap-1">
-                  {k.scopes.map(s => (
-                    <span key={s} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">{s}</span>
-                  ))}
-                </div>
+      <div className="divide-y dark:divide-gray-700">
+        {keys.map(k => (
+          <div key={k.prefix} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-sm font-medium">{k.name}</div>
+              <div className="text-xs text-gray-400">
+                <span className="font-mono">{k.prefix}...</span>
+                <span className="ml-2">{k.scopes.join(", ")}</span>
               </div>
-              <button onClick={() => onRevoke(k.prefix)} className="rounded border border-red-300 px-2 py-1 text-xs text-red-600">
-                Revoke
-              </button>
             </div>
-          ))}
-        </div>
-      )}
+            {k.revoked ? (
+              <span className="text-xs text-red-500">Revoked</span>
+            ) : (
+              <button onClick={() => onRevoke(k.prefix)}
+                className="text-xs text-red-500 hover:underline">Revoke</button>
+            )}
+          </div>
+        ))}
+        {keys.length === 0 && <div className="p-4 text-center text-sm text-gray-400">No API keys</div>}
+      </div>
     </div>
   );
 }
