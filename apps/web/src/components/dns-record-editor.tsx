@@ -1,42 +1,40 @@
 "use client";
 
-interface DnsRecord { type: string; name: string; value: string; ttl: number; }
-interface DnsRecordEditorProps { domain: string; records: DnsRecord[];
-  onAdd: (type: string, name: string, value: string) => void;
-  onRemove: (name: string, type: string) => void; }
+interface DnsRecord { domain: string; type: string; value: string; ttl: number; }
+interface DnsRecordEditorProps { records: DnsRecord[];
+  onAdd: () => void; onDelete: (domain: string, type: string, value: string) => void; }
 
-const TYPE_COLOR: Record<string, string> = {
-  A: "bg-green-100 text-green-700", AAAA: "bg-green-100 text-green-700",
-  CNAME: "bg-blue-100 text-blue-700", TXT: "bg-purple-100 text-purple-700",
-  MX: "bg-yellow-100 text-yellow-700", NS: "bg-gray-100 text-gray-700",
+const TYPE_COLORS: Record<string, string> = {
+  A: "bg-blue-100 text-blue-700", AAAA: "bg-indigo-100 text-indigo-700",
+  CNAME: "bg-green-100 text-green-700", TXT: "bg-yellow-100 text-yellow-700",
+  MX: "bg-purple-100 text-purple-700", NS: "bg-gray-100 text-gray-700",
 };
 
-export function DnsRecordEditor({ domain, records, onAdd, onRemove }: DnsRecordEditorProps) {
+export function DnsRecordEditor({ records, onAdd, onDelete }: DnsRecordEditorProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b dark:border-gray-700">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <h3 className="font-semibold">🌐 DNS Records</h3>
-        <p className="text-xs text-gray-400">{domain} · {records.length} records</p>
+        <div className="flex gap-2">
+          <span className="text-xs text-gray-400">{records.length} records</span>
+          <button onClick={onAdd} className="px-2 py-0.5 text-xs bg-blue-500 text-white rounded">+ Add</button>
+        </div>
       </div>
-      <table className="w-full text-sm">
-        <thead><tr className="text-xs text-gray-400 border-b dark:border-gray-700">
-          <th className="p-3 text-left">Type</th><th className="p-3 text-left">Name</th>
-          <th className="p-3 text-left">Value</th><th className="p-3">TTL</th><th className="p-3"></th>
-        </tr></thead>
-        <tbody>
-          {records.map((r, i) => (
-            <tr key={i} className="border-b last:border-0 dark:border-gray-700">
-              <td className="p-3"><span className={`text-xs px-1.5 py-0.5 rounded font-bold ${TYPE_COLOR[r.type] || ""}`}>{r.type}</span></td>
-              <td className="p-3 font-mono text-xs">{r.name}</td>
-              <td className="p-3 font-mono text-xs truncate max-w-xs">{r.value}</td>
-              <td className="p-3 text-center text-xs text-gray-400">{r.ttl}</td>
-              <td className="p-3 text-right">
-                <button onClick={() => onRemove(r.name, r.type)} className="text-xs text-red-500 hover:text-red-700">Delete</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="divide-y dark:divide-gray-700">
+        {records.map((r, i) => (
+          <div key={i} className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className={`px-1.5 py-0.5 text-[10px] rounded font-mono ${TYPE_COLORS[r.type] ?? ""}`}>{r.type}</span>
+              <span className="text-sm font-mono">{r.domain}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-gray-400 max-w-[180px] truncate">{r.value}</span>
+              <span className="text-[10px] text-gray-300">{r.ttl}s</span>
+              <button onClick={() => onDelete(r.domain, r.type, r.value)} className="text-xs text-red-500">×</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
