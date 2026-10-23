@@ -1,36 +1,43 @@
 "use client";
 
-interface ApiVersion { version: string; date: string; added: number; removed: number; modified: number; breaking: boolean; total_changes: number; }
-interface ApiChangelogTimelineProps { entries: ApiVersion[]; stabilityScore: number; }
+interface ChangeEntry { endpoint: string; description: string; version: string; date: string; }
+interface ChangeSection { type: string; count: number; entries: ChangeEntry[]; }
+interface ApiChangelogTimelineProps { totalChanges: number; severity: string; sections: ChangeSection[]; }
 
-export function ApiChangelogTimeline({ entries, stabilityScore }: ApiChangelogTimelineProps) {
+const TYPE_ICON: Record<string, string> = {
+  breaking: "🔴", deprecated: "🟡", added: "🟢", fixed: "🔵", changed: "⚪",
+};
+const TYPE_LABEL: Record<string, string> = {
+  breaking: "Breaking Changes", deprecated: "Deprecations",
+  added: "New Endpoints", fixed: "Bug Fixes", changed: "Changes",
+};
+
+export function ApiChangelogTimeline({ totalChanges, severity, sections }: ApiChangelogTimelineProps) {
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">API Changelog</h1>
-        <div className="text-right">
-          <span className={`text-lg font-bold ${stabilityScore >= 80 ? "text-green-600" : "text-yellow-600"}`}>{stabilityScore}</span>
-          <p className="text-xs text-gray-400">Stability Score</p>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">📋 API Changelog</h3>
+        <div className="flex gap-2 items-center">
+          <span className="text-xs text-gray-400">{totalChanges} changes</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+            severity === "major" ? "bg-red-100 text-red-700" :
+            severity === "minor" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
+          }`}>{severity}</span>
         </div>
       </div>
-      <div className="space-y-3">
-        {entries.map(e => (
-          <div key={e.version} className={`border-l-4 ${e.breaking ? "border-red-400" : "border-green-400"} rounded-r-lg bg-white p-4 shadow-sm dark:bg-gray-800`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-lg font-bold">{e.version}</span>
-                {e.breaking && <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700">Breaking</span>}
+      {sections.map(s => (
+        <div key={s.type} className="mb-4 last:mb-0">
+          <h4 className="text-sm font-medium mb-2">{TYPE_ICON[s.type]} {TYPE_LABEL[s.type]} ({s.count})</h4>
+          <div className="space-y-1 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+            {s.entries.map((e, i) => (
+              <div key={i} className="text-sm py-1">
+                <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">{e.endpoint}</code>
+                <span className="text-gray-500 ml-2">{e.description}</span>
               </div>
-              <span className="text-xs text-gray-400">{e.date}</span>
-            </div>
-            <div className="mt-2 flex gap-4 text-xs">
-              {e.added > 0 && <span className="text-green-600">+{e.added} added</span>}
-              {e.modified > 0 && <span className="text-blue-600">~{e.modified} modified</span>}
-              {e.removed > 0 && <span className="text-red-600">-{e.removed} removed</span>}
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
