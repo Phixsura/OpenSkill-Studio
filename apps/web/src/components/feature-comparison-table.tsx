@@ -1,37 +1,43 @@
 "use client";
 
-interface ComparisonRow { id: string; name: string; [feature: string]: unknown; }
-interface FeatureComparisonTableProps { matrix: ComparisonRow[]; features: string[];
-  winnerId: string | null; }
+interface MatrixRow { feature: string; values: Record<string, boolean>; }
+interface FeatureComparisonTableProps { products: string[]; matrix: MatrixRow[];
+  scores: Record<string, { total: number; pct: number }>; bestMatch: string; }
 
-export function FeatureComparisonTable({ matrix, features, winnerId }: FeatureComparisonTableProps) {
+export function FeatureComparisonTable({ products, matrix, scores, bestMatch }: FeatureComparisonTableProps) {
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-semibold">Feature Comparison</h2>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📊 Feature Comparison</h3>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b dark:border-gray-700">
-              <th className="pb-2 text-left">Feature</th>
-              {matrix.map(item => (
-                <th key={item.id} className="pb-2 text-center">
-                  <span className={item.id === winnerId ? "text-blue-600 font-bold" : ""}>{item.name as string}</span>
-                  {item.id === winnerId && <span className="ml-1 text-xs">🏆</span>}
-                </th>
-              ))}
-            </tr>
-          </thead>
+          <thead><tr className="border-b dark:border-gray-700">
+            <th className="p-3 text-left text-xs text-gray-400">Feature</th>
+            {products.map(p => (
+              <th key={p} className="p-3 text-center">
+                <span className="font-medium">{p}</span>
+                {p === bestMatch && <span className="block text-xs text-green-600">🏆 Best</span>}
+              </th>
+            ))}
+          </tr></thead>
           <tbody>
-            {features.map(feat => (
-              <tr key={feat} className="border-b dark:border-gray-800">
-                <td className="py-2 capitalize">{feat.replace(/_/g, " ")}</td>
-                {matrix.map(item => (
-                  <td key={item.id} className="py-2 text-center">
-                    <span className={item[feat] ? "text-green-500" : "text-gray-300"}>{item[feat] ? "✓" : "—"}</span>
+            {matrix.map(row => (
+              <tr key={row.feature} className="border-b last:border-0 dark:border-gray-700">
+                <td className="p-3 capitalize">{row.feature.replace("_", " ")}</td>
+                {products.map(p => (
+                  <td key={p} className="p-3 text-center text-lg">
+                    {row.values[p] ? "✅" : "❌"}
                   </td>
                 ))}
               </tr>
             ))}
+            <tr className="bg-gray-50 dark:bg-gray-800 font-medium">
+              <td className="p-3">Score</td>
+              {products.map(p => (
+                <td key={p} className="p-3 text-center">{scores[p]?.pct}%</td>
+              ))}
+            </tr>
           </tbody>
         </table>
       </div>
