@@ -1,21 +1,23 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 
 describe("OnboardingWizard", () => {
-  const steps = [
-    { id: "profile", title: "Complete Profile", description: "Add info", icon: "👤", required: true, completed: true },
-    { id: "cli", title: "Install CLI", description: "Get the CLI", icon: "💻", required: true, completed: false },
-  ];
-  it("renders onboarding", () => {
-    const { container } = render(
-      <OnboardingWizard steps={steps} progressPct={50} canSkip={false}
-        nextStep={steps[1]} onComplete={vi.fn()} onSkip={vi.fn()} />
+  it("renders wizard", () => {
+    const onComplete = vi.fn();
+    const { container, getAllByText } = render(
+      <OnboardingWizard progressPct={17} completedCount={1} total={6} onComplete={onComplete}
+        steps={[
+          { id: "profile", title: "Complete Profile", description: "Set name", completed: true, index: 0 },
+          { id: "create_app", title: "Create App", description: "Register app", completed: false, index: 1 },
+        ]} />
     );
-    expect(container.textContent).toContain("Welcome to OpenSkill!");
+    expect(container.textContent).toContain("Get Started");
+    expect(container.textContent).toContain("1/6");
+    expect(container.textContent).toContain("17%");
     expect(container.textContent).toContain("Complete Profile");
-    expect(container.textContent).toContain("Install CLI");
-    expect(container.textContent).toContain("50%");
-    expect(container.textContent).toContain("Start");
+    expect(container.textContent).toContain("Create App");
+    fireEvent.click(getAllByText("Start")[0]);
+    expect(onComplete).toHaveBeenCalledWith("create_app");
   });
 });
