@@ -3,17 +3,12 @@ import { describe, expect, it } from "vitest";
 import { RetentionChart } from "@/components/retention-chart";
 
 describe("RetentionChart", () => {
-  it("renders cohorts", () => {
-    const cohorts = [
-      { month: "2026-01", installed: 100, retained: 80, retention_rate: 80 },
-      { month: "2026-02", installed: 50, retained: 40, retention_rate: 80 },
-    ];
-    const { container } = render(<RetentionChart cohorts={cohorts} />);
-    expect(container.textContent).toContain("2026-01");
+  const cohorts = [{ cohort: "2026-W40", size: 100, weeklyRetention: [80, 60, 50, 45] }];
+  it("renders chart", () => {
+    const { container } = render(<RetentionChart cohorts={cohorts} avgWeek1={80} avgWeek4={45} />);
+    expect(container.textContent).toContain("Retention Cohorts");
+    expect(container.textContent).toContain("2026-W40");
     expect(container.textContent).toContain("80%");
-  });
-  it("empty state", () => {
-    const { container } = render(<RetentionChart cohorts={[]} />);
-    expect(container.textContent).toContain("No retention data");
+    expect(container.textContent).toContain("W1: 80%");
   });
 });

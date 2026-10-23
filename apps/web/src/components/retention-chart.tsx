@@ -1,26 +1,37 @@
 "use client";
 
-interface Cohort { month: string; installed: number; retained: number; retention_rate: number; }
-interface RetentionChartProps { cohorts: Cohort[]; }
+interface Cohort { cohort: string; size: number; weeklyRetention: number[]; }
+interface RetentionChartProps { cohorts: Cohort[]; avgWeek1: number; avgWeek4: number; }
 
-export function RetentionChart({ cohorts }: RetentionChartProps) {
-  if (cohorts.length === 0) return <p className="text-sm text-gray-400">No retention data yet.</p>;
+export function RetentionChart({ cohorts, avgWeek1, avgWeek4 }: RetentionChartProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h3 className="font-semibold">Retention by Cohort</h3>
-      <div className="mt-3 space-y-2">
-        {cohorts.map(c => (
-          <div key={c.month} className="flex items-center gap-3">
-            <span className="w-20 text-xs text-gray-500">{c.month}</span>
-            <div className="flex-1">
-              <div className="h-4 rounded-full bg-gray-200 dark:bg-gray-700">
-                <div className={`h-full rounded-full ${c.retention_rate >= 80 ? "bg-green-500" : c.retention_rate >= 50 ? "bg-yellow-500" : "bg-red-500"}`}
-                  style={{ width: `${c.retention_rate}%` }} />
-              </div>
-            </div>
-            <span className="w-14 text-right text-xs font-medium">{c.retention_rate}%</span>
-          </div>
-        ))}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">📊 Retention Cohorts</h3>
+        <div className="flex gap-3 text-xs text-gray-400">
+          <span>W1: {avgWeek1}%</span>
+          <span>W4: {avgWeek4}%</span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="border-b dark:border-gray-700">
+            <th className="px-2 py-1.5 text-left">Cohort</th>
+            <th className="px-2 py-1.5 text-right">Size</th>
+            {[1, 2, 3, 4].map(w => <th key={w} className="px-2 py-1.5 text-center">W{w}</th>)}
+          </tr></thead>
+          <tbody>{cohorts.map(c => (
+            <tr key={c.cohort} className="border-b dark:border-gray-800">
+              <td className="px-2 py-1.5 font-mono">{c.cohort}</td>
+              <td className="px-2 py-1.5 text-right">{c.size}</td>
+              {c.weeklyRetention.slice(0, 4).map((pct, i) => (
+                <td key={i} className="px-2 py-1.5 text-center">
+                  <span className={`rounded px-1.5 py-0.5 ${pct >= 50 ? "bg-green-100 text-green-700 dark:bg-green-900/30" : "bg-red-100 text-red-600 dark:bg-red-900/30"}`}>{pct}%</span>
+                </td>
+              ))}
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     </div>
   );
