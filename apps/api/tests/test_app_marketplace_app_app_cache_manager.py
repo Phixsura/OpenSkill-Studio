@@ -12,7 +12,7 @@ def test_miss():
     assert c.misses == 1
 
 def test_ttl_expiry():
-    c = CacheManager(ttl_s=5)
+    c = CacheManager(max_size=100, ttl_s=5)
     c.set("k", "v", now=0)
     assert c.get("k", now=6) is None
 

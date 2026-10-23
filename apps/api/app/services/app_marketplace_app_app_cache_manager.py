@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Cache manager — in-memory LRU cache with TTL and stats."""
 
 import time
