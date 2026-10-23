@@ -1,26 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WebhookDebuggerPanel } from "@/components/webhook-debugger-panel";
 
 describe("WebhookDebuggerPanel", () => {
-  it("renders attempts", () => {
-    const attempts = [
-      { event_type: "app.installed", status_code: 200, success: true, response_time_ms: 50, timestamp: "" },
-      { event_type: "app.updated", status_code: 500, success: false, response_time_ms: 200, timestamp: "" },
-    ];
-    const { container } = render(<WebhookDebuggerPanel attempts={attempts} onReplay={vi.fn()} />);
-    expect(container.textContent).toContain("app.installed");
-    expect(container.textContent).toContain("500");
-  });
-  it("empty state", () => {
-    const { container } = render(<WebhookDebuggerPanel attempts={[]} onReplay={vi.fn()} />);
-    expect(container.textContent).toContain("No delivery attempts");
-  });
-  it("replay on failure", () => {
-    const fn = vi.fn();
-    const attempts = [{ event_type: "x", status_code: 500, success: false, response_time_ms: 100, timestamp: "" }];
-    const { container } = render(<WebhookDebuggerPanel attempts={attempts} onReplay={fn} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalledWith(0);
+  const deliveries = [
+    { payload_size: 256, content_type: "application/json", has_signature: true,
+      signature_valid: true, timestamp: "2026-10-23T12:00:00" },
+  ];
+  it("renders", () => {
+    const { container } = render(
+      <WebhookDebuggerPanel endpointUrl="https://debug.openskill.dev/hooks/abc"
+        deliveries={deliveries} totalDeliveries={1} onCopyUrl={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Webhook Debugger");
+    expect(container.textContent).toContain("debug.openskill.dev");
+    expect(container.textContent).toContain("1 received");
+    expect(container.textContent).toContain("256B");
+    expect(container.textContent).toContain("✅ sig");
   });
 });
