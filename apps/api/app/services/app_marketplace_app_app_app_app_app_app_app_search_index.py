@@ -1,34 +1,34 @@
-"""Marketplace search index — build and query search index for apps."""
+"""Search index manager — manage full-text search indexes."""
 from __future__ import annotations
-import html
+
+_index: dict[str, dict] = {}
 
 
-def build_index(apps: list[dict]) -> dict:
-    index: dict[str, list[str]] = {}
-    for app in apps:
-        app_id = app.get("id", "")
-        tokens = set()
-        for field in ("name", "description", "category", "developer"):
-            text = app.get(field, "").lower()
-            tokens.update(text.split())
-        for tag in app.get("tags", []):
-            tokens.add(tag.lower())
-        for token in tokens:
-            index.setdefault(token, []).append(app_id)
-    return {"index_size": len(index), "app_count": len(apps),
-            "total_tokens": sum(len(v) for v in index.values()),
-            "index": index}
+def index_document(doc_id: str, content: str, metadata: dict | None = None) -> dict:
+    words = set(content.lower().split())
+    _index[doc_id] = {"id": doc_id, "content": content, "words": words,
+                       "metadata": metadata or {}, "word_count": len(words)}
+    return {"indexed": True, "id": doc_id, "word_count": len(words)}
 
 
-def search_index(index: dict[str, list[str]], query: str, *, limit: int = 20) -> list[str]:
-    terms = query.lower().split()
-    if not terms:
-        return []
-    # Intersection of results for all terms
-    result_sets = [set(index.get(t, [])) for t in terms]
-    if not result_sets:
-        return []
-    matches = result_sets[0]
-    for rs in result_sets[1:]:
-        matches &= rs
-    return list(matches)[:limit]
+def search(query: str, limit: int = 10) -> dict:
+    terms = set(query.lower().split())
+    results = []
+    for doc_id, doc in _index.items():
+        matches = terms & doc["words"]
+        if matches:
+            score = len(matches) / len(terms)
+            results.append({"id": doc_id, "score": round(score, 2),
+                            "matched_terms": sorted(matches)})
+    results.sort(key=lambda r: -r["score"])
+    return {"results": results[:limit], "total_matches": len(results), "query": query}
+
+
+def index_stats() -> dict:
+    total_words = sum(d["word_count"] for d in _index.values())
+    return {"total_documents": len(_index), "total_words": total_words,
+            "avg_words": round(total_words / max(len(_index), 1), 1)}
+
+
+def clear_index() -> None:
+    _index.clear()
