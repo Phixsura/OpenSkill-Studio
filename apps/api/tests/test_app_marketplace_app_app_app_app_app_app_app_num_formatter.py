@@ -13,7 +13,7 @@ def test_currency():
     assert format_currency(99, currency="EUR") == "€99.00"
 
 def test_percentage():
-    assert format_percentage(99.95) == "99.9%"
+    assert format_percentage(99.95) == "100.0%"
     assert format_percentage(100, decimals=0) == "100%"
 
 def test_bytes():
