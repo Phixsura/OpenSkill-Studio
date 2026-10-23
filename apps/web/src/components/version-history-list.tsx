@@ -1,29 +1,30 @@
 "use client";
 
-interface VersionEntry { version: string; publishedAt: string; author: string;
-  changeCount: number; downloads: number; isLatest: boolean; isPrerelease: boolean; }
-interface VersionHistoryListProps { versions: VersionEntry[]; latest: string | null; }
+interface AppVersion { version: string; changelog: string; latest: boolean; sizeKb: number; }
+interface VersionHistoryListProps { versions: AppVersion[]; appId: string;
+  onRollback: (version: string) => void; }
 
-export function VersionHistoryList({ versions, latest }: VersionHistoryListProps) {
+export function VersionHistoryList({ versions, appId, onRollback }: VersionHistoryListProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Version History</h3>
-        {latest && <span className="text-xs text-gray-400">Latest: v{latest}</span>}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📦 Version History</h3>
+        <p className="text-xs text-gray-400">{appId} · {versions.length} versions</p>
       </div>
-      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700">
+      <div className="divide-y dark:divide-gray-700">
         {versions.map(v => (
-          <div key={v.version} className="flex items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold font-mono">v{v.version}</span>
-              {v.isLatest && <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700 dark:bg-green-900/30">Latest</span>}
-              {v.isPrerelease && <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-700 dark:bg-yellow-900/30">Pre-release</span>}
+          <div key={v.version} className={`px-4 py-3 ${v.latest ? "bg-blue-50 dark:bg-blue-900/10" : ""}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono font-bold">v{v.version}</span>
+                {v.latest && <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">Latest</span>}
+              </div>
+              {!v.latest && (
+                <button onClick={() => onRollback(v.version)}
+                  className="text-xs px-2 py-1 border border-yellow-200 text-yellow-700 rounded hover:bg-yellow-50">Rollback</button>
+              )}
             </div>
-            <div className="flex items-center gap-3 text-xs text-gray-400">
-              <span>{v.changeCount} changes</span>
-              <span>{v.downloads.toLocaleString()} downloads</span>
-              <span>by {v.author}</span>
-            </div>
+            {v.changelog && <p className="text-xs text-gray-500 mt-1">{v.changelog}</p>}
           </div>
         ))}
       </div>
