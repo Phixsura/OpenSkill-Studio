@@ -1,33 +1,31 @@
 "use client";
 
-interface Recording { recording_id: string; user_id: string; page_url: string;
-  duration_formatted: string; has_errors: boolean; has_rage_clicks: boolean; event_count: number; }
-interface SessionReplayListProps { recordings: Recording[]; frustrationScore: number;
-  onPlay: (id: string) => void; }
+interface Session { sessionId: string; pageUrl: string; durationDisplay: string; events: number; errors: number; hasErrors: boolean; }
+interface SessionReplayListProps { sessions: Session[]; total: number; avgDurationS: number; errorSessions: number; }
 
-export function SessionReplayList({ recordings, frustrationScore, onPlay }: SessionReplayListProps) {
+export function SessionReplayList({ sessions, total, avgDurationS, errorSessions }: SessionReplayListProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Session Replays</h2>
-        <span className={`text-sm ${frustrationScore > 30 ? "text-red-600" : "text-green-600"}`}>
-          Frustration: {frustrationScore}%
-        </span>
+        <h3 className="text-sm font-semibold">Session Replays</h3>
+        <div className="flex gap-3 text-xs text-gray-400">
+          <span>{total} sessions</span>
+          <span>avg {Math.floor(avgDurationS / 60)}m</span>
+          {errorSessions > 0 && <span className="text-red-600">{errorSessions} with errors</span>}
+        </div>
       </div>
-      <div className="space-y-2">
-        {recordings.map(r => (
-          <button key={r.recording_id} onClick={() => onPlay(r.recording_id)}
-            className="flex w-full items-center justify-between rounded-lg border p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
-            <div>
-              <p className="text-sm font-medium">{r.page_url}</p>
-              <p className="text-xs text-gray-400">{r.user_id} · {r.event_count} events · {r.duration_formatted}</p>
+      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700">
+        {sessions.map(s => (
+          <div key={s.sessionId} className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={s.hasErrors ? "text-red-600" : "text-green-600"}>{s.hasErrors ? "⚠" : "▶"}</span>
+              <span className="text-xs font-mono truncate max-w-[200px]">{s.pageUrl}</span>
             </div>
-            <div className="flex items-center gap-1">
-              {r.has_errors && <span className="text-xs text-red-500">❌ Error</span>}
-              {r.has_rage_clicks && <span className="text-xs text-orange-500">😤 Rage</span>}
-              <span className="ml-1 text-xs text-blue-500">▶</span>
+            <div className="flex items-center gap-3 text-xs text-gray-400">
+              <span>{s.events} events</span>
+              <span>{s.durationDisplay}</span>
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>

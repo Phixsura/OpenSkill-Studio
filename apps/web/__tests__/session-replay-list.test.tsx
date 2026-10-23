@@ -1,27 +1,19 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { SessionReplayList } from "@/components/session-replay-list";
 
 describe("SessionReplayList", () => {
-  const recordings = [
-    { recording_id: "rec_1", user_id: "u1", page_url: "/dashboard", duration_formatted: "1m 30s",
-      has_errors: true, has_rage_clicks: false, event_count: 42 },
+  const sessions = [
+    { sessionId: "s1", pageUrl: "/dashboard", durationDisplay: "2m 5s", events: 50, errors: 0, hasErrors: false },
+    { sessionId: "s2", pageUrl: "/settings", durationDisplay: "0m 30s", events: 10, errors: 2, hasErrors: true },
   ];
-  it("renders", () => {
+  it("renders sessions", () => {
     const { container } = render(
-      <SessionReplayList recordings={recordings} frustrationScore={15} onPlay={vi.fn()} />
+      <SessionReplayList sessions={sessions} total={2} avgDurationS={90} errorSessions={1} />
     );
-    expect(container.textContent).toContain("Session Replays");
     expect(container.textContent).toContain("/dashboard");
-    expect(container.textContent).toContain("42 events");
-    expect(container.textContent).toContain("❌ Error");
-  });
-  it("play", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <SessionReplayList recordings={recordings} frustrationScore={15} onPlay={fn} />
-    );
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalledWith("rec_1");
+    expect(container.textContent).toContain("2m 5s");
+    expect(container.textContent).toContain("1 with errors");
+    expect(container.textContent).toContain("2 sessions");
   });
 });
