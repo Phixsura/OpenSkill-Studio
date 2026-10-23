@@ -1,40 +1,35 @@
 "use client";
 
-interface Dimension { dimension: string; score: number; weight: number; weighted: number; description: string; }
-interface HealthScoreCardProps { overall: number; grade: string; status: string; details: Dimension[]; }
+interface ScoreBreakdown { raw: number; weight: number; weighted: number; }
+interface HealthScoreCardProps { score: number; grade: string; status: string;
+  breakdown: Record<string, ScoreBreakdown>; delta?: number; }
 
-const gradeColors: Record<string, string> = {
-  "A+": "text-green-600", A: "text-green-600", B: "text-blue-600",
-  C: "text-yellow-600", D: "text-orange-600", F: "text-red-600",
+const GRADE_COLORS: Record<string, string> = {
+  A: "text-green-600", B: "text-blue-600", C: "text-yellow-600", D: "text-orange-600", F: "text-red-600",
 };
 
-export function HealthScoreCard({ overall, grade, status, details }: HealthScoreCardProps) {
+export function HealthScoreCard({ score, grade, status, breakdown, delta }: HealthScoreCardProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className={`text-4xl font-bold ${gradeColors[grade] ?? ""}`}>{grade}</p>
-          <p className="text-sm text-gray-400">{overall}/100 · {status}</p>
-        </div>
-        <div className="relative h-16 w-16">
-          <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-200 dark:text-gray-700" />
-            <circle cx="18" cy="18" r="16" fill="none" stroke="currentColor" strokeWidth="2"
-              strokeDasharray={`${overall} ${100 - overall}`}
-              className={overall >= 80 ? "text-green-500" : overall >= 60 ? "text-yellow-500" : "text-red-500"} />
-          </svg>
-        </div>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-6 text-center border-b dark:border-gray-700">
+        <div className={`text-5xl font-bold ${GRADE_COLORS[grade] ?? ""}`}>{grade}</div>
+        <div className="text-lg font-mono mt-1">{score}/100</div>
+        <div className="text-xs text-gray-400 capitalize">{status}</div>
+        {delta !== undefined && (
+          <div className={`text-xs mt-1 ${delta >= 0 ? "text-green-600" : "text-red-500"}`}>
+            {delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} pts
+          </div>
+        )}
       </div>
-      <div className="space-y-2">
-        {details.map(d => (
-          <div key={d.dimension} className="space-y-1">
-            <div className="flex justify-between text-sm">
-              <span className="capitalize">{d.dimension}</span>
-              <span className="text-gray-400">{d.score}/100</span>
+      <div className="p-4 space-y-2">
+        {Object.entries(breakdown).map(([key, b]) => (
+          <div key={key}>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="capitalize">{key.replaceAll("_", " ")}</span>
+              <span className="text-gray-400">{b.raw} × {b.weight} = {b.weighted}</span>
             </div>
-            <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700">
-              <div className={`h-full rounded-full ${d.score >= 80 ? "bg-green-500" : d.score >= 60 ? "bg-yellow-500" : "bg-red-500"}`}
-                style={{ width: `${d.score}%` }} />
+            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div className="h-full bg-blue-500 rounded-full" style={{ width: `${b.raw}%` }} />
             </div>
           </div>
         ))}
