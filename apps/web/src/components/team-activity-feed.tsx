@@ -1,29 +1,31 @@
 "use client";
 
-interface Activity { actor: string; action: string; icon: string; target: string; timestamp: string; }
-interface Contributor { name: string; count: number; }
-interface TeamActivityFeedProps { activities: Activity[]; topContributors: Contributor[]; uniqueMembers: number; }
+interface FeedItem { user: string; type: string; message: string; timestamp: string; icon: string; }
+interface TeamActivityFeedProps { items: FeedItem[]; total: number; topContributor: string | null; }
 
-export function TeamActivityFeed({ activities, topContributors, uniqueMembers }: TeamActivityFeedProps) {
+export function TeamActivityFeed({ items, total, topContributor }: TeamActivityFeedProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Team Activity</h3>
-        <span className="text-xs text-gray-400">{uniqueMembers} members active</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📡 Team Activity</h3>
+        <span className="text-xs text-gray-400">{total} events</span>
       </div>
-      <div className="flex gap-2 overflow-x-auto">
-        {topContributors.map(c => (
-          <div key={c.name} className="shrink-0 rounded-lg border px-3 py-1.5 text-center dark:border-gray-700">
-            <p className="text-xs font-medium">{c.name}</p>
-            <p className="text-xs text-gray-400">{c.count} actions</p>
-          </div>
-        ))}
-      </div>
-      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700 max-h-56 overflow-y-auto">
-        {activities.map((a, i) => (
-          <div key={i} className="flex items-center gap-2 px-4 py-2">
-            <span className="text-xs">{a.icon}</span>
-            <span className="text-sm"><strong>{a.actor}</strong> {a.action} <span className="text-gray-500">{a.target}</span></span>
+      {topContributor && (
+        <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-600 dark:text-blue-400">
+          🏅 Top contributor: <strong>{topContributor}</strong>
+        </div>
+      )}
+      <div className="divide-y dark:divide-gray-700 max-h-96 overflow-y-auto">
+        {items.map((item, i) => (
+          <div key={i} className="flex gap-3 p-3 text-sm">
+            <span className="text-lg">{item.icon}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between">
+                <span className="font-medium">{item.user}</span>
+                <time className="text-xs text-gray-400 whitespace-nowrap">{item.timestamp.slice(0, 10)}</time>
+              </div>
+              <p className="text-gray-500 truncate">{item.message}</p>
+            </div>
           </div>
         ))}
       </div>

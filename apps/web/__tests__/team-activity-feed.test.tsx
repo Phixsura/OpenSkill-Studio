@@ -3,19 +3,17 @@ import { describe, expect, it } from "vitest";
 import { TeamActivityFeed } from "@/components/team-activity-feed";
 
 describe("TeamActivityFeed", () => {
-  const activities = [
-    { actor: "Alice", action: "deployed", icon: "🚀", target: "v2.0", timestamp: "2026-01-03" },
-    { actor: "Bob", action: "reviewed", icon: "⭐", target: "PR #42", timestamp: "2026-01-02" },
-  ];
-  const top = [{ name: "Alice", count: 5 }];
   it("renders feed", () => {
     const { container } = render(
-      <TeamActivityFeed activities={activities} topContributors={top} uniqueMembers={2} />
+      <TeamActivityFeed total={3} topContributor="alice" items={[
+        { user: "alice", type: "deploy", message: "Deploy v3.1", timestamp: "2026-10-24T12:00:00Z", icon: "🚀" },
+        { user: "bob", type: "review", message: "LGTM", timestamp: "2026-10-24T11:00:00Z", icon: "👀" },
+      ]} />
     );
     expect(container.textContent).toContain("Team Activity");
-    expect(container.textContent).toContain("Alice");
-    expect(container.textContent).toContain("deployed");
-    expect(container.textContent).toContain("2 members active");
-    expect(container.textContent).toContain("5 actions");
+    expect(container.textContent).toContain("3 events");
+    expect(container.textContent).toContain("alice");
+    expect(container.textContent).toContain("Deploy v3.1");
+    expect(container.textContent).toContain("Top contributor");
   });
 });
