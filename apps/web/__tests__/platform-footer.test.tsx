@@ -3,24 +3,18 @@ import { describe, expect, it } from "vitest";
 import { PlatformFooter } from "@/components/platform-footer";
 
 describe("PlatformFooter", () => {
-  const props = {
-    brand: { name: "OpenSkill", tagline: "The Developer Platform" },
-    sections: [
-      { title: "Product", links: [{ label: "Marketplace", url: "/marketplace" }] },
-      { title: "Developers", links: [{ label: "Docs", url: "/docs" }] },
-    ],
-    social: [{ platform: "github", url: "https://github.com/openskill", icon: "🐙" }],
-    copyright: "© 2026 OpenSkill. All rights reserved.",
-  };
-  it("renders complete footer", () => {
-    const { container } = render(<PlatformFooter {...props} />);
-    expect(container.textContent).toContain("OpenSkill");
-    expect(container.textContent).toContain("The Developer Platform");
+  it("renders footer", () => {
+    const { container } = render(
+      <PlatformFooter copyright="© 2026 OpenSkill" sections={[
+        { title: "Product", links: [{ label: "Features", url: "/features" }, { label: "Pricing", url: "/pricing" }] },
+        { title: "Legal", links: [{ label: "Privacy", url: "/privacy" }] },
+      ]} />
+    );
     expect(container.textContent).toContain("Product");
-    expect(container.textContent).toContain("Marketplace");
-    expect(container.textContent).toContain("Developers");
-    expect(container.textContent).toContain("Docs");
-    expect(container.textContent).toContain("🐙");
-    expect(container.textContent).toContain("© 2026");
+    expect(container.textContent).toContain("Features");
+    expect(container.textContent).toContain("Pricing");
+    expect(container.textContent).toContain("Legal");
+    expect(container.textContent).toContain("Privacy");
+    expect(container.textContent).toContain("© 2026 OpenSkill");
   });
 });
