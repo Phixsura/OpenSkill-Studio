@@ -1,26 +1,35 @@
 "use client";
 
-interface VersionBumpSelectorProps { currentVersion: string; onSelect: (type: string, version: string) => void; }
+interface VersionBumpSelectorProps { currentVersion: string; onBump: (type: string) => void; }
 
-export function VersionBumpSelector({ currentVersion, onSelect }: VersionBumpSelectorProps) {
-  const parts = currentVersion.split(".").map(Number);
-  const bumps = [
-    { type: "patch", version: `${parts[0]}.${parts[1]}.${parts[2] + 1}`, label: "Patch", desc: "Bug fixes" },
-    { type: "minor", version: `${parts[0]}.${parts[1] + 1}.0`, label: "Minor", desc: "New features" },
-    { type: "major", version: `${parts[0] + 1}.0.0`, label: "Major", desc: "Breaking changes" },
-  ];
+const BUMPS = [
+  { type: "patch", label: "Patch", desc: "Bug fixes", color: "bg-green-500" },
+  { type: "minor", label: "Minor", desc: "New features", color: "bg-blue-500" },
+  { type: "major", label: "Major", desc: "Breaking changes", color: "bg-red-500" },
+];
 
+export function VersionBumpSelector({ currentVersion, onBump }: VersionBumpSelectorProps) {
+  const parts = currentVersion.split(".");
+  const bumped = {
+    patch: `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}`,
+    minor: `${parts[0]}.${Number(parts[1]) + 1}.0`,
+    major: `${Number(parts[0]) + 1}.0.0`,
+  };
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">Version Bump</label>
-      <p className="text-xs text-gray-400">Current: {currentVersion}</p>
-      <div className="flex gap-2">
-        {bumps.map(b => (
-          <button key={b.type} onClick={() => onSelect(b.type, b.version)}
-            className="flex-1 rounded-lg border border-gray-200 p-3 text-left transition hover:border-blue-400 dark:border-gray-700">
-            <p className="text-sm font-semibold">{b.label}</p>
-            <p className="font-mono text-xs text-blue-600">{b.version}</p>
-            <p className="text-xs text-gray-400">{b.desc}</p>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🏷️ Version Bump</h3>
+        <div className="text-xs text-gray-400 mt-0.5">Current: v{currentVersion}</div>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
+        {BUMPS.map(b => (
+          <button key={b.type} onClick={() => onBump(b.type)}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 text-left">
+            <div>
+              <div className="text-sm font-medium">{b.label}</div>
+              <div className="text-[10px] text-gray-400">{b.desc}</div>
+            </div>
+            <span className="text-sm font-mono font-bold">v{bumped[b.type as keyof typeof bumped]}</span>
           </button>
         ))}
       </div>
