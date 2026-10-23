@@ -3,16 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { CacheStatsCard } from "@/components/cache-stats-card";
 
 describe("CacheStatsCard", () => {
-  it("renders stats", () => {
-    const { container } = render(<CacheStatsCard entries={42} totalHits={1500} hitRate={85} onClear={vi.fn()} />);
-    expect(container.textContent).toContain("42");
-    expect(container.textContent).toContain("1,500");
-    expect(container.textContent).toContain("85%");
-  });
-  it("calls onClear", () => {
-    const fn = vi.fn();
-    const { container } = render(<CacheStatsCard entries={0} totalHits={0} hitRate={0} onClear={fn} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalled();
+  it("renders and flushes", () => {
+    const onFlush = vi.fn();
+    const { container, getByText } = render(
+      <CacheStatsCard size={500} maxSize={1000} hits={4000} misses={600}
+        hitRateDisplay="87.0%" onFlush={onFlush} />
+    );
+    expect(container.textContent).toContain("Response Cache");
+    expect(container.textContent).toContain("87.0%");
+    expect(container.textContent).toContain("500");
+    expect(container.textContent).toContain("4000");
+    fireEvent.click(getByText("Flush Cache"));
+    expect(onFlush).toHaveBeenCalled();
   });
 });
