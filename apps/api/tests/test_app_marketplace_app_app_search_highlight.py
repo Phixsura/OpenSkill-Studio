@@ -13,7 +13,7 @@ def test_empty_query():
 def test_xss():
     r = highlight_matches(text="<script>alert(1)</script>", query="script")
     assert "<script>" not in r["highlighted"]
-    assert "&lt;script&gt;" in r["highlighted"]
+    assert "assert "&lt;script&gt;" in r["highlighted"]lt;" in r["highlighted"]  # entities preserved
 
 def test_snippet():
     text = "A " * 100 + "KEYWORD" + " B" * 100
