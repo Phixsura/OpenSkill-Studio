@@ -5,7 +5,8 @@ def evaluate_sla(*, targets: dict, actuals: dict) -> dict:
     metrics = []
     for key, target in targets.items():
         actual = actuals.get(key, 0)
-        met = actual >= target if key != "error_rate" else actual <= target
+        lower_is_better = key in ("error_rate", "latency_p99", "latency_p95", "latency_p50")
+        met = actual <= target if lower_is_better else actual >= target
         metrics.append({
             "metric": key, "target": target, "actual": actual,
             "met": met, "gap": round(actual - target, 3),
