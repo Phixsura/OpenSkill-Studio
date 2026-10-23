@@ -1,44 +1,30 @@
-"""Data pipeline orchestrator — define, run, and monitor ETL pipelines."""
+"""Data pipeline manager — define and run ETL pipelines."""
 from __future__ import annotations
 import time
 
 
-class DataPipeline:
-    def __init__(self, name: str, steps: list[dict]):
-        self.name = name
-        self.steps = [{"name": s["name"], "type": s.get("type", "transform"),
-                        "status": "pending", "duration_ms": 0, "records": 0,
-                        "error": None} for s in steps]
-        self.status = "idle"
-        self.started: float = 0
+def create_pipeline(name: str, steps: list[dict]) -> dict:
+    return {"name": name, "steps": steps, "step_count": len(steps),
+            "status": "idle", "created_at": time.time()}
 
-    def start(self) -> dict:
-        self.status = "running"
-        self.started = time.time()
-        return {"pipeline": self.name, "status": "running", "steps": len(self.steps)}
 
-    def complete_step(self, index: int, *, records: int = 0, duration_ms: int = 0,
-                       error: str | None = None) -> dict:
-        if index >= len(self.steps):
-            return {"error": "Step index out of range"}
-        step = self.steps[index]
-        step["status"] = "failed" if error else "completed"
-        step["records"] = records
-        step["duration_ms"] = duration_ms
-        step["error"] = error
-        if error:
-            self.status = "failed"
-        elif all(s["status"] == "completed" for s in self.steps):
-            self.status = "completed"
-        return {"step": step["name"], "status": step["status"], "records": records}
-
-    def summary(self) -> dict:
-        total_records = sum(s["records"] for s in self.steps)
-        total_duration = sum(s["duration_ms"] for s in self.steps)
-        completed = sum(1 for s in self.steps if s["status"] == "completed")
-        failed = sum(1 for s in self.steps if s["status"] == "failed")
-        return {"pipeline": self.name, "status": self.status,
-                "steps_total": len(self.steps), "steps_completed": completed,
-                "steps_failed": failed, "total_records": total_records,
-                "total_duration_ms": total_duration,
-                "duration_display": f"{total_duration / 1000:.1f}s"}
+def run_pipeline(pipeline: dict, input_data: list[dict]) -> dict:
+    current = input_data
+    results = []
+    for step in pipeline["steps"]:
+        action = step.get("action", "passthrough")
+        if action == "filter":
+            field, value = step.get("field", ""), step.get("value", "")
+            current = [r for r in current if r.get(field) == value]
+        elif action == "map":
+            field = step.get("field", "")
+            fn = step.get("transform", "upper")
+            if fn == "upper" and field:
+                current = [{**r, field: str(r.get(field, "")).upper()} for r in current]
+        elif action == "sort":
+            field = step.get("field", "")
+            current = sorted(current, key=lambda r: r.get(field, ""))
+        results.append({"step": step.get("name", action), "output_count": len(current)})
+    return {"pipeline": pipeline["name"], "input_count": len(input_data),
+            "output_count": len(current), "output": current,
+            "step_results": results, "status": "completed"}
