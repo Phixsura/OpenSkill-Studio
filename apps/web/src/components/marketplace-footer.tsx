@@ -1,22 +1,35 @@
 "use client";
 
-interface Link { label: string; url: string; }
-interface MarketplaceFooterProps { sections: Record<string, Link[]>; copyright: string; }
+interface Social { name: string; href: string; icon: string; }
+interface FooterLink { label: string; href: string; }
+interface MarketplaceFooterProps { sections: Record<string, FooterLink[]>;
+  copyright: string; social: Social[]; }
 
-export function MarketplaceFooter({ sections, copyright }: MarketplaceFooterProps) {
+export function MarketplaceFooter({ sections, copyright, social }: MarketplaceFooterProps) {
   return (
-    <footer className="mt-16 border-t border-gray-200 pt-8 dark:border-gray-800">
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3">
-        {Object.entries(sections).map(([title, links]) => (
-          <div key={title}>
-            <h4 className="mb-2 text-sm font-semibold">{title}</h4>
-            <ul className="space-y-1">{links.map(l => (
-              <li key={l.label}><a href={l.url} className="text-sm text-gray-500 hover:text-blue-600">{l.label}</a></li>
-            ))}</ul>
+    <footer className="border-t py-12 dark:border-gray-800">
+      <div className="mx-auto max-w-5xl px-4">
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+          {Object.entries(sections).map(([name, links]) => (
+            <div key={name}>
+              <h4 className="text-sm font-semibold mb-3">{name}</h4>
+              <ul className="space-y-2">
+                {links.map(l => (
+                  <li key={l.href}><a href={l.href} className="text-sm text-gray-500 hover:text-gray-900 dark:hover:text-white">{l.label}</a></li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div className="mt-8 flex items-center justify-between border-t pt-6 dark:border-gray-800">
+          <p className="text-xs text-gray-400">{copyright}</p>
+          <div className="flex gap-3">
+            {social.map(s => (
+              <a key={s.name} href={s.href} title={s.name} className="text-gray-400 hover:text-gray-600">{s.icon}</a>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
-      <p className="mt-8 text-center text-xs text-gray-400">{copyright}</p>
     </footer>
   );
 }
