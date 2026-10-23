@@ -1,18 +1,17 @@
 "use client";
 
-interface StatusDotProps { color: string; label: string; pulse: boolean; showLabel?: boolean; size?: "sm" | "md" | "lg"; }
+interface StatusDotProps { status: string; label: string; icon: string; showLabel?: boolean; }
 
-const colorMap: Record<string, string> = {
-  green: "bg-green-500", gray: "bg-gray-400", yellow: "bg-yellow-500",
-  red: "bg-red-500", blue: "bg-blue-500",
+const DOT_COLOR: Record<string, string> = {
+  green: "bg-green-500", yellow: "bg-yellow-500", orange: "bg-orange-500",
+  red: "bg-red-500", blue: "bg-blue-500", gray: "bg-gray-400",
 };
-const sizeMap: Record<string, string> = { sm: "h-2 w-2", md: "h-2.5 w-2.5", lg: "h-3 w-3" };
 
-export function StatusDot({ color, label, pulse, showLabel = true, size = "md" }: StatusDotProps) {
+export function StatusDot({ status, label, icon, showLabel = true }: StatusDotProps) {
   return (
-    <div className="inline-flex items-center gap-1.5">
-      <span className={`rounded-full ${sizeMap[size]} ${colorMap[color] ?? colorMap.gray} ${pulse ? "animate-pulse" : ""}`} />
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`w-2.5 h-2.5 rounded-full ${DOT_COLOR[status] || DOT_COLOR.gray}`} title={label} />
       {showLabel && <span className="text-xs text-gray-500">{label}</span>}
-    </div>
+    </span>
   );
 }

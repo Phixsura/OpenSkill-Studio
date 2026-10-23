@@ -4,12 +4,11 @@ import { StatusDot } from "@/components/status-dot";
 
 describe("StatusDot", () => {
   it("renders with label", () => {
-    const { container } = render(<StatusDot color="green" label="Online" pulse={true} />);
-    expect(container.textContent).toContain("Online");
-    expect(container.querySelector(".animate-pulse")).toBeTruthy();
+    const { container } = render(<StatusDot status="green" label="Operational" icon="🟢" />);
+    expect(container.textContent).toContain("Operational");
   });
-  it("hides label", () => {
-    const { container } = render(<StatusDot color="red" label="Error" pulse={false} showLabel={false} />);
-    expect(container.textContent).not.toContain("Error");
+  it("renders without label", () => {
+    const { container } = render(<StatusDot status="red" label="Outage" icon="🔴" showLabel={false} />);
+    expect(container.textContent).not.toContain("Outage");
   });
 });
