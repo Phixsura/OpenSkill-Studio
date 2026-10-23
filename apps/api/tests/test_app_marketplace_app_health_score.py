@@ -1,18 +1,22 @@
-from app.services.app_marketplace_app_health_score import compute_health_score
+from app.services.app_marketplace_app_health_score import calculate_health_score
 
-def test_excellent():
-    r = compute_health_score(uptime_pct=99.99, error_rate=0.1, avg_response_ms=80,
-                              review_avg=4.8, update_frequency_days=7)
+def test_healthy():
+    r = calculate_health_score(signals={
+        "uptime": 99.9, "error_rate": 0.5, "latency": 5,
+        "crash_free": 99.8, "user_satisfaction": 92})
     assert r["grade"] == "A"
     assert r["score"] > 90
+    assert r["status"] == "healthy"
 
-def test_poor():
-    r = compute_health_score(uptime_pct=90, error_rate=10, avg_response_ms=2000,
-                              review_avg=2.0, update_frequency_days=365)
+def test_degraded():
+    r = calculate_health_score(signals={
+        "uptime": 95, "error_rate": 10, "latency": 30,
+        "crash_free": 90, "user_satisfaction": 60})
+    assert r["grade"] in ("B", "C")
+
+def test_unhealthy():
+    r = calculate_health_score(signals={
+        "uptime": 50, "error_rate": 50, "latency": 80,
+        "crash_free": 40, "user_satisfaction": 20})
+    assert r["status"] == "unhealthy"
     assert r["grade"] in ("D", "F")
-
-def test_breakdown():
-    r = compute_health_score(uptime_pct=99.9, error_rate=1, avg_response_ms=200,
-                              review_avg=4.0, update_frequency_days=30)
-    assert "uptime" in r["breakdown"]
-    assert "errors" in r["breakdown"]
