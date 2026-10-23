@@ -1,12 +1,19 @@
-from app.services.app_marketplace_app_app_quickstart_guide import generate_quickstart
+from app.services.app_marketplace_app_app_quickstart_guide import build_quickstart
 
-def test_typescript():
-    r = generate_quickstart(app_name="Auth SDK", sdk="typescript")
-    assert r["total_steps"] == 4
-    assert "npm install" in r["steps"][0]["code"]
-    assert r["estimated_time_min"] == 5
+def test_fresh():
+    r = build_quickstart()
+    assert r["completed"] == 0
+    assert r["progress_pct"] == 0
+    assert r["next_step"]["id"] == "install"
+    assert not r["all_done"]
 
-def test_python():
-    r = generate_quickstart(app_name="Auth SDK", sdk="python")
-    assert "pip install" in r["steps"][0]["code"]
-    assert "Client" in r["steps"][1]["code"]
+def test_partial():
+    r = build_quickstart(completed_steps=["install", "login"])
+    assert r["completed"] == 2
+    assert r["progress_pct"] == 40
+    assert r["next_step"]["id"] == "init"
+
+def test_all_done():
+    r = build_quickstart(completed_steps=["install", "login", "init", "develop", "deploy"])
+    assert r["all_done"]
+    assert r["progress_pct"] == 100
