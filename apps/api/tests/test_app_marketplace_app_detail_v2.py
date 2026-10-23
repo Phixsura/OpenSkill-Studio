@@ -13,7 +13,7 @@ def test_detail():
     assert len([t for t in d["tabs"] if t]) >= 4
 
 def test_breadcrumb():
-    b = get_app_detail_breadcrumb(app={"name": "App", "slug": "app", "category": "connector"})
+    b = get_app_detail_breadcrumb(app={"id": "a1", "name": "App", "slug": "app", "category": "connector"})
     assert len(b) == 3
     assert b[0]["label"] == "Marketplace"
     assert b[2]["label"] == "App"
