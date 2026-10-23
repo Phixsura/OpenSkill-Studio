@@ -3,23 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { WebhookFilterEditor } from "@/components/webhook-filter-editor";
 
 describe("WebhookFilterEditor", () => {
-  const filters = [
-    { pattern: "app.*", mode: "prefix", description: "All app events" },
-  ];
   it("renders filters", () => {
-    const { container } = render(<WebhookFilterEditor filters={filters} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("app.*");
-    expect(container.textContent).toContain("prefix");
-    expect(container.textContent).toContain("Remove");
-  });
-  it("remove click", () => {
-    const fn = vi.fn();
-    const { container } = render(<WebhookFilterEditor filters={filters} onAdd={vi.fn()} onRemove={fn} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalledWith(0);
-  });
-  it("empty state", () => {
-    const { container } = render(<WebhookFilterEditor filters={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("No filters");
+    const onToggle = vi.fn();
+    const { container, getByText } = render(
+      <WebhookFilterEditor dropRate={25} onToggle={onToggle}
+        eventTypes={["app.installed", "app.uninstalled", "user.created"]}
+        selectedTypes={["app.installed"]} />
+    );
+    expect(container.textContent).toContain("Webhook Filters");
+    expect(container.textContent).toContain("25% filtered out");
+    expect(container.textContent).toContain("app.installed");
+    fireEvent.click(getByText("user.created"));
+    expect(onToggle).toHaveBeenCalledWith("user.created");
   });
 });
