@@ -1,35 +1,43 @@
 "use client";
-
 import { useState } from "react";
 
-interface ExportFormat { id: string; label: string; icon: string; description: string; }
-interface DataExportDialogProps { formats: ExportFormat[]; rowCount: number; onExport: (formatId: string) => void; onClose: () => void; }
+interface DataExportDialogProps {
+  availableFormats: string[];
+  rowCount: number;
+  onExport: (format: string) => void;
+}
 
-export function DataExportDialog({ formats, rowCount, onExport, onClose }: DataExportDialogProps) {
-  const [selected, setSelected] = useState(formats[0]?.id ?? "");
+export function DataExportDialog({ availableFormats, rowCount, onExport }: DataExportDialogProps) {
+  const [selectedFormat, setSelectedFormat] = useState(availableFormats[0] || "csv");
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = () => {
+    setExporting(true);
+    onExport(selectedFormat);
+    setTimeout(() => setExporting(false), 1000);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-xl border bg-white p-5 shadow-xl dark:bg-gray-900 dark:border-gray-700" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold">Export Data</h3>
-        <p className="mt-1 text-sm text-gray-500">{rowCount.toLocaleString()} rows to export</p>
-        <div className="mt-4 space-y-2">
-          {formats.map(f => (
-            <label key={f.id}
-              className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${selected === f.id ? "border-blue-500 bg-blue-50 dark:bg-blue-900/10" : "dark:border-gray-700"}`}>
-              <input type="radio" name="format" checked={selected === f.id} onChange={() => setSelected(f.id)} className="accent-blue-600" />
-              <span className="text-lg">{f.icon}</span>
-              <div>
-                <p className="text-sm font-medium">{f.label}</p>
-                <p className="text-xs text-gray-400">{f.description}</p>
-              </div>
-            </label>
+    <div className="rounded-xl border p-5 dark:border-gray-700 max-w-md">
+      <h3 className="font-semibold mb-3">📥 Export Data</h3>
+      <p className="text-sm text-gray-500 mb-4">{rowCount.toLocaleString()} rows available</p>
+      <div className="mb-4">
+        <label className="block text-xs text-gray-400 mb-1">Format</label>
+        <div className="flex gap-2">
+          {availableFormats.map(f => (
+            <button key={f} onClick={() => setSelectedFormat(f)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium uppercase transition ${
+                selectedFormat === f
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+              }`}>{f}</button>
           ))}
         </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded border px-3 py-1.5 text-sm dark:border-gray-700">Cancel</button>
-          <button onClick={() => onExport(selected)} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">Export</button>
-        </div>
       </div>
+      <button onClick={handleExport} disabled={exporting}
+        className="w-full py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        {exporting ? "Exporting..." : `Export as ${selectedFormat.toUpperCase()}`}
+      </button>
     </div>
   );
 }
