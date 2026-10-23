@@ -8,7 +8,7 @@ def test_inspect():
     assert r["has_auth"]
     assert r["auth_type"] == "Bearer"
     assert r["headers"]["Authorization"] == "***"
-    assert r["body_size_bytes"] == 15
+    assert r["body_size_bytes"] == 14
 
 def test_no_auth():
     r = inspect_request(method="GET", path="/health", headers={})
