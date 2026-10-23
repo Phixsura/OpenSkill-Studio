@@ -1,41 +1,44 @@
-"""Changelog generator — auto-generate changelog from version diffs."""
+"""Changelog generator — auto-generate changelogs from commits."""
 
-from datetime import datetime, timezone
-
-
-def generate_changelog_entry(*, version: str, changes: list[dict], released_at: str | None = None) -> dict:
-    categorized = {"added": [], "changed": [], "fixed": [], "removed": []}
-    for c in changes:
-        cat = c.get("type", "changed")
-        if cat in categorized:
-            categorized[cat].append(c.get("description", ""))
-    return {
-        "version": version, "released_at": released_at or datetime.now(timezone.utc).isoformat(),
-        "categories": {k: v for k, v in categorized.items() if v},
-        "total_changes": len(changes),
-    }
+import re
+from datetime import datetime
 
 
-def render_changelog_markdown(*, entries: list[dict]) -> str:
-    lines = ["# Changelog\n"]
-    for entry in entries:
-        lines.append(f"## {entry['version']} ({entry['released_at'][:10]})\n")
-        for cat, items in entry.get("categories", {}).items():
-            lines.append(f"### {cat.title()}\n")
-            for item in items:
-                lines.append(f"- {item}")
-            lines.append("")
+COMMIT_TYPES = {
+    "feat": "Features", "fix": "Bug Fixes", "perf": "Performance",
+    "docs": "Documentation", "refactor": "Refactoring", "chore": "Chores",
+}
+
+
+def parse_commits(*, commits: list[str]) -> dict:
+    groups: dict[str, list[str]] = {}
+    breaking = []
+    for msg in commits:
+        m = re.match(r"^(\w+)(?:\(.+?\))?(!)?:\s*(.+)$", msg)
+        if m:
+            ctype, bang, desc = m.group(1), m.group(2), m.group(3)
+            label = COMMIT_TYPES.get(ctype, "Other")
+            groups.setdefault(label, []).append(desc)
+            if bang:
+                breaking.append(desc)
+        else:
+            groups.setdefault("Other", []).append(msg)
+    return {"groups": groups, "breaking_changes": breaking,
+            "total": len(commits), "has_breaking": len(breaking) > 0}
+
+
+def render_changelog(*, version: str, date: str | None = None,
+                       parsed: dict) -> str:
+    d = date or datetime.utcnow().strftime("%Y-%m-%d")
+    lines = [f"## {version} ({d})\n"]
+    if parsed["has_breaking"]:
+        lines.append("### ⚠️ Breaking Changes\n")
+        for b in parsed["breaking_changes"]:
+            lines.append(f"- {b}")
+        lines.append("")
+    for section, items in parsed["groups"].items():
+        lines.append(f"### {section}\n")
+        for item in items:
+            lines.append(f"- {item}")
+        lines.append("")
     return "\n".join(lines)
-
-
-def compare_versions_for_changelog(*, old_manifest: dict, new_manifest: dict) -> list[dict]:
-    changes = []
-    old_perms = set(old_manifest.get("permissions", []))
-    new_perms = set(new_manifest.get("permissions", []))
-    for p in new_perms - old_perms:
-        changes.append({"type": "added", "description": f"Permission: {p}"})
-    for p in old_perms - new_perms:
-        changes.append({"type": "removed", "description": f"Permission: {p}"})
-    if old_manifest.get("entry_point") != new_manifest.get("entry_point"):
-        changes.append({"type": "changed", "description": "Entry point updated"})
-    return changes
