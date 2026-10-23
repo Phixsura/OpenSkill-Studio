@@ -1,38 +1,27 @@
-"""Response cache — intelligent caching with cache-control headers and invalidation."""
+"""Response cache — HTTP response caching with ETags and conditional requests."""
 
 import hashlib
-import time
+from datetime import datetime, timedelta
 
 
-def compute_cache_key(*, method: str, path: str, query_params: dict | None = None) -> str:
-    parts = f"{method}:{path}"
-    if query_params:
-        sorted_params = "&".join(f"{k}={v}" for k, v in sorted(query_params.items()))
-        parts += f"?{sorted_params}"
-    return hashlib.sha256(parts.encode()).hexdigest()[:16]
+def generate_etag(*, content: str) -> str:
+    return f'"{hashlib.md5(content.encode()).hexdigest()}"'
 
 
-def build_cache_headers(*, max_age: int = 300, private: bool = False,
-                           stale_while_revalidate: int = 60) -> dict:
-    directives = []
-    directives.append("private" if private else "public")
-    directives.append(f"max-age={max_age}")
-    if stale_while_revalidate:
-        directives.append(f"stale-while-revalidate={stale_while_revalidate}")
-    return {"Cache-Control": ", ".join(directives)}
+def build_cache_headers(*, content: str, max_age: int = 300,
+                          private: bool = False) -> dict:
+    etag = generate_etag(content=content)
+    cache_control = f"{'private' if private else 'public'}, max-age={max_age}"
+    expires = (datetime.utcnow() + timedelta(seconds=max_age)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    return {
+        "ETag": etag,
+        "Cache-Control": cache_control,
+        "Expires": expires,
+        "Vary": "Accept-Encoding",
+    }
 
 
-def should_cache(*, method: str, status_code: int, content_type: str) -> bool:
-    if method.upper() != "GET":
-        return False
-    if status_code not in (200, 301, 304):
-        return False
-    cacheable_types = {"application/json", "text/html", "text/css", "application/javascript"}
-    return any(content_type.startswith(t) for t in cacheable_types)
-
-
-def compute_cache_hit_rate(*, hits: int, misses: int) -> dict:
-    total = hits + misses
-    rate = round(hits / max(total, 1) * 100, 1)
-    return {"hits": hits, "misses": misses, "total": total, "hit_rate": rate,
-            "efficiency": "excellent" if rate > 90 else "good" if rate > 70 else "poor"}
+def check_conditional(*, if_none_match: str | None, current_etag: str) -> dict:
+    if if_none_match and if_none_match == current_etag:
+        return {"status": 304, "message": "Not Modified", "send_body": False}
+    return {"status": 200, "message": "OK", "send_body": True}

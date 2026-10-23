@@ -1,31 +1,26 @@
-from app.services.app_marketplace_app_response_cache import compute_cache_key, build_cache_headers, should_cache, compute_cache_hit_rate
+from app.services.app_marketplace_app_response_cache import generate_etag, build_cache_headers, check_conditional
 
-def test_cache_key():
-    k1 = compute_cache_key(method="GET", path="/users")
-    k2 = compute_cache_key(method="GET", path="/users", query_params={"limit": "10"})
-    assert k1 != k2
-    assert len(k1) == 16
-
-def test_deterministic():
-    k1 = compute_cache_key(method="GET", path="/x")
-    k2 = compute_cache_key(method="GET", path="/x")
-    assert k1 == k2
+def test_etag():
+    e1 = generate_etag(content="hello")
+    e2 = generate_etag(content="hello")
+    e3 = generate_etag(content="world")
+    assert e1 == e2
+    assert e1 != e3
+    assert e1.startswith('"') and e1.endswith('"')
 
 def test_headers():
-    h = build_cache_headers(max_age=600, private=True)
-    assert "private" in h["Cache-Control"]
-    assert "max-age=600" in h["Cache-Control"]
+    r = build_cache_headers(content="test", max_age=600, private=True)
+    assert "private" in r["Cache-Control"]
+    assert "max-age=600" in r["Cache-Control"]
+    assert r["Vary"] == "Accept-Encoding"
 
-def test_should_cache_get():
-    assert should_cache(method="GET", status_code=200, content_type="application/json")
+def test_conditional_match():
+    etag = generate_etag(content="data")
+    r = check_conditional(if_none_match=etag, current_etag=etag)
+    assert r["status"] == 304
+    assert not r["send_body"]
 
-def test_should_not_cache_post():
-    assert not should_cache(method="POST", status_code=200, content_type="application/json")
-
-def test_should_not_cache_500():
-    assert not should_cache(method="GET", status_code=500, content_type="application/json")
-
-def test_hit_rate():
-    r = compute_cache_hit_rate(hits=900, misses=100)
-    assert r["hit_rate"] == 90.0
-    assert r["efficiency"] == "good"
+def test_conditional_miss():
+    r = check_conditional(if_none_match='"old"', current_etag='"new"')
+    assert r["status"] == 200
+    assert r["send_body"]
