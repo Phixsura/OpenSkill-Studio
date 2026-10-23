@@ -1,32 +1,21 @@
-from app.services.app_marketplace_app_audit_trail import create_audit_entry, query_audit_trail, summarize_audit
+from app.services.app_marketplace_app_audit_trail import create_audit_entry, verify_chain
 
 def test_create():
-    e = create_audit_entry(app_id="a1", action="app.created", actor_id="u1", details={"name": "MyApp"})
-    assert e["action"] == "app.created"
-    assert e["error"] is None
+    r = create_audit_entry(actor="admin", action="delete_app", resource="app_123")
+    assert r["entry_id"].startswith("audit_")
+    assert r["immutable"]
+    assert len(r["hash"]) == 64
 
-def test_invalid_action():
-    e = create_audit_entry(app_id="a1", action="invalid.action", actor_id="u1")
-    assert e["error"]
+def test_chain():
+    e1 = create_audit_entry(actor="a", action="create", resource="r1")
+    e2 = create_audit_entry(actor="b", action="update", resource="r1", previous_hash=e1["hash"])
+    r = verify_chain(entries=[e1, e2])
+    assert r["valid"]
+    assert r["entries_checked"] == 2
 
-def test_query_all():
-    entries = [{"action": "app.created", "actor_id": "u1", "timestamp": "2026-01-01"},
-               {"action": "version.submitted", "actor_id": "u2", "timestamp": "2026-01-02"}]
-    r = query_audit_trail(entries=entries)
-    assert r["filtered"] == 2
-    assert r["entries"][0]["timestamp"] > r["entries"][1]["timestamp"]
-
-def test_query_filter():
-    entries = [{"action": "app.created", "actor_id": "u1", "timestamp": "2026-01-01"},
-               {"action": "version.submitted", "actor_id": "u2", "timestamp": "2026-01-02"}]
-    r = query_audit_trail(entries=entries, action_filter="app.created")
-    assert r["filtered"] == 1
-
-def test_summarize():
-    entries = [{"action": "app.created", "actor_id": "u1"},
-               {"action": "app.created", "actor_id": "u2"},
-               {"action": "version.submitted", "actor_id": "u1"}]
-    s = summarize_audit(entries=entries)
-    assert s["total_events"] == 3
-    assert s["unique_actors"] == 2
-    assert s["top_actions"][0]["action"] == "app.created"
+def test_broken_chain():
+    e1 = create_audit_entry(actor="a", action="x", resource="r")
+    e2 = create_audit_entry(actor="b", action="y", resource="r", previous_hash="fake_hash")
+    r = verify_chain(entries=[e1, e2])
+    assert not r["valid"]
+    assert "tampering" in r["error"]

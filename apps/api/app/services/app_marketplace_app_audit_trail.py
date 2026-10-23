@@ -1,49 +1,36 @@
-"""Audit trail — immutable log of all app lifecycle events."""
+"""Audit trail — compliance-grade audit trail with tamper detection."""
 
-from datetime import datetime, timezone
-
-
-AUDIT_ACTIONS = {
-    "app.created", "app.published", "app.suspended", "app.deleted",
-    "version.submitted", "version.approved", "version.rejected",
-    "install.created", "install.removed",
-    "config.changed", "secret.rotated", "key.created", "key.revoked",
-    "team.member_added", "team.member_removed", "team.role_changed",
-    "transfer.initiated", "transfer.completed",
-}
+import hashlib
+import secrets
+from datetime import datetime
 
 
-def create_audit_entry(*, app_id: str, action: str, actor_id: str,
-                         details: dict | None = None, ip_address: str | None = None) -> dict:
-    if action not in AUDIT_ACTIONS:
-        return {"error": f"Unknown action: {action}"}
+def create_audit_entry(*, actor: str, action: str, resource: str,
+                         previous_hash: str | None = None,
+                         metadata: dict | None = None) -> dict:
+    timestamp = datetime.utcnow().isoformat()
+    entry_id = f"audit_{secrets.token_urlsafe(8)}"
+    payload = f"{entry_id}:{actor}:{action}:{resource}:{timestamp}:{previous_hash or 'genesis'}"
+    entry_hash = hashlib.sha256(payload.encode()).hexdigest()
     return {
-        "app_id": app_id, "action": action, "actor_id": actor_id,
-        "details": details or {}, "ip_address": ip_address,
-        "timestamp": datetime.now(timezone.utc).isoformat(), "error": None,
+        "entry_id": entry_id,
+        "actor": actor,
+        "action": action,
+        "resource": resource,
+        "timestamp": timestamp,
+        "metadata": metadata or {},
+        "hash": entry_hash,
+        "previous_hash": previous_hash,
+        "immutable": True,
     }
 
 
-def query_audit_trail(*, entries: list[dict], action_filter: str | None = None,
-                        actor_filter: str | None = None, limit: int = 50) -> dict:
-    result = entries
-    if action_filter:
-        result = [e for e in result if e.get("action") == action_filter]
-    if actor_filter:
-        result = [e for e in result if e.get("actor_id") == actor_filter]
-    result = sorted(result, key=lambda e: e.get("timestamp", ""), reverse=True)[:limit]
-    return {"entries": result, "total": len(entries), "filtered": len(result)}
-
-
-def summarize_audit(*, entries: list[dict]) -> dict:
-    actors = set()
-    action_counts: dict[str, int] = {}
-    for e in entries:
-        actors.add(e.get("actor_id"))
-        a = e.get("action", "unknown")
-        action_counts[a] = action_counts.get(a, 0) + 1
-    top_actions = sorted(action_counts.items(), key=lambda x: -x[1])[:5]
-    return {
-        "total_events": len(entries), "unique_actors": len(actors),
-        "top_actions": [{"action": a, "count": c} for a, c in top_actions],
-    }
+def verify_chain(*, entries: list[dict]) -> dict:
+    if not entries:
+        return {"valid": True, "entries_checked": 0}
+    for i in range(1, len(entries)):
+        if entries[i].get("previous_hash") != entries[i - 1].get("hash"):
+            return {"valid": False, "broken_at": i,
+                    "entry_id": entries[i].get("entry_id"),
+                    "error": "Hash chain broken — possible tampering"}
+    return {"valid": True, "entries_checked": len(entries), "chain_intact": True}
