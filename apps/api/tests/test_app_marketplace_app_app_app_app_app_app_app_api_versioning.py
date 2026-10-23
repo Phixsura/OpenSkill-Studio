@@ -1,22 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_api_versioning import ApiVersionManager
+from app.services.app_marketplace_app_app_app_app_app_app_app_api_versioning import (
+    create_version, build_version_matrix, check_deprecation,
+)
 
-def test_versioning():
-    mgr = ApiVersionManager()
-    mgr.register_version("v1", status="stable", endpoints=["/users", "/apps"])
-    mgr.register_version("v2", status="stable", endpoints=["/users", "/apps", "/exports"])
-    mgr.deprecate("v1", sunset_date="2027-01-01", migrate_to="v2")
-    r = mgr.resolve("v1")
-    assert r["status"] == "deprecated"
-    assert "Migrate to v2" in r["warning"]
-    r2 = mgr.resolve("v2")
-    assert r2["status"] == "stable"
-    s = mgr.summary()
-    assert s["total"] == 2
-    assert s["latest"] == "v2"
+def test_matrix():
+    versions = [
+        create_version("v1", "sunset"),
+        create_version("v2", "deprecated"),
+        create_version("v3", "active"),
+    ]
+    m = build_version_matrix(versions)
+    assert m["active_count"] == 1
+    assert m["deprecated_count"] == 1
+    assert m["latest"] == "v3"
 
-def test_fallback():
-    mgr = ApiVersionManager()
-    mgr.register_version("v1", status="stable")
-    r = mgr.resolve("v99")
-    assert r["fallback"]
-    assert r["resolved"] == "v1"
+def test_deprecation():
+    v = create_version("v2", "deprecated")
+    r = check_deprecation(v)
+    assert r["action_needed"]
+    assert "deprecated" in r["message"]
+    v2 = create_version("v3", "active")
+    r2 = check_deprecation(v2)
+    assert not r2["action_needed"]
