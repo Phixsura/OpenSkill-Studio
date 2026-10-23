@@ -3,18 +3,19 @@ import { describe, expect, it } from "vitest";
 import { GraphqlSchemaExplorer } from "@/components/graphql-schema-explorer";
 
 describe("GraphqlSchemaExplorer", () => {
-  const types = [{ name: "App", fields: [
-    { name: "id", type: "ID", required: true },
-    { name: "name", type: "String" },
-  ]}];
-  it("renders", () => {
+  it("renders schema", () => {
     const { container } = render(
-      <GraphqlSchemaExplorer types={types} queryCount={3} mutationCount={2} schema="type App { id: ID! }" />
+      <GraphqlSchemaExplorer analysis={{
+        totalTypes: 5, byKind: { OBJECT: 4, ENUM: 1 }, totalFields: 8,
+        queries: ["users", "apps"], mutations: ["createApp"], complexity: "low",
+      }} />
     );
     expect(container.textContent).toContain("GraphQL Schema");
-    expect(container.textContent).toContain("App");
-    expect(container.textContent).toContain("1 types");
-    expect(container.textContent).toContain("3 queries");
-    expect(container.textContent).toContain("ID");
+    expect(container.textContent).toContain("low complexity");
+    expect(container.textContent).toContain("5");
+    expect(container.textContent).toContain("users");
+    expect(container.textContent).toContain("createApp");
+    expect(container.textContent).toContain("Queries (2)");
+    expect(container.textContent).toContain("Mutations (1)");
   });
 });

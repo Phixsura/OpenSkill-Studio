@@ -1,39 +1,39 @@
 "use client";
 
-interface SchemaField { name: string; type: string; required?: boolean; }
-interface SchemaType { name: string; fields: SchemaField[]; }
-interface GraphqlSchemaExplorerProps { types: SchemaType[]; queryCount: number; mutationCount: number; schema: string; }
+interface SchemaAnalysis { totalTypes: number; byKind: Record<string, number>;
+  totalFields: number; queries: string[]; mutations: string[]; complexity: string; }
+interface GraphqlSchemaExplorerProps { analysis: SchemaAnalysis; }
 
-export function GraphqlSchemaExplorer({ types, queryCount, mutationCount, schema }: GraphqlSchemaExplorerProps) {
+export function GraphqlSchemaExplorer({ analysis }: GraphqlSchemaExplorerProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">GraphQL Schema</h2>
-        <div className="flex gap-2 text-xs text-gray-400">
-          <span>{types.length} types</span>
-          <span>{queryCount} queries</span>
-          <span>{mutationCount} mutations</span>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">🔮 GraphQL Schema</h3>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+          analysis.complexity === "high" ? "bg-red-100 text-red-700" :
+          analysis.complexity === "medium" ? "bg-yellow-100 text-yellow-700" :
+          "bg-green-100 text-green-700"
+        }`}>{analysis.complexity} complexity</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+        <div><p className="text-lg font-bold">{analysis.totalTypes}</p><p className="text-xs text-gray-400">Types</p></div>
+        <div><p className="text-lg font-bold">{analysis.totalFields}</p><p className="text-xs text-gray-400">Fields</p></div>
+        <div><p className="text-lg font-bold">{analysis.queries.length + analysis.mutations.length}</p><p className="text-xs text-gray-400">Operations</p></div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Queries ({analysis.queries.length})</h4>
+          {analysis.queries.map(q => (
+            <p key={q} className="text-sm font-mono text-blue-600 dark:text-blue-400">{q}</p>
+          ))}
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Mutations ({analysis.mutations.length})</h4>
+          {analysis.mutations.map(m => (
+            <p key={m} className="text-sm font-mono text-purple-600 dark:text-purple-400">{m}</p>
+          ))}
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {types.map(t => (
-          <div key={t.name} className="rounded-lg border p-3 dark:border-gray-700">
-            <p className="font-mono text-sm font-bold text-purple-600">{t.name}</p>
-            <div className="mt-1.5 space-y-0.5">
-              {t.fields.map(f => (
-                <div key={f.name} className="flex justify-between font-mono text-xs">
-                  <span>{f.name}</span>
-                  <span className="text-blue-500">{f.type}{f.required ? "!" : ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <details>
-        <summary className="cursor-pointer text-sm text-gray-400">Raw Schema</summary>
-        <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-3 font-mono text-xs text-green-400">{schema}</pre>
-      </details>
     </div>
   );
 }
