@@ -1,22 +1,23 @@
 "use client";
 
-interface Crumb { label: string; url: string | null; active: boolean; }
-interface BreadcrumbNavProps { crumbs: Crumb[]; }
+interface Crumb { label: string; path: string; active: boolean; }
+interface BreadcrumbNavProps { breadcrumbs: Crumb[]; onNavigate: (path: string) => void; }
 
-export function BreadcrumbNav({ crumbs }: BreadcrumbNavProps) {
+export function BreadcrumbNav({ breadcrumbs, onNavigate }: BreadcrumbNavProps) {
   return (
-    <nav className="flex items-center gap-1.5 text-sm" aria-label="Breadcrumb">
-      {crumbs.map((c, i) => (
-        <span key={i} className="flex items-center gap-1.5">
+    <nav className="flex items-center gap-1 text-sm">
+      {breadcrumbs.map((crumb, i) => (
+        <div key={crumb.path} className="flex items-center gap-1">
           {i > 0 && <span className="text-gray-300 dark:text-gray-600">/</span>}
-          {c.active ? (
-            <span className="font-medium text-gray-900 dark:text-gray-100">{c.label}</span>
+          {crumb.active ? (
+            <span className="font-medium text-gray-800 dark:text-gray-200">{crumb.label}</span>
           ) : (
-            <a href={c.url || "#"} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-              {c.label}
-            </a>
+            <button onClick={() => onNavigate(crumb.path)}
+              className="text-gray-400 hover:text-blue-500 hover:underline">
+              {crumb.label}
+            </button>
           )}
-        </span>
+        </div>
       ))}
     </nav>
   );
