@@ -1,24 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { ErrorGroupList } from "@/components/error-group-list";
 
 describe("ErrorGroupList", () => {
   it("renders groups", () => {
-    const onSelect = vi.fn();
-    const { container, getAllByRole } = render(
-      <ErrorGroupList totalErrors={50} uniqueGroups={3} onSelect={onSelect}
+    const { container } = render(
+      <ErrorGroupList uniqueErrors={2} totalOccurrences={5} dedupRatio={2.5}
         groups={[
-          { fingerprint: "abc123", message: "TypeError: null", count: 30, affectedUsers: 10, lastSeen: "5m ago" },
-          { fingerprint: "def456", message: "RangeError", count: 15, affectedUsers: 5, lastSeen: "1h ago" },
+          { fingerprint: "abc123", type: "TypeError", message: "null ref", count: 3 },
+          { fingerprint: "def456", type: "SyntaxError", message: "unexpected", count: 2 },
         ]} />
     );
     expect(container.textContent).toContain("Error Groups");
-    expect(container.textContent).toContain("50 errors");
-    expect(container.textContent).toContain("3 groups");
-    expect(container.textContent).toContain("TypeError: null");
-    expect(container.textContent).toContain("30×");
-    expect(container.textContent).toContain("10 users");
-    fireEvent.click(getAllByRole("button")[0]);
-    expect(onSelect).toHaveBeenCalledWith("abc123");
+    expect(container.textContent).toContain("2 unique");
+    expect(container.textContent).toContain("5 total");
+    expect(container.textContent).toContain("TypeError");
+    expect(container.textContent).toContain("null ref");
+    expect(container.textContent).toContain("abc123");
   });
 });

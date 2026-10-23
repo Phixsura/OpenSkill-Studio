@@ -1,34 +1,26 @@
 "use client";
 
-interface ErrorGroup { fingerprint: string; message: string; count: number;
-  affectedUsers: number; lastSeen: string; }
-interface ErrorGroupListProps { groups: ErrorGroup[]; totalErrors: number;
-  uniqueGroups: number; onSelect: (fp: string) => void; }
+interface ErrorGroup { fingerprint: string; type: string; message: string; count: number; }
+interface ErrorGroupListProps { groups: ErrorGroup[]; uniqueErrors: number;
+  totalOccurrences: number; dedupRatio: number; }
 
-export function ErrorGroupList({ groups, totalErrors, uniqueGroups, onSelect }: ErrorGroupListProps) {
+export function ErrorGroupList({ groups, uniqueErrors, totalOccurrences, dedupRatio }: ErrorGroupListProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <h3 className="font-semibold">🐛 Error Groups</h3>
-        <div className="flex gap-2 text-xs text-gray-400">
-          <span>{totalErrors} errors</span>
-          <span>{uniqueGroups} groups</span>
-        </div>
+        <span className="text-xs text-gray-400">{uniqueErrors} unique / {totalOccurrences} total · {dedupRatio}x dedup</span>
       </div>
       <div className="divide-y dark:divide-gray-700">
         {groups.map(g => (
-          <button key={g.fingerprint} onClick={() => onSelect(g.fingerprint)}
-            className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-red-600 truncate max-w-md">{g.message}</span>
-              <span className="text-sm font-bold ml-2">{g.count}×</span>
+          <div key={g.fingerprint} className="px-4 py-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-red-600">{g.type}</span>
+              <span className="px-2 py-0.5 text-[10px] bg-red-100 text-red-700 rounded-full">{g.count}×</span>
             </div>
-            <div className="flex gap-3 text-xs text-gray-400">
-              <span>👥 {g.affectedUsers} users</span>
-              <span>Last: {g.lastSeen}</span>
-              <span className="font-mono">{g.fingerprint}</span>
-            </div>
-          </button>
+            <div className="text-xs text-gray-500 mt-0.5 truncate">{g.message}</div>
+            <div className="text-[10px] text-gray-300 font-mono mt-0.5">{g.fingerprint}</div>
+          </div>
         ))}
       </div>
     </div>
