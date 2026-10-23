@@ -10,12 +10,12 @@ describe("LoadingSkeleton", () => {
   ];
   it("renders skeleton elements", () => {
     const { container } = render(<LoadingSkeleton rows={rows} count={1} />);
-    const divs = container.querySelectorAll("div > div > div");
-    expect(divs.length).toBe(3);
+    expect(container.querySelector(".animate-pulse")).toBeTruthy();
+    expect(container.querySelector(".rounded-full")).toBeTruthy(); // circle
+    expect(container.querySelector(".rounded-lg")).toBeTruthy(); // rect
   });
   it("renders multiple", () => {
     const { container } = render(<LoadingSkeleton rows={[{ type: "line" }]} count={3} />);
-    // 3 groups, each with 1 line
     const groups = container.querySelectorAll(".space-y-3");
     expect(groups.length).toBe(3);
   });
