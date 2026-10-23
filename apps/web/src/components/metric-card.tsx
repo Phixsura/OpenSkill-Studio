@@ -1,28 +1,29 @@
 "use client";
 
-interface MetricCardProps { label: string; value: number; change: number | null;
-  changePct: number | null; trend: string | null; formatType: string; icon: string; }
+interface MetricCardProps { label: string; display: string; unit: string;
+  trend: "up" | "down" | "flat" | null; changePct: number | null; }
 
-function fmt(val: number, type: string): string {
-  if (type === "currency") return `$${val.toLocaleString()}`;
-  if (type === "percentage") return `${val}%`;
-  return val.toLocaleString();
-}
+const trendConfig = {
+  up: { icon: "↑", color: "text-green-600" },
+  down: { icon: "↓", color: "text-red-600" },
+  flat: { icon: "→", color: "text-gray-400" },
+};
 
-export function MetricCard({ label, value, change, changePct, trend, formatType, icon }: MetricCardProps) {
-  const trendIcon = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
-  const trendColor = trend === "up" ? "text-green-500" : trend === "down" ? "text-red-500" : "text-gray-400";
+export function MetricCard({ label, display, unit, trend, changePct }: MetricCardProps) {
+  const t = trend ? trendConfig[trend] : null;
   return (
-    <div className="rounded-lg border p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-400">{label}</span>
-        <span className="text-lg">{icon}</span>
+    <div className="rounded-xl border p-4 dark:border-gray-700">
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+      <div className="mt-2 flex items-baseline gap-1.5">
+        <span className="text-2xl font-bold">{display}</span>
+        {unit && <span className="text-sm text-gray-400">{unit}</span>}
       </div>
-      <p className="mt-1 text-2xl font-bold">{fmt(value, formatType)}</p>
-      {change !== null && changePct !== null && (
-        <p className={`mt-0.5 text-xs ${trendColor}`}>
-          {trendIcon} {Math.abs(change).toLocaleString()} ({changePct > 0 ? "+" : ""}{changePct}%)
-        </p>
+      {t && changePct !== null && (
+        <div className={`mt-1.5 flex items-center gap-1 text-xs ${t.color}`}>
+          <span>{t.icon}</span>
+          <span>{Math.abs(changePct)}%</span>
+          <span className="text-gray-400">vs prev</span>
+        </div>
       )}
     </div>
   );

@@ -1,15 +1,29 @@
-"""Metric card — individual metric display with trend."""
+"""Metric card — KPI display with trend indicator."""
+
+import html
 
 
-def build_metric_card(*, label: str, value: float, previous: float | None = None,
-                        format_type: str = "number", icon: str = "📊") -> dict:
-    change = round(value - previous, 2) if previous is not None else None
-    change_pct = round(change / max(abs(previous), 0.01) * 100, 1) if previous and change is not None else None
+def build_metric_card(*, label: str, value: float | int, unit: str = "",
+                       previous: float | int | None = None, format_fn: str = "number") -> dict:
+    if format_fn == "percent":
+        display = f"{value:.1f}%"
+    elif format_fn == "currency":
+        display = f"${value:,.2f}"
+    elif format_fn == "compact":
+        if value >= 1_000_000:
+            display = f"{value/1_000_000:.1f}M"
+        elif value >= 1_000:
+            display = f"{value/1_000:.1f}K"
+        else:
+            display = str(value)
+    else:
+        display = f"{value:,}"
+
     trend = None
-    if change is not None:
-        trend = "up" if change > 0 else "down" if change < 0 else "flat"
-    return {
-        "label": label, "value": value, "previous": previous,
-        "change": change, "change_pct": change_pct, "trend": trend,
-        "format_type": format_type, "icon": icon,
-    }
+    change_pct = None
+    if previous is not None and previous != 0:
+        change_pct = round((value - previous) / abs(previous) * 100, 1)
+        trend = "up" if change_pct > 0 else "down" if change_pct < 0 else "flat"
+
+    return {"label": html.escape(label), "value": value, "display": display,
+            "unit": unit, "trend": trend, "change_pct": change_pct}
