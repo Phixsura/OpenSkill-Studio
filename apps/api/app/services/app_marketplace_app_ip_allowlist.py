@@ -1,49 +1,43 @@
-"""IP allowlist — restrict app API access to specific IP ranges."""
+"""IP allowlist — restrict API access to specific IP ranges."""
 
 import ipaddress
 
 
-def validate_ip_entry(entry: str) -> dict:
+def validate_ip_entry(*, entry: str) -> dict:
     try:
-        if "/" in entry:
-            net = ipaddress.ip_network(entry, strict=False)
-            return {"valid": True, "type": "cidr", "addresses": net.num_addresses}
-        else:
-            ipaddress.ip_address(entry)
-            return {"valid": True, "type": "single", "addresses": 1}
-    except ValueError:
-        return {"valid": False, "type": None, "addresses": 0}
+        network = ipaddress.ip_network(entry, strict=False)
+        return {"valid": True, "entry": entry, "normalized": str(network),
+                "version": network.version, "num_addresses": network.num_addresses}
+    except ValueError as e:
+        return {"valid": False, "entry": entry, "error": str(e)}
 
 
-def check_ip_allowed(*, ip: str, allowlist: list[str]) -> bool:
+def check_ip_allowed(*, client_ip: str, allowlist: list[str]) -> dict:
     if not allowlist:
-        return True  # No allowlist = allow all
+        return {"allowed": True, "reason": "No allowlist configured (all allowed)"}
     try:
-        addr = ipaddress.ip_address(ip)
+        addr = ipaddress.ip_address(client_ip)
     except ValueError:
-        return False
+        return {"allowed": False, "reason": f"Invalid IP: {client_ip}"}
     for entry in allowlist:
         try:
-            if "/" in entry:
-                if addr in ipaddress.ip_network(entry, strict=False):
-                    return True
-            elif str(addr) == entry:
-                return True
+            network = ipaddress.ip_network(entry, strict=False)
+            if addr in network:
+                return {"allowed": True, "matched_rule": entry}
         except ValueError:
             continue
-    return False
+    return {"allowed": False, "reason": "IP not in allowlist"}
 
 
-def build_allowlist_summary(*, entries: list[str]) -> dict:
+def get_allowlist_summary(*, entries: list[str]) -> dict:
     valid = []
     invalid = []
-    total_addresses = 0
     for e in entries:
-        v = validate_ip_entry(e)
-        if v["valid"]:
-            valid.append(e)
-            total_addresses += v["addresses"]
+        r = validate_ip_entry(entry=e)
+        if r["valid"]:
+            valid.append(r)
         else:
-            invalid.append(e)
-    return {"valid_entries": len(valid), "invalid_entries": invalid,
-            "total_addresses_covered": total_addresses}
+            invalid.append(r)
+    total_addresses = sum(v["num_addresses"] for v in valid)
+    return {"total_rules": len(entries), "valid_rules": len(valid),
+            "invalid_rules": len(invalid), "total_addresses": total_addresses}

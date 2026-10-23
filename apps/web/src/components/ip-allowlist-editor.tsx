@@ -2,35 +2,34 @@
 
 import { useState } from "react";
 
-interface IpAllowlistEditorProps { entries: string[]; onAdd: (entry: string) => void; onRemove: (entry: string) => void; }
+interface IpEntry { entry: string; normalized: string; version: number; num_addresses: number; }
+interface IpAllowlistEditorProps { entries: IpEntry[]; onAdd: (entry: string) => void; onRemove: (entry: string) => void; }
 
 export function IpAllowlistEditor({ entries, onAdd, onRemove }: IpAllowlistEditorProps) {
-  const [input, setInput] = useState("");
-
-  const handleAdd = () => { if (input.trim()) { onAdd(input.trim()); setInput(""); } };
-
+  const [newIp, setNewIp] = useState("");
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h3 className="font-semibold">IP Allowlist</h3>
-      <p className="mt-1 text-xs text-gray-400">Restrict API access to specific IPs or CIDR ranges.</p>
-      <div className="mt-3 flex gap-2">
-        <input value={input} onChange={e => setInput(e.target.value)} placeholder="10.0.0.0/24 or 192.168.1.1"
-          className="flex-1 rounded border p-2 text-sm dark:border-gray-600 dark:bg-gray-700"
-          onKeyDown={e => e.key === "Enter" && handleAdd()} />
-        <button onClick={handleAdd} disabled={!input.trim()}
-          className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">Add</button>
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">IP Allowlist</h2>
+      <div className="flex gap-2">
+        <input value={newIp} onChange={e => setNewIp(e.target.value)} placeholder="e.g. 10.0.0.0/8"
+          className="flex-1 rounded border px-3 py-1.5 font-mono text-sm dark:border-gray-600 dark:bg-gray-700" />
+        <button onClick={() => { onAdd(newIp); setNewIp(""); }}
+          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">Add</button>
       </div>
       {entries.length === 0 ? (
-        <p className="mt-3 text-xs text-gray-400">No IP restrictions — all IPs allowed.</p>
+        <p className="text-sm text-gray-400">No IP restrictions — all IPs allowed</p>
       ) : (
-        <ul className="mt-3 space-y-1">
+        <div className="space-y-1.5">
           {entries.map(e => (
-            <li key={e} className="flex items-center justify-between rounded bg-gray-50 px-3 py-1 text-sm dark:bg-gray-800">
-              <code>{e}</code>
-              <button onClick={() => onRemove(e)} className="text-red-500 text-xs hover:underline">Remove</button>
-            </li>
+            <div key={e.entry} className="flex items-center justify-between rounded border px-3 py-2 dark:border-gray-700">
+              <div>
+                <span className="font-mono text-sm">{e.normalized}</span>
+                <span className="ml-2 text-xs text-gray-400">IPv{e.version} · {e.num_addresses.toLocaleString()} addr</span>
+              </div>
+              <button onClick={() => onRemove(e.entry)} className="text-xs text-red-500">Remove</button>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );

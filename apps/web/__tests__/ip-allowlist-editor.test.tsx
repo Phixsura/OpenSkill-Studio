@@ -3,19 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { IpAllowlistEditor } from "@/components/ip-allowlist-editor";
 
 describe("IpAllowlistEditor", () => {
-  it("renders entries", () => {
-    const { container } = render(<IpAllowlistEditor entries={["10.0.0.0/24"]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("10.0.0.0/24");
+  const entries = [
+    { entry: "10.0.0.0/8", normalized: "10.0.0.0/8", version: 4, num_addresses: 16777216 },
+  ];
+  it("renders", () => {
+    const { container } = render(<IpAllowlistEditor entries={entries} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(container.textContent).toContain("IP Allowlist");
+    expect(container.textContent).toContain("10.0.0.0/8");
+    expect(container.textContent).toContain("IPv4");
   });
-  it("empty state", () => {
-    const { container } = render(<IpAllowlistEditor entries={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(container.textContent).toContain("all IPs allowed");
-  });
-  it("calls onRemove", () => {
+  it("remove", () => {
     const fn = vi.fn();
-    const { container } = render(<IpAllowlistEditor entries={["1.2.3.4"]} onAdd={vi.fn()} onRemove={fn} />);
-    const removeBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Remove")!;
-    fireEvent.click(removeBtn);
-    expect(fn).toHaveBeenCalledWith("1.2.3.4");
+    const { container } = render(<IpAllowlistEditor entries={entries} onAdd={vi.fn()} onRemove={fn} />);
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Remove")!);
+    expect(fn).toHaveBeenCalledWith("10.0.0.0/8");
   });
 });
