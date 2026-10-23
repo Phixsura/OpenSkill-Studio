@@ -3,19 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { PaginationControls } from "@/components/pagination-controls";
 
 describe("PaginationControls", () => {
-  it("renders pages", () => {
-    const { container } = render(<PaginationControls page={2} totalPages={5} onPageChange={vi.fn()} />);
-    expect(container.textContent).toContain("1");
-    expect(container.textContent).toContain("5");
+  const meta = { page: 2, per_page: 10, total: 50, total_pages: 5, has_next: true, has_prev: true };
+  it("renders", () => {
+    const { container } = render(<PaginationControls meta={meta} onPageChange={vi.fn()} />);
+    expect(container.textContent).toContain("11–20 of 50");
+    expect(container.textContent).toContain("2");
   });
-  it("navigates", () => {
+  it("next page", () => {
     const fn = vi.fn();
-    const { container } = render(<PaginationControls page={2} totalPages={5} onPageChange={fn} />);
+    const { container } = render(<PaginationControls meta={meta} onPageChange={fn} />);
     fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "→")!);
     expect(fn).toHaveBeenCalledWith(3);
-  });
-  it("hidden when 1 page", () => {
-    const { container } = render(<PaginationControls page={1} totalPages={1} onPageChange={vi.fn()} />);
-    expect(container.innerHTML).toBe("");
   });
 });
