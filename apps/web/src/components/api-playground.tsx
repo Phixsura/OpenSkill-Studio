@@ -2,26 +2,30 @@
 
 import { useState } from "react";
 
-interface Endpoint { method: string; path: string; description: string; auth: boolean; }
-interface ApiPlaygroundProps { endpoints: Endpoint[]; onExecute: (endpoint: Endpoint) => void; }
+interface ApiPlaygroundProps { onSend: (method: string, url: string) => void; }
 
-const METHOD_COLORS: Record<string, string> = { GET: "bg-green-100 text-green-800", POST: "bg-blue-100 text-blue-800", PUT: "bg-yellow-100 text-yellow-800", DELETE: "bg-red-100 text-red-800" };
+const methods = ["GET", "POST", "PUT", "DELETE"];
+const methodColors: Record<string, string> = {
+  GET: "bg-green-500", POST: "bg-blue-500", PUT: "bg-yellow-500", DELETE: "bg-red-500",
+};
 
-export function ApiPlayground({ endpoints, onExecute }: ApiPlaygroundProps) {
-  const [selected, setSelected] = useState<number | null>(null);
+export function ApiPlayground({ onSend }: ApiPlaygroundProps) {
+  const [method, setMethod] = useState("GET");
+  const [url, setUrl] = useState("");
+
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h4 className="mb-3 font-semibold">🧪 API Playground</h4>
-      <div className="space-y-2">
-        {endpoints.map((ep, i) => (
-          <div key={i} onClick={() => setSelected(i)}
-            className={`flex cursor-pointer items-center gap-2 rounded border p-2 transition ${selected === i ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20" : "border-gray-200 hover:border-gray-300 dark:border-gray-700"}`}>
-            <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${METHOD_COLORS[ep.method] ?? "bg-gray-100"}`}>{ep.method}</span>
-            <code className="flex-1 text-xs">{ep.path}</code>
-            <span className="text-xs text-gray-500">{ep.description}</span>
-            {selected === i && <button onClick={(e) => { e.stopPropagation(); onExecute(ep); }} className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white">Run</button>}
-          </div>
-        ))}
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold">API Playground</h3>
+      <div className="flex gap-2">
+        <select value={method} onChange={e => setMethod(e.target.value)}
+          className={`rounded px-2 py-2 text-sm text-white font-medium ${methodColors[method] ?? "bg-gray-500"}`}>
+          {methods.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+          placeholder="https://api.example.com/v1/apps"
+          className="flex-1 rounded border px-3 py-2 text-sm font-mono dark:bg-gray-800 dark:border-gray-600" />
+        <button onClick={() => url && onSend(method, url)}
+          className="rounded bg-blue-600 px-4 py-2 text-sm text-white font-medium">Send</button>
       </div>
     </div>
   );
