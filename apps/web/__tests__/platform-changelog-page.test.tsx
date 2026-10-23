@@ -3,15 +3,20 @@ import { describe, expect, it } from "vitest";
 import { PlatformChangelogPage } from "@/components/platform-changelog-page";
 
 describe("PlatformChangelogPage", () => {
-  it("renders", () => {
-    const entries = [
-      { title: "App1 v2.0", date: "2026-10-01", type: "app_update", link: "/app1" },
-      { title: "API v3", date: "2026-10-15", type: "platform", link: "/changelog" },
-    ];
-    const { container } = render(<PlatformChangelogPage entries={entries} rssUrl="/feed.rss" />);
-    expect(container.textContent).toContain("Changelog");
-    expect(container.textContent).toContain("App1 v2.0");
-    expect(container.textContent).toContain("API v3");
-    expect(container.textContent).toContain("RSS");
+  const sections = [{
+    service: "API", count: 2,
+    entries: [
+      { title: "New endpoint", type: "added", date: "2026-10-01", icon: "✨" },
+      { title: "Fixed auth", type: "fixed", date: "2026-10-02", icon: "🐛" },
+    ],
+  }];
+  it("renders changelog", () => {
+    const { container } = render(
+      <PlatformChangelogPage sections={sections} totalEntries={2} serviceCount={1} period="30d" />
+    );
+    expect(container.textContent).toContain("Platform Changelog");
+    expect(container.textContent).toContain("API (2)");
+    expect(container.textContent).toContain("New endpoint");
+    expect(container.textContent).toContain("Fixed auth");
   });
 });
