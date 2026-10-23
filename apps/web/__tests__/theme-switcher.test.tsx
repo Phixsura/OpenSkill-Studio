@@ -3,19 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 
 describe("ThemeSwitcher", () => {
-  const themes = [
-    { id: "light", name: "Light", preview: { bg: "#fff", text: "#000", primary: "#2563eb" } },
-    { id: "dark", name: "Dark", preview: { bg: "#111", text: "#fff", primary: "#3b82f6" } },
-  ];
   it("renders themes", () => {
-    const { container } = render(<ThemeSwitcher themes={themes} activeTheme="light" onSwitch={vi.fn()} />);
-    expect(container.textContent).toContain("Light");
-    expect(container.textContent).toContain("Dark");
-  });
-  it("switches theme", () => {
-    const fn = vi.fn();
-    const { container } = render(<ThemeSwitcher themes={themes} activeTheme="light" onSwitch={fn} />);
-    fireEvent.click(container.querySelectorAll("button")[1]);
-    expect(fn).toHaveBeenCalledWith("dark");
+    const onSelect = vi.fn();
+    const { container, getByText } = render(
+      <ThemeSwitcher current="light" onSelect={onSelect} presets={[
+        { name: "light", previewBg: "#FFFFFF", previewPrimary: "#3B82F6" },
+        { name: "dark", previewBg: "#111827", previewPrimary: "#60A5FA" },
+        { name: "midnight", previewBg: "#0F172A", previewPrimary: "#818CF8" },
+      ]} />
+    );
+    expect(container.textContent).toContain("Theme");
+    expect(container.textContent).toContain("light");
+    expect(container.textContent).toContain("dark");
+    expect(container.textContent).toContain("midnight");
+    fireEvent.click(getByText("dark"));
+    expect(onSelect).toHaveBeenCalledWith("dark");
   });
 });
