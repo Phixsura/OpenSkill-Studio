@@ -1,31 +1,40 @@
 "use client";
 
-interface Segment { name: string; count: number; pct: number; }
-interface UserSegmentBreakdownProps { totalUsers: number; segments: Segment[]; }
+interface SegmentSummary { count: number; pct: number; }
+interface UserSegmentBreakdownProps {
+  totalUsers: number;
+  summary: Record<string, SegmentSummary>;
+}
 
-const segmentLabels: Record<string, string> = {
-  new_user: "🆕 New", onboarding: "🎯 Onboarding", established: "✅ Established",
-  power_user: "⚡ Power User", active_user: "🔵 Active", contributor: "💬 Contributor",
-  premium: "💎 Premium", paying: "💳 Paying", developer: "👨‍💻 Developer",
+const COLORS: Record<string, string> = {
+  power_users: "bg-purple-500", new_users: "bg-blue-500",
+  churning: "bg-red-500", unclassified: "bg-gray-400",
+};
+const LABELS: Record<string, string> = {
+  power_users: "Power Users", new_users: "New Users",
+  churning: "Churning", unclassified: "Unclassified",
 };
 
-export function UserSegmentBreakdown({ totalUsers, segments }: UserSegmentBreakdownProps) {
+export function UserSegmentBreakdown({ totalUsers, summary }: UserSegmentBreakdownProps) {
+  const entries = Object.entries(summary).sort((a, b) => b[1].count - a[1].count);
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">User Segments</h2>
-        <span className="text-sm text-gray-400">{totalUsers.toLocaleString()} total</span>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-1">👥 User Segments</h3>
+      <p className="text-xs text-gray-400 mb-3">{totalUsers.toLocaleString()} total users</p>
+      <div className="flex h-4 rounded-full overflow-hidden mb-4">
+        {entries.map(([k, v]) => (
+          <div key={k} className={`${COLORS[k] || "bg-gray-300"}`} style={{ width: `${v.pct}%` }}
+               title={`${LABELS[k] || k}: ${v.pct}%`} />
+        ))}
       </div>
       <div className="space-y-2">
-        {segments.map(s => (
-          <div key={s.name}>
-            <div className="flex justify-between text-sm">
-              <span>{segmentLabels[s.name] ?? s.name}</span>
-              <span className="text-gray-400">{s.count} ({s.pct}%)</span>
+        {entries.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2">
+              <span className={`w-3 h-3 rounded-full ${COLORS[k] || "bg-gray-300"}`} />
+              <span>{LABELS[k] || k}</span>
             </div>
-            <div className="mt-0.5 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-              <div className="h-full rounded-full bg-blue-500" style={{ width: `${s.pct}%` }} />
-            </div>
+            <span className="text-gray-500">{v.count.toLocaleString()} ({v.pct}%)</span>
           </div>
         ))}
       </div>

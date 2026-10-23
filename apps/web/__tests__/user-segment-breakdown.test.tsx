@@ -3,17 +3,19 @@ import { describe, expect, it } from "vitest";
 import { UserSegmentBreakdown } from "@/components/user-segment-breakdown";
 
 describe("UserSegmentBreakdown", () => {
-  const segments = [
-    { name: "established", count: 500, pct: 50 },
-    { name: "power_user", count: 200, pct: 20 },
-    { name: "new_user", count: 150, pct: 15 },
-  ];
-  it("renders", () => {
-    const { container } = render(<UserSegmentBreakdown totalUsers={1000} segments={segments} />);
+  it("renders segments", () => {
+    const { container } = render(
+      <UserSegmentBreakdown totalUsers={4} summary={{
+        power_users: { count: 1, pct: 25 },
+        new_users: { count: 1, pct: 25 },
+        churning: { count: 1, pct: 25 },
+        unclassified: { count: 1, pct: 25 },
+      }} />
+    );
     expect(container.textContent).toContain("User Segments");
-    expect(container.textContent).toContain("1,000 total");
-    expect(container.textContent).toContain("✅ Established");
-    expect(container.textContent).toContain("⚡ Power User");
-    expect(container.textContent).toContain("500 (50%)");
+    expect(container.textContent).toContain("4");
+    expect(container.textContent).toContain("Power Users");
+    expect(container.textContent).toContain("Churning");
+    expect(container.textContent).toContain("25%");
   });
 });
