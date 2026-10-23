@@ -1,32 +1,28 @@
 "use client";
 
-interface TestResult { name: string; valid: boolean; errors: { field: string; error?: string }[]; }
-interface ContractTestResultsProps { total: number; passed: number; failed: number;
-  passRate: number; results: TestResult[]; allPassed: boolean; }
+interface ContractResult { contractName: string; valid: boolean; errorCount: number; fieldsChecked: number; }
+interface ContractTestResultsProps { results: ContractResult[]; passRate: number;
+  passed: number; failed: number; }
 
-export function ContractTestResults({ total, passed, failed, passRate, results, allPassed }: ContractTestResultsProps) {
+export function ContractTestResults({ results, passRate, passed, failed }: ContractTestResultsProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">🧪 Contract Tests</h3>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${allPassed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-          {passRate}% · {passed}/{total} passed
-        </span>
+        <h3 className="font-semibold">📜 Contract Tests</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="text-green-600">{passed} passed</span>
+          {failed > 0 && <span className="text-red-500">{failed} failed</span>}
+          <span className="text-gray-400">{passRate}%</span>
+        </div>
       </div>
       <div className="divide-y dark:divide-gray-700">
         {results.map(r => (
-          <div key={r.name} className="px-4 py-3">
+          <div key={r.contractName} className="flex items-center justify-between px-4 py-2.5">
             <div className="flex items-center gap-2">
               <span>{r.valid ? "✅" : "❌"}</span>
-              <span className="text-sm font-medium">{r.name}</span>
+              <span className="text-sm font-mono">{r.contractName}</span>
             </div>
-            {r.errors.length > 0 && (
-              <div className="ml-7 mt-1 space-y-0.5">
-                {r.errors.map((e, i) => (
-                  <p key={i} className="text-xs text-red-500">{e.field}: {e.error || "mismatch"}</p>
-                ))}
-              </div>
-            )}
+            <span className="text-xs text-gray-400">{r.fieldsChecked} fields · {r.errorCount} errors</span>
           </div>
         ))}
       </div>
