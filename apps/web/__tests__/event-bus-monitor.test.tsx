@@ -3,16 +3,19 @@ import { describe, expect, it } from "vitest";
 import { EventBusMonitor } from "@/components/event-bus-monitor";
 
 describe("EventBusMonitor", () => {
-  const events = [
-    { event: "app.installed", subscriberCount: 2, timestamp: "2026-01-01T10:00:00Z" },
-  ];
-  const subs = [{ handlerId: "h1", name: "Logger", event: "app.installed" }];
-  it("renders events", () => {
+  it("renders bus", () => {
     const { container } = render(
-      <EventBusMonitor events={events} subscriptions={subs} eventTypes={["app.installed"]} />
+      <EventBusMonitor totalSubscribers={5} published={100} delivered={350}
+        topics={[
+          { topic: "user.created", subscribers: 3 },
+          { topic: "order.placed", subscribers: 2 },
+        ]} />
     );
-    expect(container.textContent).toContain("app.installed");
-    expect(container.textContent).toContain("2 subs");
-    expect(container.textContent).toContain("1 event types");
+    expect(container.textContent).toContain("Event Bus");
+    expect(container.textContent).toContain("5");
+    expect(container.textContent).toContain("100");
+    expect(container.textContent).toContain("350");
+    expect(container.textContent).toContain("user.created");
+    expect(container.textContent).toContain("3 subs");
   });
 });

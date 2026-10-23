@@ -1,30 +1,26 @@
 "use client";
 
-interface EventEntry { event: string; subscriberCount: number; timestamp: string; }
-interface Subscription { handlerId: string; name: string; event: string; }
-interface EventBusMonitorProps { events: EventEntry[]; subscriptions: Subscription[]; eventTypes: string[]; }
+interface TopicInfo { topic: string; subscribers: number; }
+interface EventBusMonitorProps { topics: TopicInfo[]; totalSubscribers: number;
+  published: number; delivered: number; }
 
-export function EventBusMonitor({ events, subscriptions, eventTypes }: EventBusMonitorProps) {
+export function EventBusMonitor({ topics, totalSubscribers, published, delivered }: EventBusMonitorProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Event Bus</h3>
-        <span className="text-xs text-gray-400">{eventTypes.length} event types · {subscriptions.length} subscribers</span>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">📬 Event Bus</h3>
+      <div className="grid grid-cols-4 gap-3 text-center mb-4">
+        <div><p className="text-lg font-bold">{topics.length}</p><p className="text-xs text-gray-400">Topics</p></div>
+        <div><p className="text-lg font-bold">{totalSubscribers}</p><p className="text-xs text-gray-400">Subscribers</p></div>
+        <div><p className="text-lg font-bold">{published.toLocaleString()}</p><p className="text-xs text-gray-400">Published</p></div>
+        <div><p className="text-lg font-bold">{delivered.toLocaleString()}</p><p className="text-xs text-gray-400">Delivered</p></div>
       </div>
-      <div className="max-h-48 overflow-y-auto divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700">
-        {events.map((e, i) => (
-          <div key={i} className="flex items-center justify-between px-4 py-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs">📡</span>
-              <span className="text-sm font-mono">{e.event}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <span>{e.subscriberCount} subs</span>
-              <time>{new Date(e.timestamp).toLocaleTimeString()}</time>
-            </div>
+      <div className="space-y-1">
+        {topics.map(t => (
+          <div key={t.topic} className="flex justify-between text-sm bg-gray-50 dark:bg-gray-800 rounded px-3 py-1.5">
+            <span className="font-mono text-xs">{t.topic}</span>
+            <span className="text-xs text-gray-400">{t.subscribers} subs</span>
           </div>
         ))}
-        {events.length === 0 && <p className="py-4 text-center text-sm text-gray-400">No events yet</p>}
       </div>
     </div>
   );
