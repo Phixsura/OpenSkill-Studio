@@ -1,32 +1,19 @@
-from app.services.app_marketplace_app_cache_manager import AppCacheManager
-
-def test_set_get():
-    c = AppCacheManager()
-    c.set("k1", {"data": "hello"}, ttl_seconds=3600)
-    assert c.get("k1") == {"data": "hello"}
-
-def test_miss():
-    c = AppCacheManager()
-    assert c.get("missing") is None
-
-def test_invalidate():
-    c = AppCacheManager()
-    c.set("k1", {"x": 1})
-    assert c.invalidate("k1")
-    assert c.get("k1") is None
-
-def test_clear():
-    c = AppCacheManager()
-    c.set("a", {})
-    c.set("b", {})
-    assert c.clear() == 2
-    assert c.stats()["entries"] == 0
+from app.services.app_marketplace_app_cache_manager import get_cache_stats, invalidate_cache
 
 def test_stats():
-    c = AppCacheManager()
-    c.set("k1", {"x": 1})
-    c.get("k1")
-    c.get("k1")
-    s = c.stats()
-    assert s["entries"] == 1
-    assert s["total_hits"] == 2
+    caches = [
+        {"name": "L1", "type": "memory", "hits": 900, "misses": 100, "size_mb": 64, "max_size_mb": 128},
+        {"name": "L2", "type": "redis", "hits": 800, "misses": 200, "size_mb": 256, "max_size_mb": 512},
+    ]
+    r = get_cache_stats(caches=caches)
+    assert r["overall_hit_rate"] == 85.0
+    assert r["caches"][0]["hit_rate"] == 90.0
+
+def test_invalidate():
+    r = invalidate_cache(cache_name="L1", pattern="/api/apps/*")
+    assert r["status"] == "invalidated"
+    assert r["keys_affected"] == "partial"
+
+def test_invalidate_all():
+    r = invalidate_cache(cache_name="L1")
+    assert r["keys_affected"] == "all"
