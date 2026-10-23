@@ -1,18 +1,22 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { BackupStatusPanel } from "@/components/backup-status-panel";
 
 describe("BackupStatusPanel", () => {
-  const backups = [
-    { id: "bak_1", status: "completed", sizeMb: 150, createdAt: "2026-01-03" },
-    { id: "bak_2", status: "failed", sizeMb: 0, createdAt: "2026-01-02" },
-  ];
   it("renders backups", () => {
-    const { container } = render(
-      <BackupStatusPanel backups={backups} totalSizeMb={150} successCount={1} total={2} />
+    const onBackup = vi.fn();
+    const { container, getByText } = render(
+      <BackupStatusPanel onBackupNow={onBackup} summary={{
+        totalBackups: 3, byDatabase: { primary: 2, analytics: 1 },
+        totalSizeMb: 4700, verifiedCount: 1, unverifiedCount: 2,
+      }} />
     );
-    expect(container.textContent).toContain("bak_1");
-    expect(container.textContent).toContain("150MB");
-    expect(container.textContent).toContain("1/2");
+    expect(container.textContent).toContain("Database Backups");
+    expect(container.textContent).toContain("3");
+    expect(container.textContent).toContain("4.6 GB");
+    expect(container.textContent).toContain("primary");
+    expect(container.textContent).toContain("2 backups");
+    fireEvent.click(getByText("Backup Now"));
+    expect(onBackup).toHaveBeenCalled();
   });
 });
