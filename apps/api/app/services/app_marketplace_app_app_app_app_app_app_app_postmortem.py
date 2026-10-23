@@ -1,26 +1,28 @@
-"""Post-mortem builder — structured outage analysis with blameless retrospective."""
+"""Incident postmortem — create and track postmortem reports."""
 from __future__ import annotations
 import html
+import time
 
 
-def build_postmortem(*, title: str, severity: str, duration_min: int,
-                      impact: str, root_cause: str, timeline: list[dict],
-                      action_items: list[dict], authors: list[str]) -> dict:
-    safe_title = html.escape(title)
-    mttr_display = f"{duration_min}m" if duration_min < 60 else f"{duration_min // 60}h {duration_min % 60}m"
-    tl = [{"time": html.escape(e.get("time", "")),
-           "action": html.escape(e.get("action", "")),
-           "by": html.escape(e.get("by", ""))} for e in timeline]
-    items = [{"task": html.escape(a.get("task", "")),
-              "owner": html.escape(a.get("owner", "")),
-              "priority": a.get("priority", "medium"),
-              "due": a.get("due", "")} for a in action_items]
-    p1 = sum(1 for a in items if a["priority"] == "high")
-    return {
-        "title": safe_title, "severity": severity,
-        "duration_min": duration_min, "mttr_display": mttr_display,
-        "impact": html.escape(impact), "root_cause": html.escape(root_cause),
-        "timeline": tl, "action_items": items,
-        "authors": authors, "total_actions": len(items),
-        "high_priority_actions": p1,
-    }
+def create_postmortem(incident_id: str, title: str, severity: str,
+                       timeline: list[dict], root_cause: str,
+                       action_items: list[dict]) -> dict:
+    completed = sum(1 for a in action_items if a.get("done", False))
+    return {"incident_id": incident_id, "title": html.escape(title),
+            "severity": severity, "timeline": timeline,
+            "root_cause": html.escape(root_cause),
+            "action_items": action_items, "action_count": len(action_items),
+            "completed_actions": completed,
+            "progress_pct": round(completed / max(len(action_items), 1) * 100),
+            "created_at": time.time()}
+
+
+def postmortem_stats(postmortems: list[dict]) -> dict:
+    total_actions = sum(p["action_count"] for p in postmortems)
+    completed = sum(p["completed_actions"] for p in postmortems)
+    by_sev: dict[str, int] = {}
+    for p in postmortems:
+        by_sev[p["severity"]] = by_sev.get(p["severity"], 0) + 1
+    return {"total": len(postmortems), "total_actions": total_actions,
+            "completed_actions": completed, "by_severity": by_sev,
+            "action_completion_pct": round(completed / max(total_actions, 1) * 100)}
