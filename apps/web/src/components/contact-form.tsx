@@ -1,43 +1,36 @@
 "use client";
-
 import { useState } from "react";
 
-interface ContactFormProps { topics: { id: string; label: string }[];
-  onSubmit: (data: { name: string; email: string; topic: string; message: string }) => void; }
+interface ContactFormProps { topics: string[];
+  onSubmit: (data: { name: string; email: string; topic: string; message: string }) => void;
+  confirmation: string | null; }
 
-export function ContactForm({ topics, onSubmit }: ContactFormProps) {
+export function ContactForm({ topics, onSubmit, confirmation }: ContactFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [topic, setTopic] = useState(topics[0]?.id ?? "");
+  const [topic, setTopic] = useState(topics[0] || "general");
   const [message, setMessage] = useState("");
-
   return (
-    <div className="mx-auto max-w-md space-y-4">
-      <h2 className="text-lg font-bold">Contact Us</h2>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">Name</label>
-        <input value={name} onChange={e => setName(e.target.value)}
-          className="w-full rounded border px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600" />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">Email</label>
-        <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-          className="w-full rounded border px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600" />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">Topic</label>
-        <select value={topic} onChange={e => setTopic(e.target.value)}
-          className="w-full rounded border px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600">
-          {topics.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">Message</label>
-        <textarea value={message} onChange={e => setMessage(e.target.value)} rows={4}
-          className="w-full rounded border px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600" />
-      </div>
-      <button onClick={() => onSubmit({ name, email, topic, message })}
-        className="w-full rounded bg-blue-600 py-2 text-sm text-white">Send Message</button>
+    <div className="rounded-xl border p-6 dark:border-gray-700 max-w-lg">
+      <h3 className="text-lg font-bold mb-4">📬 Contact Us</h3>
+      {confirmation ? (
+        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg text-sm text-green-700">{confirmation}</div>
+      ) : (
+        <div className="space-y-3">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Name"
+            className="w-full text-sm px-3 py-2 border rounded dark:bg-gray-800 dark:border-gray-600" />
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email"
+            className="w-full text-sm px-3 py-2 border rounded dark:bg-gray-800 dark:border-gray-600" />
+          <select value={topic} onChange={e => setTopic(e.target.value)}
+            className="w-full text-sm px-3 py-2 border rounded dark:bg-gray-800 dark:border-gray-600">
+            {topics.map(t => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+          </select>
+          <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="Your message..."
+            rows={4} className="w-full text-sm px-3 py-2 border rounded dark:bg-gray-800 dark:border-gray-600" />
+          <button onClick={() => onSubmit({ name, email, topic, message })}
+            className="w-full py-2.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700">Send Message</button>
+        </div>
+      )}
     </div>
   );
 }
