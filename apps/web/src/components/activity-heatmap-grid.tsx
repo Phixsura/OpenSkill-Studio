@@ -1,38 +1,45 @@
 "use client";
 
-interface Cell { day: string; hour: number; count: number; intensity: number; }
-interface Peak { day: string; hour: number; count: number; }
-interface ActivityHeatmapGridProps { cells: Cell[]; days: string[]; totalEvents: number; peak: Peak; }
+interface HeatmapRow { day: string; hours: number[]; total: number; }
+interface ActivityHeatmapGridProps { grid: HeatmapRow[]; maxValue: number;
+  peakDisplay: string; totalEvents: number; }
 
-export function ActivityHeatmapGrid({ cells, days, totalEvents, peak }: ActivityHeatmapGridProps) {
+export function ActivityHeatmapGrid({ grid, maxValue, peakDisplay, totalEvents }: ActivityHeatmapGridProps) {
+  const intensity = (val: number) => Math.max(0.05, val / Math.max(maxValue, 1));
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Activity Heatmap</h2>
-        <span className="text-xs text-gray-400">{totalEvents.toLocaleString()} events</span>
-      </div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[600px]">
-          {days.map(day => {
-            const row = cells.filter(c => c.day === day);
-            return (
-              <div key={day} className="flex items-center gap-0.5">
-                <span className="w-8 text-xs text-gray-400">{day}</span>
-                {row.map(c => (
-                  <div key={c.hour} title={`${c.day} ${c.hour}:00 — ${c.count} events`}
-                    className="h-4 flex-1 rounded-sm" style={{
-                      backgroundColor: c.count === 0 ? "var(--tw-bg-opacity, #f3f4f6)" :
-                        `rgba(59, 130, 246, ${Math.max(c.intensity / 100, 0.15)})`,
-                    }} />
-                ))}
-              </div>
-            );
-          })}
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">🗓️ Activity Heatmap</h3>
+        <div className="text-xs text-gray-400">
+          <span>{totalEvents.toLocaleString()} events</span>
+          <span className="ml-2">Peak: {peakDisplay}</span>
         </div>
       </div>
-      <p className="text-center text-xs text-gray-400">
-        Peak: {peak.day} at {peak.hour}:00 ({peak.count} events)
-      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead><tr>
+            <th className="w-10"></th>
+            {Array.from({length: 24}, (_, i) => (
+              <th key={i} className="text-[9px] text-gray-400 font-normal px-0.5">{i}</th>
+            ))}
+            <th className="text-xs text-gray-400 pl-2">Total</th>
+          </tr></thead>
+          <tbody>
+            {grid.map(row => (
+              <tr key={row.day}>
+                <td className="text-xs text-gray-400 pr-2">{row.day}</td>
+                {row.hours.map((h, i) => (
+                  <td key={i} className="p-0.5">
+                    <div className="w-4 h-4 rounded-sm bg-blue-500" style={{ opacity: intensity(h) }}
+                         title={`${row.day} ${i}:00 — ${h}`} />
+                  </td>
+                ))}
+                <td className="text-xs text-gray-400 pl-2">{row.total}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
