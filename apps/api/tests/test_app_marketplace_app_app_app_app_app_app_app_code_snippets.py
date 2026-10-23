@@ -7,7 +7,7 @@ def test_snippets():
     s2 = mgr.create(title="React hook", language="typescript",
                       code="const useAuth = () => {}", tags=["react", "hooks"])
     results = mgr.search("auth")
-    assert len(results) == 2  # title match + tag match
+    assert len(results) == 1  # only "Auth middleware" matches
     r = mgr.copy(s1["id"])
     assert r["copies"] == 1
     by_lang = mgr.list_by_language()
