@@ -3,14 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { KeyRotationStatus } from "@/components/key-rotation-status";
 
 describe("KeyRotationStatus", () => {
-  it("renders grace period", () => {
+  it("renders status", () => {
     const { container } = render(
-      <KeyRotationStatus newPrefix="osk_new1" oldPrefix="osk_old1"
-        graceUntil="2026-02-01" status="in_grace_period" oldKeyActive={true} onRotate={vi.fn()} />
+      <KeyRotationStatus actionNeeded={true} dueKeys={["old_key"]}
+        upcomingKeys={["soon_key"]} onRotate={vi.fn()} />
     );
     expect(container.textContent).toContain("Key Rotation");
-    expect(container.textContent).toContain("osk_new1");
-    expect(container.textContent).toContain("Grace period");
-    expect(container.textContent).toContain("Rotate Again");
+    expect(container.textContent).toContain("1 overdue");
+    expect(container.textContent).toContain("old_key");
+    expect(container.textContent).toContain("Rotate Now");
+    expect(container.textContent).toContain("soon_key");
+    expect(container.textContent).toContain("Upcoming");
   });
 });

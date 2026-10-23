@@ -1,46 +1,29 @@
-"""API key rotation scheduler — schedule and execute key rotations."""
+"""API key rotation scheduler — automate key rotation lifecycle."""
 from __future__ import annotations
 import secrets
 import time
 
 
-class KeyRotationScheduler:
-    def __init__(self):
-        self._keys: dict[str, dict] = {}
+def create_rotation_schedule(key_name: str, rotation_days: int = 90) -> dict:
+    return {"key_name": key_name, "rotation_days": rotation_days,
+            "last_rotated": time.time(), "next_rotation": time.time() + rotation_days * 86400,
+            "rotation_count": 0}
 
-    def register_key(self, key_id: str, *, rotation_days: int = 90) -> dict:
-        now = time.time()
-        self._keys[key_id] = {
-            "created": now, "last_rotated": now,
-            "rotation_days": rotation_days,
-            "current": secrets.token_urlsafe(24),
-            "previous": None, "rotations": 0,
-        }
-        return {"key_id": key_id, "rotation_days": rotation_days, "status": "registered"}
 
-    def check_rotation(self, key_id: str, *, now: float | None = None) -> dict:
-        ts = now if now is not None else time.time()
-        entry = self._keys.get(key_id)
-        if not entry:
-            return {"error": "Key not found"}
-        days_since = (ts - entry["last_rotated"]) / 86400
-        due = days_since >= entry["rotation_days"]
-        days_left = max(0, entry["rotation_days"] - days_since)
-        return {"key_id": key_id, "days_since_rotation": round(days_since, 1),
-                "days_until_due": round(days_left, 1), "due": due,
-                "urgency": "overdue" if days_since > entry["rotation_days"] * 1.1 else "due" if due else "ok"}
+def rotate_key(schedule: dict) -> dict:
+    new_key = f"sk_{secrets.token_urlsafe(32)}"
+    schedule["rotation_count"] += 1
+    schedule["last_rotated"] = time.time()
+    schedule["next_rotation"] = time.time() + schedule["rotation_days"] * 86400
+    return {"rotated": True, "new_key_prefix": new_key[:8],
+            "rotation_number": schedule["rotation_count"]}
 
-    def rotate(self, key_id: str) -> dict:
-        entry = self._keys.get(key_id)
-        if not entry:
-            return {"error": "Key not found"}
-        entry["previous"] = entry["current"]
-        entry["current"] = secrets.token_urlsafe(24)
-        entry["last_rotated"] = time.time()
-        entry["rotations"] += 1
-        return {"key_id": key_id, "rotated": True, "rotations": entry["rotations"]}
 
-    def summary(self) -> dict:
-        total = len(self._keys)
-        due = sum(1 for k in self._keys if self.check_rotation(k).get("due"))
-        return {"total_keys": total, "due_for_rotation": due, "healthy": due == 0}
+def check_rotation_needed(schedules: list[dict], now: float | None = None) -> dict:
+    now = now or time.time()
+    due = [s for s in schedules if now >= s["next_rotation"]]
+    upcoming = [s for s in schedules if 0 < s["next_rotation"] - now <= 7 * 86400]
+    return {"due_count": len(due), "upcoming_count": len(upcoming),
+            "due_keys": [s["key_name"] for s in due],
+            "upcoming_keys": [s["key_name"] for s in upcoming],
+            "action_needed": len(due) > 0}
