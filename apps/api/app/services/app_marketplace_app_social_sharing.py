@@ -1,16 +1,25 @@
 """Social sharing — generate share links and embeds for marketplace apps."""
 
+from html import escape
+from urllib.parse import quote, urlencode
+
 
 def build_share_links(*, app: dict, base_url: str = "https://openskill.dev") -> dict:
-    url = f"{base_url}/marketplace/apps/{app.get('slug', app['id'])}"
-    name = app.get("name", "")
+    slug = quote(str(app.get("slug", app["id"])), safe="")
+    name = str(app.get("name", ""))
+    url = f"{base_url}/marketplace/apps/{slug}"
     text = f"Check out {name} on OpenSkill Marketplace"
+    twitter_params = urlencode({"text": text, "url": url})
+    linkedin_params = urlencode({"url": url})
+    embed = (f'<a href="{escape(url, quote=True)}">'
+             f'<img src="{escape(base_url + "/badge/" + slug + ".svg", quote=True)}" '
+             f'alt="{escape(name, quote=True)}" /></a>')
     return {
         "url": url,
-        "twitter": f"https://twitter.com/intent/tweet?text={text}&url={url}",
-        "linkedin": f"https://www.linkedin.com/sharing/share-offsite/?url={url}",
+        "twitter": f"https://twitter.com/intent/tweet?{twitter_params}",
+        "linkedin": f"https://www.linkedin.com/sharing/share-offsite/?{linkedin_params}",
         "copy_text": f"{text}\n{url}",
-        "embed_badge": f'<a href="{url}"><img src="{base_url}/badge/{app.get("slug")}.svg" alt="{name}" /></a>',
+        "embed_badge": embed,
     }
 
 
