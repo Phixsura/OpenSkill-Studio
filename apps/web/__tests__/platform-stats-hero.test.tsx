@@ -3,16 +3,15 @@ import { describe, expect, it } from "vitest";
 import { PlatformStatsHero } from "@/components/platform-stats-hero";
 
 describe("PlatformStatsHero", () => {
-  it("renders", () => {
+  it("renders stats", () => {
     const { container } = render(
-      <PlatformStatsHero commits={1475} lines={130000} files={3861}
-        services={850} components={750} tests={1700} version="5.5.0" />
+      <PlatformStatsHero commits={2580} lines={222000} files={7486}
+        services={1290} components={1290} modules={10} />
     );
     expect(container.textContent).toContain("OpenSkill Developer Platform");
-    expect(container.textContent).toContain("v5.5.0");
-    expect(container.textContent).toContain("1,475");
-    expect(container.textContent).toContain("130,000");
-    expect(container.textContent).toContain("3,861");
-    expect(container.textContent).toContain("🏆");
+    expect(container.textContent).toContain("2,580");
+    expect(container.textContent).toContain("222K");
+    expect(container.textContent).toContain("7,486");
+    expect(container.textContent).toContain("10");
   });
 });

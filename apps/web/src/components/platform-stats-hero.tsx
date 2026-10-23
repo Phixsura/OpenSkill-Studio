@@ -1,30 +1,29 @@
 "use client";
 
 interface PlatformStatsHeroProps { commits: number; lines: number; files: number;
-  services: number; components: number; tests: number; version: string; }
+  services: number; components: number; modules: number; }
 
-export function PlatformStatsHero({ commits, lines, files, services, components, tests, version }: PlatformStatsHeroProps) {
+export function PlatformStatsHero({ commits, lines, files, services, components, modules }: PlatformStatsHeroProps) {
   const stats = [
-    { label: "Commits", value: commits, icon: "📝" },
-    { label: "Lines", value: lines, icon: "📏" },
-    { label: "Files", value: files, icon: "📁" },
-    { label: "Services", value: services, icon: "⚙️" },
-    { label: "Components", value: components, icon: "🧩" },
-    { label: "Tests", value: tests, icon: "🧪" },
+    { label: "Commits", value: commits.toLocaleString(), icon: "📝" },
+    { label: "Lines", value: `${(lines / 1000).toFixed(0)}K`, icon: "📊" },
+    { label: "Files", value: files.toLocaleString(), icon: "📁" },
+    { label: "Services", value: services.toLocaleString(), icon: "⚙️" },
+    { label: "Components", value: components.toLocaleString(), icon: "🧩" },
+    { label: "Modules", value: String(modules), icon: "📦" },
   ];
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 p-8 text-center text-white">
-        <p className="text-4xl">🏆</p>
-        <h1 className="mt-2 text-3xl font-black">OpenSkill Developer Platform</h1>
-        <p className="mt-1 text-lg opacity-80">v{version} — Fully Operational</p>
+    <div className="rounded-xl border-2 border-blue-500 overflow-hidden bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10">
+      <div className="p-6 text-center">
+        <h2 className="text-2xl font-bold text-blue-700 dark:text-blue-400">OpenSkill Developer Platform</h2>
+        <p className="text-sm text-gray-400 mt-1">222K+ lines · Fully Operational</p>
       </div>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+      <div className="grid grid-cols-6 gap-px bg-blue-200 dark:bg-blue-800">
         {stats.map(s => (
-          <div key={s.label} className="rounded-lg border p-3 text-center dark:border-gray-700">
-            <span className="text-xl">{s.icon}</span>
-            <p className="mt-1 text-xl font-bold">{s.value.toLocaleString()}</p>
-            <p className="text-xs text-gray-400">{s.label}</p>
+          <div key={s.label} className="bg-white dark:bg-gray-900 p-3 text-center">
+            <div className="text-lg">{s.icon}</div>
+            <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{s.value}</div>
+            <div className="text-[10px] text-gray-400">{s.label}</div>
           </div>
         ))}
       </div>
