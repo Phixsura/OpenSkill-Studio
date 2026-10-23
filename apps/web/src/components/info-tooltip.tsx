@@ -1,24 +1,19 @@
 "use client";
-
 import { useState } from "react";
 
-interface InfoTooltipProps { title: string; content: string; link?: string; }
+interface InfoTooltipProps { title: string; body: string; position?: string; children: React.ReactNode; }
 
-export function InfoTooltip({ title, content, link }: InfoTooltipProps) {
+export function InfoTooltip({ title, body, position = "top", children }: InfoTooltipProps) {
   const [visible, setVisible] = useState(false);
+  const posClass = position === "bottom" ? "top-full mt-2" : position === "left" ? "right-full mr-2" :
+                   position === "right" ? "left-full ml-2" : "bottom-full mb-2";
   return (
-    <span className="relative inline-block">
-      <button onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}
-        className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] text-gray-500 dark:bg-gray-700">
-        ?
-      </button>
+    <span className="relative inline-block" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
+      {children}
       {visible && (
-        <div className="absolute bottom-6 left-1/2 z-50 w-56 -translate-x-1/2 rounded-lg border bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
-          <h4 className="text-xs font-bold">{title}</h4>
-          <p className="mt-1 text-xs text-gray-500">{content}</p>
-          {link && (
-            <a href={link} className="mt-1 block text-xs text-blue-500 hover:underline">Learn more →</a>
-          )}
+        <div className={`absolute z-50 ${posClass} w-48 p-2.5 bg-gray-900 text-white rounded-lg shadow-xl text-xs`}>
+          <p className="font-bold mb-0.5">{title}</p>
+          <p className="text-gray-300">{body}</p>
         </div>
       )}
     </span>

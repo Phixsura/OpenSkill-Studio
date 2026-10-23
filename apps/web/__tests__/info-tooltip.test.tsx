@@ -3,19 +3,16 @@ import { describe, expect, it } from "vitest";
 import { InfoTooltip } from "@/components/info-tooltip";
 
 describe("InfoTooltip", () => {
-  it("renders trigger", () => {
-    const { container } = render(
-      <InfoTooltip title="API Key" content="Your secret key" link="/docs/auth" />
+  it("shows on hover", () => {
+    const { container, getByText } = render(
+      <InfoTooltip title="API Key" body="Keep it secret">
+        <span>ℹ️</span>
+      </InfoTooltip>
     );
-    expect(container.textContent).toContain("?");
-  });
-  it("shows tooltip on hover", () => {
-    const { container } = render(
-      <InfoTooltip title="API Key" content="Your secret key" link="/docs/auth" />
-    );
-    fireEvent.mouseEnter(container.querySelector("button")!);
+    expect(container.textContent).toContain("ℹ️");
+    expect(container.textContent).not.toContain("Keep it secret");
+    fireEvent.mouseEnter(getByText("ℹ️"));
     expect(container.textContent).toContain("API Key");
-    expect(container.textContent).toContain("Your secret key");
-    expect(container.textContent).toContain("Learn more");
+    expect(container.textContent).toContain("Keep it secret");
   });
 });
