@@ -1,27 +1,27 @@
 "use client";
 
-interface Flag { key: string; enabled: boolean; percentage: number; description: string; }
-interface FeatureFlagPanelProps { flags: Flag[]; onToggle: (key: string) => void; }
+interface FlagInfo { key: string; dflt: boolean; rolloutPct: number;
+  targetedUsers: number; targetedOrgs: number; }
+interface FeatureFlagPanelProps { flags: FlagInfo[]; onToggle: (key: string) => void; }
 
 export function FeatureFlagPanel({ flags, onToggle }: FeatureFlagPanelProps) {
-  const active = flags.filter(f => f.enabled).length;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Feature Flags</h3>
-        <span className="text-xs text-gray-400">{active}/{flags.length} active</span>
-      </div>
-      <div className="divide-y dark:divide-gray-700">
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">🚩 Feature Flags</h3>
+      <div className="space-y-2">
         {flags.map(f => (
-          <div key={f.key} className="flex items-center justify-between py-3">
+          <div key={f.key} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-2.5">
             <div>
-              <p className="text-sm font-medium font-mono">{f.key}</p>
-              {f.description && <p className="text-xs text-gray-500">{f.description}</p>}
-              <span className="text-xs text-gray-400">{f.percentage}% rollout</span>
+              <span className="text-sm font-mono">{f.key}</span>
+              <div className="flex gap-2 text-xs text-gray-400 mt-0.5">
+                {f.rolloutPct > 0 && <span>{f.rolloutPct}% rollout</span>}
+                {f.targetedUsers > 0 && <span>{f.targetedUsers} users</span>}
+                {f.targetedOrgs > 0 && <span>{f.targetedOrgs} orgs</span>}
+              </div>
             </div>
             <button onClick={() => onToggle(f.key)}
-              className={`relative h-6 w-11 rounded-full transition ${f.enabled ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`}>
-              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${f.enabled ? "left-[22px]" : "left-0.5"}`} />
+              className={`w-9 h-5 rounded-full ${f.dflt ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`}>
+              <span className={`block w-4 h-4 rounded-full bg-white transform ${f.dflt ? "translate-x-4" : "translate-x-0.5"}`} />
             </button>
           </div>
         ))}
