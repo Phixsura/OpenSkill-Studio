@@ -1,29 +1,23 @@
-from app.services.app_marketplace_app_app_webhook_filter import create_filter, apply_filter
+from app.services.app_marketplace_app_app_webhook_filter import match_event, build_filter_summary
 
-def test_create():
-    r = create_filter(name="High value only", conditions=[
-        {"field": "data.amount", "operator": "gt", "value": 100}])
-    assert r["condition_count"] == 1
-    assert r["active"]
+def test_exact():
+    r = match_event(event_type="app.installed", filters=[{"pattern": "app.installed", "mode": "exact"}])
+    assert r["matched"]
 
-def test_create_empty():
-    r = create_filter(name="X", conditions=[])
-    assert "error" in r
+def test_prefix():
+    r = match_event(event_type="app.updated", filters=[{"pattern": "app.", "mode": "prefix"}])
+    assert r["matched"]
 
-def test_apply_pass():
-    event = {"type": "payment", "data": {"amount": 200}}
-    conditions = [{"field": "data.amount", "operator": "gt", "value": 100}]
-    r = apply_filter(event=event, conditions=conditions)
-    assert r["deliver"]
+def test_regex():
+    r = match_event(event_type="deploy.v2.completed", filters=[{"pattern": r"deploy\.v\d+\..*", "mode": "regex"}])
+    assert r["matched"]
 
-def test_apply_block():
-    event = {"type": "payment", "data": {"amount": 50}}
-    conditions = [{"field": "data.amount", "operator": "gt", "value": 100}]
-    r = apply_filter(event=event, conditions=conditions)
-    assert not r["deliver"]
+def test_no_match():
+    r = match_event(event_type="user.login", filters=[{"pattern": "app.installed", "mode": "exact"}])
+    assert not r["matched"]
 
-def test_apply_contains():
-    event = {"type": "app.installed", "user": {"email": "alice@example.com"}}
-    conditions = [{"field": "user.email", "operator": "contains", "value": "example.com"}]
-    r = apply_filter(event=event, conditions=conditions)
-    assert r["deliver"]
+def test_summary_with_test():
+    filters = [{"pattern": "app.", "mode": "prefix"}]
+    r = build_filter_summary(filters=filters, test_events=["app.installed", "user.login"])
+    assert r["test_results"][0]["matched"]
+    assert not r["test_results"][1]["matched"]

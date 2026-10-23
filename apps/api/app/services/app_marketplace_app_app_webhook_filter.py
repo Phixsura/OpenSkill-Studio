@@ -1,52 +1,35 @@
-"""Webhook filter — filter webhook events before delivery."""
+"""Webhook filter — event filtering rules for webhook subscriptions."""
 
 import re
+import html
 
 
-def create_filter(*, name: str, conditions: list[dict]) -> dict:
-    if not conditions:
-        return {"error": "At least one condition required"}
-    validated = []
-    for cond in conditions:
-        field = cond.get("field", "")
-        operator = cond.get("operator", "eq")
-        value = cond.get("value")
-        valid_ops = {"eq", "ne", "contains", "starts_with", "gt", "lt", "in", "exists"}
-        if operator not in valid_ops:
-            return {"error": f"Invalid operator: {operator}"}
-        validated.append({"field": field, "operator": operator, "value": value})
-    return {"name": name, "conditions": validated, "condition_count": len(validated), "active": True}
+def match_event(*, event_type: str, filters: list[dict]) -> dict:
+    if not filters:
+        return {"matched": True, "reason": "no_filters"}
+    for f in filters:
+        pattern = f.get("pattern", "")
+        mode = f.get("mode", "exact")
+        if mode == "exact" and event_type == pattern:
+            return {"matched": True, "rule": f, "reason": "exact_match"}
+        elif mode == "prefix" and event_type.startswith(pattern):
+            return {"matched": True, "rule": f, "reason": "prefix_match"}
+        elif mode == "regex":
+            try:
+                if re.match(pattern, event_type):
+                    return {"matched": True, "rule": f, "reason": "regex_match"}
+            except re.error:
+                continue
+    return {"matched": False, "reason": "no_matching_rule"}
 
 
-def apply_filter(*, event: dict, conditions: list[dict]) -> dict:
-    for cond in conditions:
-        field = cond["field"]
-        value = event
-        for part in field.split("."):
-            if isinstance(value, dict):
-                value = value.get(part)
-            else:
-                value = None
-                break
-        op = cond["operator"]
-        target = cond["value"]
-        match = False
-        if op == "eq":
-            match = value == target
-        elif op == "ne":
-            match = value != target
-        elif op == "contains" and isinstance(value, str):
-            match = target in value
-        elif op == "starts_with" and isinstance(value, str):
-            match = value.startswith(str(target))
-        elif op == "exists":
-            match = value is not None
-        elif op == "gt" and isinstance(value, (int, float)):
-            match = value > target
-        elif op == "lt" and isinstance(value, (int, float)):
-            match = value < target
-        elif op == "in" and isinstance(target, list):
-            match = value in target
-        if not match:
-            return {"deliver": False, "blocked_by": cond["field"]}
-    return {"deliver": True}
+def build_filter_summary(*, filters: list[dict], test_events: list[str] | None = None) -> dict:
+    items = [{"pattern": html.escape(f.get("pattern", "")), "mode": f.get("mode", "exact"),
+              "description": html.escape(f.get("description", ""))} for f in filters]
+    results = None
+    if test_events:
+        results = []
+        for evt in test_events:
+            r = match_event(event_type=evt, filters=filters)
+            results.append({"event": evt, "matched": r["matched"], "reason": r["reason"]})
+    return {"filters": items, "total": len(items), "test_results": results}
