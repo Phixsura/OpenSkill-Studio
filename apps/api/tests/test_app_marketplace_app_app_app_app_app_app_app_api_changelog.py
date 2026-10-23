@@ -1,20 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_api_changelog import generate_changelog
+from app.services.app_marketplace_app_app_app_app_app_app_app_api_changelog import record_change, build_api_changelog
+
+def test_record():
+    r = record_change("2.0", "added", "/api/v2/users", "New users endpoint")
+    assert r["recorded"]
+    r2 = record_change("2.0", "invalid", "/x", "bad")
+    assert not r2["recorded"]
 
 def test_changelog():
-    entries = [
-        {"type": "breaking", "endpoint": "/api/v1/users", "description": "Removed email field", "version": "3.0"},
-        {"type": "added", "endpoint": "/api/v1/exports", "description": "New export endpoint", "version": "3.0"},
-        {"type": "fixed", "endpoint": "/api/v1/auth", "description": "Token refresh bug", "version": "3.0"},
+    changes = [
+        record_change("2.0", "added", "/users", "New endpoint"),
+        record_change("2.0", "removed", "/legacy", "Removed", breaking=True),
+        record_change("1.5", "fixed", "/auth", "Bug fix"),
     ]
-    r = generate_changelog(entries)
+    r = build_api_changelog(changes)
+    assert r["version_count"] == 2
     assert r["total_changes"] == 3
+    assert r["breaking_count"] == 1
     assert r["has_breaking"]
-    assert r["severity"] == "major"
-    assert len(r["sections"]) == 3
-    assert r["sections"][0]["type"] == "breaking"
-
-def test_no_breaking():
-    entries = [{"type": "added", "endpoint": "/new", "description": "New"}]
-    r = generate_changelog(entries)
-    assert not r["has_breaking"]
-    assert r["severity"] == "minor"

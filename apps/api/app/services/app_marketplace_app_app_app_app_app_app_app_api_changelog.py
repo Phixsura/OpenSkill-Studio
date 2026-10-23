@@ -1,27 +1,29 @@
-"""API changelog generator — track breaking changes, deprecations, new endpoints."""
+"""API changelog tracker — track breaking and non-breaking API changes."""
 from __future__ import annotations
+import html
 
 
-def generate_changelog(entries: list[dict]) -> dict:
-    categorized: dict[str, list[dict]] = {"breaking": [], "deprecated": [], "added": [], "fixed": [], "changed": []}
-    for e in entries:
-        cat = e.get("type", "changed")
-        if cat in categorized:
-            categorized[cat].append({
-                "endpoint": e.get("endpoint", ""),
-                "description": e.get("description", ""),
-                "version": e.get("version", ""),
-                "date": e.get("date", ""),
-            })
-    has_breaking = len(categorized["breaking"]) > 0
-    total = sum(len(v) for v in categorized.values())
-    sections = []
-    for cat in ("breaking", "deprecated", "added", "fixed", "changed"):
-        if categorized[cat]:
-            sections.append({"type": cat, "count": len(categorized[cat]),
-                             "entries": categorized[cat]})
-    return {
-        "total_changes": total, "has_breaking": has_breaking,
-        "severity": "major" if has_breaking else "minor" if categorized["added"] else "patch",
-        "sections": sections,
-    }
+CHANGE_TYPES = {"added", "deprecated", "removed", "changed", "fixed"}
+
+
+def record_change(version: str, change_type: str, endpoint: str,
+                  description: str, breaking: bool = False) -> dict:
+    if change_type not in CHANGE_TYPES:
+        return {"recorded": False, "error": f"invalid type, use {sorted(CHANGE_TYPES)}"}
+    return {"recorded": True, "version": version, "type": change_type,
+            "endpoint": endpoint, "description": html.escape(description),
+            "breaking": breaking}
+
+
+def build_api_changelog(changes: list[dict]) -> dict:
+    by_version: dict[str, list[dict]] = {}
+    breaking_count = 0
+    for c in changes:
+        v = c.get("version", "unknown")
+        by_version.setdefault(v, []).append(c)
+        if c.get("breaking"):
+            breaking_count += 1
+    versions = sorted(by_version.keys(), reverse=True)
+    return {"versions": {v: by_version[v] for v in versions},
+            "total_changes": len(changes), "breaking_count": breaking_count,
+            "version_count": len(versions), "has_breaking": breaking_count > 0}

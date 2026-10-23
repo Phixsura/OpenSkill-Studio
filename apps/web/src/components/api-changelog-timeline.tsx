@@ -1,38 +1,33 @@
 "use client";
 
-interface ChangeEntry { endpoint: string; description: string; version: string; date: string; }
-interface ChangeSection { type: string; count: number; entries: ChangeEntry[]; }
-interface ApiChangelogTimelineProps { totalChanges: number; severity: string; sections: ChangeSection[]; }
+interface ApiChange { type: string; endpoint: string; description: string; breaking: boolean; }
+interface ApiChangelogTimelineProps { versions: Record<string, ApiChange[]>;
+  totalChanges: number; breakingCount: number; }
 
-const TYPE_ICON: Record<string, string> = {
-  breaking: "🔴", deprecated: "🟡", added: "🟢", fixed: "🔵", changed: "⚪",
-};
-const TYPE_LABEL: Record<string, string> = {
-  breaking: "Breaking Changes", deprecated: "Deprecations",
-  added: "New Endpoints", fixed: "Bug Fixes", changed: "Changes",
+const TYPE_ICONS: Record<string, string> = {
+  added: "🟢", deprecated: "🟡", removed: "🔴", changed: "🔵", fixed: "🔧",
 };
 
-export function ApiChangelogTimeline({ totalChanges, severity, sections }: ApiChangelogTimelineProps) {
+export function ApiChangelogTimeline({ versions, totalChanges, breakingCount }: ApiChangelogTimelineProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">📋 API Changelog</h3>
-        <div className="flex gap-2 items-center">
-          <span className="text-xs text-gray-400">{totalChanges} changes</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            severity === "major" ? "bg-red-100 text-red-700" :
-            severity === "minor" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
-          }`}>{severity}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📝 API Changelog</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="text-gray-400">{totalChanges} changes</span>
+          {breakingCount > 0 && <span className="text-red-500">⚠ {breakingCount} breaking</span>}
         </div>
       </div>
-      {sections.map(s => (
-        <div key={s.type} className="mb-4 last:mb-0">
-          <h4 className="text-sm font-medium mb-2">{TYPE_ICON[s.type]} {TYPE_LABEL[s.type]} ({s.count})</h4>
-          <div className="space-y-1 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
-            {s.entries.map((e, i) => (
-              <div key={i} className="text-sm py-1">
-                <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">{e.endpoint}</code>
-                <span className="text-gray-500 ml-2">{e.description}</span>
+      {Object.entries(versions).map(([version, changes]) => (
+        <div key={version}>
+          <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 text-xs font-bold">v{version}</div>
+          <div className="divide-y dark:divide-gray-700">
+            {changes.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 px-4 py-2 text-xs">
+                <span>{TYPE_ICONS[c.type] ?? "⚪"}</span>
+                <span className="font-mono text-blue-500">{c.endpoint}</span>
+                <span className="text-gray-400">{c.description}</span>
+                {c.breaking && <span className="text-red-500 text-[10px] ml-auto">breaking</span>}
               </div>
             ))}
           </div>
