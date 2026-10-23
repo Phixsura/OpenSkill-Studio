@@ -1,18 +1,21 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DataTable } from "@/components/data-table";
 
 describe("DataTable", () => {
-  const columns = [{ key: "name", label: "Name", sortable: true }];
-  const rows = [{ name: "App A" }, { name: "App B" }];
   it("renders table", () => {
-    const { container } = render(
-      <DataTable columns={columns} rows={rows} total={2} page={1} totalPages={1}
-        sortBy={null} sortDir="asc" onSort={vi.fn()} onPageChange={vi.fn()} />
+    const onNext = vi.fn();
+    const { container, getByText } = render(
+      <DataTable columns={["name", "value"]}
+        rows={[{ name: "A", value: 1 }, { name: "B", value: 2 }]}
+        showing="1-2 of 50" hasNext={true} hasPrev={false}
+        onNext={onNext} onPrev={vi.fn()} />
     );
-    expect(container.textContent).toContain("Name");
-    expect(container.textContent).toContain("App A");
-    expect(container.textContent).toContain("App B");
-    expect(container.textContent).toContain("2 items");
+    expect(container.textContent).toContain("name");
+    expect(container.textContent).toContain("A");
+    expect(container.textContent).toContain("B");
+    expect(container.textContent).toContain("1-2 of 50");
+    fireEvent.click(getByText("Next →"));
+    expect(onNext).toHaveBeenCalled();
   });
 });
