@@ -3,19 +3,18 @@ import { describe, expect, it } from "vitest";
 import { CircuitBreakerStatus } from "@/components/circuit-breaker-status";
 
 describe("CircuitBreakerStatus", () => {
-  it("renders closed state", () => {
+  it("renders breakers", () => {
     const { container } = render(
-      <CircuitBreakerStatus state="closed" failures={1} threshold={5} recoveryTimeoutS={30} />
+      <CircuitBreakerStatus services={[
+        { name: "Payment API", state: "closed", failures: 0, threshold: 5 },
+        { name: "Email Service", state: "open", failures: 5, threshold: 5 },
+        { name: "Search", state: "half_open", failures: 3, threshold: 5 },
+      ]} />
     );
+    expect(container.textContent).toContain("Circuit Breakers");
+    expect(container.textContent).toContain("Payment API");
     expect(container.textContent).toContain("closed");
-    expect(container.textContent).toContain("1/5");
-    expect(container.textContent).toContain("🟢");
-  });
-  it("renders open state", () => {
-    const { container } = render(
-      <CircuitBreakerStatus state="open" failures={5} threshold={5} recoveryTimeoutS={30} />
-    );
     expect(container.textContent).toContain("open");
-    expect(container.textContent).toContain("🔴");
+    expect(container.textContent).toContain("half open");
   });
 });
