@@ -1,31 +1,27 @@
 "use client";
 
-interface Channel { channel: string; version: string; released_at: string; }
-interface ReleaseChannelSelectorProps { channels: Channel[]; selected: string; onSelect: (ch: string) => void; }
+interface Channel { id: string; label: string; icon: string; current_version: string | null; has_release: boolean; risk: string; }
+interface ReleaseChannelSelectorProps { channels: Channel[]; selectedChannel: string; onSelect: (id: string) => void; }
 
-const CHANNEL_STYLES: Record<string, { color: string; label: string }> = {
-  stable: { color: "bg-green-100 text-green-800", label: "Stable" },
-  rc: { color: "bg-blue-100 text-blue-800", label: "Release Candidate" },
-  beta: { color: "bg-yellow-100 text-yellow-800", label: "Beta" },
-  canary: { color: "bg-orange-100 text-orange-800", label: "Canary" },
-};
+const riskLabel: Record<string, string> = { low: "Stable", medium: "Pre-release", high: "Experimental" };
 
-export function ReleaseChannelSelector({ channels, selected, onSelect }: ReleaseChannelSelectorProps) {
+export function ReleaseChannelSelector({ channels, selectedChannel, onSelect }: ReleaseChannelSelectorProps) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">Release Channel</label>
-      <div className="flex flex-wrap gap-2">
-        {channels.map(ch => {
-          const style = CHANNEL_STYLES[ch.channel] || { color: "bg-gray-100", label: ch.channel };
-          const isSelected = ch.channel === selected;
-          return (
-            <button key={ch.channel} onClick={() => onSelect(ch.channel)}
-              className={`rounded-lg border px-3 py-2 text-sm transition ${isSelected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200 dark:border-gray-700"}`}>
-              <span className={`mr-1 inline-block rounded px-1.5 py-0.5 text-xs ${style.color}`}>{style.label}</span>
-              <span className="font-mono text-xs">{ch.version}</span>
-            </button>
-          );
-        })}
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">Release Channels</h2>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {channels.map(ch => (
+          <button key={ch.id} onClick={() => onSelect(ch.id)}
+            className={`rounded-lg border p-3 text-left ${ch.id === selectedChannel ? "border-blue-500 bg-blue-50 dark:bg-blue-900/10" : "border-gray-200 dark:border-gray-700"}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{ch.icon}</span>
+              <span className="font-medium">{ch.label}</span>
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              {ch.has_release ? `v${ch.current_version}` : "No release"} · {riskLabel[ch.risk] ?? ch.risk}
+            </p>
+          </button>
+        ))}
       </div>
     </div>
   );

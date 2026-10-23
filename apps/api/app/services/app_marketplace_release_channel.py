@@ -1,36 +1,32 @@
-"""Release channels — stable, beta, canary distribution tracks."""
-
-from datetime import datetime, timezone
-
-VALID_CHANNELS = {"stable", "beta", "canary", "rc"}
+"""Release channel — manage stable, beta, and canary release channels."""
 
 
-def assign_channel(*, version_id: str, channel: str, promoted_by: str) -> dict:
-    if channel not in VALID_CHANNELS:
-        return {"error": f"Invalid channel. Use: {', '.join(sorted(VALID_CHANNELS))}"}
-    return {
-        "version_id": version_id, "channel": channel, "promoted_by": promoted_by,
-        "promoted_at": datetime.now(timezone.utc).isoformat(), "error": None,
-    }
+CHANNELS = {
+    "stable": {"label": "Stable", "icon": "✅", "auto_update": True, "risk": "low"},
+    "beta": {"label": "Beta", "icon": "🧪", "auto_update": False, "risk": "medium"},
+    "canary": {"label": "Canary", "icon": "🐤", "auto_update": False, "risk": "high"},
+    "internal": {"label": "Internal", "icon": "🔒", "auto_update": False, "risk": "high"},
+}
 
 
-def get_latest_by_channel(*, versions: list[dict], channel: str) -> dict | None:
-    matching = [v for v in versions if v.get("channel") == channel]
-    if not matching:
-        return None
-    return max(matching, key=lambda v: v.get("released_at", ""))
+def get_channels(*, app_id: str, versions: dict[str, str]) -> dict:
+    result = []
+    for ch_id, meta in CHANNELS.items():
+        ver = versions.get(ch_id)
+        result.append({
+            "id": ch_id, **meta, "current_version": ver,
+            "has_release": ver is not None,
+        })
+    return {"app_id": app_id, "channels": result,
+            "active_channels": sum(1 for r in result if r["has_release"])}
 
 
-def promote_to_stable(*, version: dict) -> dict:
-    if version.get("channel") not in ("beta", "rc"):
-        return {"error": "Only beta or rc versions can be promoted to stable"}
-    return {**version, "channel": "stable", "promoted_at": datetime.now(timezone.utc).isoformat(), "error": None}
-
-
-def list_channels_summary(*, versions: list[dict]) -> list[dict]:
-    channels = {}
-    for v in versions:
-        ch = v.get("channel", "stable")
-        if ch not in channels or v.get("released_at", "") > channels[ch].get("released_at", ""):
-            channels[ch] = v
-    return [{"channel": ch, "version": v.get("version"), "released_at": v.get("released_at")} for ch, v in sorted(channels.items())]
+def promote_release(*, from_channel: str, to_channel: str, version: str) -> dict:
+    order = ["canary", "beta", "stable"]
+    if from_channel not in order or to_channel not in order:
+        return {"error": "Invalid channel"}
+    if order.index(from_channel) >= order.index(to_channel):
+        return {"error": f"Cannot promote from {from_channel} to {to_channel}"}
+    return {"promoted": True, "version": version,
+            "from": from_channel, "to": to_channel,
+            "message": f"v{version} promoted from {from_channel} to {to_channel}"}

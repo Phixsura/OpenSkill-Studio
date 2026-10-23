@@ -4,18 +4,23 @@ import { ReleaseChannelSelector } from "@/components/release-channel-selector";
 
 describe("ReleaseChannelSelector", () => {
   const channels = [
-    { channel: "stable", version: "1.0.0", released_at: "2026-01-01" },
-    { channel: "beta", version: "2.0.0-beta", released_at: "2026-06-01" },
+    { id: "stable", label: "Stable", icon: "✅", current_version: "1.0.0", has_release: true, risk: "low" },
+    { id: "beta", label: "Beta", icon: "🧪", current_version: "1.1.0-beta", has_release: true, risk: "medium" },
   ];
-  it("renders channels", () => {
-    const { container } = render(<ReleaseChannelSelector channels={channels} selected="stable" onSelect={vi.fn()} />);
+  it("renders", () => {
+    const { container } = render(
+      <ReleaseChannelSelector channels={channels} selectedChannel="stable" onSelect={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Release Channels");
     expect(container.textContent).toContain("Stable");
+    expect(container.textContent).toContain("v1.0.0");
     expect(container.textContent).toContain("Beta");
-    expect(container.textContent).toContain("1.0.0");
   });
-  it("calls onSelect", () => {
+  it("select", () => {
     const fn = vi.fn();
-    const { container } = render(<ReleaseChannelSelector channels={channels} selected="stable" onSelect={fn} />);
+    const { container } = render(
+      <ReleaseChannelSelector channels={channels} selectedChannel="stable" onSelect={fn} />
+    );
     const btns = container.querySelectorAll("button");
     fireEvent.click(btns[1]);
     expect(fn).toHaveBeenCalledWith("beta");
