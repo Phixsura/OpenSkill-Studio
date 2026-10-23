@@ -1,36 +1,28 @@
-"""Release notes generator — compile commits into structured release notes."""
+"""Release notes generator — auto-generate release notes from PRs."""
 from __future__ import annotations
-import re
-
-COMMIT_RE = re.compile(r"^(feat|fix|docs|chore|refactor|perf|test|ci|style)(?:\(([^)]+)\))?:\s*(.+)")
-CATEGORY_LABEL = {
-    "feat": "✨ New Features", "fix": "🐛 Bug Fixes", "perf": "⚡ Performance",
-    "docs": "📝 Documentation", "refactor": "♻️ Refactoring", "chore": "🔧 Chores",
-    "test": "🧪 Tests", "ci": "🔄 CI/CD", "style": "💅 Style",
-}
+import html
 
 
-def generate_release_notes(commits: list[str], *, version: str, date: str = "") -> dict:
-    sections: dict[str, list[dict]] = {}
-    uncategorized = []
-    for commit in commits:
-        m = COMMIT_RE.match(commit)
-        if m:
-            cat, scope, msg = m.group(1), m.group(2) or "", m.group(3)
-            sections.setdefault(cat, []).append({"scope": scope, "message": msg})
-        else:
-            uncategorized.append(commit)
-    output = []
-    for cat in ("feat", "fix", "perf", "docs", "refactor", "chore", "test", "ci", "style"):
-        if cat in sections:
-            output.append({"category": cat, "label": CATEGORY_LABEL[cat],
-                           "items": sections[cat], "count": len(sections[cat])})
-    breaking = [c for c in commits if "BREAKING" in c.upper()]
-    return {
-        "version": version, "date": date,
-        "total_commits": len(commits),
-        "sections": output,
-        "uncategorized": uncategorized,
-        "has_breaking": len(breaking) > 0,
-        "breaking_count": len(breaking),
-    }
+def generate_notes(version: str, prs: list[dict], contributors: list[str]) -> dict:
+    sections: dict[str, list[str]] = {}
+    for pr in prs:
+        label = pr.get("label", "other")
+        title = html.escape(pr.get("title", ""))
+        author = pr.get("author", "")
+        sections.setdefault(label, []).append(f"{title} (@{author})")
+    md_lines = [f"# Release {version}\n"]
+    for section, items in sections.items():
+        md_lines.append(f"\n## {section.title()}\n")
+        for item in items:
+            md_lines.append(f"- {item}")
+    md_lines.append(f"\n---\nContributors: {', '.join(sorted(contributors))}")
+    return {"version": version, "sections": sections, "pr_count": len(prs),
+            "contributor_count": len(contributors),
+            "markdown": "\n".join(md_lines)}
+
+
+def diff_releases(prev_notes: dict, curr_notes: dict) -> dict:
+    new_prs = curr_notes["pr_count"] - prev_notes["pr_count"]
+    new_contributors = curr_notes["contributor_count"] - prev_notes["contributor_count"]
+    return {"prev_version": prev_notes["version"], "curr_version": curr_notes["version"],
+            "new_prs": new_prs, "new_contributors": new_contributors}
