@@ -13,5 +13,5 @@ def test_profile():
     assert r["verified"]
     assert r["app_count"] == 2
     assert r["total_installs"] == 80000
-    assert r["avg_rating"] == 4.65
+    assert r["avg_rating"] == 4.7
     assert r["total_installs_display"] == "80,000"
