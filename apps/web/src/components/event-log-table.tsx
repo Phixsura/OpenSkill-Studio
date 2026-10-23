@@ -1,25 +1,29 @@
 "use client";
 
-interface EventLogEntry { eventId: string; eventType: string; status: string; timestamp: string; display: string; }
+interface LogEvent { id: string; type: string; source: string; actor: string; }
+interface EventLogTableProps { events: LogEvent[]; countByType: Record<string, number>; }
 
-interface EventLogTableProps { entries: EventLogEntry[]; }
-
-export function EventLogTable({ entries }: EventLogTableProps) {
-  if (entries.length === 0) return <p className="py-3 text-center text-sm text-gray-400">No events logged</p>;
+export function EventLogTable({ events, countByType }: EventLogTableProps) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead><tr className="border-b dark:border-gray-700">
-          <th className="px-2 py-1">Event</th><th className="px-2 py-1">Status</th><th className="px-2 py-1">Time</th>
-        </tr></thead>
-        <tbody>{entries.map(e => (
-          <tr key={e.eventId} className="border-b dark:border-gray-800">
-            <td className="px-2 py-1 font-mono text-xs">{e.display}</td>
-            <td className="px-2 py-1"><span className={`rounded px-1.5 py-0.5 text-xs ${e.status === "delivered" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>{e.status}</span></td>
-            <td className="px-2 py-1 text-xs text-gray-400">{e.timestamp}</td>
-          </tr>
-        ))}</tbody>
-      </table>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📜 Event Log</h3>
+        <div className="flex gap-2 text-xs">
+          {Object.entries(countByType).map(([t, c]) => (
+            <span key={t} className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">{t}: {c}</span>
+          ))}
+        </div>
+      </div>
+      <div className="max-h-64 overflow-y-auto">
+        {events.map(e => (
+          <div key={e.id} className="flex items-center gap-3 px-4 py-2 text-sm border-b last:border-0 dark:border-gray-800">
+            <span className="font-mono text-xs text-gray-400 w-24 truncate">{e.id}</span>
+            <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/20 text-blue-700 rounded">{e.type}</span>
+            <span className="text-xs text-gray-400">{e.source}</span>
+            {e.actor && <span className="text-xs text-gray-400 ml-auto">{e.actor}</span>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
