@@ -10,14 +10,15 @@ def build_rss_feed(*, title: str, link: str, entries: list[dict],
     for e in entries:
         items.append({
             "title": html.escape(e.get("title", "")),
-            "link": e.get("link", ""),
+            "link": html.escape(e.get("link", ""), quote=True),
             "description": html.escape(e.get("description", "")[:500]),
             "pub_date": e.get("date", ""),
-            "category": e.get("category", ""),
-            "guid": e.get("id", e.get("link", "")),
+            "category": html.escape(e.get("category", ""), quote=True),
+            "guid": html.escape(e.get("id", e.get("link", "")), quote=True),
         })
-    xml_header = f'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n<title>{safe_title}</title>\n<link>{link}</link>'
-    return {"title": safe_title, "link": link, "description": html.escape(description),
+    safe_link = html.escape(link, quote=True)
+    xml_header = f'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n<channel>\n<title>{safe_title}</title>\n<link>{safe_link}</link>'
+    return {"title": safe_title, "link": safe_link, "description": html.escape(description),
             "items": items, "item_count": len(items),
             "content_type": "application/rss+xml",
             "xml_preview": xml_header}
