@@ -21,7 +21,7 @@ def test_unlimited():
 
 def test_summary():
     quotas = [{"resource": "api", "current": 500, "limit": 1000},
-              {"resource": "storage", "current": 1100, "limit": 1000}]
+              {"resource": "storage", "current": 1050, "limit": 1000}]
     r = get_enforcement_summary(quotas=quotas)
     assert r["warned_count"] == 1
     assert not r["all_ok"]
