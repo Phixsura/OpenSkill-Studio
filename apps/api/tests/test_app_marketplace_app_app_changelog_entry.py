@@ -1,21 +1,18 @@
-from app.services.app_marketplace_app_app_changelog_entry import create_changelog_entry
+from app.services.app_marketplace_app_app_changelog_entry import create_entry, group_entries
 
-def test_entry():
-    changes = [
-        {"type": "feature", "description": "Dark mode"},
-        {"type": "fix", "description": "Login crash"},
-        {"type": "feature", "description": "Export CSV"},
+def test_create():
+    r = create_entry(type="added", title="Dark mode", description="New theme option", pr_number=42, author="Alice")
+    assert r["icon"] == "✨"
+    assert r["title"] == "Dark mode"
+    assert r["pr_number"] == 42
+
+def test_group():
+    entries = [
+        {"type": "added", "title": "Feature A"},
+        {"type": "fixed", "title": "Bug B"},
+        {"type": "added", "title": "Feature C"},
     ]
-    r = create_changelog_entry(version="2.1.0", date="2026-10-23", changes=changes)
-    assert r["version"] == "2.1.0"
-    assert r["total_changes"] == 3
-    assert not r["has_breaking"]
-    assert len(r["categories"]) == 2
-
-def test_breaking():
-    r = create_changelog_entry(version="3.0", changes=[{"type": "breaking", "description": "Removed v1", "breaking": True}])
-    assert r["has_breaking"]
-
-def test_xss():
-    r = create_changelog_entry(version="1.0", changes=[{"description": "<script>alert(1)</script>"}])
-    assert "<script>" not in r["categories"][0]["items"][0]
+    r = group_entries(entries=entries)
+    assert r["total"] == 3
+    assert r["groups"][0]["type"] == "added"
+    assert r["groups"][0]["count"] == 2
