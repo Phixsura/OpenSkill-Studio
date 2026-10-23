@@ -1,37 +1,34 @@
 "use client";
 
-import { useState } from "react";
+interface JwtInspectorProps { valid: boolean; algorithm: string; expired: boolean;
+  header: Record<string, unknown>; payload: Record<string, unknown>;
+  standardClaims: string[]; customClaims: string[]; }
 
-interface JwtInspectorProps { onDecode: (token: string) => { valid: boolean; header?: Record<string, unknown>;
-  payload?: Record<string, unknown>; algorithm?: string; expired?: boolean; error?: string }; }
-
-export function JwtInspector({ onDecode }: JwtInspectorProps) {
-  const [token, setToken] = useState("");
-  const result = token.includes(".") ? onDecode(token) : null;
-
+export function JwtInspector({ valid, algorithm, expired, header, payload, standardClaims, customClaims }: JwtInspectorProps) {
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold">JWT Inspector</h3>
-      <textarea value={token} onChange={e => setToken(e.target.value)}
-        placeholder="Paste JWT token here..." rows={3}
-        className="w-full rounded border px-3 py-2 text-xs font-mono dark:bg-gray-800 dark:border-gray-600" />
-      {result && !result.valid && <p className="text-xs text-red-500">⚠ {result.error}</p>}
-      {result?.valid && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{result.algorithm}</span>
-            {result.expired && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-400">Expired</span>}
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-gray-400 mb-1">Header</p>
-            <pre className="rounded bg-gray-100 p-2 text-xs font-mono dark:bg-gray-800 overflow-x-auto">{JSON.stringify(result.header, null, 2)}</pre>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-gray-400 mb-1">Payload</p>
-            <pre className="rounded bg-gray-100 p-2 text-xs font-mono dark:bg-gray-800 overflow-x-auto">{JSON.stringify(result.payload, null, 2)}</pre>
-          </div>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔑 JWT Inspector</h3>
+        <div className="flex gap-2 text-xs">
+          <span className={valid ? "text-green-600" : "text-red-500"}>{valid ? "✅ Valid" : "❌ Invalid"}</span>
+          <span className="text-gray-400">{algorithm}</span>
+          {expired && <span className="text-red-500">⏰ Expired</span>}
         </div>
-      )}
+      </div>
+      <div className="grid grid-cols-2 divide-x dark:divide-gray-700">
+        <div className="p-3">
+          <div className="text-[10px] text-gray-400 mb-1">Header</div>
+          <pre className="text-[10px] font-mono">{JSON.stringify(header, null, 2)}</pre>
+        </div>
+        <div className="p-3">
+          <div className="text-[10px] text-gray-400 mb-1">Payload</div>
+          <pre className="text-[10px] font-mono">{JSON.stringify(payload, null, 2)}</pre>
+        </div>
+      </div>
+      <div className="p-3 border-t dark:border-gray-700 flex gap-2 flex-wrap text-[10px]">
+        {standardClaims.map(c => <span key={c} className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">{c}</span>)}
+        {customClaims.map(c => <span key={c} className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{c}</span>)}
+      </div>
     </div>
   );
 }
