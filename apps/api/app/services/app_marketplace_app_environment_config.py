@@ -1,35 +1,36 @@
-"""Environment config — manage per-environment (dev/staging/prod) app settings."""
+"""App environment config — manage env vars and secrets for apps."""
 
-VALID_ENVS = {"development", "staging", "production"}
-
-
-def create_env_config(*, app_id: str, environment: str, config: dict) -> dict:
-    if environment not in VALID_ENVS:
-        return {"error": f"Invalid environment. Use: {', '.join(sorted(VALID_ENVS))}"}
-    return {"app_id": app_id, "environment": environment, "config": config, "error": None}
+import re
+import secrets
 
 
-def merge_configs(*, base: dict, override: dict) -> dict:
-    merged = dict(base)
-    for k, v in override.items():
-        if isinstance(v, dict) and isinstance(merged.get(k), dict):
-            merged[k] = merge_configs(base=merged[k], override=v)
-        else:
-            merged[k] = v
-    return merged
+ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
-def get_effective_config(*, base_config: dict, env_overrides: dict, environment: str) -> dict:
-    overrides = env_overrides.get(environment, {})
-    return merge_configs(base=base_config, override=overrides)
+def validate_env_key(*, key: str) -> dict:
+    if not ENV_KEY_RE.match(key):
+        return {"valid": False, "error": "Key must be uppercase alphanumeric with underscores, starting with a letter"}
+    return {"valid": True, "key": key}
 
 
-def diff_env_configs(*, env_a: dict, env_b: dict) -> dict:
-    all_keys = set(env_a.keys()) | set(env_b.keys())
-    diffs = []
-    for k in sorted(all_keys):
-        a_val = env_a.get(k)
-        b_val = env_b.get(k)
-        if a_val != b_val:
-            diffs.append({"key": k, "env_a": a_val, "env_b": b_val})
-    return {"differences": diffs, "count": len(diffs)}
+def set_env_var(*, app_id: str, key: str, value: str, is_secret: bool = False) -> dict:
+    v = validate_env_key(key=key)
+    if not v["valid"]:
+        return {"success": False, "error": v["error"]}
+    masked = "••••••••" if is_secret else value
+    return {"success": True, "app_id": app_id, "key": key,
+            "display_value": masked, "is_secret": is_secret,
+            "encryption_key_id": f"kms_{secrets.token_hex(4)}" if is_secret else None}
+
+
+def list_env_vars(*, app_id: str) -> dict:
+    return {
+        "app_id": app_id,
+        "variables": [
+            {"key": "DATABASE_URL", "display_value": "••••••••", "is_secret": True},
+            {"key": "API_BASE_URL", "display_value": "https://api.example.com", "is_secret": False},
+            {"key": "LOG_LEVEL", "display_value": "info", "is_secret": False},
+        ],
+        "total": 3,
+        "secret_count": 1,
+    }
