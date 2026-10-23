@@ -1,38 +1,27 @@
 "use client";
 
-interface BackendInfo { id: string; healthy: boolean; rps: number; latencyMs: number; }
-interface LoadBalancerPanelProps { status: string; totalRps: number; avgLatencyMs: number;
-  backends: BackendInfo[]; healthyCount: number; unhealthyCount: number; }
+interface Backend { address: string; weight: number; healthy: boolean; }
+interface LoadBalancerPanelProps { name: string; algorithm: string; backends: Backend[];
+  capacityPct: number; healthy: number; total: number; }
 
-export function LoadBalancerPanel({ status, totalRps, avgLatencyMs, backends, healthyCount, unhealthyCount }: LoadBalancerPanelProps) {
+export function LoadBalancerPanel({ name, algorithm, backends, capacityPct, healthy, total }: LoadBalancerPanelProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">⚖️ Load Balancer</h3>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          status === "healthy" ? "bg-green-100 text-green-700" :
-          status === "degraded" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
-        }`}>{status}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-3 mb-4 text-center">
-        <div><p className="text-lg font-bold">{totalRps.toLocaleString()}</p><p className="text-xs text-gray-400">Total RPS</p></div>
-        <div><p className="text-lg font-bold">{avgLatencyMs}ms</p><p className="text-xs text-gray-400">Avg Latency</p></div>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <div>
-          <p className="text-lg font-bold">{healthyCount}<span className="text-gray-300">/{healthyCount + unhealthyCount}</span></p>
-          <p className="text-xs text-gray-400">Healthy</p>
+          <h3 className="font-semibold text-sm">⚖️ {name}</h3>
+          <div className="text-xs text-gray-400 mt-0.5 capitalize">{algorithm.replaceAll("_", " ")} · {capacityPct}% capacity</div>
         </div>
+        <span className="text-xs">{healthy}/{total} healthy</span>
       </div>
-      <div className="space-y-2">
+      <div className="divide-y dark:divide-gray-700">
         {backends.map(b => (
-          <div key={b.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 text-sm">
+          <div key={b.address} className="flex items-center justify-between px-4 py-2.5">
             <div className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${b.healthy ? "bg-green-500" : "bg-red-500"}`} />
-              <span className="font-mono text-xs">{b.id}</span>
+              <span className="text-sm font-mono">{b.address}</span>
             </div>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span>{b.rps} rps</span>
-              <span>{b.latencyMs}ms</span>
-            </div>
+            <span className="text-xs text-gray-400">{b.weight}%</span>
           </div>
         ))}
       </div>

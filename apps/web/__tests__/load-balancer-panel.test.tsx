@@ -3,19 +3,19 @@ import { describe, expect, it } from "vitest";
 import { LoadBalancerPanel } from "@/components/load-balancer-panel";
 
 describe("LoadBalancerPanel", () => {
-  it("renders LB", () => {
+  it("renders pool", () => {
     const { container } = render(
-      <LoadBalancerPanel status="degraded" totalRps={980} avgLatencyMs={47}
-        healthyCount={2} unhealthyCount={1} backends={[
-          { id: "i-1", healthy: true, rps: 500, latencyMs: 45 },
-          { id: "i-2", healthy: true, rps: 480, latencyMs: 50 },
-          { id: "i-3", healthy: false, rps: 0, latencyMs: 0 },
+      <LoadBalancerPanel name="API Pool" algorithm="round_robin" capacityPct={67} healthy={2} total={3}
+        backends={[
+          { address: "10.0.0.1:8080", weight: 50, healthy: true },
+          { address: "10.0.0.2:8080", weight: 30, healthy: true },
+          { address: "10.0.0.3:8080", weight: 20, healthy: false },
         ]} />
     );
-    expect(container.textContent).toContain("Load Balancer");
-    expect(container.textContent).toContain("degraded");
-    expect(container.textContent).toContain("980");
-    expect(container.textContent).toContain("i-1");
-    expect(container.textContent).toContain("2/3");
+    expect(container.textContent).toContain("API Pool");
+    expect(container.textContent).toContain("round robin");
+    expect(container.textContent).toContain("67%");
+    expect(container.textContent).toContain("2/3 healthy");
+    expect(container.textContent).toContain("10.0.0.1:8080");
   });
 });
