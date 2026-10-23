@@ -1,42 +1,27 @@
-"""SSO provider manager — configure and validate SSO identity providers."""
+"""SSO provider config — manage OAuth/SAML identity providers."""
 from __future__ import annotations
 from urllib.parse import urlparse
-import html
+
+PROTOCOLS = {"oauth2", "saml", "oidc"}
 
 
-class SsoProviderManager:
-    def __init__(self):
-        self._providers: dict[str, dict] = {}
+def create_provider(name: str, protocol: str, client_id: str,
+                    authorize_url: str, token_url: str = "") -> dict:
+    if protocol not in PROTOCOLS:
+        return {"created": False, "error": f"unsupported protocol, use {sorted(PROTOCOLS)}"}
+    parsed = urlparse(authorize_url)
+    if parsed.scheme not in ("https",):
+        return {"created": False, "error": "authorize_url must use https"}
+    return {"created": True, "name": name, "protocol": protocol,
+            "client_id": client_id, "authorize_url": authorize_url,
+            "token_url": token_url, "status": "active"}
 
-    def add_provider(self, *, provider_id: str, name: str, protocol: str,
-                      metadata_url: str, domains: list[str]) -> dict:
-        parsed = urlparse(metadata_url)
-        if parsed.scheme not in ("https",):
-            return {"error": "metadata_url must use HTTPS"}
-        safe_name = html.escape(name)
-        self._providers[provider_id] = {
-            "id": provider_id, "name": safe_name, "protocol": protocol,
-            "metadata_url": metadata_url, "domains": domains,
-            "enabled": True, "verified": False,
-        }
-        return {"provider_id": provider_id, "name": safe_name, "status": "configured"}
 
-    def verify(self, provider_id: str) -> dict:
-        p = self._providers.get(provider_id)
-        if not p:
-            return {"error": "Provider not found"}
-        p["verified"] = True
-        return {"provider_id": provider_id, "verified": True}
-
-    def resolve_provider(self, email: str) -> dict:
-        domain = email.split("@")[-1].lower() if "@" in email else ""
-        for p in self._providers.values():
-            if p["enabled"] and domain in p["domains"]:
-                return {"found": True, "provider_id": p["id"], "name": p["name"],
-                        "protocol": p["protocol"]}
-        return {"found": False, "domain": domain}
-
-    def list_providers(self) -> list[dict]:
-        return [{"id": p["id"], "name": p["name"], "protocol": p["protocol"],
-                 "domains": p["domains"], "enabled": p["enabled"], "verified": p["verified"]}
-                for p in self._providers.values()]
+def list_providers(providers: list[dict]) -> dict:
+    active = sum(1 for p in providers if p.get("status") == "active")
+    by_protocol: dict[str, int] = {}
+    for p in providers:
+        proto = p.get("protocol", "unknown")
+        by_protocol[proto] = by_protocol.get(proto, 0) + 1
+    return {"providers": providers, "total": len(providers),
+            "active": active, "by_protocol": by_protocol}

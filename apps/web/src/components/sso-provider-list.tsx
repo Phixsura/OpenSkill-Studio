@@ -1,31 +1,38 @@
 "use client";
 
-interface SsoProvider { id: string; name: string; protocol: string;
-  domains: string[]; enabled: boolean; verified: boolean; }
-interface SsoProviderListProps { providers: SsoProvider[]; onToggle: (id: string) => void; }
+interface SsoProvider { name: string; protocol: string; status: string; clientId?: string; }
+interface SsoProviderListProps { providers: SsoProvider[]; active: number;
+  onAdd: () => void; onToggle: (name: string) => void; }
 
-export function SsoProviderList({ providers, onToggle }: SsoProviderListProps) {
+const PROTO_BADGE: Record<string, string> = {
+  oauth2: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400",
+  saml: "bg-purple-100 text-purple-700 dark:bg-purple-900/20 dark:text-purple-400",
+  oidc: "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400",
+};
+
+export function SsoProviderList({ providers, active, onAdd, onToggle }: SsoProviderListProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <h3 className="font-semibold mb-3">🔐 SSO Providers</h3>
-      <div className="space-y-3">
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔐 SSO Providers</h3>
+        <div className="flex gap-2">
+          <span className="text-xs text-gray-400">{active}/{providers.length} active</span>
+          <button onClick={onAdd} className="px-2 py-0.5 text-xs bg-blue-500 text-white rounded">+ Add</button>
+        </div>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
         {providers.map(p => (
-          <div key={p.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium">{p.name}</p>
-                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 uppercase">{p.protocol}</span>
-                {p.verified && <span className="text-xs text-green-600">✓ Verified</span>}
-              </div>
-              <p className="text-xs text-gray-400 mt-0.5">{p.domains.join(", ")}</p>
+          <div key={p.name} className={`flex items-center justify-between px-4 py-3 ${p.status !== "active" ? "opacity-50" : ""}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{p.name}</span>
+              <span className={`px-1.5 py-0.5 text-[10px] rounded ${PROTO_BADGE[p.protocol] ?? ""}`}>{p.protocol}</span>
             </div>
-            <button onClick={() => onToggle(p.id)}
-              className={`w-10 h-5 rounded-full transition ${p.enabled ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-600"}`}>
-              <span className={`block w-4 h-4 rounded-full bg-white transition transform ${p.enabled ? "translate-x-5" : "translate-x-0.5"}`} />
+            <button onClick={() => onToggle(p.name)}
+              className={`text-xs ${p.status === "active" ? "text-green-600" : "text-gray-400"}`}>
+              {p.status === "active" ? "● Active" : "○ Disabled"}
             </button>
           </div>
         ))}
-        {providers.length === 0 && <p className="text-sm text-gray-400">No SSO providers configured</p>}
       </div>
     </div>
   );
