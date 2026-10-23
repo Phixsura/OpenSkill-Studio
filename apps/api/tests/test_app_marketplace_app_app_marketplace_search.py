@@ -1,23 +1,23 @@
 from app.services.app_marketplace_app_app_marketplace_search import search_marketplace
 
+APPS = [
+    {"name": "Code Editor", "description": "A powerful code editor", "category": "tools",
+     "tags": ["editor", "code"], "downloads": 5000, "rating": 4.5},
+    {"name": "Slack Bot", "description": "Automate Slack workflows", "category": "communication",
+     "tags": ["slack", "bot"], "downloads": 3000, "rating": 4.8},
+    {"name": "Code Analyzer", "description": "Static code analysis", "category": "tools",
+     "tags": ["code", "analysis"], "downloads": 2000, "rating": 4.2},
+]
+
 def test_search():
-    apps = [
-        {"id": "a1", "name": "Auth SDK", "description": "Authentication", "category": "security", "rating": 4.5, "price": 0},
-        {"id": "a2", "name": "Chart Builder", "description": "Beautiful charts", "category": "design", "rating": 4.0, "price": 9.99},
-        {"id": "a3", "name": "Auth Helper", "description": "Auth utilities", "category": "security", "rating": 3.8, "price": 0},
-    ]
-    r = search_marketplace(query="auth", apps=apps)
+    r = search_marketplace(query="code", apps=APPS)
     assert r["total"] == 2
-    assert r["results"][0]["name"] == "Auth SDK"  # higher score (starts with + contains)
+    assert r["results"][0]["name"] == "Code Editor"
 
-def test_filter():
-    apps = [
-        {"id": "a1", "name": "Free Auth", "category": "security", "rating": 4.5, "price": 0},
-        {"id": "a2", "name": "Paid Auth", "category": "security", "rating": 4.0, "price": 10},
-    ]
-    r = search_marketplace(query="auth", apps=apps, filters={"free_only": True})
-    assert r["total"] == 1
+def test_category_filter():
+    r = search_marketplace(query="", apps=APPS, category="tools")
+    assert r["total"] == 2
 
-def test_no_results():
-    r = search_marketplace(query="zzz", apps=[{"name": "Auth"}])
-    assert r["total"] == 0
+def test_sort_by_downloads():
+    r = search_marketplace(query="", apps=APPS, sort_by="downloads")
+    assert r["results"][0]["downloads"] == 5000
