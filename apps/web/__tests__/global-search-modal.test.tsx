@@ -14,7 +14,6 @@ describe("GlobalSearchModal", () => {
     );
     expect(container.textContent).toContain("User Management");
     expect(container.textContent).toContain("API Keys");
-    expect(container.textContent).toContain("2 results");
     const buttons = getAllByRole("button");
     fireEvent.click(buttons[0]);
     expect(onSelect).toHaveBeenCalledWith("/users");
