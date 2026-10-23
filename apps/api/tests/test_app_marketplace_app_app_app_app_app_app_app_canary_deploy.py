@@ -1,19 +1,22 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_canary_deploy import CanaryController
+from app.services.app_marketplace_app_app_app_app_app_app_app_canary_deploy import (
+    create_canary, evaluate_canary, advance_canary,
+)
 
-def test_canary_promote():
-    c = CanaryController()
-    c.start_canary(app_id="myapp", version="2.0", target_pct=50, step_pct=50)
-    r = c.check_health("myapp", success_rate=0.999, latency_p99=150)
-    assert r["action"] == "promote"
-    assert r["traffic_pct"] == 100
-    s = c.status("myapp")
-    assert s["phase"] == "promoted"
+def test_canary_flow():
+    c = create_canary("api", "2.0", "2.1", initial_pct=5.0)
+    assert c["traffic_pct"] == 5.0
+    e = evaluate_canary(c, {"error_rate": 0.5, "p99_latency_ms": 100},
+                          {"error_rate": 0.6, "p99_latency_ms": 110})
+    assert e["healthy"]
+    assert e["action"] == "advance"
+    advance_canary(c, 50)
+    assert c["phase"] == "majority"
+    e2 = evaluate_canary(c, {"error_rate": 0.5}, {"error_rate": 0.6})
+    assert e2["action"] == "promote"
 
-def test_canary_rollback():
-    c = CanaryController()
-    c.start_canary(app_id="myapp", version="2.0", target_pct=10, step_pct=10)
-    r = c.check_health("myapp", success_rate=0.95, latency_p99=500)
-    assert r["action"] == "rollback"
-    s = c.status("myapp")
-    assert s["phase"] == "rollback"
-    assert s["traffic_pct"] == 0
+def test_rollback():
+    c = create_canary("web", "1.0", "1.1")
+    e = evaluate_canary(c, {"error_rate": 0.5, "p99_latency_ms": 100},
+                          {"error_rate": 5.0, "p99_latency_ms": 500})
+    assert not e["healthy"]
+    assert e["action"] == "rollback"
