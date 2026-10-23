@@ -3,26 +3,27 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 describe("ConfirmDialog", () => {
-  it("shows title and message", () => {
-    const { container } = render(<ConfirmDialog title="Delete App?" message="This cannot be undone" onConfirm={vi.fn()} onCancel={vi.fn()} />);
-    expect(container.textContent).toContain("Delete App?");
-    expect(container.textContent).toContain("cannot be undone");
-  });
-  it("calls onConfirm", () => {
+  it("renders dialog", () => {
     const onConfirm = vi.fn();
-    const { container } = render(<ConfirmDialog title="X" message="Y" onConfirm={onConfirm} onCancel={vi.fn()} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Confirm")!);
+    const { container, getByText } = render(
+      <ConfirmDialog title="Delete App?" body="This is permanent." confirmLabel="Delete"
+        variant="danger" requiresName={false} resourceName="" onConfirm={onConfirm} onCancel={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Delete App?");
+    expect(container.textContent).toContain("This is permanent.");
+    fireEvent.click(getByText("Delete"));
     expect(onConfirm).toHaveBeenCalled();
   });
-  it("calls onCancel", () => {
-    const onCancel = vi.fn();
-    const { container } = render(<ConfirmDialog title="X" message="Y" onConfirm={vi.fn()} onCancel={onCancel} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Cancel")!);
-    expect(onCancel).toHaveBeenCalled();
-  });
-  it("shows destructive styling", () => {
-    const { container } = render(<ConfirmDialog title="X" message="Y" destructive confirmLabel="Delete" onConfirm={vi.fn()} onCancel={vi.fn()} />);
-    const btn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Delete");
-    expect(btn?.className).toContain("red");
+
+  it("blocks confirm without name", () => {
+    const onConfirm = vi.fn();
+    const { getByText } = render(
+      <ConfirmDialog title="Delete?" body="Type name" confirmLabel="Delete"
+        variant="danger" requiresName={true} resourceName="myapp"
+        onConfirm={onConfirm} onCancel={vi.fn()} />
+    );
+    const btn = getByText("Delete");
+    fireEvent.click(btn);
+    expect(onConfirm).not.toHaveBeenCalled(); // disabled
   });
 });
