@@ -1,24 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppDetailSidebar } from "@/components/app-detail-sidebar";
 
 describe("AppDetailSidebar", () => {
-  it("renders stats", () => {
+  const infoItems = [{ label: "Version", value: "2.1.0", icon: "📦" }];
+  const links = [{ label: "Docs", url: "https://docs.example.com", icon: "📚" }];
+  it("renders", () => {
     const { container } = render(
-      <AppDetailSidebar installCount={2000} activeCount={1800} avgRating={4.5} reviewCount={50}
-        screenshots={["s1.png"]} onInstall={vi.fn()} />
+      <AppDetailSidebar infoItems={infoItems} links={links}
+        permissions={["read:profile"]} tags={["auth", "oauth"]} />
     );
-    expect(container.textContent).toContain("2,000");
-    expect(container.textContent).toContain("4.5 ★");
-    expect(container.textContent).toContain("Install App");
-  });
-  it("install button", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <AppDetailSidebar installCount={0} activeCount={0} avgRating={0} reviewCount={0}
-        screenshots={[]} onInstall={fn} />
-    );
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("Information");
+    expect(container.textContent).toContain("2.1.0");
+    expect(container.textContent).toContain("Docs");
+    expect(container.textContent).toContain("Permissions (1)");
+    expect(container.textContent).toContain("read:profile");
+    expect(container.textContent).toContain("auth");
+    expect(container.textContent).toContain("oauth");
   });
 });
