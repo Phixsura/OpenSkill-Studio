@@ -1,30 +1,38 @@
 "use client";
 
-interface ChangelogEntry { version: string; title: string; type: string; icon: string; date: string; }
-interface ChangelogWidgetProps { appName: string; entries: ChangelogEntry[];
-  hasMore: boolean; onViewAll: () => void; }
+interface ChangeItem { version: string; title: string; type: string; date: string; }
+interface ChangelogWidgetProps { items: ChangeItem[]; hasMore: boolean;
+  onViewAll: () => void; }
 
-export function ChangelogWidget({ appName, entries, hasMore, onViewAll }: ChangelogWidgetProps) {
+const TYPE_BADGE: Record<string, { emoji: string; color: string }> = {
+  added: { emoji: "✨", color: "bg-green-100 text-green-700" },
+  fixed: { emoji: "🐛", color: "bg-orange-100 text-orange-700" },
+  changed: { emoji: "🔄", color: "bg-blue-100 text-blue-700" },
+};
+
+export function ChangelogWidget({ items, hasMore, onViewAll }: ChangelogWidgetProps) {
   return (
-    <div className="rounded-xl border p-4 dark:border-gray-700">
-      <h3 className="text-sm font-semibold mb-3">📝 {appName} Updates</h3>
-      <div className="space-y-2">
-        {entries.map((e, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <span className="text-xs mt-0.5">{e.icon}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-mono text-gray-400">v{e.version}</span>
-                <span className="text-sm truncate">{e.title}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden w-72">
+      <div className="p-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+        <h4 className="text-sm font-semibold">📋 What&apos;s New</h4>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
+        {items.map((item, i) => {
+          const badge = TYPE_BADGE[item.type] || { emoji: "📌", color: "bg-gray-100" };
+          return (
+            <div key={i} className="px-3 py-2">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className={`text-xs px-1 rounded ${badge.color}`}>{badge.emoji} {item.type}</span>
+                <span className="text-xs text-gray-400">v{item.version}</span>
               </div>
-              <time className="text-xs text-gray-400">{e.date}</time>
+              <p className="text-sm">{item.title}</p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {hasMore && (
-        <button onClick={onViewAll} className="mt-3 w-full text-center text-xs text-blue-600 hover:underline">
-          View all updates →
+        <button onClick={onViewAll} className="w-full py-2 text-xs text-blue-600 hover:bg-gray-50 dark:hover:bg-gray-800 border-t dark:border-gray-700">
+          View all changes →
         </button>
       )}
     </div>

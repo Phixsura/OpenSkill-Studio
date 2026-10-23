@@ -1,16 +1,20 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChangelogWidget } from "@/components/changelog-widget";
 
 describe("ChangelogWidget", () => {
-  const entries = [{ version: "2.1.0", title: "Dark mode", type: "added", icon: "✨", date: "2026-10-20" }];
   it("renders widget", () => {
-    const { container } = render(
-      <ChangelogWidget appName="SuperApp" entries={entries} hasMore={true} onViewAll={vi.fn()} />
+    const onViewAll = vi.fn();
+    const { container, getByText } = render(
+      <ChangelogWidget hasMore={true} onViewAll={onViewAll} items={[
+        { version: "3.5", title: "SSO Support", type: "added", date: "2026-10-24" },
+        { version: "3.4.1", title: "Bug fix", type: "fixed", date: "2026-10-20" },
+      ]} />
     );
-    expect(container.textContent).toContain("SuperApp Updates");
-    expect(container.textContent).toContain("Dark mode");
-    expect(container.textContent).toContain("v2.1.0");
-    expect(container.textContent).toContain("View all updates");
+    expect(container.textContent).toContain("What's New");
+    expect(container.textContent).toContain("SSO Support");
+    expect(container.textContent).toContain("Bug fix");
+    fireEvent.click(getByText("View all changes →"));
+    expect(onViewAll).toHaveBeenCalled();
   });
 });
