@@ -1,30 +1,31 @@
-"""User preferences — per-user settings with defaults and persistence."""
+"""User preference store — persist user preferences."""
 from __future__ import annotations
 
-DEFAULTS = {
-    "theme": "system", "language": "en", "timezone": "UTC",
-    "notifications_email": True, "notifications_push": True,
-    "sidebar_collapsed": False, "density": "comfortable",
-    "date_format": "YYYY-MM-DD", "code_font_size": 14,
-}
+_prefs: dict[str, dict] = {}
+
+DEFAULTS = {"theme": "system", "language": "en", "email_digest": "weekly",
+            "show_tips": True, "compact_view": False, "timezone": "UTC"}
 
 
-def get_prefs(user_id: str, overrides: dict | None = None) -> dict:
-    prefs = dict(DEFAULTS)
-    if overrides:
-        prefs.update(overrides)
-    return {"user_id": user_id, "preferences": prefs}
+def get_prefs(user_id: str) -> dict:
+    user_prefs = _prefs.get(user_id, {})
+    merged = {**DEFAULTS, **user_prefs}
+    return {"user_id": user_id, "preferences": merged,
+            "customized": len(user_prefs), "total": len(merged)}
 
 
-def update_pref(current: dict, key: str, value) -> dict:
+def set_pref(user_id: str, key: str, value: object) -> dict:
     if key not in DEFAULTS:
-        return {"error": f"Unknown preference: {key}"}
-    expected_type = type(DEFAULTS[key])
-    if not isinstance(value, expected_type):
-        return {"error": f"{key} expects {expected_type.__name__}"}
-    current[key] = value
-    return {"updated": key, "value": value}
+        return {"set": False, "error": "unknown_preference"}
+    _prefs.setdefault(user_id, {})[key] = value
+    return {"set": True, "key": key, "value": value}
 
 
-def reset_prefs() -> dict:
-    return {"preferences": dict(DEFAULTS), "reset": True}
+def reset_prefs(user_id: str) -> dict:
+    if user_id in _prefs:
+        del _prefs[user_id]
+    return {"reset": True, "user_id": user_id}
+
+
+def clear_all_prefs() -> None:
+    _prefs.clear()

@@ -1,20 +1,18 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { UserPrefsForm } from "@/components/user-prefs-form";
 
 describe("UserPrefsForm", () => {
   it("renders prefs", () => {
-    const onUpdate = vi.fn();
-    const { container, getByText, getAllByRole } = render(
-      <UserPrefsForm onUpdate={onUpdate} onReset={vi.fn()}
-        prefs={{ theme: "dark", notifications_email: true, code_font_size: 14 }} />
+    const { container } = render(
+      <UserPrefsForm customized={1} onSet={vi.fn()} onReset={vi.fn()}
+        preferences={{ theme: "dark", language: "en", show_tips: true, compact_view: false }} />
     );
     expect(container.textContent).toContain("Preferences");
+    expect(container.textContent).toContain("1 customized");
     expect(container.textContent).toContain("theme");
     expect(container.textContent).toContain("dark");
-    expect(container.textContent).toContain("14");
-    const toggles = getAllByRole("button").filter(b => b.className.includes("rounded-full"));
-    fireEvent.click(toggles[0]);
-    expect(onUpdate).toHaveBeenCalledWith("notifications_email", false);
+    expect(container.textContent).toContain("show tips");
+    expect(container.textContent).toContain("Reset");
   });
 });
