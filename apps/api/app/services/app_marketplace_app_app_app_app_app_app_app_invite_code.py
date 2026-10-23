@@ -4,10 +4,14 @@ import secrets
 import time
 
 _codes: dict[str, dict] = {}
+_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def create_code(creator: str, max_uses: int = 1, expires_days: int = 7) -> dict:
-    code = secrets.token_urlsafe(8).upper()[:8]
+    for _ in range(100):
+        code = "".join(secrets.choice(_ALPHABET) for _ in range(12))
+        if code not in _codes:
+            break
     _codes[code] = {"code": code, "creator": creator, "max_uses": max_uses,
                      "uses": 0, "created_at": time.time(),
                      "expires_at": time.time() + expires_days * 86400,

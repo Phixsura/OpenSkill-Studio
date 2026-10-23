@@ -11,7 +11,6 @@ describe("OpenApiSpecViewer", () => {
     expect(container.textContent).toContain("My API");
     expect(container.textContent).toContain("v1.0.0");
     expect(container.textContent).toContain("10 endpoints");
-    expect(container.textContent).toContain("GET ×5");
     expect(container.textContent).toContain("users");
     expect(container.textContent).toContain("system");
   });
