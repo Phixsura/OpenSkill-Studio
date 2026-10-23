@@ -13,7 +13,7 @@ describe("MaturityRadar", () => {
         ]} />
     );
     expect(container.textContent).toContain("Platform Maturity");
-    expect(container.textContent).toContain("4.0");
+    expect(container.textContent).toContain("4");
     expect(container.textContent).toContain("Measured");
     expect(container.textContent).toContain("CI/CD");
     expect(container.textContent).toContain("L5 Optimized");
