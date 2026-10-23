@@ -18,6 +18,10 @@ AVAILABLE_SCOPES = [
 
 
 def create_key(*, name: str, scopes: list[str], expires_days: int = 365) -> dict:
+    valid_ids = {s["id"] for s in AVAILABLE_SCOPES}
+    unknown = set(scopes) - valid_ids
+    if unknown:
+        return {"error": f"Unknown scopes: {sorted(unknown)}"}
     raw = f"sk_live_{secrets.token_urlsafe(32)}"
     integrity = hmac.new(_HMAC_KEY, raw.encode(), hashlib.sha256).hexdigest()[:16]
     selected = [s for s in AVAILABLE_SCOPES if s["id"] in scopes]
@@ -25,8 +29,8 @@ def create_key(*, name: str, scopes: list[str], expires_days: int = 365) -> dict
                "high" if any(s["risk"] == "high" for s in selected) else \
                "medium" if any(s["risk"] == "medium" for s in selected) else "low"
     return {
-        "key": raw, "name": html.escape(name), "scopes": scopes,
-        "scope_count": len(scopes), "max_risk": max_risk,
+        "key": raw, "name": html.escape(name), "scopes": [s["id"] for s in selected],
+        "scope_count": len(selected), "max_risk": max_risk,
         "expires_days": expires_days, "integrity": integrity,
         "warning": "This key has admin access!" if "admin" in scopes else None,
     }
