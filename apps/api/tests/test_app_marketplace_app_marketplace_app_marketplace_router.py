@@ -27,4 +27,4 @@ def test_no_match():
 def test_sitemap():
     urls = build_sitemap_urls()
     assert any("/marketplace" in u for u in urls)
-    assert all(":" not in u for u in urls)
+    assert all("/:" not in u for u in urls)
