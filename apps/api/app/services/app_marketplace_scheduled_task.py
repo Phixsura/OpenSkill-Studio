@@ -11,7 +11,7 @@ CRON_FIELD_RE = re.compile(r"^(\*|[0-9]{1,2}(-[0-9]{1,2})?)(\/[0-9]{1,2})?$")
 def validate_cron(*, expression: str) -> dict:
     fields = expression.strip().split()
     if len(fields) != 5:
-        return {"valid": False, "error": "Cron expression must have 5 fields"}
+        return {"valid": False, "errors": ["Cron expression must have 5 fields"]}
     errors = []
     labels = ["minute", "hour", "day_of_month", "month", "day_of_week"]
     for i, (field, label) in enumerate(zip(fields, labels)):
