@@ -4,13 +4,18 @@ import { ContractTestResults } from "@/components/contract-test-results";
 
 describe("ContractTestResults", () => {
   it("renders results", () => {
-    const results = [
-      { endpoint: "/users", valid: true, errors: [] },
-      { endpoint: "/apps", valid: false, errors: ["Missing field: id"] },
-    ];
-    const { container } = render(<ContractTestResults results={results} passRate={50} />);
-    expect(container.textContent).toContain("/users");
-    expect(container.textContent).toContain("Missing field: id");
+    const { container } = render(
+      <ContractTestResults total={2} passed={1} failed={1} passRate={50} allPassed={false}
+        results={[
+          { name: "GET /users", valid: true, errors: [] },
+          { name: "GET /bad", valid: false, errors: [{ field: "status", error: "mismatch" }] },
+        ]} />
+    );
+    expect(container.textContent).toContain("Contract Tests");
     expect(container.textContent).toContain("50%");
+    expect(container.textContent).toContain("1/2 passed");
+    expect(container.textContent).toContain("GET /users");
+    expect(container.textContent).toContain("GET /bad");
+    expect(container.textContent).toContain("status: mismatch");
   });
 });
