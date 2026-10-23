@@ -23,7 +23,7 @@ def build_email(*, template_id: str, variables: dict[str, str],
     except KeyError as e:
         return {"error": f"Missing variable: {e}"}
     return {"template_id": template_id, "subject": subject, "preheader": preheader,
-            "body_html": body_html, "variables": safe,
+            "body_html": html.escape(body_html) if body_html else "", "variables": safe,
             "text_preview": f"{subject} — {preheader}"}
 
 

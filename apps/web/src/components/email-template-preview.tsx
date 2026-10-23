@@ -24,7 +24,7 @@ export function EmailTemplatePreview({ subject, preheader, bodyHtml, templateId 
         {bodyHtml && (
           <div className="mt-3 rounded border p-3 dark:border-gray-700">
             <p className="text-xs text-gray-400 mb-1">Body</p>
-            <div className="text-sm prose dark:prose-invert" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+            <iframe sandbox="" srcDoc={bodyHtml} className="w-full h-32 border-0 rounded" title="Email body preview" />
           </div>
         )}
       </div>
