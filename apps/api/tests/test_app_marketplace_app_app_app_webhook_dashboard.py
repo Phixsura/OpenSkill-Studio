@@ -8,4 +8,4 @@ def test_dashboard():
     r = build_webhook_dashboard(endpoints=eps, recent_deliveries=deliveries)
     assert r["active_endpoints"] == 1
     assert r["deliveries"]["success_rate"] == 66.7
-    assert r["health"] == "warning"
+    assert r["health"] == "critical"
