@@ -1,25 +1,22 @@
-from app.services.app_marketplace_app_log_aggregator import aggregate_logs, compute_log_volume
+from app.services.app_marketplace_app_log_aggregator import aggregate_logs
 
 def test_aggregate():
-    sources = {
-        "app": [{"timestamp": "2026-01-01T10:00:00Z", "message": "Started", "level": "info"}],
-        "webhook": [{"timestamp": "2026-01-01T10:01:00Z", "message": "Delivered", "level": "info"}],
-    }
+    sources = [
+        {"name": "api", "logs": [
+            {"level": "info", "message": "Request OK", "timestamp": "2026-10-23T12:00:00"},
+            {"level": "error", "message": "DB timeout", "timestamp": "2026-10-23T12:01:00"},
+        ]},
+        {"name": "worker", "logs": [
+            {"level": "info", "message": "Job done", "timestamp": "2026-10-23T12:00:30"},
+        ]},
+    ]
     r = aggregate_logs(sources=sources)
-    assert r["total"] == 2
-    assert r["logs"][0]["source"] == "webhook"  # newest first
+    assert r["total_logs"] == 3
+    assert r["by_source"]["api"] == 2
+    assert r["has_errors"]
+    assert r["logs"][0]["timestamp"] == "2026-10-23T12:01:00"  # sorted desc
 
-def test_dedup():
-    sources = {
-        "a": [{"timestamp": "2026-01-01T10:00:00Z", "message": "Dup"}],
-        "b": [{"timestamp": "2026-01-01T10:00:00Z", "message": "Dup"}],
-    }
-    r = aggregate_logs(sources=sources, dedup=True)
-    assert r["total"] == 1
-
-def test_volume():
-    logs = [{"level": "error", "source": "app"}, {"level": "info", "source": "app"},
-            {"level": "error", "source": "webhook"}]
-    v = compute_log_volume(logs=logs)
-    assert v["by_level"]["error"] == 2
-    assert v["by_source"]["app"] == 2
+def test_empty():
+    r = aggregate_logs(sources=[])
+    assert r["total_logs"] == 0
+    assert not r["has_errors"]

@@ -1,30 +1,27 @@
-"""Log aggregator — combine logs from multiple sources with dedup."""
+"""Log aggregator — aggregate logs from multiple sources."""
 
-from collections import defaultdict
+from datetime import datetime
 
 
-def aggregate_logs(*, sources: dict[str, list[dict]], dedup: bool = True) -> dict:
+def aggregate_logs(*, sources: list[dict]) -> dict:
     all_logs = []
-    for source, logs in sources.items():
+    source_stats: dict[str, int] = {}
+    level_stats: dict[str, int] = {}
+    for src in sources:
+        name = src["name"]
+        logs = src.get("logs", [])
+        source_stats[name] = len(logs)
         for log in logs:
-            all_logs.append({**log, "source": source})
+            log["source"] = name
+            lvl = log.get("level", "info")
+            level_stats[lvl] = level_stats.get(lvl, 0) + 1
+            all_logs.append(log)
     all_logs.sort(key=lambda l: l.get("timestamp", ""), reverse=True)
-    if dedup:
-        seen = set()
-        deduped = []
-        for log in all_logs:
-            key = f"{log.get('timestamp')}:{log.get('message', '')}"
-            if key not in seen:
-                seen.add(key)
-                deduped.append(log)
-        all_logs = deduped
-    return {"logs": all_logs, "total": len(all_logs), "sources": list(sources.keys())}
-
-
-def compute_log_volume(*, logs: list[dict]) -> dict:
-    by_level = defaultdict(int)
-    by_source = defaultdict(int)
-    for l in logs:
-        by_level[l.get("level", "unknown")] += 1
-        by_source[l.get("source", "unknown")] += 1
-    return {"by_level": dict(by_level), "by_source": dict(by_source), "total": len(logs)}
+    return {
+        "logs": all_logs[:200],
+        "total_logs": len(all_logs),
+        "by_source": source_stats,
+        "by_level": level_stats,
+        "source_count": len(sources),
+        "has_errors": level_stats.get("error", 0) + level_stats.get("critical", 0) > 0,
+    }
