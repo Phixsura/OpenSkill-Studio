@@ -5,18 +5,20 @@ import { ErrorBudgetGauge } from "@/components/error-budget-gauge";
 describe("ErrorBudgetGauge", () => {
   it("renders healthy", () => {
     const { container } = render(
-      <ErrorBudgetGauge budgetPct={75} burnRate={0.8} sloTarget={99.9} recommendation="OK: Budget healthy" />
+      <ErrorBudgetGauge sloTarget={99.9} actualSuccessRate={99.95} budgetPctUsed={50}
+        budgetRemaining={50} status="ok" estimatedDaysRemaining={30} />
     );
-    expect(container.textContent).toContain("75%");
-    expect(container.textContent).toContain("99.9%");
-    expect(container.textContent).toContain("0.8x");
-    expect(container.textContent).toContain("OK");
+    expect(container.textContent).toContain("Error Budget");
+    expect(container.textContent).toContain("99.95%");
+    expect(container.textContent).toContain("ok");
+    expect(container.textContent).toContain("50%");
+    expect(container.textContent).toContain("30d");
   });
   it("renders exhausted", () => {
     const { container } = render(
-      <ErrorBudgetGauge budgetPct={0} burnRate={3} sloTarget={99.9} recommendation="FREEZE: Budget exhausted" />
+      <ErrorBudgetGauge sloTarget={99.9} actualSuccessRate={99.7} budgetPctUsed={120}
+        budgetRemaining={0} status="exhausted" estimatedDaysRemaining={0} />
     );
-    expect(container.textContent).toContain("0%");
-    expect(container.textContent).toContain("FREEZE");
+    expect(container.textContent).toContain("exhausted");
   });
 });
