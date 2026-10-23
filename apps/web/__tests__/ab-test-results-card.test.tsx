@@ -1,31 +1,19 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { AbTestResultsCard } from "@/components/ab-test-results-card";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { ABTestResultsCard } from "@/components/ab-test-results-card";
 
-describe("AbTestResultsCard", () => {
-  it("renders", () => {
+describe("ABTestResultsCard", () => {
+  it("renders winner", () => {
     const { container } = render(
-      <AbTestResultsCard control={{ rate: 4, visitors: 5000, conversions: 200 }}
-        variant={{ rate: 6, visitors: 5000, conversions: 300 }} liftPct={50}
-        winner="variant" significant={true} recommendation="Promote variant"
-        onPromote={vi.fn()} />
+      <ABTestResultsCard testName="Checkout v2"
+        control={{ visitors: 5000, conversions: 200, rate: 4.0, rateDisplay: "4.00%" }}
+        variant={{ visitors: 5000, conversions: 280, rate: 5.6, rateDisplay: "5.60%" }}
+        liftDisplay="+40.0%" significant={true} winner="variant" />
     );
-    expect(container.textContent).toContain("A/B Test Results");
-    expect(container.textContent).toContain("4%");
-    expect(container.textContent).toContain("6%");
-    expect(container.textContent).toContain("🏆");
-    expect(container.textContent).toContain("↑ 50%");
-    expect(container.textContent).toContain("Statistically significant");
-    expect(container.textContent).toContain("Promote Variant");
-  });
-  it("promote", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <AbTestResultsCard control={{ rate: 4, visitors: 5000, conversions: 200 }}
-        variant={{ rate: 6, visitors: 5000, conversions: 300 }} liftPct={50}
-        winner="variant" significant={true} recommendation="Promote" onPromote={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Promote Variant")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("Checkout v2");
+    expect(container.textContent).toContain("4.00%");
+    expect(container.textContent).toContain("5.60%");
+    expect(container.textContent).toContain("Winner");
+    expect(container.textContent).toContain("Significant");
   });
 });
