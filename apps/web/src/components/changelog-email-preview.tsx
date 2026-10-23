@@ -1,34 +1,28 @@
 "use client";
 
-interface ChangelogEmailPreviewProps { subject: string; bodyHtml: string;
-  recipientCount: number; changeCount: number; hasBreaking: boolean;
-  onSend: () => void; onEdit: () => void; }
+interface EmailSection { type: string; emoji: string; items: string[]; count: number; }
+interface ChangelogEmailPreviewProps { subject: string; greeting: string;
+  version: string; sections: EmailSection[]; totalChanges: number; }
 
-export function ChangelogEmailPreview({ subject, bodyHtml, recipientCount, changeCount,
-  hasBreaking, onSend, onEdit }: ChangelogEmailPreviewProps) {
+export function ChangelogEmailPreview({ subject, greeting, version, sections, totalChanges }: ChangelogEmailPreviewProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Email Preview</h2>
-        <div className="flex items-center gap-2 text-xs text-gray-400">
-          <span>{changeCount} changes</span>
-          <span>{recipientCount} recipients</span>
-          {hasBreaking && <span className="text-red-500">⚠️ Breaking</span>}
-        </div>
+    <div className="max-w-lg mx-auto rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="bg-blue-600 text-white px-5 py-3">
+        <p className="text-xs opacity-75">Email Preview</p>
+        <h3 className="font-bold">{subject}</h3>
       </div>
-      <div className="rounded-lg border dark:border-gray-700">
-        <div className="border-b bg-gray-50 px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
-          <p className="text-xs text-gray-400">Subject:</p>
-          <p className="text-sm font-medium">{subject}</p>
-        </div>
-        <div className="prose prose-sm max-w-none p-4 dark:prose-invert"
-          dangerouslySetInnerHTML={{ __html: bodyHtml }} />
-      </div>
-      <div className="flex gap-2">
-        <button onClick={onEdit} className="flex-1 rounded border py-2 text-sm dark:border-gray-600">Edit</button>
-        <button onClick={onSend} className="flex-1 rounded bg-green-600 py-2 text-sm text-white">
-          Send to {recipientCount} subscribers
-        </button>
+      <div className="p-5 bg-white dark:bg-gray-900 space-y-4">
+        <p className="text-sm">{greeting}</p>
+        <p className="text-sm text-gray-500">Here&apos;s what&apos;s new in <strong>v{version}</strong>:</p>
+        {sections.map(s => (
+          <div key={s.type}>
+            <h4 className="text-sm font-semibold mb-1">{s.emoji} {s.type.charAt(0).toUpperCase() + s.type.slice(1)} ({s.count})</h4>
+            <ul className="text-sm text-gray-600 space-y-0.5 ml-4">
+              {s.items.map((item, i) => <li key={i}>• {item}</li>)}
+            </ul>
+          </div>
+        ))}
+        <p className="text-xs text-gray-400">{totalChanges} total changes</p>
       </div>
     </div>
   );
