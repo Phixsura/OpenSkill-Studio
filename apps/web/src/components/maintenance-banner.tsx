@@ -1,28 +1,35 @@
 "use client";
 
-interface MaintenanceWindow { title: string; start: string; end: string; status: string; services: string[]; }
-interface MaintenanceBannerProps { windows: MaintenanceWindow[]; hasActive: boolean; }
+interface MaintenanceWindow { id: string; title: string; start: string; end: string;
+  affected: string[]; severity: string; status: string; }
+interface MaintenanceBannerProps { windows: MaintenanceWindow[]; }
 
-export function MaintenanceBanner({ windows, hasActive }: MaintenanceBannerProps) {
+export function MaintenanceBanner({ windows }: MaintenanceBannerProps) {
   const active = windows.filter(w => w.status === "in_progress");
   const upcoming = windows.filter(w => w.status === "scheduled");
-
-  if (!hasActive && upcoming.length === 0) return null;
-
+  if (!active.length && !upcoming.length) return null;
   return (
     <div className="space-y-2">
-      {active.map((w, i) => (
-        <div key={i} className="rounded-lg border-l-4 border-yellow-500 bg-yellow-50 p-3 dark:bg-yellow-900/10">
-          <div className="flex items-center gap-2">
-            <span className="animate-pulse">🔧</span>
-            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">Maintenance in progress: {w.title}</p>
+      {active.map(w => (
+        <div key={w.id} className="rounded-lg p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm">🔧</span>
+            <span className="text-sm font-semibold text-red-700 dark:text-red-400">Maintenance in Progress</span>
           </div>
-          <p className="mt-1 text-xs text-yellow-600">Affected: {w.services.join(", ")} · Until {new Date(w.end).toLocaleTimeString()}</p>
+          <p className="text-sm text-red-600 dark:text-red-300">{w.title}</p>
+          <p className="text-xs text-red-400 mt-1">
+            Affected: {w.affected.join(", ")} · {w.start} – {w.end}
+          </p>
         </div>
       ))}
-      {upcoming.slice(0, 2).map((w, i) => (
-        <div key={i} className="rounded-lg border bg-blue-50 p-3 dark:bg-blue-900/10 dark:border-blue-800">
-          <p className="text-sm text-blue-700 dark:text-blue-300">📅 Upcoming: {w.title} — {new Date(w.start).toLocaleDateString()}</p>
+      {upcoming.map(w => (
+        <div key={w.id} className="rounded-lg p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm">📅</span>
+            <span className="text-sm font-semibold text-yellow-700 dark:text-yellow-400">Scheduled Maintenance</span>
+          </div>
+          <p className="text-sm text-yellow-600 dark:text-yellow-300">{w.title}</p>
+          <p className="text-xs text-yellow-400 mt-1">{w.start} – {w.end}</p>
         </div>
       ))}
     </div>
