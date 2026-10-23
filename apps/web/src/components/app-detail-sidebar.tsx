@@ -21,7 +21,7 @@ export function AppDetailSidebar({ infoItems, links, permissions, tags, onTagCli
         <div className="space-y-1.5">
           <h3 className="text-sm font-semibold text-gray-400">Links</h3>
           {links.map(link => (
-            <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer"
+            <a key={link.url} href={link.url.startsWith("http") || link.url.startsWith("mailto:") ? link.url : "#"} target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-sm text-blue-500 hover:underline">
               {link.icon} {link.label}
             </a>

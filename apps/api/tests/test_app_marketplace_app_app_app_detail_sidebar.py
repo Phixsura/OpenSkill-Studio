@@ -16,3 +16,4 @@ def test_minimal():
     r = build_app_sidebar(app={})
     assert r["info_items"][0]["value"] == "—"
     assert len(r["links"]) == 0
+    assert len(r["links"]) == 0
