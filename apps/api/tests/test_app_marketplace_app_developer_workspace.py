@@ -10,12 +10,12 @@ def test_short_name():
     assert w["error"]
 
 def test_add_app():
-    w = create_workspace(name="WS", owner_id="u1", apps=["a1"])
+    w = create_workspace(name="MyWS", owner_id="u1", apps=["a1"])
     w = add_app_to_workspace(workspace=w, app_id="a2")
     assert w["app_count"] == 2
 
 def test_add_duplicate():
-    w = create_workspace(name="WS", owner_id="u1", apps=["a1"])
+    w = create_workspace(name="MyWS", owner_id="u1", apps=["a1"])
     w = add_app_to_workspace(workspace=w, app_id="a1")
     assert w["error"]
 
