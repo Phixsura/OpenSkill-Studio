@@ -3,22 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { CorsConfigEditor } from "@/components/cors-config-editor";
 
 describe("CorsConfigEditor", () => {
-  it("renders", () => {
-    const { container } = render(
-      <CorsConfigEditor origins={["https://example.com"]} methods={["GET", "POST"]}
-        maxAgeSec={3600} onSave={vi.fn()} />
+  it("renders and removes", () => {
+    const onRemove = vi.fn();
+    const { container, getAllByText } = render(
+      <CorsConfigEditor origins={["https://app.example.com"]} methods={["GET", "POST"]}
+        headers={["Content-Type"]} credentials={true}
+        onAddOrigin={vi.fn()} onRemoveOrigin={onRemove} />
     );
-    expect(container.textContent).toContain("CORS Configuration");
-    expect(container.textContent).toContain("https://example.com");
-    expect(container.textContent).toContain("Allowed Methods");
-    expect(container.textContent).toContain("Save CORS Config");
-  });
-  it("save", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <CorsConfigEditor origins={["*"]} methods={["GET"]} maxAgeSec={3600} onSave={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Save CORS Config")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("CORS Policy");
+    expect(container.textContent).toContain("https://app.example.com");
+    expect(container.textContent).toContain("GET, POST");
+    fireEvent.click(getAllByText("×")[0]);
+    expect(onRemove).toHaveBeenCalledWith("https://app.example.com");
   });
 });
