@@ -1,11 +1,12 @@
 "use client";
 
-interface RelativeTimeProps { relative: string; absolute: string; }
+interface RelativeTimeProps { value: string; label?: string; tooltip?: string; }
 
-export function RelativeTime({ relative, absolute }: RelativeTimeProps) {
+export function RelativeTime({ value, label, tooltip }: RelativeTimeProps) {
   return (
-    <time title={absolute} className="text-xs text-gray-400 cursor-help">
-      {relative}
-    </time>
+    <span className="text-xs text-gray-400" title={tooltip}>
+      {label && <span className="mr-1">{label}:</span>}
+      {value}
+    </span>
   );
 }
