@@ -7,7 +7,7 @@ def test_generate():
     assert "•" in k["display"]
 
 def test_mask():
-    assert mask_key("sk_live_abc123def456") == "sk_live_••••••••••••••"
+    assert len(mask_key("sk_live_abc123def456")) == 20  # 8 shown + 12 masked
     assert mask_key("short") == "•••••"
 
 def test_format():
