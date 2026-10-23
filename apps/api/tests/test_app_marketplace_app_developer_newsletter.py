@@ -1,22 +1,22 @@
-from app.services.app_marketplace_app_developer_newsletter import generate_newsletter, build_email_subject
+from app.services.app_marketplace_app_developer_newsletter import create_newsletter, get_newsletter_stats
 
-def test_newsletter():
-    n = generate_newsletter(period="Oct 2026",
-                             new_apps=[{"name": "App1", "description": "Great"}],
-                             trending=[{"name": "PopularApp"}],
-                             announcements=["API v3 launched"], tips=["Use webhooks"])
-    assert n["section_count"] == 4
-    assert n["period"] == "Oct 2026"
+def test_create():
+    sections = [
+        {"heading": "What's New", "body": "We launched dark mode!", "cta_label": "Try it", "cta_url": "/settings"},
+        {"heading": "Tips", "body": "Optimize your API calls."},
+    ]
+    r = create_newsletter(title="Dev Update #42", sections=sections, edition=42)
+    assert r["newsletter_id"].startswith("nl_")
+    assert r["edition"] == 42
+    assert r["section_count"] == 2
+    assert r["status"] == "draft"
 
-def test_empty():
-    n = generate_newsletter(period="Oct 2026", new_apps=[], trending=[], announcements=[], tips=[])
-    assert n["section_count"] == 0
+def test_xss():
+    r = create_newsletter(title="<script>xss</script>", sections=[{"heading": "<b>bold</b>"}], edition=1)
+    assert "<script>" not in r["title"]
 
-def test_subject():
-    s = build_email_subject(period="Oct 2026", highlight="API v3 is here!")
-    assert "Oct 2026" in s
-    assert "API v3" in s
-
-def test_subject_no_highlight():
-    s = build_email_subject(period="Oct 2026")
-    assert "Oct 2026" in s
+def test_stats():
+    newsletters = [{"sent_count": 1000, "opened_count": 400},
+                   {"sent_count": 1000, "opened_count": 350}]
+    r = get_newsletter_stats(newsletters=newsletters)
+    assert r["avg_open_rate"] == 37.5

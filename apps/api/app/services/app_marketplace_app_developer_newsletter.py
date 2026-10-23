@@ -1,23 +1,35 @@
-"""Developer newsletter — automated newsletter generation from platform activity."""
+"""Developer newsletter — generate and manage developer newsletters."""
 
-from datetime import datetime, timezone
-
-
-def generate_newsletter(*, period: str, new_apps: list[dict], trending: list[dict],
-                           announcements: list[str], tips: list[str]) -> dict:
-    sections = []
-    if announcements:
-        sections.append({"title": "📢 Announcements", "items": announcements})
-    if new_apps:
-        sections.append({"title": "🆕 New Apps", "items": [f"{a['name']} — {a.get('description', '')}" for a in new_apps[:5]]})
-    if trending:
-        sections.append({"title": "🔥 Trending", "items": [a["name"] for a in trending[:5]]})
-    if tips:
-        sections.append({"title": "💡 Developer Tips", "items": tips})
-    return {"period": period, "sections": sections, "section_count": len(sections),
-            "generated_at": datetime.now(timezone.utc).isoformat()}
+import html
+import secrets
+from datetime import datetime
 
 
-def build_email_subject(*, period: str, highlight: str | None = None) -> str:
-    base = f"OpenSkill Developer Update — {period}"
-    return f"{base}: {highlight}" if highlight else base
+def create_newsletter(*, title: str, sections: list[dict], edition: int) -> dict:
+    safe_title = html.escape(title)
+    rendered = []
+    for sec in sections:
+        rendered.append({
+            "heading": html.escape(sec.get("heading", "")),
+            "body": html.escape(sec.get("body", "")),
+            "cta_label": sec.get("cta_label"),
+            "cta_url": sec.get("cta_url"),
+        })
+    return {
+        "newsletter_id": f"nl_{secrets.token_urlsafe(8)}",
+        "title": safe_title,
+        "edition": edition,
+        "sections": rendered,
+        "section_count": len(rendered),
+        "created_at": datetime.utcnow().isoformat(),
+        "status": "draft",
+    }
+
+
+def get_newsletter_stats(*, newsletters: list[dict]) -> dict:
+    total = len(newsletters)
+    total_sent = sum(n.get("sent_count", 0) for n in newsletters)
+    total_opened = sum(n.get("opened_count", 0) for n in newsletters)
+    avg_open_rate = round(total_opened / max(total_sent, 1) * 100, 1)
+    return {"total_newsletters": total, "total_sent": total_sent,
+            "total_opened": total_opened, "avg_open_rate": avg_open_rate}
