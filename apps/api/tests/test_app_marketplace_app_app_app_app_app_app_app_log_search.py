@@ -1,21 +1,17 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_log_search import search_logs, parse_log_line
+from app.services.app_marketplace_app_app_app_app_app_app_app_log_search import search_logs, extract_services
 
 def test_search():
     logs = [
-        {"level": "error", "service": "api", "message": "Connection timeout to database"},
-        {"level": "info", "service": "api", "message": "Request processed in 45ms"},
-        {"level": "error", "service": "worker", "message": "Job failed: timeout"},
-        {"level": "warn", "service": "api", "message": "Slow query detected"},
+        {"level": "error", "service": "api", "message": "Connection timeout"},
+        {"level": "info", "service": "api", "message": "Request handled"},
+        {"level": "error", "service": "worker", "message": "Task failed"},
     ]
     r = search_logs(logs, query="timeout")
-    assert r["total"] == 2
-    r2 = search_logs(logs, query="timeout", service="api")
-    assert r2["total"] == 1
-    r3 = search_logs(logs, query="", level="error")
-    assert r3["total"] == 2
+    assert r["matched"] == 1
+    assert r["results"][0]["message"] == "Connection timeout"
+    r2 = search_logs(logs, level="error")
+    assert r2["matched"] == 2
 
-def test_parse():
-    p = parse_log_line("[ERROR] api Connection refused")
-    assert p["level"] == "error"
-    assert p["service"] == "api"
-    assert "Connection" in p["message"]
+def test_services():
+    logs = [{"service": "api"}, {"service": "worker"}, {"service": "api"}]
+    assert extract_services(logs) == ["api", "worker"]

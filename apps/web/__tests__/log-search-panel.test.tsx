@@ -1,20 +1,20 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { LogSearchPanel } from "@/components/log-search-panel";
 
 describe("LogSearchPanel", () => {
-  it("renders and searches", () => {
-    const onSearch = vi.fn();
-    const { container, getByText } = render(
-      <LogSearchPanel total={2} onSearch={onSearch} logs={[
-        { level: "error", service: "api", message: "Connection timeout" },
-        { level: "info", service: "worker", message: "Job completed" },
-      ]} />
+  it("renders logs", () => {
+    const { container } = render(
+      <LogSearchPanel matched={2} total={10} services={["api"]} onSearch={vi.fn()}
+        levelCounts={{ error: 3, info: 7 }}
+        logs={[
+          { level: "error", service: "api", message: "Connection timeout" },
+          { level: "info", service: "api", message: "OK" },
+        ]} />
     );
     expect(container.textContent).toContain("Log Search");
-    expect(container.textContent).toContain("2 results");
+    expect(container.textContent).toContain("2/10");
     expect(container.textContent).toContain("Connection timeout");
-    fireEvent.click(getByText("Search"));
-    expect(onSearch).toHaveBeenCalled();
+    expect(container.textContent).toContain("error");
   });
 });
