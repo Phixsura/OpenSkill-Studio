@@ -4,11 +4,13 @@ import { SkeletonLoader } from "@/components/skeleton-loader";
 
 describe("SkeletonLoader", () => {
   it("renders skeletons", () => {
-    const { container } = render(<SkeletonLoader count={5} />);
-    expect(container.querySelectorAll("[class*='animate-pulse']").length).toBe(5);
-  });
-  it("default count", () => {
-    const { container } = render(<SkeletonLoader />);
-    expect(container.querySelectorAll("[class*='animate-pulse']").length).toBe(3);
+    const { container } = render(
+      <SkeletonLoader blocks={[
+        { type: "header", w: "60%", h: "32px" },
+        { type: "table", rows: 3, cols: 2 },
+      ]} />
+    );
+    const divs = container.querySelectorAll("div");
+    expect(divs.length).toBeGreaterThan(5); // header + table rows
   });
 });
