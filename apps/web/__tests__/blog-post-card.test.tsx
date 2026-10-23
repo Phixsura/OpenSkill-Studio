@@ -1,17 +1,20 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { BlogPostCard } from "@/components/blog-post-card";
 
 describe("BlogPostCard", () => {
-  it("renders", () => {
-    const { container } = render(
-      <BlogPostCard title="Getting Started with Webhooks" excerpt="Learn how to set up webhooks"
-        category="tutorial" date="Oct 23, 2026" readTime={5} slug="webhooks-guide" author="Alice" />
+  it("renders post", () => {
+    const onClick = vi.fn();
+    const { container, getByText } = render(
+      <BlogPostCard slug="sso" title="SSO is here!" excerpt="Enterprise auth"
+        author="Team" date="2026-10-24" readTime="3 min" tags={["sso"]}
+        featured={true} onClick={onClick} />
     );
-    expect(container.textContent).toContain("Getting Started with Webhooks");
-    expect(container.textContent).toContain("tutorial");
-    expect(container.textContent).toContain("5 min read");
-    expect(container.textContent).toContain("By Alice");
-    expect(container.querySelector("a")?.getAttribute("href")).toBe("/blog/webhooks-guide");
+    expect(container.textContent).toContain("SSO is here!");
+    expect(container.textContent).toContain("Featured");
+    expect(container.textContent).toContain("Enterprise auth");
+    expect(container.textContent).toContain("3 min");
+    fireEvent.click(getByText("SSO is here!"));
+    expect(onClick).toHaveBeenCalled();
   });
 });
