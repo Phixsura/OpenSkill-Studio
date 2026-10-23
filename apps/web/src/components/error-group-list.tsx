@@ -1,28 +1,36 @@
 "use client";
 
-interface ErrorGroup { fingerprint: string; type: string; message: string; count: number; first_seen: string; last_seen: string; }
-interface ErrorGroupListProps { groups: ErrorGroup[]; onSelect: (fp: string) => void; }
+interface ErrorGroup { fingerprint: string; message: string; count: number;
+  affectedUsers: number; lastSeen: string; }
+interface ErrorGroupListProps { groups: ErrorGroup[]; totalErrors: number;
+  uniqueGroups: number; onSelect: (fp: string) => void; }
 
-export function ErrorGroupList({ groups, onSelect }: ErrorGroupListProps) {
-  if (groups.length === 0) return <p className="text-sm text-gray-400">No errors 🎉</p>;
+export function ErrorGroupList({ groups, totalErrors, uniqueGroups, onSelect }: ErrorGroupListProps) {
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700">
-      <div className="border-b p-3 dark:border-gray-700">
-        <h3 className="text-sm font-semibold">Error Groups ({groups.length})</h3>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🐛 Error Groups</h3>
+        <div className="flex gap-2 text-xs text-gray-400">
+          <span>{totalErrors} errors</span>
+          <span>{uniqueGroups} groups</span>
+        </div>
       </div>
-      <ul className="max-h-64 overflow-y-auto">
+      <div className="divide-y dark:divide-gray-700">
         {groups.map(g => (
-          <li key={g.fingerprint} onClick={() => onSelect(g.fingerprint)}
-            className="cursor-pointer border-b px-3 py-2 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-red-600">{g.type}</span>
-              <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-bold text-red-700">{g.count}</span>
+          <button key={g.fingerprint} onClick={() => onSelect(g.fingerprint)}
+            className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium text-red-600 truncate max-w-md">{g.message}</span>
+              <span className="text-sm font-bold ml-2">{g.count}×</span>
             </div>
-            <p className="truncate text-xs text-gray-500">{g.message}</p>
-            <p className="text-xs text-gray-400">First: {g.first_seen?.slice(0, 10)} · Last: {g.last_seen?.slice(0, 10)}</p>
-          </li>
+            <div className="flex gap-3 text-xs text-gray-400">
+              <span>👥 {g.affectedUsers} users</span>
+              <span>Last: {g.lastSeen}</span>
+              <span className="font-mono">{g.fingerprint}</span>
+            </div>
+          </button>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

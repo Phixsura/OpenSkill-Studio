@@ -4,21 +4,21 @@ import { ErrorGroupList } from "@/components/error-group-list";
 
 describe("ErrorGroupList", () => {
   it("renders groups", () => {
-    const groups = [{ fingerprint: "abc", type: "TypeError", message: "x is undefined", count: 15, first_seen: "2026-01-01", last_seen: "2026-01-15" }];
-    const { container } = render(<ErrorGroupList groups={groups} onSelect={vi.fn()} />);
-    expect(container.textContent).toContain("TypeError");
-    expect(container.textContent).toContain("15");
-    expect(container.textContent).toContain("x is undefined");
-  });
-  it("empty state", () => {
-    const { container } = render(<ErrorGroupList groups={[]} onSelect={vi.fn()} />);
-    expect(container.textContent).toContain("No errors");
-  });
-  it("selects group", () => {
-    const fn = vi.fn();
-    const groups = [{ fingerprint: "xyz", type: "E", message: "M", count: 1, first_seen: "", last_seen: "" }];
-    const { container } = render(<ErrorGroupList groups={groups} onSelect={fn} />);
-    fireEvent.click(container.querySelector("li")!);
-    expect(fn).toHaveBeenCalledWith("xyz");
+    const onSelect = vi.fn();
+    const { container, getAllByRole } = render(
+      <ErrorGroupList totalErrors={50} uniqueGroups={3} onSelect={onSelect}
+        groups={[
+          { fingerprint: "abc123", message: "TypeError: null", count: 30, affectedUsers: 10, lastSeen: "5m ago" },
+          { fingerprint: "def456", message: "RangeError", count: 15, affectedUsers: 5, lastSeen: "1h ago" },
+        ]} />
+    );
+    expect(container.textContent).toContain("Error Groups");
+    expect(container.textContent).toContain("50 errors");
+    expect(container.textContent).toContain("3 groups");
+    expect(container.textContent).toContain("TypeError: null");
+    expect(container.textContent).toContain("30×");
+    expect(container.textContent).toContain("10 users");
+    fireEvent.click(getAllByRole("button")[0]);
+    expect(onSelect).toHaveBeenCalledWith("abc123");
   });
 });
