@@ -1,39 +1,31 @@
-"""Structured log parser — parse JSON logs and compute aggregates."""
+"""Structured logging formatter — format logs as structured JSON."""
 from __future__ import annotations
-import json
+import time
+import html
 
 
-def parse_logs(lines: list[str]) -> dict:
-    parsed = []
-    errors = 0
-    for line in lines:
-        try:
-            entry = json.loads(line)
-            parsed.append(entry)
-        except (json.JSONDecodeError, TypeError):
-            errors += 1
-    by_level: dict[str, int] = {}
-    by_service: dict[str, int] = {}
-    for e in parsed:
-        lv = e.get("level", "unknown").lower()
-        svc = e.get("service", "unknown")
-        by_level[lv] = by_level.get(lv, 0) + 1
-        by_service[svc] = by_service.get(svc, 0) + 1
-    return {
-        "total": len(lines), "parsed": len(parsed), "parse_errors": errors,
-        "by_level": by_level, "by_service": by_service,
-        "error_count": by_level.get("error", 0) + by_level.get("fatal", 0),
-        "has_errors": by_level.get("error", 0) + by_level.get("fatal", 0) > 0,
-    }
+def format_log(level: str, message: str, context: dict | None = None,
+               service: str = "", trace_id: str = "") -> dict:
+    return {"timestamp": time.time(), "level": level.upper(),
+            "message": html.escape(message), "service": service,
+            "trace_id": trace_id, "context": context or {},
+            "formatted": f"[{level.upper()}] {html.escape(message)}"}
 
 
-def filter_logs(parsed: list[dict], *, level: str | None = None,
-                 service: str | None = None, search: str | None = None) -> list[dict]:
-    result = parsed
-    if level:
-        result = [e for e in result if e.get("level", "").lower() == level.lower()]
-    if service:
-        result = [e for e in result if e.get("service") == service]
-    if search:
-        result = [e for e in result if search.lower() in json.dumps(e).lower()]
-    return result
+def parse_log_line(line: str) -> dict:
+    parts = line.strip().split(" ", 2)
+    if len(parts) >= 3 and parts[0].startswith("["):
+        level = parts[0].strip("[]")
+        return {"level": level, "message": parts[2] if len(parts) > 2 else parts[1],
+                "parsed": True}
+    return {"level": "unknown", "message": line.strip(), "parsed": False}
+
+
+def aggregate_log_levels(logs: list[dict]) -> dict:
+    counts: dict[str, int] = {}
+    for log in logs:
+        lv = log.get("level", "UNKNOWN")
+        counts[lv] = counts.get(lv, 0) + 1
+    total = sum(counts.values())
+    return {"total": total, "by_level": counts,
+            "error_pct": round(counts.get("ERROR", 0) / max(total, 1) * 100, 1)}

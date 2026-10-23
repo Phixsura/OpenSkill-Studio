@@ -5,17 +5,16 @@ import { StructuredLogViewer } from "@/components/structured-log-viewer";
 describe("StructuredLogViewer", () => {
   it("renders logs", () => {
     const { container } = render(
-      <StructuredLogViewer total={3} hasErrors={true}
-        byLevel={{ info: 2, error: 1 }}
+      <StructuredLogViewer total={100} errorPct={5} byLevel={{ INFO: 80, ERROR: 5, WARN: 15 }}
         logs={[
-          { level: "info", service: "api", message: "Request handled" },
-          { level: "error", service: "api", message: "DB timeout" },
+          { level: "ERROR", message: "Connection failed", service: "api", traceId: "t1" },
+          { level: "INFO", message: "Request handled", service: "api", traceId: "t2" },
         ]} />
     );
-    expect(container.textContent).toContain("Logs");
-    expect(container.textContent).toContain("info: 2");
-    expect(container.textContent).toContain("error: 1");
-    expect(container.textContent).toContain("DB timeout");
-    expect(container.textContent).toContain("3 total entries");
+    expect(container.textContent).toContain("Structured Logs");
+    expect(container.textContent).toContain("100 logs");
+    expect(container.textContent).toContain("5% errors");
+    expect(container.textContent).toContain("Connection failed");
+    expect(container.textContent).toContain("INFO: 80");
   });
 });

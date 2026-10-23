@@ -1,25 +1,18 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_structured_log import parse_logs, filter_logs
+from app.services.app_marketplace_app_app_app_app_app_app_app_structured_log import format_log, parse_log_line, aggregate_log_levels
+
+def test_format():
+    r = format_log("info", "Server started", {"port": 8080}, "api", "trace-123")
+    assert r["level"] == "INFO"
+    assert r["service"] == "api"
+    assert "[INFO]" in r["formatted"]
 
 def test_parse():
-    lines = [
-        '{"level": "info", "service": "api", "message": "Request handled"}',
-        '{"level": "error", "service": "api", "message": "DB timeout"}',
-        '{"level": "info", "service": "worker", "message": "Job done"}',
-        'not json',
-    ]
-    r = parse_logs(lines)
-    assert r["total"] == 4
-    assert r["parsed"] == 3
-    assert r["parse_errors"] == 1
-    assert r["error_count"] == 1
-    assert r["has_errors"]
+    r = parse_log_line("[ERROR] Connection failed to database")
+    assert r["parsed"]
+    assert r["level"] == "ERROR"
 
-def test_filter():
-    logs = [
-        {"level": "info", "service": "api", "message": "ok"},
-        {"level": "error", "service": "api", "message": "fail"},
-        {"level": "info", "service": "worker", "message": "done"},
-    ]
-    assert len(filter_logs(logs, level="error")) == 1
-    assert len(filter_logs(logs, service="worker")) == 1
-    assert len(filter_logs(logs, search="fail")) == 1
+def test_aggregate():
+    logs = [{"level": "INFO"}, {"level": "INFO"}, {"level": "ERROR"}, {"level": "WARN"}]
+    r = aggregate_log_levels(logs)
+    assert r["total"] == 4
+    assert r["error_pct"] == 25.0
