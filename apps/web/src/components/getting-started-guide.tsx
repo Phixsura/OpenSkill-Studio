@@ -1,44 +1,27 @@
 "use client";
 
-import { useState } from "react";
+interface Guide { id: string; title: string; icon: string; stepCount: number; steps?: string[]; }
+interface GettingStartedGuideProps { guides: Guide[]; recommended: string;
+  onSelect: (id: string) => void; }
 
-interface Step { order: number; title: string; code: string; }
-interface GettingStartedGuideProps { steps: Step[]; availableLanguages: string[];
-  language: string; onLanguageChange: (lang: string) => void; }
-
-const langIcons: Record<string, string> = { typescript: "📘", python: "🐍", go: "🐹", ruby: "💎" };
-
-export function GettingStartedGuide({ steps, availableLanguages, language, onLanguageChange }: GettingStartedGuideProps) {
-  const [copied, setCopied] = useState<number | null>(null);
-  const copy = (order: number, code: string) => {
-    navigator.clipboard?.writeText(code); setCopied(order);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
+export function GettingStartedGuide({ guides, recommended, onSelect }: GettingStartedGuideProps) {
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
-      <h2 className="text-2xl font-bold">Getting Started</h2>
-      <div className="flex gap-1">
-        {availableLanguages.map(l => (
-          <button key={l} onClick={() => onLanguageChange(l)}
-            className={`rounded px-3 py-1 text-xs capitalize ${language === l ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>
-            {langIcons[l] ?? "📄"} {l}
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">🎓 Getting Started</h3>
+      <div className="space-y-2">
+        {guides.map(g => (
+          <button key={g.id} onClick={() => onSelect(g.id)}
+            className={`w-full text-left flex items-center gap-3 rounded-lg px-4 py-3 transition ${
+              g.id === recommended ? "bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-200" :
+              "bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700"
+            }`}>
+            <span className="text-2xl">{g.icon}</span>
+            <div>
+              <p className="text-sm font-medium">{g.title}</p>
+              <p className="text-xs text-gray-400">{g.stepCount} steps</p>
+            </div>
+            {g.id === recommended && <span className="ml-auto text-xs text-blue-600 font-medium">Recommended</span>}
           </button>
-        ))}
-      </div>
-      <div className="space-y-4">
-        {steps.map(s => (
-          <div key={s.order} className="rounded-xl border p-4 dark:border-gray-700">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs text-white">{s.order}</span>
-              <h3 className="text-sm font-semibold">{s.title}</h3>
-            </div>
-            <div className="relative">
-              <pre className="rounded-lg bg-gray-950 p-3 text-xs font-mono text-green-400 overflow-x-auto">{s.code}</pre>
-              <button onClick={() => copy(s.order, s.code)}
-                className="absolute top-2 right-2 text-xs text-gray-500">{copied === s.order ? "✓" : "📋"}</button>
-            </div>
-          </div>
         ))}
       </div>
     </div>
