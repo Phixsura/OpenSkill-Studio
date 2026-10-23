@@ -1,39 +1,35 @@
 "use client";
 
 interface GatewayRoute { path: string; upstream: string; methods: string[];
-  rateLimit: number; authRequired: boolean; enabled: boolean; }
-interface GatewayRoutesTableProps { routes: GatewayRoute[]; middleware: string[];
-  onToggle: (path: string) => void; }
+  authRequired: boolean; rateLimit: number; }
+interface GatewayRoutesTableProps { routes: GatewayRoute[]; total: number;
+  rateLimited: number; }
 
-export function GatewayRoutesTable({ routes, middleware, onToggle }: GatewayRoutesTableProps) {
+export function GatewayRoutesTable({ routes, total, rateLimited }: GatewayRoutesTableProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">🚪 API Gateway</h3>
-        <span className="text-xs text-gray-400">{routes.length} routes · {middleware.length} middleware</span>
+        <h3 className="font-semibold">🌐 API Gateway</h3>
+        <span className="text-xs text-gray-400">{total} routes · {rateLimited} rate-limited</span>
       </div>
-      <table className="w-full text-sm">
-        <thead><tr className="text-xs text-gray-400 border-b dark:border-gray-700">
-          <th className="p-3 text-left">Path</th><th className="p-3 text-left">Upstream</th>
-          <th className="p-3">Auth</th><th className="p-3">Rate</th><th className="p-3">Active</th>
-        </tr></thead>
-        <tbody>
-          {routes.map(r => (
-            <tr key={r.path} className="border-b last:border-0 dark:border-gray-700">
-              <td className="p-3 font-mono text-xs">{r.path}</td>
-              <td className="p-3 text-xs text-gray-400">{r.upstream}</td>
-              <td className="p-3 text-center">{r.authRequired ? "🔒" : "🔓"}</td>
-              <td className="p-3 text-center text-xs">{r.rateLimit || "—"}</td>
-              <td className="p-3 text-center">
-                <button onClick={() => onToggle(r.path)}
-                  className={`w-8 h-4 rounded-full ${r.enabled ? "bg-green-500" : "bg-gray-300"}`}>
-                  <span className={`block w-3 h-3 rounded-full bg-white transform ${r.enabled ? "translate-x-4" : "translate-x-0.5"}`} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="divide-y dark:divide-gray-700">
+        {routes.map(r => (
+          <div key={r.path} className="flex items-center justify-between px-4 py-2.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono">{r.path}</span>
+                {!r.authRequired && <span className="text-[10px] text-yellow-600">public</span>}
+              </div>
+              <div className="text-[10px] text-gray-400">→ {r.upstream}</div>
+            </div>
+            <div className="flex gap-1">
+              {r.methods.map(m => (
+                <span key={m} className="px-1.5 py-0.5 text-[10px] bg-gray-100 dark:bg-gray-800 rounded font-mono">{m}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

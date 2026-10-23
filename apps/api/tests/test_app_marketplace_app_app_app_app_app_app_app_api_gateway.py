@@ -1,17 +1,17 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_api_gateway import ApiGateway
+from app.services.app_marketplace_app_app_app_app_app_app_app_api_gateway import create_route, build_gateway, match_route
 
 def test_gateway():
-    gw = ApiGateway()
-    gw.add_route(path="/api/v1/users", upstream="http://users:8001", rate_limit=100)
-    gw.add_route(path="/api/v1/billing", upstream="http://billing:8002", auth_required=True)
-    gw.add_middleware("cors")
-    gw.add_middleware("rate_limit")
-    r = gw.resolve("/api/v1/users", "GET")
-    assert r["matched"]
-    assert r["allowed"]
-    assert r["upstream"] == "http://users:8001"
-    r2 = gw.resolve("/unknown")
-    assert not r2["matched"]
-    c = gw.config()
-    assert c["total_routes"] == 2
-    assert len(c["middleware"]) == 2
+    routes = [
+        create_route("/api/users", "user-svc:8080", ["GET", "POST"], auth_required=True, rate_limit=100),
+        create_route("/api/health", "health-svc:8080", ["GET"], auth_required=False),
+    ]
+    g = build_gateway(routes)
+    assert g["total"] == 2
+    assert g["by_auth"]["public"] == 1
+    assert g["rate_limited"] == 1
+
+def test_match():
+    routes = [create_route("/api/users", "svc", ["GET", "POST"])]
+    g = build_gateway(routes)
+    assert match_route(g, "GET", "/api/users")["matched"]
+    assert not match_route(g, "DELETE", "/api/users")["matched"]

@@ -1,19 +1,20 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { GatewayRoutesTable } from "@/components/gateway-routes-table";
 
 describe("GatewayRoutesTable", () => {
   it("renders routes", () => {
     const { container } = render(
-      <GatewayRoutesTable middleware={["cors", "rate_limit"]} onToggle={vi.fn()}
-        routes={[
-          { path: "/api/v1/users", upstream: "http://users:8001", methods: ["GET"], rateLimit: 100, authRequired: true, enabled: true },
-        ]} />
+      <GatewayRoutesTable total={2} rateLimited={1} routes={[
+        { path: "/api/users", upstream: "user-svc:8080", methods: ["GET", "POST"], authRequired: true, rateLimit: 100 },
+        { path: "/api/health", upstream: "health-svc:8080", methods: ["GET"], authRequired: false, rateLimit: 0 },
+      ]} />
     );
     expect(container.textContent).toContain("API Gateway");
-    expect(container.textContent).toContain("1 routes");
-    expect(container.textContent).toContain("2 middleware");
-    expect(container.textContent).toContain("/api/v1/users");
-    expect(container.textContent).toContain("http://users:8001");
+    expect(container.textContent).toContain("2 routes");
+    expect(container.textContent).toContain("1 rate-limited");
+    expect(container.textContent).toContain("/api/users");
+    expect(container.textContent).toContain("public");
+    expect(container.textContent).toContain("POST");
   });
 });
