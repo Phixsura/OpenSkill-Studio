@@ -17,9 +17,12 @@ def check_permission(*, role: str, permission: str) -> dict:
     return {"allowed": allowed, "role": role, "permission": permission}
 
 
-def assign_role(*, user_id: str, app_id: str, role: str, assigner_role: str) -> dict:
-    if role not in ROLES:
+def assign_role(*, user_id: str, app_id: str, role: str, assigner_role: str,
+                   target_current_role: str | None = None) -> dict:
+    if role not in ROLES or assigner_role not in ROLES:
         return {"success": False, "error": f"Invalid role: {role}"}
+    if not check_permission(role=assigner_role, permission="manage_members")["allowed"]:
+        return {"success": False, "error": "Not permitted to manage members"}
     assigner_level = ROLES.get(assigner_role, {}).get("level", 0)
     target_level = ROLES[role]["level"]
     if target_level >= assigner_level:
