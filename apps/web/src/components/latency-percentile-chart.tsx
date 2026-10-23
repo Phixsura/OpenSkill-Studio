@@ -1,42 +1,36 @@
 "use client";
 
-interface LatencyPercentileChartProps { p50: number; p90: number; p95: number; p99: number;
-  avg: number; min: number; max: number; count: number; status: string; }
+interface LatencyPercentileChartProps { p50: number; p90: number; p95: number;
+  p99: number; avg: number; max: number; count: number; sloMet: boolean; }
 
-export function LatencyPercentileChart({ p50, p90, p95, p99, avg, min, max, count, status }: LatencyPercentileChartProps) {
+export function LatencyPercentileChart({ p50, p90, p95, p99, avg, max, count, sloMet }: LatencyPercentileChartProps) {
+  const maxVal = Math.max(p99, max, 1);
   const bars = [
-    { label: "p50", value: p50, color: "bg-green-500" },
-    { label: "p90", value: p90, color: "bg-blue-500" },
-    { label: "p95", value: p95, color: "bg-yellow-500" },
-    { label: "p99", value: p99, color: "bg-red-500" },
+    { label: "p50", value: p50 }, { label: "p90", value: p90 },
+    { label: "p95", value: p95 }, { label: "p99", value: p99 },
   ];
-  const maxVal = Math.max(...bars.map(b => b.value), 1);
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">⏱️ Latency</h3>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">{count.toLocaleString()} samples</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            status === "fast" ? "bg-green-100 text-green-700" :
-            status === "ok" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
-          }`}>{status}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">⏱️ Latency Percentiles</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="text-gray-400">{count} samples · avg {avg}ms</span>
+          <span className={sloMet ? "text-green-600" : "text-red-500"}>{sloMet ? "✅ SLO met" : "⚠ SLO breach"}</span>
         </div>
       </div>
-      <div className="space-y-2 mb-4">
+      <div className="p-4 space-y-2">
         {bars.map(b => (
-          <div key={b.label} className="flex items-center gap-3">
-            <span className="text-xs font-mono w-8 text-gray-400">{b.label}</span>
-            <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-800 rounded">
-              <div className={`h-full rounded ${b.color}`}
-                   style={{ width: `${(b.value / maxVal) * 100}%` }} />
+          <div key={b.label}>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="font-mono font-medium">{b.label}</span>
+              <span className="text-gray-400">{b.value}ms</span>
             </div>
-            <span className="text-xs font-mono w-16 text-right">{b.value}ms</span>
+            <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div className={`h-full rounded-full ${b.label === "p99" && !sloMet ? "bg-red-500" : "bg-blue-500"}`}
+                style={{ width: `${(b.value / maxVal) * 100}%` }} />
+            </div>
           </div>
         ))}
-      </div>
-      <div className="flex gap-4 text-xs text-gray-400">
-        <span>Avg: {avg}ms</span><span>Min: {min}ms</span><span>Max: {max}ms</span>
       </div>
     </div>
   );
