@@ -1,33 +1,35 @@
 "use client";
 
-interface Event { event_id: string; type: string; source: string; timestamp: string; payload: Record<string, unknown>; }
-interface EventStreamViewerProps { events: Event[]; hasMore: boolean; onLoadMore: () => void; }
+interface StreamEvent { seq: number; type: string; stream: string; data: Record<string, unknown>; }
+interface EventStreamViewerProps { streamId: string; events: StreamEvent[];
+  version: number; totalStreams: number; }
 
-const typeIcons: Record<string, string> = {
-  "app.installed": "📥", "app.uninstalled": "📤", "app.updated": "🔄",
-  "review.created": "⭐", "webhook.delivered": "✅", "webhook.failed": "❌",
-  "payment.completed": "💰", "user.signup": "👤",
+const TYPE_COLOR: Record<string, string> = {
+  created: "bg-green-100 text-green-700", paid: "bg-blue-100 text-blue-700",
+  shipped: "bg-purple-100 text-purple-700", cancelled: "bg-red-100 text-red-700",
 };
 
-export function EventStreamViewer({ events, hasMore, onLoadMore }: EventStreamViewerProps) {
+export function EventStreamViewer({ streamId, events, version, totalStreams }: EventStreamViewerProps) {
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-semibold">Event Stream</h2>
-      <div className="space-y-1">
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">📜 Event Stream</h3>
+          <span className="text-xs text-gray-400">{totalStreams} streams</span>
+        </div>
+        <p className="text-xs text-gray-400 mt-0.5 font-mono">{streamId} · v{version}</p>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
         {events.map(e => (
-          <div key={e.event_id} className="flex items-center gap-3 rounded border px-3 py-2 font-mono text-xs dark:border-gray-700">
-            <span>{typeIcons[e.type] ?? "📌"}</span>
-            <span className="font-medium text-blue-600 dark:text-blue-400">{e.type}</span>
-            <span className="text-gray-400">{e.source}</span>
-            <span className="ml-auto text-gray-300">{new Date(e.timestamp).toLocaleTimeString()}</span>
+          <div key={e.seq} className="flex items-start gap-3 px-4 py-3">
+            <span className="text-xs font-mono text-gray-400 w-6 pt-0.5">#{e.seq}</span>
+            <div>
+              <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_COLOR[e.type] || "bg-gray-100 text-gray-600"}`}>{e.type}</span>
+              <pre className="text-xs text-gray-500 mt-1">{JSON.stringify(e.data)}</pre>
+            </div>
           </div>
         ))}
       </div>
-      {hasMore && (
-        <button onClick={onLoadMore} className="w-full rounded border py-1.5 text-xs text-gray-500 dark:border-gray-700">
-          Load More Events
-        </button>
-      )}
     </div>
   );
 }

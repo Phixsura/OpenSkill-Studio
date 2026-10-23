@@ -1,17 +1,21 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { EventStreamViewer } from "@/components/event-stream-viewer";
 
 describe("EventStreamViewer", () => {
-  const events = [
-    { event_id: "e1", type: "app.installed", source: "web", timestamp: "2026-10-23T12:00:00", payload: {} },
-    { event_id: "e2", type: "review.created", source: "api", timestamp: "2026-10-23T11:00:00", payload: {} },
-  ];
-  it("renders", () => {
-    const { container } = render(<EventStreamViewer events={events} hasMore={false} onLoadMore={vi.fn()} />);
+  it("renders events", () => {
+    const { container } = render(
+      <EventStreamViewer streamId="order-1" version={3} totalStreams={5} events={[
+        { seq: 1, type: "created", stream: "order-1", data: { total: 100 } },
+        { seq: 2, type: "paid", stream: "order-1", data: { method: "card" } },
+        { seq: 3, type: "shipped", stream: "order-1", data: { tracking: "TRK123" } },
+      ]} />
+    );
     expect(container.textContent).toContain("Event Stream");
-    expect(container.textContent).toContain("app.installed");
-    expect(container.textContent).toContain("📥");
-    expect(container.textContent).toContain("review.created");
+    expect(container.textContent).toContain("order-1");
+    expect(container.textContent).toContain("v3");
+    expect(container.textContent).toContain("created");
+    expect(container.textContent).toContain("shipped");
+    expect(container.textContent).toContain("TRK123");
   });
 });
