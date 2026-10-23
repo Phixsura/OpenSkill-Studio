@@ -1,19 +1,20 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ABTestResultsCard } from "@/components/ab-test-results-card";
+import { AbTestResultsCard } from "@/components/ab-test-results-card";
 
-describe("ABTestResultsCard", () => {
-  it("renders winner", () => {
+describe("AbTestResultsCard", () => {
+  it("renders results", () => {
     const { container } = render(
-      <ABTestResultsCard testName="Checkout v2"
-        control={{ visitors: 5000, conversions: 200, rate: 4.0, rateDisplay: "4.00%" }}
-        variant={{ visitors: 5000, conversions: 280, rate: 5.6, rateDisplay: "5.60%" }}
-        liftDisplay="+40.0%" significant={true} winner="variant" />
+      <AbTestResultsCard experimentName="Button Color" winner="B" bestRate={8.0}
+        results={[
+          { name: "A", views: 1000, conversions: 50, rate: 5.0 },
+          { name: "B", views: 1000, conversions: 80, rate: 8.0 },
+        ]} />
     );
-    expect(container.textContent).toContain("Checkout v2");
-    expect(container.textContent).toContain("4.00%");
-    expect(container.textContent).toContain("5.60%");
-    expect(container.textContent).toContain("Winner");
-    expect(container.textContent).toContain("Significant");
+    expect(container.textContent).toContain("Button Color");
+    expect(container.textContent).toContain("Winner: B");
+    expect(container.textContent).toContain("8%");
+    expect(container.textContent).toContain("1,000 views");
+    expect(container.textContent).toContain("🏆");
   });
 });
