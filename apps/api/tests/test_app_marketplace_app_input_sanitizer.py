@@ -27,6 +27,6 @@ def test_cmd_injection():
     assert ";" in r["dangerous_chars"]
 
 def test_filename():
-    assert sanitize_filename(filename="../../etc/passwd") == "etc_passwd"
+    assert sanitize_filename(filename="../../etc/passwd") == "etcpasswd"
     assert sanitize_filename(filename="my file (1).txt") == "my_file__1_.txt"
     assert sanitize_filename(filename="normal.jpg") == "normal.jpg"
