@@ -1,24 +1,18 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_ip_allowlist import IpAllowlistManager
+from app.services.app_marketplace_app_app_app_app_app_app_app_ip_allowlist import validate_ip, check_access, summarize_allowlist
 
-def test_allowlist():
-    mgr = IpAllowlistManager()
-    mgr.add_rule(cidr="10.0.0.0/8", label="Internal")
-    mgr.add_rule(cidr="203.0.113.0/24", label="Office")
-    r = mgr.check_ip("10.1.2.3")
-    assert r["allowed"]
-    assert r["label"] == "Internal"
-    r2 = mgr.check_ip("8.8.8.8")
-    assert not r2["allowed"]
-    assert r2["reason"] == "not_in_allowlist"
+def test_validate():
+    assert validate_ip("192.168.1.1")["valid"]
+    assert validate_ip("10.0.0.0/8")["valid"]
+    assert not validate_ip("not-an-ip")["valid"]
 
-def test_invalid():
-    mgr = IpAllowlistManager()
-    r = mgr.add_rule(cidr="not-a-cidr")
-    assert "error" in r
+def test_access():
+    allow = ["10.0.0.0/8", "192.168.1.0/24"]
+    assert check_access(allow, "10.0.0.5")["allowed"]
+    assert check_access(allow, "192.168.1.100")["allowed"]
+    assert not check_access(allow, "8.8.8.8")["allowed"]
+    assert check_access([], "1.2.3.4")["allowed"]  # no restrictions
 
-def test_remove():
-    mgr = IpAllowlistManager()
-    mgr.add_rule(cidr="10.0.0.0/8", label="Internal")
-    assert len(mgr.list_rules()) == 1
-    mgr.remove_rule("10.0.0.0/8")
-    assert len(mgr.list_rules()) == 0
+def test_summary():
+    r = summarize_allowlist(["10.0.0.0/8", "bad", "192.168.1.1"])
+    assert r["valid"] == 2
+    assert r["invalid"] == 1
