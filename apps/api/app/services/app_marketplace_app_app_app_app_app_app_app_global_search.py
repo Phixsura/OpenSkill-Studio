@@ -1,29 +1,29 @@
-"""Global search engine — unified search across apps, docs, users, and settings."""
+"""Global search — unified search across all platform entities."""
 from __future__ import annotations
-import html
-import re
 
 
-def search(query: str, *, sources: list[dict], limit: int = 20) -> dict:
-    if not query.strip():
-        return {"results": [], "total": 0, "query": ""}
-    q = query.strip().lower()
-    safe_query = html.escape(query)
+ENTITY_TYPES = {"app", "user", "team", "webhook", "deployment", "document"}
+
+
+def search_all(query: str, entities: list[dict], limit: int = 10) -> dict:
+    q = query.lower()
     results = []
-    for item in sources:
-        title = item.get("title", "")
-        description = item.get("description", "")
-        content = f"{title} {description}".lower()
-        if q in content:
-            # Simple relevance: title match > description match
-            score = 10 if q in title.lower() else 5
-            score += len(q) / max(len(content), 1) * 10  # length ratio bonus
-            results.append({
-                "title": html.escape(title), "description": html.escape(description[:200]),
-                "type": item.get("type", "page"), "url": item.get("url", ""),
-                "icon": item.get("icon", "📄"), "score": round(score, 2),
-            })
+    by_type: dict[str, int] = {}
+    for e in entities:
+        name = e.get("name", "").lower()
+        desc = e.get("description", "").lower()
+        etype = e.get("type", "unknown")
+        if q in name or q in desc:
+            score = 1.0 if q in name else 0.5
+            results.append({**e, "score": score, "match_field": "name" if q in name else "description"})
+            by_type[etype] = by_type.get(etype, 0) + 1
     results.sort(key=lambda r: -r["score"])
-    total = len(results)
-    return {"results": results[:limit], "total": total, "query": safe_query,
-            "shown": min(total, limit), "has_more": total > limit}
+    return {"results": results[:limit], "total_matches": len(results),
+            "by_type": by_type, "query": query, "truncated": len(results) > limit}
+
+
+def suggest_completions(query: str, names: list[str], limit: int = 5) -> list[str]:
+    q = query.lower()
+    matches = [n for n in names if n.lower().startswith(q)]
+    contains = [n for n in names if q in n.lower() and not n.lower().startswith(q)]
+    return (matches + contains)[:limit]

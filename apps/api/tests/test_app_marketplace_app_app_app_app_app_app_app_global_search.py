@@ -1,18 +1,18 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_global_search import search
+from app.services.app_marketplace_app_app_app_app_app_app_app_global_search import search_all, suggest_completions
 
 def test_search():
-    sources = [
-        {"title": "User Management", "description": "Manage users and roles", "type": "page", "url": "/users"},
-        {"title": "API Keys", "description": "Manage API keys", "type": "settings", "url": "/settings/keys"},
-        {"title": "Billing", "description": "Payment and invoices", "type": "page", "url": "/billing"},
+    entities = [
+        {"name": "Auth Service", "type": "app", "description": "Authentication"},
+        {"name": "User Profile", "type": "document", "description": "User settings"},
+        {"name": "Analytics Dashboard", "type": "app", "description": "Data analytics"},
     ]
-    r = search("manage", sources=sources)
-    assert r["total"] == 2
-    assert r["results"][0]["title"] in ("User Management", "API Keys")
-    r2 = search("billing", sources=sources)
-    assert r2["total"] == 1
-    assert r2["results"][0]["url"] == "/billing"
+    r = search_all("auth", entities)
+    assert r["total_matches"] == 1
+    assert r["results"][0]["name"] == "Auth Service"
 
-def test_empty():
-    r = search("", sources=[{"title": "Test"}])
-    assert r["total"] == 0
+def test_suggest():
+    names = ["Auth Service", "API Gateway", "Analytics", "Billing"]
+    r = suggest_completions("a", names)
+    assert "Auth Service" in r
+    assert "Analytics" in r
+    assert "Billing" not in r
