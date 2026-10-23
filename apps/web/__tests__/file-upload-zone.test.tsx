@@ -3,14 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { FileUploadZone } from "@/components/file-upload-zone";
 
 describe("FileUploadZone", () => {
-  it("renders", () => {
+  it("renders zone", () => {
     const { container } = render(
-      <FileUploadZone category="image" maxSizeMb={5} allowedTypes={[".png", ".jpg"]}
-        onUpload={vi.fn()} />
+      <FileUploadZone category="image" maxMb={10} allowedExtensions={[".png", ".jpg"]}
+        onUpload={vi.fn()} uploading={false}
+        lastResult={{ valid: true, filename: "logo.png" }} />
     );
-    expect(container.textContent).toContain("image Upload");
-    expect(container.textContent).toContain("Max 5MB");
-    expect(container.textContent).toContain(".png");
-    expect(container.textContent).toContain("Drag & drop");
+    expect(container.textContent).toContain("Upload image");
+    expect(container.textContent).toContain(".png, .jpg");
+    expect(container.textContent).toContain("Max 10MB");
+    expect(container.textContent).toContain("logo.png uploaded");
   });
 });

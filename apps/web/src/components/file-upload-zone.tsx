@@ -1,36 +1,28 @@
 "use client";
 
-import { useState } from "react";
+interface FileUploadZoneProps { category: string; maxMb: number;
+  allowedExtensions: string[]; onUpload: (file: File) => void;
+  uploading: boolean; lastResult: { valid: boolean; filename?: string; error?: string } | null; }
 
-interface FileUploadZoneProps { category: string; maxSizeMb: number; allowedTypes: string[];
-  onUpload: (file: { name: string; size: number }) => void; }
-
-export function FileUploadZone({ category, maxSizeMb, allowedTypes, onUpload }: FileUploadZoneProps) {
-  const [dragging, setDragging] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
-
-  const handleFile = (name: string, size: number) => {
-    setFileName(name);
-    onUpload({ name, size });
-  };
-
+export function FileUploadZone({ category, maxMb, allowedExtensions, onUpload, uploading, lastResult }: FileUploadZoneProps) {
   return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium capitalize">{category} Upload</h3>
-      <div
-        onDragOver={e => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false);
-          const f = e.dataTransfer.files[0]; if (f) handleFile(f.name, f.size); }}
-        className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center transition-colors ${dragging ? "border-blue-500 bg-blue-50 dark:bg-blue-900/10" : "border-gray-300 dark:border-gray-600"}`}>
-        <span className="text-3xl">📁</span>
-        <p className="mt-2 text-sm text-gray-500">Drag & drop or click to upload</p>
-        <p className="mt-1 text-xs text-gray-400">
-          Max {maxSizeMb}MB · {allowedTypes.join(", ")}
+    <div className="rounded-xl border-2 border-dashed dark:border-gray-600 p-8 text-center">
+      <p className="text-3xl mb-2">📁</p>
+      <p className="text-sm font-medium mb-1">Upload {category}</p>
+      <p className="text-xs text-gray-400 mb-4">
+        {allowedExtensions.join(", ")} · Max {maxMb}MB
+      </p>
+      <label className={`inline-block px-4 py-2 text-sm rounded-lg cursor-pointer ${
+        uploading ? "bg-gray-300 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"
+      }`}>
+        {uploading ? "Uploading..." : "Choose File"}
+        <input type="file" className="hidden" disabled={uploading}
+          onChange={e => e.target.files?.[0] && onUpload(e.target.files[0])} />
+      </label>
+      {lastResult && (
+        <p className={`text-xs mt-3 ${lastResult.valid ? "text-green-600" : "text-red-500"}`}>
+          {lastResult.valid ? `✅ ${lastResult.filename} uploaded` : `❌ ${lastResult.error}`}
         </p>
-      </div>
-      {fileName && (
-        <p className="text-xs text-green-600">✅ {fileName} selected</p>
       )}
     </div>
   );
