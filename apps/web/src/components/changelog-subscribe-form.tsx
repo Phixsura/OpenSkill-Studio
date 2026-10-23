@@ -1,38 +1,29 @@
 "use client";
-
 import { useState } from "react";
 
-interface ChangelogSubscribeFormProps { appName: string; channels: string[];
-  onSubscribe: (email: string, channels: string[]) => void; }
+interface ChangelogSubscribeFormProps { onSubscribe: (email: string, freq: string) => void;
+  subscriberCount: number; }
 
-export function ChangelogSubscribeForm({ appName, channels, onSubscribe }: ChangelogSubscribeFormProps) {
+export function ChangelogSubscribeForm({ onSubscribe, subscriberCount }: ChangelogSubscribeFormProps) {
   const [email, setEmail] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set(["email"]));
-
-  const toggle = (ch: string) => {
-    const next = new Set(selected);
-    next.has(ch) ? next.delete(ch) : next.add(ch);
-    setSelected(next);
-  };
-
+  const [freq, setFreq] = useState("weekly");
+  const handleSubmit = () => { if (email.includes("@")) { onSubscribe(email, freq); setEmail(""); } };
   return (
-    <div className="rounded-xl border p-4 dark:border-gray-700">
-      <h3 className="text-sm font-semibold">📬 Subscribe to {appName} Updates</h3>
-      <div className="mt-3 space-y-2">
-        <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-          placeholder="your@email.com"
-          className="w-full rounded border px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600" />
-        <div className="flex gap-2">
-          {channels.map(ch => (
-            <label key={ch} className="flex items-center gap-1.5 text-xs">
-              <input type="checkbox" checked={selected.has(ch)} onChange={() => toggle(ch)} className="accent-blue-600" />
-              <span className="capitalize">{ch}</span>
-            </label>
-          ))}
-        </div>
-        <button onClick={() => email && selected.size > 0 && onSubscribe(email, Array.from(selected))}
-          className="w-full rounded bg-blue-600 py-2 text-sm text-white">Subscribe</button>
+    <div className="rounded-xl border p-5 dark:border-gray-700 max-w-md">
+      <h3 className="font-semibold mb-1">📬 Stay Updated</h3>
+      <p className="text-xs text-gray-400 mb-3">Join {subscriberCount.toLocaleString()} subscribers</p>
+      <div className="flex gap-2 mb-2">
+        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"
+          className="flex-1 text-sm px-3 py-1.5 border rounded dark:bg-gray-800 dark:border-gray-600" />
+        <select value={freq} onChange={e => setFreq(e.target.value)}
+          className="text-sm px-2 py-1.5 border rounded dark:bg-gray-800 dark:border-gray-600">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
       </div>
+      <button onClick={handleSubmit}
+        className="w-full py-2 bg-blue-600 text-white text-sm rounded font-medium hover:bg-blue-700">Subscribe</button>
     </div>
   );
 }
