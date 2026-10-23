@@ -1,25 +1,21 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GettingStartedGuide } from "@/components/getting-started-guide";
 
-const STEPS = [
-  { step: 1, title: "Create Account", description: "Set up profile", docsUrl: "/docs/1" },
-  { step: 2, title: "Create App", description: "Choose category", docsUrl: "/docs/2" },
-  { step: 3, title: "Publish", description: "Go live", docsUrl: "/docs/3" },
-];
-
 describe("GettingStartedGuide", () => {
-  it("shows all steps", () => {
-    const { container } = render(<GettingStartedGuide steps={STEPS} completedSteps={[]} />);
-    expect(container.textContent).toContain("Create Account");
-    expect(container.textContent).toContain("Publish");
-  });
-  it("shows progress", () => {
-    const { container } = render(<GettingStartedGuide steps={STEPS} completedSteps={[1, 2]} />);
-    expect(container.textContent).toContain("67%");
-  });
-  it("marks completed", () => {
-    const { container } = render(<GettingStartedGuide steps={STEPS} completedSteps={[1]} />);
-    expect(container.textContent).toContain("✓");
+  const steps = [
+    { order: 1, title: "Install the SDK", code: "npm install @openskill/sdk" },
+    { order: 2, title: "Set API key", code: "export OSK_API_KEY=key" },
+  ];
+  it("renders guide", () => {
+    const { container } = render(
+      <GettingStartedGuide steps={steps} availableLanguages={["typescript", "python"]}
+        language="typescript" onLanguageChange={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Getting Started");
+    expect(container.textContent).toContain("Install the SDK");
+    expect(container.textContent).toContain("npm install");
+    expect(container.textContent).toContain("typescript");
+    expect(container.textContent).toContain("python");
   });
 });

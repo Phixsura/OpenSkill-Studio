@@ -1,35 +1,46 @@
 "use client";
 
-interface GuideStep { step: number; title: string; description: string; docsUrl: string; }
+import { useState } from "react";
 
-interface GettingStartedGuideProps { steps: GuideStep[]; completedSteps: number[]; }
+interface Step { order: number; title: string; code: string; }
+interface GettingStartedGuideProps { steps: Step[]; availableLanguages: string[];
+  language: string; onLanguageChange: (lang: string) => void; }
 
-export function GettingStartedGuide({ steps, completedSteps }: GettingStartedGuideProps) {
-  const completed = new Set(completedSteps);
-  const pct = steps.length > 0 ? Math.round((completedSteps.length / steps.length) * 100) : 0;
+const langIcons: Record<string, string> = { typescript: "📘", python: "🐍", go: "🐹", ruby: "💎" };
+
+export function GettingStartedGuide({ steps, availableLanguages, language, onLanguageChange }: GettingStartedGuideProps) {
+  const [copied, setCopied] = useState<number | null>(null);
+  const copy = (order: number, code: string) => {
+    navigator.clipboard?.writeText(code); setCopied(order);
+    setTimeout(() => setCopied(null), 2000);
+  };
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="font-semibold">🚀 Getting Started</h3>
-        <span className="text-sm">{pct}% complete</span>
-      </div>
-      <div className="mb-4 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-        <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <ol className="space-y-3">
-        {steps.map(s => (
-          <li key={s.step} className={`flex gap-3 ${completed.has(s.step) ? "opacity-60" : ""}`}>
-            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${
-              completed.has(s.step) ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-700"
-            }`}>{completed.has(s.step) ? "✓" : s.step}</span>
-            <div>
-              <p className={`text-sm font-medium ${completed.has(s.step) ? "line-through" : ""}`}>{s.title}</p>
-              <p className="text-xs text-gray-500">{s.description}</p>
-            </div>
-          </li>
+    <div className="mx-auto max-w-2xl space-y-5">
+      <h2 className="text-2xl font-bold">Getting Started</h2>
+      <div className="flex gap-1">
+        {availableLanguages.map(l => (
+          <button key={l} onClick={() => onLanguageChange(l)}
+            className={`rounded px-3 py-1 text-xs capitalize ${language === l ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>
+            {langIcons[l] ?? "📄"} {l}
+          </button>
         ))}
-      </ol>
+      </div>
+      <div className="space-y-4">
+        {steps.map(s => (
+          <div key={s.order} className="rounded-xl border p-4 dark:border-gray-700">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs text-white">{s.order}</span>
+              <h3 className="text-sm font-semibold">{s.title}</h3>
+            </div>
+            <div className="relative">
+              <pre className="rounded-lg bg-gray-950 p-3 text-xs font-mono text-green-400 overflow-x-auto">{s.code}</pre>
+              <button onClick={() => copy(s.order, s.code)}
+                className="absolute top-2 right-2 text-xs text-gray-500">{copied === s.order ? "✓" : "📋"}</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

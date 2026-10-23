@@ -1,28 +1,40 @@
-"""Getting started — complete onboarding guide for new developers."""
+"""Getting started — quick start guide with code examples."""
+
+import html
+
+CODE_EXAMPLES = {
+    "typescript": {
+        "install": "npm install @openskill/sdk",
+        "init": '''import { OpenSkill } from '@openskill/sdk';
+
+const client = new OpenSkill({ apiKey: process.env.OSK_API_KEY });
+
+const apps = await client.apps.list();
+console.log(`Found ${apps.length} apps`);''',
+    },
+    "python": {
+        "install": "pip install openskill-sdk",
+        "init": '''from openskill import OpenSkill
+
+client = OpenSkill(api_key=os.environ["OSK_API_KEY"])
+
+apps = client.apps.list()
+print(f"Found {len(apps)} apps")''',
+    },
+}
 
 
-def build_getting_started(*, developer_name: str, completed: list[str]) -> dict:
-    steps = [
-        {"id": "signup", "title": "Create Account", "icon": "👤", "time_min": 2},
-        {"id": "verify", "title": "Verify Email", "icon": "📧", "time_min": 1},
-        {"id": "profile", "title": "Set Up Profile", "icon": "🎨", "time_min": 3},
-        {"id": "create_app", "title": "Create First App", "icon": "📦", "time_min": 5},
-        {"id": "add_sdk", "title": "Install SDK", "icon": "🔧", "time_min": 5},
-        {"id": "first_api", "title": "Make First API Call", "icon": "⚡", "time_min": 3},
-        {"id": "deploy", "title": "Deploy to Production", "icon": "🚀", "time_min": 10},
-        {"id": "publish", "title": "Publish to Marketplace", "icon": "🏪", "time_min": 5},
-    ]
-    enriched = [{"completed": s["id"] in completed, **s} for s in steps]
-    done = sum(1 for s in enriched if s["completed"])
-    current = next((s for s in enriched if not s["completed"]), None)
-    total_time = sum(s["time_min"] for s in enriched if not s["completed"])
+def build_getting_started(*, language: str = "typescript") -> dict:
+    examples = CODE_EXAMPLES.get(language, CODE_EXAMPLES["typescript"])
     return {
-        "developer_name": developer_name,
-        "steps": enriched,
-        "completed": done,
-        "total": len(enriched),
-        "pct": round(done / len(enriched) * 100),
-        "current_step": current,
-        "remaining_time_min": total_time,
-        "all_done": done == len(enriched),
+        "language": language,
+        "install_command": examples["install"],
+        "code_example": examples["init"],
+        "steps": [
+            {"order": 1, "title": "Install the SDK", "code": examples["install"]},
+            {"order": 2, "title": "Set up your API key", "code": f"export OSK_API_KEY=your_key_here"},
+            {"order": 3, "title": "Write your first integration", "code": examples["init"]},
+            {"order": 4, "title": "Run it!", "code": "npx tsx index.ts" if language == "typescript" else "python main.py"},
+        ],
+        "available_languages": list(CODE_EXAMPLES.keys()),
     }
