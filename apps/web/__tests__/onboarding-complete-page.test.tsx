@@ -1,18 +1,17 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OnboardingCompletePage } from "@/components/onboarding-complete-page";
 
 describe("OnboardingCompletePage", () => {
-  it("renders", () => {
-    const nextSteps = [{ label: "Dashboard", url: "/dev", icon: "📊" }];
+  const steps = [{ label: "Create App", href: "/apps/new", icon: "📦", primary: true }];
+  it("renders complete page", () => {
     const { container } = render(
-      <OnboardingCompletePage message="Welcome, Alice!"
-        achievements={["Created account", "Published app"]} nextSteps={nextSteps} />
+      <OnboardingCompletePage headline="Welcome, Alice!" subtitle="Ready to go"
+        planLabel="Pro" nextSteps={steps} onNavigate={vi.fn()} />
     );
     expect(container.textContent).toContain("Welcome, Alice!");
-    expect(container.textContent).toContain("Created account");
-    expect(container.textContent).toContain("Published app");
-    expect(container.textContent).toContain("Dashboard");
-    expect(container.textContent).toContain("🎉");
+    expect(container.textContent).toContain("Ready to go");
+    expect(container.textContent).toContain("Pro Plan");
+    expect(container.textContent).toContain("Create App");
   });
 });
