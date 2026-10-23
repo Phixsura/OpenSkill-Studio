@@ -1,20 +1,16 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { IdempotencyKeyViewer } from "@/components/idempotency-key-viewer";
 
 describe("IdempotencyKeyViewer", () => {
-  it("renders keys", () => {
+  it("renders stats", () => {
     const { container } = render(
-      <IdempotencyKeyViewer trackedKeys={5} ttlSec={3600}
-        recentKeys={[
-          { key: "pay_abc123def", age: "2m" },
-          { key: "pay_xyz789ghi", age: "5m" },
-        ]} />
+      <IdempotencyKeyViewer total={500} active={480} withResponse={450} onCleanup={vi.fn()} />
     );
     expect(container.textContent).toContain("Idempotency Keys");
-    expect(container.textContent).toContain("5");
-    expect(container.textContent).toContain("3600s");
-    expect(container.textContent).toContain("pay_abc123def");
-    expect(container.textContent).toContain("2m ago");
+    expect(container.textContent).toContain("500");
+    expect(container.textContent).toContain("480");
+    expect(container.textContent).toContain("450");
+    expect(container.textContent).toContain("Cleanup Expired");
   });
 });
