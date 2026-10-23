@@ -1,38 +1,37 @@
-"""Event bus — publish-subscribe event system with topic routing."""
+"""Event bus — publish/subscribe event system."""
 from __future__ import annotations
+import time
+
+_subscribers: dict[str, list[str]] = {}
+_events: list[dict] = []
 
 
-class EventBus:
-    def __init__(self):
-        self._subscriptions: dict[str, list[dict]] = {}
-        self._published = 0
-        self._delivered = 0
+def subscribe(topic: str, handler: str) -> dict:
+    _subscribers.setdefault(topic, [])
+    if handler not in _subscribers[topic]:
+        _subscribers[topic].append(handler)
+    return {"subscribed": True, "topic": topic, "handler": handler,
+            "subscriber_count": len(_subscribers[topic])}
 
-    def subscribe(self, topic: str, *, subscriber: str, filter_fn: str = "") -> dict:
-        self._subscriptions.setdefault(topic, []).append(
-            {"subscriber": subscriber, "filter": filter_fn})
-        return {"topic": topic, "subscriber": subscriber,
-                "total_subscribers": len(self._subscriptions[topic])}
 
-    def unsubscribe(self, topic: str, *, subscriber: str) -> dict:
-        subs = self._subscriptions.get(topic, [])
-        before = len(subs)
-        self._subscriptions[topic] = [s for s in subs if s["subscriber"] != subscriber]
-        return {"removed": before > len(self._subscriptions[topic])}
+def publish(topic: str, payload: dict) -> dict:
+    handlers = _subscribers.get(topic, [])
+    event = {"topic": topic, "payload": payload, "timestamp": time.time(),
+             "delivered_to": len(handlers)}
+    _events.append(event)
+    return event
 
-    def publish(self, topic: str, *, payload: dict) -> dict:
-        self._published += 1
-        subs = self._subscriptions.get(topic, [])
-        delivered = len(subs)
-        self._delivered += delivered
-        return {"topic": topic, "delivered_to": delivered,
-                "subscribers": [s["subscriber"] for s in subs]}
 
-    def topics(self) -> list[dict]:
-        return [{"topic": t, "subscribers": len(s)}
-                for t, s in sorted(self._subscriptions.items())]
+def get_subscriptions() -> dict:
+    total = sum(len(h) for h in _subscribers.values())
+    return {"topics": dict(_subscribers), "topic_count": len(_subscribers),
+            "total_subscriptions": total}
 
-    def stats(self) -> dict:
-        total_subs = sum(len(s) for s in self._subscriptions.values())
-        return {"topics": len(self._subscriptions), "total_subscribers": total_subs,
-                "published": self._published, "delivered": self._delivered}
+
+def event_history(limit: int = 20) -> list[dict]:
+    return list(reversed(_events[-limit:]))
+
+
+def clear_bus() -> None:
+    _subscribers.clear()
+    _events.clear()

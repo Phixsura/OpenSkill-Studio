@@ -1,17 +1,24 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_event_bus import EventBus
+from app.services.app_marketplace_app_app_app_app_app_app_app_event_bus import (
+    subscribe, publish, get_subscriptions, event_history, clear_bus,
+)
 
-def test_pubsub():
-    bus = EventBus()
-    bus.subscribe("user.created", subscriber="email_service")
-    bus.subscribe("user.created", subscriber="analytics")
-    bus.subscribe("order.placed", subscriber="inventory")
-    r = bus.publish("user.created", payload={"user_id": "u1"})
+def test_pub_sub():
+    clear_bus()
+    subscribe("user.created", "send_welcome")
+    subscribe("user.created", "create_profile")
+    subscribe("order.placed", "process_payment")
+    r = publish("user.created", {"user_id": "u1"})
     assert r["delivered_to"] == 2
-    assert "email_service" in r["subscribers"]
-    bus.unsubscribe("user.created", subscriber="email_service")
-    r2 = bus.publish("user.created", payload={"user_id": "u2"})
-    assert r2["delivered_to"] == 1
-    s = bus.stats()
-    assert s["topics"] == 2
-    assert s["published"] == 2
-    assert s["delivered"] == 3
+    s = get_subscriptions()
+    assert s["topic_count"] == 2
+    assert s["total_subscriptions"] == 3
+    clear_bus()
+
+def test_history():
+    clear_bus()
+    publish("a", {})
+    publish("b", {})
+    h = event_history()
+    assert len(h) == 2
+    assert h[0]["topic"] == "b"
+    clear_bus()
