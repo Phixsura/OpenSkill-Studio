@@ -2,40 +2,45 @@
 
 import { useState } from "react";
 
-interface EndpointGroup { name: string; endpoints: { method: string; path: string; summary: string }[]; }
-interface ApiDocsPageProps { title: string; version: string; groups: EndpointGroup[]; totalEndpoints: number; }
+interface Endpoint { method: string; path: string; fullUrl: string; summary: string; }
+interface DocSection { id: string; title: string; icon: string; endpoints: Endpoint[]; endpointCount: number; }
+interface ApiDocsPageProps { sections: DocSection[]; totalEndpoints: number; baseUrl: string; }
 
-const METHOD_COLORS: Record<string, string> = {
-  GET: "bg-green-100 text-green-700", POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-yellow-100 text-yellow-700", DELETE: "bg-red-100 text-red-700",
+const methodColors: Record<string, string> = {
+  GET: "bg-green-500", POST: "bg-blue-500", PUT: "bg-yellow-500",
+  PATCH: "bg-orange-500", DELETE: "bg-red-500",
 };
 
-export function ApiDocsPage({ title, version, groups, totalEndpoints }: ApiDocsPageProps) {
-  const [activeGroup, setActiveGroup] = useState(groups[0]?.name || "");
-  const currentGroup = groups.find(g => g.name === activeGroup);
+export function ApiDocsPage({ sections, totalEndpoints, baseUrl }: ApiDocsPageProps) {
+  const [activeSection, setActiveSection] = useState(sections[0]?.id ?? "");
+  const section = sections.find(s => s.id === activeSection);
 
   return (
     <div className="flex gap-6">
-      <nav className="w-48 space-y-0.5">
-        <h2 className="px-3 py-1 text-xs font-semibold text-gray-400">{title} {version}</h2>
-        <p className="px-3 text-xs text-gray-400">{totalEndpoints} endpoints</p>
-        {groups.map(g => (
-          <button key={g.name} onClick={() => setActiveGroup(g.name)}
-            className={`flex w-full items-center justify-between rounded px-3 py-1.5 text-left text-sm ${
-              activeGroup === g.name ? "bg-blue-50 font-semibold text-blue-700 dark:bg-blue-900/20" : "text-gray-600 dark:text-gray-400"}`}>
-            <span className="capitalize">{g.name}</span>
-            <span className="text-xs text-gray-400">{g.endpoints.length}</span>
+      <nav className="w-48 shrink-0 space-y-1">
+        {sections.map(s => (
+          <button key={s.id} onClick={() => setActiveSection(s.id)}
+            className={`flex w-full items-center gap-2 rounded px-3 py-2 text-sm ${activeSection === s.id ? "bg-blue-50 text-blue-700 font-medium dark:bg-blue-900/20" : "text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800"}`}>
+            <span>{s.icon}</span>{s.title}<span className="ml-auto text-xs text-gray-400">{s.endpointCount}</span>
           </button>
         ))}
       </nav>
-      <div className="flex-1 space-y-2">
-        {currentGroup?.endpoints.map((ep, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-            <span className={`rounded px-2 py-0.5 text-xs font-mono font-bold ${METHOD_COLORS[ep.method] || "bg-gray-100"}`}>{ep.method}</span>
-            <code className="text-sm">{ep.path}</code>
-            <span className="ml-auto text-xs text-gray-400">{ep.summary}</span>
-          </div>
-        ))}
+      <div className="flex-1 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">{section?.icon} {section?.title}</h2>
+          <span className="text-xs text-gray-400">{totalEndpoints} total endpoints</span>
+        </div>
+        <div className="space-y-2">
+          {section?.endpoints.map((ep, i) => (
+            <div key={i} className="rounded-lg border p-3 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <span className={`rounded px-1.5 py-0.5 text-xs text-white font-mono ${methodColors[ep.method] ?? "bg-gray-500"}`}>{ep.method}</span>
+                <code className="text-sm font-mono">{ep.path}</code>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">{ep.summary}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
