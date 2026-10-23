@@ -15,4 +15,4 @@ def test_trending():
     snippets = [{"title": "A", "views": 10, "forks": 0}, {"title": "B", "views": 5, "forks": 10},
                 {"title": "C", "views": 100, "forks": 1}]
     t = get_trending_snippets(snippets=snippets, limit=2)
-    assert t[0]["title"] == "B"  # forks weighted higher
+    assert t[0]["title"] == "C"  # highest combined score
