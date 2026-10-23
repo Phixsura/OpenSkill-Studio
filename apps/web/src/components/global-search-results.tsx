@@ -1,28 +1,40 @@
 "use client";
 
-interface SearchResult { type: string; name?: string; title?: string; id?: string; }
-interface GlobalSearchResultsProps { query: string; results: Record<string, SearchResult[]>; total: number; }
+interface SearchResult { id: string; title: string; category: string; snippet: string; }
+interface GlobalSearchResultsProps { results: SearchResult[]; query: string; total: number;
+  byCategory: Record<string, number>; onSelect: (id: string, category: string) => void; }
 
-const TYPE_ICONS: Record<string, string> = { app: "📦", developer: "👨‍💻", doc: "📄" };
+const catIcon: Record<string, string> = {
+  apps: "📦", docs: "📚", settings: "⚙️", users: "👤", webhooks: "🔗",
+};
 
-export function GlobalSearchResults({ query, results, total }: GlobalSearchResultsProps) {
-  if (total === 0) return <p className="p-4 text-center text-sm text-gray-400">No results for &quot;{query}&quot;</p>;
+export function GlobalSearchResults({ results, query, total, byCategory, onSelect }: GlobalSearchResultsProps) {
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700">
-      <div className="border-b p-3 dark:border-gray-700">
-        <p className="text-xs text-gray-400">{total} results for &quot;{query}&quot;</p>
-      </div>
-      {Object.entries(results).map(([type, items]) => items.length > 0 && (
-        <div key={type} className="border-b p-2 last:border-0 dark:border-gray-700">
-          <p className="px-2 text-xs font-medium text-gray-500 capitalize">{type}</p>
-          {items.map((r, i) => (
-            <div key={i} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
-              <span>{TYPE_ICONS[r.type] || "📌"}</span>
-              <span>{r.name || r.title}</span>
-            </div>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-400">
+          {total} results for <strong>&quot;{query}&quot;</strong>
+        </p>
+        <div className="flex gap-2">
+          {Object.entries(byCategory).map(([cat, count]) => (
+            <span key={cat} className="rounded bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-800">
+              {catIcon[cat] ?? "📁"} {cat} ({count})
+            </span>
           ))}
         </div>
-      ))}
+      </div>
+      <div className="space-y-1.5">
+        {results.map(r => (
+          <button key={`${r.category}-${r.id}`} onClick={() => onSelect(r.id, r.category)}
+            className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
+            <span className="text-lg">{catIcon[r.category] ?? "📁"}</span>
+            <div>
+              <p className="text-sm font-medium">{r.title}</p>
+              <p className="text-xs text-gray-400">{r.category}</p>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

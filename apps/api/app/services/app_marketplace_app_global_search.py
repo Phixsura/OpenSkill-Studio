@@ -1,16 +1,27 @@
-"""Global search — unified search across apps, developers, docs, and community."""
+"""Global search — search across apps, docs, settings, and users."""
 
-def global_search(*, query: str, apps: list[dict], developers: list[dict], docs: list[dict]) -> dict:
+
+def global_search(*, query: str, catalogs: dict[str, list[dict]], limit: int = 10) -> dict:
+    if not query or len(query) < 2:
+        return {"results": [], "query": query, "total": 0}
     q = query.lower()
-    results = {"apps": [], "developers": [], "docs": []}
-    for a in apps:
-        if q in a.get("name", "").lower() or q in a.get("description", "").lower():
-            results["apps"].append({"type": "app", "name": a["name"], "id": a.get("id")})
-    for d in developers:
-        if q in d.get("name", "").lower():
-            results["developers"].append({"type": "developer", "name": d["name"]})
-    for doc in docs:
-        if q in doc.get("title", "").lower() or q in doc.get("content", "").lower():
-            results["docs"].append({"type": "doc", "title": doc["title"]})
-    total = sum(len(v) for v in results.values())
-    return {"query": query, "results": results, "total": total}
+    results = []
+    for category, items in catalogs.items():
+        for item in items:
+            searchable = " ".join(str(v) for v in item.values()).lower()
+            if q in searchable:
+                results.append({
+                    "id": item.get("id", ""),
+                    "title": item.get("title", item.get("name", "")),
+                    "category": category,
+                    "snippet": searchable[:100],
+                })
+    by_category: dict[str, int] = {}
+    for r in results:
+        by_category[r["category"]] = by_category.get(r["category"], 0) + 1
+    return {
+        "results": results[:limit],
+        "total": len(results),
+        "query": query,
+        "by_category": by_category,
+    }
