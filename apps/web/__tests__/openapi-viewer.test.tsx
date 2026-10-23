@@ -3,17 +3,18 @@ import { describe, expect, it } from "vitest";
 import { OpenApiViewer } from "@/components/openapi-viewer";
 
 describe("OpenApiViewer", () => {
-  it("renders API spec", () => {
-    const endpoints = [
-      { path: "/users", method: "GET", summary: "List users" },
-      { path: "/users", method: "POST", summary: "Create user" },
-    ];
+  const endpoints = [
+    { method: "GET", path: "/apps", operationId: "listApps", hasSummary: true, tags: ["apps"] },
+    { method: "POST", path: "/apps", operationId: "createApp", hasSummary: true, tags: ["apps"] },
+  ];
+  it("renders spec", () => {
     const { container } = render(
-      <OpenApiViewer title="MyApp API" version="2.0.0" endpoints={endpoints} serverUrl="https://api.example.com" />
+      <OpenApiViewer title="My API" version="3.0.0" valid={true} endpoints={endpoints} errors={[]} warnings={[]} />
     );
-    expect(container.textContent).toContain("MyApp API");
-    expect(container.textContent).toContain("2.0.0");
-    expect(container.textContent).toContain("/users");
-    expect(container.textContent).toContain("List users");
+    expect(container.textContent).toContain("My API");
+    expect(container.textContent).toContain("3.0.0");
+    expect(container.textContent).toContain("Valid");
+    expect(container.textContent).toContain("GET");
+    expect(container.textContent).toContain("/apps");
   });
 });

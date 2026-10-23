@@ -1,31 +1,36 @@
 "use client";
 
-interface Endpoint { path: string; method: string; summary: string; }
-interface OpenApiViewerProps { title: string; version: string; endpoints: Endpoint[]; serverUrl: string; }
+interface Endpoint { method: string; path: string; operationId: string | null; hasSummary: boolean; tags: string[]; }
+interface OpenApiViewerProps { title: string; version: string; valid: boolean;
+  endpoints: Endpoint[]; errors: string[]; warnings: string[]; }
 
-const METHOD_COLORS: Record<string, string> = {
-  GET: "bg-green-100 text-green-700", POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-yellow-100 text-yellow-700", DELETE: "bg-red-100 text-red-700",
-  PATCH: "bg-purple-100 text-purple-700",
+const methodColors: Record<string, string> = {
+  GET: "bg-green-500", POST: "bg-blue-500", PUT: "bg-yellow-500",
+  PATCH: "bg-orange-500", DELETE: "bg-red-500",
 };
 
-export function OpenApiViewer({ title, version, endpoints, serverUrl }: OpenApiViewerProps) {
+export function OpenApiViewer({ title, version, valid, endpoints, errors, warnings }: OpenApiViewerProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">{title}</h3>
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-700">{version}</span>
+        <div>
+          <h3 className="text-sm font-semibold">{title || "API Spec"}</h3>
+          <p className="text-xs text-gray-400">OpenAPI {version}</p>
+        </div>
+        <span className={`rounded px-2 py-0.5 text-xs ${valid ? "bg-green-100 text-green-700 dark:bg-green-900/30" : "bg-red-100 text-red-700 dark:bg-red-900/30"}`}>
+          {valid ? "Valid" : `${errors.length} errors`}
+        </span>
       </div>
-      <p className="mt-1 text-xs text-gray-400">{serverUrl}</p>
-      <ul className="mt-3 space-y-1">
+      {warnings.length > 0 && <p className="text-xs text-yellow-600">⚠ {warnings.length} warnings</p>}
+      <div className="divide-y rounded-lg border dark:divide-gray-700 dark:border-gray-700 max-h-64 overflow-y-auto">
         {endpoints.map((ep, i) => (
-          <li key={i} className="flex items-center gap-2 text-sm">
-            <span className={`rounded px-1.5 py-0.5 text-xs font-mono ${METHOD_COLORS[ep.method] || "bg-gray-100"}`}>{ep.method}</span>
-            <code className="text-xs text-gray-600 dark:text-gray-400">{ep.path}</code>
-            <span className="ml-auto text-xs text-gray-400">{ep.summary}</span>
-          </li>
+          <div key={i} className="flex items-center gap-2 px-4 py-2">
+            <span className={`rounded px-1.5 py-0.5 text-xs text-white font-mono ${methodColors[ep.method] ?? "bg-gray-500"}`}>{ep.method}</span>
+            <span className="text-sm font-mono">{ep.path}</span>
+            {ep.tags.map(t => <span key={t} className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">{t}</span>)}
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
