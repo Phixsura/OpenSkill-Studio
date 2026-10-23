@@ -1,21 +1,22 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_data_export import export_data
+from app.services.app_marketplace_app_app_app_app_app_app_app_data_export import (
+    create_export, list_exports, export_stats, clear_exports,
+)
 
-def test_csv_export():
-    records = [{"name": "Alice", "plan": "pro"}, {"name": "Bob", "plan": "free"}]
-    r = export_data(records, fmt="csv")
-    assert r["status"] == "complete"
-    assert r["rows"] == 2
-    assert "Alice" in r["content"]
-    assert r["format"] == "csv"
+def test_create():
+    clear_exports()
+    r = create_export("users", "csv", row_count=5000)
+    assert r["created"]
+    assert r["size_mb"] == 5.0
+    r2 = create_export("bad", "xml")
+    assert not r2["created"]
+    clear_exports()
 
-def test_json_export():
-    records = [{"id": 1, "value": 42}]
-    r = export_data(records, fmt="json", columns=["id", "value"])
-    assert r["status"] == "complete"
-    assert r["size_bytes"] > 0
-    assert '"value": 42' in r["content"]
-
-def test_empty():
-    r = export_data([], fmt="csv")
-    assert r["status"] == "empty"
-    assert r["rows"] == 0
+def test_stats():
+    clear_exports()
+    create_export("a", "csv", row_count=1000)
+    create_export("b", "json", row_count=2000)
+    create_export("c", "csv", row_count=500)
+    s = export_stats()
+    assert s["total"] == 3
+    assert s["by_format"]["csv"] == 2
+    clear_exports()

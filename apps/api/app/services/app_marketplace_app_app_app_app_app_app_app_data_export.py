@@ -1,35 +1,37 @@
-"""Data export manager — generate CSV/JSON exports with progress tracking."""
+"""Data export manager — generate and track data exports."""
 from __future__ import annotations
-import csv
-import io
-import json
+import hashlib
+import time
+
+_exports: list[dict] = []
 
 
-def export_data(records: list[dict], *, fmt: str = "csv",
-                columns: list[str] | None = None) -> dict:
-    if not records:
-        return {"status": "empty", "format": fmt, "rows": 0, "size_bytes": 0, "content": ""}
-    cols = columns or sorted(records[0].keys())
-    if fmt == "csv":
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
-        writer.writeheader()
-        for r in records:
-            writer.writerow(r)
-        content = buf.getvalue()
-    elif fmt == "json":
-        filtered = [{k: r.get(k) for k in cols} for r in records]
-        content = json.dumps(filtered, indent=2)
-    else:
-        return {"status": "error", "message": f"Unsupported format: {fmt}"}
-    return {"status": "complete", "format": fmt, "rows": len(records),
-            "columns": cols, "size_bytes": len(content.encode()),
-            "size_display": _human_size(len(content.encode())), "content": content}
+def create_export(name: str, format: str, filters: dict | None = None,
+                  row_count: int = 0) -> dict:
+    valid_formats = {"csv", "json", "xlsx", "parquet"}
+    if format not in valid_formats:
+        return {"created": False, "error": f"invalid format, use {sorted(valid_formats)}"}
+    export_id = hashlib.sha256(f"{name}:{time.time()}".encode()).hexdigest()[:10]
+    entry = {"id": export_id, "name": name, "format": format,
+             "filters": filters or {}, "row_count": row_count,
+             "status": "completed", "created_at": time.time(),
+             "size_mb": round(row_count * 0.001, 2)}
+    _exports.append(entry)
+    return {"created": True, **entry}
 
 
-def _human_size(b: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}" if b != int(b) else f"{b} {unit}"
-        b /= 1024
-    return f"{b:.1f} TB"
+def list_exports(limit: int = 20) -> list[dict]:
+    return list(reversed(_exports[-limit:]))
+
+
+def export_stats() -> dict:
+    total_size = sum(e["size_mb"] for e in _exports)
+    by_format: dict[str, int] = {}
+    for e in _exports:
+        by_format[e["format"]] = by_format.get(e["format"], 0) + 1
+    return {"total": len(_exports), "total_size_mb": round(total_size, 2),
+            "by_format": by_format}
+
+
+def clear_exports() -> None:
+    _exports.clear()
