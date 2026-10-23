@@ -1,48 +1,30 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+interface HealthCheck { metric: string; value: string; score: number; max: number; }
+interface AppHealthBadgeProps { score: number; grade: string; checks: HealthCheck[]; }
 
-import { apiWithAuth } from "@/lib/api";
-
-interface AppHealthBadgeProps {
-  appId: string;
-  /** Show text label next to icon */
-  showLabel?: boolean;
-}
-
-const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
-  healthy: { icon: "🟢", color: "text-green-600", label: "Healthy" },
-  degraded: { icon: "🟡", color: "text-yellow-600", label: "Degraded" },
-  critical: { icon: "🔴", color: "text-red-600", label: "Critical" },
-  unknown: { icon: "⚪", color: "text-gray-400", label: "Unknown" },
+const GRADE_COLOR: Record<string, string> = {
+  A: "bg-green-500", B: "bg-blue-500", C: "bg-yellow-500", D: "bg-red-500",
 };
 
-/**
- * AppHealthBadge — compact health status indicator for app listings.
- * Fetches health data and displays a colored icon with optional label.
- */
-export function AppHealthBadge({ appId, showLabel = false }: AppHealthBadgeProps) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["app-health-badge", appId],
-    queryFn: () =>
-      apiWithAuth<{ data: { status: string } }>(`/developer/apps/${appId}/health`).then(
-        (r) => r.data,
-      ),
-    staleTime: 60_000,
-    retry: false,
-  });
-
-  if (isLoading) {
-    return <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-gray-200" />;
-  }
-
-  const status = data?.status ?? "unknown";
-  const config = STATUS_CONFIG[status] ?? { icon: "⚪", color: "text-gray-400", label: "Unknown" };
-
+export function AppHealthBadge({ score, grade, checks }: AppHealthBadgeProps) {
   return (
-    <span className={`inline-flex items-center gap-1 ${config.color}`} title={config.label}>
-      <span className="text-xs">{config.icon}</span>
-      {showLabel && <span className="text-xs font-medium">{config.label}</span>}
-    </span>
+    <div className="rounded-xl border p-4 dark:border-gray-700">
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`w-10 h-10 rounded-full ${GRADE_COLOR[grade] || "bg-gray-400"} text-white font-bold text-lg flex items-center justify-center`}>{grade}</div>
+        <div>
+          <p className="text-sm font-bold">{score}/100</p>
+          <p className="text-xs text-gray-400">App Health</p>
+        </div>
+      </div>
+      <div className="space-y-1">
+        {checks.map(c => (
+          <div key={c.metric} className="flex items-center justify-between text-xs">
+            <span>{c.metric}: {c.value}</span>
+            <span className="text-gray-400">{c.score}/{c.max}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
