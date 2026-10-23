@@ -1,29 +1,32 @@
-"""Webhook filter — filter webhook events by type, source, and conditions."""
+"""Webhook filter engine — filter webhook events before delivery."""
 from __future__ import annotations
+import re
 
 
-def create_filter(*, event_types: list[str] | None = None,
-                    sources: list[str] | None = None,
-                    conditions: dict | None = None) -> dict:
-    return {"event_types": event_types or [], "sources": sources or [],
-            "conditions": conditions or {}, "active": True}
+def create_filter(name: str, rules: list[dict]) -> dict:
+    return {"name": name, "rules": rules, "rule_count": len(rules)}
 
 
-def apply_filter(events: list[dict], webhook_filter: dict) -> list[dict]:
-    result = events
-    types = webhook_filter.get("event_types", [])
-    sources = webhook_filter.get("sources", [])
-    conditions = webhook_filter.get("conditions", {})
-    if types:
-        result = [e for e in result if e.get("type") in types]
-    if sources:
-        result = [e for e in result if e.get("source") in sources]
-    for key, value in conditions.items():
-        result = [e for e in result if e.get("payload", {}).get(key) == value]
-    return result
-
-
-def filter_stats(original: int, filtered: int) -> dict:
-    dropped = original - filtered
-    return {"original": original, "filtered": filtered, "dropped": dropped,
-            "drop_rate": round(dropped / max(original, 1) * 100, 1)}
+def apply_filter(filter_config: dict, event: dict) -> dict:
+    for rule in filter_config["rules"]:
+        field = rule.get("field", "")
+        operator = rule.get("operator", "eq")
+        value = rule.get("value")
+        event_val = event.get(field)
+        matched = False
+        if operator == "eq":
+            matched = event_val == value
+        elif operator == "neq":
+            matched = event_val != value
+        elif operator == "contains" and isinstance(event_val, str):
+            matched = value in event_val
+        elif operator == "regex" and isinstance(event_val, str):
+            matched = bool(re.search(value, event_val))
+        elif operator == "in" and isinstance(value, list):
+            matched = event_val in value
+        action = rule.get("action", "include")
+        if matched and action == "exclude":
+            return {"delivered": False, "reason": f"excluded by rule: {rule.get('name', '')}"}
+        if matched and action == "include":
+            return {"delivered": True, "matched_rule": rule.get("name", "")}
+    return {"delivered": True, "matched_rule": "default"}

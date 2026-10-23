@@ -1,19 +1,20 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WebhookFilterEditor } from "@/components/webhook-filter-editor";
 
 describe("WebhookFilterEditor", () => {
   it("renders filters", () => {
-    const onToggle = vi.fn();
-    const { container, getByText } = render(
-      <WebhookFilterEditor dropRate={25} onToggle={onToggle}
-        eventTypes={["app.installed", "app.uninstalled", "user.created"]}
-        selectedTypes={["app.installed"]} />
+    const { container } = render(
+      <WebhookFilterEditor name="prod_only" onAddRule={vi.fn()} onDeleteRule={vi.fn()}
+        rules={[
+          { name: "env", field: "environment", operator: "eq", value: "production", action: "include" },
+          { name: "skip", field: "type", operator: "eq", value: "test", action: "exclude" },
+        ]} />
     );
-    expect(container.textContent).toContain("Webhook Filters");
-    expect(container.textContent).toContain("25% filtered out");
-    expect(container.textContent).toContain("app.installed");
-    fireEvent.click(getByText("user.created"));
-    expect(onToggle).toHaveBeenCalledWith("user.created");
+    expect(container.textContent).toContain("Filter: prod_only");
+    expect(container.textContent).toContain("2 rules");
+    expect(container.textContent).toContain("include");
+    expect(container.textContent).toContain("exclude");
+    expect(container.textContent).toContain("environment eq production");
   });
 });
