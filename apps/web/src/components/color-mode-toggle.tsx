@@ -1,21 +1,21 @@
 "use client";
 
-interface ColorModeToggleProps { currentMode: string; onModeChange: (mode: string) => void; }
+interface ColorModeToggleProps { current: string; onSelect: (mode: string) => void; }
 
-const modes = [
+const MODES = [
   { id: "light", icon: "☀️", label: "Light" },
   { id: "dark", icon: "🌙", label: "Dark" },
   { id: "system", icon: "💻", label: "System" },
 ];
 
-export function ColorModeToggle({ currentMode, onModeChange }: ColorModeToggleProps) {
+export function ColorModeToggle({ current, onSelect }: ColorModeToggleProps) {
   return (
-    <div className="flex items-center gap-1 rounded-lg border p-1 dark:border-gray-700">
-      {modes.map(m => (
-        <button key={m.id} onClick={() => onModeChange(m.id)} title={m.label}
-          className={`rounded-md px-2.5 py-1.5 text-sm ${currentMode === m.id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"}`}>
-          {m.icon}
-        </button>
+    <div className="inline-flex rounded-lg border dark:border-gray-700 p-0.5">
+      {MODES.map(m => (
+        <button key={m.id} onClick={() => onSelect(m.id)}
+          className={`px-3 py-1.5 text-xs rounded-md transition ${
+            m.id === current ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-700"
+          }`} title={m.label}>{m.icon}</button>
       ))}
     </div>
   );

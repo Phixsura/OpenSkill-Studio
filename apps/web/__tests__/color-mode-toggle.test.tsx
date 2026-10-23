@@ -3,17 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { ColorModeToggle } from "@/components/color-mode-toggle";
 
 describe("ColorModeToggle", () => {
-  it("renders", () => {
-    const { container } = render(<ColorModeToggle currentMode="light" onModeChange={vi.fn()} />);
+  it("renders toggle", () => {
+    const onSelect = vi.fn();
+    const { container, getByTitle } = render(
+      <ColorModeToggle current="dark" onSelect={onSelect} />
+    );
     expect(container.textContent).toContain("☀️");
     expect(container.textContent).toContain("🌙");
     expect(container.textContent).toContain("💻");
-    expect(container.querySelectorAll("button").length).toBe(3);
-  });
-  it("changes mode", () => {
-    const fn = vi.fn();
-    const { container } = render(<ColorModeToggle currentMode="light" onModeChange={fn} />);
-    fireEvent.click(container.querySelectorAll("button")[1]); // dark
-    expect(fn).toHaveBeenCalledWith("dark");
+    fireEvent.click(getByTitle("Light"));
+    expect(onSelect).toHaveBeenCalledWith("light");
   });
 });
