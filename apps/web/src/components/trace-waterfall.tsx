@@ -1,31 +1,37 @@
 "use client";
 
-interface Span { span_id: string; service: string; operation: string; duration_ms: number; status: string; }
-interface TraceWaterfallProps { traceId: string; spans: Span[]; totalDurationMs: number; }
+interface Span { spanId: string; parentSpanId: string | null; operation: string; service: string; startedAt: string; }
+interface TraceWaterfallProps { spans: Span[]; totalSpans: number; services: string[]; maxDepth: number; }
 
-export function TraceWaterfall({ traceId, spans, totalDurationMs }: TraceWaterfallProps) {
+const svcColors = ["bg-blue-500", "bg-green-500", "bg-purple-500", "bg-orange-500", "bg-pink-500"];
+
+export function TraceWaterfall({ spans, totalSpans, services, maxDepth }: TraceWaterfallProps) {
+  const colorMap = Object.fromEntries(services.map((s, i) => [s, svcColors[i % svcColors.length]]));
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Trace</h3>
-        <span className="font-mono text-xs text-gray-400">{traceId}</span>
+        <h3 className="text-sm font-semibold">Trace</h3>
+        <span className="text-xs text-gray-400">{totalSpans} spans · {services.length} services · depth {maxDepth}</span>
       </div>
-      <p className="text-xs text-gray-400">{spans.length} spans · {totalDurationMs}ms total</p>
-      <div className="mt-3 space-y-1">
+      <div className="space-y-1">
         {spans.map(s => {
-          const widthPct = Math.max(5, Math.round((s.duration_ms / Math.max(totalDurationMs, 1)) * 100));
+          const depth = s.parentSpanId ? 1 : 0; // simplified
           return (
-            <div key={s.span_id} className="flex items-center gap-2">
-              <span className="w-20 truncate text-xs">{s.service}</span>
-              <div className="flex-1">
-                <div className={`h-4 rounded text-xs leading-4 px-1 text-white ${s.status === "error" ? "bg-red-500" : "bg-blue-500"}`}
-                  style={{ width: `${widthPct}%` }}>
-                  {s.duration_ms}ms
-                </div>
-              </div>
+            <div key={s.spanId} className="flex items-center gap-2" style={{ paddingLeft: depth * 24 }}>
+              <div className={`h-4 rounded ${colorMap[s.service] ?? "bg-gray-400"}`} style={{ width: 80 }} />
+              <span className="text-xs font-mono">{s.operation}</span>
+              <span className="text-xs text-gray-400">{s.service}</span>
             </div>
           );
         })}
+      </div>
+      <div className="flex gap-3">
+        {services.map(s => (
+          <div key={s} className="flex items-center gap-1 text-xs">
+            <span className={`h-2 w-2 rounded ${colorMap[s]}`} />
+            <span>{s}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
