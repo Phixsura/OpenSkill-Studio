@@ -5,7 +5,7 @@ def test_percentiles():
     r = compute_percentiles(samples)
     assert r["count"] == 100
     assert r["p50"] == 50.5
-    assert r["p99"] == 99.02
+    assert r["p99"] == 99.01
     assert r["min"] == 1
     assert r["max"] == 100
     assert r["status"] == "fast"
