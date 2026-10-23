@@ -15,4 +15,4 @@ def test_audit():
     db = next(s for s in r["results"] if s["name"] == "DB_PASSWORD")
     assert db["status"] == "overdue"
     jwt = next(s for s in r["results"] if s["name"] == "JWT_SECRET")
-    assert jwt["status"] == "warning"
+    assert jwt["status"] == "ok"  # 12 days old, 78 days until rotation
