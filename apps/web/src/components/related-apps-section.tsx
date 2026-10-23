@@ -1,23 +1,26 @@
 "use client";
 
-interface RelatedApp { name: string; slug: string; category: string; installCount: number; }
-interface RelatedAppsSectionProps { apps: RelatedApp[]; }
+interface App { id: string; name?: string; }
+interface Section { key: string; title: string; apps: App[]; count: number; }
+interface RelatedAppsSectionProps { sections: Section[]; }
 
-const ICONS: Record<string, string> = { connector: "🔌", automation: "🤖", analytics: "📊" };
-
-export function RelatedAppsSection({ apps }: RelatedAppsSectionProps) {
-  if (apps.length === 0) return null;
+export function RelatedAppsSection({ sections }: RelatedAppsSectionProps) {
+  const nonEmpty = sections.filter(s => s.count > 0);
+  if (nonEmpty.length === 0) return null;
   return (
-    <div>
-      <h3 className="mb-3 font-semibold">Related Apps</h3>
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {apps.map(a => (
-          <a key={a.slug} href={`/marketplace/apps/${a.slug}`} className="min-w-[180px] rounded-lg border border-gray-200 p-3 hover:border-blue-400 dark:border-gray-700">
-            <span>{ICONS[a.category] ?? "📦"}</span> <span className="font-medium">{a.name}</span>
-            <p className="text-xs text-gray-400">📥 {a.installCount}</p>
-          </a>
-        ))}
-      </div>
+    <div className="space-y-6">
+      {nonEmpty.map(s => (
+        <div key={s.key}>
+          <h3 className="text-lg font-semibold">{s.title}</h3>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {s.apps.map(a => (
+              <div key={a.id} className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+                <p className="font-medium">{a.name || a.id}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
