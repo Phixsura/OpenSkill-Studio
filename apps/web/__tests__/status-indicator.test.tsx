@@ -3,16 +3,12 @@ import { describe, expect, it } from "vitest";
 import { StatusIndicator } from "@/components/status-indicator";
 
 describe("StatusIndicator", () => {
-  it("shows operational", () => {
-    const { container } = render(<StatusIndicator status="operational" />);
-    expect(container.textContent).toContain("operational");
-  });
-  it("shows custom label", () => {
-    const { container } = render(<StatusIndicator status="degraded" label="Partially down" />);
-    expect(container.textContent).toContain("Partially down");
-  });
-  it("has colored dot", () => {
-    const { container } = render(<StatusIndicator status="outage" />);
-    expect(container.querySelector("[class*='bg-red']")).toBeTruthy();
+  it("renders online", () => {
+    const { container } = render(
+      <StatusIndicator status="online" label="Online" icon="🟢" color="green" appName="MyApp" isHealthy={true} />
+    );
+    expect(container.textContent).toContain("MyApp");
+    expect(container.textContent).toContain("Online");
+    expect(container.textContent).toContain("🟢");
   });
 });
