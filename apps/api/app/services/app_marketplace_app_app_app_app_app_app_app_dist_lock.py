@@ -1,38 +1,47 @@
-"""Distributed lock manager — acquire, release, and monitor distributed locks."""
+"""Distributed lock manager — coordinate access to shared resources."""
 from __future__ import annotations
 import secrets
 import time
 
+_locks: dict[str, dict] = {}
 
-class DistributedLockManager:
-    def __init__(self, *, default_ttl: int = 30):
-        self._locks: dict[str, dict] = {}
-        self._default_ttl = default_ttl
 
-    def acquire(self, key: str, *, owner: str, ttl: int | None = None,
-                now: float | None = None) -> dict:
-        ts = now if now is not None else time.time()
-        ttl = ttl or self._default_ttl
-        existing = self._locks.get(key)
-        if existing and ts < existing["expires"]:
-            if existing["owner"] == owner:
-                existing["expires"] = ts + ttl  # renew
-                return {"acquired": True, "renewed": True, "key": key, "token": existing["token"]}
-            return {"acquired": False, "reason": "locked", "owner": existing["owner"],
-                    "expires_in": round(existing["expires"] - ts, 1)}
-        token = secrets.token_hex(8)
-        self._locks[key] = {"owner": owner, "token": token, "acquired_at": ts, "expires": ts + ttl}
-        return {"acquired": True, "renewed": False, "key": key, "token": token, "ttl": ttl}
+def acquire_lock(resource: str, owner: str, ttl_sec: int = 30) -> dict:
+    now = time.time()
+    existing = _locks.get(resource)
+    if existing and existing["expires_at"] > now:
+        return {"acquired": False, "held_by": existing["owner"],
+                "expires_in": round(existing["expires_at"] - now, 1)}
+    token = secrets.token_urlsafe(16)
+    _locks[resource] = {"resource": resource, "owner": owner, "token": token,
+                         "acquired_at": now, "expires_at": now + ttl_sec}
+    return {"acquired": True, "token": token, "resource": resource, "ttl_sec": ttl_sec}
 
-    def release(self, key: str, *, token: str) -> dict:
-        lock = self._locks.get(key)
-        if not lock:
-            return {"released": False, "reason": "not_found"}
-        if lock["token"] != token:
-            return {"released": False, "reason": "token_mismatch"}
-        del self._locks[key]
-        return {"released": True, "key": key}
 
-    def status(self) -> dict:
-        return {"active_locks": len(self._locks),
-                "locks": [{"key": k, "owner": v["owner"]} for k, v in self._locks.items()]}
+def release_lock(resource: str, token: str) -> dict:
+    lock = _locks.get(resource)
+    if not lock:
+        return {"released": False, "error": "not_found"}
+    if lock["token"] != token:
+        return {"released": False, "error": "token_mismatch"}
+    del _locks[resource]
+    return {"released": True, "resource": resource}
+
+
+def extend_lock(resource: str, token: str, extra_sec: int = 30) -> dict:
+    lock = _locks.get(resource)
+    if not lock or lock["token"] != token:
+        return {"extended": False, "error": "not_found_or_mismatch"}
+    lock["expires_at"] += extra_sec
+    return {"extended": True, "new_ttl": round(lock["expires_at"] - time.time(), 1)}
+
+
+def list_locks() -> list[dict]:
+    now = time.time()
+    return [{"resource": l["resource"], "owner": l["owner"],
+             "ttl_remaining": round(max(0, l["expires_at"] - now), 1)}
+            for l in _locks.values() if l["expires_at"] > now]
+
+
+def clear_locks() -> None:
+    _locks.clear()
