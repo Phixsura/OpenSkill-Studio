@@ -1,52 +1,52 @@
 "use client";
 
-interface InstallStep { id: string; label: string; icon: string; }
-interface InstallFlowWizardProps { appName: string; steps: InstallStep[];
-  currentStep: number; permissions: string[];
-  onNext: () => void; onBack: () => void; onInstall: () => void; }
+interface Permission { name: string; description: string; risk: string; }
+interface InstallStep { id: string; title: string; status: string; }
+interface InstallFlowWizardProps { appName: string; appIcon: string;
+  developer: string; permissions: Permission[]; steps: InstallStep[];
+  currentStep: number; hasDangerous: boolean;
+  onAdvance: () => void; onCancel: () => void; }
 
-export function InstallFlowWizard({ appName, steps, currentStep, permissions,
-  onNext, onBack, onInstall }: InstallFlowWizardProps) {
-  const isFinal = currentStep === steps.length - 1;
-  const isFirst = currentStep === 0;
-  const step = steps[currentStep];
-  const pct = Math.round((currentStep / (steps.length - 1)) * 100);
+const RISK_STYLE: Record<string, string> = {
+  low: "text-green-600", medium: "text-yellow-600", high: "text-red-600",
+};
 
+export function InstallFlowWizard({ appName, appIcon, developer, permissions,
+  steps, currentStep, hasDangerous, onAdvance, onCancel }: InstallFlowWizardProps) {
   return (
-    <div className="mx-auto max-w-lg space-y-5">
-      <h2 className="text-lg font-bold">Install {appName}</h2>
-      <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-        <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
+    <div className="rounded-xl border dark:border-gray-700 p-6 max-w-lg">
+      <div className="flex items-center gap-3 mb-4">
+        <span className="text-3xl">{appIcon}</span>
+        <div>
+          <h3 className="font-bold">Install {appName}</h3>
+          <p className="text-xs text-gray-400">By {developer}</p>
+        </div>
       </div>
-      <div className="flex justify-between">
+      <div className="flex gap-1 mb-4">
         {steps.map((s, i) => (
-          <div key={s.id} className={`flex flex-col items-center gap-1 ${i <= currentStep ? "" : "opacity-40"}`}>
-            <span className="text-lg">{s.icon}</span>
-            <span className="text-xs">{s.label}</span>
-          </div>
+          <div key={s.id} className={`flex-1 h-1.5 rounded-full ${
+            s.status === "completed" ? "bg-green-500" :
+            s.status === "current" ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
+          }`} />
         ))}
       </div>
-      <div className="rounded-lg border p-4 dark:border-gray-700">
-        <h3 className="text-sm font-semibold">{step?.icon} {step?.label}</h3>
-        {currentStep === 0 && (
-          <div className="mt-3 space-y-1">
-            <p className="text-xs text-gray-400 mb-2">This app requests:</p>
-            {permissions.map(p => (
-              <div key={p} className="flex items-center gap-2 text-sm">
-                <span className="text-green-500">✓</span>{p}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="flex justify-between">
-        <button onClick={onBack} disabled={isFirst}
-          className="rounded border px-4 py-2 text-sm disabled:opacity-30 dark:border-gray-700">Back</button>
-        {isFinal ? (
-          <button onClick={onInstall} className="rounded bg-green-600 px-4 py-2 text-sm text-white font-medium">Install</button>
-        ) : (
-          <button onClick={onNext} className="rounded bg-blue-600 px-4 py-2 text-sm text-white">Next</button>
-        )}
+      <p className="text-sm font-medium mb-2">{steps[currentStep]?.title}</p>
+      {currentStep === 0 && permissions.length > 0 && (
+        <div className="space-y-1 mb-4">
+          {permissions.map(p => (
+            <div key={p.name} className="flex justify-between text-sm bg-gray-50 dark:bg-gray-800 rounded px-3 py-1.5">
+              <span>{p.name}</span>
+              <span className={`text-xs ${RISK_STYLE[p.risk] || ""}`}>{p.risk}</span>
+            </div>
+          ))}
+          {hasDangerous && <p className="text-xs text-red-500">⚠️ This app requests high-risk permissions</p>}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 py-2 border rounded text-sm">Cancel</button>
+        <button onClick={onAdvance} className="flex-1 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+          {currentStep === steps.length - 1 ? "Activate" : "Continue"}
+        </button>
       </div>
     </div>
   );
