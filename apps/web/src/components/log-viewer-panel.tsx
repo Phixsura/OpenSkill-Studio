@@ -2,35 +2,40 @@
 
 import { useState } from "react";
 
-interface LogEntry { timestamp: string; level: string; message: string; }
-interface LogViewerPanelProps { logs: LogEntry[]; onFilter: (level: string | null, search: string) => void; }
+interface LogEntry { level: string; message: string; timestamp?: string; }
+interface LogViewerPanelProps { logs: LogEntry[]; totalMatched: number;
+  onFilter: (level: string, search: string) => void; }
 
-const LEVEL_COLORS: Record<string, string> = {
-  error: "text-red-600", warn: "text-yellow-600", info: "text-blue-600", debug: "text-gray-400",
+const levelColors: Record<string, string> = {
+  debug: "text-gray-400", info: "text-blue-500", warning: "text-yellow-500",
+  error: "text-red-500", critical: "text-red-700 font-bold",
 };
 
-export function LogViewerPanel({ logs, onFilter }: LogViewerPanelProps) {
+export function LogViewerPanel({ logs, totalMatched, onFilter }: LogViewerPanelProps) {
+  const [level, setLevel] = useState("debug");
   const [search, setSearch] = useState("");
-  const [level, setLevel] = useState<string | null>(null);
-
-  const handleFilter = (newLevel: string | null) => { setLevel(newLevel); onFilter(newLevel, search); };
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700">
-      <div className="flex items-center gap-2 border-b p-3 dark:border-gray-700">
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold">Logs</h2>
+      <div className="flex gap-2">
+        <select value={level} onChange={e => { setLevel(e.target.value); onFilter(e.target.value, search); }}
+          className="rounded border px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-700">
+          <option value="debug">Debug+</option>
+          <option value="info">Info+</option>
+          <option value="warning">Warning+</option>
+          <option value="error">Error+</option>
+        </select>
         <input value={search} onChange={e => { setSearch(e.target.value); onFilter(level, e.target.value); }}
-          placeholder="Search logs..." className="flex-1 rounded border px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700" />
-        {["error", "warn", "info"].map(l => (
-          <button key={l} onClick={() => handleFilter(level === l ? null : l)}
-            className={`rounded px-2 py-1 text-xs ${level === l ? "bg-blue-100 font-semibold" : "text-gray-500"}`}>{l}</button>
-        ))}
+          placeholder="Search logs..." className="flex-1 rounded border px-3 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-700" />
+        <span className="flex items-center text-xs text-gray-400">{totalMatched} results</span>
       </div>
-      <div className="max-h-64 overflow-y-auto p-2 font-mono text-xs">
-        {logs.length === 0 ? <p className="p-2 text-gray-400">No logs found.</p> : logs.map((l, i) => (
-          <div key={i} className="py-0.5">
-            <span className="text-gray-400">{l.timestamp.slice(11, 19)}</span>{" "}
-            <span className={LEVEL_COLORS[l.level] || ""}>{l.level.toUpperCase().padEnd(5)}</span>{" "}
-            <span>{l.message}</span>
+      <div className="max-h-80 overflow-y-auto rounded border bg-gray-900 p-3 font-mono text-xs dark:border-gray-700">
+        {logs.map((l, i) => (
+          <div key={i} className="flex gap-2 py-0.5">
+            {l.timestamp && <span className="text-gray-500">{l.timestamp}</span>}
+            <span className={`w-16 uppercase ${levelColors[l.level] ?? "text-gray-400"}`}>{l.level}</span>
+            <span className="text-gray-200">{l.message}</span>
           </div>
         ))}
       </div>
