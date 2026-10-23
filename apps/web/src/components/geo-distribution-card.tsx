@@ -1,33 +1,34 @@
 "use client";
 
-interface CountryData { country: string; count: number; }
-interface GeoDistributionCardProps { countries: CountryData[]; totalInstalls: number; }
+interface RegionData { region: string; label: string; count: number; pct: number; }
+interface GeoDistributionCardProps { total: number; regions: RegionData[]; topRegion: string; }
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  US: "🇺🇸", DE: "🇩🇪", JP: "🇯🇵", GB: "🇬🇧", FR: "🇫🇷", CN: "🇨🇳", KR: "🇰🇷", BR: "🇧🇷",
+const REGION_EMOJI: Record<string, string> = {
+  "us-east": "🇺🇸", "us-west": "🇺🇸", "eu-west": "🇬🇧", "eu-central": "🇩🇪", "ap-east": "🇯🇵", "ap-south": "🇮🇳",
 };
 
-export function GeoDistributionCard({ countries, totalInstalls }: GeoDistributionCardProps) {
-  const top = countries.slice(0, 8);
+export function GeoDistributionCard({ total, regions, topRegion }: GeoDistributionCardProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <h3 className="font-semibold">Geographic Distribution</h3>
-      <p className="mt-1 text-xs text-gray-400">{countries.length} countries · {totalInstalls.toLocaleString()} installs</p>
-      <ul className="mt-3 space-y-2">
-        {top.map(c => {
-          const pct = Math.round((c.count / Math.max(totalInstalls, 1)) * 100);
-          return (
-            <li key={c.country} className="flex items-center gap-2 text-sm">
-              <span className="w-6">{COUNTRY_FLAGS[c.country] || "🌍"}</span>
-              <span className="w-8">{c.country}</span>
-              <div className="flex-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-                <div className="h-full rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
-              </div>
-              <span className="w-14 text-right text-xs text-gray-400">{c.count} ({pct}%)</span>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">🌍 Traffic Distribution</h3>
+        <span className="text-xs text-gray-400">{total.toLocaleString()} requests</span>
+      </div>
+      <div className="flex h-5 rounded-full overflow-hidden mb-4">
+        {regions.map(r => (
+          <div key={r.region} className="bg-blue-500 first:bg-blue-600 last:bg-blue-300"
+               style={{ width: `${r.pct}%`, opacity: r.region === topRegion ? 1 : 0.6 }}
+               title={`${r.label}: ${r.pct}%`} />
+        ))}
+      </div>
+      <div className="space-y-2">
+        {regions.map(r => (
+          <div key={r.region} className="flex items-center justify-between text-sm">
+            <span>{REGION_EMOJI[r.region] || "🌐"} {r.label}</span>
+            <span className="text-gray-500">{r.count.toLocaleString()} ({r.pct}%)</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
