@@ -1,21 +1,32 @@
 "use client";
 
-interface Change { type: string; description: string; }
-interface ApiVersion { version: string; date: string; changes: Change[]; }
+interface Entry { endpoint: string; description: string; icon: string; label: string; }
+interface Section { type: string; label: string; icon: string; entries: Entry[]; }
+interface ApiChangelogViewProps { version: string; sections: Section[]; totalChanges: number; hasBreaking: boolean; }
 
-interface ApiChangelogViewProps { versions: ApiVersion[]; }
-
-const TYPE_ICONS: Record<string, string> = { added: "✨", changed: "🔄", deprecated: "⚠️", removed: "🗑️", fixed: "🐛" };
-
-export function ApiChangelogView({ versions }: ApiChangelogViewProps) {
+export function ApiChangelogView({ version, sections, totalChanges, hasBreaking }: ApiChangelogViewProps) {
   return (
-    <div className="space-y-6">
-      {versions.map(v => (
-        <div key={v.version} className="border-l-2 border-blue-500 pl-4">
-          <h3 className="font-semibold">API {v.version} <span className="text-xs text-gray-500">({v.date})</span></h3>
-          <ul className="mt-2 space-y-1">{v.changes.map((c, i) => (
-            <li key={i} className="text-sm">{TYPE_ICONS[c.type] ?? "•"} {c.description}</li>
-          ))}</ul>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">API Changelog — {version}</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">{totalChanges} changes</span>
+          {hasBreaking && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-900/30">Breaking</span>}
+        </div>
+      </div>
+      {sections.map(s => (
+        <div key={s.type}>
+          <h3 className="flex items-center gap-1 text-sm font-medium">
+            <span>{s.icon}</span> {s.label}
+          </h3>
+          <div className="ml-6 mt-1 space-y-1">
+            {s.entries.map((e, i) => (
+              <div key={i} className="text-sm">
+                {e.endpoint && <code className="mr-1 text-xs text-blue-500">{e.endpoint}</code>}
+                <span className="text-gray-500">{e.description}</span>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>

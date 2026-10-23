@@ -2,16 +2,21 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ApiChangelogView } from "@/components/api-changelog-view";
 
-const VERSIONS = [{ version: "2024-01-01", date: "2024-01-01", changes: [{ type: "added", description: "New API" }] }];
-
 describe("ApiChangelogView", () => {
-  it("shows version", () => {
-    const { container } = render(<ApiChangelogView versions={VERSIONS} />);
-    expect(container.textContent).toContain("2024-01-01");
-  });
-  it("shows changes", () => {
-    const { container } = render(<ApiChangelogView versions={VERSIONS} />);
-    expect(container.textContent).toContain("New API");
-    expect(container.textContent).toContain("✨");
+  const sections = [
+    { type: "added", label: "Added", icon: "➕",
+      entries: [{ endpoint: "GET /users", description: "New endpoint", icon: "➕", label: "Added" }] },
+    { type: "removed", label: "Removed", icon: "❌",
+      entries: [{ endpoint: "GET /v1/users", description: "Deprecated", icon: "❌", label: "Removed" }] },
+  ];
+  it("renders", () => {
+    const { container } = render(
+      <ApiChangelogView version="v2" sections={sections} totalChanges={2} hasBreaking={true} />
+    );
+    expect(container.textContent).toContain("API Changelog — v2");
+    expect(container.textContent).toContain("Breaking");
+    expect(container.textContent).toContain("➕");
+    expect(container.textContent).toContain("GET /users");
+    expect(container.textContent).toContain("❌");
   });
 });
