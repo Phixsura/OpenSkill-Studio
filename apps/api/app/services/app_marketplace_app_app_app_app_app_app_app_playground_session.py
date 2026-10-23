@@ -8,12 +8,12 @@ class PlaygroundSession:
         self._sessions: dict[str, dict] = {}
 
     def create(self, *, user_id: str, base_url: str = "https://api.openskill.io") -> dict:
-        sid = f"play_{secrets.token_hex(6)}"
+        sid = f"play_{secrets.token_urlsafe(16)}"
         self._sessions[sid] = {"id": sid, "user_id": user_id, "base_url": base_url,
                                 "history": [], "variables": {}}
         return {"session_id": sid, "base_url": base_url}
 
-    def add_request(self, sid: str, *, method: str, path: str, status: int,
+    def add_request(self, sid: str, *, user_id: str = "", method: str, path: str, status: int,
                       duration_ms: int) -> dict:
         s = self._sessions.get(sid)
         if not s:
@@ -29,5 +29,8 @@ class PlaygroundSession:
         s["variables"][key] = value
         return {"set": key, "variables_count": len(s["variables"])}
 
-    def get_session(self, sid: str) -> dict | None:
-        return self._sessions.get(sid)
+    def get_session(self, sid: str, *, user_id: str = "") -> dict | None:
+        s = self._sessions.get(sid)
+        if s and user_id and s["user_id"] != user_id:
+            return None
+        return s
