@@ -1,24 +1,23 @@
-from app.services.app_marketplace_support_ticket import create_ticket, add_reply, compute_response_metrics
+from app.services.app_marketplace_support_ticket import create_ticket, update_ticket_status, get_ticket_stats
 
 def test_create():
-    t = create_ticket(app_id="a1", user_id="u1", subject="Bug report", description="Crash on load", priority="high")
-    assert t["status"] == "open"
-    assert t["priority"] == "high"
+    r = create_ticket(subject="Cannot install app", description="Error on install page",
+                      priority="high", reporter_id="u1", app_id="app1")
+    assert r["ticket_id"].startswith("TKT-")
+    assert r["priority_level"] == 3
+    assert r["status"] == "open"
 
-def test_invalid_priority():
-    t = create_ticket(app_id="a1", user_id="u1", subject="Test subject", description="D", priority="urgent")
-    assert t["error"]
+def test_create_invalid():
+    r = create_ticket(subject="Hi", description="x", priority="medium", reporter_id="u1")
+    assert "error" in r
 
-def test_short_subject():
-    t = create_ticket(app_id="a1", user_id="u1", subject="Hi", description="D")
-    assert "too short" in t["error"]
+def test_update():
+    r = update_ticket_status(ticket_id="TKT-1", new_status="resolved", note="Fixed")
+    assert r["updated"]
 
-def test_reply():
-    r = add_reply(ticket={"id": "t1"}, author_id="dev1", message="Working on it", is_developer=True)
-    assert r["is_developer"]
-
-def test_metrics():
-    tickets = [{"status": "open"}, {"status": "resolved"}, {"status": "open"}]
-    m = compute_response_metrics(tickets=tickets)
-    assert m["open_count"] == 2
-    assert m["resolved_count"] == 1
+def test_stats():
+    tickets = [{"status": "open", "priority": "high"}, {"status": "resolved", "priority": "low"},
+               {"status": "in_progress", "priority": "medium"}]
+    r = get_ticket_stats(tickets=tickets)
+    assert r["total"] == 3
+    assert r["open_count"] == 2
