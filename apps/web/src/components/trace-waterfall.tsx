@@ -1,35 +1,38 @@
 "use client";
 
-interface Span { spanId: string; parentSpanId: string | null; operation: string; service: string; startedAt: string; }
-interface TraceWaterfallProps { spans: Span[]; totalSpans: number; services: string[]; maxDepth: number; }
+interface Span { spanId: string; parent: string | null; service: string;
+  operation: string; durationMs: number; status: string; }
+interface TraceWaterfallProps { traceId: string; spans: Span[]; totalDurationMs: number;
+  serviceCount: number; errorCount: number; }
 
-const svcColors = ["bg-blue-500", "bg-green-500", "bg-purple-500", "bg-orange-500", "bg-pink-500"];
+const STATUS_COLOR: Record<string, string> = { ok: "bg-blue-500", error: "bg-red-500", active: "bg-yellow-500" };
 
-export function TraceWaterfall({ spans, totalSpans, services, maxDepth }: TraceWaterfallProps) {
-  const colorMap = Object.fromEntries(services.map((s, i) => [s, svcColors[i % svcColors.length]]));
+export function TraceWaterfall({ traceId, spans, totalDurationMs, serviceCount, errorCount }: TraceWaterfallProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Trace</h3>
-        <span className="text-xs text-gray-400">{totalSpans} spans · {services.length} services · depth {maxDepth}</span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">🔗 Trace Waterfall</h3>
+          <span className="text-xs text-gray-400">{totalDurationMs}ms</span>
+        </div>
+        <div className="flex gap-3 mt-1 text-xs text-gray-400">
+          <span>Trace: <code>{traceId.slice(0, 12)}…</code></span>
+          <span>{spans.length} spans</span>
+          <span>{serviceCount} services</span>
+          {errorCount > 0 && <span className="text-red-500">{errorCount} errors</span>}
+        </div>
       </div>
-      <div className="space-y-1">
-        {spans.map(s => {
-          const depth = s.parentSpanId ? 1 : 0; // simplified
-          return (
-            <div key={s.spanId} className="flex items-center gap-2" style={{ paddingLeft: depth * 24 }}>
-              <div className={`h-4 rounded ${colorMap[s.service] ?? "bg-gray-400"}`} style={{ width: 80 }} />
-              <span className="text-xs font-mono">{s.operation}</span>
-              <span className="text-xs text-gray-400">{s.service}</span>
+      <div className="p-4 space-y-1.5">
+        {spans.map((s, i) => (
+          <div key={s.spanId} className="flex items-center gap-2" style={{ paddingLeft: s.parent ? 24 : 0 }}>
+            <span className="text-xs text-gray-400 w-16 shrink-0">{s.service}</span>
+            <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-800 rounded relative">
+              <div className={`h-full rounded ${STATUS_COLOR[s.status] || "bg-gray-400"}`}
+                   style={{ width: `${Math.max((s.durationMs / Math.max(totalDurationMs, 1)) * 100, 5)}%` }} />
+              <span className="absolute inset-0 flex items-center px-2 text-[10px] text-white font-medium truncate">
+                {s.operation} · {s.durationMs}ms
+              </span>
             </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-3">
-        {services.map(s => (
-          <div key={s} className="flex items-center gap-1 text-xs">
-            <span className={`h-2 w-2 rounded ${colorMap[s]}`} />
-            <span>{s}</span>
           </div>
         ))}
       </div>

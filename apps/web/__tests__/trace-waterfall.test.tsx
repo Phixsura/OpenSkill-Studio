@@ -3,17 +3,20 @@ import { describe, expect, it } from "vitest";
 import { TraceWaterfall } from "@/components/trace-waterfall";
 
 describe("TraceWaterfall", () => {
-  const spans = [
-    { spanId: "s1", parentSpanId: null, operation: "GET /apps", service: "gateway", startedAt: "2026-01-01" },
-    { spanId: "s2", parentSpanId: "s1", operation: "findAll", service: "api", startedAt: "2026-01-01" },
-  ];
-  it("renders spans", () => {
+  it("renders trace", () => {
     const { container } = render(
-      <TraceWaterfall spans={spans} totalSpans={2} services={["gateway", "api"]} maxDepth={2} />
+      <TraceWaterfall traceId="abc123def456" totalDurationMs={45} serviceCount={3} errorCount={1}
+        spans={[
+          { spanId: "s1", parent: null, service: "gateway", operation: "GET /users", durationMs: 45, status: "ok" },
+          { spanId: "s2", parent: "s1", service: "auth", operation: "validate", durationMs: 15, status: "ok" },
+          { spanId: "s3", parent: "s1", service: "cache", operation: "get", durationMs: 2, status: "error" },
+        ]} />
     );
-    expect(container.textContent).toContain("GET /apps");
+    expect(container.textContent).toContain("Trace Waterfall");
+    expect(container.textContent).toContain("45ms");
+    expect(container.textContent).toContain("3 spans");
+    expect(container.textContent).toContain("1 errors");
     expect(container.textContent).toContain("gateway");
-    expect(container.textContent).toContain("2 spans");
-    expect(container.textContent).toContain("depth 2");
+    expect(container.textContent).toContain("GET /users");
   });
 });
