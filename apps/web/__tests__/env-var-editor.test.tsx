@@ -1,30 +1,23 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { EnvVarEditor } from "@/components/env-var-editor";
 
-const VARS = [{ key: "API_KEY", value: "secret" }, { key: "DB_HOST", value: "localhost" }];
-
 describe("EnvVarEditor", () => {
-  it("shows vars", () => {
-    const { container } = render(<EnvVarEditor vars={VARS} onChange={vi.fn()} />);
+  const vars = [
+    { key: "DATABASE_URL", value: "postgres://localhost", is_sensitive: false, source: "manual" },
+    { key: "API_KEY", value: "sk••••••", is_sensitive: true, source: "manual" },
+  ];
+  it("renders vars with masking", () => {
+    const { container } = render(<EnvVarEditor variables={vars} onDelete={vi.fn()} />);
+    expect(container.textContent).toContain("DATABASE_URL");
     expect(container.textContent).toContain("API_KEY");
-    expect(container.textContent).toContain("DB_HOST");
+    expect(container.textContent).toContain("••••••••");
   });
-
-  it("masks values", () => {
-    const { container } = render(<EnvVarEditor vars={VARS} onChange={vi.fn()} />);
-    expect(container.textContent).toContain("••••••");
-    expect(container.textContent).not.toContain("secret");
-  });
-
-  it("has add form", () => {
-    const { container } = render(<EnvVarEditor vars={[]} onChange={vi.fn()} />);
-    expect(container.querySelectorAll("input").length).toBe(2);
-    expect(container.textContent).toContain("Add");
-  });
-
-  it("has remove buttons", () => {
-    const { container } = render(<EnvVarEditor vars={VARS} onChange={vi.fn()} />);
-    expect(container.querySelectorAll("button").length).toBeGreaterThanOrEqual(2);
+  it("delete click", () => {
+    const fn = vi.fn();
+    const { container } = render(<EnvVarEditor variables={vars} onDelete={fn} />);
+    const delBtns = Array.from(container.querySelectorAll("button")).filter(b => b.textContent === "Delete");
+    fireEvent.click(delBtns[0]);
+    expect(fn).toHaveBeenCalledWith("DATABASE_URL");
   });
 });
