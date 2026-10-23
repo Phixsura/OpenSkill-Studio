@@ -1,30 +1,41 @@
 "use client";
 
-interface PoolStats { active: number; idle: number; waiting: number; maxSize: number; utilizationPct: number; healthy: boolean; }
-interface ConnectionPoolMonitorProps { stats: PoolStats; }
+interface PoolStats { maxSize: number; active: number; idle: number;
+  utilizationDisplay: string; waits: number; health: string; }
+interface ConnectionPoolMonitorProps { pools: { name: string; stats: PoolStats }[]; }
 
-export function ConnectionPoolMonitor({ stats }: ConnectionPoolMonitorProps) {
-  const color = stats.healthy ? "bg-green-500" : "bg-red-500";
+export function ConnectionPoolMonitor({ pools }: ConnectionPoolMonitorProps) {
   return (
-    <div className="rounded-lg border p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold">Connection Pool</h3>
-        <div className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${color}`} />
-          <span className="text-xs text-gray-400">{stats.healthy ? "Healthy" : "Saturated"}</span>
-        </div>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">🔌 Connection Pools</h3>
+      <div className="space-y-4">
+        {pools.map(p => (
+          <div key={p.name}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium">{p.name}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">{p.stats.utilizationDisplay}</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  p.stats.health === "healthy" ? "bg-green-100 text-green-700" :
+                  p.stats.health === "busy" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
+                }`}>{p.stats.health}</span>
+              </div>
+            </div>
+            <div className="flex h-4 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800">
+              <div className="bg-blue-500 h-full" style={{ width: `${(p.stats.active / p.stats.maxSize) * 100}%` }}
+                   title={`Active: ${p.stats.active}`} />
+              <div className="bg-blue-200 dark:bg-blue-800 h-full" style={{ width: `${(p.stats.idle / p.stats.maxSize) * 100}%` }}
+                   title={`Idle: ${p.stats.idle}`} />
+            </div>
+            <div className="flex gap-4 mt-1 text-xs text-gray-400">
+              <span>Active: {p.stats.active}</span>
+              <span>Idle: {p.stats.idle}</span>
+              <span>Max: {p.stats.maxSize}</span>
+              {p.stats.waits > 0 && <span className="text-red-500">{p.stats.waits} waits</span>}
+            </div>
+          </div>
+        ))}
       </div>
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <div><p className="text-lg font-bold text-blue-600">{stats.active}</p><p className="text-xs text-gray-400">Active</p></div>
-        <div><p className="text-lg font-bold text-green-600">{stats.idle}</p><p className="text-xs text-gray-400">Idle</p></div>
-        <div><p className="text-lg font-bold text-yellow-600">{stats.waiting}</p><p className="text-xs text-gray-400">Waiting</p></div>
-        <div><p className="text-lg font-bold">{stats.maxSize}</p><p className="text-xs text-gray-400">Max</p></div>
-      </div>
-      <div className="mt-3 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-        <div className={`h-full rounded-full transition-all ${stats.utilizationPct > 80 ? "bg-red-500" : "bg-blue-500"}`}
-          style={{ width: `${stats.utilizationPct}%` }} />
-      </div>
-      <p className="mt-1 text-center text-xs text-gray-400">{stats.utilizationPct}% utilized</p>
     </div>
   );
 }
