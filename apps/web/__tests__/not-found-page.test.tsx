@@ -3,14 +3,21 @@ import { describe, expect, it } from "vitest";
 import { NotFoundPage } from "@/components/not-found-page";
 
 describe("NotFoundPage", () => {
-  it("renders", () => {
+  it("renders 404 with suggestions", () => {
     const { container } = render(
-      <NotFoundPage title="App Not Found" message="The app doesn't exist" icon="🔍"
-        suggestions={["Check the URL"]} actions={[{ label: "Go Home", url: "/", primary: true }]} />
+      <NotFoundPage requestedPath="/docs/start"
+        suggestions={["/docs/getting-started"]} categoryMatches={[]} />
     );
-    expect(container.textContent).toContain("App Not Found");
-    expect(container.textContent).toContain("Check the URL");
-    expect(container.textContent).toContain("Go Home");
-    expect(container.textContent).toContain("🔍");
+    expect(container.textContent).toContain("404");
+    expect(container.textContent).toContain("/docs/start");
+    expect(container.textContent).toContain("Did you mean");
+    expect(container.textContent).toContain("/docs/getting-started");
+  });
+  it("no suggestions", () => {
+    const { container } = render(
+      <NotFoundPage requestedPath="/xyz" suggestions={[]} categoryMatches={[]} />
+    );
+    expect(container.textContent).toContain("404");
+    expect(container.textContent).not.toContain("Did you mean");
   });
 });

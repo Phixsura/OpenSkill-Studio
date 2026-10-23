@@ -1,27 +1,32 @@
 "use client";
 
-interface Action { label: string; url: string; primary?: boolean; }
-interface NotFoundPageProps { title: string; message: string; icon: string; suggestions: string[]; actions: Action[]; }
+interface NotFoundPageProps { requestedPath: string; suggestions: string[];
+  categoryMatches: string[]; }
 
-export function NotFoundPage({ title, message, icon, suggestions, actions }: NotFoundPageProps) {
+export function NotFoundPage({ requestedPath, suggestions, categoryMatches }: NotFoundPageProps) {
   return (
-    <div className="mx-auto max-w-md py-16 text-center">
-      <span className="text-6xl">{icon}</span>
-      <h1 className="mt-4 text-2xl font-bold">{title}</h1>
-      <p className="mt-2 text-sm text-gray-500">{message}</p>
-      <ul className="mt-4 space-y-1">
-        {suggestions.map((s, i) => (
-          <li key={i} className="text-sm text-gray-400">💡 {s}</li>
-        ))}
-      </ul>
-      <div className="mt-6 flex justify-center gap-3">
-        {actions.map(a => (
-          <a key={a.label} href={a.url}
-            className={`rounded-lg px-4 py-2 text-sm ${a.primary ? "bg-blue-600 text-white" : "border border-gray-200 dark:border-gray-700"}`}>
-            {a.label}
-          </a>
-        ))}
-      </div>
+    <div className="flex min-h-[400px] flex-col items-center justify-center text-center p-8">
+      <span className="text-6xl mb-4">🔍</span>
+      <h1 className="text-4xl font-bold">404</h1>
+      <p className="mt-2 text-gray-500">Page not found: <code className="text-sm">{requestedPath}</code></p>
+      {suggestions.length > 0 && (
+        <div className="mt-6">
+          <p className="text-sm font-medium text-gray-400 mb-2">Did you mean?</p>
+          <div className="space-y-1">
+            {suggestions.map(s => (
+              <a key={s} href={s} className="block text-sm text-blue-600 hover:underline">{s}</a>
+            ))}
+          </div>
+        </div>
+      )}
+      {categoryMatches.length > 0 && suggestions.length === 0 && (
+        <div className="mt-6">
+          <p className="text-sm font-medium text-gray-400 mb-2">Related pages</p>
+          {categoryMatches.map(p => (
+            <a key={p} href={p} className="block text-sm text-blue-600 hover:underline">{p}</a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
