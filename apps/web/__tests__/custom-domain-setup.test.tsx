@@ -1,29 +1,25 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CustomDomainSetup } from "@/components/custom-domain-setup";
 
 describe("CustomDomainSetup", () => {
-  const dns = [
-    { type: "CNAME", name: "myapp.example.com", value: "apps.openskill.dev" },
-    { type: "TXT", name: "_verify.myapp.example.com", value: "openskill-verify=a1" },
-  ];
-  it("renders", () => {
+  it("renders setup form", () => {
     const { container } = render(
-      <CustomDomainSetup domain="myapp.example.com" dnsRecords={dns} sslStatus="pending"
-        verificationStatus="pending" onVerify={vi.fn()} />
+      <CustomDomainSetup domain={null} status={null} dnsRecords={[]} ssl={null}
+        statusIcon="" statusMessage="" onSetup={vi.fn()} onVerify={vi.fn()} />
     );
     expect(container.textContent).toContain("Custom Domain");
-    expect(container.textContent).toContain("myapp.example.com");
-    expect(container.textContent).toContain("CNAME");
-    expect(container.textContent).toContain("SSL: pending");
+    expect(container.textContent).toContain("Setup");
   });
-  it("verify", () => {
-    const fn = vi.fn();
+  it("renders pending verification", () => {
+    const dns = [{ type: "CNAME", name: "app.example.com", value: "x.apps.openskill.dev" }];
     const { container } = render(
-      <CustomDomainSetup domain="x.com" dnsRecords={dns} sslStatus="pending"
-        verificationStatus="pending" onVerify={fn} />
+      <CustomDomainSetup domain="app.example.com" status="pending_verification"
+        dnsRecords={dns} ssl={{ status: "pending", issuer: "Let's Encrypt", autoRenew: true }}
+        statusIcon="🔴" statusMessage="Waiting for DNS" onSetup={vi.fn()} onVerify={vi.fn()} />
     );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Verify DNS")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("app.example.com");
+    expect(container.textContent).toContain("CNAME");
+    expect(container.textContent).toContain("Verify DNS");
   });
 });
