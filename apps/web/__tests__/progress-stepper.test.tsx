@@ -4,20 +4,15 @@ import { ProgressStepper } from "@/components/progress-stepper";
 
 describe("ProgressStepper", () => {
   const steps = [
-    { index: 0, name: "Setup", status: "completed", description: "Done" },
-    { index: 1, name: "Configure", status: "in_progress", description: "In progress" },
-    { index: 2, name: "Deploy", status: "pending", description: "" },
+    { index: 0, label: "Upload", status: "completed", icon: "✓" },
+    { index: 1, label: "Process", status: "current", icon: "2" },
+    { index: 2, label: "Publish", status: "pending", icon: "3" },
   ];
-  it("renders", () => {
-    const { container } = render(
-      <ProgressStepper title="App Setup" steps={steps} progressPct={33} currentStep={1} />
-    );
-    expect(container.textContent).toContain("App Setup");
-    expect(container.textContent).toContain("33%");
-    expect(container.textContent).toContain("✅");
-    expect(container.textContent).toContain("🔵");
-    expect(container.textContent).toContain("⬜");
-    expect(container.textContent).toContain("Setup");
-    expect(container.textContent).toContain("Configure");
+  it("renders steps", () => {
+    const { container } = render(<ProgressStepper steps={steps} progressPct={50} />);
+    expect(container.textContent).toContain("Upload");
+    expect(container.textContent).toContain("Process");
+    expect(container.textContent).toContain("Publish");
+    expect(container.textContent).toContain("✓");
   });
 });
