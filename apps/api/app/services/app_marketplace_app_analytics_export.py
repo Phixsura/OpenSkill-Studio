@@ -1,25 +1,42 @@
-"""Analytics export — CSV/JSON export of app analytics data."""
+"""Analytics export — export analytics data in various formats."""
 
 import csv
 import io
 import json
+from datetime import datetime
 
 
-def export_to_csv(*, data: list[dict], columns: list[str]) -> str:
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
-    writer.writeheader()
-    for row in data:
-        writer.writerow(row)
-    return output.getvalue()
+def export_analytics(*, app_id: str, data: list[dict], fmt: str = "json") -> dict:
+    valid_formats = {"json", "csv", "markdown"}
+    if fmt not in valid_formats:
+        return {"error": f"Invalid format. Valid: {', '.join(sorted(valid_formats))}"}
+    if not data:
+        return {"error": "No data to export"}
 
+    if fmt == "json":
+        content = json.dumps(data, indent=2)
+        mime = "application/json"
+    elif fmt == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=data[0].keys())
+        writer.writeheader()
+        writer.writerows(data)
+        content = buf.getvalue()
+        mime = "text/csv"
+    else:  # markdown
+        headers = list(data[0].keys())
+        lines = ["| " + " | ".join(headers) + " |",
+                 "| " + " | ".join("---" for _ in headers) + " |"]
+        for row in data:
+            lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
+        content = "\n".join(lines)
+        mime = "text/markdown"
 
-def export_to_json(*, data: list[dict], pretty: bool = False) -> str:
-    return json.dumps({"data": data, "count": len(data)}, indent=2 if pretty else None, default=str)
-
-
-def build_export_metadata(*, app_id: str, export_type: str, row_count: int, columns: list[str]) -> dict:
     return {
-        "app_id": app_id, "format": export_type, "row_count": row_count,
-        "columns": columns, "size_estimate_bytes": row_count * len(columns) * 20,
+        "app_id": app_id,
+        "format": fmt,
+        "mime_type": mime,
+        "content": content,
+        "row_count": len(data),
+        "exported_at": datetime.utcnow().isoformat(),
     }

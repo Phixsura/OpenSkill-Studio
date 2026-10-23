@@ -1,16 +1,23 @@
-from app.services.app_marketplace_app_analytics_export import export_to_csv, export_to_json, build_export_metadata
-
-def test_csv():
-    data = [{"date": "2026-01-01", "installs": 5}, {"date": "2026-01-02", "installs": 10}]
-    csv_str = export_to_csv(data=data, columns=["date", "installs"])
-    assert "date,installs" in csv_str
-    assert "2026-01-01,5" in csv_str
+from app.services.app_marketplace_app_analytics_export import export_analytics
 
 def test_json():
-    j = export_to_json(data=[{"x": 1}], pretty=True)
-    assert '"count": 1' in j
+    data = [{"date": "2026-10-01", "installs": 50}, {"date": "2026-10-02", "installs": 60}]
+    r = export_analytics(app_id="a1", data=data, fmt="json")
+    assert r["mime_type"] == "application/json"
+    assert r["row_count"] == 2
+    assert '"installs": 50' in r["content"]
 
-def test_metadata():
-    m = build_export_metadata(app_id="a1", export_type="csv", row_count=100, columns=["a", "b"])
-    assert m["row_count"] == 100
-    assert m["size_estimate_bytes"] > 0
+def test_csv():
+    data = [{"date": "2026-10-01", "installs": 50}]
+    r = export_analytics(app_id="a1", data=data, fmt="csv")
+    assert "date,installs" in r["content"]
+    assert r["mime_type"] == "text/csv"
+
+def test_markdown():
+    data = [{"metric": "installs", "value": 100}]
+    r = export_analytics(app_id="a1", data=data, fmt="markdown")
+    assert "| metric | value |" in r["content"]
+
+def test_empty():
+    r = export_analytics(app_id="a1", data=[], fmt="json")
+    assert "error" in r
