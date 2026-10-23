@@ -6,7 +6,7 @@ describe("SessionListPanel", () => {
   it("renders sessions", () => {
     const onRevoke = vi.fn();
     const { container, getByText } = render(
-      <SessionListPanel currentSessionId="sess_abc123" onRevoke={onRevoke}
+      <SessionListPanel currentSessionId="sess_abc123def456gh" onRevoke={onRevoke}
         sessions={[
           { id: "sess_abc123def456gh", ip: "1.2.3.4", userAgent: "Chrome" },
           { id: "sess_xyz789qwe012rs", ip: "5.6.7.8", userAgent: "Firefox" },
