@@ -1,31 +1,32 @@
-"""Content policy — enforce marketplace listing guidelines."""
+"""Content policy — enforce platform content guidelines."""
 
 import re
 
-FORBIDDEN_WORDS = {"hack", "crack", "keygen", "warez", "exploit"}
-MAX_NAME_LENGTH = 50
-MAX_DESCRIPTION_LENGTH = 2000
+
+FORBIDDEN_CATEGORIES = {"malware", "gambling", "adult", "weapons", "hate_speech"}
+
+NAME_BLOCKLIST = re.compile(r"(official|certified|verified)\s+(google|apple|microsoft|amazon)", re.IGNORECASE)
 
 
-def validate_listing_content(*, name: str, description: str, tags: list[str]) -> dict:
+def check_content_policy(*, app_name: str, description: str,
+                           category: str, screenshots: int = 0) -> dict:
     violations = []
-    if len(name) > MAX_NAME_LENGTH:
-        violations.append(f"Name exceeds {MAX_NAME_LENGTH} chars")
-    if len(description) > MAX_DESCRIPTION_LENGTH:
-        violations.append(f"Description exceeds {MAX_DESCRIPTION_LENGTH} chars")
-    combined = f"{name} {description} {' '.join(tags)}".lower()
-    for word in FORBIDDEN_WORDS:
-        if word in combined:
-            violations.append(f"Forbidden content: '{word}'")
-    if re.search(r'https?://(?!openskill\.dev)', combined):
-        violations.append("External links not allowed in listing")
-    if len(tags) > 10:
-        violations.append("Maximum 10 tags allowed")
-    return {"compliant": len(violations) == 0, "violations": violations}
-
-
-def sanitize_html(*, content: str) -> str:
-    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-    content = re.sub(r'on\w+\s*=\s*"[^"]*"', '', content, flags=re.IGNORECASE)
-    content = re.sub(r"on\w+\s*=\s*'[^']*'", '', content, flags=re.IGNORECASE)
-    return content.strip()
+    if category.lower() in FORBIDDEN_CATEGORIES:
+        violations.append({"rule": "forbidden_category", "severity": "critical",
+                           "detail": f"Category '{category}' is not allowed"})
+    if NAME_BLOCKLIST.search(app_name):
+        violations.append({"rule": "impersonation", "severity": "critical",
+                           "detail": "App name implies official affiliation"})
+    if len(description) < 50:
+        violations.append({"rule": "min_description", "severity": "warning",
+                           "detail": "Description should be at least 50 characters"})
+    if screenshots < 1:
+        violations.append({"rule": "min_screenshots", "severity": "warning",
+                           "detail": "At least 1 screenshot is required"})
+    if len(app_name) > 50:
+        violations.append({"rule": "name_length", "severity": "warning",
+                           "detail": "App name should be 50 characters or less"})
+    passed = not any(v["severity"] == "critical" for v in violations)
+    return {"passed": passed, "violations": violations,
+            "critical_count": sum(1 for v in violations if v["severity"] == "critical"),
+            "warning_count": sum(1 for v in violations if v["severity"] == "warning")}
