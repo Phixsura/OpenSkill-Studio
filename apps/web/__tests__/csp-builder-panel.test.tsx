@@ -1,24 +1,17 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CspBuilderPanel } from "@/components/csp-builder-panel";
 
 describe("CspBuilderPanel", () => {
-  it("renders", () => {
-    const directives = { "default-src": ["'self'"], "script-src": ["'self'"] };
+  const directives = { "default-src": ["'self'"], "script-src": ["'self'"] };
+  it("renders CSP header and directives", () => {
     const { container } = render(
-      <CspBuilderPanel headerValue="default-src 'self'; script-src 'self'" directives={directives}
-        securityScore={100} warnings={[]} onUpdate={vi.fn()} />
+      <CspBuilderPanel header="default-src 'self'; script-src 'self'" directives={directives}
+        warnings={["Missing frame-ancestors"]} directiveCount={2} />
     );
-    expect(container.textContent).toContain("Content Security Policy");
-    expect(container.textContent).toContain("100/100");
     expect(container.textContent).toContain("default-src");
-  });
-  it("shows warnings", () => {
-    const { container } = render(
-      <CspBuilderPanel headerValue="x" directives={{}} securityScore={40}
-        warnings={["unsafe-inline detected"]} onUpdate={vi.fn()} />
-    );
-    expect(container.textContent).toContain("⚠️ unsafe-inline detected");
-    expect(container.textContent).toContain("40/100");
+    expect(container.textContent).toContain("script-src");
+    expect(container.textContent).toContain("Missing frame-ancestors");
+    expect(container.textContent).toContain("2 directives");
   });
 });
