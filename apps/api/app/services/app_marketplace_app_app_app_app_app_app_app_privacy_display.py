@@ -1,6 +1,7 @@
 """Privacy policy display — show app data practices and permissions."""
 from __future__ import annotations
 import html
+from urllib.parse import urlparse
 
 DATA_CATEGORIES = {
     "personal": {"icon": "👤", "label": "Personal Information", "risk": "high"},
@@ -22,14 +23,14 @@ def build_privacy_summary(app: dict) -> dict:
         items.append({"id": cat_id, **cat})
         if risk_order.get(cat["risk"], 0) > risk_order.get(max_risk, 0):
             max_risk = cat["risk"]
+    # Validate privacy URL scheme
+    privacy_raw = app.get("privacy_url", "")
+    parsed = urlparse(privacy_raw)
+    safe_privacy = privacy_raw if parsed.scheme in ("http", "https") and parsed.hostname else ""
     return {
         "app_name": html.escape(app.get("name", "")),
-        privacy_raw = app.get("privacy_url", "")
-    from urllib.parse import urlparse as _urlparse
-    _p = _urlparse(privacy_raw)
-    safe_privacy = privacy_raw if _p.scheme in ("http", "https") and _p.hostname else ""
+        "privacy_url": safe_privacy,
         "data_collected": items, "data_count": len(items),
         "max_risk": max_risk,
-        "privacy_url": safe_privacy,
-            "has_privacy_policy": bool(safe_privacy),
+        "has_privacy_policy": bool(safe_privacy),
     }

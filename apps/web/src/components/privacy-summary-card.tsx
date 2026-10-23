@@ -8,7 +8,17 @@ const RISK_COLOR: Record<string, string> = {
   low: "text-green-600", medium: "text-yellow-600", high: "text-orange-600", critical: "text-red-600",
 };
 
+function getSafeUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return ["http:", "https:"].includes(u.protocol) ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function PrivacySummaryCard({ appName, dataCollected, maxRisk, hasPrivacyPolicy, privacyUrl }: PrivacySummaryCardProps) {
+  const safeUrl = getSafeUrl(privacyUrl);
   return (
     <div className="rounded-xl border dark:border-gray-700 p-5">
       <div className="flex items-center justify-between mb-3">
@@ -26,10 +36,11 @@ export function PrivacySummaryCard({ appName, dataCollected, maxRisk, hasPrivacy
         ))}
         {dataCollected.length === 0 && <p className="text-sm text-gray-400">No data collection declared</p>}
       </div>
-      {hasPrivacyPolicy ? (
-        const safeUrl = (() => { try { const u = new URL(privacyUrl); return ["http:", "https:"].includes(u.protocol) ? u.href : null; } catch { return null; } })();
-      {safeUrl && <a href={safeUrl} target="_blank" rel="noopener noreferrer"
-          className="text-xs text-blue-600 hover:text-blue-700">📄 View Privacy Policy →</a>}
+      {safeUrl ? (
+        <a href={safeUrl} target="_blank" rel="noopener noreferrer"
+          className="text-xs text-blue-600 hover:text-blue-700">📄 View Privacy Policy →</a>
+      ) : hasPrivacyPolicy ? (
+        <p className="text-xs text-gray-400">Privacy policy link unavailable</p>
       ) : (
         <p className="text-xs text-red-500">⚠️ No privacy policy provided</p>
       )}
