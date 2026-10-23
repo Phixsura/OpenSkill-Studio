@@ -4,19 +4,14 @@ import { TagInput } from "@/components/tag-input";
 
 describe("TagInput", () => {
   it("renders tags", () => {
-    const { container } = render(
-      <TagInput tags={["api", "tools"]} suggestions={[]} onAdd={vi.fn()} onRemove={vi.fn()} maxTags={10} />
+    const onRemove = vi.fn();
+    const { container, getAllByText } = render(
+      <TagInput tags={["python", "api"]} maxTags={10} onAdd={vi.fn()} onRemove={onRemove} />
     );
+    expect(container.textContent).toContain("python");
     expect(container.textContent).toContain("api");
-    expect(container.textContent).toContain("tools");
-    expect(container.textContent).toContain("2/10");
-  });
-  it("remove tag", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <TagInput tags={["api"]} suggestions={[]} onAdd={vi.fn()} onRemove={fn} maxTags={10} />
-    );
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalledWith("api");
+    expect(container.textContent).toContain("2/10 tags");
+    fireEvent.click(getAllByText("×")[0]);
+    expect(onRemove).toHaveBeenCalledWith("python");
   });
 });
