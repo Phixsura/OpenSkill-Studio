@@ -3,18 +3,17 @@ import { describe, expect, it } from "vitest";
 import { ChangelogTimeline } from "@/components/changelog-timeline";
 
 describe("ChangelogTimeline", () => {
-  it("renders entries", () => {
-    const entries = [{
-      version: "2.0.0", released_at: "2026-06-01T00:00:00Z", total_changes: 3,
-      categories: { added: ["Dark mode", "API v2"], fixed: ["Login bug"] },
-    }];
-    const { container } = render(<ChangelogTimeline entries={entries} />);
-    expect(container.textContent).toContain("2.0.0");
-    expect(container.textContent).toContain("Dark mode");
-    expect(container.textContent).toContain("3 changes");
-  });
-  it("empty state", () => {
-    const { container } = render(<ChangelogTimeline entries={[]} />);
-    expect(container.textContent).toContain("No changelog");
+  const releases = [{
+    version: "2.0.0", date: "2026-03-01",
+    entries: [{ text: "Added dark mode", type: "feat" }, { text: "Fix login crash", type: "fix" }],
+  }];
+  it("renders changelog", () => {
+    const { container } = render(<ChangelogTimeline releases={releases} totalEntries={2} />);
+    expect(container.textContent).toContain("v2.0.0");
+    expect(container.textContent).toContain("Added dark mode");
+    expect(container.textContent).toContain("Fix login crash");
+    expect(container.textContent).toContain("1 releases");
+    expect(container.textContent).toContain("✨");
+    expect(container.textContent).toContain("🐛");
   });
 });
