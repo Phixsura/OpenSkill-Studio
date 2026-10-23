@@ -9,9 +9,9 @@ describe("LocaleCoverage", () => {
   ];
   it("renders coverage", () => {
     const { container } = render(<LocaleCoverage locales={locales} baseKeys={3} />);
-    expect(container.textContent).toContain("ES");
+    expect(container.textContent).toContain("es");
     expect(container.textContent).toContain("Complete");
-    expect(container.textContent).toContain("FR");
+    expect(container.textContent).toContain("fr");
     expect(container.textContent).toContain("1 missing");
     expect(container.textContent).toContain("3 base keys");
   });
