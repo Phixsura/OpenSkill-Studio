@@ -19,5 +19,5 @@ def test_scan_files():
     }
     r = scan_files(files)
     assert r["total_files"] == 2
-    assert r["total_findings"] == 1
+    assert r["total_findings"] == 2  # aws_key + generic_secret
     assert not r["clean"]
