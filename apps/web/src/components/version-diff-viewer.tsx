@@ -1,37 +1,43 @@
 "use client";
 
-interface DiffEndpoint { method?: string; path?: string; endpoint?: string; }
-interface VersionDiffViewerProps { added: DiffEndpoint[]; removed: DiffEndpoint[];
-  changed: DiffEndpoint[]; summary: string; breaking: boolean; }
+interface DiffEntry { key: string; value?: unknown; old?: unknown; new?: unknown; }
+interface VersionDiffViewerProps { added: DiffEntry[]; removed: DiffEntry[];
+  changed: DiffEntry[]; totalChanges: number; hasBreaking: boolean; }
 
-export function VersionDiffViewer({ added, removed, changed, summary, breaking }: VersionDiffViewerProps) {
+export function VersionDiffViewer({ added, removed, changed, totalChanges, hasBreaking }: VersionDiffViewerProps) {
   return (
-    <div className="rounded-xl border p-5 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">🔄 API Version Diff</h3>
-        <div className="flex gap-2">
-          <span className="text-xs font-mono text-gray-400">{summary}</span>
-          {breaking && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Breaking</span>}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔀 Version Diff</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="text-gray-400">{totalChanges} changes</span>
+          {hasBreaking && <span className="text-red-500 font-medium">⚠ Breaking</span>}
         </div>
       </div>
-      {added.length > 0 && (
-        <div className="mb-3">
-          <h4 className="text-xs font-semibold text-green-600 mb-1">+ Added ({added.length})</h4>
-          {added.map((e, i) => <p key={i} className="text-sm text-green-600 font-mono">+ {e.method} {e.path}</p>)}
-        </div>
-      )}
-      {removed.length > 0 && (
-        <div className="mb-3">
-          <h4 className="text-xs font-semibold text-red-600 mb-1">- Removed ({removed.length})</h4>
-          {removed.map((e, i) => <p key={i} className="text-sm text-red-600 font-mono">- {e.method} {e.path}</p>)}
-        </div>
-      )}
-      {changed.length > 0 && (
-        <div>
-          <h4 className="text-xs font-semibold text-yellow-600 mb-1">~ Changed ({changed.length})</h4>
-          {changed.map((e, i) => <p key={i} className="text-sm text-yellow-600 font-mono">~ {e.endpoint}</p>)}
-        </div>
-      )}
+      <div className="divide-y dark:divide-gray-700 text-sm">
+        {added.map(e => (
+          <div key={e.key} className="flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-900/10">
+            <span className="text-green-600 font-mono text-xs">+ added</span>
+            <span className="font-mono">{e.key}</span>
+            <span className="text-gray-400 ml-auto">{String(e.value)}</span>
+          </div>
+        ))}
+        {removed.map(e => (
+          <div key={e.key} className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/10">
+            <span className="text-red-600 font-mono text-xs">- removed</span>
+            <span className="font-mono">{e.key}</span>
+            <span className="text-gray-400 ml-auto">{String(e.value)}</span>
+          </div>
+        ))}
+        {changed.map(e => (
+          <div key={e.key} className="flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/10">
+            <span className="text-yellow-600 font-mono text-xs">~ changed</span>
+            <span className="font-mono">{e.key}</span>
+            <span className="text-gray-400 ml-auto">{String(e.old)} → {String(e.new)}</span>
+          </div>
+        ))}
+        {totalChanges === 0 && <div className="px-4 py-3 text-gray-400 text-center">No differences</div>}
+      </div>
     </div>
   );
 }

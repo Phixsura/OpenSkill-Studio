@@ -5,16 +5,17 @@ import { VersionDiffViewer } from "@/components/version-diff-viewer";
 describe("VersionDiffViewer", () => {
   it("renders diff", () => {
     const { container } = render(
-      <VersionDiffViewer summary="+1 -1 ~1" breaking={true}
-        added={[{ method: "GET", path: "/exports" }]}
-        removed={[{ method: "GET", path: "/legacy" }]}
-        changed={[{ endpoint: "POST:/users" }]} />
+      <VersionDiffViewer totalChanges={3} hasBreaking={true}
+        added={[{ key: "retries", value: 3 }]}
+        removed={[{ key: "timeout", value: 30 }]}
+        changed={[{ key: "version", old: "1.0", new: "2.0" }]} />
     );
-    expect(container.textContent).toContain("API Version Diff");
-    expect(container.textContent).toContain("+1 -1 ~1");
+    expect(container.textContent).toContain("Version Diff");
+    expect(container.textContent).toContain("3 changes");
     expect(container.textContent).toContain("Breaking");
-    expect(container.textContent).toContain("+ GET /exports");
-    expect(container.textContent).toContain("- GET /legacy");
-    expect(container.textContent).toContain("~ POST:/users");
+    expect(container.textContent).toContain("retries");
+    expect(container.textContent).toContain("timeout");
+    expect(container.textContent).toContain("1.0");
+    expect(container.textContent).toContain("2.0");
   });
 });
