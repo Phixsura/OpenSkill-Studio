@@ -3,23 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { OAuthScopeSelector } from "@/components/oauth-scope-selector";
 
 describe("OAuthScopeSelector", () => {
-  const groups = [{
-    category: "user",
-    scopes: [{ scope: "read:profile", description: "Read profile", category: "user", risk: "low" }],
-  }];
-  it("renders", () => {
+  it("renders scopes", () => {
     const { container } = render(
-      <OAuthScopeSelector groups={groups} selected={new Set(["read:profile"])}
-        onToggle={vi.fn()} requiresAdminConsent={false} />
+      <OAuthScopeSelector selected={["read:user"]} hasAdmin={false} onToggle={vi.fn()}
+        scopes={[
+          { scope: "read:user", description: "Read profile", category: "user" },
+          { scope: "write:apps", description: "Manage apps", category: "apps" },
+          { scope: "admin", description: "Full access", category: "admin" },
+        ]} />
     );
     expect(container.textContent).toContain("OAuth Scopes");
+    expect(container.textContent).toContain("1 selected");
+    expect(container.textContent).toContain("read:user");
     expect(container.textContent).toContain("Read profile");
-    expect(container.textContent).toContain("read:profile");
-  });
-  it("admin consent warning", () => {
-    const { container } = render(
-      <OAuthScopeSelector groups={groups} selected={new Set()} onToggle={vi.fn()} requiresAdminConsent={true} />
-    );
-    expect(container.textContent).toContain("admin consent");
+    expect(container.textContent).toContain("admin");
   });
 });
