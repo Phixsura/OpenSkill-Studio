@@ -1,31 +1,33 @@
-"""Screenshot manager — validate and organize app listing screenshots."""
+"""Screenshot manager — validate, order, and serve app screenshots."""
 
-ALLOWED_FORMATS = {"png", "jpg", "jpeg", "webp"}
+import re
+
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_FILE_SIZE_MB = 5
 MAX_SCREENSHOTS = 10
-MAX_SIZE_MB = 5
+MIN_SCREENSHOTS = 1
+MIN_DIMENSIONS = (640, 360)
 
 
-def validate_screenshot(*, filename: str, size_bytes: int) -> dict:
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+def validate_screenshot(*, filename: str, file_size_bytes: int,
+                          width: int, height: int) -> dict:
     errors = []
-    if ext not in ALLOWED_FORMATS:
-        errors.append(f"Invalid format '{ext}'. Use: {', '.join(sorted(ALLOWED_FORMATS))}")
-    size_mb = size_bytes / (1024 * 1024)
-    if size_mb > MAX_SIZE_MB:
-        errors.append(f"File too large ({size_mb:.1f}MB). Max: {MAX_SIZE_MB}MB")
-    return {"valid": len(errors) == 0, "errors": errors, "format": ext, "size_mb": round(size_mb, 2)}
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        errors.append(f"Invalid format: {ext}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+    if file_size_bytes > MAX_FILE_SIZE_MB * 1024 * 1024:
+        errors.append(f"File too large: {file_size_bytes / 1024 / 1024:.1f}MB (max {MAX_FILE_SIZE_MB}MB)")
+    if width < MIN_DIMENSIONS[0] or height < MIN_DIMENSIONS[1]:
+        errors.append(f"Too small: {width}x{height} (min {MIN_DIMENSIONS[0]}x{MIN_DIMENSIONS[1]})")
+    return {"valid": len(errors) == 0, "errors": errors, "filename": filename}
 
 
-def reorder_screenshots(*, screenshots: list[dict], new_order: list[str]) -> list[dict]:
+def reorder_screenshots(*, screenshots: list[dict], new_order: list[str]) -> dict:
     by_id = {s["id"]: s for s in screenshots}
-    ordered = []
-    for sid in new_order:
-        if sid in by_id:
-            ordered.append({**by_id[sid], "position": len(ordered)})
-    return ordered
-
-
-def get_screenshot_requirements() -> dict:
-    return {"max_count": MAX_SCREENSHOTS, "max_size_mb": MAX_SIZE_MB,
-            "allowed_formats": sorted(ALLOWED_FORMATS),
-            "recommended_size": "1280x720", "min_screenshots": 1}
+    missing = [sid for sid in new_order if sid not in by_id]
+    if missing:
+        return {"success": False, "error": f"Unknown IDs: {', '.join(missing)}"}
+    ordered = [by_id[sid] for sid in new_order]
+    for i, s in enumerate(ordered):
+        s["position"] = i
+    return {"success": True, "screenshots": ordered}
