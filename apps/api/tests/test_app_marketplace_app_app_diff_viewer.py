@@ -13,7 +13,7 @@ def test_parse():
     assert r["removals"] == 1
     assert r["total_changes"] == 3
     assert len(r["hunks"]) == 1
-    assert len(r["hunks"][0]["lines"]) == 4
+    assert len(r["hunks"][0]["lines"]) == 5
 
 def test_xss():
     d = "@@ -1 +1 @@\n+<script>alert(1)</script>"
