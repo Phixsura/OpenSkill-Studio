@@ -1,27 +1,22 @@
-from app.services.app_marketplace_app_api_mock_server import create_mock_endpoint, match_request, generate_mock_data, build_mock_server_config
+from app.services.app_marketplace_app_api_mock_server import create_mock_endpoint, create_mock_collection
 
 def test_create():
-    m = create_mock_endpoint(path="/users", method="GET", response_body={"users": []})
-    assert m["status_code"] == 200
-    assert m["response_body"]["users"] == []
+    r = create_mock_endpoint(path="/api/users", method="GET", status_code=200,
+        response_body={"users": []})
+    assert r["mock_id"].startswith("mock_")
+    assert r["method"] == "GET"
+    assert r["url"].endswith("/api/users")
 
-def test_match():
-    mocks = [create_mock_endpoint(path="/users", method="GET"),
-             create_mock_endpoint(path="/users", method="POST", status_code=201)]
-    r = match_request(mocks=mocks, method="POST", path="/users")
-    assert r["status_code"] == 201
+def test_with_delay():
+    r = create_mock_endpoint(path="/slow", delay_ms=2000)
+    assert r["delay_ms"] == 2000
 
-def test_no_match():
-    assert match_request(mocks=[], method="GET", path="/x") is None
+def test_too_slow():
+    r = create_mock_endpoint(path="/x", delay_ms=20000)
+    assert "error" in r
 
-def test_generate():
-    schema = {"properties": {"name": {"type": "string"}, "age": {"type": "integer"}, "active": {"type": "boolean"}}}
-    d = generate_mock_data(schema=schema)
-    assert d["name"] == "mock_name"
-    assert d["age"] == 42
-
-def test_config():
-    eps = [create_mock_endpoint(path="/a", method="GET")]
-    c = build_mock_server_config(endpoints=eps)
-    assert c["endpoint_count"] == 1
-    assert c["cors_enabled"]
+def test_collection():
+    eps = [{"path": "/users", "method": "GET"}, {"path": "/users", "method": "POST"}]
+    r = create_mock_collection(name="User API", endpoints=eps)
+    assert r["total_created"] == 2
+    assert r["collection_name"] == "User API"
