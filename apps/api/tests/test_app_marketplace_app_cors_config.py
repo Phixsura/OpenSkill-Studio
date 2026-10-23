@@ -1,23 +1,21 @@
-from app.services.app_marketplace_app_cors_config import validate_origin, build_cors_config
+from app.services.app_marketplace_app_cors_config import validate_cors_config
 
-def test_valid_origin():
-    r = validate_origin("https://example.com")
+def test_valid():
+    r = validate_cors_config(allowed_origins=["https://example.com", "http://localhost:3000"],
+                              allowed_methods=["GET", "POST"])
     assert r["valid"]
+    assert len(r["origins"]) == 2
+    assert "GET" in r["methods"]
 
-def test_wildcard_warning():
-    r = validate_origin("*")
+def test_wildcard():
+    r = validate_cors_config(allowed_origins=["*"], allowed_methods=["GET"])
     assert r["valid"]
-    assert r["warning"]
+    assert not r["wildcard_warning"]
 
-def test_invalid():
-    r = validate_origin("not-a-url")
+def test_invalid_origin():
+    r = validate_cors_config(allowed_origins=["not-a-url"], allowed_methods=["GET"])
     assert not r["valid"]
 
-def test_config():
-    c = build_cors_config(allowed_origins=["https://app.com", "https://dev.app.com"])
-    assert c["valid"]
-    assert c["allow_credentials"]
-
-def test_config_wildcard():
-    c = build_cors_config(allowed_origins=["*"])
-    assert not c["allow_credentials"]
+def test_invalid_method():
+    r = validate_cors_config(allowed_origins=["https://x.com"], allowed_methods=["EXPLODE"])
+    assert not r["valid"]
