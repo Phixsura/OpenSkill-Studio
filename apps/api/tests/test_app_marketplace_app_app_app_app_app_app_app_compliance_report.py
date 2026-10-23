@@ -1,23 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_compliance_report import generate_compliance_report
+from app.services.app_marketplace_app_app_app_app_app_app_app_compliance_report import generate_report, control_summary
 
 def test_report():
-    controls = [
-        {"id": "AC-1", "name": "Access Control", "category": "Security", "status": "passed"},
-        {"id": "AC-2", "name": "Encryption", "category": "Security", "status": "passed"},
-        {"id": "DM-1", "name": "Data Mapping", "category": "Privacy", "status": "failed", "notes": "Incomplete"},
-        {"id": "DM-2", "name": "Consent", "category": "Privacy", "status": "n/a"},
-    ]
-    r = generate_compliance_report(framework="soc2", org_name="Acme Corp",
-                                     period="2026-Q3", controls=controls)
-    assert r["framework"] == "SOC2"
-    assert r["compliance_score"] == 67  # 2 passed / 3 applicable
-    assert r["verdict"] == "non_compliant"
+    r = generate_report("Acme", "SOC2", [
+        {"id": "CC1", "title": "Encryption", "status": "passed"},
+        {"id": "CC2", "title": "Access Control", "status": "passed"},
+        {"id": "CC3", "title": "Logging", "status": "failed"},
+    ])
     assert r["passed"] == 2
-    assert r["failed"] == 1
-    assert len(r["sections"]) == 2
+    assert r["score"] == 67
+    assert not r["compliant"]
 
-def test_compliant():
-    controls = [{"id": "1", "name": "X", "status": "passed"}]
-    r = generate_compliance_report(framework="gdpr", org_name="Test", period="Q3", controls=controls)
-    assert r["verdict"] == "compliant"
-    assert r["compliance_score"] == 100
+def test_summary():
+    reports = [
+        generate_report("A", "SOC2", [{"status": "passed"}] * 10),
+        generate_report("A", "GDPR", [{"status": "passed"}] * 8 + [{"status": "failed"}] * 2),
+    ]
+    s = control_summary(reports)
+    assert s["reports"] == 2
+    assert s["total_controls"] == 20
