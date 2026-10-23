@@ -19,7 +19,7 @@ describe("PermissionMatrix", () => {
     const { container } = render(
       <PermissionMatrix matrix={matrix} roles={roles} actions={actions} onToggle={fn} />
     );
-    fireEvent.click(container.querySelectorAll("button")[1]); // viewer+write
+    fireEvent.click(container.querySelectorAll("button")[2]); // viewer+write
     expect(fn).toHaveBeenCalledWith("viewer", "write");
   });
 });
