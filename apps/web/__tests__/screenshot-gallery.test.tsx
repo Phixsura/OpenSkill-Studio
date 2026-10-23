@@ -3,12 +3,17 @@ import { describe, expect, it } from "vitest";
 import { ScreenshotGallery } from "@/components/screenshot-gallery";
 
 describe("ScreenshotGallery", () => {
-  it("shows images", () => {
-    const { container } = render(<ScreenshotGallery screenshots={[{ url: "img.png", alt: "Test" }]} />);
-    expect(container.querySelector("img")).toBeTruthy();
+  const screenshots = [
+    { url: "https://cdn.example.com/1.png", altText: "Dashboard", order: 1 },
+    { url: "https://cdn.example.com/2.png", altText: "Settings", order: 2 },
+  ];
+  it("renders gallery", () => {
+    const { container } = render(<ScreenshotGallery screenshots={screenshots} meetsMinimum={true} />);
+    expect(container.querySelectorAll("img").length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll("button").length).toBe(2);
   });
-  it("null when empty", () => {
-    const { container } = render(<ScreenshotGallery screenshots={[]} />);
-    expect(container.innerHTML).toBe("");
+  it("empty state", () => {
+    const { container } = render(<ScreenshotGallery screenshots={[]} meetsMinimum={false} />);
+    expect(container.textContent).toContain("No screenshots");
   });
 });
