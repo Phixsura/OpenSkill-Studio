@@ -3,18 +3,16 @@ import { describe, expect, it } from "vitest";
 import { PlatformStatsHero } from "@/components/platform-stats-hero";
 
 describe("PlatformStatsHero", () => {
-  it("renders stats", () => {
-    const stats = [
-      { label: "Apps", value: 500, icon: "📦" },
-      { label: "Developers", value: 100, icon: "👨‍💻" },
-      { label: "Installs", value: 25000, icon: "📥" },
-    ];
+  it("renders", () => {
     const { container } = render(
-      <PlatformStatsHero stats={stats} title="OpenSkill Marketplace" subtitle="Build. Share. Grow." />
+      <PlatformStatsHero commits={1475} lines={130000} files={3861}
+        services={850} components={750} tests={1700} version="5.5.0" />
     );
-    expect(container.textContent).toContain("OpenSkill Marketplace");
-    expect(container.textContent).toContain("500");
-    expect(container.textContent).toContain("25,000");
-    expect(container.textContent).toContain("Build. Share. Grow.");
+    expect(container.textContent).toContain("OpenSkill Developer Platform");
+    expect(container.textContent).toContain("v5.5.0");
+    expect(container.textContent).toContain("1,475");
+    expect(container.textContent).toContain("130,000");
+    expect(container.textContent).toContain("3,861");
+    expect(container.textContent).toContain("🏆");
   });
 });
