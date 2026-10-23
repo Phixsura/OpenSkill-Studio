@@ -1,24 +1,28 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 
 describe("OnboardingChecklist", () => {
-  const steps = [
-    { key: "profile", title: "Complete profile", required: true, completed: true },
-    { key: "app", title: "Create app", required: true, completed: false },
-    { key: "docs", title: "Add docs", required: false, completed: false },
+  const tasks = [
+    { id: "1", title: "Create app", description: "Set up your first app", completed: true, action_url: null, icon: "🔧", required: true },
+    { id: "2", title: "Add webhook", description: "", completed: false, action_url: null, icon: "🔗", required: true },
   ];
-  it("renders progress", () => {
-    const { container } = render(<OnboardingChecklist steps={steps} progressPct={33} canPublish={false} />);
-    expect(container.textContent).toContain("33%");
-    expect(container.textContent).toContain("Complete profile");
+  it("renders tasks", () => {
+    const { container } = render(
+      <OnboardingChecklist tasks={tasks} greeting="Welcome!" progressPct={50} onComplete={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Welcome!");
+    expect(container.textContent).toContain("Create app");
+    expect(container.textContent).toContain("Add webhook");
+    expect(container.textContent).toContain("50%");
   });
-  it("shows required badge", () => {
-    const { container } = render(<OnboardingChecklist steps={steps} progressPct={33} canPublish={false} />);
-    expect(container.textContent).toContain("Required");
-  });
-  it("shows publish ready", () => {
-    const { container } = render(<OnboardingChecklist steps={steps} progressPct={100} canPublish={true} />);
-    expect(container.textContent).toContain("publish apps");
+  it("complete click", () => {
+    const fn = vi.fn();
+    const { container } = render(
+      <OnboardingChecklist tasks={tasks} greeting="Hi" progressPct={50} onComplete={fn} />
+    );
+    const buttons = container.querySelectorAll("button");
+    fireEvent.click(buttons[1]); // second task (uncompleted)
+    expect(fn).toHaveBeenCalledWith("2");
   });
 });

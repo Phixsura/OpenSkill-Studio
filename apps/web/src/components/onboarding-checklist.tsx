@@ -1,30 +1,31 @@
 "use client";
 
-interface Step { key: string; title: string; required: boolean; completed: boolean; }
+interface Task { id: string; title: string; description: string; completed: boolean;
+  action_url: string | null; icon: string; required: boolean; }
+interface OnboardingChecklistProps { tasks: Task[]; greeting: string; progressPct: number;
+  onComplete: (id: string) => void; }
 
-interface OnboardingChecklistProps { steps: Step[]; progressPct: number; canPublish: boolean; }
-
-export function OnboardingChecklist({ steps, progressPct, canPublish }: OnboardingChecklistProps) {
+export function OnboardingChecklist({ tasks, greeting, progressPct, onComplete }: OnboardingChecklistProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-6 dark:border-gray-700">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Getting Started</h3>
-        <span className="text-sm text-gray-500">{progressPct}% complete</span>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h2 className="text-lg font-bold">{greeting}</h2>
+      <p className="mt-1 text-sm text-gray-500">Complete these steps to get started</p>
+      <div className="mt-3 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
+        <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${progressPct}%` }} />
       </div>
-      <div className="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-        <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${progressPct}%` }} />
-      </div>
-      {canPublish && (
-        <div className="mt-3 rounded bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">
-          ✅ You can now publish apps!
-        </div>
-      )}
-      <ul className="mt-4 space-y-2">
-        {steps.map(s => (
-          <li key={s.key} className="flex items-center gap-3 text-sm">
-            <span className={s.completed ? "text-green-500" : "text-gray-300"}>{s.completed ? "✅" : "⬜"}</span>
-            <span className={s.completed ? "line-through opacity-60" : ""}>{s.title}</span>
-            {s.required && !s.completed && <span className="text-xs text-red-500">Required</span>}
+      <p className="mt-1 text-xs text-gray-400">{progressPct}% complete</p>
+      <ul className="mt-4 space-y-3">
+        {tasks.map(t => (
+          <li key={t.id} className="flex items-start gap-3">
+            <button onClick={() => !t.completed && onComplete(t.id)}
+              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${t.completed ? "bg-green-500 border-green-500 text-white" : "dark:border-gray-600"}`}>
+              {t.completed && "✓"}
+            </button>
+            <div>
+              <p className={`text-sm font-medium ${t.completed ? "line-through text-gray-400" : ""}`}>{t.title}</p>
+              {t.description && <p className="text-xs text-gray-500">{t.description}</p>}
+              {!t.required && <span className="text-xs text-gray-400 italic">Optional</span>}
+            </div>
           </li>
         ))}
       </ul>
