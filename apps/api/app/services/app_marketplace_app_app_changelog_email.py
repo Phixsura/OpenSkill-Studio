@@ -15,7 +15,7 @@ def generate_changelog_email(*, app_name: str, version: str, changes: list[dict]
     type_labels = {"feature": "🚀 New Features", "fix": "🐛 Bug Fixes",
                     "improvement": "✨ Improvements", "breaking": "⚠️ Breaking Changes"}
     for ctype, items in sections.items():
-        label = type_labels.get(ctype, ctype.title())
+        label = type_labels.get(ctype) or html.escape(str(ctype).title())
         body_parts.append(f"<h3>{label}</h3><ul>")
         for item in items:
             body_parts.append(f"<li>{item}</li>")
