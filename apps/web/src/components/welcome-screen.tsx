@@ -1,36 +1,25 @@
 "use client";
 
-interface Feature { title: string; description: string; icon: string; }
-interface NextStep { title: string; href: string; icon: string; }
-interface WelcomeScreenProps { appName: string; appIcon: string; headline: string;
-  features: Feature[]; nextSteps: NextStep[];
-  onDismiss: () => void; onNavigate: (href: string) => void; }
+interface WelcomeScreenProps { greeting: string; message: string; type: string;
+  steps?: string[]; ctaLabel: string; onCta: () => void; }
 
-export function WelcomeScreen({ appName, appIcon, headline, features, nextSteps, onDismiss, onNavigate }: WelcomeScreenProps) {
+export function WelcomeScreen({ greeting, message, type, steps, ctaLabel, onCta }: WelcomeScreenProps) {
   return (
-    <div className="mx-auto max-w-lg space-y-6 py-8 text-center">
-      <span className="text-6xl">{appIcon}</span>
-      <h1 className="text-2xl font-extrabold">{headline}</h1>
-      <div className="grid gap-3">
-        {features.map(f => (
-          <div key={f.title} className="flex items-center gap-3 rounded-lg border p-3 text-left dark:border-gray-700">
-            <span className="text-2xl">{f.icon}</span>
-            <div><p className="text-sm font-medium">{f.title}</p><p className="text-xs text-gray-400">{f.description}</p></div>
-          </div>
-        ))}
-      </div>
-      <div>
-        <p className="text-sm font-semibold mb-2">Next Steps</p>
-        <div className="flex justify-center gap-2">
-          {nextSteps.map(s => (
-            <button key={s.href} onClick={() => onNavigate(s.href)}
-              className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
-              <span>{s.icon}</span>{s.title}
-            </button>
+    <div className="max-w-lg mx-auto text-center py-12">
+      <h1 className="text-2xl font-bold mb-2">{greeting}</h1>
+      <p className="text-sm text-gray-500 mb-6">{message}</p>
+      {type === "new_user" && steps && (
+        <div className="text-left mb-6 space-y-2">
+          {steps.map((s, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-2">
+              <span className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center">{i + 1}</span>
+              {s}
+            </div>
           ))}
         </div>
-      </div>
-      <button onClick={onDismiss} className="text-sm text-gray-400 hover:text-gray-600">Skip for now →</button>
+      )}
+      <button onClick={onCta}
+        className="px-8 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700">{ctaLabel}</button>
     </div>
   );
 }
