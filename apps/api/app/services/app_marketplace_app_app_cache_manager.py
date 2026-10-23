@@ -14,7 +14,7 @@ class CacheManager:
         self.misses = 0
 
     def get(self, key: str, now: float | None = None) -> object | None:
-        t = now or time.monotonic()
+        t = now if now is not None else time.monotonic()
         if key in self._cache:
             ts, val = self._cache[key]
             if t - ts < self.ttl_s:
@@ -26,7 +26,7 @@ class CacheManager:
         return None
 
     def set(self, key: str, value: object, now: float | None = None) -> None:
-        t = now or time.monotonic()
+        t = now if now is not None else time.monotonic()
         if key in self._cache:
             del self._cache[key]
         elif len(self._cache) >= self.max_size:
