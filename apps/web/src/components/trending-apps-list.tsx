@@ -1,24 +1,32 @@
 "use client";
 
-interface TrendingApp { name: string; category: string; recentInstalls: number; trendingScore: number; }
+interface TrendingApp { name: string; icon?: string; rating: number;
+  recentInstalls: number; trendingScore: number; rank: number; }
+interface TrendingAppsListProps { apps: TrendingApp[]; onSelect: (name: string) => void; }
 
-interface TrendingAppsListProps { apps: TrendingApp[]; }
-
-const CAT_ICONS: Record<string, string> = { connector: "🔌", automation: "🤖", analytics: "📊", ui_extension: "🖥️" };
-
-export function TrendingAppsList({ apps }: TrendingAppsListProps) {
-  if (apps.length === 0) return <p className="py-3 text-center text-sm text-gray-400">No trending apps</p>;
+export function TrendingAppsList({ apps, onSelect }: TrendingAppsListProps) {
   return (
-    <div className="space-y-2">
-      {apps.map((app, i) => (
-        <div key={app.name} className="flex items-center gap-3 rounded border border-gray-200 p-3 dark:border-gray-700">
-          <span className="w-6 text-center text-sm font-bold text-gray-400">#{i + 1}</span>
-          <span>{CAT_ICONS[app.category] ?? "📦"}</span>
-          <span className="flex-1 font-medium">{app.name}</span>
-          <span className="text-xs text-gray-500">📥 {app.recentInstalls}</span>
-          <span className="text-xs text-blue-600">🔥 {app.trendingScore}</span>
-        </div>
-      ))}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔥 Trending Apps</h3>
+      </div>
+      <div className="divide-y dark:divide-gray-700">
+        {apps.map(a => (
+          <button key={a.name} onClick={() => onSelect(a.name)}
+            className="w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
+            <span className="text-lg font-bold text-gray-300 w-6">{a.rank}</span>
+            <span className="text-xl">{a.icon || "📱"}</span>
+            <div className="flex-1">
+              <p className="text-sm font-medium">{a.name}</p>
+              <div className="flex gap-2 text-xs text-gray-400">
+                <span>⭐ {a.rating}</span>
+                <span>📥 {a.recentInstalls.toLocaleString()}</span>
+              </div>
+            </div>
+            <span className="text-xs font-mono text-gray-300">{a.trendingScore}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
