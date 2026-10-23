@@ -1,24 +1,24 @@
-from app.services.app_marketplace_app_integration_catalog import list_integrations, search_integrations, get_integration
+from app.services.app_marketplace_app_integration_catalog import list_integrations, connect_integration
 
 def test_list_all():
-    assert len(list_integrations()) == 6
+    r = list_integrations()
+    assert r["total"] == 6
+    assert len(r["categories"]) >= 4
 
 def test_filter_category():
     r = list_integrations(category="communication")
-    assert all(i["category"] == "communication" for i in r)
-
-def test_filter_status():
-    r = list_integrations(status="beta")
-    assert all(i["status"] == "beta" for i in r)
+    assert r["total"] == 1
+    assert r["integrations"][0]["id"] == "slack"
 
 def test_search():
-    r = search_integrations(query="slack")
-    assert len(r) == 1
-    assert r[0]["id"] == "slack"
+    r = list_integrations(search="github")
+    assert r["total"] == 1
 
-def test_get():
-    r = get_integration(integration_id="github")
-    assert r["name"] == "GitHub"
+def test_connect():
+    r = connect_integration(app_id="a1", integration_id="slack", config={"channel": "#dev"})
+    assert r["success"]
+    assert r["integration"] == "Slack"
 
-def test_get_missing():
-    assert get_integration(integration_id="nope") is None
+def test_connect_unknown():
+    r = connect_integration(app_id="a1", integration_id="unknown")
+    assert not r["success"]
