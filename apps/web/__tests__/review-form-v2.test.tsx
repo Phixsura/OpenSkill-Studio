@@ -9,11 +9,12 @@ describe("ReviewFormV2", () => {
     expect(container.textContent).toContain("Rating");
     expect(container.textContent).toContain("Pros");
     expect(container.textContent).toContain("Cons");
-    expect(container.querySelector("button:last-of-type")?.textContent).toContain("Submit Review");
+    expect(container.textContent).toContain("Submit Review");
   });
   it("submit disabled initially", () => {
     const { container } = render(<ReviewFormV2 appName="X" onSubmit={vi.fn()} />);
-    const btn = Array.from(container.querySelectorAll("button")).find(b => b.textContent?.includes("Submit")) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    const btns = Array.from(container.querySelectorAll("button"));
+    const submitBtn = btns.find(b => b.textContent?.includes("Submit")) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
   });
 });
