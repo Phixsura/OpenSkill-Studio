@@ -1,19 +1,27 @@
-"""Changelog RSS — generate RSS feed from platform changelog entries."""
+"""Changelog RSS feed — generate RSS from changelog entries."""
 from __future__ import annotations
 import html
 
 
-def build_changelog_rss(entries: list[dict], *, title: str = "OpenSkill Changelog",
-                          base_url: str = "https://openskill.io") -> dict:
-    items = []
+def generate_rss(title: str, link: str, entries: list[dict]) -> dict:
+    safe_title = html.escape(title)
+    safe_link = html.escape(link)
+    items_xml = []
     for e in entries:
-        items.append({
-            "title": html.escape(e.get("title", "")),
-            "version": e.get("version", ""),
-            "date": e.get("date", ""),
-            "description": html.escape(e.get("description", "")[:500]),
-            "link": f"{base_url}/changelog/{e.get('version', '')}",
-            "change_count": e.get("change_count", 0),
-        })
-    return {"title": title, "items": items, "item_count": len(items),
-            "last_updated": items[0]["date"] if items else ""}
+        items_xml.append(
+            f"<item><title>{html.escape(e.get('title', ''))}</title>"
+            f"<description>{html.escape(e.get('description', ''))}</description>"
+            f"<pubDate>{html.escape(e.get('date', ''))}</pubDate>"
+            f"<guid>{html.escape(e.get('id', ''))}</guid></item>"
+        )
+    xml = (f'<?xml version="1.0" encoding="UTF-8"?>'
+           f'<rss version="2.0"><channel>'
+           f'<title>{safe_title}</title><link>{safe_link}</link>'
+           f'{"".join(items_xml)}</channel></rss>')
+    return {"xml": xml, "item_count": len(entries), "title": safe_title}
+
+
+def parse_entries(releases: list[dict]) -> list[dict]:
+    return [{"id": r.get("version", ""), "title": f"v{r.get('version', '')}",
+             "description": r.get("summary", ""), "date": r.get("date", "")}
+            for r in releases]
