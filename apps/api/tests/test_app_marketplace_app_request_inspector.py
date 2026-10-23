@@ -1,22 +1,22 @@
-from app.services.app_marketplace_app_request_inspector import capture_request, search_requests, compute_request_stats
+from app.services.app_marketplace_app_request_inspector import inspect_request, compare_requests
 
-def test_capture():
-    r = capture_request(method="GET", path="/api/v1/apps", headers={"Authorization": "Bearer secret", "Accept": "application/json"},
-                         status_code=200, duration_ms=45)
-    assert "Authorization" not in r["headers"]
-    assert r["duration_ms"] == 45
+def test_inspect():
+    r = inspect_request(method="POST", path="/api/apps",
+        headers={"Content-Type": "application/json", "Authorization": "Bearer sk_test"},
+        body='{"name":"App"}', query_params={"v": "2"})
+    assert r["method"] == "POST"
+    assert r["has_auth"]
+    assert r["auth_type"] == "Bearer"
+    assert r["headers"]["Authorization"] == "***"
+    assert r["body_size_bytes"] == 15
 
-def test_search_status():
-    reqs = [{"status_code": 200, "method": "GET", "path": "/a"},
-            {"status_code": 500, "method": "POST", "path": "/b"}]
-    assert len(search_requests(requests=reqs, status_filter=500)) == 1
+def test_no_auth():
+    r = inspect_request(method="GET", path="/health", headers={})
+    assert not r["has_auth"]
 
-def test_search_method():
-    reqs = [{"method": "GET", "path": "/a"}, {"method": "POST", "path": "/b"}]
-    assert len(search_requests(requests=reqs, method_filter="post")) == 1
-
-def test_stats():
-    reqs = [{"status_code": 200, "duration_ms": 100}, {"status_code": 500, "duration_ms": 200}]
-    s = compute_request_stats(requests=reqs)
-    assert s["error_rate"] == 50.0
-    assert s["avg_duration_ms"] == 150
+def test_compare():
+    a = {"method": "GET", "path": "/a", "body_size_bytes": 0}
+    b = {"method": "POST", "path": "/a", "body_size_bytes": 100}
+    r = compare_requests(req_a=a, req_b=b)
+    assert r["diff_count"] == 2
+    assert not r["identical"]

@@ -3,18 +3,18 @@ import { describe, expect, it } from "vitest";
 import { RequestInspectorPanel } from "@/components/request-inspector-panel";
 
 describe("RequestInspectorPanel", () => {
-  it("renders requests", () => {
-    const requests = [
-      { method: "GET", path: "/api/v1/apps", status_code: 200, duration_ms: 45, captured_at: "" },
-      { method: "POST", path: "/api/v1/install", status_code: 500, duration_ms: 200, captured_at: "" },
-    ];
-    const { container } = render(<RequestInspectorPanel requests={requests} />);
-    expect(container.textContent).toContain("GET");
-    expect(container.textContent).toContain("/api/v1/apps");
-    expect(container.textContent).toContain("500");
-  });
-  it("empty state", () => {
-    const { container } = render(<RequestInspectorPanel requests={[]} />);
-    expect(container.textContent).toContain("No requests");
+  const request = {
+    request_id: "abc123", method: "POST", path: "/api/apps",
+    headers: { "Content-Type": "application/json", "Authorization": "***" },
+    body_size_bytes: 42, content_type: "application/json",
+    has_auth: true, auth_type: "Bearer", timestamp: "2026-10-23T12:00:00",
+  };
+  it("renders", () => {
+    const { container } = render(<RequestInspectorPanel request={request} />);
+    expect(container.textContent).toContain("POST");
+    expect(container.textContent).toContain("/api/apps");
+    expect(container.textContent).toContain("abc123");
+    expect(container.textContent).toContain("42 bytes");
+    expect(container.textContent).toContain("Bearer ✓");
   });
 });
