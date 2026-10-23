@@ -1,26 +1,23 @@
 "use client";
 
-interface PaginationControlsProps { page: number; totalPages: number; hasPrev: boolean;
-  hasNext: boolean; onPageChange: (page: number) => void; }
+interface PaginationControlsProps { page: number; totalPages: number;
+  pages: number[]; showing: string; hasPrev: boolean; hasNext: boolean;
+  onPage: (page: number) => void; }
 
-export function PaginationControls({ page, totalPages, hasPrev, hasNext, onPageChange }: PaginationControlsProps) {
-  const pages: number[] = [];
-  const start = Math.max(1, page - 2);
-  const end = Math.min(totalPages, page + 2);
-  for (let i = start; i <= end; i++) pages.push(i);
-
+export function PaginationControls({ page, totalPages, pages, showing, hasPrev, hasNext, onPage }: PaginationControlsProps) {
   return (
-    <div className="flex items-center justify-center gap-1">
-      <button onClick={() => onPageChange(page - 1)} disabled={!hasPrev}
-        className="rounded border px-2.5 py-1 text-sm disabled:opacity-30 dark:border-gray-700">←</button>
-      {start > 1 && <><button onClick={() => onPageChange(1)} className="rounded px-2.5 py-1 text-sm hover:bg-gray-100 dark:hover:bg-gray-800">1</button><span className="text-gray-400">…</span></>}
-      {pages.map(p => (
-        <button key={p} onClick={() => onPageChange(p)}
-          className={`rounded px-2.5 py-1 text-sm ${p === page ? "bg-blue-600 text-white" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}>{p}</button>
-      ))}
-      {end < totalPages && <><span className="text-gray-400">…</span><button onClick={() => onPageChange(totalPages)} className="rounded px-2.5 py-1 text-sm hover:bg-gray-100 dark:hover:bg-gray-800">{totalPages}</button></>}
-      <button onClick={() => onPageChange(page + 1)} disabled={!hasNext}
-        className="rounded border px-2.5 py-1 text-sm disabled:opacity-30 dark:border-gray-700">→</button>
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-xs text-gray-400">{showing}</span>
+      <div className="flex gap-1">
+        <button onClick={() => onPage(page - 1)} disabled={!hasPrev}
+          className="px-2 py-1 rounded border text-xs disabled:opacity-30 hover:bg-gray-50 dark:hover:bg-gray-800">←</button>
+        {pages.map(p => (
+          <button key={p} onClick={() => onPage(p)}
+            className={`px-2.5 py-1 rounded text-xs ${p === page ? "bg-blue-600 text-white" : "border hover:bg-gray-50 dark:hover:bg-gray-800"}`}>{p}</button>
+        ))}
+        <button onClick={() => onPage(page + 1)} disabled={!hasNext}
+          className="px-2 py-1 rounded border text-xs disabled:opacity-30 hover:bg-gray-50 dark:hover:bg-gray-800">→</button>
+      </div>
     </div>
   );
 }
