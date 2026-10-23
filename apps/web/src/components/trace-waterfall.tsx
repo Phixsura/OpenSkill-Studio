@@ -1,40 +1,41 @@
 "use client";
 
-interface Span { spanId: string; parent: string | null; service: string;
-  operation: string; durationMs: number; status: string; }
+interface Span { spanId: string; operation: string; durationMs: number; parentId: string | null; }
 interface TraceWaterfallProps { traceId: string; spans: Span[]; totalDurationMs: number;
-  serviceCount: number; errorCount: number; }
+  criticalSpan: string | null; depth: number; }
 
-const STATUS_COLOR: Record<string, string> = { ok: "bg-blue-500", error: "bg-red-500", active: "bg-yellow-500" };
-
-export function TraceWaterfall({ traceId, spans, totalDurationMs, serviceCount, errorCount }: TraceWaterfallProps) {
+export function TraceWaterfall({ traceId, spans, totalDurationMs, criticalSpan, depth }: TraceWaterfallProps) {
+  const maxDur = Math.max(...spans.map(s => s.durationMs), 1);
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b dark:border-gray-700">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">🔗 Trace Waterfall</h3>
-          <span className="text-xs text-gray-400">{totalDurationMs}ms</span>
-        </div>
-        <div className="flex gap-3 mt-1 text-xs text-gray-400">
-          <span>Trace: <code>{traceId.slice(0, 12)}…</code></span>
-          <span>{spans.length} spans</span>
-          <span>{serviceCount} services</span>
-          {errorCount > 0 && <span className="text-red-500">{errorCount} errors</span>}
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔍 Trace Waterfall</h3>
+        <div className="text-xs text-gray-400">
+          {spans.length} spans · {totalDurationMs}ms · depth {depth}
         </div>
       </div>
-      <div className="p-4 space-y-1.5">
-        {spans.map((s, i) => (
-          <div key={s.spanId} className="flex items-center gap-2" style={{ paddingLeft: s.parent ? 24 : 0 }}>
-            <span className="text-xs text-gray-400 w-16 shrink-0">{s.service}</span>
-            <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-800 rounded relative">
-              <div className={`h-full rounded ${STATUS_COLOR[s.status] || "bg-gray-400"}`}
-                   style={{ width: `${Math.max((s.durationMs / Math.max(totalDurationMs, 1)) * 100, 5)}%` }} />
-              <span className="absolute inset-0 flex items-center px-2 text-[10px] text-white font-medium truncate">
-                {s.operation} · {s.durationMs}ms
-              </span>
+      <div className="p-2 text-[10px] text-gray-400 font-mono border-b dark:border-gray-700 px-4">
+        trace: {traceId} {criticalSpan && `· bottleneck: ${criticalSpan}`}
+      </div>
+      <div className="divide-y dark:divide-gray-700">
+        {spans.map(s => {
+          const pct = Math.round((s.durationMs / maxDur) * 100);
+          const isCritical = s.operation === criticalSpan;
+          return (
+            <div key={s.spanId} className="px-4 py-1.5">
+              <div className="flex items-center justify-between text-xs mb-0.5">
+                <span className={`font-mono ${isCritical ? "text-red-600 font-bold" : ""}`}>
+                  {s.parentId ? "└─ " : ""}{s.operation}
+                </span>
+                <span className="text-gray-400">{s.durationMs}ms</span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full">
+                <div className={`h-full rounded-full ${isCritical ? "bg-red-500" : "bg-blue-400"}`}
+                  style={{ width: `${pct}%` }} />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
