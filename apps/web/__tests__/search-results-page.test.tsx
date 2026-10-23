@@ -1,19 +1,21 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SearchResultsPage } from "@/components/search-results-page";
 
 describe("SearchResultsPage", () => {
-  const results = [{ id: "a1", name: "Editor", icon: "📝", tagline: "Code editor",
-    category: "tools", rating: 4.5, downloads: 5000, verified: true }];
   it("renders results", () => {
-    const { container } = render(
-      <SearchResultsPage query="code" results={results} total={1} sortBy="relevance"
-        categories={{ tools: 1 }} hasResults={true}
-        onSort={vi.fn()} onFilterCategory={vi.fn()} onSelect={vi.fn()} />
+    const onSelect = vi.fn();
+    const { container, getAllByRole } = render(
+      <SearchResultsPage query="slack" total={2} onSelect={onSelect} results={[
+        { id: "app1", name: "Slack Bot", icon: "💬", description: "Chat integration" },
+        { id: "app2", name: "Slack Notifier", icon: "🔔", description: "Notifications" },
+      ]} />
     );
-    expect(container.textContent).toContain("code");
-    expect(container.textContent).toContain("Editor");
-    expect(container.textContent).toContain("1 results");
-    expect(container.textContent).toContain("tools");
+    expect(container.textContent).toContain("2 results");
+    expect(container.textContent).toContain("slack");
+    expect(container.textContent).toContain("Slack Bot");
+    expect(container.textContent).toContain("Chat integration");
+    fireEvent.click(getAllByRole("button")[0]);
+    expect(onSelect).toHaveBeenCalledWith("app1");
   });
 });
