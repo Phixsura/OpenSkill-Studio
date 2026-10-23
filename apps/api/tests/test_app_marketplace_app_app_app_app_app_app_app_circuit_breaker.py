@@ -1,19 +1,24 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_circuit_breaker import CircuitBreaker
+from app.services.app_marketplace_app_app_app_app_app_app_app_circuit_breaker import (
+    create_breaker, record_result, get_status, clear_breakers,
+)
 
-def test_circuit_breaker():
-    cb = CircuitBreaker(failure_threshold=3, recovery_timeout=10)
-    assert cb.call(now=0)["allowed"]
-    cb.record_failure(now=1)
-    cb.record_failure(now=2)
-    assert cb.status()["state"] == "closed"
-    cb.record_failure(now=3)
-    assert cb.status()["state"] == "open"
-    r = cb.call(now=5)
-    assert not r["allowed"]
+def test_trip():
+    clear_breakers()
+    create_breaker("db", failure_threshold=3)
+    record_result("db", False)
+    record_result("db", False)
+    r = record_result("db", False)  # 3rd failure
     assert r["state"] == "open"
-    # After recovery timeout
-    r2 = cb.call(now=14)
-    assert r2["allowed"]
-    assert r2["state"] == "half_open"
-    cb.record_success()
-    assert cb.status()["state"] == "closed"
+    assert not r["allowed"]
+    s = get_status("db")
+    assert s["total_trips"] == 1
+    clear_breakers()
+
+def test_recovery():
+    clear_breakers()
+    create_breaker("api", failure_threshold=2, recovery_sec=0)  # instant recovery
+    record_result("api", False)
+    record_result("api", False)  # trips open
+    r = record_result("api", True)  # recovery_sec=0 → half_open, success → closed
+    assert r["state"] == "closed"
+    clear_breakers()
