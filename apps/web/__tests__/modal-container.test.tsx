@@ -3,29 +3,27 @@ import { describe, expect, it, vi } from "vitest";
 import { ModalContainer } from "@/components/modal-container";
 
 describe("ModalContainer", () => {
-  it("renders when open", () => {
+  it("renders", () => {
     const { container } = render(
-      <ModalContainer open={true} title="Test Modal" onClose={vi.fn()}>
-        <p>Modal content</p>
+      <ModalContainer title="Confirm" sizeClass="max-w-md" dismissible={true}
+        hasFooter={true} onClose={vi.fn()} onConfirm={vi.fn()}>
+        <p>Are you sure?</p>
       </ModalContainer>
     );
-    expect(container.textContent).toContain("Test Modal");
-    expect(container.textContent).toContain("Modal content");
+    expect(container.textContent).toContain("Confirm");
+    expect(container.textContent).toContain("Are you sure?");
+    expect(container.textContent).toContain("Cancel");
+    expect(container.textContent).toContain("Confirm");
   });
-  it("hidden when closed", () => {
+  it("close", () => {
+    const fn = vi.fn();
     const { container } = render(
-      <ModalContainer open={false} title="Hidden" onClose={vi.fn()}>
+      <ModalContainer title="X" sizeClass="max-w-sm" dismissible={true}
+        hasFooter={false} onClose={fn}>
         <p>Content</p>
       </ModalContainer>
     );
-    expect(container.innerHTML).toBe("");
-  });
-  it("closes on X", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <ModalContainer open={true} title="X" onClose={fn}><p>C</p></ModalContainer>
-    );
-    fireEvent.click(container.querySelector("button")!);
+    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "✕")!);
     expect(fn).toHaveBeenCalled();
   });
 });
