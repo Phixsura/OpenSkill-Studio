@@ -27,8 +27,9 @@ export function PrivacySummaryCard({ appName, dataCollected, maxRisk, hasPrivacy
         {dataCollected.length === 0 && <p className="text-sm text-gray-400">No data collection declared</p>}
       </div>
       {hasPrivacyPolicy ? (
-        <a href={privacyUrl} target="_blank" rel="noopener noreferrer"
-          className="text-xs text-blue-600 hover:text-blue-700">📄 View Privacy Policy →</a>
+        const safeUrl = (() => { try { const u = new URL(privacyUrl); return ["http:", "https:"].includes(u.protocol) ? u.href : null; } catch { return null; } })();
+      {safeUrl && <a href={safeUrl} target="_blank" rel="noopener noreferrer"
+          className="text-xs text-blue-600 hover:text-blue-700">📄 View Privacy Policy →</a>}
       ) : (
         <p className="text-xs text-red-500">⚠️ No privacy policy provided</p>
       )}

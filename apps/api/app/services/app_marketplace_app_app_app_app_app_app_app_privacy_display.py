@@ -24,8 +24,12 @@ def build_privacy_summary(app: dict) -> dict:
             max_risk = cat["risk"]
     return {
         "app_name": html.escape(app.get("name", "")),
-        "privacy_url": app.get("privacy_url", ""),
+        privacy_raw = app.get("privacy_url", "")
+    from urllib.parse import urlparse as _urlparse
+    _p = _urlparse(privacy_raw)
+    safe_privacy = privacy_raw if _p.scheme in ("http", "https") and _p.hostname else ""
         "data_collected": items, "data_count": len(items),
         "max_risk": max_risk,
-        "has_privacy_policy": bool(app.get("privacy_url")),
+        "privacy_url": safe_privacy,
+            "has_privacy_policy": bool(safe_privacy),
     }
