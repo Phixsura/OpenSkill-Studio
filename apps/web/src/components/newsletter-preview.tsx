@@ -1,33 +1,27 @@
 "use client";
 
-interface Section { heading: string; body: string; cta_label?: string; cta_url?: string; }
-interface NewsletterPreviewProps { title: string; edition: number; sections: Section[];
-  onSend: () => void; onEdit: () => void; }
+interface NewsletterSection { type: string; title: string; body: string; cta: string; link: string; }
+interface NewsletterPreviewProps { subject: string; sections: NewsletterSection[];
+  readTimeMin: number; footer: string; }
 
-export function NewsletterPreview({ title, edition, sections, onSend, onEdit }: NewsletterPreviewProps) {
+export function NewsletterPreview({ subject, sections, readTimeMin, footer }: NewsletterPreviewProps) {
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <div className="rounded-t-xl bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-center text-white">
-        <p className="text-xs opacity-60">Edition #{edition}</p>
-        <h1 className="mt-1 text-2xl font-bold">{title}</h1>
+    <div className="max-w-lg mx-auto rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="bg-blue-600 text-white p-4 text-center">
+        <p className="text-xs opacity-75">Newsletter Preview</p>
+        <h2 className="text-lg font-bold">{subject}</h2>
+        <p className="text-xs opacity-75">{readTimeMin} min read</p>
       </div>
-      <div className="space-y-4 px-4">
+      <div className="p-5 space-y-4 bg-white dark:bg-gray-900">
         {sections.map((s, i) => (
-          <div key={i} className="border-b pb-4 dark:border-gray-700">
-            <h2 className="font-bold">{s.heading}</h2>
-            <p className="mt-1 text-sm text-gray-500">{s.body}</p>
-            {s.cta_label && s.cta_url && (
-              <a href={s.cta_url} className="mt-2 inline-block text-sm text-blue-600 hover:underline">
-                {s.cta_label} →
-              </a>
-            )}
+          <div key={i}>
+            <h3 className="font-semibold mb-1">{s.title}</h3>
+            <p className="text-sm text-gray-500">{s.body}</p>
+            {s.cta && <p className="text-sm text-blue-600 mt-1 font-medium">{s.cta} →</p>}
           </div>
         ))}
       </div>
-      <div className="flex gap-2 px-4 pb-4">
-        <button onClick={onEdit} className="flex-1 rounded border py-2 text-sm dark:border-gray-600">Edit</button>
-        <button onClick={onSend} className="flex-1 rounded bg-blue-600 py-2 text-sm text-white">Send Newsletter</button>
-      </div>
+      <div className="px-5 py-3 bg-gray-50 dark:bg-gray-800 text-xs text-gray-400 text-center">{footer}</div>
     </div>
   );
 }

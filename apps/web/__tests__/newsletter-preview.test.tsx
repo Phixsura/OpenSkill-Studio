@@ -1,28 +1,20 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { NewsletterPreview } from "@/components/newsletter-preview";
 
 describe("NewsletterPreview", () => {
-  const sections = [
-    { heading: "What's New", body: "Dark mode launched!", cta_label: "Try it", cta_url: "/settings" },
-  ];
-  it("renders", () => {
+  it("renders newsletter", () => {
     const { container } = render(
-      <NewsletterPreview title="Dev Update" edition={42} sections={sections}
-        onSend={vi.fn()} onEdit={vi.fn()} />
+      <NewsletterPreview subject="Weekly #42" readTimeMin={2} footer="Unsubscribe"
+        sections={[
+          { type: "hero", title: "SSO Support", body: "Enterprise auth", cta: "Learn More", link: "" },
+          { type: "text", title: "Updates", body: "15 new features", cta: "", link: "" },
+        ]} />
     );
-    expect(container.textContent).toContain("Dev Update");
-    expect(container.textContent).toContain("#42");
-    expect(container.textContent).toContain("What's New");
-    expect(container.textContent).toContain("Dark mode launched!");
-    expect(container.textContent).toContain("Try it →");
-  });
-  it("send", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <NewsletterPreview title="X" edition={1} sections={sections} onSend={fn} onEdit={vi.fn()} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Send Newsletter")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("Weekly #42");
+    expect(container.textContent).toContain("SSO Support");
+    expect(container.textContent).toContain("Learn More →");
+    expect(container.textContent).toContain("15 new features");
+    expect(container.textContent).toContain("Unsubscribe");
   });
 });
