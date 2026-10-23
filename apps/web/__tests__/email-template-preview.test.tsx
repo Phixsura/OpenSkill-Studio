@@ -1,26 +1,16 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { EmailTemplatePreview } from "@/components/email-template-preview";
 
 describe("EmailTemplatePreview", () => {
-  const templates = [
-    { id: "welcome", name: "Welcome", subject: "Welcome to {{app_name}}!", variables: ["app_name", "user_name"] },
-  ];
-  it("renders", () => {
+  it("renders email preview", () => {
     const { container } = render(
-      <EmailTemplatePreview templates={templates} onPreview={vi.fn(() => "")} onSend={vi.fn()} />
+      <EmailTemplatePreview subject="Welcome to SuperApp!" preheader="Get started"
+        bodyHtml="<p>Hello!</p>" templateId="welcome" />
     );
-    expect(container.textContent).toContain("Email Templates");
-    expect(container.textContent).toContain("Welcome");
-    expect(container.textContent).toContain("{{app_name}}");
-    expect(container.textContent).toContain("{{user_name}}");
-  });
-  it("send test", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <EmailTemplatePreview templates={templates} onPreview={vi.fn(() => "")} onSend={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Send Test Email")!);
-    expect(fn).toHaveBeenCalledWith("welcome");
+    expect(container.textContent).toContain("Welcome to SuperApp!");
+    expect(container.textContent).toContain("Get started");
+    expect(container.textContent).toContain("welcome");
+    expect(container.textContent).toContain("Hello!");
   });
 });

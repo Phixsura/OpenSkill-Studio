@@ -1,42 +1,33 @@
 "use client";
 
-import { useState } from "react";
+interface EmailTemplatePreviewProps { subject: string; preheader: string; bodyHtml: string;
+  templateId: string; }
 
-interface Template { id: string; name: string; subject: string; variables: string[]; }
-interface EmailTemplatePreviewProps { templates: Template[]; onPreview: (id: string, vars: Record<string, string>) => string;
-  onSend: (id: string) => void; }
-
-export function EmailTemplatePreview({ templates, onPreview, onSend }: EmailTemplatePreviewProps) {
-  const [selected, setSelected] = useState(templates[0]?.id ?? "");
-  const template = templates.find(t => t.id === selected);
-
+export function EmailTemplatePreview({ subject, preheader, bodyHtml, templateId }: EmailTemplatePreviewProps) {
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Email Templates</h2>
-      <div className="flex gap-2">
-        {templates.map(t => (
-          <button key={t.id} onClick={() => setSelected(t.id)}
-            className={`rounded px-3 py-1.5 text-sm ${selected === t.id ? "bg-blue-600 text-white" : "border dark:border-gray-600"}`}>
-            {t.name}
-          </button>
-        ))}
-      </div>
-      {template && (
-        <div className="rounded-lg border p-4 dark:border-gray-700">
-          <p className="text-sm font-medium">Subject: {template.subject}</p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {template.variables.map(v => (
-              <span key={v} className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30">
-                {`{{${v}}}`}
-              </span>
-            ))}
-          </div>
-          <button onClick={() => onSend(template.id)}
-            className="mt-3 rounded bg-green-600 px-3 py-1.5 text-sm text-white">
-            Send Test Email
-          </button>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="border-b bg-gray-50 px-4 py-3 dark:bg-gray-900 dark:border-gray-700">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-gray-400 font-mono">{templateId}</span>
+          <span className="text-xs text-gray-400">Preview</span>
         </div>
-      )}
+      </div>
+      <div className="p-4">
+        <div className="mb-3 space-y-1">
+          <p className="text-xs text-gray-400">Subject</p>
+          <p className="text-sm font-semibold">{subject}</p>
+        </div>
+        <div className="mb-3 space-y-1">
+          <p className="text-xs text-gray-400">Preheader</p>
+          <p className="text-sm text-gray-500">{preheader}</p>
+        </div>
+        {bodyHtml && (
+          <div className="mt-3 rounded border p-3 dark:border-gray-700">
+            <p className="text-xs text-gray-400 mb-1">Body</p>
+            <div className="text-sm prose dark:prose-invert" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
