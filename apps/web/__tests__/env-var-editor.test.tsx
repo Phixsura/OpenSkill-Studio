@@ -3,21 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { EnvVarEditor } from "@/components/env-var-editor";
 
 describe("EnvVarEditor", () => {
-  const vars = [
-    { key: "DATABASE_URL", value: "postgres://localhost", is_sensitive: false, source: "manual" },
-    { key: "API_KEY", value: "sk••••••", is_sensitive: true, source: "manual" },
-  ];
-  it("renders vars with masking", () => {
-    const { container } = render(<EnvVarEditor variables={vars} onDelete={vi.fn()} />);
-    expect(container.textContent).toContain("DATABASE_URL");
-    expect(container.textContent).toContain("API_KEY");
-    expect(container.textContent).toContain("••••••••");
-  });
-  it("delete click", () => {
-    const fn = vi.fn();
-    const { container } = render(<EnvVarEditor variables={vars} onDelete={fn} />);
-    const delBtns = Array.from(container.querySelectorAll("button")).filter(b => b.textContent === "Delete");
-    fireEvent.click(delBtns[0]);
-    expect(fn).toHaveBeenCalledWith("DATABASE_URL");
+  it("renders vars and adds", () => {
+    const onAdd = vi.fn();
+    const { container, getByPlaceholderText, getByText } = render(
+      <EnvVarEditor vars={[
+        { key: "DB_URL", masked: "po****db", sensitive: true },
+        { key: "APP_ENV", masked: "production", sensitive: false },
+      ]} onAdd={onAdd} />
+    );
+    expect(container.textContent).toContain("Environment Variables");
+    expect(container.textContent).toContain("DB_URL");
+    expect(container.textContent).toContain("po****db");
+    fireEvent.change(getByPlaceholderText("KEY"), { target: { value: "NEW_KEY" } });
+    fireEvent.change(getByPlaceholderText("value"), { target: { value: "secret" } });
+    fireEvent.click(getByText("Add"));
+    expect(onAdd).toHaveBeenCalledWith("NEW_KEY", "secret", true);
   });
 });
