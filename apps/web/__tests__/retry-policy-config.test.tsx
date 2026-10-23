@@ -10,7 +10,7 @@ describe("RetryPolicyConfig", () => {
     );
     expect(container.textContent).toContain("Retry Policy");
     expect(container.textContent).toContain("3");
-    expect(container.textContent).toContain("Exponential");
+    expect(container.textContent).toContain("exponential");
     expect(container.textContent).toContain("1000ms");
     expect(container.textContent).toContain("2000ms");
     expect(container.textContent).toContain("429");
