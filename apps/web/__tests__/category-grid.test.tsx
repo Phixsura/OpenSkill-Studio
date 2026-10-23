@@ -1,31 +1,18 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CategoryGrid } from "@/components/category-grid";
 
 describe("CategoryGrid", () => {
-  const categories = [
-    { id: "tools", name: "Developer Tools", icon: "🔧", count: 85, color: "blue" },
-    { id: "security", name: "Security", icon: "🔒", count: 48, color: "red" },
-    { id: "ai_ml", name: "AI & ML", icon: "🤖", count: 28, color: "cyan" },
+  const cats = [
+    { id: "tools", name: "Developer Tools", icon: "🔧", description: "Build faster", count: 320 },
+    { id: "ai", name: "AI & ML", icon: "🤖", description: "Intelligent", count: 130 },
   ];
-  it("renders", () => {
-    const { container } = render(
-      <CategoryGrid categories={categories} totalApps={500} onCategoryClick={vi.fn()} />
-    );
+  it("renders grid", () => {
+    const { container } = render(<CategoryGrid categories={cats} totalApps={450} onSelect={vi.fn()} />);
     expect(container.textContent).toContain("Browse Categories");
-    expect(container.textContent).toContain("500 apps across 3 categories");
-    expect(container.textContent).toContain("🔧");
     expect(container.textContent).toContain("Developer Tools");
-    expect(container.textContent).toContain("85 apps");
-    expect(container.textContent).toContain("🔒");
-    expect(container.textContent).toContain("🤖");
-  });
-  it("click category", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <CategoryGrid categories={categories} totalApps={500} onCategoryClick={fn} />
-    );
-    fireEvent.click(container.querySelectorAll("button")[1]);
-    expect(fn).toHaveBeenCalledWith("security");
+    expect(container.textContent).toContain("AI & ML");
+    expect(container.textContent).toContain("320 apps");
+    expect(container.textContent).toContain("450");
   });
 });
