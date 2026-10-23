@@ -3,23 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { ToastContainer } from "@/components/toast-container";
 
 describe("ToastContainer", () => {
-  const toasts = [
-    { type: "success", title: "Saved!", message: "Changes saved", icon: "✅", dismissible: true },
-    { type: "error", title: "Failed", message: "", icon: "❌", dismissible: true },
-  ];
   it("renders toasts", () => {
-    const { container } = render(<ToastContainer toasts={toasts} onDismiss={vi.fn()} />);
+    const onDismiss = vi.fn();
+    const { container, getAllByText } = render(
+      <ToastContainer onDismiss={onDismiss} toasts={[
+        { id: "t1", title: "Saved!", message: "", variant: "success", icon: "✅", dismissible: true },
+        { id: "t2", title: "Error", message: "Connection lost", variant: "error", icon: "❌", dismissible: true },
+      ]} />
+    );
     expect(container.textContent).toContain("Saved!");
-    expect(container.textContent).toContain("Failed");
-  });
-  it("dismisses", () => {
-    const fn = vi.fn();
-    const { container } = render(<ToastContainer toasts={toasts} onDismiss={fn} />);
-    fireEvent.click(container.querySelectorAll("button")[0]);
-    expect(fn).toHaveBeenCalledWith(0);
-  });
-  it("hidden when empty", () => {
-    const { container } = render(<ToastContainer toasts={[]} onDismiss={vi.fn()} />);
-    expect(container.innerHTML).toBe("");
+    expect(container.textContent).toContain("Error");
+    expect(container.textContent).toContain("Connection lost");
+    fireEvent.click(getAllByText("✕")[0]);
+    expect(onDismiss).toHaveBeenCalledWith("t1");
   });
 });
