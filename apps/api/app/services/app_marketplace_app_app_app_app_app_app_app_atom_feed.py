@@ -12,7 +12,7 @@ def build_atom_feed(*, title: str, app_id: str, entries: list[dict],
         items.append({
             "title": html.escape(e.get("title", "")),
             "version": e.get("version", ""),
-            "date": e.get("date", ""),
+            "date": html.escape(str(e.get("date", ""))),
             "summary": html.escape(e.get("summary", "")[:500]),
             "url": f"{base_url}/apps/{app_id}/changelog/{e.get('version', '')}",
         })
