@@ -5,7 +5,7 @@ import { WebhookCatalogViewer } from "@/components/webhook-catalog-viewer";
 describe("WebhookCatalogViewer", () => {
   it("renders events", () => {
     const onSelect = vi.fn();
-    const { container, getByText } = render(
+    const { container } = render(
       <WebhookCatalogViewer selectedCategory={null} onSelectCategory={onSelect}
         categories={["apps", "billing"]}
         events={[
@@ -17,7 +17,7 @@ describe("WebhookCatalogViewer", () => {
     expect(container.textContent).toContain("app.installed");
     expect(container.textContent).toContain("payment.completed");
     expect(container.textContent).toContain("app_id");
-    fireEvent.click(getByText("billing"));
+    const billingBtns = container.querySelectorAll("button"); fireEvent.click(billingBtns[2]);
     expect(onSelect).toHaveBeenCalledWith("billing");
   });
 });
