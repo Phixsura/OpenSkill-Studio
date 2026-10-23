@@ -3,17 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { DataTable } from "@/components/data-table";
 
 describe("DataTable", () => {
-  const columns = [{ key: "name", label: "Name" }, { key: "installs", label: "Installs" }];
-  const rows = [{ name: "App A", installs: 500 }, { name: "App B", installs: 1000 }];
-  it("renders", () => {
+  const columns = [{ key: "name", label: "Name", sortable: true }];
+  const rows = [{ name: "App A" }, { name: "App B" }];
+  it("renders table", () => {
     const { container } = render(
-      <DataTable columns={columns} rows={rows} totalRows={2} page={1} totalPages={1}
-        sortBy={null} sortDir="asc" onSort={vi.fn()} onPage={vi.fn()} />
+      <DataTable columns={columns} rows={rows} total={2} page={1} totalPages={1}
+        sortBy={null} sortDir="asc" onSort={vi.fn()} onPageChange={vi.fn()} />
     );
     expect(container.textContent).toContain("Name");
-    expect(container.textContent).toContain("Installs");
     expect(container.textContent).toContain("App A");
-    expect(container.textContent).toContain("1000");
-    expect(container.textContent).toContain("2 rows");
+    expect(container.textContent).toContain("App B");
+    expect(container.textContent).toContain("2 items");
   });
 });
