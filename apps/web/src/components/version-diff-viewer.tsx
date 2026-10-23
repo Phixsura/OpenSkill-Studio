@@ -1,45 +1,37 @@
 "use client";
 
-interface ModifiedField { field: string; old: unknown; new: unknown; }
-interface VersionDiffViewerProps { addedFields: string[]; removedFields: string[];
-  modifiedFields: ModifiedField[]; totalChanges: number; hasBreaking: boolean; }
+interface DiffEndpoint { method?: string; path?: string; endpoint?: string; }
+interface VersionDiffViewerProps { added: DiffEndpoint[]; removed: DiffEndpoint[];
+  changed: DiffEndpoint[]; summary: string; breaking: boolean; }
 
-export function VersionDiffViewer({ addedFields, removedFields, modifiedFields, totalChanges, hasBreaking }: VersionDiffViewerProps) {
+export function VersionDiffViewer({ added, removed, changed, summary, breaking }: VersionDiffViewerProps) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Version Diff</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-400">{totalChanges} changes</span>
-          {hasBreaking && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700 dark:bg-red-900/30">Breaking</span>}
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">🔄 API Version Diff</h3>
+        <div className="flex gap-2">
+          <span className="text-xs font-mono text-gray-400">{summary}</span>
+          {breaking && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Breaking</span>}
         </div>
       </div>
-      {addedFields.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-green-600">+ Added</h3>
-          {addedFields.map(f => <p key={f} className="ml-2 font-mono text-xs text-green-500">+ {f}</p>)}
+      {added.length > 0 && (
+        <div className="mb-3">
+          <h4 className="text-xs font-semibold text-green-600 mb-1">+ Added ({added.length})</h4>
+          {added.map((e, i) => <p key={i} className="text-sm text-green-600 font-mono">+ {e.method} {e.path}</p>)}
         </div>
       )}
-      {removedFields.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-red-600">− Removed</h3>
-          {removedFields.map(f => <p key={f} className="ml-2 font-mono text-xs text-red-500">- {f}</p>)}
+      {removed.length > 0 && (
+        <div className="mb-3">
+          <h4 className="text-xs font-semibold text-red-600 mb-1">- Removed ({removed.length})</h4>
+          {removed.map((e, i) => <p key={i} className="text-sm text-red-600 font-mono">- {e.method} {e.path}</p>)}
         </div>
       )}
-      {modifiedFields.length > 0 && (
+      {changed.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium text-yellow-600">~ Modified</h3>
-          {modifiedFields.map(m => (
-            <div key={m.field} className="ml-2 font-mono text-xs">
-              <span className="text-gray-400">{m.field}: </span>
-              <span className="text-red-400">{String(m.old)}</span>
-              <span className="text-gray-400"> → </span>
-              <span className="text-green-400">{String(m.new)}</span>
-            </div>
-          ))}
+          <h4 className="text-xs font-semibold text-yellow-600 mb-1">~ Changed ({changed.length})</h4>
+          {changed.map((e, i) => <p key={i} className="text-sm text-yellow-600 font-mono">~ {e.endpoint}</p>)}
         </div>
       )}
-      {totalChanges === 0 && <p className="text-sm text-gray-400">No changes between versions</p>}
     </div>
   );
 }

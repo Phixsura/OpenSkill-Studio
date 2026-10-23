@@ -5,22 +5,16 @@ import { VersionDiffViewer } from "@/components/version-diff-viewer";
 describe("VersionDiffViewer", () => {
   it("renders diff", () => {
     const { container } = render(
-      <VersionDiffViewer addedFields={["icon"]} removedFields={["category"]}
-        modifiedFields={[{ field: "version", old: "1.0", new: "2.0" }]}
-        totalChanges={3} hasBreaking={true} />
+      <VersionDiffViewer summary="+1 -1 ~1" breaking={true}
+        added={[{ method: "GET", path: "/exports" }]}
+        removed={[{ method: "GET", path: "/legacy" }]}
+        changed={[{ endpoint: "POST:/users" }]} />
     );
-    expect(container.textContent).toContain("Version Diff");
-    expect(container.textContent).toContain("3 changes");
+    expect(container.textContent).toContain("API Version Diff");
+    expect(container.textContent).toContain("+1 -1 ~1");
     expect(container.textContent).toContain("Breaking");
-    expect(container.textContent).toContain("+ icon");
-    expect(container.textContent).toContain("- category");
-    expect(container.textContent).toContain("1.0 → 2.0");
-  });
-  it("no changes", () => {
-    const { container } = render(
-      <VersionDiffViewer addedFields={[]} removedFields={[]} modifiedFields={[]}
-        totalChanges={0} hasBreaking={false} />
-    );
-    expect(container.textContent).toContain("No changes");
+    expect(container.textContent).toContain("+ GET /exports");
+    expect(container.textContent).toContain("- GET /legacy");
+    expect(container.textContent).toContain("~ POST:/users");
   });
 });
