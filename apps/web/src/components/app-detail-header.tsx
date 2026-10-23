@@ -1,37 +1,36 @@
 "use client";
 
-interface AppDetailHeaderProps {
-  name: string;
-  slug: string;
-  category: string;
-  status: string;
-  iconUrl?: string | null;
-  developerName?: string;
-}
+interface AppDetailHeaderProps { name: string; developer: string; tagline: string;
+  iconLetter: string; rating: number; stars: string; reviewCount: number;
+  installDisplay: string; priceLabel: string; category: string; verified: boolean;
+  version: string; onInstall: () => void; }
 
-const CATEGORY_ICONS: Record<string, string> = {
-  connector: "🔌", automation: "🤖", analytics: "📊", ui_extension: "🖥️",
-  ecosystem_source: "🌐", content_pack: "📦", workflow_adapter: "⚡",
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-yellow-100 text-yellow-800", published: "bg-green-100 text-green-800",
-  deprecated: "bg-orange-100 text-orange-800", revoked: "bg-red-100 text-red-800",
-};
-
-export function AppDetailHeader({ name, slug, category, status, iconUrl, developerName }: AppDetailHeaderProps) {
+export function AppDetailHeader({ name, developer, tagline, iconLetter, rating, stars,
+  reviewCount, installDisplay, priceLabel, category, verified, version, onInstall }: AppDetailHeaderProps) {
   return (
-    <div className="flex items-start gap-4">
-      <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-gray-100 text-3xl dark:bg-gray-800">
-        {iconUrl ? <img src={iconUrl} alt="" className="h-12 w-12 rounded-lg" /> : CATEGORY_ICONS[category] ?? "📦"}
+    <div className="flex gap-5">
+      <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 text-3xl font-bold text-white">
+        {iconLetter}
       </div>
-      <div>
-        <h1 className="text-2xl font-bold">{name}</h1>
-        <p className="text-sm text-gray-500">@{slug}{developerName ? ` · by ${developerName}` : ""}</p>
-        <div className="mt-1 flex gap-2">
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status] ?? "bg-gray-100"}`}>{status}</span>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-800">{category.replace(/_/g, " ")}</span>
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-black">{name}</h1>
+          {verified && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30">✓ Verified</span>}
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">v{version}</span>
         </div>
+        <p className="mt-0.5 text-sm text-gray-400">by {developer}</p>
+        <p className="mt-1 text-sm text-gray-500">{tagline}</p>
+        <div className="mt-2 flex items-center gap-4 text-sm">
+          <span className="text-yellow-500">{stars} <span className="text-gray-400">({reviewCount})</span></span>
+          <span className="text-gray-400">📥 {installDisplay}</span>
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">{category}</span>
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-2">
+        <button onClick={onInstall}
+          className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white">
+          {priceLabel === "Free" ? "Install Free" : `Install — ${priceLabel}`}
+        </button>
       </div>
     </div>
   );

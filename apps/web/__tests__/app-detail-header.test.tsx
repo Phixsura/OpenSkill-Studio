@@ -1,30 +1,23 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppDetailHeader } from "@/components/app-detail-header";
 
 describe("AppDetailHeader", () => {
-  it("shows name", () => {
-    const { container } = render(<AppDetailHeader name="My App" slug="my-app" category="connector" status="published" />);
-    expect(container.textContent).toContain("My App");
-  });
-
-  it("shows slug", () => {
-    const { container } = render(<AppDetailHeader name="X" slug="my-app" category="connector" status="draft" />);
-    expect(container.textContent).toContain("@my-app");
-  });
-
-  it("shows developer", () => {
-    const { container } = render(<AppDetailHeader name="X" slug="x" category="connector" status="draft" developerName="Dev Co" />);
-    expect(container.textContent).toContain("Dev Co");
-  });
-
-  it("shows status badge", () => {
-    const { container } = render(<AppDetailHeader name="X" slug="x" category="connector" status="published" />);
-    expect(container.textContent).toContain("published");
-  });
-
-  it("shows category", () => {
-    const { container } = render(<AppDetailHeader name="X" slug="x" category="ui_extension" status="draft" />);
-    expect(container.textContent).toContain("ui extension");
+  it("renders", () => {
+    const { container } = render(
+      <AppDetailHeader name="Auth SDK" developer="Alice" tagline="Easy auth"
+        iconLetter="A" rating={4.7} stars="★★★★★" reviewCount={120}
+        installDisplay="8K+" priceLabel="Free" category="security"
+        verified={true} version="2.1.0" onInstall={vi.fn()} />
+    );
+    expect(container.textContent).toContain("Auth SDK");
+    expect(container.textContent).toContain("by Alice");
+    expect(container.textContent).toContain("Easy auth");
+    expect(container.textContent).toContain("★★★★★");
+    expect(container.textContent).toContain("(120)");
+    expect(container.textContent).toContain("8K+");
+    expect(container.textContent).toContain("✓ Verified");
+    expect(container.textContent).toContain("v2.1.0");
+    expect(container.textContent).toContain("Install Free");
   });
 });
