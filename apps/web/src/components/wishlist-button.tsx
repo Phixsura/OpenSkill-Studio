@@ -1,18 +1,16 @@
 "use client";
 
-interface WishlistButtonProps { isWishlisted: boolean; onToggle: () => void; count?: number; }
+interface WishlistButtonProps { wishlisted: boolean; count: number; onToggle: () => void; }
 
-export function WishlistButton({ isWishlisted, onToggle, count }: WishlistButtonProps) {
+export function WishlistButton({ wishlisted, count, onToggle }: WishlistButtonProps) {
   return (
     <button onClick={onToggle}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition ${
-        isWishlisted
-          ? "border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-900/20"
-          : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400"
+      className={`inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition ${
+        wishlisted ? "bg-red-50 text-red-600 dark:bg-red-900/20" : "bg-gray-100 dark:bg-gray-800 text-gray-500 hover:text-red-500"
       }`}>
-      <span>{isWishlisted ? "❤️" : "🤍"}</span>
-      <span>{isWishlisted ? "Wishlisted" : "Add to Wishlist"}</span>
-      {count != null && <span className="text-xs opacity-60">({count})</span>}
+      <span>{wishlisted ? "❤️" : "🤍"}</span>
+      <span>{wishlisted ? "Wishlisted" : "Add to Wishlist"}</span>
+      {count > 0 && <span className="text-xs text-gray-400">({count})</span>}
     </button>
   );
 }
