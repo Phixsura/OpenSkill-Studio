@@ -2,24 +2,20 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { EndpointHealthTable } from "@/components/endpoint-health-table";
 
-const EPS = [
-  { endpoint: "https://a.com/hook", status: "healthy", successRate: 99.5, avgMs: 120, total: 500 },
-  { endpoint: "https://b.com/hook", status: "degraded", successRate: 85, avgMs: 800, total: 200 },
-];
-
 describe("EndpointHealthTable", () => {
-  it("shows endpoints", () => {
-    const { container } = render(<EndpointHealthTable endpoints={EPS} />);
-    expect(container.textContent).toContain("a.com");
-    expect(container.textContent).toContain("b.com");
-  });
-  it("shows status", () => {
-    const { container } = render(<EndpointHealthTable endpoints={EPS} />);
-    expect(container.textContent).toContain("healthy");
+  it("renders endpoints", () => {
+    const { container } = render(
+      <EndpointHealthTable overall="degraded" healthPct={67} avgLatencyMs={1055}
+        results={[
+          { path: "/api/v1/billing", method: "POST", statusCode: 500, latencyMs: 3000, healthy: false },
+          { path: "/api/v1/apps", method: "GET", statusCode: 200, latencyMs: 120, healthy: true },
+        ]} />
+    );
+    expect(container.textContent).toContain("Endpoint Health");
+    expect(container.textContent).toContain("67% healthy");
     expect(container.textContent).toContain("degraded");
-  });
-  it("empty state", () => {
-    const { container } = render(<EndpointHealthTable endpoints={[]} />);
-    expect(container.textContent).toContain("No endpoint");
+    expect(container.textContent).toContain("/api/v1/billing");
+    expect(container.textContent).toContain("500");
+    expect(container.textContent).toContain("3000ms");
   });
 });
