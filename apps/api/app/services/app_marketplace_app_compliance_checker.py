@@ -1,35 +1,39 @@
-"""Compliance checker — verify apps meet marketplace security and privacy standards."""
-
-REQUIRED_CHECKS = [
-    {"id": "manifest_valid", "label": "Valid manifest", "category": "structure"},
-    {"id": "no_secrets_in_code", "label": "No hardcoded secrets", "category": "security"},
-    {"id": "https_only", "label": "HTTPS-only endpoints", "category": "security"},
-    {"id": "privacy_policy", "label": "Privacy policy provided", "category": "privacy"},
-    {"id": "data_handling", "label": "Data handling declaration", "category": "privacy"},
-    {"id": "error_handling", "label": "Proper error handling", "category": "quality"},
-    {"id": "rate_limiting", "label": "Rate limiting implemented", "category": "quality"},
-    {"id": "documentation", "label": "Documentation provided", "category": "quality"},
-]
+"""Compliance checker — verify app meets regulatory requirements."""
 
 
-def run_compliance_check(*, app: dict, completed_checks: list[str]) -> dict:
+COMPLIANCE_RULES = {
+    "gdpr": [
+        {"id": "gdpr_privacy", "label": "Privacy policy URL provided", "required": True},
+        {"id": "gdpr_data_export", "label": "User data export supported", "required": True},
+        {"id": "gdpr_data_delete", "label": "User data deletion supported", "required": True},
+        {"id": "gdpr_consent", "label": "Cookie consent mechanism", "required": True},
+    ],
+    "ccpa": [
+        {"id": "ccpa_notice", "label": "Notice at collection", "required": True},
+        {"id": "ccpa_opt_out", "label": "Opt-out of data sale", "required": True},
+    ],
+    "accessibility": [
+        {"id": "a11y_alt_text", "label": "Images have alt text", "required": True},
+        {"id": "a11y_keyboard", "label": "Keyboard navigation support", "required": True},
+        {"id": "a11y_contrast", "label": "Color contrast ratio ≥ 4.5:1", "required": False},
+    ],
+}
+
+
+def check_compliance(*, framework: str, app_features: dict) -> dict:
+    rules = COMPLIANCE_RULES.get(framework)
+    if not rules:
+        return {"error": f"Unknown framework: {framework}. Available: {', '.join(COMPLIANCE_RULES)}"}
     results = []
-    for check in REQUIRED_CHECKS:
-        passed = check["id"] in completed_checks
-        results.append({**check, "passed": passed})
-    passed_count = sum(1 for r in results if r["passed"])
-    score = round(passed_count / len(REQUIRED_CHECKS) * 100)
+    for rule in rules:
+        met = app_features.get(rule["id"], False)
+        results.append({**rule, "met": met, "status": "pass" if met else ("fail" if rule["required"] else "warning")})
+    required_met = all(r["met"] for r in results if r["required"])
     return {
-        "results": results, "score": score,
-        "passed": passed_count, "total": len(REQUIRED_CHECKS),
-        "compliant": score >= 80,
-        "blocking_issues": [r for r in results if not r["passed"] and r["category"] == "security"],
+        "framework": framework,
+        "compliant": required_met,
+        "results": results,
+        "passed": sum(1 for r in results if r["met"]),
+        "total": len(results),
+        "score": round(sum(1 for r in results if r["met"]) / len(results) * 100),
     }
-
-
-def get_compliance_recommendations(*, results: list[dict]) -> list[str]:
-    recs = []
-    for r in results:
-        if not r["passed"]:
-            recs.append(f"Fix: {r['label']} ({r['category']})")
-    return recs

@@ -1,24 +1,21 @@
-from app.services.app_marketplace_app_compliance_checker import run_compliance_check, get_compliance_recommendations
+from app.services.app_marketplace_app_compliance_checker import check_compliance
 
-def test_full_compliance():
-    all_ids = ["manifest_valid", "no_secrets_in_code", "https_only", "privacy_policy",
-               "data_handling", "error_handling", "rate_limiting", "documentation"]
-    r = run_compliance_check(app={"id": "a1"}, completed_checks=all_ids)
+def test_gdpr_compliant():
+    features = {"gdpr_privacy": True, "gdpr_data_export": True, "gdpr_data_delete": True, "gdpr_consent": True}
+    r = check_compliance(framework="gdpr", app_features=features)
     assert r["compliant"]
     assert r["score"] == 100
 
-def test_partial():
-    r = run_compliance_check(app={"id": "a1"}, completed_checks=["manifest_valid", "https_only"])
+def test_gdpr_non_compliant():
+    r = check_compliance(framework="gdpr", app_features={"gdpr_privacy": True})
     assert not r["compliant"]
-    assert r["score"] == 25
+    assert r["passed"] == 1
 
-def test_blocking():
-    r = run_compliance_check(app={"id": "a1"}, completed_checks=["manifest_valid"])
-    assert len(r["blocking_issues"]) > 0
+def test_a11y():
+    features = {"a11y_alt_text": True, "a11y_keyboard": True}
+    r = check_compliance(framework="accessibility", app_features=features)
+    assert r["compliant"]  # required met, optional contrast missing is just warning
 
-def test_recommendations():
-    results = [{"id": "x", "label": "Fix X", "category": "security", "passed": False},
-               {"id": "y", "label": "Y ok", "category": "quality", "passed": True}]
-    recs = get_compliance_recommendations(results=results)
-    assert len(recs) == 1
-    assert "Fix X" in recs[0]
+def test_unknown():
+    r = check_compliance(framework="hipaa", app_features={})
+    assert "error" in r
