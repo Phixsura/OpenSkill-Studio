@@ -3,17 +3,21 @@ import { describe, expect, it } from "vitest";
 import { CopyButton } from "@/components/copy-button";
 
 describe("CopyButton", () => {
-  it("renders button variant", () => {
-    const { container } = render(<CopyButton text="hello" label="Copy Code" />);
-    expect(container.textContent).toContain("Copy Code");
+  it("renders with label", () => {
+    const { container } = render(
+      <CopyButton value="sk_live_abc" display="sk_l••••_abc" label="API Key" sensitive={true} />
+    );
+    expect(container.textContent).toContain("API Key");
+    expect(container.textContent).toContain("sk_l••••_abc");
+    expect(container.textContent).toContain("Copy");
   });
-  it("renders icon variant", () => {
-    const { container } = render(<CopyButton text="hello" variant="icon" />);
-    expect(container.textContent).toContain("📋");
-  });
-  it("shows copied state", () => {
-    const { container } = render(<CopyButton text="test" />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("Copied! ✓");
+
+  it("reveals on click", () => {
+    const { container, getByText } = render(
+      <CopyButton value="secret123" display="••••••••" label="" sensitive={true} />
+    );
+    expect(container.textContent).toContain("••••••••");
+    fireEvent.click(getByText("👁️"));
+    expect(container.textContent).toContain("secret123");
   });
 });
