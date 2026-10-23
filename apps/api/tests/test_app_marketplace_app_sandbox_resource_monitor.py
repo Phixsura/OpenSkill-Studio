@@ -1,26 +1,19 @@
-from app.services.app_marketplace_app_sandbox_resource_monitor import check_resource_usage, should_throttle, build_resource_report
+from app.services.app_marketplace_app_sandbox_resource_monitor import get_resource_snapshot, check_resource_limits
+
+def test_snapshot():
+    r = get_resource_snapshot(app_id="a1", sandbox_id="sb1")
+    assert r["status"] == "running"
+    assert r["cpu"]["usage_pct"] == 42.5
+    assert r["memory"]["limit_mb"] == 512
 
 def test_healthy():
-    r = check_resource_usage(cpu_pct=30, memory_mb=100, network_kb=500,
-                              limits={"cpu_pct": 80, "memory_mb": 256, "network_kb": 10240})
+    snap = get_resource_snapshot(app_id="a1", sandbox_id="sb1")
+    r = check_resource_limits(snapshot=snap)
     assert r["healthy"]
 
-def test_violation():
-    r = check_resource_usage(cpu_pct=95, memory_mb=100, network_kb=500,
-                              limits={"cpu_pct": 80, "memory_mb": 256, "network_kb": 10240})
+def test_alerts():
+    snap = {"cpu": {"usage_pct": 95}, "memory": {"usage_pct": 92},
+            "disk": {"usage_pct": 50}, "network": {"connections": 10, "limit_connections": 50}}
+    r = check_resource_limits(snapshot=snap)
+    assert r["alert_count"] == 2
     assert not r["healthy"]
-    assert r["violations"][0]["resource"] == "cpu"
-
-def test_throttle():
-    r = should_throttle(cpu_pct=95, memory_mb=200)
-    assert r["throttle"]
-
-def test_no_throttle():
-    r = should_throttle(cpu_pct=50, memory_mb=200)
-    assert not r["throttle"]
-
-def test_report():
-    samples = [{"cpu_pct": 30, "memory_mb": 100}, {"cpu_pct": 70, "memory_mb": 200}]
-    r = build_resource_report(samples=samples)
-    assert r["avg_cpu"] == 50.0
-    assert r["peak_memory"] == 200.0
