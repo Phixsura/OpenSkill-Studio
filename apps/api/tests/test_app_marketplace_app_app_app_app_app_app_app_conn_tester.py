@@ -1,19 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_conn_tester import test_connection, test_multiple
+from app.services.app_marketplace_app_app_app_app_app_app_app_conn_tester import test_connection as check_conn, test_multiple as check_multi
 
 def test_valid():
-    r = test_connection(url="https://api.example.com/health")
+    r = check_conn(url="https://api.example.com/health")
     assert r["success"]
     assert r["tls"]
     assert r["port"] == 443
 
 def test_invalid():
-    r = test_connection(url="ftp://bad.com")
+    r = check_conn(url="ftp://bad.com")
     assert not r["success"]
-    r2 = test_connection(url="not-a-url")
+    r2 = check_conn(url="not-a-url")
     assert not r2["success"]
 
 def test_multiple_conns():
-    r = test_multiple([
+    r = check_multi([
         {"url": "https://api.example.com"},
         {"url": "https://db.example.com"},
     ])
