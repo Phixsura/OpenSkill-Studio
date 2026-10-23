@@ -7,18 +7,18 @@ def test_subdomain():
     assert r["strategy"] == "subdomain"
 
 def test_path():
-    r = resolve_tenant(host="marketplace.openskill.dev", path="/t/acme/api/apps")
+    r = resolve_tenant(host="openskill.dev", path="/t/acme/api/apps")
     assert r["resolved"]
     assert r["tenant_id"] == "acme"
     assert r["strategy"] == "path"
 
 def test_header():
-    r = resolve_tenant(host="marketplace.openskill.dev", path="/api", header_tenant="acme")
+    r = resolve_tenant(host="openskill.dev", path="/api", header_tenant="acme")
     assert r["tenant_id"] == "acme"
     assert r["strategy"] == "header"
 
 def test_unresolved():
-    r = resolve_tenant(host="marketplace.openskill.dev", path="/api")
+    r = resolve_tenant(host="openskill.dev", path="/api")
     assert not r["resolved"]
 
 def test_strategies():
