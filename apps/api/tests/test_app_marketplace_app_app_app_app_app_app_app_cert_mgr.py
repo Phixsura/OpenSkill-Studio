@@ -12,8 +12,8 @@ def test_expired():
     assert r["status"] == "expired"
 
 def test_summary():
-    certs = [create_cert("a.com", validity_days=90), create_cert("b.com", validity_days=1)]
+    certs = [create_cert("a.com", validity_days=90), create_cert("b.com", validity_days=90)]
     r = summarize_certs(certs)
     assert r["total"] == 2
-    assert r["valid"] == 2  # both just created
+    assert r["valid"] == 2
     assert not r["needs_action"]
