@@ -1,12 +1,12 @@
-from app.services.app_marketplace_app_app_endpoint_tester import test_endpoint, run_test_suite
+from app.services.app_marketplace_app_app_endpoint_tester import test_endpoint as check_endpoint, run_test_suite
 
 def test_valid_endpoint():
-    r = test_endpoint(url="https://api.example.com/health")
+    r = check_endpoint(url="https://api.example.com/health")
     assert r["pass"]
     assert r["actual_status"] == 200
 
 def test_bad_ep_scheme():
-    r = test_endpoint(url="ftp://bad.com")
+    r = check_endpoint(url="ftp://bad.com")
     assert not r["pass"]
 
 def test_suite():
