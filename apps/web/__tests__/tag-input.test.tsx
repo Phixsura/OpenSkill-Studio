@@ -1,27 +1,22 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TagInput } from "@/components/tag-input";
 
 describe("TagInput", () => {
-  it("shows existing tags", () => {
-    const { container } = render(<TagInput tags={["analytics", "dashboard"]} onChange={vi.fn()} />);
-    expect(container.textContent).toContain("analytics");
-    expect(container.textContent).toContain("dashboard");
+  it("renders tags", () => {
+    const { container } = render(
+      <TagInput tags={["api", "tools"]} suggestions={[]} onAdd={vi.fn()} onRemove={vi.fn()} maxTags={10} />
+    );
+    expect(container.textContent).toContain("api");
+    expect(container.textContent).toContain("tools");
+    expect(container.textContent).toContain("2/10");
   });
-
-  it("shows count", () => {
-    const { container } = render(<TagInput tags={["a", "b"]} onChange={vi.fn()} maxTags={5} />);
-    expect(container.textContent).toContain("2/5");
-  });
-
-  it("has input and add button", () => {
-    const { container } = render(<TagInput tags={[]} onChange={vi.fn()} />);
-    expect(container.querySelector("input")).toBeTruthy();
-    expect(container.textContent).toContain("Add");
-  });
-
-  it("has remove buttons", () => {
-    const { container } = render(<TagInput tags={["x"]} onChange={vi.fn()} />);
-    expect(container.textContent).toContain("×");
+  it("remove tag", () => {
+    const fn = vi.fn();
+    const { container } = render(
+      <TagInput tags={["api"]} suggestions={[]} onAdd={vi.fn()} onRemove={fn} maxTags={10} />
+    );
+    fireEvent.click(container.querySelector("button")!);
+    expect(fn).toHaveBeenCalledWith("api");
   });
 });
