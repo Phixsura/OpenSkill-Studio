@@ -3,17 +3,16 @@ import { describe, expect, it } from "vitest";
 import { BatchProgressBar } from "@/components/batch-progress-bar";
 
 describe("BatchProgressBar", () => {
-  it("shows progress", () => {
-    const { container } = render(<BatchProgressBar total={10} completed={7} failed={0} operation="Restart" />);
-    expect(container.textContent).toContain("7/10");
-    expect(container.textContent).toContain("Restart");
-  });
-  it("shows failures", () => {
-    const { container } = render(<BatchProgressBar total={5} completed={3} failed={2} operation="Update" />);
-    expect(container.textContent).toContain("2 failed");
-  });
-  it("shows complete", () => {
-    const { container } = render(<BatchProgressBar total={5} completed={5} failed={0} operation="Done" />);
-    expect(container.textContent).toContain("✅");
+  it("renders progress", () => {
+    const { container } = render(
+      <BatchProgressBar totalItems={250} processed={240} failed={10}
+        remaining={0} progressDisplay="100.0%" batchesTotal={3} status="completed" />
+    );
+    expect(container.textContent).toContain("Batch Processing");
+    expect(container.textContent).toContain("100.0%");
+    expect(container.textContent).toContain("240");
+    expect(container.textContent).toContain("10 failed");
+    expect(container.textContent).toContain("completed");
+    expect(container.textContent).toContain("3 batches");
   });
 });
