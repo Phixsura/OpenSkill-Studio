@@ -14,6 +14,8 @@ class UrlShortener:
         if parsed.scheme not in ("http", "https"):
             return {"error": "Invalid URL"}
         slug = custom_slug or hashlib.sha256(url.encode()).hexdigest()[:8]
+        if slug in self._links:
+            return {"error": "Slug already in use"}
         self._links[slug] = {"url": url, "slug": slug, "clicks": 0}
         return {"short_url": f"{self._base}/{slug}", "slug": slug, "original": url}
 
