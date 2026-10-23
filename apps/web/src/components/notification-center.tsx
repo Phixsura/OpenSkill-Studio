@@ -1,25 +1,34 @@
 "use client";
 
-interface Notification { title: string; message: string; type: string; read: boolean; createdAt: string; }
-interface NotificationCenterProps { notifications: Notification[]; unreadCount: number; onMarkRead: () => void; }
+interface Notification { id: string; title: string; body: string; icon: string; type: string; read: boolean; timestamp: string; }
+interface NotificationCenterProps { notifications: Notification[]; onMarkRead: (ids: string[]) => void; }
 
-const TYPE_ICONS: Record<string, string> = { success: "✅", error: "❌", warning: "⚠️", info: "ℹ️" };
-
-export function NotificationCenter({ notifications, unreadCount, onMarkRead }: NotificationCenterProps) {
+export function NotificationCenter({ notifications, onMarkRead }: NotificationCenterProps) {
+  const unread = notifications.filter(n => !n.read).length;
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <div className="mb-3 flex items-center justify-between">
-        <h4 className="font-semibold">🔔 Notifications {unreadCount > 0 && <span className="ml-1 rounded-full bg-red-500 px-1.5 text-xs text-white">{unreadCount}</span>}</h4>
-        {unreadCount > 0 && <button onClick={onMarkRead} className="text-xs text-blue-600">Mark all read</button>}
+    <div className="w-full max-w-md rounded-xl border shadow-lg dark:border-gray-700">
+      <div className="flex items-center justify-between border-b px-4 py-3 dark:border-gray-700">
+        <h3 className="text-sm font-semibold">Notifications</h3>
+        <div className="flex items-center gap-2">
+          {unread > 0 && <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs text-white">{unread}</span>}
+          {unread > 0 && (
+            <button onClick={() => onMarkRead(notifications.filter(n => !n.read).map(n => n.id))}
+              className="text-xs text-blue-600 hover:underline">Mark all read</button>
+          )}
+        </div>
       </div>
-      {notifications.length === 0 ? <p className="text-sm text-gray-400">No notifications</p> : (
-        <div className="space-y-2">{notifications.map((n, i) => (
-          <div key={i} className={`rounded border p-2 text-sm ${n.read ? "border-gray-100 opacity-60" : "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20"}`}>
-            <span>{TYPE_ICONS[n.type] ?? "•"}</span> <span className="font-medium">{n.title}</span>
-            <p className="text-xs text-gray-500">{n.message}</p>
+      <div className="max-h-80 overflow-y-auto divide-y dark:divide-gray-700">
+        {notifications.map(n => (
+          <div key={n.id} className={`flex gap-3 px-4 py-3 ${n.read ? "opacity-60" : "bg-blue-50/50 dark:bg-blue-900/10"}`}>
+            <span className="text-lg">{n.icon}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{n.title}</p>
+              <p className="text-xs text-gray-500 truncate">{n.body}</p>
+              <time className="text-xs text-gray-400">{new Date(n.timestamp).toLocaleDateString()}</time>
+            </div>
           </div>
-        ))}</div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
