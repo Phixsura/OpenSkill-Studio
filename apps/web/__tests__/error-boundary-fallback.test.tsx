@@ -3,32 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { ErrorBoundaryFallback } from "@/components/error-boundary-fallback";
 
 describe("ErrorBoundaryFallback", () => {
-  const actions = [{ label: "Refresh", action: "reload" }, { label: "Home", action: "navigate", url: "/" }];
-  it("renders", () => {
-    const { container } = render(
-      <ErrorBoundaryFallback title="Oops" message="Something broke" icon="💥"
-        actions={actions} showStackTrace={false} onAction={vi.fn()} />
+  it("renders fallback", () => {
+    const onAction = vi.fn();
+    const { container, getByText } = render(
+      <ErrorBoundaryFallback title="Something went wrong" message="Cannot read null"
+        showDetails={true} stackPreview="at UserProfile (user.tsx:42)"
+        actions={[
+          { label: "Retry", action: "retry" },
+          { label: "Go Home", action: "navigate", url: "/" },
+        ]} onAction={onAction} />
     );
-    expect(container.textContent).toContain("💥");
-    expect(container.textContent).toContain("Oops");
-    expect(container.textContent).toContain("Something broke");
-    expect(container.textContent).toContain("Refresh");
-    expect(container.textContent).toContain("Home");
-  });
-  it("shows stack trace", () => {
-    const { container } = render(
-      <ErrorBoundaryFallback title="X" message="Y" icon="💥" actions={[]}
-        showStackTrace={true} error="TypeError: undefined" onAction={vi.fn()} />
-    );
-    expect(container.textContent).toContain("TypeError: undefined");
-  });
-  it("action click", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <ErrorBoundaryFallback title="X" message="Y" icon="💥" actions={actions}
-        showStackTrace={false} onAction={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Refresh")!);
-    expect(fn).toHaveBeenCalledWith("reload", undefined);
+    expect(container.textContent).toContain("Something went wrong");
+    expect(container.textContent).toContain("Cannot read null");
+    expect(container.textContent).toContain("user.tsx:42");
+    fireEvent.click(getByText("Retry"));
+    expect(onAction).toHaveBeenCalledWith("retry", undefined);
   });
 });
