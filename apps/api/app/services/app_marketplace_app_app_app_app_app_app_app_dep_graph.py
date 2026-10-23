@@ -1,56 +1,43 @@
-"""Dependency graph resolver — topological sort and cycle detection."""
+"""Dependency graph — track and analyze app dependencies."""
 from __future__ import annotations
 
 
-def build_graph(nodes: list[dict]) -> dict:
+def build_dep_graph(deps: list[dict]) -> dict:
+    nodes = {}
+    edges = []
+    for d in deps:
+        src = d["from"]
+        tgt = d["to"]
+        nodes.setdefault(src, {"id": src, "in": 0, "out": 0})
+        nodes.setdefault(tgt, {"id": tgt, "in": 0, "out": 0})
+        nodes[src]["out"] += 1
+        nodes[tgt]["in"] += 1
+        edges.append({"source": src, "target": tgt, "type": d.get("type", "runtime")})
+    roots = [n for n in nodes.values() if n["in"] == 0]
+    leaves = [n for n in nodes.values() if n["out"] == 0]
+    return {"nodes": list(nodes.values()), "edges": edges,
+            "node_count": len(nodes), "edge_count": len(edges),
+            "roots": [r["id"] for r in roots],
+            "leaves": [l["id"] for l in leaves]}
+
+
+def find_circular(deps: list[dict]) -> list[list[str]]:
     adj: dict[str, list[str]] = {}
-    for n in nodes:
-        adj[n["id"]] = n.get("depends_on", [])
-    return {"nodes": list(adj.keys()), "edges": adj, "node_count": len(adj),
-            "edge_count": sum(len(v) for v in adj.values())}
-
-
-def topological_sort(graph: dict) -> dict:
-    adj = graph["edges"]
-    visited: set[str] = set()
-    temp: set[str] = set()
-    order: list[str] = []
-    has_cycle = False
-    cycle_nodes: list[str] = []
-
-    def visit(node: str) -> bool:
-        nonlocal has_cycle
-        if node in temp:
-            has_cycle = True
-            cycle_nodes.append(node)
-            return False
+    for d in deps:
+        adj.setdefault(d["from"], []).append(d["to"])
+    visited, stack, cycles = set(), set(), []
+    def dfs(node: str, path: list[str]) -> None:
+        if node in stack:
+            idx = path.index(node)
+            cycles.append(path[idx:] + [node])
+            return
         if node in visited:
-            return True
-        temp.add(node)
-        for dep in adj.get(node, []):
-            if not visit(dep):
-                if has_cycle:
-                    cycle_nodes.append(node)
-                return False
-        temp.remove(node)
+            return
         visited.add(node)
-        order.append(node)
-        return True
-
+        stack.add(node)
+        for nb in adj.get(node, []):
+            dfs(nb, path + [node])
+        stack.discard(node)
     for n in adj:
-        if n not in visited:
-            visit(n)
-    return {"order": order if not has_cycle else [], "has_cycle": has_cycle,
-            "cycle_nodes": list(set(cycle_nodes)) if has_cycle else [],
-            "build_phases": _phases(order, adj) if not has_cycle else []}
-
-
-def _phases(order: list[str], adj: dict[str, list[str]]) -> list[list[str]]:
-    depth: dict[str, int] = {}
-    for n in order:
-        deps = adj.get(n, [])
-        depth[n] = max((depth.get(d, 0) for d in deps), default=-1) + 1
-    phases: dict[int, list[str]] = {}
-    for n, d in depth.items():
-        phases.setdefault(d, []).append(n)
-    return [phases[i] for i in sorted(phases)]
+        dfs(n, [])
+    return cycles
