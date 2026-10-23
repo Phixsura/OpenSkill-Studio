@@ -3,26 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { ChaosExperimentCard } from "@/components/chaos-experiment-card";
 
 describe("ChaosExperimentCard", () => {
-  it("renders experiment", () => {
-    const { container } = render(
-      <ChaosExperimentCard faultType="latency" target="api" durationSeconds={60} status="ready" onStart={vi.fn()} onStop={vi.fn()} />
+  it("renders experiments", () => {
+    const onStart = vi.fn();
+    const { container, getByText } = render(
+      <ChaosExperimentCard onStart={onStart} experiments={[
+        { id: "c1", name: "Kill API", target: "api", faultType: "pod_kill", status: "created", blastRadiusPct: 25 },
+        { id: "c2", name: "Slow DB", target: "db", faultType: "latency", status: "completed", blastRadiusPct: 50 },
+      ]} />
     );
-    expect(container.textContent).toContain("latency");
-    expect(container.textContent).toContain("api");
-    expect(container.textContent).toContain("Start");
-  });
-  it("shows grade", () => {
-    const { container } = render(
-      <ChaosExperimentCard faultType="error" target="x" durationSeconds={30} status="completed" grade="A" onStart={vi.fn()} onStop={vi.fn()} />
-    );
-    expect(container.textContent).toContain("A");
-  });
-  it("start button", () => {
-    const fn = vi.fn();
-    const { container } = render(
-      <ChaosExperimentCard faultType="latency" target="x" durationSeconds={30} status="ready" onStart={fn} onStop={vi.fn()} />
-    );
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalled();
+    expect(container.textContent).toContain("Chaos Experiments");
+    expect(container.textContent).toContain("Kill API");
+    expect(container.textContent).toContain("25% blast radius");
+    expect(container.textContent).toContain("completed");
+    fireEvent.click(getByText("Run"));
+    expect(onStart).toHaveBeenCalledWith("c1");
   });
 });

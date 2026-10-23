@@ -1,33 +1,39 @@
 "use client";
 
-interface ChaosExperimentCardProps {
-  faultType: string; target: string; durationSeconds: number; status: string;
-  grade?: string; onStart: () => void; onStop: () => void;
-}
+interface ChaosExperiment { id: string; name: string; target: string;
+  faultType: string; status: string; blastRadiusPct: number; }
+interface ChaosExperimentCardProps { experiments: ChaosExperiment[];
+  onStart: (id: string) => void; }
 
-const FAULT_ICONS: Record<string, string> = {
-  latency: "🐌", error: "💥", timeout: "⏳", connection_drop: "🔌", cpu_spike: "🔥",
+const FAULT_ICON: Record<string, string> = {
+  pod_kill: "💀", latency: "🐌", cpu_stress: "🔥", network_partition: "🔌", disk_fill: "💾",
+};
+const STATUS_BADGE: Record<string, string> = {
+  created: "bg-gray-100 text-gray-600", running: "bg-yellow-100 text-yellow-700",
+  completed: "bg-green-100 text-green-700",
 };
 
-export function ChaosExperimentCard({ faultType, target, durationSeconds, status, grade, onStart, onStop }: ChaosExperimentCardProps) {
+export function ChaosExperimentCard({ experiments, onStart }: ChaosExperimentCardProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">{FAULT_ICONS[faultType] || "🧪"}</span>
-          <div>
-            <h3 className="font-semibold capitalize">{faultType.replace("_", " ")}</h3>
-            <p className="text-xs text-gray-400">Target: {target} · {durationSeconds}s</p>
+    <div className="rounded-xl border p-5 dark:border-gray-700">
+      <h3 className="font-semibold mb-3">🌪️ Chaos Experiments</h3>
+      <div className="space-y-2">
+        {experiments.map(e => (
+          <div key={e.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-lg px-4 py-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span>{FAULT_ICON[e.faultType] || "⚡"}</span>
+                <span className="text-sm font-medium">{e.name}</span>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_BADGE[e.status] || ""}`}>{e.status}</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">Target: {e.target} · {e.blastRadiusPct}% blast radius</p>
+            </div>
+            {e.status === "created" && (
+              <button onClick={() => onStart(e.id)}
+                className="text-xs px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">Run</button>
+            )}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {grade && <span className={`text-lg font-bold ${grade === "A" ? "text-green-600" : grade === "F" ? "text-red-600" : "text-yellow-600"}`}>{grade}</span>}
-          {status === "ready" ? (
-            <button onClick={onStart} className="rounded bg-red-600 px-3 py-1 text-xs text-white">Start</button>
-          ) : status === "running" ? (
-            <button onClick={onStop} className="rounded bg-gray-600 px-3 py-1 text-xs text-white">Stop</button>
-          ) : <span className="text-xs text-gray-400">{status}</span>}
-        </div>
+        ))}
       </div>
     </div>
   );
