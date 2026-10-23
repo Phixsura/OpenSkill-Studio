@@ -1,30 +1,40 @@
-"""Connection pool — manage database/HTTP connection pools for apps."""
+"""Connection pool — monitor and manage database connection pools."""
 
 
-def create_pool_config(*, app_id: str, pool_type: str, min_size: int = 2,
-                         max_size: int = 10, idle_timeout_seconds: int = 300) -> dict:
-    valid_types = {"database", "http", "redis"}
-    if pool_type not in valid_types:
-        return {"error": f"Invalid pool type. Use: {', '.join(sorted(valid_types))}"}
-    if min_size > max_size:
-        return {"error": "min_size cannot exceed max_size"}
-    return {"app_id": app_id, "pool_type": pool_type, "min_size": min_size,
-            "max_size": max_size, "idle_timeout_seconds": idle_timeout_seconds, "error": None}
-
-
-def get_pool_health(*, active: int, idle: int, max_size: int, waiting: int) -> dict:
-    utilization = round((active + idle) / max(max_size, 1) * 100, 1)
-    healthy = waiting == 0 and utilization < 90
-    return {"active": active, "idle": idle, "waiting": waiting,
-            "utilization_pct": utilization, "healthy": healthy,
-            "recommendation": "Consider increasing pool size" if utilization > 80 else None}
-
-
-def compute_pool_metrics(*, samples: list[dict]) -> dict:
-    if not samples:
-        return {"avg_active": 0, "avg_wait_ms": 0, "peak_active": 0}
+def get_pool_status(*, pools: list[dict]) -> dict:
+    results = []
+    for pool in pools:
+        active = pool.get("active", 0)
+        idle = pool.get("idle", 0)
+        max_size = pool.get("max_size", 20)
+        total = active + idle
+        utilization = round(active / max(max_size, 1) * 100, 1)
+        results.append({
+            "name": pool["name"],
+            "active": active,
+            "idle": idle,
+            "total": total,
+            "max_size": max_size,
+            "utilization_pct": utilization,
+            "healthy": utilization < 90,
+            "waiting": pool.get("waiting", 0),
+        })
+    exhausted = [r for r in results if not r["healthy"]]
     return {
-        "avg_active": round(sum(s.get("active", 0) for s in samples) / len(samples), 1),
-        "avg_wait_ms": round(sum(s.get("wait_ms", 0) for s in samples) / len(samples), 1),
-        "peak_active": max(s.get("active", 0) for s in samples),
+        "pools": results,
+        "total_pools": len(results),
+        "exhausted_count": len(exhausted),
+        "overall_health": "healthy" if not exhausted else "critical",
+    }
+
+
+def recommend_pool_size(*, avg_queries_per_sec: float, avg_query_ms: float,
+                          target_utilization: float = 70) -> dict:
+    concurrent = avg_queries_per_sec * (avg_query_ms / 1000)
+    recommended = max(int(concurrent / (target_utilization / 100)) + 2, 5)
+    return {
+        "avg_concurrent_queries": round(concurrent, 1),
+        "recommended_pool_size": recommended,
+        "target_utilization_pct": target_utilization,
+        "headroom": recommended - int(concurrent),
     }
