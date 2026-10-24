@@ -7,8 +7,8 @@ describe("EventDedupPanel", () => {
       <EventDedupPanel seen={5000} deduped={200} window={10000} />
     );
     expect(container.textContent).toContain("Event Dedup");
-    expect(container.textContent).toContain("5,000/10,000 tracked");
+    expect(container.textContent).toContain("5000/10000 tracked");
     expect(container.textContent).toContain("200 deduped");
-    expect(container.textContent).toContain("5,000");
+    expect(container.textContent).toContain("5,000"); // from grid toLocaleString
   });
 });
