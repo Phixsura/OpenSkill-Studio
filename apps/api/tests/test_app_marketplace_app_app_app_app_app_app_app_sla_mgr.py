@@ -1,7 +1,7 @@
 from app.services.app_marketplace_app_app_app_app_app_app_app_sla_mgr import define_sla, evaluate_sla, sla_overview
 
 def test_evaluate():
-    sla = define_sla("api", {"uptime_pct": 99.9, "p99_ms": 500})
+    sla = define_sla("api", {"uptime_pct": 99.9, "p99_ms": 200})
     r = evaluate_sla(sla, {"uptime_pct": 99.95, "p99_ms": 300})
     assert r["fully_compliant"]
     assert r["met"] == 2
