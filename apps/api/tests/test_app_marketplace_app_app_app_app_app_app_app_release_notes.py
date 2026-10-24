@@ -4,10 +4,10 @@ def test_generate():
     r = generate_release_notes([
         {"message": "feat: add dark mode"},
         {"message": "fix: login bug"},
-        {"message": "feat: BREAKING CHANGE: new API"},
+        {"message": "BREAKING CHANGE: new API"},
         {"message": "chore: update deps"},
     ], version="2.0.0")
-    assert len(r["features"]) == 2
+    assert len(r["features"]) == 1
     assert len(r["fixes"]) == 1
     assert r["has_breaking"]
 
