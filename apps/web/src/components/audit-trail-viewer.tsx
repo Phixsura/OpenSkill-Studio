@@ -1,29 +1,33 @@
 "use client";
 
-interface AuditEntry { entry_id: string; actor: string; action: string; resource: string;
-  timestamp: string; hash: string; }
-interface AuditTrailViewerProps { entries: AuditEntry[]; chainValid: boolean; onVerify: () => void; }
+interface AuditEntry { seq: number; actor: string; action: string; resource: string; }
+interface AuditTrailViewerProps { entries: AuditEntry[]; chainValid: boolean; total: number; }
 
-export function AuditTrailViewer({ entries, chainValid, onVerify }: AuditTrailViewerProps) {
+const ACTION_STYLE: Record<string, string> = {
+  create: "text-green-600", update: "text-blue-500", delete: "text-red-600",
+};
+
+export function AuditTrailViewer({ entries, chainValid, total }: AuditTrailViewerProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Audit Trail</h2>
-        <div className="flex items-center gap-2">
-          <span className={`rounded-full px-2 py-0.5 text-xs ${chainValid ? "bg-green-100 text-green-700 dark:bg-green-900/30" : "bg-red-100 text-red-700 dark:bg-red-900/30"}`}>
-            {chainValid ? "🔗 Chain Valid" : "⚠️ Chain Broken"}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📝 Audit Trail</h3>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={chainValid ? "text-green-600" : "text-red-500"}>
+            {chainValid ? "🔗 chain valid" : "⚠ chain broken"}
           </span>
-          <button onClick={onVerify} className="text-xs text-blue-500">Verify</button>
+          <span className="text-gray-400">{total} entries</span>
         </div>
       </div>
-      <div className="space-y-1">
+      <div className="divide-y dark:divide-gray-700">
         {entries.map(e => (
-          <div key={e.entry_id} className="flex items-center gap-2 rounded border px-3 py-2 font-mono text-xs dark:border-gray-700">
-            <span className="w-16 text-gray-400">{e.timestamp.slice(11, 19)}</span>
-            <span className="w-16 text-blue-500">{e.actor}</span>
-            <span className="flex-1 font-bold">{e.action}</span>
-            <span className="text-gray-400">{e.resource}</span>
-            <span className="w-16 truncate text-[10px] text-gray-300">{e.hash.slice(0, 12)}…</span>
+          <div key={e.seq} className="flex items-center justify-between px-4 py-1.5 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400 w-6">#{e.seq}</span>
+              <span className={`font-bold ${ACTION_STYLE[e.action] ?? ""}`}>{e.action}</span>
+              <span className="font-mono">{e.resource}</span>
+            </div>
+            <span className="text-gray-400">{e.actor}</span>
           </div>
         ))}
       </div>

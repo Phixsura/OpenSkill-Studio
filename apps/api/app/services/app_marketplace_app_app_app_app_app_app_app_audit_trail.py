@@ -1,43 +1,33 @@
-"""Audit trail — immutable event log for compliance."""
+"""Audit trail logger — immutable audit log for compliance."""
 from __future__ import annotations
-import hashlib
-import html
-import time
+import hashlib, time
 
 
-_trail: list[dict] = []
+class AuditTrail:
+    def __init__(self):
+        self._entries: list[dict] = []
 
+    def log(self, actor: str, action: str, resource: str, details: dict | None = None) -> dict:
+        prev_hash = self._entries[-1]["hash"] if self._entries else "0" * 64
+        entry = {"seq": len(self._entries) + 1, "timestamp": time.time(),
+                 "actor": actor, "action": action, "resource": resource,
+                 "details": details or {}, "prev_hash": prev_hash}
+        raw = f"{entry['seq']}:{entry['actor']}:{entry['action']}:{entry['resource']}:{prev_hash}"
+        entry["hash"] = hashlib.sha256(raw.encode()).hexdigest()
+        self._entries.append(entry)
+        return entry
 
-def append_event(actor: str, action: str, resource: str, detail: str = "") -> dict:
-    seq = len(_trail) + 1
-    prev_hash = _trail[-1]["hash"] if _trail else "0" * 64
-    payload = f"{seq}:{actor}:{action}:{resource}:{prev_hash}"
-    entry = {
-        "seq": seq,
-        "timestamp": time.time(),
-        "actor": html.escape(actor),
-        "action": action,
-        "resource": html.escape(resource),
-        "detail": html.escape(detail),
-        "hash": hashlib.sha256(payload.encode()).hexdigest(),
-        "prev_hash": prev_hash,
-    }
-    _trail.append(entry)
-    return entry
+    def verify_chain(self) -> dict:
+        for i, entry in enumerate(self._entries):
+            expected_prev = self._entries[i - 1]["hash"] if i > 0 else "0" * 64
+            if entry["prev_hash"] != expected_prev:
+                return {"valid": False, "broken_at": entry["seq"]}
+        return {"valid": True, "entries": len(self._entries)}
 
-
-def get_trail(limit: int = 50) -> dict:
-    items = list(reversed(_trail[-limit:]))
-    return {"events": items, "total": len(_trail), "shown": len(items)}
-
-
-def verify_chain() -> dict:
-    for i, entry in enumerate(_trail):
-        expected_prev = _trail[i - 1]["hash"] if i > 0 else "0" * 64
-        if entry["prev_hash"] != expected_prev:
-            return {"valid": False, "broken_at": entry["seq"]}
-    return {"valid": True, "length": len(_trail)}
-
-
-def reset_trail() -> None:
-    _trail.clear()
+    def query(self, actor: str = "", action: str = "", limit: int = 10) -> list[dict]:
+        results = self._entries
+        if actor:
+            results = [e for e in results if e["actor"] == actor]
+        if action:
+            results = [e for e in results if e["action"] == action]
+        return results[-limit:]
