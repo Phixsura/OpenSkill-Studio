@@ -1,7 +1,7 @@
 {
-  "mode": "merge",
+  "mode": "replace",
   "target": "/Users/phj/Develop/OpenSkill-Studio/.claude",
-  "timestamp": "2026-09-10T13:57:02Z",
+  "timestamp": "2026-10-10T14:03:07Z",
   "added": [
     "ccmetr/bin",
     "skills/metr-bug",
