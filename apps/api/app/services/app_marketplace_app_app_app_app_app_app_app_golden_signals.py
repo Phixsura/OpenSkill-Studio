@@ -1,17 +1,27 @@
-"""Golden signals dashboard — the four golden signals of monitoring."""
+"""Golden signals — monitor the four golden signals of monitoring."""
 from __future__ import annotations
 
 
-def calculate_golden_signals(latency_ms: float, traffic_rps: float,
-                               error_rate_pct: float, saturation_pct: float) -> dict:
-    lat_ok = latency_ms < 200
-    traffic_ok = traffic_rps > 0
-    err_ok = error_rate_pct < 1
-    sat_ok = saturation_pct < 80
-    score = sum([lat_ok, traffic_ok, err_ok, sat_ok])
-    status = "healthy" if score == 4 else "degraded" if score >= 2 else "critical"
-    return {"latency": {"value": latency_ms, "unit": "ms", "ok": lat_ok},
-            "traffic": {"value": traffic_rps, "unit": "rps", "ok": traffic_ok},
-            "errors": {"value": error_rate_pct, "unit": "%", "ok": err_ok},
-            "saturation": {"value": saturation_pct, "unit": "%", "ok": sat_ok},
-            "score": score, "status": status}
+def evaluate_golden_signals(metrics: dict) -> dict:
+    # Latency
+    latency_ms = metrics.get("p99_ms", 0)
+    latency_ok = latency_ms < metrics.get("latency_target_ms", 500)
+    # Traffic
+    rps = metrics.get("rps", 0)
+    traffic_ok = rps > 0
+    # Errors
+    error_rate = metrics.get("error_rate_pct", 0)
+    errors_ok = error_rate < metrics.get("error_target_pct", 1)
+    # Saturation
+    cpu_pct = metrics.get("cpu_pct", 0)
+    mem_pct = metrics.get("memory_pct", 0)
+    saturation = max(cpu_pct, mem_pct)
+    saturation_ok = saturation < 80
+
+    all_ok = latency_ok and traffic_ok and errors_ok and saturation_ok
+    status = "healthy" if all_ok else "degraded"
+    return {"status": status,
+            "latency": {"p99_ms": latency_ms, "ok": latency_ok},
+            "traffic": {"rps": rps, "ok": traffic_ok},
+            "errors": {"rate_pct": error_rate, "ok": errors_ok},
+            "saturation": {"pct": saturation, "ok": saturation_ok}}
