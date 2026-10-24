@@ -1,26 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_resp_cache import (
-    cache_key, get_cached, set_cached, cache_metrics, clear_cache,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_resp_cache import ResponseCache
 
-def test_cache_flow():
-    clear_cache()
-    key = cache_key("GET", "/api/users")
-    assert len(key) == 16
-    assert not get_cached(key)["hit"]
-    set_cached(key, {"users": [1, 2, 3]}, ttl_sec=300)
-    r = get_cached(key)
+def test_cache_hit():
+    rc = ResponseCache(default_ttl=60)
+    rc.set("GET:/users", '{"users":[]}')
+    r = rc.get("GET:/users")
     assert r["hit"]
-    assert r["data"]["users"] == [1, 2, 3]
-    assert r["hits"] == 1
-    clear_cache()
+    assert r["body"] == '{"users":[]}'
 
-def test_metrics():
-    clear_cache()
-    k1 = cache_key("GET", "/a")
-    set_cached(k1, {"a": 1})
-    get_cached(k1)
-    get_cached(k1)
-    m = cache_metrics()
-    assert m["total_keys"] == 1
-    assert m["total_hits"] == 2
-    clear_cache()
+def test_etag():
+    rc = ResponseCache()
+    stored = rc.set("k", "data")
+    r = rc.get("k", etag=stored["etag"])
+    assert r["not_modified"]
+
+def test_miss():
+    rc = ResponseCache()
+    r = rc.get("missing")
+    assert not r["hit"]
+    assert rc.stats()["misses"] == 1

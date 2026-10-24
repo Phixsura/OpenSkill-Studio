@@ -1,40 +1,39 @@
-"""API response cache — cache and serve API responses."""
+"""Platform response cache — cache API responses with ETags."""
 from __future__ import annotations
-import hashlib
-import time
-
-_cache: dict[str, dict] = {}
+import hashlib, time
 
 
-def cache_key(method: str, path: str, params: str = "") -> str:
-    return hashlib.sha256(f"{method}:{path}:{params}".encode()).hexdigest()[:16]
+class ResponseCache:
+    def __init__(self, default_ttl: int = 300):
+        self._cache: dict[str, dict] = {}
+        self._ttl = default_ttl
+        self._hits = 0
+        self._misses = 0
 
+    def get(self, key: str, etag: str = "", now: float | None = None) -> dict:
+        now = now or time.time()
+        entry = self._cache.get(key)
+        if not entry or now > entry["expires_at"]:
+            self._misses += 1
+            return {"hit": False}
+        if etag and etag == entry["etag"]:
+            self._hits += 1
+            return {"hit": True, "not_modified": True, "etag": entry["etag"]}
+        self._hits += 1
+        return {"hit": True, "not_modified": False, "body": entry["body"], "etag": entry["etag"]}
 
-def get_cached(key: str) -> dict:
-    entry = _cache.get(key)
-    if not entry:
-        return {"hit": False}
-    if time.time() > entry["expires_at"]:
-        del _cache[key]
-        return {"hit": False, "expired": True}
-    entry["hits"] += 1
-    return {"hit": True, "data": entry["data"], "age_sec": round(time.time() - entry["cached_at"]),
-            "hits": entry["hits"]}
+    def set(self, key: str, body: str, ttl: int | None = None) -> dict:
+        etag = hashlib.md5(body.encode()).hexdigest()[:16]
+        self._cache[key] = {"body": body, "etag": etag,
+                             "expires_at": time.time() + (ttl or self._ttl)}
+        return {"cached": True, "key": key, "etag": etag}
 
+    def invalidate(self, key: str) -> dict:
+        removed = key in self._cache
+        self._cache.pop(key, None)
+        return {"invalidated": removed, "key": key}
 
-def set_cached(key: str, data: dict, ttl_sec: int = 60) -> dict:
-    now = time.time()
-    _cache[key] = {"data": data, "cached_at": now, "expires_at": now + ttl_sec,
-                    "hits": 0, "ttl_sec": ttl_sec}
-    return {"cached": True, "key": key, "ttl_sec": ttl_sec}
-
-
-def cache_metrics() -> dict:
-    now = time.time()
-    active = sum(1 for v in _cache.values() if now < v["expires_at"])
-    total_hits = sum(v["hits"] for v in _cache.values())
-    return {"total_keys": len(_cache), "active": active, "total_hits": total_hits}
-
-
-def clear_cache() -> None:
-    _cache.clear()
+    def stats(self) -> dict:
+        total = self._hits + self._misses
+        return {"entries": len(self._cache), "hits": self._hits, "misses": self._misses,
+                "hit_rate": round(self._hits / max(total, 1) * 100, 1)}
