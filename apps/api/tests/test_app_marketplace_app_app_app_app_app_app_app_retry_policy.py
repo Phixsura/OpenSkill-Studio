@@ -1,20 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_retry_policy import (
-    create_policy, compute_delay, should_retry,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_retry_policy import calculate_delay, should_retry, retry_budget
 
 def test_exponential():
-    p = create_policy(max_retries=3, backoff="exponential", base_delay_ms=1000)
-    d0 = compute_delay(p, 0)
-    assert d0["delay_ms"] == 1000
-    d1 = compute_delay(p, 1)
-    assert d1["delay_ms"] == 2000
-    d2 = compute_delay(p, 2)
-    assert d2["delay_ms"] == 4000
-    d3 = compute_delay(p, 3)
-    assert not d3["should_retry"]
+    r1 = calculate_delay(1, base_ms=1000)
+    assert r1["delay_ms"] == 1000
+    r2 = calculate_delay(3, base_ms=1000)
+    assert r2["delay_ms"] == 4000
+    r3 = calculate_delay(10, base_ms=1000, max_ms=30000)
+    assert r3["capped"]
 
 def test_should_retry():
-    p = create_policy(max_retries=2)
-    assert should_retry(p, 503, 0)["retry"]
-    assert not should_retry(p, 404, 0)["retry"]
-    assert not should_retry(p, 503, 2)["retry"]
+    assert should_retry(503, 1)["retry"]
+    assert not should_retry(404, 1)["retry"]
+    assert not should_retry(503, 3, max_attempts=3)["retry"]
+
+def test_budget():
+    r = retry_budget(10000, 500, budget_pct=10)
+    assert r["budget"] == 1000
+    assert r["remaining"] == 500
+    assert not r["exhausted"]
