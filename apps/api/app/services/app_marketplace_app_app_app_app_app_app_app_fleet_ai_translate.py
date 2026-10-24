@@ -1,8 +1,9 @@
-"""Fleet AI Translation — track multilingual AI service."""
+"""Fleet AI Translation — track multilingual AI translation pipelines."""
 from __future__ import annotations
-def fleet_ai_translate(services: list[dict]) -> dict:
-    active = [s for s in services if s.get("active", True)]
-    translations_24h = sum(s.get("translations_24h", 0) for s in services)
-    languages = max((s.get("languages", 0) for s in services), default=0)
-    return {"services": len(services), "active": len(active), "translations_24h": translations_24h,
-            "languages": languages, "multilingual": languages >= 50}
+def fleet_ai_translation(translators: list[dict]) -> dict:
+    active = [t for t in translators if t.get("active", True)]
+    translations_24h = sum(t.get("translations_24h", 0) for t in translators)
+    lang_pairs = sum(t.get("lang_pairs", 0) for t in translators)
+    bleu = round(sum(t.get("bleu", 0) for t in translators) / max(len(translators), 1), 1)
+    return {"translators": len(translators), "active": len(active), "translations_24h": translations_24h,
+            "lang_pairs": lang_pairs, "bleu": bleu, "fluent": bleu > 40}
