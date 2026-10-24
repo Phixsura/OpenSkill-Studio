@@ -1,37 +1,31 @@
-"""Event bus — publish/subscribe event system."""
+"""Platform event bus — pub/sub event routing with filtering."""
 from __future__ import annotations
-import time
-
-_subscribers: dict[str, list[str]] = {}
-_events: list[dict] = []
+from collections import defaultdict
 
 
-def subscribe(topic: str, handler: str) -> dict:
-    _subscribers.setdefault(topic, [])
-    if handler not in _subscribers[topic]:
-        _subscribers[topic].append(handler)
-    return {"subscribed": True, "topic": topic, "handler": handler,
-            "subscriber_count": len(_subscribers[topic])}
+class EventBus:
+    def __init__(self):
+        self._subscribers: dict[str, list[dict]] = defaultdict(list)
+        self._published: int = 0
+        self._delivered: int = 0
 
+    def subscribe(self, event_type: str, handler_id: str, filter_fn: callable | None = None) -> dict:
+        self._subscribers[event_type].append({"handler": handler_id, "filter": filter_fn})
+        return {"event_type": event_type, "handler": handler_id,
+                "total_subs": len(self._subscribers[event_type])}
 
-def publish(topic: str, payload: dict) -> dict:
-    handlers = _subscribers.get(topic, [])
-    event = {"topic": topic, "payload": payload, "timestamp": time.time(),
-             "delivered_to": len(handlers)}
-    _events.append(event)
-    return event
+    def publish(self, event_type: str, payload: dict) -> dict:
+        self._published += 1
+        subs = self._subscribers.get(event_type, [])
+        delivered = 0
+        for sub in subs:
+            if sub["filter"] and not sub["filter"](payload):
+                continue
+            delivered += 1
+        self._delivered += delivered
+        return {"event_type": event_type, "delivered": delivered, "total_subs": len(subs)}
 
-
-def get_subscriptions() -> dict:
-    total = sum(len(h) for h in _subscribers.values())
-    return {"topics": dict(_subscribers), "topic_count": len(_subscribers),
-            "total_subscriptions": total}
-
-
-def event_history(limit: int = 20) -> list[dict]:
-    return list(reversed(_events[-limit:]))
-
-
-def clear_bus() -> None:
-    _subscribers.clear()
-    _events.clear()
+    def stats(self) -> dict:
+        total_subs = sum(len(s) for s in self._subscribers.values())
+        return {"event_types": len(self._subscribers), "total_subscribers": total_subs,
+                "published": self._published, "delivered": self._delivered}

@@ -1,24 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_event_bus import (
-    subscribe, publish, get_subscriptions, event_history, clear_bus,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_event_bus import EventBus
 
-def test_pub_sub():
-    clear_bus()
-    subscribe("user.created", "send_welcome")
-    subscribe("user.created", "create_profile")
-    subscribe("order.placed", "process_payment")
-    r = publish("user.created", {"user_id": "u1"})
-    assert r["delivered_to"] == 2
-    s = get_subscriptions()
-    assert s["topic_count"] == 2
-    assert s["total_subscriptions"] == 3
-    clear_bus()
+def test_pubsub():
+    bus = EventBus()
+    bus.subscribe("order.created", "email-handler")
+    bus.subscribe("order.created", "analytics-handler")
+    r = bus.publish("order.created", {"order_id": "o1"})
+    assert r["delivered"] == 2
+    s = bus.stats()
+    assert s["published"] == 1
+    assert s["delivered"] == 2
 
-def test_history():
-    clear_bus()
-    publish("a", {})
-    publish("b", {})
-    h = event_history()
-    assert len(h) == 2
-    assert h[0]["topic"] == "b"
-    clear_bus()
+def test_filter():
+    bus = EventBus()
+    bus.subscribe("order.created", "vip-handler", filter_fn=lambda p: p.get("amount", 0) > 1000)
+    r = bus.publish("order.created", {"amount": 500})
+    assert r["delivered"] == 0
+    r2 = bus.publish("order.created", {"amount": 2000})
+    assert r2["delivered"] == 1
