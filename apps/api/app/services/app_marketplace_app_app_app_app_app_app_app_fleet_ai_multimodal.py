@@ -1,10 +1,10 @@
-"""Fleet AI Multimodal — track vision/audio/video AI."""
+"""Fleet AI Multimodal — track vision, audio, and multimodal AI pipelines."""
 from __future__ import annotations
-def fleet_ai_multimodal(services: list[dict]) -> dict:
-    active = [s for s in services if s.get("active", True)]
-    image_calls = sum(s.get("image_calls_24h", 0) for s in services)
-    audio_calls = sum(s.get("audio_calls_24h", 0) for s in services)
-    video_calls = sum(s.get("video_calls_24h", 0) for s in services)
-    return {"services": len(services), "active": len(active), "image_calls": image_calls,
-            "audio_calls": audio_calls, "video_calls": video_calls,
-            "total_calls": image_calls + audio_calls + video_calls}
+def fleet_ai_multimodal(pipelines: list[dict]) -> dict:
+    active = [p for p in pipelines if p.get("active", True)]
+    modalities = set()
+    for p in pipelines:
+        modalities.update(p.get("modalities", []))
+    requests_24h = sum(p.get("requests_24h", 0) for p in pipelines)
+    return {"pipelines": len(pipelines), "active": len(active), "modalities": sorted(modalities),
+            "requests_24h": requests_24h, "multimodal": len(modalities) > 1}
