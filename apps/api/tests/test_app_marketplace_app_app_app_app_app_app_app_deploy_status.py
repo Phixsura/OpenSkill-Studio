@@ -1,22 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_status import (
-    create_deployment, update_step, deployment_summary,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_status import aggregate_deploy_status, deploy_velocity
 
-def test_deployment():
-    d = create_deployment("d1", "2.0", "production", ["build", "test", "deploy"])
-    r = update_step(d, "build", "completed", 5000)
-    assert r["progress"] == 33
-    update_step(d, "test", "completed", 3000)
-    update_step(d, "deploy", "completed", 2000)
-    assert d["status"] == "completed"
+def test_aggregate():
+    r = aggregate_deploy_status([
+        {"env": "prod", "status": "success"},
+        {"env": "prod", "status": "success"},
+        {"env": "staging", "status": "failed"},
+        {"env": "staging", "status": "in_progress"},
+    ])
+    assert r["total"] == 4
+    assert not r["all_success"]
+    assert r["by_env"]["prod"]["success"] == 2
+    assert r["by_env"]["staging"]["failed"] == 1
 
-def test_failure():
-    d = create_deployment("d2", "2.1", "staging", ["build", "test"])
-    update_step(d, "build", "completed")
-    update_step(d, "test", "failed")
-    assert d["status"] == "failed"
-
-def test_summary():
-    deployments = [{"status": "completed"}, {"status": "completed"}, {"status": "failed"}]
-    r = deployment_summary(deployments)
-    assert r["success_rate"] == 67
+def test_velocity():
+    deploys = [{"status": "success"}] * 14 + [{"status": "failed"}] * 1
+    r = deploy_velocity(deploys, days=7)
+    assert r["per_day"] == 2.1
+    assert r["success_rate"] == 93.3
