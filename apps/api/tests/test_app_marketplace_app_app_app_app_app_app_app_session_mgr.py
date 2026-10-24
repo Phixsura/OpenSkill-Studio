@@ -1,13 +1,27 @@
 from app.services.app_marketplace_app_app_app_app_app_app_app_session_mgr import SessionManager
 
-def test_sessions():
-    mgr = SessionManager(max_sessions_per_user=2)
-    s1 = mgr.create(user_id="alice", ip="1.2.3.4", now=100)
-    s2 = mgr.create(user_id="alice", ip="5.6.7.8", now=200)
-    assert len(mgr.user_sessions("alice")) == 2
-    # Third session evicts oldest
-    s3 = mgr.create(user_id="alice", ip="9.0.1.2", now=300)
-    assert len(mgr.user_sessions("alice")) == 2
-    mgr.revoke(s3["session_id"])
-    assert len(mgr.user_sessions("alice")) == 1
-    assert mgr.stats()["total_sessions"] == 1
+def test_create_validate():
+    sm = SessionManager(ttl_seconds=60)
+    r = sm.create("u1")
+    token = r["token"]
+    v = sm.validate(token)
+    assert v["valid"]
+    assert v["user_id"] == "u1"
+
+def test_expired():
+    sm = SessionManager(ttl_seconds=10)
+    r = sm.create("u1")
+    v = sm.validate(r["token"], now=time.time() + 11)
+    assert not v["valid"]
+    assert v["reason"] == "expired"
+
+def test_revoke_user():
+    sm = SessionManager()
+    sm.create("u1")
+    sm.create("u1")
+    sm.create("u2")
+    r = sm.revoke_user("u1")
+    assert r["revoked"] == 2
+    assert sm.stats()["active_sessions"] == 1
+
+import time

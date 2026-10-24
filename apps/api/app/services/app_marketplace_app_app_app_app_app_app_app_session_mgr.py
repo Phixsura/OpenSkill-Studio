@@ -1,43 +1,42 @@
-"""User session manager — track active sessions and enforce limits."""
+"""Platform session manager — manage user sessions with expiry."""
 from __future__ import annotations
-import secrets
-import time
+import secrets, time
 
 
 class SessionManager:
-    def __init__(self, *, max_sessions_per_user: int = 5):
+    def __init__(self, ttl_seconds: int = 3600):
         self._sessions: dict[str, dict] = {}
-        self._max = max_sessions_per_user
+        self._ttl = ttl_seconds
 
-    def create(self, *, user_id: str, ip: str = "", user_agent: str = "",
-               now: float | None = None) -> dict:
-        ts = now if now is not None else time.time()
-        user_sessions = [s for s in self._sessions.values() if s["user_id"] == user_id]
-        if len(user_sessions) >= self._max:
-            oldest = min(user_sessions, key=lambda s: s["created"])
-            del self._sessions[oldest["id"]]
-        sid = f"sess_{secrets.token_hex(12)}"
-        self._sessions[sid] = {"id": sid, "user_id": user_id, "ip": ip,
-                                "user_agent": user_agent, "created": ts, "last_active": ts}
-        return {"session_id": sid, "user_id": user_id}
+    def create(self, user_id: str, metadata: dict | None = None) -> dict:
+        token = secrets.token_urlsafe(32)
+        self._sessions[token] = {"user_id": user_id, "created_at": time.time(),
+                                  "expires_at": time.time() + self._ttl,
+                                  "metadata": metadata or {}}
+        return {"token": token, "expires_in": self._ttl}
 
-    def touch(self, sid: str, *, now: float | None = None) -> dict:
-        s = self._sessions.get(sid)
-        if not s:
-            return {"error": "Session not found"}
-        s["last_active"] = now if now is not None else time.time()
-        return {"touched": True}
+    def validate(self, token: str, now: float | None = None) -> dict:
+        now = now or time.time()
+        session = self._sessions.get(token)
+        if not session:
+            return {"valid": False, "reason": "not_found"}
+        if now > session["expires_at"]:
+            del self._sessions[token]
+            return {"valid": False, "reason": "expired"}
+        return {"valid": True, "user_id": session["user_id"],
+                "remaining": round(session["expires_at"] - now)}
 
-    def revoke(self, sid: str) -> dict:
-        if sid in self._sessions:
-            del self._sessions[sid]
+    def revoke(self, token: str) -> dict:
+        if token in self._sessions:
+            del self._sessions[token]
             return {"revoked": True}
-        return {"revoked": False}
+        return {"revoked": False, "reason": "not_found"}
 
-    def user_sessions(self, user_id: str) -> list[dict]:
-        return [{"id": s["id"], "ip": s["ip"], "user_agent": s["user_agent"][:50]}
-                for s in self._sessions.values() if s["user_id"] == user_id]
+    def revoke_user(self, user_id: str) -> dict:
+        tokens = [t for t, s in self._sessions.items() if s["user_id"] == user_id]
+        for t in tokens:
+            del self._sessions[t]
+        return {"revoked": len(tokens), "user_id": user_id}
 
     def stats(self) -> dict:
-        return {"total_sessions": len(self._sessions),
-                "unique_users": len({s["user_id"] for s in self._sessions.values()})}
+        return {"active_sessions": len(self._sessions), "ttl_seconds": self._ttl}
