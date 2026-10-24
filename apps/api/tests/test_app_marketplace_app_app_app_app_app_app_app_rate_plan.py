@@ -1,20 +1,16 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_rate_plan import get_plan, compare_plans, can_use_feature
+from app.services.app_marketplace_app_app_app_app_app_app_app_rate_plan import get_plan, check_usage
 
-def test_plan():
-    p = get_plan("pro")
-    assert p["price"] == 99
-    assert p["price_display"] == "$99/mo"
-    assert "sso" in p["features"]
+def test_get():
+    r = get_plan("pro")
+    assert r["found"]
+    assert r["limits"]["rpm"] == 1000
 
-def test_enterprise():
-    p = get_plan("enterprise")
-    assert p["is_unlimited"]
-    assert p["price_display"] == "Custom"
+def test_check():
+    r = check_usage("free", current_daily=900, current_monthly=5000)
+    assert r["daily_pct"] == 90.0
+    assert r["recommend_upgrade"]
+    assert not r["exceeded"]
 
-def test_compare():
-    plans = compare_plans()
-    assert len(plans) == 4
-
-def test_feature():
-    assert can_use_feature("pro", "sso")
-    assert not can_use_feature("free", "sso")
+def test_exceeded():
+    r = check_usage("free", current_daily=1500, current_monthly=5000)
+    assert r["exceeded"]
