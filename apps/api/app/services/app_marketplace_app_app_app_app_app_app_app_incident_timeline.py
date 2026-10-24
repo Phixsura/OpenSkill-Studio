@@ -1,34 +1,26 @@
-"""Incident timeline — track incident lifecycle events."""
+"""Incident timeline builder — construct incident timelines from events."""
 from __future__ import annotations
 
-SEVERITIES = {"critical": 1, "major": 2, "minor": 3, "info": 4}
+
+def build_timeline(events: list[dict]) -> dict:
+    sorted_events = sorted(events, key=lambda e: e["timestamp"])
+    phases: dict[str, list[dict]] = {}
+    for ev in sorted_events:
+        phase = ev.get("phase", "unknown")
+        phases.setdefault(phase, []).append(ev)
+    first = sorted_events[0]["timestamp"] if sorted_events else None
+    last = sorted_events[-1]["timestamp"] if sorted_events else None
+    return {"events": sorted_events, "total_events": len(sorted_events),
+            "phases": {k: len(v) for k, v in phases.items()},
+            "started_at": first, "last_event_at": last}
 
 
-def build_incident(title: str, severity: str, events: list[dict]) -> dict:
-    status = "open"
-    for e in events:
-        if e.get("type") == "resolved":
-            status = "resolved"
-        elif e.get("type") == "acknowledged":
-            status = "acknowledged"
-    duration_min = 0
-    if len(events) >= 2:
-        first_ts = events[0].get("timestamp", 0)
-        last_ts = events[-1].get("timestamp", 0)
-        duration_min = round((last_ts - first_ts) / 60)
-    return {"title": title, "severity": severity,
-            "severity_level": SEVERITIES.get(severity, 4),
-            "status": status, "events": events, "event_count": len(events),
-            "duration_min": duration_min}
-
-
-def summarize_incidents(incidents: list[dict]) -> dict:
-    by_sev = {}
-    open_count = 0
-    for inc in incidents:
-        sev = inc.get("severity", "info")
-        by_sev[sev] = by_sev.get(sev, 0) + 1
-        if inc.get("status") != "resolved":
-            open_count += 1
-    return {"total": len(incidents), "open": open_count,
-            "resolved": len(incidents) - open_count, "by_severity": by_sev}
+def calculate_mttr(incidents: list[dict]) -> dict:
+    resolved = [i for i in incidents if i.get("resolved_at") and i.get("detected_at")]
+    if not resolved:
+        return {"mttr_minutes": 0, "resolved_count": 0, "total": len(incidents)}
+    ttrs = [(i["resolved_at"] - i["detected_at"]) / 60 for i in resolved]
+    avg = round(sum(ttrs) / len(ttrs), 1)
+    return {"mttr_minutes": avg, "resolved_count": len(resolved),
+            "total": len(incidents), "min_ttr": round(min(ttrs), 1),
+            "max_ttr": round(max(ttrs), 1)}

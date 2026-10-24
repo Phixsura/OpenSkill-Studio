@@ -1,21 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_incident_timeline import build_incident, summarize_incidents
+from app.services.app_marketplace_app_app_app_app_app_app_app_incident_timeline import build_timeline, calculate_mttr
 
-def test_build():
-    r = build_incident("DB Down", "critical", [
-        {"type": "triggered", "timestamp": 1000},
-        {"type": "acknowledged", "timestamp": 1060},
-        {"type": "resolved", "timestamp": 1600},
+def test_timeline():
+    r = build_timeline([
+        {"timestamp": 3, "phase": "resolve", "msg": "fixed"},
+        {"timestamp": 1, "phase": "detect", "msg": "alert fired"},
+        {"timestamp": 2, "phase": "triage", "msg": "team paged"},
     ])
-    assert r["status"] == "resolved"
-    assert r["severity_level"] == 1
-    assert r["duration_min"] == 10
+    assert r["total_events"] == 3
+    assert r["events"][0]["timestamp"] == 1
+    assert r["phases"]["detect"] == 1
 
-def test_summarize():
-    r = summarize_incidents([
-        {"severity": "critical", "status": "resolved"},
-        {"severity": "major", "status": "open"},
-        {"severity": "critical", "status": "open"},
+def test_mttr():
+    r = calculate_mttr([
+        {"detected_at": 1000, "resolved_at": 1600},
+        {"detected_at": 2000, "resolved_at": 3800},
     ])
-    assert r["total"] == 3
-    assert r["open"] == 2
-    assert r["by_severity"]["critical"] == 2
+    assert r["resolved_count"] == 2
+    assert r["mttr_minutes"] == 20.0
