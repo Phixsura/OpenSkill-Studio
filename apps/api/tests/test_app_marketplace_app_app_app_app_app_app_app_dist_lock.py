@@ -1,23 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_dist_lock import (
-    acquire_lock, release_lock, extend_lock, list_locks, clear_locks,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_dist_lock import DistributedLockManager
 
 def test_acquire_release():
-    clear_locks()
-    r = acquire_lock("db:migrate", "worker-1")
+    lm = DistributedLockManager(default_ttl=10)
+    r = lm.acquire("res-1", "worker-a")
     assert r["acquired"]
-    r2 = acquire_lock("db:migrate", "worker-2")
-    assert not r2["acquired"]
-    assert r2["held_by"] == "worker-1"
-    release_lock("db:migrate", r["token"])
-    r3 = acquire_lock("db:migrate", "worker-2")
-    assert r3["acquired"]
-    clear_locks()
+    token = r["token"]
+    # Same owner can re-acquire
+    r2 = lm.acquire("res-1", "worker-a")
+    assert r2["acquired"]
+    # Different owner blocked
+    r3 = lm.acquire("res-1", "worker-b")
+    assert not r3["acquired"]
+    # Release
+    lm.release("res-1", r2["token"])
+    r4 = lm.acquire("res-1", "worker-b")
+    assert r4["acquired"]
 
-def test_extend():
-    clear_locks()
-    r = acquire_lock("res", "me", ttl_sec=10)
-    e = extend_lock("res", r["token"], extra_sec=20)
-    assert e["extended"]
-    assert e["new_ttl"] > 25
-    clear_locks()
+def test_invalid_release():
+    lm = DistributedLockManager()
+    lm.acquire("res-2", "w1")
+    r = lm.release("res-2", "bad-token")
+    assert not r["released"]

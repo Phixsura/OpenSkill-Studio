@@ -1,19 +1,21 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DistLockPanel } from "@/components/dist-lock-panel";
 
 describe("DistLockPanel", () => {
-  it("renders locks", () => {
+  it("renders", () => {
     const { container } = render(
-      <DistLockPanel onRelease={vi.fn()} locks={[
-        { resource: "db:migrate", owner: "worker-1", ttlRemaining: 25.3 },
-        { resource: "cache:flush", owner: "admin", ttlRemaining: 10 },
-      ]} />
+      <DistLockPanel activeLocks={2} defaultTtl={30}
+        locks={[
+          { resource: "orders/123", owner: "worker-a", expiresIn: 15 },
+          { resource: "users/456", owner: "worker-b", expiresIn: 28 },
+        ]} />
     );
     expect(container.textContent).toContain("Distributed Locks");
     expect(container.textContent).toContain("2 active");
-    expect(container.textContent).toContain("db:migrate");
-    expect(container.textContent).toContain("worker-1");
-    expect(container.textContent).toContain("Force Release");
+    expect(container.textContent).toContain("30s TTL");
+    expect(container.textContent).toContain("orders/123");
+    expect(container.textContent).toContain("worker-a");
+    expect(container.textContent).toContain("15s left");
   });
 });

@@ -1,28 +1,30 @@
 "use client";
 
-interface LockEntry { resource: string; owner: string; ttlRemaining: number; }
-interface DistLockPanelProps { locks: LockEntry[]; onRelease: (resource: string) => void; }
+interface LockEntry { resource: string; owner: string; expiresIn: number; }
+interface DistLockPanelProps { activeLocks: number; defaultTtl: number; locks: LockEntry[]; }
 
-export function DistLockPanel({ locks, onRelease }: DistLockPanelProps) {
+export function DistLockPanel({ activeLocks, defaultTtl, locks }: DistLockPanelProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">🔐 Distributed Locks</h3>
-        <span className="text-xs text-gray-400">{locks.length} active</span>
+        <h3 className="font-semibold">🔒 Distributed Locks</h3>
+        <span className="text-xs text-gray-400">{activeLocks} active · {defaultTtl}s TTL</span>
       </div>
-      <div className="divide-y dark:divide-gray-700">
-        {locks.map(l => (
-          <div key={l.resource} className="flex items-center justify-between px-4 py-2.5">
-            <div>
-              <div className="text-sm font-mono">{l.resource}</div>
-              <div className="text-[10px] text-gray-400">held by {l.owner} · {l.ttlRemaining}s remaining</div>
+      {locks.length > 0 ? (
+        <div className="divide-y dark:divide-gray-700">
+          {locks.map(l => (
+            <div key={l.resource} className="flex items-center justify-between px-4 py-1.5 text-xs">
+              <span className="font-mono">{l.resource}</span>
+              <div className="flex items-center gap-2 text-gray-400">
+                <span>{l.owner}</span>
+                <span>{l.expiresIn}s left</span>
+              </div>
             </div>
-            <button onClick={() => onRelease(l.resource)}
-              className="text-xs text-red-500 hover:underline">Force Release</button>
-          </div>
-        ))}
-        {locks.length === 0 && <div className="p-4 text-center text-sm text-gray-400">No active locks</div>}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="p-4 text-xs text-gray-400 text-center">No active locks</div>
+      )}
     </div>
   );
 }
