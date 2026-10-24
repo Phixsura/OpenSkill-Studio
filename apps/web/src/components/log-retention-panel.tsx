@@ -1,27 +1,17 @@
 "use client";
-
-interface RetentionAction { source: string; policy: string; reclaimableGb: number; daysOver: number; }
-interface LogRetentionPanelProps { actions: RetentionAction[];
-  totalReclaimableGb: number; onPurge: (source: string) => void; }
-
-export function LogRetentionPanel({ actions, totalReclaimableGb, onPurge }: LogRetentionPanelProps) {
+interface LogRetentionPanelProps { toKeep: number; toDelete: number; sizeFreedMb: number;
+  currentGb: number; maxProjectedGb: number; retentionDays: number; }
+export function LogRetentionPanel({ toKeep, toDelete, sizeFreedMb, currentGb, maxProjectedGb, retentionDays }: LogRetentionPanelProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">🗑️ Log Retention</h3>
-        <span className="text-xs text-gray-400">{actions.length} actions · {totalReclaimableGb} GB reclaimable</span>
+        <h3 className="font-semibold">📋 Log Retention</h3>
+        <span className="text-xs text-gray-400">{retentionDays}d policy · {sizeFreedMb}MB reclaimable</span>
       </div>
-      <div className="divide-y dark:divide-gray-700">
-        {actions.map(a => (
-          <div key={a.source} className="flex items-center justify-between px-4 py-2.5">
-            <div>
-              <div className="text-xs font-mono font-medium">{a.source}</div>
-              <div className="text-[10px] text-gray-400">{a.daysOver}d over · {a.reclaimableGb} GB · {a.policy}</div>
-            </div>
-            <button onClick={() => onPurge(a.source)} className="px-2 py-1 text-xs bg-red-500 text-white rounded">Purge</button>
-          </div>
-        ))}
-        {actions.length === 0 && <div className="p-4 text-center text-sm text-gray-400">✅ All within retention</div>}
+      <div className="grid grid-cols-3 gap-3 p-4 text-center text-xs">
+        <div><span className="text-gray-400">Keep</span><div className="font-bold text-green-600 text-lg">{toKeep}</div></div>
+        <div><span className="text-gray-400">Delete</span><div className="font-bold text-red-500 text-lg">{toDelete}</div></div>
+        <div><span className="text-gray-400">Storage</span><div className="font-bold text-lg">{currentGb}/{maxProjectedGb}GB</div></div>
       </div>
     </div>
   );

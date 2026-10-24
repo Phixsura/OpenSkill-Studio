@@ -1,26 +1,27 @@
-"""Log retention policy — manage log retention and cleanup."""
+"""Log retention policy — manage log retention and cleanup policies."""
 from __future__ import annotations
 
 
-def create_policy(name: str, retention_days: int, sources: list[str],
-                   max_size_gb: float = 0) -> dict:
-    return {"name": name, "retention_days": retention_days, "sources": sources,
-            "max_size_gb": max_size_gb, "status": "active"}
+def evaluate_retention(logs: list[dict], policies: dict[str, int]) -> dict:
+    to_keep = []
+    to_delete = []
+    for log in logs:
+        log_type = log.get("type", "general")
+        retention_days = policies.get(log_type, policies.get("default", 30))
+        age_days = log.get("age_days", 0)
+        if age_days > retention_days:
+            to_delete.append(log)
+        else:
+            to_keep.append(log)
+    size_freed = sum(l.get("size_mb", 0) for l in to_delete)
+    return {"to_keep": len(to_keep), "to_delete": len(to_delete),
+            "size_freed_mb": round(size_freed, 1), "total": len(logs)}
 
 
-def evaluate_retention(policies: list[dict], current_usage: dict[str, dict]) -> dict:
-    actions = []
-    total_reclaimable_gb = 0
-    for policy in policies:
-        for source in policy["sources"]:
-            usage = current_usage.get(source, {})
-            oldest_days = usage.get("oldest_days", 0)
-            size_gb = usage.get("size_gb", 0)
-            if oldest_days > policy["retention_days"]:
-                reclaimable = round(size_gb * (oldest_days - policy["retention_days"]) / max(oldest_days, 1), 2)
-                total_reclaimable_gb += reclaimable
-                actions.append({"source": source, "policy": policy["name"],
-                                 "action": "purge", "reclaimable_gb": reclaimable,
-                                 "days_over": oldest_days - policy["retention_days"]})
-    return {"actions": actions, "action_count": len(actions),
-            "total_reclaimable_gb": round(total_reclaimable_gb, 2)}
+def storage_projection(current_size_gb: float, daily_ingest_gb: float,
+                        retention_days: int) -> dict:
+    max_storage = round(daily_ingest_gb * retention_days, 1)
+    pct_of_max = round(current_size_gb / max(max_storage, 0.01) * 100, 1)
+    return {"current_gb": current_size_gb, "max_projected_gb": max_storage,
+            "daily_ingest_gb": daily_ingest_gb, "retention_days": retention_days,
+            "pct_of_max": pct_of_max}
