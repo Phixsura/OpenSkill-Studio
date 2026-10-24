@@ -1,28 +1,32 @@
-"""Service map explorer — navigate microservice architecture."""
+"""Service map generator — generate visual service topology maps."""
 from __future__ import annotations
+from collections import defaultdict
 
 
-def build_service_map(services: list[dict]) -> dict:
-    map_data = {"services": {}, "connections": []}
-    for s in services:
-        map_data["services"][s["name"]] = {
-            "type": s.get("type", "service"),
-            "team": s.get("team", "unknown"),
-            "language": s.get("language", "unknown"),
-            "status": s.get("status", "healthy"),
-        }
-        for dep in s.get("calls", []):
-            map_data["connections"].append({"from": s["name"], "to": dep})
-    teams = sorted({s.get("team", "") for s in services})
-    langs = sorted({s.get("language", "") for s in services})
-    return {**map_data, "service_count": len(services),
-            "connection_count": len(map_data["connections"]),
-            "teams": teams, "languages": langs}
+def generate_service_map(connections: list[dict]) -> dict:
+    nodes = set()
+    edges = []
+    by_source: dict[str, int] = defaultdict(int)
+    for conn in connections:
+        src = conn["source"]
+        dst = conn["destination"]
+        nodes.add(src)
+        nodes.add(dst)
+        by_source[src] += conn.get("request_count", 1)
+        edges.append({"source": src, "destination": dst,
+                       "requests": conn.get("request_count", 1),
+                       "avg_latency_ms": conn.get("avg_latency_ms", 0),
+                       "error_rate": conn.get("error_rate", 0)})
+    # Identify entry points (nodes that are never destinations)
+    destinations = set(e["destination"] for e in edges)
+    entry_points = sorted(nodes - destinations)
+    # Identify leaf nodes (nodes that are never sources)
+    sources = set(e["source"] for e in edges)
+    leaf_nodes = sorted(nodes - sources)
+    return {"nodes": sorted(nodes), "edges": edges,
+            "node_count": len(nodes), "edge_count": len(edges),
+            "entry_points": entry_points, "leaf_nodes": leaf_nodes}
 
 
-def find_isolated(service_map: dict) -> list[str]:
-    connected = set()
-    for c in service_map["connections"]:
-        connected.add(c["from"])
-        connected.add(c["to"])
-    return sorted(set(service_map["services"].keys()) - connected)
+def detect_hotspots(edges: list[dict], threshold_rps: int = 1000) -> list[dict]:
+    return [e for e in edges if e.get("requests", 0) > threshold_rps or e.get("error_rate", 0) > 5]

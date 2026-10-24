@@ -1,20 +1,18 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_svc_map import build_service_map, find_isolated
+from app.services.app_marketplace_app_app_app_app_app_app_app_svc_map import generate_service_map, detect_hotspots
 
 def test_map():
-    r = build_service_map([
-        {"name": "api", "team": "platform", "language": "python", "calls": ["db", "cache"]},
-        {"name": "web", "team": "frontend", "language": "typescript", "calls": ["api"]},
-        {"name": "db", "team": "data", "language": "sql"},
-        {"name": "cache", "team": "data", "language": "redis"},
-        {"name": "cron", "team": "platform", "language": "python"},
+    r = generate_service_map([
+        {"source": "gateway", "destination": "api", "request_count": 10000},
+        {"source": "api", "destination": "db", "request_count": 5000},
+        {"source": "api", "destination": "cache", "request_count": 8000},
     ])
-    assert r["service_count"] == 5
-    assert r["connection_count"] == 3
-    assert "platform" in r["teams"]
+    assert r["node_count"] == 4
+    assert r["entry_points"] == ["gateway"]
+    assert sorted(r["leaf_nodes"]) == ["cache", "db"]
 
-def test_isolated():
-    m = build_service_map([
-        {"name": "api", "calls": ["db"]}, {"name": "db"}, {"name": "orphan"},
-    ])
-    iso = find_isolated(m)
-    assert "orphan" in iso
+def test_hotspots():
+    edges = [{"source": "a", "destination": "b", "requests": 500, "error_rate": 1},
+             {"source": "c", "destination": "d", "requests": 2000, "error_rate": 10}]
+    r = detect_hotspots(edges, threshold_rps=1000)
+    assert len(r) == 1
+    assert r[0]["source"] == "c"
