@@ -1,33 +1,33 @@
-"""CORS policy manager — configure cross-origin resource sharing."""
+"""CORS policy manager — manage cross-origin resource sharing policies."""
 from __future__ import annotations
-from urllib.parse import urlparse
 
 
-def create_policy(allowed_origins: list[str], allowed_methods: list[str] | None = None,
-                  allow_credentials: bool = False, max_age: int = 86400) -> dict:
-    valid_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
-    methods = [m.upper() for m in (allowed_methods or ["GET", "POST"])]
-    invalid = [m for m in methods if m not in valid_methods]
-    if invalid:
-        return {"created": False, "error": f"invalid methods: {invalid}"}
-    origins = []
-    for o in allowed_origins:
-        if o == "*":
-            origins.append("*")
+class CorsPolicyManager:
+    def __init__(self):
+        self._policies: dict[str, dict] = {}
+
+    def set_policy(self, origin: str, methods: list[str] | None = None,
+                   headers: list[str] | None = None, max_age: int = 3600,
+                   credentials: bool = False) -> dict:
+        self._policies[origin] = {
+            "origin": origin,
+            "methods": methods or ["GET", "POST", "PUT", "DELETE"],
+            "headers": headers or ["Content-Type", "Authorization"],
+            "max_age": max_age, "credentials": credentials}
+        return self._policies[origin]
+
+    def check(self, request_origin: str, method: str) -> dict:
+        if "*" in self._policies:
+            policy = self._policies["*"]
+        elif request_origin in self._policies:
+            policy = self._policies[request_origin]
         else:
-            parsed = urlparse(o)
-            if parsed.scheme not in ("http", "https"):
-                return {"created": False, "error": f"invalid origin scheme: {o}"}
-            origins.append(o)
-    if allow_credentials and "*" in origins:
-        return {"created": False, "error": "cannot use wildcard with credentials"}
-    return {"created": True, "origins": origins, "methods": methods,
-            "credentials": allow_credentials, "max_age": max_age}
+            return {"allowed": False, "reason": "origin_not_allowed"}
+        if method not in policy["methods"]:
+            return {"allowed": False, "reason": "method_not_allowed"}
+        return {"allowed": True, "origin": policy["origin"],
+                "headers": policy["headers"], "max_age": policy["max_age"],
+                "credentials": policy["credentials"]}
 
-
-def check_origin(policy: dict, origin: str) -> dict:
-    if "*" in policy["origins"]:
-        return {"allowed": True, "matched": "*"}
-    if origin in policy["origins"]:
-        return {"allowed": True, "matched": origin}
-    return {"allowed": False, "reason": "origin_not_allowed"}
+    def list_policies(self) -> list[dict]:
+        return list(self._policies.values())
