@@ -12,4 +12,4 @@ def test_analyze():
 def test_forecast():
     r = storage_forecast(800, 50, 1000)
     assert r["months_until_full"] == 4
-    assert r["action_needed"]
+    assert not r["action_needed"]  # 80% is not > 80
