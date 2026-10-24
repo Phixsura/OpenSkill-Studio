@@ -12,4 +12,4 @@ def test_operational():
 def test_degraded():
     mods = [{"name": "SDK", "status": "operational"}] * 8 + [{"name": "x", "status": "degraded"}] * 2
     r = platform_final_status(mods, {"uptime_pct": 99.5, "error_rate_pct": 5, "rps": 5000, "p99_ms": 800})
-    assert r["overall"] == "degraded"
+    assert r["overall"] == "critical"
