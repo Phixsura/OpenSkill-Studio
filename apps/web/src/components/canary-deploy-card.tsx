@@ -1,46 +1,38 @@
 "use client";
 
-interface CanaryDeployCardProps { service: string; baseline: string; canary: string;
-  trafficPct: number; phase: string; status: string; healthy: boolean;
-  onAdvance: () => void; onRollback: () => void; onPromote: () => void; }
+interface CanaryDeployCardProps { verdict: string; errorDelta: number;
+  latencyDeltaPct: number; errOk: boolean; latOk: boolean;
+  baselineTraffic: number; canaryTraffic: number; }
 
-const PHASE_COLORS: Record<string, string> = {
-  initial: "bg-blue-100 text-blue-700", expanding: "bg-yellow-100 text-yellow-700",
-  majority: "bg-purple-100 text-purple-700", complete: "bg-green-100 text-green-700",
+const VERDICT_STYLE: Record<string, string> = {
+  promote: "text-green-600", rollback: "text-red-600", hold: "text-yellow-600",
 };
 
-export function CanaryDeployCard({ service, baseline, canary, trafficPct, phase, status, healthy, onAdvance, onRollback, onPromote }: CanaryDeployCardProps) {
+export function CanaryDeployCard({ verdict, errorDelta, latencyDeltaPct,
+  errOk, latOk, baselineTraffic, canaryTraffic }: CanaryDeployCardProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🐤 Canary Analysis</h3>
+        <span className={`text-sm font-bold uppercase ${VERDICT_STYLE[verdict] ?? ""}`}>{verdict}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-4 text-xs">
         <div>
-          <h3 className="font-semibold text-sm">🐤 Canary: {service}</h3>
-          <div className="text-xs text-gray-400 mt-0.5">v{baseline} → v{canary}</div>
+          <div className="text-gray-400 mb-0.5">Error Rate Delta</div>
+          <div className={errOk ? "text-green-600" : "text-red-600"}>{errorDelta > 0 ? "+" : ""}{errorDelta}%</div>
         </div>
-        <span className={`px-2 py-0.5 text-[10px] rounded-full ${PHASE_COLORS[phase] ?? ""}`}>{phase}</span>
-      </div>
-      <div className="p-4">
-        <div className="flex justify-between text-xs mb-1">
-          <span>Canary traffic</span>
-          <span className="font-bold">{trafficPct}%</span>
+        <div>
+          <div className="text-gray-400 mb-0.5">Latency Delta</div>
+          <div className={latOk ? "text-green-600" : "text-red-600"}>{latencyDeltaPct > 0 ? "+" : ""}{latencyDeltaPct}%</div>
         </div>
-        <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex">
-          <div className="h-full bg-yellow-500" style={{ width: `${trafficPct}%` }} />
-          <div className="h-full bg-blue-500 flex-1" />
+        <div>
+          <div className="text-gray-400 mb-0.5">Baseline Traffic</div>
+          <div>{baselineTraffic.toLocaleString()}</div>
         </div>
-        <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-          <span>🐤 v{canary} ({trafficPct}%)</span>
-          <span>v{baseline} ({100 - trafficPct}%)</span>
+        <div>
+          <div className="text-gray-400 mb-0.5">Canary Traffic</div>
+          <div>{canaryTraffic.toLocaleString()}</div>
         </div>
-      </div>
-      <div className="flex gap-2 p-3 border-t dark:border-gray-700">
-        {status === "running" && (
-          <>
-            <button onClick={onAdvance} className="flex-1 py-1.5 text-xs bg-blue-500 text-white rounded-lg">Advance</button>
-            <button onClick={onPromote} className="flex-1 py-1.5 text-xs bg-green-500 text-white rounded-lg">Promote</button>
-            <button onClick={onRollback} className="flex-1 py-1.5 text-xs bg-red-500 text-white rounded-lg">Rollback</button>
-          </>
-        )}
       </div>
     </div>
   );

@@ -1,20 +1,16 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CanaryDeployCard } from "@/components/canary-deploy-card";
 
 describe("CanaryDeployCard", () => {
-  it("renders canary", () => {
+  it("renders promote", () => {
     const { container } = render(
-      <CanaryDeployCard service="api" baseline="2.0" canary="2.1" trafficPct={25}
-        phase="expanding" status="running" healthy={true}
-        onAdvance={vi.fn()} onRollback={vi.fn()} onPromote={vi.fn()} />
+      <CanaryDeployCard verdict="promote" errorDelta={0.02} latencyDeltaPct={5}
+        errOk={true} latOk={true} baselineTraffic={10000} canaryTraffic={1000} />
     );
-    expect(container.textContent).toContain("Canary: api");
-    expect(container.textContent).toContain("v2.0");
-    expect(container.textContent).toContain("v2.1");
-    expect(container.textContent).toContain("25%");
-    expect(container.textContent).toContain("expanding");
-    expect(container.textContent).toContain("Advance");
-    expect(container.textContent).toContain("Rollback");
+    expect(container.textContent).toContain("Canary Analysis");
+    expect(container.textContent).toContain("promote");
+    expect(container.textContent).toContain("10,000");
+    expect(container.textContent).toContain("1,000");
   });
 });
