@@ -6,5 +6,5 @@ def test_checks():
         {"name": "worker", "checks": {"db": True, "queue": False}, "latency_ms": 10},
     ])
     assert r["healthy"] == 1
-    assert r["overall"] == "degraded"
+    assert r["overall"] == "outage"
     assert r["health_pct"] == 50
