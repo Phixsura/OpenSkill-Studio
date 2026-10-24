@@ -1,23 +1,21 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_region_failover import (
-    create_region_config, check_failover_needed, execute_failover,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_region_failover import RegionFailoverCoordinator
 
-def test_no_failover():
-    regions = [{"name": "us-east", "role": "primary", "healthy": True},
-               {"name": "eu-west", "role": "standby", "healthy": True}]
-    r = check_failover_needed(regions)
-    assert not r["failover_needed"]
-
-def test_failover_needed():
-    regions = [{"name": "us-east", "role": "primary", "healthy": False},
-               {"name": "eu-west", "role": "standby", "healthy": True}]
-    r = check_failover_needed(regions)
-    assert r["failover_needed"]
-    assert r["candidate"] == "eu-west"
-
-def test_execute():
-    regions = [{"name": "us-east", "role": "primary"}, {"name": "eu-west", "role": "standby"}]
-    r = execute_failover(regions, "eu-west")
+def test_failover():
+    rfc = RegionFailoverCoordinator()
+    rfc.register_region("us-east", is_primary=True)
+    rfc.register_region("eu-west")
+    rfc.register_region("ap-south")
+    r = rfc.failover("us-east")
+    assert r["success"]
     assert r["new_primary"] == "eu-west"
-    assert regions[0]["role"] == "standby"
-    assert regions[1]["role"] == "primary"
+    s = rfc.status()
+    assert s["primary"] == "eu-west"
+    assert "us-east" in s["failed"]
+
+def test_failback():
+    rfc = RegionFailoverCoordinator()
+    rfc.register_region("us-east", is_primary=True)
+    rfc.register_region("eu-west")
+    rfc.failover("us-east")
+    rfc.failback("us-east")
+    assert rfc.status()["active"] == 2

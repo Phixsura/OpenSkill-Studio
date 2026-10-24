@@ -1,34 +1,34 @@
-"""Multi-region failover — manage regional failover and routing."""
+"""Multi-region failover coordinator — coordinate failover across regions."""
 from __future__ import annotations
 
 
-def create_region_config(regions: list[dict]) -> dict:
-    primary = [r for r in regions if r.get("role") == "primary"]
-    standby = [r for r in regions if r.get("role") == "standby"]
-    return {"regions": regions, "primary": primary[0]["name"] if primary else None,
-            "standby_count": len(standby), "total_regions": len(regions)}
+class RegionFailoverCoordinator:
+    def __init__(self):
+        self._regions: dict[str, dict] = {}
+        self._primary: str = ""
 
+    def register_region(self, name: str, is_primary: bool = False) -> dict:
+        self._regions[name] = {"name": name, "status": "active", "is_primary": is_primary}
+        if is_primary:
+            self._primary = name
+        return self._regions[name]
 
-def check_failover_needed(regions: list[dict]) -> dict:
-    primary = next((r for r in regions if r.get("role") == "primary"), None)
-    if not primary:
-        return {"failover_needed": True, "reason": "no_primary"}
-    if not primary.get("healthy", True):
-        candidates = [r for r in regions if r.get("role") == "standby" and r.get("healthy")]
-        return {"failover_needed": True, "reason": "primary_unhealthy",
-                "primary": primary["name"],
-                "candidate": candidates[0]["name"] if candidates else None}
-    return {"failover_needed": False, "primary": primary["name"]}
+    def failover(self, failed_region: str) -> dict:
+        self._regions[failed_region]["status"] = "failed"
+        candidates = [r for r in self._regions.values() if r["status"] == "active" and r["name"] != failed_region]
+        if not candidates:
+            return {"success": False, "reason": "no_healthy_regions"}
+        new_primary = candidates[0]["name"]
+        self._regions[new_primary]["is_primary"] = True
+        self._primary = new_primary
+        return {"success": True, "failed": failed_region, "new_primary": new_primary}
 
+    def failback(self, region: str) -> dict:
+        self._regions[region]["status"] = "active"
+        return {"region": region, "status": "active"}
 
-def execute_failover(regions: list[dict], new_primary: str) -> dict:
-    changes = []
-    for r in regions:
-        if r["name"] == new_primary:
-            old_role = r["role"]
-            r["role"] = "primary"
-            changes.append({"region": r["name"], "from": old_role, "to": "primary"})
-        elif r.get("role") == "primary":
-            r["role"] = "standby"
-            changes.append({"region": r["name"], "from": "primary", "to": "standby"})
-    return {"executed": True, "new_primary": new_primary, "changes": changes}
+    def status(self) -> dict:
+        active = sum(1 for r in self._regions.values() if r["status"] == "active")
+        return {"total_regions": len(self._regions), "active": active,
+                "primary": self._primary,
+                "failed": [r["name"] for r in self._regions.values() if r["status"] == "failed"]}
