@@ -1,32 +1,40 @@
-"""Infrastructure cost optimizer — identify cost reduction opportunities."""
+"""Infrastructure cost optimizer — identify cost savings opportunities."""
 from __future__ import annotations
 
 
 def analyze_resources(resources: list[dict]) -> dict:
-    underutilized = []
-    oversized = []
-    total_cost = 0.0
-    potential_savings = 0.0
+    savings = []
+    total_monthly = 0
+    potential_savings = 0
     for r in resources:
         cost = r.get("monthly_cost", 0)
-        utilization = r.get("utilization_pct", 0)
-        total_cost += cost
+        total_monthly += cost
+        utilization = r.get("utilization_pct", 100)
         if utilization < 20:
-            saving = cost * 0.7  # can save 70%
-            potential_savings += saving
-            underutilized.append({**r, "suggestion": "downsize_or_remove", "saving": round(saving, 2)})
+            save = round(cost * 0.7, 2)
+            savings.append({"resource": r["name"], "type": r.get("type", "unknown"),
+                            "utilization_pct": utilization, "monthly_cost": cost,
+                            "potential_savings": save, "recommendation": "terminate_or_downsize"})
+            potential_savings += save
         elif utilization < 50:
-            saving = cost * 0.3
-            potential_savings += saving
-            oversized.append({**r, "suggestion": "rightsize", "saving": round(saving, 2)})
-    return {"total_cost": round(total_cost, 2), "potential_savings": round(potential_savings, 2),
-            "savings_pct": round(potential_savings / max(total_cost, 0.01) * 100, 1),
-            "underutilized": underutilized, "oversized": oversized,
-            "recommendations": len(underutilized) + len(oversized)}
+            save = round(cost * 0.4, 2)
+            savings.append({"resource": r["name"], "type": r.get("type", "unknown"),
+                            "utilization_pct": utilization, "monthly_cost": cost,
+                            "potential_savings": save, "recommendation": "rightsize"})
+            potential_savings += save
+    savings.sort(key=lambda s: -s["potential_savings"])
+    return {"total_monthly_cost": round(total_monthly, 2),
+            "potential_savings": round(potential_savings, 2),
+            "savings_pct": round(potential_savings / max(total_monthly, 0.01) * 100, 1),
+            "opportunities": savings, "resources_analyzed": len(resources)}
 
 
-def projected_savings(monthly_savings: float, months: int = 12) -> dict:
-    annual = round(monthly_savings * months, 2)
-    return {"monthly": monthly_savings, "annual": annual,
-            "display_monthly": f"${monthly_savings:,.2f}",
-            "display_annual": f"${annual:,.2f}"}
+def reserved_vs_ondemand(instances: list[dict]) -> dict:
+    reserved = sum(1 for i in instances if i.get("pricing") == "reserved")
+    ondemand = sum(1 for i in instances if i.get("pricing") == "on_demand")
+    reserved_cost = sum(i.get("monthly_cost", 0) for i in instances if i.get("pricing") == "reserved")
+    ondemand_cost = sum(i.get("monthly_cost", 0) for i in instances if i.get("pricing") == "on_demand")
+    return {"reserved": reserved, "on_demand": ondemand,
+            "reserved_cost": round(reserved_cost, 2),
+            "on_demand_cost": round(ondemand_cost, 2),
+            "recommendation": "increase_reserved" if ondemand > reserved else "balanced"}
