@@ -1,14 +1,12 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_health_score import calculate_health_score, compare_scores
+from app.services.app_marketplace_app_app_app_app_app_app_app_health_score import calculate_health_score
 
-def test_score():
-    r = calculate_health_score({"uptime": 99.9, "error_rate": 95, "latency": 85, "throughput": 90, "saturation": 80})
-    assert r["grade"] in ("A", "B")
-    assert r["score"] > 80
-    assert r["status"] == "healthy"
+def test_healthy():
+    r = calculate_health_score({"uptime_pct": 99.99, "error_rate_pct": 0.1,
+                                "p99_ms": 50, "cpu_pct": 40, "data_age_minutes": 5})
+    assert r["grade"] == "A"
+    assert r["score"] >= 90
 
-def test_compare():
-    c = calculate_health_score({"uptime": 99, "error_rate": 95, "latency": 90, "throughput": 85, "saturation": 80})
-    p = calculate_health_score({"uptime": 80, "error_rate": 70, "latency": 60, "throughput": 50, "saturation": 40})
-    r = compare_scores(c, p)
-    assert r["improved"]
-    assert r["delta"] > 0
+def test_unhealthy():
+    r = calculate_health_score({"uptime_pct": 95, "error_rate_pct": 10,
+                                "p99_ms": 2000, "cpu_pct": 95, "data_age_minutes": 60})
+    assert r["grade"] in ("D", "F")

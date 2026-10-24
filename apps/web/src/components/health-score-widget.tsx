@@ -1,37 +1,32 @@
 "use client";
 
-interface Signal { raw: number; normalized: number; weighted: number; weight: number; }
-interface HealthScoreWidgetProps { score: number; grade: string; status: string;
-  signals: Record<string, Signal>; }
+interface HealthScoreWidgetProps { score: number; grade: string;
+  breakdown: Record<string, number>; }
 
-const gradeColor: Record<string, string> = {
-  A: "text-green-600", B: "text-blue-600", C: "text-yellow-600", D: "text-orange-600", F: "text-red-600",
-};
-const signalLabels: Record<string, string> = {
-  uptime: "Uptime", error_rate: "Error Rate", latency: "Latency",
-  crash_free: "Crash-Free", user_satisfaction: "User Satisfaction",
+const GRADE_STYLE: Record<string, string> = {
+  A: "text-green-600", B: "text-blue-500", C: "text-yellow-600", D: "text-orange-500", F: "text-red-600",
 };
 
-export function HealthScoreWidget({ score, grade, status, signals }: HealthScoreWidgetProps) {
+export function HealthScoreWidget({ score, grade, breakdown }: HealthScoreWidgetProps) {
   return (
-    <div className="space-y-4 rounded-lg border p-5 dark:border-gray-700">
-      <div className="text-center">
-        <span className={`text-5xl font-black ${gradeColor[grade] ?? ""}`}>{grade}</span>
-        <p className="mt-1 text-2xl font-bold">{score}/100</p>
-        <p className={`text-sm ${status === "healthy" ? "text-green-500" : status === "degraded" ? "text-yellow-500" : "text-red-500"}`}>
-          {status}
-        </p>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">💯 Health Score</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-black">{score}</span>
+          <span className={`text-xl font-black ${GRADE_STYLE[grade] ?? ""}`}>{grade}</span>
+        </div>
       </div>
-      <div className="space-y-2">
-        {Object.entries(signals).map(([key, s]) => (
+      <div className="p-4 space-y-2">
+        {Object.entries(breakdown).map(([key, val]) => (
           <div key={key}>
-            <div className="flex justify-between text-xs">
-              <span>{signalLabels[key] ?? key}</span>
-              <span className="text-gray-400">{s.weighted}/{s.weight}</span>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="text-gray-500 capitalize">{key.replace("_", " ")}</span>
+              <span className="text-gray-400">{val}</span>
             </div>
-            <div className="mt-0.5 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700">
-              <div className="h-full rounded-full bg-blue-500"
-                style={{ width: `${s.normalized}%` }} />
+            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div className={`h-full rounded-full ${val >= 80 ? "bg-green-500" : val >= 50 ? "bg-yellow-500" : "bg-red-500"}`}
+                style={{ width: `${Math.min(val, 100)}%` }} />
             </div>
           </div>
         ))}
