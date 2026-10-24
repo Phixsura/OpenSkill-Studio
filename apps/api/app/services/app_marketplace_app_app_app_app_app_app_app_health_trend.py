@@ -7,18 +7,18 @@ def analyze_trend(snapshots: list[dict]) -> dict:
         return {"trend": "insufficient_data", "data_points": len(snapshots)}
     uptimes = [s.get("uptime_pct", 100) for s in snapshots]
     avg = round(sum(uptimes) / len(uptimes), 2)
-    recent_avg = round(sum(uptimes[-3:]) / min(3, len(uptimes)), 2)
-    older_avg = round(sum(uptimes[:3]) / min(3, len(uptimes)), 2)
-    if recent_avg > older_avg + 1:
+    n = len(uptimes)
+    half = n // 2
+    recent_avg = round(sum(uptimes[half:]) / max(n - half, 1), 2)
+    older_avg = round(sum(uptimes[:half]) / max(half, 1), 2)
+    if recent_avg > older_avg + 0.5:
         trend = "improving"
-    elif recent_avg < older_avg - 1:
+    elif recent_avg < older_avg - 0.5:
         trend = "degrading"
     else:
         trend = "stable"
-    worst = min(uptimes)
-    best = max(uptimes)
     return {"trend": trend, "avg_uptime": avg, "recent_avg": recent_avg,
-            "worst": worst, "best": best, "data_points": len(snapshots)}
+            "worst": min(uptimes), "best": max(uptimes), "data_points": n}
 
 
 def predict_sla(trend_data: dict, sla_target: float = 99.9) -> dict:
@@ -26,4 +26,4 @@ def predict_sla(trend_data: dict, sla_target: float = 99.9) -> dict:
     on_track = avg >= sla_target
     gap = round(avg - sla_target, 3)
     return {"on_track": on_track, "current_avg": avg, "sla_target": sla_target,
-            "gap": gap, "risk": "low" if gap > 0.5 else ("medium" if gap > 0 else "high")}
+            "gap": gap, "risk": "low" if gap > 0 else ("medium" if gap > -0.5 else "high")}
