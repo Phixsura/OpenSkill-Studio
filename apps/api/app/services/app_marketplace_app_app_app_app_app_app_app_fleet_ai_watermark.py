@@ -1,8 +1,9 @@
-"""Fleet AI Watermarking — track AI content provenance."""
+"""Fleet AI Watermark — track AI-generated content watermarking."""
 from __future__ import annotations
-def fleet_ai_watermark(services: list[dict]) -> dict:
-    active = [s for s in services if s.get("active", True)]
-    watermarked_24h = sum(s.get("watermarked_24h", 0) for s in services)
-    verified_24h = sum(s.get("verified_24h", 0) for s in services)
-    return {"services": len(services), "active": len(active), "watermarked_24h": watermarked_24h,
-            "verified_24h": verified_24h, "all_active": len(active) == len(services)}
+def fleet_ai_watermark(systems: list[dict]) -> dict:
+    active = [s for s in systems if s.get("active", True)]
+    watermarked_24h = sum(s.get("watermarked_24h", 0) for s in systems)
+    detected_24h = sum(s.get("detected_24h", 0) for s in systems)
+    detection_rate = round(detected_24h / max(watermarked_24h, 1) * 100, 1)
+    return {"systems": len(systems), "active": len(active), "watermarked_24h": watermarked_24h,
+            "detected_24h": detected_24h, "detection_rate": detection_rate}
