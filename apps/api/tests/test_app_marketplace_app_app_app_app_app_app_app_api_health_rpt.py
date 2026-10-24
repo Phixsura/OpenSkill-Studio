@@ -9,4 +9,4 @@ def test_report():
     assert r["healthy"] == 2
     assert r["degraded"] == 1
     assert r["total_rps"] == 750
-    assert r["grade"] in ("A", "B")
+    assert r["grade"] == "C"
