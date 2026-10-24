@@ -14,7 +14,7 @@ def test_clamped():
     assert r["clamped"] == 3
 
 def test_cooldown():
-    r = cooldown_check(last_scale_at=100, now=350, cooldown_seconds=300)
+    r = cooldown_check(last_scale_at=100, now=401, cooldown_seconds=300)
     assert r["can_scale"]
 
 def test_fleet():
