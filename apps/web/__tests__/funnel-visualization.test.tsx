@@ -5,18 +5,18 @@ import { FunnelVisualization } from "@/components/funnel-visualization";
 describe("FunnelVisualization", () => {
   it("renders funnel", () => {
     const { container } = render(
-      <FunnelVisualization overallDisplay="12.0%" worstStep="View Details"
-        steps={[
-          { step: "Visit Page", count: 10000, conversionDisplay: "100%", dropOff: 0, dropPct: 0 },
-          { step: "View Details", count: 3000, conversionDisplay: "30%", dropOff: 7000, dropPct: 70 },
-          { step: "Install", count: 1200, conversionDisplay: "12%", dropOff: 1800, dropPct: 60 },
+      <FunnelVisualization overallConversion={5} bottleneck="Signup"
+        funnel={[
+          { step: "Visit", count: 1000, dropOffPct: 0, conversionPct: 100 },
+          { step: "Signup", count: 500, dropOffPct: 50, conversionPct: 50 },
+          { step: "Subscribe", count: 50, dropOffPct: 90, conversionPct: 5 },
         ]} />
     );
-    expect(container.textContent).toContain("Conversion Funnel");
-    expect(container.textContent).toContain("12.0% overall");
-    expect(container.textContent).toContain("Visit Page");
-    expect(container.textContent).toContain("10,000");
-    expect(container.textContent).toContain("7,000 dropped");
-    expect(container.textContent).toContain("70%");
+    expect(container.textContent).toContain("User Funnel");
+    expect(container.textContent).toContain("5% conversion");
+    expect(container.textContent).toContain("bottleneck: Signup");
+    expect(container.textContent).toContain("Visit");
+    expect(container.textContent).toContain("1,000");
+    expect(container.textContent).toContain("50% drop-off");
   });
 });
