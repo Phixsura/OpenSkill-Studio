@@ -1,15 +1,21 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_health_trend import calculate_health_trend, health_forecast
+from app.services.app_marketplace_app_app_app_app_app_app_app_health_trend import analyze_trend, predict_sla
 
 def test_improving():
-    r = calculate_health_trend([80, 82, 85, 88, 90, 92, 95])
+    r = analyze_trend([
+        {"uptime_pct": 98}, {"uptime_pct": 99}, {"uptime_pct": 99.5},
+        {"uptime_pct": 99.9}, {"uptime_pct": 99.99},
+    ])
     assert r["trend"] == "improving"
-    assert r["delta"] > 0
+    assert r["worst"] == 98
 
-def test_stable():
-    r = calculate_health_trend([90, 91, 89, 90, 91, 90, 89])
-    assert r["trend"] == "stable"
+def test_degrading():
+    r = analyze_trend([
+        {"uptime_pct": 99.99}, {"uptime_pct": 99.9}, {"uptime_pct": 99.5},
+        {"uptime_pct": 99}, {"uptime_pct": 98},
+    ])
+    assert r["trend"] == "degrading"
 
-def test_forecast():
-    r = health_forecast([80, 85, 90])
-    assert len(r["forecast"]) == 3
-    assert r["forecast"][0]["projected"] > 90
+def test_predict():
+    r = predict_sla({"avg_uptime": 99.95}, sla_target=99.9)
+    assert r["on_track"]
+    assert r["risk"] == "low"

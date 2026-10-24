@@ -1,30 +1,29 @@
-"""Service health trend — track health score changes over time."""
+"""Service health trend analyzer — analyze health trends over time."""
 from __future__ import annotations
 
 
-def calculate_health_trend(scores: list[float], periods: int = 7) -> dict:
-    if len(scores) < 2:
-        return {"trend": "insufficient", "scores": scores}
-    recent = scores[-periods:] if len(scores) >= periods else scores
-    avg_recent = round(sum(recent) / len(recent), 1)
-    first_half = scores[:len(scores)//2]
-    second_half = scores[len(scores)//2:]
-    avg_first = round(sum(first_half) / max(len(first_half), 1), 1)
-    avg_second = round(sum(second_half) / max(len(second_half), 1), 1)
-    delta = round(avg_second - avg_first, 1)
-    trend = "improving" if delta > 2 else "declining" if delta < -2 else "stable"
-    return {"trend": trend, "current_avg": avg_recent, "delta": delta,
-            "latest": scores[-1], "min": min(scores), "max": max(scores),
-            "data_points": len(scores)}
+def analyze_trend(snapshots: list[dict]) -> dict:
+    if len(snapshots) < 2:
+        return {"trend": "insufficient_data", "data_points": len(snapshots)}
+    uptimes = [s.get("uptime_pct", 100) for s in snapshots]
+    avg = round(sum(uptimes) / len(uptimes), 2)
+    recent_avg = round(sum(uptimes[-3:]) / min(3, len(uptimes)), 2)
+    older_avg = round(sum(uptimes[:3]) / min(3, len(uptimes)), 2)
+    if recent_avg > older_avg + 1:
+        trend = "improving"
+    elif recent_avg < older_avg - 1:
+        trend = "degrading"
+    else:
+        trend = "stable"
+    worst = min(uptimes)
+    best = max(uptimes)
+    return {"trend": trend, "avg_uptime": avg, "recent_avg": recent_avg,
+            "worst": worst, "best": best, "data_points": len(snapshots)}
 
 
-def health_forecast(scores: list[float], forecast_periods: int = 3) -> dict:
-    if len(scores) < 3:
-        return {"forecast": []}
-    avg_change = (scores[-1] - scores[0]) / (len(scores) - 1)
-    forecast = []
-    last = scores[-1]
-    for i in range(forecast_periods):
-        projected = round(min(100, max(0, last + avg_change * (i + 1))), 1)
-        forecast.append({"period": i + 1, "projected": projected})
-    return {"forecast": forecast, "avg_change": round(avg_change, 2)}
+def predict_sla(trend_data: dict, sla_target: float = 99.9) -> dict:
+    avg = trend_data.get("avg_uptime", 100)
+    on_track = avg >= sla_target
+    gap = round(avg - sla_target, 3)
+    return {"on_track": on_track, "current_avg": avg, "sla_target": sla_target,
+            "gap": gap, "risk": "low" if gap > 0.5 else ("medium" if gap > 0 else "high")}
