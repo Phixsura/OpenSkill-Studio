@@ -1,34 +1,24 @@
 "use client";
-
-interface Dimension { dimension: string; score: number; target: number;
-  weight: number; weighted: number; met: boolean; }
-interface HealthScorecardProps { totalScore: number; grade: string;
-  dimensions: Dimension[]; targetsMet: number; targetsTotal: number; }
-
-const GRADE_COLORS: Record<string, string> = {
-  "A+": "text-green-600", A: "text-green-600", B: "text-blue-600",
-  C: "text-yellow-600", D: "text-red-600",
-};
-
-export function HealthScorecard({ totalScore, grade, dimensions, targetsMet, targetsTotal }: HealthScorecardProps) {
+interface HealthScorecardProps { overall: number; grade: string; dimensions: Record<string, number>; weakest: string; }
+const GRADE_COLOR: Record<string, string> = { A: "text-green-600", B: "text-blue-500", C: "text-yellow-600", F: "text-red-600" };
+export function HealthScorecard({ overall, grade, dimensions, weakest }: HealthScorecardProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
-      <div className="p-6 text-center border-b dark:border-gray-700">
-        <div className={`text-5xl font-bold ${GRADE_COLORS[grade] ?? ""}`}>{grade}</div>
-        <div className="text-lg font-mono mt-1">{totalScore}/100</div>
-        <div className="text-xs text-gray-400">{targetsMet}/{targetsTotal} targets met</div>
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">💯 Health Scorecard</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-black">{overall}</span>
+          <span className={`text-lg font-black ${GRADE_COLOR[grade] ?? ""}`}>{grade}</span>
+        </div>
       </div>
-      <div className="divide-y dark:divide-gray-700">
-        {dimensions.map(d => (
-          <div key={d.dimension} className="px-4 py-2.5">
-            <div className="flex justify-between text-xs mb-0.5">
-              <span className="capitalize">{d.dimension.replaceAll("_", " ")} {d.met ? "✅" : "⚠"}</span>
-              <span>{d.score} / {d.target} (×{d.weight})</span>
+      <div className="p-4 space-y-1">
+        {Object.entries(dimensions).map(([dim, score]) => (
+          <div key={dim} className="flex items-center gap-2 text-xs">
+            <span className={`w-20 ${dim === weakest ? "text-red-500 font-bold" : "text-gray-500"}`}>{dim}</span>
+            <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div className={`h-full rounded-full ${score >= 90 ? "bg-green-500" : score >= 70 ? "bg-yellow-500" : "bg-red-500"}`} style={{ width: `${score}%` }} />
             </div>
-            <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full">
-              <div className={`h-full rounded-full ${d.met ? "bg-green-500" : "bg-yellow-500"}`}
-                style={{ width: `${Math.min(d.score, 100)}%` }} />
-            </div>
+            <span className="text-gray-400 w-8 text-right">{score}</span>
           </div>
         ))}
       </div>
