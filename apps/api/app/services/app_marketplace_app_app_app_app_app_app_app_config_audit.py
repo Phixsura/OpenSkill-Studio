@@ -1,29 +1,35 @@
-"""Service config audit — audit configurations for best practices."""
+"""Config change auditor — audit all configuration changes."""
 from __future__ import annotations
+import hashlib, time
 
 
-BEST_PRACTICES = {
-    "timeout_configured": "Set explicit request timeouts",
-    "retries_configured": "Configure retry policies",
-    "circuit_breaker": "Enable circuit breaker",
-    "health_check": "Add health check endpoint",
-    "logging_structured": "Use structured logging",
-    "metrics_enabled": "Enable Prometheus metrics",
-    "tracing_enabled": "Enable distributed tracing",
-}
+class ConfigAuditor:
+    def __init__(self):
+        self._log: list[dict] = []
 
+    def record_change(self, key: str, old_value: str, new_value: str,
+                      changed_by: str, env: str = "production") -> dict:
+        entry = {"key": key, "old_hash": hashlib.sha256(old_value.encode()).hexdigest()[:12],
+                 "new_hash": hashlib.sha256(new_value.encode()).hexdigest()[:12],
+                 "changed_by": changed_by, "env": env, "timestamp": time.time()}
+        self._log.append(entry)
+        return entry
 
-def audit_config(service: str, config: dict) -> dict:
-    findings = []
-    score = 0
-    for practice, description in BEST_PRACTICES.items():
-        implemented = config.get(practice, False)
-        if implemented:
-            score += 1
-        else:
-            findings.append({"practice": practice, "description": description, "status": "missing"})
-    total = len(BEST_PRACTICES)
-    pct = round(score / total * 100)
-    return {"service": service, "score": score, "total": total,
-            "compliance_pct": pct, "findings": findings,
-            "grade": "A" if pct >= 90 else "B" if pct >= 70 else "C" if pct >= 50 else "D"}
+    def query(self, key: str = "", env: str = "", changed_by: str = "",
+              limit: int = 50) -> list[dict]:
+        results = self._log
+        if key:
+            results = [r for r in results if r["key"] == key]
+        if env:
+            results = [r for r in results if r["env"] == env]
+        if changed_by:
+            results = [r for r in results if r["changed_by"] == changed_by]
+        return results[-limit:]
+
+    def stats(self) -> dict:
+        by_env: dict[str, int] = {}
+        by_user: dict[str, int] = {}
+        for entry in self._log:
+            by_env[entry["env"]] = by_env.get(entry["env"], 0) + 1
+            by_user[entry["changed_by"]] = by_user.get(entry["changed_by"], 0) + 1
+        return {"total_changes": len(self._log), "by_env": by_env, "by_user": by_user}
