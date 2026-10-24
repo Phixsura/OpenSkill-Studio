@@ -7,7 +7,7 @@ export function SlowQueryPanel({ queries, thresholdMs, total }: SlowQueryPanelPr
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <h3 className="font-semibold">🐌 Slow Queries</h3>
         <span className={`text-xs ${total > 0 ? "text-yellow-600" : "text-green-600"}`}>
-          {total} slow (>{thresholdMs}ms)
+          {total} slow ({">"}{thresholdMs}ms)
         </span>
       </div>
       <div className="divide-y dark:divide-gray-700">
