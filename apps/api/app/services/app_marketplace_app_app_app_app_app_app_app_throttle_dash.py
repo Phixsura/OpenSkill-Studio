@@ -1,21 +1,24 @@
-"""API throttle dashboard — overview of all throttled endpoints."""
+"""Request throttle dashboard — unified throttle view across all tenants."""
 from __future__ import annotations
+from collections import defaultdict
 
 
-def build_throttle_dashboard(endpoints: list[dict]) -> dict:
-    throttled = []
-    healthy = 0
-    total_blocked = 0
-    for ep in endpoints:
-        blocked = ep.get("blocked_count", 0)
-        total_blocked += blocked
-        if blocked > 0:
-            throttled.append({"path": ep["path"], "blocked": blocked,
-                               "limit": ep.get("limit", 0),
-                               "current_rps": ep.get("current_rps", 0)})
+def throttle_dashboard(events: list[dict]) -> dict:
+    by_tenant: dict[str, dict] = defaultdict(lambda: {"allowed": 0, "throttled": 0})
+    for e in events:
+        tid = e.get("tenant_id", "unknown")
+        if e.get("throttled"):
+            by_tenant[tid]["throttled"] += 1
         else:
-            healthy += 1
-    return {"total_endpoints": len(endpoints), "healthy": healthy,
-            "throttled_count": len(throttled), "total_blocked": total_blocked,
-            "throttled_endpoints": throttled,
-            "status": "healthy" if not throttled else "throttling"}
+            by_tenant[tid]["allowed"] += 1
+    tenants = []
+    for tid, data in sorted(by_tenant.items(), key=lambda x: -x[1]["throttled"]):
+        total = data["allowed"] + data["throttled"]
+        tenants.append({"tenant_id": tid, "allowed": data["allowed"],
+                        "throttled": data["throttled"],
+                        "throttle_rate": round(data["throttled"] / max(total, 1) * 100, 1)})
+    total_throttled = sum(t["throttled"] for t in tenants)
+    total_allowed = sum(t["allowed"] for t in tenants)
+    return {"tenants": tenants, "total_allowed": total_allowed,
+            "total_throttled": total_throttled,
+            "overall_rate": round(total_throttled / max(total_throttled + total_allowed, 1) * 100, 1)}
