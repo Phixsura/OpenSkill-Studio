@@ -7,7 +7,7 @@ def test_on_demand():
     assert r["deploys_per_day"] == 2.0
 
 def test_weekly():
-    r = calculate_frequency([{"env": "prod"}] * 4, period_days=30)
+    r = calculate_frequency([{"env": "prod"}] * 5, period_days=30)
     assert r["frequency"] == "weekly"
 
 def test_lead_time():
