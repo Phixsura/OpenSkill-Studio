@@ -1,8 +1,9 @@
-"""Fleet AI Vision — track computer vision service."""
+"""Fleet AI Vision — track computer vision and image understanding."""
 from __future__ import annotations
-def fleet_ai_vision(services: list[dict]) -> dict:
-    active = [s for s in services if s.get("active", True)]
-    images_24h = sum(s.get("images_24h", 0) for s in services)
-    detections = sum(s.get("detections_24h", 0) for s in services)
-    return {"services": len(services), "active": len(active), "images_24h": images_24h,
-            "detections_24h": detections, "all_active": len(active) == len(services)}
+def fleet_ai_vision(pipelines: list[dict]) -> dict:
+    active = [p for p in pipelines if p.get("active", True)]
+    images_24h = sum(p.get("images_24h", 0) for p in pipelines)
+    accuracy = round(sum(p.get("accuracy", 0) for p in pipelines) / max(len(pipelines), 1), 1)
+    models = len(set(p.get("model", "") for p in pipelines))
+    return {"pipelines": len(pipelines), "active": len(active), "images_24h": images_24h,
+            "accuracy": accuracy, "models": models, "precise": accuracy > 95}
