@@ -8,7 +8,7 @@ describe("DedupCachePanel", () => {
     );
     expect(container.textContent).toContain("Dedup Cache");
     expect(container.textContent).toContain("80% hit rate");
-    expect(container.textContent).toContain("5,000/10,000");
+    expect(container.textContent).toContain("5000/10000");
     expect(container.textContent).toContain("8,000");
     expect(container.textContent).toContain("2,000");
   });
