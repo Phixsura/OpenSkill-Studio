@@ -1,15 +1,10 @@
 from app.services.app_marketplace_app_app_app_app_app_app_app_usage_forecast import forecast_usage
 
-def test_forecast():
-    data = [{"value": 100}, {"value": 120}, {"value": 140}, {"value": 160}, {"value": 180}]
-    r = forecast_usage(data, months_ahead=3)
+def test_growing():
+    r = forecast_usage([100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200])
     assert r["trend"] == "growing"
-    assert r["slope"] == 20.0
-    assert len(r["predictions"]) == 3
-    assert r["predictions"][0]["predicted"] > 180
+    assert r["projected_30d"] > 200
 
-def test_flat():
-    data = [{"value": 50}, {"value": 50}, {"value": 50}]
-    r = forecast_usage(data)
-    assert r["trend"] == "flat"
-    assert r["slope"] == 0
+def test_stable():
+    r = forecast_usage([100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
+    assert r["trend"] == "stable"
