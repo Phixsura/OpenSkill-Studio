@@ -1,8 +1,10 @@
-"""Fleet AI Compliance — track AI governance and compliance."""
+"""Fleet AI Compliance Audit — track AI regulatory compliance status."""
 from __future__ import annotations
-def fleet_ai_compliance(checks: list[dict]) -> dict:
-    passing = [c for c in checks if c.get("passed", True)]
-    regulations = len(set(c.get("regulation", "") for c in checks))
-    audits_completed = sum(c.get("audits", 0) for c in checks)
-    return {"total_checks": len(checks), "passing": len(passing), "regulations": regulations,
-            "audits": audits_completed, "compliant": len(passing) == len(checks)}
+def fleet_ai_compliance(audits: list[dict]) -> dict:
+    passed = [a for a in audits if a.get("status") == "passed"]
+    failed = [a for a in audits if a.get("status") == "failed"]
+    frameworks = set()
+    for a in audits:
+        frameworks.update(a.get("frameworks", []))
+    return {"audits": len(audits), "passed": len(passed), "failed": len(failed),
+            "frameworks": sorted(frameworks), "compliant": len(failed) == 0}
