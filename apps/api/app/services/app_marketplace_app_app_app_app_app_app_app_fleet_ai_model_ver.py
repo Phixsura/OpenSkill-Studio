@@ -1,8 +1,9 @@
-"""Fleet AI Model Versioning — track model version lifecycle."""
+"""Fleet AI Model Versioner — track semantic versioning for AI models."""
 from __future__ import annotations
-def fleet_ai_model_versioning(registries: list[dict]) -> dict:
-    models = sum(r.get("models", 0) for r in registries)
-    versions = sum(r.get("versions", 0) for r in registries)
-    active_versions = sum(r.get("active_versions", 0) for r in registries)
-    return {"registries": len(registries), "models": models, "versions": versions,
-            "active": active_versions, "well_managed": versions > 0}
+def fleet_ai_model_versioner(versioners: list[dict]) -> dict:
+    active = [v for v in versioners if v.get("active", True)]
+    models_versioned = sum(v.get("models", 0) for v in versioners)
+    total_versions = sum(v.get("versions", 0) for v in versioners)
+    rollbacks_24h = sum(v.get("rollbacks", 0) for v in versioners)
+    return {"versioners": len(versioners), "active": len(active), "models": models_versioned,
+            "versions": total_versions, "rollbacks": rollbacks_24h, "stable": rollbacks_24h < 5}
