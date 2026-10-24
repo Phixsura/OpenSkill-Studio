@@ -1,23 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_token_bucket import (
-    create_bucket, consume, bucket_status, clear_buckets,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_token_bucket import TokenBucket
 
 def test_consume():
-    clear_buckets()
-    create_bucket("api", capacity=10, refill_rate=1.0)
-    for _ in range(10):
-        r = consume("api")
-        assert r["allowed"]
-    r = consume("api")
-    assert not r["allowed"]
-    assert r["retry_after_sec"] > 0
-    clear_buckets()
+    tb = TokenBucket(capacity=10, refill_rate=1.0)
+    r = tb.consume("u1", 3, now=0)
+    assert r["allowed"]
+    assert r["remaining"] == 7
 
-def test_status():
-    clear_buckets()
-    create_bucket("test", capacity=100, refill_rate=10)
-    consume("test", 30)
-    s = bucket_status("test")
-    assert s["tokens"] == 70
-    assert s["fill_pct"] == 70
-    clear_buckets()
+def test_exhausted():
+    tb = TokenBucket(capacity=2, refill_rate=0.5)
+    tb.consume("u1", 2, now=0)
+    r = tb.consume("u1", 1, now=0)
+    assert not r["allowed"]
+    assert r["retry_after_seconds"] == 2.0
+
+def test_refill():
+    tb = TokenBucket(capacity=5, refill_rate=1.0)
+    tb.consume("u1", 5, now=0)
+    r = tb.peek("u1", now=3)
+    assert r["tokens"] == 3
