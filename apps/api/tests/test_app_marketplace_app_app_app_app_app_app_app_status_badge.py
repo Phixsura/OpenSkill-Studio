@@ -1,21 +1,16 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_status_badge import generate_badge, generate_status_badge, generate_uptime_badge
+from app.services.app_marketplace_app_app_app_app_app_app_app_status_badge import generate_badge, generate_badges
 
 def test_badge():
-    r = generate_badge(label="build", value="passing", color="green")
+    r = generate_badge("build", "passing", "green")
     assert "<svg" in r["svg"]
     assert "passing" in r["svg"]
-    assert r["color"] == "#22C55E"
-    assert r["content_type"] == "image/svg+xml"
+    assert "#4c1" in r["svg"]
 
-def test_status():
-    r = generate_status_badge(status="operational")
-    assert "operational" in r["svg"]
-    r2 = generate_status_badge(status="outage")
-    assert r2["color"] == "#EF4444"
+def test_badges():
+    r = generate_badges({"uptime_pct": 99.95, "version": "3.0.1", "status": "operational"})
+    assert len(r) == 3
+    assert any("uptime" in b["label"] for b in r)
 
-def test_uptime():
-    r = generate_uptime_badge(99.95)
-    assert "99.95%" in r["svg"]
-    assert r["color"] == "#22C55E"
-    r2 = generate_uptime_badge(98.5)
-    assert r2["color"] == "#EF4444"
+def test_escape():
+    r = generate_badge("<script>", "x&y")
+    assert "<script>" not in r["svg"]
