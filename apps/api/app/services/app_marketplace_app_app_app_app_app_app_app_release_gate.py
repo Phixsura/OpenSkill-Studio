@@ -1,33 +1,27 @@
-"""Release gating engine — enforce quality gates before release."""
+"""Release gate controller — manage release gates for safe deployments."""
 from __future__ import annotations
 
 
-def create_gate(name: str, checks: list[dict]) -> dict:
-    items = []
-    for c in checks:
-        items.append({"name": c["name"], "type": c.get("type", "required"),
-                       "status": "pending", "result": None})
-    return {"name": name, "checks": items, "total": len(items), "passed": 0, "failed": 0}
+class ReleaseGateController:
+    def __init__(self):
+        self._gates: dict[str, list[dict]] = {}
 
+    def define_release(self, release: str, gates: list[dict]) -> dict:
+        self._gates[release] = [{"name": g["name"], "required": g.get("required", True),
+                                  "passed": False} for g in gates]
+        return {"release": release, "gates": len(self._gates[release])}
 
-def evaluate_gate(gate: dict, results: dict[str, bool]) -> dict:
-    passed = 0
-    failed = 0
-    blocking = False
-    for check in gate["checks"]:
-        result = results.get(check["name"])
-        if result is True:
-            check["status"] = "passed"
-            check["result"] = True
-            passed += 1
-        elif result is False:
-            check["status"] = "failed"
-            check["result"] = False
-            failed += 1
-            if check["type"] == "required":
-                blocking = True
-    gate["passed"] = passed
-    gate["failed"] = failed
-    can_release = not blocking and passed + failed == gate["total"]
-    return {"gate": gate["name"], "passed": passed, "failed": failed,
-            "total": gate["total"], "can_release": can_release, "blocking": blocking}
+    def pass_gate(self, release: str, gate_name: str) -> dict:
+        for g in self._gates[release]:
+            if g["name"] == gate_name:
+                g["passed"] = True
+                return {"release": release, "gate": gate_name, "passed": True}
+        return {"release": release, "gate": gate_name, "error": "gate_not_found"}
+
+    def can_release(self, release: str) -> dict:
+        gates = self._gates.get(release, [])
+        required_passed = all(g["passed"] for g in gates if g["required"])
+        pending = [g["name"] for g in gates if g["required"] and not g["passed"]]
+        return {"release": release, "can_release": required_passed,
+                "pending_gates": pending, "total_gates": len(gates),
+                "passed_gates": sum(1 for g in gates if g["passed"])}
