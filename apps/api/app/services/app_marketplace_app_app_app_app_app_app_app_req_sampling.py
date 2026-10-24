@@ -1,22 +1,28 @@
-"""Request sampling engine — intelligent request sampling for observability."""
+"""Request sampling controller — sample requests for debugging and analysis."""
 from __future__ import annotations
 import hashlib
 
 
-def should_sample(request_id: str, sample_rate: float, priority: str = "normal") -> dict:
-    if priority == "high":
-        return {"sampled": True, "reason": "high_priority"}
-    if priority == "error":
-        return {"sampled": True, "reason": "error_always_sampled"}
-    h = int(hashlib.md5(request_id.encode()).hexdigest(), 16) % 10000
-    threshold = int(sample_rate * 10000)
-    sampled = h < threshold
-    return {"sampled": sampled, "reason": "rate_based", "rate": sample_rate}
+class RequestSampler:
+    def __init__(self, sample_rate: float = 0.01):
+        self._rate = sample_rate
+        self._sampled: list[dict] = []
+        self._total = 0
 
+    def should_sample(self, request_id: str) -> bool:
+        self._total += 1
+        h = int(hashlib.md5(request_id.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+        return h < self._rate
 
-def sampling_stats(total: int, sampled: int, target_rate: float) -> dict:
-    actual_rate = round(sampled / max(total, 1), 4)
-    deviation = round(abs(actual_rate - target_rate) / max(target_rate, 0.0001) * 100, 1)
-    return {"total": total, "sampled": sampled, "dropped": total - sampled,
-            "target_rate": target_rate, "actual_rate": actual_rate,
-            "deviation_pct": deviation, "accurate": deviation < 5}
+    def capture(self, request: dict) -> dict:
+        self._sampled.append(request)
+        if len(self._sampled) > 1000:
+            self._sampled = self._sampled[-1000:]
+        return {"captured": True, "buffer_size": len(self._sampled)}
+
+    def recent(self, limit: int = 20) -> list[dict]:
+        return self._sampled[-limit:]
+
+    def stats(self) -> dict:
+        return {"total_seen": self._total, "captured": len(self._sampled),
+                "sample_rate": self._rate}
