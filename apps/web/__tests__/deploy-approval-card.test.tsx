@@ -1,20 +1,25 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DeployApprovalCard } from "@/components/deploy-approval-card";
 
 describe("DeployApprovalCard", () => {
-  it("renders approval", () => {
+  it("renders pending", () => {
     const { container } = render(
-      <DeployApprovalCard deployId="d1" environment="production" requester="alice"
-        requiredApprovers={["bob", "carol"]} approvals={[{ approver: "bob" }]}
-        status="pending" onApprove={vi.fn()} onReject={vi.fn()} />
+      <DeployApprovalCard deployId="d1" version="2.0.0" env="prod"
+        status="pending" approvals={1} required={2} />
     );
     expect(container.textContent).toContain("Deploy Approval");
-    expect(container.textContent).toContain("production");
-    expect(container.textContent).toContain("alice");
-    expect(container.textContent).toContain("bob");
-    expect(container.textContent).toContain("carol");
-    expect(container.textContent).toContain("Approve");
-    expect(container.textContent).toContain("Reject");
+    expect(container.textContent).toContain("pending");
+    expect(container.textContent).toContain("d1");
+    expect(container.textContent).toContain("2.0.0");
+    expect(container.textContent).toContain("1/2");
+  });
+  it("renders rejected", () => {
+    const { container } = render(
+      <DeployApprovalCard deployId="d2" version="3.0.0" env="staging"
+        status="rejected" approvals={0} required={2} rejectionReason="failing tests" />
+    );
+    expect(container.textContent).toContain("rejected");
+    expect(container.textContent).toContain("failing tests");
   });
 });

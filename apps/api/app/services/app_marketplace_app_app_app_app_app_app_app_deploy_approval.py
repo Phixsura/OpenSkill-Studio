@@ -1,30 +1,33 @@
-"""Deployment approval workflow — require approvals before deploy."""
+"""Deployment approval workflow — multi-stage approval for deployments."""
 from __future__ import annotations
-import time
 
 
-def create_approval_request(deploy_id: str, requester: str, environment: str,
-                             required_approvers: list[str]) -> dict:
-    return {"deploy_id": deploy_id, "requester": requester, "environment": environment,
-            "required_approvers": required_approvers, "approvals": [],
-            "rejections": [], "status": "pending", "created_at": time.time()}
+class DeploymentApproval:
+    def __init__(self, required_approvers: int = 2):
+        self._required = required_approvers
+        self._deployments: dict[str, dict] = {}
 
+    def create(self, deploy_id: str, version: str, env: str) -> dict:
+        self._deployments[deploy_id] = {
+            "version": version, "env": env, "approvals": [],
+            "rejections": [], "status": "pending"}
+        return {"deploy_id": deploy_id, "status": "pending", "required": self._required}
 
-def approve(request: dict, approver: str) -> dict:
-    if approver == request["requester"]:
-        return {"approved": False, "error": "cannot_self_approve"}
-    if approver in [a["approver"] for a in request["approvals"]]:
-        return {"approved": False, "error": "already_approved"}
-    request["approvals"].append({"approver": approver, "at": time.time()})
-    approved_by = {a["approver"] for a in request["approvals"]}
-    all_approved = all(r in approved_by for r in request["required_approvers"])
-    if all_approved:
-        request["status"] = "approved"
-    return {"approved": True, "total_approvals": len(request["approvals"]),
-            "all_approved": all_approved, "status": request["status"]}
+    def approve(self, deploy_id: str, approver: str) -> dict:
+        d = self._deployments[deploy_id]
+        if approver not in d["approvals"]:
+            d["approvals"].append(approver)
+        if len(d["approvals"]) >= self._required:
+            d["status"] = "approved"
+        return {"deploy_id": deploy_id, "status": d["status"],
+                "approvals": len(d["approvals"]), "needed": max(0, self._required - len(d["approvals"]))}
 
+    def reject(self, deploy_id: str, rejector: str, reason: str) -> dict:
+        d = self._deployments[deploy_id]
+        d["rejections"].append({"by": rejector, "reason": reason})
+        d["status"] = "rejected"
+        return {"deploy_id": deploy_id, "status": "rejected", "reason": reason}
 
-def reject(request: dict, rejector: str, reason: str = "") -> dict:
-    request["rejections"].append({"rejector": rejector, "reason": reason, "at": time.time()})
-    request["status"] = "rejected"
-    return {"rejected": True, "status": "rejected"}
+    def get(self, deploy_id: str) -> dict:
+        d = self._deployments[deploy_id]
+        return {"deploy_id": deploy_id, **d}
