@@ -1,16 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_net_policy import create_rule, evaluate_traffic
+from app.services.app_marketplace_app_app_app_app_app_app_app_net_policy import NetworkPolicyManager
 
-def test_create():
-    r = create_rule("block-external", "egress", "deny", "*", "0.0.0.0/0", 0)
-    assert r["created"]
-
-def test_evaluate():
-    rules = [
-        create_rule("allow-http", "ingress", "allow", "*", "10.0.0.1", 80),
-        create_rule("deny-ssh", "ingress", "deny", "*", "*", 22),
-    ]
-    r = evaluate_traffic(rules, "ingress", "1.2.3.4", "10.0.0.1", 80)
+def test_allow():
+    npm = NetworkPolicyManager()
+    npm.add_policy("web-to-api", "web", "api", 8080)
+    r = npm.evaluate("web", "api", 8080)
     assert r["allowed"]
-    r2 = evaluate_traffic(rules, "ingress", "1.2.3.4", "10.0.0.1", 22)
-    assert not r2["allowed"]
-    assert r2["matched_rule"] == "deny-ssh"
+    assert r["matched_policy"] == "web-to-api"
+
+def test_deny():
+    npm = NetworkPolicyManager()
+    npm.add_policy("block-external", "external", "db", 5432, action="deny")
+    r = npm.evaluate("external", "db", 5432)
+    assert not r["allowed"]
+
+def test_implicit_deny():
+    npm = NetworkPolicyManager()
+    r = npm.evaluate("unknown", "api", 8080)
+    assert not r["allowed"]
+    assert r["action"] == "implicit_deny"
