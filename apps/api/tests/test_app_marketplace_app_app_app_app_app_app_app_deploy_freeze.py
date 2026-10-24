@@ -1,21 +1,21 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_freeze import (
-    create_freeze, is_frozen, cancel_freeze, clear_freezes,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_freeze import DeployFreezeController
+import time
 
 def test_freeze():
-    clear_freezes()
-    now = 1000.0
-    create_freeze("Holiday", now - 100, now + 3600, ["production"])
-    r = is_frozen("production", now=now)
+    dfc = DeployFreezeController()
+    dfc.create_freeze("Black Friday", 48, "ops-lead")
+    r = dfc.is_frozen()
     assert r["frozen"]
-    assert r["reason"] == "Holiday"
-    r2 = is_frozen("staging", now=now)
-    assert not r2["frozen"]
-    clear_freezes()
+    assert r["remaining_hours"] > 0
 
-def test_cancel():
-    clear_freezes()
-    f = create_freeze("Test", 0, 99999)
-    cancel_freeze(f["id"])
-    assert not is_frozen(now=50)["frozen"]
-    clear_freezes()
+def test_lift():
+    dfc = DeployFreezeController()
+    dfc.create_freeze("Maintenance", 2, "admin")
+    dfc.lift_freeze()
+    assert not dfc.is_frozen()["frozen"]
+
+def test_expired():
+    dfc = DeployFreezeController()
+    dfc.create_freeze("test", 1, "admin")
+    r = dfc.is_frozen(now=time.time() + 7200)
+    assert not r["frozen"]

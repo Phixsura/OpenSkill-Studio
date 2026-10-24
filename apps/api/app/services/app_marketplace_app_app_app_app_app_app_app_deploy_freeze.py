@@ -1,40 +1,37 @@
-"""Deployment freeze manager — block deploys during freeze windows."""
+"""Deployment freeze controller — manage deployment freezes during critical periods."""
 from __future__ import annotations
 import time
 
 
-_freezes: list[dict] = []
+class DeployFreezeController:
+    def __init__(self):
+        self._freezes: list[dict] = []
+        self._active_freeze: dict | None = None
 
+    def create_freeze(self, reason: str, duration_hours: int, created_by: str) -> dict:
+        freeze = {"reason": reason, "duration_hours": duration_hours,
+                  "created_by": created_by, "created_at": time.time(),
+                  "expires_at": time.time() + duration_hours * 3600,
+                  "active": True}
+        self._freezes.append(freeze)
+        self._active_freeze = freeze
+        return freeze
 
-def create_freeze(reason: str, start_ts: float, end_ts: float, environments: list[str] | None = None) -> dict:
-    freeze = {"id": len(_freezes) + 1, "reason": reason, "start_ts": start_ts,
-              "end_ts": end_ts, "environments": environments or ["production"],
-              "created_at": time.time(), "active": True}
-    _freezes.append(freeze)
-    return freeze
+    def is_frozen(self, now: float | None = None) -> dict:
+        now = now or time.time()
+        if self._active_freeze and now < self._active_freeze["expires_at"]:
+            remaining = round((self._active_freeze["expires_at"] - now) / 3600, 1)
+            return {"frozen": True, "reason": self._active_freeze["reason"],
+                    "remaining_hours": remaining}
+        self._active_freeze = None
+        return {"frozen": False}
 
+    def lift_freeze(self) -> dict:
+        if self._active_freeze:
+            self._active_freeze["active"] = False
+            self._active_freeze = None
+            return {"lifted": True}
+        return {"lifted": False}
 
-def is_frozen(environment: str = "production", now: float | None = None) -> dict:
-    now = now or time.time()
-    active = [f for f in _freezes if f["active"] and f["start_ts"] <= now <= f["end_ts"]
-              and environment in f["environments"]]
-    if active:
-        return {"frozen": True, "reason": active[0]["reason"],
-                "ends_at": active[0]["end_ts"], "freeze_count": len(active)}
-    return {"frozen": False}
-
-
-def list_freezes() -> list[dict]:
-    return list(_freezes)
-
-
-def cancel_freeze(freeze_id: int) -> dict:
-    for f in _freezes:
-        if f["id"] == freeze_id:
-            f["active"] = False
-            return {"cancelled": True}
-    return {"cancelled": False, "error": "not_found"}
-
-
-def clear_freezes() -> None:
-    _freezes.clear()
+    def history(self) -> list[dict]:
+        return list(self._freezes)
