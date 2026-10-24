@@ -1,47 +1,36 @@
-"""IP allowlist — restrict API access by IP address."""
+"""IP allowlist manager — manage IP-based access control lists."""
 from __future__ import annotations
 import ipaddress
 
 
-def validate_ip(addr: str) -> dict:
-    try:
-        ip = ipaddress.ip_address(addr)
-        return {"valid": True, "address": str(ip), "version": ip.version,
-                "is_private": ip.is_private, "is_loopback": ip.is_loopback}
-    except ValueError:
+class IpAllowlist:
+    def __init__(self):
+        self._rules: list[dict] = []
+
+    def add_rule(self, name: str, cidr: str, description: str = "") -> dict:
         try:
-            net = ipaddress.ip_network(addr, strict=False)
-            return {"valid": True, "network": str(net), "version": net.version,
-                    "num_addresses": net.num_addresses}
-        except ValueError:
-            return {"valid": False, "error": "invalid_ip_or_cidr"}
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError as e:
+            return {"added": False, "error": str(e)}
+        self._rules.append({"name": name, "cidr": cidr, "network": network,
+                             "description": description})
+        return {"added": True, "name": name, "cidr": cidr}
 
-
-def check_access(allowlist: list[str], client_ip: str) -> dict:
-    if not allowlist:
-        return {"allowed": True, "reason": "no_restrictions"}
-    try:
-        client = ipaddress.ip_address(client_ip)
-    except ValueError:
-        return {"allowed": False, "reason": "invalid_client_ip"}
-    for entry in allowlist:
+    def check(self, ip_str: str) -> dict:
         try:
-            net = ipaddress.ip_network(entry, strict=False)
-            if client in net:
-                return {"allowed": True, "matched_rule": entry}
+            addr = ipaddress.ip_address(ip_str)
         except ValueError:
-            continue
-    return {"allowed": False, "reason": "not_in_allowlist"}
+            return {"allowed": False, "reason": "invalid_ip"}
+        for rule in self._rules:
+            if addr in rule["network"]:
+                return {"allowed": True, "matched_rule": rule["name"], "cidr": rule["cidr"]}
+        return {"allowed": False, "reason": "no_matching_rule"}
 
+    def remove_rule(self, name: str) -> dict:
+        before = len(self._rules)
+        self._rules = [r for r in self._rules if r["name"] != name]
+        return {"removed": before != len(self._rules), "name": name}
 
-def summarize_allowlist(entries: list[str]) -> dict:
-    valid = []
-    invalid = []
-    for e in entries:
-        r = validate_ip(e)
-        if r["valid"]:
-            valid.append(e)
-        else:
-            invalid.append(e)
-    return {"total": len(entries), "valid": len(valid),
-            "invalid": len(invalid), "invalid_entries": invalid}
+    def list_rules(self) -> list[dict]:
+        return [{"name": r["name"], "cidr": r["cidr"], "description": r["description"]}
+                for r in self._rules]
