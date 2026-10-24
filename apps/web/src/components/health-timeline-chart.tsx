@@ -1,30 +1,27 @@
 "use client";
 
-interface TimelinePoint { timestamp: string; status: string; response_ms: number; }
-interface HealthTimelineChartProps { timeline: TimelinePoint[]; uptimePct: number; currentStatus: string; }
+interface TimelineEntry { healthy: boolean; }
+interface HealthTimelineChartProps { timeline: TimelineEntry[]; uptimePct: number;
+  incidents: number; windowHours: number; improving: boolean | null; }
 
-const STATUS_COLORS: Record<string, string> = { healthy: "bg-green-500", degraded: "bg-yellow-500", down: "bg-red-500", unknown: "bg-gray-300" };
-
-export function HealthTimelineChart({ timeline, uptimePct, currentStatus }: HealthTimelineChartProps) {
+export function HealthTimelineChart({ timeline, uptimePct, incidents, windowHours, improving }: HealthTimelineChartProps) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Uptime</h3>
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 rounded-full ${STATUS_COLORS[currentStatus] || "bg-gray-300"}`} />
-          <span className={`text-lg font-bold ${uptimePct >= 99.9 ? "text-green-600" : uptimePct >= 99 ? "text-yellow-600" : "text-red-600"}`}>
-            {uptimePct}%
-          </span>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">📈 Health Timeline ({windowHours}h)</h3>
+        <div className="flex gap-2 text-xs">
+          <span className="font-bold">{uptimePct}% uptime</span>
+          <span className="text-gray-400">{incidents} incidents</span>
+          {improving !== null && (
+            <span className={improving ? "text-green-600" : "text-red-500"}>{improving ? "↑" : "↓"}</span>
+          )}
         </div>
       </div>
-      <div className="mt-3 flex gap-px">
-        {timeline.slice(-90).map((t, i) => (
-          <div key={i} className={`h-8 flex-1 rounded-sm ${STATUS_COLORS[t.status] || "bg-gray-200"}`}
-            title={`${t.timestamp.slice(0, 10)}: ${t.status}`} />
+      <div className="p-3 flex gap-0.5">
+        {timeline.map((e, i) => (
+          <div key={i} className={`flex-1 h-6 rounded-sm ${e.healthy ? "bg-green-400" : "bg-red-400"}`}
+            title={e.healthy ? "Healthy" : "Unhealthy"} />
         ))}
-      </div>
-      <div className="mt-1 flex justify-between text-xs text-gray-400">
-        <span>90 days ago</span><span>Today</span>
       </div>
     </div>
   );
