@@ -1,15 +1,12 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_dep_matrix import build_matrix, find_hubs
+from app.services.app_marketplace_app_app_app_app_app_app_app_dep_matrix import build_matrix
 
 def test_matrix():
-    r = build_matrix(["api", "web", "db", "cache"],
-                       {"api": ["db", "cache"], "web": ["api"], "db": [], "cache": []})
-    assert r["total_deps"] == 3
-    assert r["matrix"]["api"]["db"] is True
-    assert r["matrix"]["db"]["api"] is False
-
-def test_hubs():
-    m = build_matrix(["api", "web", "worker", "db"],
-                       {"api": ["db"], "web": ["api", "db"], "worker": ["db"], "db": []})
-    r = find_hubs(m)
-    assert r["most_depended_on"] == "db"
-    assert r["incoming"] == 3
+    r = build_matrix(["api", "db", "cache"], [
+        {"source": "api", "destination": "db", "status": "healthy"},
+        {"source": "api", "destination": "cache", "status": "healthy"},
+        {"source": "db", "destination": "cache", "status": "degraded"},
+    ])
+    assert r["healthy_pairs"] == 2
+    assert r["total_pairs"] == 3
+    assert r["health_pct"] == 66.7
+    assert r["matrix"]["api"]["db"] == "healthy"
