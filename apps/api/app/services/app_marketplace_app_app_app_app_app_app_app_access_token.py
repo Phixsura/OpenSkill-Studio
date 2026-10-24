@@ -1,44 +1,39 @@
-"""Access token manager — issue and validate short-lived tokens."""
+"""Access token manager — issue, validate, and revoke platform tokens."""
 from __future__ import annotations
-import secrets
-import hashlib
-import time
-
-_tokens: dict[str, dict] = {}
+import secrets, hashlib, time
 
 
-def issue_token(subject: str, scopes: list[str], ttl_sec: int = 3600) -> dict:
-    raw = secrets.token_urlsafe(32)
-    hashed = hashlib.sha256(raw.encode()).hexdigest()
-    _tokens[hashed] = {"subject": subject, "scopes": scopes,
-                        "issued_at": time.time(),
-                        "expires_at": time.time() + ttl_sec,
-                        "revoked": False}
-    return {"token": raw, "subject": subject, "scopes": scopes,
-            "expires_in": ttl_sec}
+class AccessTokenManager:
+    def __init__(self, ttl_seconds: int = 3600):
+        self._tokens: dict[str, dict] = {}
+        self._ttl = ttl_seconds
+        self._revoked: set[str] = set()
 
+    def issue(self, subject: str, scopes: list[str]) -> dict:
+        token = f"osk_{secrets.token_urlsafe(32)}"
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        self._tokens[token_hash] = {"subject": subject, "scopes": scopes,
+                                     "issued_at": time.time(),
+                                     "expires_at": time.time() + self._ttl}
+        return {"token": token, "token_hash": token_hash[:12],
+                "expires_in": self._ttl, "scopes": scopes}
 
-def validate_token(raw: str, required_scope: str | None = None) -> dict:
-    hashed = hashlib.sha256(raw.encode()).hexdigest()
-    entry = _tokens.get(hashed)
-    if not entry:
-        return {"valid": False, "error": "not_found"}
-    if entry["revoked"]:
-        return {"valid": False, "error": "revoked"}
-    if time.time() > entry["expires_at"]:
-        return {"valid": False, "error": "expired"}
-    if required_scope and required_scope not in entry["scopes"]:
-        return {"valid": False, "error": "insufficient_scope"}
-    return {"valid": True, "subject": entry["subject"], "scopes": entry["scopes"]}
+    def validate(self, token: str, now: float | None = None) -> dict:
+        now = now or time.time()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        if token_hash in self._revoked:
+            return {"valid": False, "reason": "revoked"}
+        entry = self._tokens.get(token_hash)
+        if not entry:
+            return {"valid": False, "reason": "not_found"}
+        if now > entry["expires_at"]:
+            return {"valid": False, "reason": "expired"}
+        return {"valid": True, "subject": entry["subject"], "scopes": entry["scopes"]}
 
-
-def revoke_token(raw: str) -> dict:
-    hashed = hashlib.sha256(raw.encode()).hexdigest()
-    if hashed in _tokens:
-        _tokens[hashed]["revoked"] = True
+    def revoke(self, token: str) -> dict:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        self._revoked.add(token_hash)
         return {"revoked": True}
-    return {"revoked": False, "error": "not_found"}
 
-
-def clear_tokens() -> None:
-    _tokens.clear()
+    def stats(self) -> dict:
+        return {"active": len(self._tokens), "revoked": len(self._revoked)}
