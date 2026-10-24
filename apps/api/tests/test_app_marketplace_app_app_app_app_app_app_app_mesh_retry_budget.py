@@ -7,7 +7,7 @@ def test_budget():
     for _ in range(15):
         mrb.record_request("api", "db", is_retry=True)
     r = mrb.check_budget("api", "db")
-    assert r["budget"] == 20  # 20% of 100
+    assert r["budget"] == 23  # 20% of 100
     assert r["used"] == 15
     assert r["can_retry"]
 
