@@ -1,46 +1,41 @@
 "use client";
 
-interface Service { id: string; name: string; status: string; icon: string; }
-interface Incident { title: string; status: string; updated: string; }
-interface PlatformStatusPageProps { groups: Record<string, Service[]>; overall: string;
-  overallLabel: string; healthy: number; incidents: Incident[]; updatedAt: string; }
+interface StatusService { name: string; status: string; }
+interface PlatformStatusPageProps { overall: string; groups: Record<string, StatusService[]>;
+  operational: number; total: number; }
 
-export function PlatformStatusPage({ groups, overall, overallLabel, healthy, incidents, updatedAt }: PlatformStatusPageProps) {
-  const overallIcon = overall === "operational" ? "🟢" : overall === "degraded" ? "🟡" : "🔴";
+const OVERALL_TEXT: Record<string, string> = {
+  all_systems_operational: "All Systems Operational",
+  degraded_performance: "Degraded Performance",
+  partial_outage: "Partial Outage",
+  major_outage: "Major Outage",
+};
+const OVERALL_STYLE: Record<string, string> = {
+  all_systems_operational: "bg-green-500", degraded_performance: "bg-yellow-500",
+  partial_outage: "bg-orange-500", major_outage: "bg-red-500",
+};
+const DOT: Record<string, string> = { operational: "bg-green-500", degraded: "bg-yellow-500", outage: "bg-red-500" };
+
+export function PlatformStatusPage({ overall, groups, operational, total }: PlatformStatusPageProps) {
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div className="rounded-xl border p-6 text-center dark:border-gray-700">
-        <span className="text-4xl">{overallIcon}</span>
-        <h1 className="mt-2 text-xl font-bold">{overallLabel}</h1>
-        <p className="text-xs text-gray-400 mt-1">Updated {new Date(updatedAt).toLocaleString()}</p>
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className={`p-4 text-white text-center ${OVERALL_STYLE[overall] ?? "bg-gray-500"}`}>
+        <h3 className="font-bold">{OVERALL_TEXT[overall] ?? overall}</h3>
+        <p className="text-xs opacity-80">{operational}/{total} operational</p>
       </div>
-      {Object.entries(groups).map(([group, services]) => (
-        <div key={group}>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase mb-2">{group}</h3>
-          <div className="space-y-1">
-            {services.map(s => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg border px-4 py-2 dark:border-gray-700">
-                <span className="text-sm">{s.name}</span>
-                <div className="flex items-center gap-1.5">
-                  <span>{s.icon}</span>
-                  <span className="text-xs text-gray-400 capitalize">{s.status}</span>
-                </div>
+      <div className="divide-y dark:divide-gray-700">
+        {Object.entries(groups).map(([group, svcs]) => (
+          <div key={group} className="p-3">
+            <div className="text-xs font-semibold text-gray-500 mb-1">{group}</div>
+            {svcs.map(s => (
+              <div key={s.name} className="flex items-center justify-between py-0.5 text-xs">
+                <span>{s.name}</span>
+                <span className={`w-2 h-2 rounded-full ${DOT[s.status] ?? "bg-gray-400"}`} />
               </div>
             ))}
           </div>
-        </div>
-      ))}
-      {incidents.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold mb-2">⚠ Active Incidents</h3>
-          {incidents.map((inc, i) => (
-            <div key={i} className="rounded-lg border-l-4 border-yellow-500 bg-yellow-50 p-3 dark:bg-yellow-900/10">
-              <p className="text-sm font-medium">{inc.title}</p>
-              <p className="text-xs text-gray-400 capitalize">{inc.status}</p>
-            </div>
-          ))}
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
