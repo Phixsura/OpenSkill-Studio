@@ -1,20 +1,21 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_usage_analytics import aggregate_usage
+from app.services.app_marketplace_app_app_app_app_app_app_app_usage_analytics import aggregate_usage, top_consumers
 
 def test_aggregate():
-    events = [
-        {"action": "view", "date": "2024-01-01", "user_id": "u1"},
-        {"action": "click", "date": "2024-01-01", "user_id": "u1"},
-        {"action": "view", "date": "2024-01-02", "user_id": "u2"},
-        {"action": "view", "date": "2024-01-02", "user_id": "u3"},
-    ]
-    r = aggregate_usage(events)
-    assert r["total_events"] == 4
-    assert r["unique_users"] == 3
-    assert r["top_action"] == "view"
-    assert r["by_action"]["view"] == 3
-    assert r["avg_per_day"] == 2.0
+    r = aggregate_usage([
+        {"endpoint": "/users", "latency_ms": 50, "status": 200},
+        {"endpoint": "/users", "latency_ms": 60, "status": 200},
+        {"endpoint": "/orders", "latency_ms": 100, "status": 500},
+    ])
+    assert r["total_requests"] == 3
+    assert r["unique_endpoints"] == 2
+    assert r["endpoints"][0]["endpoint"] == "/users"
+    assert r["endpoints"][1]["error_rate"] == 100.0
 
-def test_empty():
-    r = aggregate_usage([])
-    assert r["total_events"] == 0
-    assert r["unique_users"] == 0
+def test_top_consumers():
+    r = top_consumers([
+        {"user_id": "u1"}, {"user_id": "u1"}, {"user_id": "u1"},
+        {"user_id": "u2"}, {"user_id": "u2"},
+    ], limit=2)
+    assert r[0]["user_id"] == "u1"
+    assert r[0]["count"] == 3
+    assert len(r) == 2
