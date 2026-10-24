@@ -1,17 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_config_drift import detect_drift, suggest_fixes
+from app.services.app_marketplace_app_app_app_app_app_app_app_config_drift import detect_drift, compare_envs
+
+def test_no_drift():
+    r = detect_drift({"a": "1", "b": "2"}, {"a": "1", "b": "2"})
+    assert not r["drifted"]
+    assert r["severity"] == "ok"
 
 def test_drift():
-    r = detect_drift({
-        "production": {"db_host": "prod-db", "cache": "redis", "debug": False},
-        "staging": {"db_host": "stg-db", "cache": "redis", "debug": True},
-        "development": {"db_host": "localhost", "cache": "memory", "debug": True},
-    })
-    assert r["has_drift"]
-    assert r["drift_count"] == 3  # db_host, cache, debug all differ
+    r = detect_drift({"a": "1", "b": "2"}, {"a": "X", "c": "3"})
+    assert r["drifted"]
+    assert "b" in r["missing"]
+    assert "c" in r["extra"]
+    assert r["changed"][0]["key"] == "a"
+    assert r["severity"] == "critical"
 
-def test_fixes():
-    drifts = [{"key": "debug", "values": {"production": False, "staging": True}}]
-    fixes = suggest_fixes(drifts, "production")
-    assert len(fixes) == 1
-    assert fixes[0]["environment"] == "staging"
-    assert fixes[0]["expected"] is False
+def test_compare_envs():
+    r = compare_envs({
+        "prod": {"db": "prod-db", "cache": "redis"},
+        "staging": {"db": "stg-db", "cache": "redis"},
+        "dev": {"db": "dev-db"},
+    }, baseline="prod")
+    assert r["drifted"] == 2
+    assert r["total_envs"] == 2

@@ -3,19 +3,18 @@ import { describe, expect, it } from "vitest";
 import { ConfigDriftViewer } from "@/components/config-drift-viewer";
 
 describe("ConfigDriftViewer", () => {
-  it("renders drifts", () => {
+  it("renders", () => {
     const { container } = render(
-      <ConfigDriftViewer hasDrift={true} totalKeys={5} envNames={["production", "staging"]}
-        drifts={[
-          { key: "debug", values: { production: false, staging: true }, environments: 2 },
-          { key: "db_host", values: { production: "prod-db", staging: "stg-db" }, environments: 2 },
-        ]} />
+      <ConfigDriftViewer baseline="prod" driftedCount={1}
+        comparisons={{
+          staging: { drifted: true, severity: "warning", missing: [], extra: [],
+            changed: [{ key: "db", expected: "prod-db", actual: "stg-db" }], totalIssues: 1 },
+        }} />
     );
     expect(container.textContent).toContain("Config Drift");
-    expect(container.textContent).toContain("2/5 keys drifted");
-    expect(container.textContent).toContain("debug");
-    expect(container.textContent).toContain("db_host");
-    expect(container.textContent).toContain("prod-db");
-    expect(container.textContent).toContain("stg-db");
+    expect(container.textContent).toContain("vs prod");
+    expect(container.textContent).toContain("1 drifted");
+    expect(container.textContent).toContain("staging");
+    expect(container.textContent).toContain("warning");
   });
 });

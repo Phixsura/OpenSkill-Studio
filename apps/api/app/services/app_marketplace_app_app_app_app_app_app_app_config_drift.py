@@ -1,33 +1,28 @@
-"""Config drift detector — detect config differences across environments."""
+"""Config drift detector — detect configuration drift across environments."""
 from __future__ import annotations
 
 
-def detect_drift(envs: dict[str, dict]) -> dict:
-    if len(envs) < 2:
-        return {"drifts": [], "drift_count": 0, "has_drift": False}
-    env_names = list(envs.keys())
-    all_keys = set()
-    for config in envs.values():
-        all_keys.update(config.keys())
-    drifts = []
-    for key in sorted(all_keys):
-        values = {env: envs[env].get(key, "<missing>") for env in env_names}
-        unique = set(str(v) for v in values.values())
-        if len(unique) > 1:
-            drifts.append({"key": key, "values": values, "environments": len(unique)})
-    return {"drifts": drifts, "drift_count": len(drifts),
-            "total_keys": len(all_keys), "has_drift": len(drifts) > 0,
-            "environments": env_names}
+def detect_drift(expected: dict[str, str], actual: dict[str, str]) -> dict:
+    missing = sorted(set(expected) - set(actual))
+    extra = sorted(set(actual) - set(expected))
+    changed = []
+    for k in sorted(set(expected) & set(actual)):
+        if expected[k] != actual[k]:
+            changed.append({"key": k, "expected": expected[k], "actual": actual[k]})
+    drifted = len(missing) + len(extra) + len(changed) > 0
+    severity = "critical" if missing else ("warning" if changed else ("info" if extra else "ok"))
+    return {"drifted": drifted, "severity": severity, "missing": missing,
+            "extra": extra, "changed": changed,
+            "total_issues": len(missing) + len(extra) + len(changed)}
 
 
-def suggest_fixes(drifts: list[dict], source_env: str) -> list[dict]:
-    fixes = []
-    for d in drifts:
-        source_val = d["values"].get(source_env)
-        if source_val is None:
+def compare_envs(envs: dict[str, dict[str, str]], baseline: str) -> dict:
+    base = envs.get(baseline, {})
+    results = {}
+    for name, cfg in envs.items():
+        if name == baseline:
             continue
-        for env, val in d["values"].items():
-            if env != source_env and str(val) != str(source_val):
-                fixes.append({"key": d["key"], "environment": env,
-                              "current": val, "expected": source_val})
-    return fixes
+        results[name] = detect_drift(base, cfg)
+    drifted_count = sum(1 for r in results.values() if r["drifted"])
+    return {"baseline": baseline, "comparisons": results,
+            "total_envs": len(envs) - 1, "drifted": drifted_count}
