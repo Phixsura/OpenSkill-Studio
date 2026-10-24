@@ -11,8 +11,8 @@ def test_healthy():
 
 def test_degraded():
     r = aggregate_signals([
-        {"source": "metrics", "health_pct": 60},
+        {"source": "metrics", "health_pct": 70},
         {"source": "logs", "health_pct": 100},
-        {"source": "traces", "health_pct": 50},
+        {"source": "traces", "health_pct": 60},
     ])
     assert r["status"] == "degraded"
