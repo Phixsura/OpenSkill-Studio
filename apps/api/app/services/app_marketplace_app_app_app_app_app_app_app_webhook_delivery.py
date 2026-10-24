@@ -1,27 +1,33 @@
-"""Webhook delivery log — track webhook delivery attempts."""
+"""Webhook delivery tracker — track delivery status and retries."""
 from __future__ import annotations
-import html
 
 
-def record_delivery(endpoint: str, event: str, status_code: int,
-                    response_ms: int, payload_bytes: int = 0) -> dict:
-    success = 200 <= status_code < 300
-    return {"endpoint": html.escape(endpoint), "event": event,
-            "status_code": status_code, "response_ms": response_ms,
-            "payload_bytes": payload_bytes, "success": success}
+class WebhookDeliveryTracker:
+    def __init__(self, max_retries: int = 3):
+        self._max_retries = max_retries
+        self._deliveries: list[dict] = []
 
+    def record(self, webhook_id: str, url: str, status_code: int, attempt: int) -> dict:
+        success = 200 <= status_code < 300
+        should_retry = not success and attempt < self._max_retries
+        entry = {"webhook_id": webhook_id, "url": url, "status_code": status_code,
+                 "attempt": attempt, "success": success, "should_retry": should_retry}
+        self._deliveries.append(entry)
+        return entry
 
-def summarize_deliveries(deliveries: list[dict]) -> dict:
-    total = len(deliveries)
-    successes = sum(1 for d in deliveries if d["success"])
-    failures = total - successes
-    by_event: dict[str, int] = {}
-    avg_ms = 0
-    for d in deliveries:
-        by_event[d["event"]] = by_event.get(d["event"], 0) + 1
-        avg_ms += d["response_ms"]
-    avg_ms = round(avg_ms / max(total, 1))
-    rate = round(successes / max(total, 1) * 100)
-    return {"total": total, "successes": successes, "failures": failures,
-            "success_rate": rate, "avg_response_ms": avg_ms,
-            "by_event": by_event}
+    def stats(self) -> dict:
+        total = len(self._deliveries)
+        successes = sum(1 for d in self._deliveries if d["success"])
+        failures = total - successes
+        rate = round(successes / max(total, 1) * 100, 1)
+        return {"total": total, "successes": successes, "failures": failures,
+                "success_rate": rate, "max_retries": self._max_retries}
+
+    def failed_webhooks(self) -> list[dict]:
+        failed: dict[str, dict] = {}
+        for d in self._deliveries:
+            if not d["success"]:
+                wid = d["webhook_id"]
+                if wid not in failed or d["attempt"] > failed[wid]["attempt"]:
+                    failed[wid] = d
+        return sorted(failed.values(), key=lambda x: -x["attempt"])
