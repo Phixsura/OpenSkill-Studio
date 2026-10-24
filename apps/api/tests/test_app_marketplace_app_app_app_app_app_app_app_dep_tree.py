@@ -1,13 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_dep_tree import build_tree
+from app.services.app_marketplace_app_app_app_app_app_app_app_dep_tree import build_tree, find_circular
 
 def test_tree():
-    deps = {"app": ["api", "worker"], "api": ["db", "cache"], "worker": ["db"], "db": [], "cache": []}
-    r = build_tree("app", deps)
-    assert r["root"] == "app"
-    assert r["total_nodes"] == 6  # app, api, worker, db(×2), cache
-    assert r["max_depth"] == 2
+    r = build_tree([
+        {"parent": "api", "child": "auth"},
+        {"parent": "api", "child": "db"},
+        {"parent": "auth", "child": "db"},
+    ])
+    assert r["roots"] == ["api"]
+    assert r["max_depth"] == 3
+    assert r["edges"] == 3
 
 def test_circular():
-    deps = {"a": ["b"], "b": ["a"]}
-    r = build_tree("a", deps, max_depth=5)
-    assert r["total_nodes"] >= 2
+    cycles = find_circular([
+        {"parent": "a", "child": "b"},
+        {"parent": "b", "child": "c"},
+        {"parent": "c", "child": "a"},
+    ])
+    assert len(cycles) >= 1
