@@ -5,18 +5,16 @@ import { HealthScorecard } from "@/components/health-scorecard";
 describe("HealthScorecard", () => {
   it("renders scorecard", () => {
     const { container } = render(
-      <HealthScorecard overallDisplay="82/100" overallStatus="good" needsAttention={true}
+      <HealthScorecard totalScore={93.5} grade="A" targetsMet={4} targetsTotal={5}
         dimensions={[
-          { name: "Uptime", score: 99, status: "excellent", details: "" },
-          { name: "Reliability", score: 45, status: "poor", details: "High error rate" },
+          { dimension: "reliability", score: 99.95, target: 99.9, weight: 0.3, weighted: 29.99, met: true },
+          { dimension: "performance", score: 92, target: 95, weight: 0.25, weighted: 23, met: false },
         ]} />
     );
-    expect(container.textContent).toContain("82/100");
-    expect(container.textContent).toContain("good");
-    expect(container.textContent).toContain("Uptime");
-    expect(container.textContent).toContain("99/100");
-    expect(container.textContent).toContain("Reliability");
-    expect(container.textContent).toContain("High error rate");
-    expect(container.textContent).toContain("need attention");
+    expect(container.textContent).toContain("A");
+    expect(container.textContent).toContain("93.5/100");
+    expect(container.textContent).toContain("4/5 targets met");
+    expect(container.textContent).toContain("reliability");
+    expect(container.textContent).toContain("performance");
   });
 });
