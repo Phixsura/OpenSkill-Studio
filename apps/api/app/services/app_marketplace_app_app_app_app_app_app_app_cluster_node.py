@@ -1,27 +1,34 @@
-"""Cluster node monitor — track node health in compute clusters."""
+"""Cluster node manager — manage cluster node lifecycle."""
 from __future__ import annotations
 
 
-def create_node(name: str, cpu_cores: int, memory_gb: int, zone: str,
-                 cpu_used_pct: float = 0, memory_used_pct: float = 0) -> dict:
-    status = "ready"
-    if cpu_used_pct > 90 or memory_used_pct > 90:
-        status = "pressure"
-    return {"name": name, "cpu_cores": cpu_cores, "memory_gb": memory_gb,
-            "zone": zone, "cpu_used_pct": cpu_used_pct,
-            "memory_used_pct": memory_used_pct, "status": status,
-            "pods": 0}
+class ClusterNodeManager:
+    def __init__(self):
+        self._nodes: dict[str, dict] = {}
 
+    def add_node(self, name: str, role: str, cpu: int, memory_gb: int) -> dict:
+        self._nodes[name] = {"name": name, "role": role, "cpu": cpu,
+                              "memory_gb": memory_gb, "status": "ready",
+                              "pods": 0, "cordon": False}
+        return self._nodes[name]
 
-def cluster_summary(nodes: list[dict]) -> dict:
-    total_cpu = sum(n["cpu_cores"] for n in nodes)
-    total_mem = sum(n["memory_gb"] for n in nodes)
-    avg_cpu = round(sum(n["cpu_used_pct"] for n in nodes) / max(len(nodes), 1), 1)
-    avg_mem = round(sum(n["memory_used_pct"] for n in nodes) / max(len(nodes), 1), 1)
-    by_zone: dict[str, int] = {}
-    for n in nodes:
-        by_zone[n["zone"]] = by_zone.get(n["zone"], 0) + 1
-    ready = sum(1 for n in nodes if n["status"] == "ready")
-    return {"node_count": len(nodes), "ready": ready, "pressure": len(nodes) - ready,
-            "total_cpu_cores": total_cpu, "total_memory_gb": total_mem,
-            "avg_cpu_pct": avg_cpu, "avg_memory_pct": avg_mem, "by_zone": by_zone}
+    def cordon(self, name: str) -> dict:
+        self._nodes[name]["cordon"] = True
+        return {"name": name, "cordoned": True}
+
+    def drain(self, name: str) -> dict:
+        node = self._nodes[name]
+        node["pods"] = 0
+        node["status"] = "drained"
+        return {"name": name, "status": "drained"}
+
+    def remove(self, name: str) -> dict:
+        del self._nodes[name]
+        return {"name": name, "removed": True}
+
+    def stats(self) -> dict:
+        total_cpu = sum(n["cpu"] for n in self._nodes.values())
+        total_mem = sum(n["memory_gb"] for n in self._nodes.values())
+        ready = sum(1 for n in self._nodes.values() if n["status"] == "ready")
+        return {"total_nodes": len(self._nodes), "ready": ready,
+                "total_cpu": total_cpu, "total_memory_gb": total_mem}

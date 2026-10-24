@@ -1,19 +1,20 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_cluster_node import create_node, cluster_summary
+from app.services.app_marketplace_app_app_app_app_app_app_app_cluster_node import ClusterNodeManager
 
-def test_node():
-    n = create_node("node-1", 8, 32, "us-east-1a", 45, 60)
-    assert n["status"] == "ready"
-    n2 = create_node("node-2", 4, 16, "us-east-1b", 95, 85)
-    assert n2["status"] == "pressure"
+def test_lifecycle():
+    cm = ClusterNodeManager()
+    cm.add_node("n1", "worker", 8, 32)
+    cm.add_node("n2", "worker", 16, 64)
+    cm.cordon("n1")
+    cm.drain("n1")
+    cm.remove("n1")
+    s = cm.stats()
+    assert s["total_nodes"] == 1
+    assert s["total_cpu"] == 16
 
-def test_summary():
-    nodes = [
-        create_node("n1", 8, 32, "zone-a", 40, 50),
-        create_node("n2", 8, 32, "zone-a", 60, 70),
-        create_node("n3", 4, 16, "zone-b", 92, 88),
-    ]
-    r = cluster_summary(nodes)
-    assert r["node_count"] == 3
-    assert r["ready"] == 2
-    assert r["total_cpu_cores"] == 20
-    assert r["by_zone"]["zone-a"] == 2
+def test_stats():
+    cm = ClusterNodeManager()
+    cm.add_node("n1", "control", 4, 16)
+    cm.add_node("n2", "worker", 8, 32)
+    s = cm.stats()
+    assert s["ready"] == 2
+    assert s["total_memory_gb"] == 48
