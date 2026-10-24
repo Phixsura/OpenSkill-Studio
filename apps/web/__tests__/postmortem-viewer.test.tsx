@@ -3,20 +3,17 @@ import { describe, expect, it } from "vitest";
 import { PostmortemViewer } from "@/components/postmortem-viewer";
 
 describe("PostmortemViewer", () => {
-  it("renders postmortem", () => {
+  it("renders", () => {
     const { container } = render(
-      <PostmortemViewer incidentId="INC-1" title="Database Outage" severity="critical"
-        rootCause="Connection pool exhaustion" progressPct={50}
-        actionItems={[
-          { task: "Add connection limits", done: true },
-          { task: "Add alerting", done: false },
-        ]} />
+      <PostmortemViewer title="API Outage" severity="critical" durationMinutes={30}
+        usersAffected={5000} rootCause="Connection pool exhausted"
+        actionItems={["Increase pool size", "Add monitoring"]} status="completed" />
     );
-    expect(container.textContent).toContain("Database Outage");
+    expect(container.textContent).toContain("API Outage");
     expect(container.textContent).toContain("critical");
-    expect(container.textContent).toContain("INC-1");
-    expect(container.textContent).toContain("Connection pool exhaustion");
-    expect(container.textContent).toContain("50% complete");
-    expect(container.textContent).toContain("Add connection limits");
+    expect(container.textContent).toContain("30min");
+    expect(container.textContent).toContain("5,000 users");
+    expect(container.textContent).toContain("Connection pool exhausted");
+    expect(container.textContent).toContain("Increase pool size");
   });
 });
