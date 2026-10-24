@@ -1,23 +1,22 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_idempotency import (
-    check_or_store, store_response, key_stats, clear_keys,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_idempotency import IdempotencyManager
 
-def test_idempotency():
-    clear_keys()
-    r1 = check_or_store("pay_123")
-    assert not r1["is_duplicate"]
-    store_response("pay_123", {"status": "ok", "amount": 100})
-    r2 = check_or_store("pay_123")
-    assert r2["is_duplicate"]
-    assert r2["original_response"]["amount"] == 100
-    clear_keys()
+def test_first_request():
+    im = IdempotencyManager()
+    r = im.check_or_create("req-1")
+    assert not r["duplicate"]
+    im.store_response("req-1", {"order_id": "o1"})
 
-def test_stats():
-    clear_keys()
-    check_or_store("a")
-    check_or_store("b")
-    store_response("a", {"ok": True})
-    s = key_stats()
-    assert s["total"] == 2
-    assert s["with_response"] == 1
-    clear_keys()
+def test_duplicate():
+    im = IdempotencyManager()
+    im.check_or_create("req-1")
+    im.store_response("req-1", {"order_id": "o1"})
+    r = im.check_or_create("req-1")
+    assert r["duplicate"]
+    assert r["original_response"]["order_id"] == "o1"
+
+def test_expiry():
+    im = IdempotencyManager(ttl_seconds=10)
+    im.check_or_create("req-1", now=100)
+    im.store_response("req-1", {"ok": True})
+    r = im.check_or_create("req-1", now=111)
+    assert not r["duplicate"]  # expired
