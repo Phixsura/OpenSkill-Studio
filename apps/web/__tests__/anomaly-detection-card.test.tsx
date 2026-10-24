@@ -3,20 +3,14 @@ import { describe, expect, it } from "vitest";
 import { AnomalyDetectionCard } from "@/components/anomaly-detection-card";
 
 describe("AnomalyDetectionCard", () => {
-  it("renders normal", () => {
+  it("renders", () => {
     const { container } = render(
-      <AnomalyDetectionCard metricName="CPU" currentValue={50} mean={48} upper={60} lower={36}
-        isAnomaly={false} direction="normal" severity="info" />
+      <AnomalyDetectionCard metricsChecked={5} hasAnomaly={true}
+        anomalies={[{ metric: "cpu", latest: 95, mean: 40, zScore: 27.5, type: "high" }]} />
     );
-    expect(container.textContent).toContain("CPU");
-    expect(container.textContent).toContain("50");
-  });
-  it("renders anomaly", () => {
-    const { container } = render(
-      <AnomalyDetectionCard metricName="Latency" currentValue={500} mean={100} upper={150} lower={50}
-        isAnomaly={true} direction="above" severity="critical" />
-    );
-    expect(container.textContent).toContain("critical");
-    expect(container.textContent).toContain("above");
+    expect(container.textContent).toContain("Anomaly Detection");
+    expect(container.textContent).toContain("1 anomalies");
+    expect(container.textContent).toContain("cpu: 95");
+    expect(container.textContent).toContain("mean 40");
   });
 });

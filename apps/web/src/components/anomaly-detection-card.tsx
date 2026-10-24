@@ -1,26 +1,27 @@
 "use client";
 
-interface AnomalyDetectionCardProps {
-  metricName: string; currentValue: number; mean: number; upper: number; lower: number;
-  isAnomaly: boolean; direction: string; severity: string;
-}
+interface Anomaly { metric: string; latest: number; mean: number; zScore: number; type: string; }
+interface AnomalyDetectionCardProps { anomalies: Anomaly[]; metricsChecked: number; hasAnomaly: boolean; }
 
-export function AnomalyDetectionCard({ metricName, currentValue, mean, upper, lower, isAnomaly, direction, severity }: AnomalyDetectionCardProps) {
-  const sevColors: Record<string, string> = { critical: "border-red-500 bg-red-50", warning: "border-yellow-500 bg-yellow-50", info: "border-gray-200" };
+export function AnomalyDetectionCard({ anomalies, metricsChecked, hasAnomaly }: AnomalyDetectionCardProps) {
   return (
-    <div className={`rounded-lg border p-4 dark:border-gray-700 ${isAnomaly ? sevColors[severity] || "" : ""}`}>
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold">{metricName}</h3>
-        {isAnomaly && <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${severity === "critical" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
-          {severity} — {direction}
-        </span>}
+    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <h3 className="font-semibold">🔮 Anomaly Detection</h3>
+        <span className={`text-xs ${hasAnomaly ? "text-red-500" : "text-green-600"}`}>
+          {hasAnomaly ? `⚠ ${anomalies.length} anomalies` : "✅ Normal"} · {metricsChecked} checked
+        </span>
       </div>
-      <p className={`mt-2 text-3xl font-bold text-center ${isAnomaly ? "text-red-600" : ""}`}>{currentValue}</p>
-      <div className="mt-2 flex justify-between text-xs text-gray-400">
-        <span>Lower: {lower}</span>
-        <span>Mean: {mean}</span>
-        <span>Upper: {upper}</span>
-      </div>
+      {anomalies.length > 0 && (
+        <div className="divide-y dark:divide-gray-700">
+          {anomalies.map(a => (
+            <div key={a.metric} className="flex justify-between px-4 py-2 text-xs">
+              <span className="font-mono text-red-600">{a.metric}: {a.latest}</span>
+              <span className="text-gray-400">mean {a.mean} · z={a.zScore} {a.type === "high" ? "📈" : "📉"}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
