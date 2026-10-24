@@ -1,22 +1,20 @@
-"""Infrastructure drift detector — detect config drift in infrastructure."""
+"""Infrastructure drift detector — detect drift between desired and actual state."""
 from __future__ import annotations
 
 
-def detect_drift(desired: dict, actual: dict) -> dict:
-    drifts = []
-    for key in set(desired) | set(actual):
-        d_val = desired.get(key)
-        a_val = actual.get(key)
-        if d_val != a_val:
-            drifts.append({"key": key, "desired": d_val, "actual": a_val,
-                            "type": "missing" if a_val is None else "extra" if d_val is None else "changed"})
-    return {"drifts": drifts, "drift_count": len(drifts),
-            "has_drift": len(drifts) > 0, "keys_checked": len(set(desired) | set(actual))}
-
-
-def drift_summary(resources: list[dict]) -> dict:
-    total_drifts = sum(r.get("drift_count", 0) for r in resources)
-    drifted = sum(1 for r in resources if r.get("has_drift"))
-    return {"total_resources": len(resources), "drifted": drifted,
-            "clean": len(resources) - drifted, "total_drifts": total_drifts,
-            "drift_pct": round(drifted / max(len(resources), 1) * 100)}
+def detect_infra_drift(desired: dict[str, dict], actual: dict[str, dict]) -> dict:
+    drifted = []
+    missing = sorted(set(desired) - set(actual))
+    extra = sorted(set(actual) - set(desired))
+    for resource in sorted(set(desired) & set(actual)):
+        changes = {}
+        for key in set(desired[resource]) | set(actual[resource]):
+            d_val = desired[resource].get(key)
+            a_val = actual[resource].get(key)
+            if d_val != a_val:
+                changes[key] = {"desired": d_val, "actual": a_val}
+        if changes:
+            drifted.append({"resource": resource, "changes": changes})
+    has_drift = bool(drifted or missing or extra)
+    return {"has_drift": has_drift, "drifted": drifted, "missing": missing,
+            "extra": extra, "total_issues": len(drifted) + len(missing) + len(extra)}
