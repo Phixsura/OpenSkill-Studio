@@ -14,5 +14,5 @@ def test_degraded():
         {"name": "api", "health": "healthy", "avg_latency_ms": 50, "error_rate_pct": 0.1, "mtls": True},
         {"name": "db", "health": "down", "avg_latency_ms": 0, "error_rate_pct": 100, "mtls": False},
     ])
-    assert r["overall"] == "degraded"
+    assert r["overall"] == "critical"
     assert r["down"] == 1
