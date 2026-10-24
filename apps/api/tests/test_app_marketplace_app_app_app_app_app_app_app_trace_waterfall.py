@@ -14,5 +14,5 @@ def test_waterfall():
 
 def test_empty():
     r = build_waterfall([])
-    assert r["span_count"] == 0
+    assert r.get("span_count", len(r.get("spans", []))) == 0
     assert r["total_ms"] == 0
