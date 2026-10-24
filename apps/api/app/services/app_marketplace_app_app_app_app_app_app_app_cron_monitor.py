@@ -1,29 +1,31 @@
-"""Cron job monitor — track cron job execution health."""
+"""Cron job monitor — track cron job executions and failures."""
 from __future__ import annotations
-import time
 
 
-def record_execution(job_name: str, success: bool, duration_sec: float,
-                      output: str = "") -> dict:
-    return {"job_name": job_name, "success": success, "duration_sec": round(duration_sec, 2),
-            "output_length": len(output), "executed_at": time.time()}
+class CronMonitor:
+    def __init__(self):
+        self._jobs: dict[str, dict] = {}
 
+    def register(self, name: str, schedule: str) -> dict:
+        self._jobs[name] = {"name": name, "schedule": schedule,
+                             "runs": 0, "failures": 0, "last_status": "pending"}
+        return self._jobs[name]
 
-def analyze_job_health(executions: list[dict]) -> dict:
-    if not executions:
-        return {"runs": 0, "success_rate": 0, "avg_duration": 0}
-    succeeded = sum(1 for e in executions if e["success"])
-    durations = [e["duration_sec"] for e in executions]
-    failures_in_row = 0
-    for e in reversed(executions):
-        if not e["success"]:
-            failures_in_row += 1
-        else:
-            break
-    return {"runs": len(executions), "succeeded": succeeded,
-            "failed": len(executions) - succeeded,
-            "success_rate": round(succeeded / len(executions) * 100),
-            "avg_duration": round(sum(durations) / len(durations), 2),
-            "max_duration": max(durations),
-            "consecutive_failures": failures_in_row,
-            "healthy": failures_in_row < 3}
+    def record_run(self, name: str, success: bool, duration_ms: float) -> dict:
+        job = self._jobs[name]
+        job["runs"] += 1
+        if not success:
+            job["failures"] += 1
+        job["last_status"] = "success" if success else "failed"
+        job["last_duration_ms"] = duration_ms
+        return {"name": name, "status": job["last_status"], "run": job["runs"]}
+
+    def failing_jobs(self) -> list[dict]:
+        return [j for j in self._jobs.values() if j["last_status"] == "failed"]
+
+    def stats(self) -> dict:
+        total_runs = sum(j["runs"] for j in self._jobs.values())
+        total_failures = sum(j["failures"] for j in self._jobs.values())
+        return {"total_jobs": len(self._jobs), "total_runs": total_runs,
+                "total_failures": total_failures,
+                "success_rate": round((total_runs - total_failures) / max(total_runs, 1) * 100, 1)}

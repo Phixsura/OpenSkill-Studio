@@ -1,18 +1,13 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_cron_monitor import record_execution, analyze_job_health
+from app.services.app_marketplace_app_app_app_app_app_app_app_cron_monitor import CronMonitor
 
-def test_record():
-    r = record_execution("cleanup", True, 5.5, "done")
-    assert r["success"]
-    assert r["duration_sec"] == 5.5
-
-def test_health():
-    execs = [
-        record_execution("job", True, 3),
-        record_execution("job", True, 4),
-        record_execution("job", False, 10),
-    ]
-    r = analyze_job_health(execs)
-    assert r["runs"] == 3
-    assert r["success_rate"] == 67
-    assert r["consecutive_failures"] == 1
-    assert r["healthy"]
+def test_monitor():
+    cm = CronMonitor()
+    cm.register("cleanup", "0 * * * *")
+    cm.register("report", "0 9 * * *")
+    cm.record_run("cleanup", True, 500)
+    cm.record_run("cleanup", True, 450)
+    cm.record_run("report", False, 3000)
+    assert len(cm.failing_jobs()) == 1
+    s = cm.stats()
+    assert s["total_runs"] == 3
+    assert s["success_rate"] == 66.7
