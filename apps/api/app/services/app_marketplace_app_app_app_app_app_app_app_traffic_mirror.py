@@ -1,25 +1,34 @@
-"""Traffic mirroring engine — mirror production traffic for testing."""
+"""Traffic mirror — mirror production traffic to shadow environments."""
 from __future__ import annotations
 
 
-def create_mirror(source: str, target: str, sample_rate: float = 1.0,
-                   filters: list[str] | None = None) -> dict:
-    return {"source": source, "target": target, "sample_rate": min(1.0, max(0, sample_rate)),
-            "filters": filters or [], "status": "active", "mirrored": 0, "errors": 0}
+class TrafficMirror:
+    def __init__(self):
+        self._mirrors: dict[str, dict] = {}
+        self._mirrored_count = 0
 
+    def create_mirror(self, source: str, target: str, sample_pct: int = 100) -> dict:
+        key = f"{source}→{target}"
+        self._mirrors[key] = {"source": source, "target": target,
+                               "sample_pct": sample_pct, "active": True,
+                               "mirrored": 0, "errors": 0}
+        return self._mirrors[key]
 
-def process_mirror(mirror: dict, request_count: int, error_count: int = 0) -> dict:
-    sampled = int(request_count * mirror["sample_rate"])
-    mirror["mirrored"] += sampled
-    mirror["errors"] += error_count
-    return {"mirrored": sampled, "total_mirrored": mirror["mirrored"],
-            "total_errors": mirror["errors"],
-            "error_rate": round(mirror["errors"] / max(mirror["mirrored"], 1) * 100, 1)}
+    def mirror_request(self, source: str) -> list[dict]:
+        results = []
+        for key, m in self._mirrors.items():
+            if m["source"] == source and m["active"]:
+                m["mirrored"] += 1
+                self._mirrored_count += 1
+                results.append({"target": m["target"], "mirrored": True})
+        return results
 
+    def pause(self, source: str, target: str) -> dict:
+        key = f"{source}→{target}"
+        self._mirrors[key]["active"] = False
+        return {"paused": True}
 
-def mirror_summary(mirrors: list[dict]) -> dict:
-    total_mirrored = sum(m["mirrored"] for m in mirrors)
-    total_errors = sum(m["errors"] for m in mirrors)
-    active = sum(1 for m in mirrors if m["status"] == "active")
-    return {"total_mirrors": len(mirrors), "active": active,
-            "total_mirrored": total_mirrored, "total_errors": total_errors}
+    def stats(self) -> dict:
+        active = sum(1 for m in self._mirrors.values() if m["active"])
+        return {"total_mirrors": len(self._mirrors), "active": active,
+                "total_mirrored": self._mirrored_count}
