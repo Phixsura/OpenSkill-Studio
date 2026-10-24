@@ -1,23 +1,17 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_contract_reg import (
-    register_contract, verify_contract, contract_summary,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_contract_reg import ContractRegistry
 
-def test_register_verify():
-    c = register_contract("user-svc", "api-gw", "1.0", {"fields": ["id", "name", "email"]})
-    assert c["field_count"] == 3
-    r = verify_contract(c, {"id": 1, "name": "Alice", "email": "a@b.com"})
-    assert r["valid"]
-    assert r["compliance_pct"] == 100
-    r2 = verify_contract(c, {"id": 1, "name": "Alice"})
-    assert not r2["valid"]
-    assert "email" in r2["missing_fields"]
+def test_register():
+    cr = ContractRegistry()
+    cr.register("user-api", "1.0", {"fields": {"id": "string"}}, "team-a")
+    cr.register("user-api", "2.0", {"fields": {"id": "string", "email": "string"}})
+    assert cr.latest("user-api")["version"] == "2.0"
+    assert cr.versions("user-api") == ["1.0", "2.0"]
 
-def test_summary():
-    contracts = [
-        register_contract("a", "b", "1.0", {"fields": []}),
-        register_contract("a", "c", "1.0", {"fields": []}),
-        register_contract("d", "b", "1.0", {"fields": []}),
-    ]
-    r = contract_summary(contracts)
-    assert r["total"] == 3
-    assert r["by_provider"]["a"] == 2
+def test_search():
+    cr = ContractRegistry()
+    cr.register("user-api", "1.0", {})
+    cr.register("order-api", "1.0", {})
+    r = cr.search("user")
+    assert len(r) == 1
+    assert r[0]["name"] == "user-api"
+    assert cr.stats()["contracts"] == 2
