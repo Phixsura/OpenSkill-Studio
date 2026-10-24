@@ -1,25 +1,16 @@
-"""SLA tracker — monitor service level agreement compliance."""
+"""SLA tracker — track SLA compliance per service."""
 from __future__ import annotations
 
+def check_sla(service: str, uptime_pct: float, target: float, p99_ms: float, max_p99: float) -> dict:
+    uptime_met = uptime_pct >= target
+    latency_met = p99_ms <= max_p99
+    compliant = uptime_met and latency_met
+    return {"service": service, "compliant": compliant, "uptime_pct": uptime_pct,
+            "uptime_target": target, "uptime_met": uptime_met,
+            "p99_ms": p99_ms, "max_p99_ms": max_p99, "latency_met": latency_met}
 
-def define_sla(name: str, target_pct: float, metric: str, window_days: int = 30) -> dict:
-    return {"name": name, "target_pct": target_pct, "metric": metric, "window_days": window_days}
-
-
-def check_sla(sla: dict, actual_pct: float) -> dict:
-    met = actual_pct >= sla["target_pct"]
-    gap = round(actual_pct - sla["target_pct"], 3)
-    budget_remaining = round(actual_pct - sla["target_pct"], 3) if met else 0
-    status = "met" if met else "breached"
-    return {"name": sla["name"], "target": sla["target_pct"], "actual": actual_pct,
-            "met": met, "status": status, "gap": gap,
-            "budget_remaining": budget_remaining}
-
-
-def summarize_slas(results: list[dict]) -> dict:
-    met_count = sum(1 for r in results if r["met"])
-    total = len(results)
-    breached = [r["name"] for r in results if not r["met"]]
-    return {"total": total, "met": met_count, "breached_count": total - met_count,
-            "breached_names": breached,
-            "compliance_pct": round(met_count / max(total, 1) * 100)}
+def fleet_sla(services: list[dict]) -> dict:
+    compliant = sum(1 for s in services if s["compliant"])
+    return {"total": len(services), "compliant": compliant,
+            "non_compliant": len(services) - compliant,
+            "compliance_pct": round(compliant / max(len(services), 1) * 100, 1)}
