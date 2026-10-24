@@ -1,14 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_window import check_deploy_window, next_available_window
+from app.services.app_marketplace_app_app_app_app_app_app_app_deploy_window import create_window, is_in_window, next_window
 
-def test_allowed():
-    r = check_deploy_window("business_hours", 14, 2)  # Wed 2pm
-    assert r["allowed"]
+def test_create():
+    w = create_window("maintenance", day_of_week=6, start_hour=2, duration_hours=4)
+    assert w["end_hour"] == 6
+    assert w["duration_hours"] == 4
 
-def test_blocked():
-    r = check_deploy_window("business_hours", 22, 2)  # Wed 10pm
-    assert not r["allowed"]
+def test_in_window():
+    w = create_window("maint", 6, 2, 4)
+    r = is_in_window(6, 3, w)
+    assert r["in_window"]
+    r2 = is_in_window(6, 7, w)
+    assert not r2["in_window"]
 
 def test_next():
-    r = next_available_window(["business_hours", "off_peak"], 23, 1)  # Tue 11pm
-    assert r["available_now"]
-    assert r["window"] == "off_peak"
+    windows = [create_window("w1", 3, 2, 2), create_window("w2", 5, 22, 2)]
+    r = next_window(windows, current_day=1, current_hour=10)
+    assert r["name"] == "w1"
+    assert r["hours_until"] == 40  # 2 days - 8 hours
