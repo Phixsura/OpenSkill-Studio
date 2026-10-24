@@ -1,17 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_runbook_exec import create_runbook, execute_step, runbook_status
+from app.services.app_marketplace_app_app_app_app_app_app_app_runbook_exec import RunbookExecutor
 
 def test_execute():
-    rb = create_runbook("Deploy", [
-        {"title": "Backup DB", "type": "automated"},
-        {"title": "Run Migrations", "type": "automated"},
-        {"title": "Verify", "type": "manual"},
+    re = RunbookExecutor()
+    re.register("restart_api", [
+        {"name": "drain", "action": lambda: {"drained": True}},
+        {"name": "restart", "action": lambda: {"restarted": True}},
+        {"name": "verify", "action": lambda: {"healthy": True}},
     ])
-    assert rb["total_steps"] == 3
-    r = execute_step(rb, 0)
-    assert r["executed"]
-    assert r["progress_pct"] == 33
-    execute_step(rb, 1)
-    execute_step(rb, 2)
-    s = runbook_status(rb)
-    assert s["status"] == "complete"
-    assert s["failed"] == 0
+    r = re.execute("restart_api")
+    assert r["success"]
+    assert r["completed"] == 3
+
+def test_critical_failure():
+    re = RunbookExecutor()
+    re.register("deploy", [
+        {"name": "build", "action": lambda: {"ok": True}},
+        {"name": "test", "action": lambda: (_ for _ in ()).throw(RuntimeError("tests failed")), "critical": True},
+        {"name": "deploy", "action": lambda: {"ok": True}},
+    ])
+    r = re.execute("deploy")
+    assert not r["success"]
+    assert r["stopped_at"] == 1
