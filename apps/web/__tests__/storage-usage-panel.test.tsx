@@ -1,20 +1,16 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { StorageUsagePanel } from "@/components/storage-usage-panel";
-
 describe("StorageUsagePanel", () => {
-  const buckets = [
-    { name: "uploads", size_gb: 1.0, objects: 500 },
-    { name: "backups", size_gb: 0.5, objects: 50 },
-  ];
   it("renders", () => {
     const { container } = render(
-      <StorageUsagePanel buckets={buckets} totalSizeGb={1.5} totalObjects={550} onCreate={vi.fn()} />
+      <StorageUsagePanel totalGb={650} limitGb={1000} pctUsed={65}
+        monthsUntilFull={7} byType={{ blob: 500, database: 150 }} />
     );
-    expect(container.textContent).toContain("Storage");
-    expect(container.textContent).toContain("1.5 GB");
-    expect(container.textContent).toContain("550");
-    expect(container.textContent).toContain("uploads");
-    expect(container.textContent).toContain("backups");
+    expect(container.textContent).toContain("Storage Usage");
+    expect(container.textContent).toContain("650GB / 1000GB");
+    expect(container.textContent).toContain("65%");
+    expect(container.textContent).toContain("7mo left");
+    expect(container.textContent).toContain("blob: 500GB");
   });
 });
