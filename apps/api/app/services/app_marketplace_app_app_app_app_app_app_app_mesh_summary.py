@@ -9,7 +9,7 @@ def mesh_summary(services: list[dict], traffic: dict, health: dict) -> dict:
     error_rate = traffic.get("error_rate_pct", 0)
     mtls_pct = round(sum(1 for s in services if s.get("mtls")) / max(total_services, 1) * 100, 1)
     overall = "healthy" if healthy == total_services and error_rate < 1 else (
-        "degraded" if healthy > total_services * 0.5 else "critical")
+        "degraded" if healthy >= total_services * 0.5 else "critical")
     return {"overall": overall, "total_services": total_services,
             "healthy": healthy, "unhealthy": total_services - healthy,
             "total_rps": total_rps, "error_rate_pct": error_rate,
