@@ -1,30 +1,33 @@
-"""Blue-green deploy controller — manage blue-green deployments."""
+"""Blue-green deployment switcher — manage blue/green slot switching."""
 from __future__ import annotations
 
 
-def create_deployment(service: str, blue_version: str, green_version: str) -> dict:
-    return {"service": service, "blue": {"version": blue_version, "status": "active", "traffic_pct": 100},
-            "green": {"version": green_version, "status": "standby", "traffic_pct": 0},
-            "active_slot": "blue"}
+class BlueGreenDeployer:
+    def __init__(self):
+        self._active = "blue"
+        self._slots = {
+            "blue": {"version": "", "healthy": False},
+            "green": {"version": "", "healthy": False},
+        }
 
+    def deploy_to_inactive(self, version: str) -> dict:
+        inactive = "green" if self._active == "blue" else "blue"
+        self._slots[inactive] = {"version": version, "healthy": False}
+        return {"slot": inactive, "version": version, "status": "deploying"}
 
-def switch_traffic(deployment: dict, to_slot: str) -> dict:
-    if to_slot not in ("blue", "green"):
-        return {"switched": False, "error": "invalid slot"}
-    other = "green" if to_slot == "blue" else "blue"
-    deployment[to_slot]["traffic_pct"] = 100
-    deployment[to_slot]["status"] = "active"
-    deployment[other]["traffic_pct"] = 0
-    deployment[other]["status"] = "standby"
-    deployment["active_slot"] = to_slot
-    return {"switched": True, "active": to_slot,
-            "version": deployment[to_slot]["version"]}
+    def mark_healthy(self, slot: str) -> dict:
+        self._slots[slot]["healthy"] = True
+        return {"slot": slot, "healthy": True}
 
+    def switch(self) -> dict:
+        inactive = "green" if self._active == "blue" else "blue"
+        if not self._slots[inactive]["healthy"]:
+            return {"success": False, "reason": "inactive_slot_unhealthy"}
+        old_active = self._active
+        self._active = inactive
+        return {"success": True, "old_active": old_active,
+                "new_active": self._active,
+                "version": self._slots[self._active]["version"]}
 
-def deployment_status(deployment: dict) -> dict:
-    active = deployment["active_slot"]
-    standby = "green" if active == "blue" else "blue"
-    return {"service": deployment["service"],
-            "active": {"slot": active, "version": deployment[active]["version"]},
-            "standby": {"slot": standby, "version": deployment[standby]["version"]},
-            "ready_to_switch": deployment[standby]["status"] == "standby"}
+    def status(self) -> dict:
+        return {"active": self._active, "slots": dict(self._slots)}
