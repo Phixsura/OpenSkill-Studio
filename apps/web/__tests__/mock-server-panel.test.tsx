@@ -1,19 +1,20 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { MockServerPanel } from "@/components/mock-server-panel";
-
 describe("MockServerPanel", () => {
-  it("renders endpoints", () => {
-    const eps = [{ path: "/users", method: "GET", status_code: 200 }];
-    const { container } = render(<MockServerPanel endpoints={eps} port={3001} isRunning={true} onToggle={vi.fn()} />);
-    expect(container.textContent).toContain("/users");
-    expect(container.textContent).toContain(":3001");
-    expect(container.textContent).toContain("Stop");
-  });
-  it("toggles", () => {
-    const fn = vi.fn();
-    const { container } = render(<MockServerPanel endpoints={[]} port={3001} isRunning={false} onToggle={fn} />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalled();
+  it("renders", () => {
+    const { container } = render(
+      <MockServerPanel totalCalls={50}
+        mocks={[
+          { key: "GET /api/users", status: 200, calls: 30, delayMs: 0 },
+          { key: "POST /api/orders", status: 201, calls: 20, delayMs: 100 },
+        ]} />
+    );
+    expect(container.textContent).toContain("Mock Server");
+    expect(container.textContent).toContain("2 mocks");
+    expect(container.textContent).toContain("50 calls");
+    expect(container.textContent).toContain("GET /api/users");
+    expect(container.textContent).toContain("200");
+    expect(container.textContent).toContain("100ms delay");
   });
 });
