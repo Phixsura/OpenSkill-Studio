@@ -1,22 +1,16 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_data_export import (
-    create_export, list_exports, export_stats, clear_exports,
-)
+from app.services.app_marketplace_app_app_app_app_app_app_app_data_export import DataExportManager
 
-def test_create():
-    clear_exports()
-    r = create_export("users", "csv", row_count=5000)
-    assert r["created"]
-    assert r["size_mb"] == 5.0
-    r2 = create_export("bad", "xml")
-    assert not r2["created"]
-    clear_exports()
+def test_lifecycle():
+    dem = DataExportManager()
+    dem.create("exp-1", "csv", "SELECT * FROM users", "admin")
+    dem.complete("exp-1", 10000, 5242880)
+    exports = dem.list_exports("completed")
+    assert len(exports) == 1
+    assert exports[0]["row_count"] == 10000
 
-def test_stats():
-    clear_exports()
-    create_export("a", "csv", row_count=1000)
-    create_export("b", "json", row_count=2000)
-    create_export("c", "csv", row_count=500)
-    s = export_stats()
-    assert s["total"] == 3
-    assert s["by_format"]["csv"] == 2
-    clear_exports()
+def test_fail():
+    dem = DataExportManager()
+    dem.create("exp-2", "json", "SELECT * FROM orders", "admin")
+    dem.fail("exp-2", "timeout")
+    s = dem.stats()
+    assert s["by_status"]["failed"] == 1
