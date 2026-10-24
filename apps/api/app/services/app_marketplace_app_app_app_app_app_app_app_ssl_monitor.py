@@ -1,25 +1,32 @@
-"""SSL certificate monitor — track cert expiry and renewal status."""
+"""SSL certificate monitor — track certificate expiry and renewal."""
 from __future__ import annotations
 
 
-def check_certificates(certs: list[dict], *, warn_days: int = 30) -> dict:
-    results = []
-    expiring_soon = 0
-    expired = 0
-    for c in certs:
-        days_left = c.get("days_until_expiry", 0)
-        status = "expired" if days_left <= 0 else "expiring" if days_left <= warn_days else "valid"
-        if status == "expired":
-            expired += 1
-        elif status == "expiring":
-            expiring_soon += 1
-        results.append({
-            "domain": c["domain"], "issuer": c.get("issuer", ""),
-            "days_until_expiry": days_left, "status": status,
-            "auto_renew": c.get("auto_renew", False),
-        })
-    results.sort(key=lambda r: r["days_until_expiry"])
-    healthy = len(certs) - expired - expiring_soon
-    return {"total": len(certs), "valid": healthy, "expiring_soon": expiring_soon,
-            "expired": expired, "results": results,
-            "overall": "critical" if expired > 0 else "warning" if expiring_soon > 0 else "healthy"}
+def check_certificates(certs: list[dict]) -> dict:
+    expiring_soon = []
+    expired = []
+    valid = []
+    for cert in certs:
+        days = cert.get("days_until_expiry", 0)
+        entry = {"domain": cert["domain"], "issuer": cert.get("issuer", "unknown"),
+                 "days_until_expiry": days}
+        if days <= 0:
+            expired.append(entry)
+        elif days <= 30:
+            expiring_soon.append(entry)
+        else:
+            valid.append(entry)
+    return {"valid": len(valid), "expiring_soon": len(expiring_soon),
+            "expired": len(expired), "total": len(certs),
+            "critical": len(expired) > 0,
+            "details": {"valid": valid, "expiring": expiring_soon, "expired": expired}}
+
+
+def renewal_plan(expiring: list[dict]) -> list[dict]:
+    sorted_certs = sorted(expiring, key=lambda c: c["days_until_expiry"])
+    plan = []
+    for i, cert in enumerate(sorted_certs):
+        plan.append({"priority": i + 1, "domain": cert["domain"],
+                      "days_left": cert["days_until_expiry"],
+                      "action": "renew_immediately" if cert["days_until_expiry"] <= 7 else "schedule_renewal"})
+    return plan
