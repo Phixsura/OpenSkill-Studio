@@ -1,29 +1,35 @@
-"""API key rotation scheduler — automate key rotation lifecycle."""
+"""API key rotation scheduler — schedule and track key rotations."""
 from __future__ import annotations
-import secrets
-import time
+import time, secrets, hashlib
 
 
-def create_rotation_schedule(key_name: str, rotation_days: int = 90) -> dict:
-    return {"key_name": key_name, "rotation_days": rotation_days,
-            "last_rotated": time.time(), "next_rotation": time.time() + rotation_days * 86400,
-            "rotation_count": 0}
+class KeyRotationScheduler:
+    def __init__(self, rotation_days: int = 90):
+        self._rotation_days = rotation_days
+        self._keys: dict[str, dict] = {}
 
+    def register_key(self, name: str, created_days_ago: int = 0) -> dict:
+        age = created_days_ago
+        due_in = max(0, self._rotation_days - age)
+        overdue = age > self._rotation_days
+        self._keys[name] = {"name": name, "age_days": age, "due_in_days": due_in,
+                             "overdue": overdue, "rotated": False}
+        return self._keys[name]
 
-def rotate_key(schedule: dict) -> dict:
-    new_key = f"sk_{secrets.token_urlsafe(32)}"
-    schedule["rotation_count"] += 1
-    schedule["last_rotated"] = time.time()
-    schedule["next_rotation"] = time.time() + schedule["rotation_days"] * 86400
-    return {"rotated": True, "new_key_prefix": new_key[:8],
-            "rotation_number": schedule["rotation_count"]}
+    def rotate(self, name: str) -> dict:
+        key = self._keys[name]
+        old_age = key["age_days"]
+        key["age_days"] = 0
+        key["due_in_days"] = self._rotation_days
+        key["overdue"] = False
+        key["rotated"] = True
+        return {"name": name, "rotated": True, "old_age_days": old_age}
 
+    def overdue_keys(self) -> list[dict]:
+        return sorted([k for k in self._keys.values() if k["overdue"]],
+                       key=lambda k: -k["age_days"])
 
-def check_rotation_needed(schedules: list[dict], now: float | None = None) -> dict:
-    now = now or time.time()
-    due = [s for s in schedules if now >= s["next_rotation"]]
-    upcoming = [s for s in schedules if 0 < s["next_rotation"] - now <= 7 * 86400]
-    return {"due_count": len(due), "upcoming_count": len(upcoming),
-            "due_keys": [s["key_name"] for s in due],
-            "upcoming_keys": [s["key_name"] for s in upcoming],
-            "action_needed": len(due) > 0}
+    def stats(self) -> dict:
+        overdue = sum(1 for k in self._keys.values() if k["overdue"])
+        return {"total_keys": len(self._keys), "overdue": overdue,
+                "rotation_days": self._rotation_days}
