@@ -1,29 +1,28 @@
-"""Cost allocation tracker — allocate costs to teams and projects."""
+"""Cost allocation tracker — allocate infrastructure costs to teams/services."""
 from __future__ import annotations
+from collections import defaultdict
 
 
-def allocate_costs(items: list[dict]) -> dict:
-    by_team: dict[str, float] = {}
-    by_project: dict[str, float] = {}
+def allocate_costs(resources: list[dict]) -> dict:
+    by_team: dict[str, float] = defaultdict(float)
+    by_service: dict[str, float] = defaultdict(float)
     total = 0.0
-    for item in items:
-        cost = item.get("cost", 0.0)
+    for r in resources:
+        cost = r.get("monthly_cost", 0)
         total += cost
-        team = item.get("team", "unassigned")
-        project = item.get("project", "unassigned")
-        by_team[team] = round(by_team.get(team, 0) + cost, 2)
-        by_project[project] = round(by_project.get(project, 0) + cost, 2)
-    top_team = max(by_team, key=by_team.get) if by_team else None
-    return {"total_cost": round(total, 2), "by_team": by_team, "by_project": by_project,
-            "team_count": len(by_team), "project_count": len(by_project),
-            "top_team": top_team, "display": f"${total:,.2f}"}
+        by_team[r.get("team", "unassigned")] += cost
+        by_service[r.get("service", "shared")] += cost
+    teams = [{"team": k, "cost": round(v, 2), "pct": round(v / max(total, 0.01) * 100, 1)}
+             for k, v in sorted(by_team.items(), key=lambda x: -x[1])]
+    services = [{"service": k, "cost": round(v, 2), "pct": round(v / max(total, 0.01) * 100, 1)}
+                for k, v in sorted(by_service.items(), key=lambda x: -x[1])]
+    return {"total_cost": round(total, 2), "by_team": teams,
+            "by_service": services, "resources": len(resources)}
 
 
-def compare_periods(current: dict, previous: dict) -> dict:
-    cur = current["total_cost"]
-    prev = previous["total_cost"]
-    delta = round(cur - prev, 2)
-    pct_change = round(delta / max(prev, 0.01) * 100, 1)
-    trend = "up" if delta > 0 else "down" if delta < 0 else "flat"
-    return {"current": cur, "previous": prev, "delta": delta,
-            "pct_change": pct_change, "trend": trend}
+def budget_vs_actual(budget: float, actual: float) -> dict:
+    variance = round(actual - budget, 2)
+    variance_pct = round(variance / max(budget, 0.01) * 100, 1)
+    status = "under" if actual <= budget else ("warning" if actual <= budget * 1.1 else "over")
+    return {"budget": budget, "actual": actual, "variance": variance,
+            "variance_pct": variance_pct, "status": status}
