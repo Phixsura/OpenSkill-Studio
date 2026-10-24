@@ -1,25 +1,20 @@
-"""Developer activity leaderboard — rank developers by contributions."""
+"""Developer leaderboard — rank developers by contributions."""
 from __future__ import annotations
 
 
-def build_leaderboard(developers: list[dict], *, period: str = "monthly") -> dict:
-    scored = []
-    for d in developers:
-        commits = d.get("commits", 0)
-        prs = d.get("pull_requests", 0)
-        reviews = d.get("reviews", 0)
-        deploys = d.get("deploys", 0)
-        score = commits * 1 + prs * 5 + reviews * 3 + deploys * 10
-        scored.append({
-            "name": d["name"], "avatar": d.get("avatar", ""),
-            "commits": commits, "pull_requests": prs,
-            "reviews": reviews, "deploys": deploys,
-            "score": score,
-        })
-    scored.sort(key=lambda x: -x["score"])
-    for i, d in enumerate(scored):
-        d["rank"] = i + 1
-        d["badge"] = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else ""
-    return {"leaderboard": scored, "period": period,
-            "total_developers": len(scored),
-            "top_contributor": scored[0]["name"] if scored else None}
+def build_leaderboard(contributions: list[dict]) -> dict:
+    by_dev: dict[str, dict] = {}
+    for c in contributions:
+        dev = c.get("developer", "")
+        if dev not in by_dev:
+            by_dev[dev] = {"developer": dev, "commits": 0, "prs": 0, "reviews": 0, "score": 0}
+        entry = by_dev[dev]
+        entry["commits"] += c.get("commits", 0)
+        entry["prs"] += c.get("prs", 0)
+        entry["reviews"] += c.get("reviews", 0)
+        entry["score"] = entry["commits"] * 1 + entry["prs"] * 5 + entry["reviews"] * 3
+    ranked = sorted(by_dev.values(), key=lambda d: -d["score"])
+    for i, dev in enumerate(ranked):
+        dev["rank"] = i + 1
+    return {"leaderboard": ranked, "total_developers": len(ranked),
+            "total_commits": sum(d["commits"] for d in ranked)}

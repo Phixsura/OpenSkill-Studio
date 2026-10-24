@@ -5,16 +5,16 @@ import { DevLeaderboard } from "@/components/dev-leaderboard";
 describe("DevLeaderboard", () => {
   it("renders leaderboard", () => {
     const { container } = render(
-      <DevLeaderboard period="monthly" leaderboard={[
-        { name: "Carol", rank: 1, badge: "🥇", score: 275, commits: 30, pullRequests: 15, reviews: 30, deploys: 8 },
-        { name: "Alice", rank: 2, badge: "🥈", score: 210, commits: 50, pullRequests: 10, reviews: 20, deploys: 5 },
+      <DevLeaderboard totalDevelopers={3} leaderboard={[
+        { developer: "alice", rank: 1, score: 160, commits: 50, prs: 10, reviews: 20 },
+        { developer: "bob", rank: 2, score: 120, commits: 30, prs: 15, reviews: 5 },
       ]} />
     );
     expect(container.textContent).toContain("Developer Leaderboard");
-    expect(container.textContent).toContain("monthly");
-    expect(container.textContent).toContain("Carol");
+    expect(container.textContent).toContain("3 developers");
+    expect(container.textContent).toContain("alice");
+    expect(container.textContent).toContain("160 pts");
+    expect(container.textContent).toContain("50 commits");
     expect(container.textContent).toContain("🥇");
-    expect(container.textContent).toContain("275");
-    expect(container.textContent).toContain("Alice");
   });
 });
