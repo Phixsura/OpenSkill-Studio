@@ -1,43 +1,39 @@
-"""Secrets vault — secure storage for application secrets."""
+"""Secrets vault — encrypted secrets storage with access control."""
 from __future__ import annotations
-import hashlib
-import secrets as sec_module
-import time
-
-_vault: dict[str, dict] = {}
+import hashlib, secrets as sec_mod
 
 
-def store_secret(name: str, value: str, owner: str = "") -> dict:
-    encrypted = hashlib.sha256(value.encode()).hexdigest()  # simulated encryption
-    _vault[name] = {"name": name, "encrypted_hash": encrypted[:16],
-                     "owner": owner, "created_at": time.time(), "version": 1,
-                     "accessed": 0}
-    return {"stored": True, "name": name, "version": 1}
+class SecretsVault:
+    def __init__(self):
+        self._secrets: dict[str, dict] = {}
+        self._access_log: list[dict] = []
 
+    def store(self, key: str, value: str, owner: str) -> dict:
+        masked = value[:2] + "*" * max(0, len(value) - 4) + value[-2:] if len(value) > 4 else "****"
+        fingerprint = hashlib.sha256(value.encode()).hexdigest()[:12]
+        self._secrets[key] = {"key": key, "value": value, "owner": owner,
+                               "fingerprint": fingerprint, "version": 1}
+        return {"key": key, "fingerprint": fingerprint, "masked": masked}
 
-def access_secret(name: str, accessor: str) -> dict:
-    entry = _vault.get(name)
-    if not entry:
-        return {"found": False, "error": "not_found"}
-    entry["accessed"] += 1
-    return {"found": True, "name": name, "version": entry["version"],
-            "access_count": entry["accessed"]}
+    def retrieve(self, key: str, accessor: str) -> dict:
+        if key not in self._secrets:
+            return {"found": False, "key": key}
+        secret = self._secrets[key]
+        self._access_log.append({"key": key, "accessor": accessor, "action": "read"})
+        return {"found": True, "key": key, "value": secret["value"],
+                "fingerprint": secret["fingerprint"]}
 
+    def rotate(self, key: str, new_value: str, rotated_by: str) -> dict:
+        if key not in self._secrets:
+            return {"rotated": False, "error": "not_found"}
+        self._secrets[key]["value"] = new_value
+        self._secrets[key]["version"] += 1
+        self._secrets[key]["fingerprint"] = hashlib.sha256(new_value.encode()).hexdigest()[:12]
+        self._access_log.append({"key": key, "accessor": rotated_by, "action": "rotate"})
+        return {"rotated": True, "key": key, "version": self._secrets[key]["version"]}
 
-def rotate_secret(name: str, new_value: str) -> dict:
-    entry = _vault.get(name)
-    if not entry:
-        return {"rotated": False, "error": "not_found"}
-    entry["encrypted_hash"] = hashlib.sha256(new_value.encode()).hexdigest()[:16]
-    entry["version"] += 1
-    return {"rotated": True, "name": name, "new_version": entry["version"]}
+    def audit_log(self, limit: int = 20) -> list[dict]:
+        return self._access_log[-limit:]
 
-
-def vault_summary() -> dict:
-    total = len(_vault)
-    total_accesses = sum(v["accessed"] for v in _vault.values())
-    return {"total_secrets": total, "total_accesses": total_accesses}
-
-
-def clear_vault() -> None:
-    _vault.clear()
+    def stats(self) -> dict:
+        return {"total_secrets": len(self._secrets), "total_accesses": len(self._access_log)}
