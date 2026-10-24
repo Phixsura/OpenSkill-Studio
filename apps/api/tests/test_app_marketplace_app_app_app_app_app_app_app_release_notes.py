@@ -1,18 +1,19 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_release_notes import generate_notes, diff_releases
+from app.services.app_marketplace_app_app_app_app_app_app_app_release_notes import generate_release_notes, compare_releases
 
 def test_generate():
-    r = generate_notes("3.0.0", [
-        {"title": "Add dark mode", "label": "feature", "author": "alice"},
-        {"title": "Fix login bug", "label": "bugfix", "author": "bob"},
-    ], ["alice", "bob"])
-    assert r["pr_count"] == 2
-    assert r["contributor_count"] == 2
-    assert "# Release 3.0.0" in r["markdown"]
-    assert "dark mode" in r["markdown"]
+    r = generate_release_notes([
+        {"message": "feat: add dark mode"},
+        {"message": "fix: login bug"},
+        {"message": "feat: BREAKING CHANGE: new API"},
+        {"message": "chore: update deps"},
+    ], version="2.0.0")
+    assert len(r["features"]) == 2
+    assert len(r["fixes"]) == 1
+    assert r["has_breaking"]
 
-def test_diff():
-    prev = generate_notes("2.0", [{"title": "x", "author": "a"}], ["a"])
-    curr = generate_notes("3.0", [{"title": "x", "author": "a"}, {"title": "y", "author": "b"}], ["a", "b"])
-    r = diff_releases(prev, curr)
-    assert r["new_prs"] == 1
-    assert r["new_contributors"] == 1
+def test_compare():
+    v1 = generate_release_notes([], "1.0")
+    v2 = generate_release_notes([{"message": "feat: new"}], "2.0")
+    r = compare_releases(v1, v2)
+    assert r["upgrade_risk"] == "low"
+    assert len(r["new_features"]) == 1

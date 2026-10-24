@@ -1,28 +1,32 @@
-"""Release notes generator — auto-generate release notes from PRs."""
+"""Platform release notes generator — generate release notes from commits."""
 from __future__ import annotations
-import html
 
 
-def generate_notes(version: str, prs: list[dict], contributors: list[str]) -> dict:
-    sections: dict[str, list[str]] = {}
-    for pr in prs:
-        label = pr.get("label", "other")
-        title = html.escape(pr.get("title", ""))
-        author = pr.get("author", "")
-        sections.setdefault(label, []).append(f"{title} (@{author})")
-    md_lines = [f"# Release {version}\n"]
-    for section, items in sections.items():
-        md_lines.append(f"\n## {section.title()}\n")
-        for item in items:
-            md_lines.append(f"- {item}")
-    md_lines.append(f"\n---\nContributors: {', '.join(sorted(contributors))}")
-    return {"version": version, "sections": sections, "pr_count": len(prs),
-            "contributor_count": len(contributors),
-            "markdown": "\n".join(md_lines)}
+def generate_release_notes(commits: list[dict], version: str) -> dict:
+    features = []
+    fixes = []
+    breaking = []
+    other = []
+    for c in commits:
+        msg = c.get("message", "")
+        if msg.startswith("feat"):
+            features.append(msg)
+        elif msg.startswith("fix"):
+            fixes.append(msg)
+        elif "BREAKING" in msg.upper():
+            breaking.append(msg)
+        else:
+            other.append(msg)
+    return {"version": version, "features": features, "fixes": fixes,
+            "breaking_changes": breaking, "other": other,
+            "total_commits": len(commits),
+            "has_breaking": len(breaking) > 0}
 
 
-def diff_releases(prev_notes: dict, curr_notes: dict) -> dict:
-    new_prs = curr_notes["pr_count"] - prev_notes["pr_count"]
-    new_contributors = curr_notes["contributor_count"] - prev_notes["contributor_count"]
-    return {"prev_version": prev_notes["version"], "curr_version": curr_notes["version"],
-            "new_prs": new_prs, "new_contributors": new_contributors}
+def compare_releases(v1: dict, v2: dict) -> dict:
+    return {"from_version": v1.get("version", ""),
+            "to_version": v2.get("version", ""),
+            "new_features": v2.get("features", []),
+            "new_fixes": v2.get("fixes", []),
+            "breaking": v2.get("breaking_changes", []),
+            "upgrade_risk": "high" if v2.get("has_breaking") else "low"}
