@@ -3,18 +3,19 @@ import { describe, expect, it } from "vitest";
 import { MiddlewareChainViewer } from "@/components/middleware-chain-viewer";
 
 describe("MiddlewareChainViewer", () => {
-  it("renders chain", () => {
+  it("renders", () => {
     const { container } = render(
-      <MiddlewareChainViewer enabled={2} total={3} chain={[
-        { order: 0, name: "cors", type: "transform", enabled: true },
-        { order: 1, name: "auth", type: "auth", enabled: true },
-        { order: 2, name: "cache", type: "cache", enabled: false },
-      ]} />
+      <MiddlewareChainViewer completed={true}
+        steps={[
+          { name: "logging", status: "applied" },
+          { name: "auth", status: "applied" },
+          { name: "rate_limit", status: "applied" },
+        ]} />
     );
     expect(container.textContent).toContain("Middleware Chain");
-    expect(container.textContent).toContain("2/3 enabled");
-    expect(container.textContent).toContain("cors");
+    expect(container.textContent).toContain("Complete");
+    expect(container.textContent).toContain("logging");
     expect(container.textContent).toContain("auth");
-    expect(container.textContent).toContain("cache");
+    expect(container.textContent).toContain("rate_limit");
   });
 });

@@ -1,28 +1,26 @@
 "use client";
 
-interface Middleware { order: number; name: string; type: string; enabled: boolean; }
-interface MiddlewareChainViewerProps { chain: Middleware[]; enabled: number; total: number; }
+interface MwStep { name: string; status: string; error?: string; }
+interface MiddlewareChainViewerProps { steps: MwStep[]; completed: boolean; }
 
-const TYPE_ICONS: Record<string, string> = {
-  transform: "🔄", auth: "🔐", rate_limit: "⏱️", cache: "💨", log: "📋",
-};
+const STATUS_ICON: Record<string, string> = { applied: "✅", error: "❌", skipped: "⏭️" };
 
-export function MiddlewareChainViewer({ chain, enabled, total }: MiddlewareChainViewerProps) {
+export function MiddlewareChainViewer({ steps, completed }: MiddlewareChainViewerProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">⛓️ Middleware Chain</h3>
-        <span className="text-xs text-gray-400">{enabled}/{total} enabled</span>
+        <h3 className="font-semibold">🔗 Middleware Chain</h3>
+        <span className={`text-xs font-bold ${completed ? "text-green-600" : "text-red-500"}`}>
+          {completed ? "✅ Complete" : "❌ Aborted"}
+        </span>
       </div>
-      <div className="flex items-center gap-1 p-4 flex-wrap">
-        {chain.map((m, i) => (
-          <div key={m.order} className="flex items-center">
-            <div className={`px-3 py-2 rounded-lg text-xs text-center border ${m.enabled ? "border-green-300 dark:border-green-800" : "border-gray-300 dark:border-gray-600 opacity-50"}`}>
-              <div>{TYPE_ICONS[m.type] ?? "⚙️"}</div>
-              <div className="font-medium">{m.name}</div>
-              <div className="text-[10px] text-gray-400">{m.type}</div>
+      <div className="p-4 flex items-center gap-1">
+        {steps.map((s, i) => (
+          <div key={s.name} className="flex items-center gap-1">
+            <div className={`px-2 py-1 rounded text-xs ${s.status === "applied" ? "bg-green-100 dark:bg-green-900 text-green-700" : "bg-red-100 dark:bg-red-900 text-red-700"}`}>
+              {STATUS_ICON[s.status] ?? "⏳"} {s.name}
             </div>
-            {i < chain.length - 1 && <span className="text-gray-300 mx-1">→</span>}
+            {i < steps.length - 1 && <span className="text-gray-400">→</span>}
           </div>
         ))}
       </div>
