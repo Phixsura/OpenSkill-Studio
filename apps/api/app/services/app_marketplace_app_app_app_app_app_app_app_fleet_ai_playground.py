@@ -1,8 +1,9 @@
-"""Fleet AI Playground — track interactive AI experimentation."""
+"""Fleet AI Playground — track interactive AI experimentation environments."""
 from __future__ import annotations
-def fleet_ai_playground(instances: list[dict]) -> dict:
-    active = [i for i in instances if i.get("active", True)]
-    sessions_24h = sum(i.get("sessions_24h", 0) for i in instances)
-    prompts_24h = sum(i.get("prompts_24h", 0) for i in instances)
-    return {"instances": len(instances), "active": len(active), "sessions_24h": sessions_24h,
-            "prompts_24h": prompts_24h, "popular": sessions_24h > 1000}
+def fleet_ai_playground(playgrounds: list[dict]) -> dict:
+    active = [p for p in playgrounds if p.get("active", True)]
+    users_24h = sum(p.get("users_24h", 0) for p in playgrounds)
+    experiments_24h = sum(p.get("experiments_24h", 0) for p in playgrounds)
+    models_available = sum(p.get("models", 0) for p in playgrounds)
+    return {"playgrounds": len(playgrounds), "active": len(active), "users_24h": users_24h,
+            "experiments_24h": experiments_24h, "models": models_available, "popular": users_24h > 1000}
