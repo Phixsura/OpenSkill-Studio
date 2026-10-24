@@ -1,21 +1,22 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_contract_test import verify_contract, contract_summary
+from app.services.app_marketplace_app_app_app_app_app_app_app_contract_test import validate_contract, run_contract_suite
 
 def test_valid():
-    contract = {"name": "get_user", "required_fields": ["id", "name"],
-                "field_types": {"id": "string", "name": "string", "age": "number"}}
-    r = verify_contract(contract, {"id": "u1", "name": "Alice", "age": 30})
+    r = validate_contract(
+        {"status": 200, "body": {"id": "u1", "name": "Alice", "age": 30}},
+        {"name": "get_user", "status": 200, "body_fields": {"id": "string", "name": "string", "age": "number"}})
     assert r["valid"]
-    assert r["error_count"] == 0
 
 def test_invalid():
-    contract = {"name": "get_user", "required_fields": ["id", "email"],
-                "field_types": {"id": "number"}}
-    r = verify_contract(contract, {"id": "not_a_number"})
+    r = validate_contract(
+        {"status": 200, "body": {"id": 123}},
+        {"name": "get_user", "status": 200, "body_fields": {"id": "string", "name": "string"}})
     assert not r["valid"]
-    assert r["error_count"] == 2  # missing email + wrong type
+    assert len(r["errors"]) == 2  # id wrong type + name missing
 
-def test_summary():
-    results = [{"valid": True}, {"valid": True}, {"valid": False}]
-    s = contract_summary(results)
-    assert s["passed"] == 2
-    assert s["pass_rate"] == 67
+def test_suite():
+    r = run_contract_suite([
+        {"response": {"status": 200, "body": {"ok": True}}, "contract": {"name": "t1", "status": 200, "body_fields": {}}},
+        {"response": {"status": 500, "body": {}}, "contract": {"name": "t2", "status": 200, "body_fields": {}}},
+    ])
+    assert r["passed"] == 1
+    assert r["failed"] == 1
