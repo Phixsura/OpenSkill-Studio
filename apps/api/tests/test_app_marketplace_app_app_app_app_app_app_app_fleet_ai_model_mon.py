@@ -1,5 +1,5 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_fleet_ai_model_mon import fleet_ai_model_monitoring
+from app.services.app_marketplace_app_app_app_app_app_app_app_fleet_ai_model_mon import fleet_ai_model_monitor
 def test_mm():
-    r = fleet_ai_model_monitoring([{"active": True, "models": 50, "drift_alerts_24h": 0, "perf_alerts_24h": 0}])
-    assert r["models"] == 50
-    assert r["stable"]
+    r = fleet_ai_model_monitor([{"active": True, "models": 100, "alerts_24h": 5, "degraded": 0}])
+    assert r["models"] == 100
+    assert r["healthy"]

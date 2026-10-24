@@ -1,10 +1,9 @@
-"""Fleet AI Model Monitoring — track production model health."""
+"""Fleet AI Model Monitor v2 — track production model performance monitoring."""
 from __future__ import annotations
-def fleet_ai_model_monitoring(monitors: list[dict]) -> dict:
+def fleet_ai_model_monitor(monitors: list[dict]) -> dict:
     active = [m for m in monitors if m.get("active", True)]
     models_monitored = sum(m.get("models", 0) for m in monitors)
-    drift_alerts = sum(m.get("drift_alerts_24h", 0) for m in monitors)
-    perf_alerts = sum(m.get("perf_alerts_24h", 0) for m in monitors)
+    alerts_24h = sum(m.get("alerts_24h", 0) for m in monitors)
+    degraded = sum(m.get("degraded", 0) for m in monitors)
     return {"monitors": len(monitors), "active": len(active), "models": models_monitored,
-            "drift_alerts": drift_alerts, "perf_alerts": perf_alerts,
-            "stable": drift_alerts == 0 and perf_alerts == 0}
+            "alerts_24h": alerts_24h, "degraded": degraded, "healthy": degraded == 0}
