@@ -1,12 +1,14 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_uptime_calc import calculate_uptime, compare_uptime
+from app.services.app_marketplace_app_app_app_app_app_app_app_uptime_calc import calculate_uptime, monthly_report
 
 def test_uptime():
-    # 30 days, 43 seconds downtime = 99.998%
-    r = calculate_uptime(30 * 24 * 3600, 43)
-    assert r["uptime_pct"] > 99.99
-    assert r["nines"] >= 4
+    r = calculate_uptime(43200, 5)  # 30 days, 5 min down
+    assert r["uptime_pct"] > 99.98
+    assert r["nines"] == 4
 
-def test_compare():
-    uptime = calculate_uptime(86400, 86)  # 99.9%
-    r = compare_uptime(uptime, 99.9)
-    assert r["met"]
+def test_monthly():
+    r = monthly_report([
+        {"duration_minutes": 10}, {"duration_minutes": 5},
+    ])
+    assert r["incidents"] == 2
+    assert r["total_downtime_minutes"] == 15
+    assert r["nines"] >= 3
