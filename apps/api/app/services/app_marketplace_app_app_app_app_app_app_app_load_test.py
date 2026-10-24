@@ -1,23 +1,25 @@
-"""API load test runner — simulate and report load test results."""
+"""Load test runner — define and analyze load test results."""
 from __future__ import annotations
 
 
-def run_load_test(endpoint: str, rps: int, duration_sec: int,
-                   avg_latency_ms: float, error_rate_pct: float) -> dict:
-    total_requests = rps * duration_sec
-    successful = int(total_requests * (1 - error_rate_pct / 100))
-    failed = total_requests - successful
-    throughput = round(successful / duration_sec, 1)
-    return {"endpoint": endpoint, "rps": rps, "duration_sec": duration_sec,
-            "total_requests": total_requests, "successful": successful, "failed": failed,
-            "avg_latency_ms": avg_latency_ms, "error_rate_pct": error_rate_pct,
-            "throughput_rps": throughput,
-            "passed": error_rate_pct < 1 and avg_latency_ms < 500}
+def analyze_load_test(results: dict) -> dict:
+    total_reqs = results.get("total_requests", 0)
+    failed = results.get("failed_requests", 0)
+    duration_s = results.get("duration_seconds", 1)
+    rps = round(total_reqs / max(duration_s, 0.01), 1)
+    error_rate = round(failed / max(total_reqs, 1) * 100, 2)
+    p50 = results.get("p50_ms", 0)
+    p95 = results.get("p95_ms", 0)
+    p99 = results.get("p99_ms", 0)
+    passed = error_rate < 1 and p99 < results.get("max_p99_ms", 1000)
+    return {"rps": rps, "total_requests": total_reqs, "error_rate_pct": error_rate,
+            "p50_ms": p50, "p95_ms": p95, "p99_ms": p99,
+            "duration_seconds": duration_s, "passed": passed}
 
 
-def compare_runs(current: dict, baseline: dict) -> dict:
-    latency_delta = round(current["avg_latency_ms"] - baseline["avg_latency_ms"], 1)
-    error_delta = round(current["error_rate_pct"] - baseline["error_rate_pct"], 2)
-    return {"latency_change_ms": latency_delta, "error_change_pct": error_delta,
-            "regression": latency_delta > 50 or error_delta > 0.5,
-            "improved": latency_delta < -20 and error_delta <= 0}
+def compare_runs(baseline: dict, current: dict) -> dict:
+    rps_change = round((current["rps"] - baseline["rps"]) / max(baseline["rps"], 0.01) * 100, 1)
+    p99_change = round((current["p99_ms"] - baseline["p99_ms"]) / max(baseline["p99_ms"], 0.01) * 100, 1)
+    regression = current["p99_ms"] > baseline["p99_ms"] * 1.2 or current["error_rate_pct"] > baseline["error_rate_pct"] * 2
+    return {"rps_change_pct": rps_change, "p99_change_pct": p99_change,
+            "regression": regression}
