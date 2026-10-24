@@ -1,20 +1,22 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { FeatureFlagPanel } from "@/components/feature-flag-panel";
 
 describe("FeatureFlagPanel", () => {
-  it("renders flags", () => {
+  it("renders", () => {
     const { container } = render(
-      <FeatureFlagPanel environment="production" enabled={1} total={2} onToggle={vi.fn()}
+      <FeatureFlagPanel userId="u1" enabledCount={2}
         flags={[
-          { key: "dark_mode", label: "Dark Mode", enabled: true, rolloutPct: 100, environments: ["production"] },
-          { key: "beta_ai", label: "Beta AI", enabled: false, rolloutPct: 50, environments: ["staging"] },
+          { flag: "dark_mode", value: true, reason: "rollout" },
+          { flag: "beta_ui", value: true, reason: "allowlisted" },
+          { flag: "v3_api", value: false, reason: "disabled" },
         ]} />
     );
     expect(container.textContent).toContain("Feature Flags");
-    expect(container.textContent).toContain("production");
-    expect(container.textContent).toContain("1/2 on");
-    expect(container.textContent).toContain("Dark Mode");
-    expect(container.textContent).toContain("50% rollout");
+    expect(container.textContent).toContain("u1");
+    expect(container.textContent).toContain("2/3 on");
+    expect(container.textContent).toContain("dark_mode");
+    expect(container.textContent).toContain("rollout");
+    expect(container.textContent).toContain("disabled");
   });
 });
