@@ -1,17 +1,23 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_health_agg import aggregate_health
+from app.services.app_marketplace_app_app_app_app_app_app_app_health_agg import aggregate_health, health_history
 
-def test_all_healthy():
+def test_healthy():
     r = aggregate_health([
-        {"service": "api", "status": "healthy", "latency_ms": 50},
-        {"service": "db", "status": "healthy", "latency_ms": 10},
+        {"name": "api", "status": "up", "latency_ms": 10},
+        {"name": "db", "status": "up", "latency_ms": 5},
     ])
     assert r["overall"] == "healthy"
-    assert r["health_pct"] == 100
+    assert r["uptime_pct"] == 100.0
 
 def test_degraded():
     r = aggregate_health([
-        {"service": "api", "status": "healthy", "latency_ms": 50},
-        {"service": "db", "status": "unhealthy", "latency_ms": 10},
+        {"name": "api", "status": "up", "latency_ms": 10},
+        {"name": "db", "status": "down", "latency_ms": 0},
+        {"name": "cache", "status": "up", "latency_ms": 2},
     ])
     assert r["overall"] == "degraded"
-    assert r["healthy"] == 1
+
+def test_history():
+    r = health_history([
+        {"uptime_pct": 95.0}, {"uptime_pct": 99.0},
+    ])
+    assert r["trend"] == "improving"
