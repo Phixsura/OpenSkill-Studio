@@ -1,19 +1,21 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_req_validator import validate_fields
+from app.services.app_marketplace_app_app_app_app_app_app_app_req_validator import validate_request, sanitize_input
 
 def test_valid():
-    rules = [
-        {"field": "name", "type": "string", "required": True, "min_length": 2},
-        {"field": "email", "type": "email", "required": True},
-    ]
-    r = validate_fields({"name": "Alice", "email": "alice@test.com"}, rules)
+    r = validate_request(
+        {"name": "Alice", "email": "alice@example.com", "age": 25},
+        {"name": {"type": "string", "required": True, "min_length": 1},
+         "email": {"type": "string", "required": True, "pattern": r"^[\w.+-]+@[\w-]+\.[\w.]+$"},
+         "age": {"type": "int"}})
     assert r["valid"]
 
-def test_errors():
-    rules = [
-        {"field": "name", "type": "string", "required": True},
-        {"field": "email", "type": "email", "required": True},
-        {"field": "url", "type": "url"},
-    ]
-    r = validate_fields({"email": "bad", "url": "not-a-url"}, rules)
+def test_invalid():
+    r = validate_request(
+        {"name": "", "email": "not-email"},
+        {"name": {"type": "string", "required": True, "min_length": 1},
+         "email": {"type": "string", "pattern": r"^[\w.+-]+@[\w-]+\.[\w.]+$"}})
     assert not r["valid"]
-    assert r["error_count"] == 3  # name missing, email invalid, url invalid
+    assert len(r["errors"]) == 2
+
+def test_sanitize():
+    assert sanitize_input("<script>alert(1)</script>") == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert len(sanitize_input("a" * 2000, max_length=100)) == 100
