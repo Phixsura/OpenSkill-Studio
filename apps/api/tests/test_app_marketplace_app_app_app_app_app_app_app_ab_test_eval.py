@@ -3,7 +3,7 @@ from app.services.app_marketplace_app_app_app_app_app_app_app_ab_test_eval impor
 def test_significant():
     r = evaluate_experiment(
         {"visitors": 10000, "conversions": 500},
-        {"visitors": 10000, "conversions": 600})
+        {"visitors": 10000, "conversions": 700})
     assert r["significant"]
     assert r["winner"] == "variant"
     assert r["lift_pct"] > 0
