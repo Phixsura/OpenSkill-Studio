@@ -3,25 +3,26 @@ from __future__ import annotations
 import math
 
 
-def detect_anomalies(daily_costs: list[float], threshold_sigma: float = 2.0) -> dict:
+def detect_anomalies(daily_costs: list[float], threshold_std: float = 2.0) -> dict:
     if len(daily_costs) < 3:
-        return {"anomalies": [], "mean": 0, "std": 0, "checked": len(daily_costs)}
+        return {"anomalies": [], "mean": 0, "std": 0, "status": "insufficient_data"}
     mean = sum(daily_costs) / len(daily_costs)
     variance = sum((x - mean) ** 2 for x in daily_costs) / len(daily_costs)
     std = math.sqrt(variance)
+    upper = mean + threshold_std * std
     anomalies = []
     for i, cost in enumerate(daily_costs):
-        z_score = (cost - mean) / max(std, 0.01)
-        if abs(z_score) > threshold_sigma:
-            anomalies.append({"day": i, "cost": cost, "z_score": round(z_score, 2),
-                               "direction": "spike" if z_score > 0 else "drop"})
-    return {"anomalies": anomalies, "anomaly_count": len(anomalies),
-            "mean": round(mean, 2), "std": round(std, 2),
-            "checked": len(daily_costs), "has_anomaly": len(anomalies) > 0}
+        if cost > upper:
+            anomalies.append({"day": i, "cost": round(cost, 2),
+                              "deviation": round((cost - mean) / max(std, 0.01), 2),
+                              "threshold": round(upper, 2)})
+    return {"anomalies": anomalies, "mean": round(mean, 2), "std": round(std, 2),
+            "upper_bound": round(upper, 2), "total_days": len(daily_costs),
+            "status": "alert" if anomalies else "normal"}
 
 
-def estimate_savings(anomalies: list[dict], mean: float) -> dict:
-    total_excess = sum(max(0, a["cost"] - mean) for a in anomalies if a["direction"] == "spike")
-    return {"potential_savings": round(total_excess, 2),
-            "spike_count": sum(1 for a in anomalies if a["direction"] == "spike"),
-            "display": f"${total_excess:,.2f}"}
+def forecast_monthly(daily_avg: float, days_remaining: int, spent_so_far: float) -> dict:
+    projected = spent_so_far + daily_avg * days_remaining
+    return {"daily_avg": round(daily_avg, 2), "days_remaining": days_remaining,
+            "spent_so_far": round(spent_so_far, 2),
+            "projected_total": round(projected, 2)}
