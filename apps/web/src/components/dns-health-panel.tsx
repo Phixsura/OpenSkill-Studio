@@ -1,27 +1,25 @@
 "use client";
 
-interface DnsCheck { type: string; name: string; expected: string; resolved: boolean; }
-interface DnsHealthPanelProps { domain: string; checks: DnsCheck[];
-  allOk: boolean; propagationPct: number; }
+interface DnsRecord { domain: string; type: string; resolved: boolean; ttl: number; ip: string; }
+interface DnsHealthPanelProps { records: DnsRecord[]; healthy: number; unhealthy: number; allHealthy: boolean; }
 
-export function DnsHealthPanel({ domain, checks, allOk, propagationPct }: DnsHealthPanelProps) {
+export function DnsHealthPanel({ records, healthy, unhealthy, allHealthy }: DnsHealthPanelProps) {
   return (
     <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold text-sm">🌐 DNS: {domain}</h3>
-        <div className="flex gap-2 text-xs">
-          <span className={allOk ? "text-green-600" : "text-red-500"}>{allOk ? "✅ All OK" : "⚠ Issues"}</span>
-          <span className="text-gray-400">{propagationPct}% propagated</span>
-        </div>
+        <h3 className="font-semibold">🌐 DNS Health</h3>
+        <span className={`text-xs ${allHealthy ? "text-green-600" : "text-red-500"}`}>
+          {allHealthy ? `✅ ${healthy} healthy` : `⚠ ${unhealthy} unhealthy`}
+        </span>
       </div>
       <div className="divide-y dark:divide-gray-700">
-        {checks.map((c, i) => (
-          <div key={i} className="flex items-center justify-between px-4 py-2 text-xs">
+        {records.map(r => (
+          <div key={r.domain} className="flex items-center justify-between px-4 py-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span>{c.resolved ? "✅" : "❌"}</span>
-              <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-mono">{c.type}</span>
-              <span className="font-mono text-gray-400">{c.expected || "—"}</span>
+              <span className={`w-2 h-2 rounded-full ${r.resolved ? "bg-green-500" : "bg-red-500"}`} />
+              <span className="font-mono">{r.domain}</span>
             </div>
+            <span className="text-gray-400">{r.type} · {r.ip || "unresolved"} · TTL {r.ttl}s</span>
           </div>
         ))}
       </div>

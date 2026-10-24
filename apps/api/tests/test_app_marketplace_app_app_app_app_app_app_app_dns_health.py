@@ -1,20 +1,18 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_dns_health import check_dns, propagation_status
+from app.services.app_marketplace_app_app_app_app_app_app_app_dns_health import check_dns_health, detect_stale_records
 
-def test_check():
-    r = check_dns("app.example.com", [
-        {"type": "A", "value": "1.2.3.4", "ttl": 300},
-        {"type": "CNAME", "value": "proxy.example.com"},
-        {"type": "TXT", "value": ""},
+def test_health():
+    r = check_dns_health([
+        {"domain": "api.example.com", "resolved": True, "ttl": 300, "ip": "1.2.3.4"},
+        {"domain": "bad.example.com", "resolved": False, "ttl": 0},
     ])
-    assert r["resolved"] == 2
-    assert not r["all_ok"]
+    assert r["healthy"] == 1
+    assert r["unhealthy"] == 1
+    assert not r["all_healthy"]
 
-def test_propagation():
-    r = propagation_status([
-        {"region": "us-east", "propagated": True},
-        {"region": "eu-west", "propagated": True},
-        {"region": "ap-south", "propagated": False},
-    ])
-    assert r["propagated"] == 2
-    assert r["progress_pct"] == 67
-    assert not r["complete"]
+def test_stale():
+    r = detect_stale_records([
+        {"domain": "a.com", "ttl": 100000},
+        {"domain": "b.com", "ttl": 3600},
+    ], max_ttl=86400)
+    assert len(r) == 1
+    assert r[0]["domain"] == "a.com"

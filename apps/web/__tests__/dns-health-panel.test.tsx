@@ -3,17 +3,18 @@ import { describe, expect, it } from "vitest";
 import { DnsHealthPanel } from "@/components/dns-health-panel";
 
 describe("DnsHealthPanel", () => {
-  it("renders DNS checks", () => {
+  it("renders", () => {
     const { container } = render(
-      <DnsHealthPanel domain="app.example.com" allOk={false} propagationPct={67}
-        checks={[
-          { type: "A", name: "app.example.com", expected: "1.2.3.4", resolved: true },
-          { type: "TXT", name: "app.example.com", expected: "", resolved: false },
+      <DnsHealthPanel healthy={1} unhealthy={1} allHealthy={false}
+        records={[
+          { domain: "api.example.com", type: "A", resolved: true, ttl: 300, ip: "1.2.3.4" },
+          { domain: "bad.example.com", type: "A", resolved: false, ttl: 0, ip: "" },
         ]} />
     );
-    expect(container.textContent).toContain("DNS: app.example.com");
-    expect(container.textContent).toContain("Issues");
-    expect(container.textContent).toContain("67% propagated");
+    expect(container.textContent).toContain("DNS Health");
+    expect(container.textContent).toContain("1 unhealthy");
+    expect(container.textContent).toContain("api.example.com");
     expect(container.textContent).toContain("1.2.3.4");
+    expect(container.textContent).toContain("unresolved");
   });
 });
