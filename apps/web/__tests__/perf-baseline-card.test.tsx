@@ -12,7 +12,7 @@ describe("PerfBaselineCard", () => {
     );
     expect(container.textContent).toContain("Performance Baseline");
     expect(container.textContent).toContain("Regression Detected");
-    expect(container.textContent).toContain("AVG");
+    expect(container.textContent).toContain("avg");
     expect(container.textContent).toContain("70ms");
     expect(container.textContent).toContain("100ms");
     expect(container.textContent).toContain("+42.9%");
