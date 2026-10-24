@@ -1,34 +1,33 @@
-"""Search index manager — manage full-text search indexes."""
+"""Platform search indexer — index and search platform resources."""
 from __future__ import annotations
 
-_index: dict[str, dict] = {}
 
+class SearchIndexer:
+    def __init__(self):
+        self._docs: dict[str, dict] = {}
 
-def index_document(doc_id: str, content: str, metadata: dict | None = None) -> dict:
-    words = set(content.lower().split())
-    _index[doc_id] = {"id": doc_id, "content": content, "words": words,
-                       "metadata": metadata or {}, "word_count": len(words)}
-    return {"indexed": True, "id": doc_id, "word_count": len(words)}
+    def index(self, doc_id: str, title: str, body: str, tags: list[str] | None = None, doc_type: str = "general") -> dict:
+        tokens = set((title + " " + body).lower().split())
+        self._docs[doc_id] = {"id": doc_id, "title": title, "body": body,
+                               "tags": tags or [], "type": doc_type, "tokens": tokens}
+        return {"indexed": True, "id": doc_id, "token_count": len(tokens)}
 
+    def search(self, query: str, doc_type: str = "", limit: int = 10) -> list[dict]:
+        q_tokens = set(query.lower().split())
+        results = []
+        for doc in self._docs.values():
+            if doc_type and doc["type"] != doc_type:
+                continue
+            overlap = q_tokens & doc["tokens"]
+            if overlap:
+                score = len(overlap) / len(q_tokens)
+                results.append({"id": doc["id"], "title": doc["title"],
+                                "score": round(score, 3), "type": doc["type"]})
+        results.sort(key=lambda r: -r["score"])
+        return results[:limit]
 
-def search(query: str, limit: int = 10) -> dict:
-    terms = set(query.lower().split())
-    results = []
-    for doc_id, doc in _index.items():
-        matches = terms & doc["words"]
-        if matches:
-            score = len(matches) / len(terms)
-            results.append({"id": doc_id, "score": round(score, 2),
-                            "matched_terms": sorted(matches)})
-    results.sort(key=lambda r: -r["score"])
-    return {"results": results[:limit], "total_matches": len(results), "query": query}
-
-
-def index_stats() -> dict:
-    total_words = sum(d["word_count"] for d in _index.values())
-    return {"total_documents": len(_index), "total_words": total_words,
-            "avg_words": round(total_words / max(len(_index), 1), 1)}
-
-
-def clear_index() -> None:
-    _index.clear()
+    def stats(self) -> dict:
+        by_type: dict[str, int] = {}
+        for d in self._docs.values():
+            by_type[d["type"]] = by_type.get(d["type"], 0) + 1
+        return {"total_docs": len(self._docs), "by_type": by_type}
