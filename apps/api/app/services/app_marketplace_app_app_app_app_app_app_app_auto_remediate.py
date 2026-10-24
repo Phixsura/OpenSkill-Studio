@@ -1,31 +1,34 @@
-"""Auto-remediation engine — automatically fix common issues."""
+"""Auto-remediation engine — automatically fix common platform issues."""
 from __future__ import annotations
 
 
-PLAYBOOKS = {
-    "high_cpu": {"action": "scale_up", "description": "Add replicas when CPU > 90%"},
-    "disk_full": {"action": "cleanup_logs", "description": "Purge old logs when disk > 85%"},
-    "connection_pool_exhausted": {"action": "increase_pool", "description": "Expand pool size"},
-    "high_error_rate": {"action": "rollback", "description": "Rollback last deploy"},
-    "certificate_expiring": {"action": "renew_cert", "description": "Auto-renew TLS certificate"},
-}
+class AutoRemediation:
+    def __init__(self):
+        self._rules: list[dict] = []
+        self._actions_taken: list[dict] = []
 
+    def add_rule(self, name: str, condition: callable, action: callable, severity: str = "warning") -> dict:
+        self._rules.append({"name": name, "condition": condition, "action": action, "severity": severity})
+        return {"name": name, "added": True, "total_rules": len(self._rules)}
 
-def evaluate_remediation(issue_type: str, severity: str) -> dict:
-    playbook = PLAYBOOKS.get(issue_type)
-    if not playbook:
-        return {"can_remediate": False, "reason": "no_playbook"}
-    auto_approve = severity != "critical"  # critical needs human approval
-    return {"can_remediate": True, "issue": issue_type, "severity": severity,
-            "action": playbook["action"], "description": playbook["description"],
-            "auto_approve": auto_approve}
+    def evaluate(self, context: dict) -> dict:
+        triggered = []
+        for rule in self._rules:
+            if rule["condition"](context):
+                result = rule["action"](context)
+                entry = {"rule": rule["name"], "severity": rule["severity"],
+                         "action_result": result, "auto_fixed": True}
+                triggered.append(entry)
+                self._actions_taken.append(entry)
+        return {"evaluated": len(self._rules), "triggered": len(triggered),
+                "actions": triggered}
 
+    def history(self, limit: int = 20) -> list[dict]:
+        return self._actions_taken[-limit:]
 
-def remediation_stats(actions: list[dict]) -> dict:
-    auto = sum(1 for a in actions if a.get("auto_approve"))
-    manual = len(actions) - auto
-    by_action: dict[str, int] = {}
-    for a in actions:
-        by_action[a.get("action", "")] = by_action.get(a.get("action", ""), 0) + 1
-    return {"total": len(actions), "auto": auto, "manual": manual,
-            "by_action": by_action, "auto_pct": round(auto / max(len(actions), 1) * 100)}
+    def stats(self) -> dict:
+        by_severity = {}
+        for a in self._actions_taken:
+            by_severity[a["severity"]] = by_severity.get(a["severity"], 0) + 1
+        return {"total_rules": len(self._rules), "actions_taken": len(self._actions_taken),
+                "by_severity": by_severity}

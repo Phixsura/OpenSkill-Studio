@@ -1,22 +1,26 @@
-from app.services.app_marketplace_app_app_app_app_app_app_app_auto_remediate import evaluate_remediation, remediation_stats
+from app.services.app_marketplace_app_app_app_app_app_app_app_auto_remediate import AutoRemediation
 
-def test_remediate():
-    r = evaluate_remediation("high_cpu", "warning")
-    assert r["can_remediate"]
-    assert r["action"] == "scale_up"
-    assert r["auto_approve"]
+def test_evaluate():
+    ar = AutoRemediation()
+    ar.add_rule("high_cpu", lambda ctx: ctx.get("cpu_pct", 0) > 90,
+                lambda ctx: {"action": "scale_up"}, "critical")
+    ar.add_rule("low_disk", lambda ctx: ctx.get("disk_free_pct", 100) < 10,
+                lambda ctx: {"action": "cleanup"}, "warning")
+    r = ar.evaluate({"cpu_pct": 95, "disk_free_pct": 50})
+    assert r["triggered"] == 1
+    assert r["actions"][0]["rule"] == "high_cpu"
 
-def test_critical():
-    r = evaluate_remediation("high_error_rate", "critical")
-    assert r["can_remediate"]
-    assert not r["auto_approve"]
-
-def test_unknown():
-    r = evaluate_remediation("unknown_issue", "warning")
-    assert not r["can_remediate"]
+def test_no_trigger():
+    ar = AutoRemediation()
+    ar.add_rule("test", lambda ctx: False, lambda ctx: {})
+    r = ar.evaluate({})
+    assert r["triggered"] == 0
 
 def test_stats():
-    actions = [{"action": "scale_up", "auto_approve": True},
-               {"action": "rollback", "auto_approve": False}]
-    r = remediation_stats(actions)
-    assert r["auto_pct"] == 50
+    ar = AutoRemediation()
+    ar.add_rule("r1", lambda _: True, lambda _: {}, "critical")
+    ar.evaluate({})
+    ar.evaluate({})
+    s = ar.stats()
+    assert s["actions_taken"] == 2
+    assert s["by_severity"]["critical"] == 2
