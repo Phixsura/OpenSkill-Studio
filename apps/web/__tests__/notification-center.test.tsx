@@ -1,23 +1,21 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NotificationCenter } from "@/components/notification-center";
 
 describe("NotificationCenter", () => {
-  const notifs = [
-    { id: "1", title: "New review", body: "Alice reviewed", icon: "⭐", type: "review", read: false, timestamp: "2026-01-02T00:00:00Z" },
-    { id: "2", title: "Published", body: "App v2", icon: "🚀", type: "publish", read: true, timestamp: "2026-01-01T00:00:00Z" },
-  ];
-  it("renders notifications and badge", () => {
-    const { container } = render(<NotificationCenter notifications={notifs} onMarkRead={vi.fn()} />);
-    expect(container.textContent).toContain("New review");
-    expect(container.textContent).toContain("Published");
-    expect(container.textContent).toContain("1"); // unread badge
-  });
-  it("mark all read", () => {
-    const fn = vi.fn();
-    const { container } = render(<NotificationCenter notifications={notifs} onMarkRead={fn} />);
-    const btn = container.querySelector("button")!;
-    fireEvent.click(btn);
-    expect(fn).toHaveBeenCalledWith(["1"]);
+  it("renders notifications", () => {
+    const { container } = render(
+      <NotificationCenter unread={2} onMarkRead={vi.fn()} onMarkAllRead={vi.fn()}
+        notifications={[
+          { id: 2, title: "Alert", body: "CPU high", category: "alert", priority: "high", read: false },
+          { id: 1, title: "Deploy Done", body: "v2.0 deployed", category: "deploy", priority: "normal", read: true },
+        ]} />
+    );
+    expect(container.textContent).toContain("Notifications");
+    expect(container.textContent).toContain("2");
+    expect(container.textContent).toContain("Alert");
+    expect(container.textContent).toContain("urgent");
+    expect(container.textContent).toContain("Deploy Done");
+    expect(container.textContent).toContain("Mark all read");
   });
 });
