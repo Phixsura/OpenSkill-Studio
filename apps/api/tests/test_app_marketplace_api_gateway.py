@@ -58,3 +58,12 @@ def test_request_log():
     log = gw.get_request_log("slack-ext")
     assert len(log) == 1
     assert log[0]["status"] == 200
+
+
+def test_cross_tenant_rejected():
+    gw = _setup_gateway()
+    # valid-key-123 is registered for slack-ext, not pub-ext
+    gw.register_route(GatewayRoute("/api/ext/other", "other-ext", ["GET"]))
+    resp = gw.handle_request(GatewayRequest("GET", "/api/ext/other/data", api_key="valid-key-123"))
+    assert resp.status_code == 403
+    assert "not authorized" in resp.body["error"]

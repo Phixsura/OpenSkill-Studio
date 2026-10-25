@@ -72,12 +72,15 @@ class APIGateway:
         if not route:
             return GatewayResponse(404, {"error": "Not found"})
 
-        # 2. Authentication
+        # 2. Authentication + extension binding
         if route.requires_auth:
             if not request.api_key:
                 return GatewayResponse(401, {"error": "API key required"})
-            if request.api_key not in self._valid_keys:
+            key_ext = self._valid_keys.get(request.api_key)
+            if key_ext is None:
                 return GatewayResponse(401, {"error": "Invalid API key"})
+            if key_ext != route.extension_id:
+                return GatewayResponse(403, {"error": "API key not authorized for this extension"})
 
         # 3. Rate limiting
         rate_key = f"{request.api_key}:{route.path_prefix}"
