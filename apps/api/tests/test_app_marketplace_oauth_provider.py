@@ -62,3 +62,11 @@ def test_revoke_token():
     token_resp = oauth.exchange_code(auth["code"], "c6", reg["client_secret"])
     assert oauth.revoke_token(token_resp["access_token"]) is True
     assert oauth.validate_token(token_resp["access_token"]) is None
+
+
+def test_duplicate_client_rejected():
+    import pytest
+    oauth = OAuthProvider()
+    oauth.register_client("dup-1", "App A", ["https://a.com/cb"], ["read"], "dev-a")
+    with pytest.raises(ValueError, match="already registered"):
+        oauth.register_client("dup-1", "App B", ["https://b.com/cb"], ["write"], "dev-b")

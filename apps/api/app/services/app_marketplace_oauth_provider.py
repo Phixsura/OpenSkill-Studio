@@ -23,6 +23,8 @@ class OAuthProvider:
         scopes: list[str], developer_id: str,
     ) -> dict:
         """Register an OAuth client for an extension."""
+        if client_id in self._clients:
+            raise ValueError(f"client_id {client_id} already registered")
         client_secret = secrets.token_urlsafe(32)
         client = {
             "client_id": client_id,
