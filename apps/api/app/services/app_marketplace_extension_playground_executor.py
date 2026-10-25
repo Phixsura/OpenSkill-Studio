@@ -41,10 +41,10 @@ class PlaygroundExecutor:
 
         # Basic validation
         if not code.strip():
-            return ExecutionResult(snippet_id, "", "Empty code", None, 0, False, "EmptyCode")
+            result = ExecutionResult(snippet_id, "", "Empty code", None, 0, False, "EmptyCode"); self._history.setdefault(extension_id, []).append(result); return result
 
         if len(code) > 100000:
-            return ExecutionResult(snippet_id, "", "Code too large", None, 0, False, "SizeLimit")
+            result = ExecutionResult(snippet_id, "", "Code too large", None, 0, False, "SizeLimit"); self._history.setdefault(extension_id, []).append(result); return result
 
         # Simulated execution
         stdout_lines = []
