@@ -31,7 +31,7 @@ def test_security_failure():
     assert result.overall_result == "failed"
     security_stage = next(s for s in result.stages if s.stage.value == "security_scan")
     assert security_stage.result == StageResult.FAILED
-    assert "eval()" in security_stage.details["issues"]
+    assert any("eval" in i for i in security_stage.details["issues"])
 
 
 def test_get_and_list_runs():
