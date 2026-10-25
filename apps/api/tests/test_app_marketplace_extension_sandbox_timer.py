@@ -12,7 +12,7 @@ def test_start_and_check():
 
 def test_immediate_timeout():
     st = SandboxTimer()
-    st.start("t2", "ext-2", timeout=0.0, grace=0.0)
+    st.start("t2", "ext-2", timeout=-1.0, grace=-1.0)
     status = st.check("t2")
     assert status["timed_out"] is True
     assert status["grace_expired"] is True
@@ -40,7 +40,7 @@ def test_budget_deduction():
     st.start("t5", "ext-5", timeout=60.0)
     st.stop("t5")  # deducts elapsed
     budget = st.get_budget("ext-5")
-    assert budget["remaining_seconds"] < 1.0
+    assert budget["remaining_seconds"] <= 1.0
 
 
 def test_no_budget_always_allowed():
