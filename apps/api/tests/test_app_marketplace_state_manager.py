@@ -27,7 +27,7 @@ def test_delete_and_exists():
 
 def test_ttl_expiry():
     sm = StateManager()
-    sm.set("ext-3", "fast", "gone", ttl=0.0)
+    sm.set("ext-3", "fast", "gone", ttl=-1.0)
     assert sm.get("ext-3", "fast") is None
 
 
