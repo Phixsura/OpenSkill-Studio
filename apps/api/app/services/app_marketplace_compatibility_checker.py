@@ -26,7 +26,7 @@ class CompatibilityChecker:
     def __init__(self, platform_version: str = "1.0.0",
                  available_apis: list[str] | None = None):
         self._platform_ver = platform_version
-        self._available_apis = set(available_apis or [
+        self._available_apis = set(available_apis if available_apis is not None else [
             "extensions.v1", "webhooks.v1", "config.v1", "events.v1",
             "analytics.v1", "sandbox.v1", "auth.v1", "storage.v1",
         ])

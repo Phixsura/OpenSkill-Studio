@@ -19,7 +19,7 @@ class EnvVar:
 class EnvironmentManager:
     """Manages environment variables for extension sandboxes."""
 
-    RESERVED_PREFIXES = ("OPENSKILL_", "SYSTEM_", "PATH", "HOME")
+    RESERVED_PREFIXES = ("OPENSKILL_", "SYSTEM_", "PATH", "HOME", "LD_", "DYLD_", "NODE_", "PYTHON", "PERL", "RUBY", "BASH_", "GIT_", "SHELL", "USER")
     MAX_KEY_LENGTH = 128
     MAX_VALUE_LENGTH = 8192
     MAX_VARS_PER_SCOPE = 100
