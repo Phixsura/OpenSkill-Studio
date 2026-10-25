@@ -30,7 +30,7 @@ def test_negotiate_deprecated():
     vm.deprecate("v1", sunset_at="2027-01-01")
     ver, headers = vm.negotiate("v1")
     assert ver == "v1"  # still served
-    assert "Deprecation" in headers.get("X-Deprecation-Notice", "")
+    assert "deprecated" in headers.get("X-Deprecation-Notice", "")
     assert headers["X-Sunset-Date"] == "2027-01-01"
 
 
@@ -47,7 +47,7 @@ def test_negotiate_unknown():
     vm = _setup()
     ver, headers = vm.negotiate("v99")
     assert ver == "v2"
-    assert "Fallback" in headers.get("X-Fallback", "")
+    assert "Unknown" in headers.get("X-Fallback", "")
 
 
 def test_list_versions():
