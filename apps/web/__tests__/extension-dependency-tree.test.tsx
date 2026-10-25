@@ -15,7 +15,7 @@ const mockTree = {
 };
 
 describe("ExtensionDependencyTree", () => {
-  it("renders root and children", () => {
+  it("renders root and direct children", () => {
     const { container } = render(<ExtensionDependencyTree root={mockTree} />);
     expect(container.textContent).toContain("Dependency Tree");
     expect(container.textContent).toContain("my-extension");
@@ -30,9 +30,12 @@ describe("ExtensionDependencyTree", () => {
     expect(container.textContent).toContain("4 dependencies");
   });
 
-  it("toggles expansion", () => {
-    const { container, getByText } = render(<ExtensionDependencyTree root={mockTree} />);
-    // httpx is nested under sdk which is expanded by default (root expanded)
+  it("expands nested children on click", () => {
+    const { container, getAllByText } = render(<ExtensionDependencyTree root={mockTree} />);
+    // sdk has a ▶ toggle — click it to expand
+    const toggles = container.querySelectorAll("button");
+    const sdkToggle = Array.from(toggles).find((b) => b.textContent === "▶");
+    if (sdkToggle) fireEvent.click(sdkToggle);
     expect(container.textContent).toContain("httpx");
   });
 
