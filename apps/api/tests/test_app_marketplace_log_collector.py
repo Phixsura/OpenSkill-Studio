@@ -31,9 +31,9 @@ def test_search():
 
 def test_trace_id():
     lc = LogCollector()
-    lc.info("ext-4", "Start", trace_id="tx-001")
-    lc.info("ext-4", "Step 2", trace_id="tx-001")
-    lc.info("ext-4", "Other", trace_id="tx-002")
+    lc.log("ext-4", LogLevel.INFO, "Start", trace_id="tx-001")
+    lc.log("ext-4", LogLevel.INFO, "Step 2", trace_id="tx-001")
+    lc.log("ext-4", LogLevel.INFO, "Other", trace_id="tx-002")
     traced = lc.query("ext-4", trace_id="tx-001")
     assert len(traced) == 2
 
