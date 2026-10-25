@@ -24,7 +24,7 @@ export function SandboxConsole({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+    if (scrollRef.current && scrollRef.current.scrollTo) { scrollRef.current.scrollTo(0, scrollRef.current.scrollHeight); }
   }, [entries]);
 
   const handleSubmit = () => {
