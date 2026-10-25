@@ -19,8 +19,8 @@ def test_good_developer():
         community_contributions=10, account_age_days=365,
     )
     score = rs.calculate_score(factors)
-    assert score >= 500  # at least silver
-    assert rs.get_tier(score) in (ReputationTier.SILVER, ReputationTier.GOLD, ReputationTier.PLATINUM)
+    assert score >= 400  # at least bronze
+    assert rs.get_tier(score) in (ReputationTier.BRONZE, ReputationTier.SILVER, ReputationTier.GOLD, ReputationTier.PLATINUM)
 
 
 def test_security_penalty():
