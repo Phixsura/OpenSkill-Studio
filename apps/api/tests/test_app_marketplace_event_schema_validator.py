@@ -50,7 +50,7 @@ def test_enum_validation():
 def test_valid_enum():
     v = _setup()
     ok, _ = v.validate("extension.installed", {
-        "extension_id": "ext-1", "org_id": "org-1", "source": "marketplace",
+        "extension_id": "ext-1", "org_id": "org-1", "version": "1.0", "source": "marketplace",
     })
     assert ok is True
 
@@ -66,7 +66,7 @@ def test_min_length():
 def test_unknown_fields_soft():
     v = _setup()
     ok, errors = v.validate("extension.installed", {
-        "extension_id": "ext-1", "org_id": "org-1", "extra_field": "val",
+        "extension_id": "ext-1", "org_id": "org-1", "version": "1.0", "extra_field": "val",
     })
     assert ok is True  # unknown fields are warnings, not errors
     assert any("Unknown" in e for e in errors)
