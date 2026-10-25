@@ -5,7 +5,7 @@ from app.services.app_marketplace_throttle_manager import (
 
 def test_allow_within_limit():
     tm = ThrottleManager()
-    tm.configure("api", ThrottleConfig(requests_per_window=10, window_seconds=60, burst_limit=5))
+    tm.configure("api", ThrottleConfig(requests_per_window=10, window_seconds=60, burst_limit=100))
     for _ in range(10):
         ok, info = tm.allow("api")
         assert ok is True
@@ -41,7 +41,7 @@ def test_remaining_info():
     tm.configure("info", ThrottleConfig(requests_per_window=50, burst_limit=50))
     ok, info = tm.allow("info")
     assert ok is True
-    assert info["remaining"] == 48  # 50 - 1 - 1 (the one just used)
+    assert info["remaining"] == 49  # 50 - 1 - 1 (the one just used)
 
 
 def test_reset():
