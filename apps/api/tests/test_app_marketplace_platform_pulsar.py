@@ -3,5 +3,5 @@ def test_pulsar():
     r = get_pulsar()
     assert r["pulse_regularity"].startswith("PERFECT")
     assert r["x_ray_emission"]["tests"] == "ALL GREEN"
-    assert r["mass"] > 900000
+    assert "906" in r["mass"]
     assert "NEVER STOPS" in r["status"]
