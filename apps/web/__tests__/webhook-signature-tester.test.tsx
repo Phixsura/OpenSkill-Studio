@@ -3,17 +3,36 @@ import { describe, expect, it, vi } from "vitest";
 import { WebhookSignatureTester } from "@/components/webhook-signature-tester";
 
 describe("WebhookSignatureTester", () => {
-  it("renders", () => {
-    const { container } = render(<WebhookSignatureTester onVerify={vi.fn(() => ({ valid: true }))} />);
-    expect(container.textContent).toContain("Signature Tester");
-    expect(container.querySelector("textarea")).toBeTruthy();
-    expect(container.textContent).toContain("Verify");
+  it("renders form fields", () => {
+    const { container, getByPlaceholderText } = render(<WebhookSignatureTester />);
+    expect(container.textContent).toContain("Webhook Signature Tester");
+    expect(getByPlaceholderText("whsec_...")).toBeDefined();
+    expect(getByPlaceholderText("sha256=...")).toBeDefined();
   });
-  it("verify valid", () => {
-    const fn = vi.fn(() => ({ valid: true }));
-    const { container } = render(<WebhookSignatureTester onVerify={fn} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Verify")!);
-    expect(fn).toHaveBeenCalled();
-    expect(container.textContent).toContain("✅ Valid signature");
+
+  it("disables verify when fields empty", () => {
+    const { getByText } = render(<WebhookSignatureTester />);
+    const btn = getByText("🔍 Verify Signature");
+    expect(btn.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("calls onVerify and shows result", () => {
+    const onVerify = vi.fn().mockReturnValue(true);
+    const { getByText, getByPlaceholderText, container } = render(
+      <WebhookSignatureTester onVerify={onVerify} />
+    );
+    fireEvent.change(getByPlaceholderText("whsec_..."), { target: { value: "my-secret" } });
+    fireEvent.change(getByPlaceholderText("sha256=..."), { target: { value: "sha256=abc123" } });
+    fireEvent.click(getByText("🔍 Verify Signature"));
+    expect(onVerify).toHaveBeenCalled();
+    expect(container.textContent).toContain("valid");
+  });
+
+  it("generates a signature", () => {
+    const { getByText, getByPlaceholderText } = render(<WebhookSignatureTester />);
+    fireEvent.change(getByPlaceholderText("whsec_..."), { target: { value: "secret" } });
+    fireEvent.click(getByText("Generate"));
+    const sigInput = getByPlaceholderText("sha256=...") as HTMLInputElement;
+    expect(sigInput.value).toContain("sha256=");
   });
 });
