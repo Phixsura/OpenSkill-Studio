@@ -1,34 +1,56 @@
-from app.services.app_marketplace_token_introspection import introspect_token, check_token_scope, compute_token_usage_stats
+from app.services.app_marketplace_token_introspection import TokenIntrospectionService
 
-def test_active():
-    tokens = {"hash1": {"app_id": "a1", "scopes": ["read"], "issued_at": 1000, "expires_at": 0}}
-    r = introspect_token(token_hash="hash1", stored_tokens=tokens)
-    assert r["active"]
-    assert r["scopes"] == ["read"]
 
-def test_not_found():
-    r = introspect_token(token_hash="missing", stored_tokens={})
-    assert not r["active"]
+def test_register_and_introspect():
+    tis = TokenIntrospectionService()
+    tis.register_token("tok_abc123", "client-1", "user-1", ["read", "write"])
+    result = tis.introspect("tok_abc123")
+    assert result["active"] is True
+    assert result["client_id"] == "client-1"
+    assert result["sub"] == "user-1"
+    assert "read" in result["scope"]
 
-def test_revoked():
-    tokens = {"hash1": {"revoked": True, "scopes": []}}
-    r = introspect_token(token_hash="hash1", stored_tokens=tokens)
-    assert not r["active"]
 
-def test_scope_ok():
-    r = check_token_scope(token_scopes=["read", "write"], required_scope="read")
-    assert r["authorized"]
+def test_unknown_token():
+    tis = TokenIntrospectionService()
+    result = tis.introspect("unknown_token")
+    assert result["active"] is False
 
-def test_scope_admin():
-    r = check_token_scope(token_scopes=["admin"], required_scope="anything")
-    assert r["authorized"]
 
-def test_scope_missing():
-    r = check_token_scope(token_scopes=["read"], required_scope="write")
-    assert not r["authorized"]
+def test_expired_token():
+    tis = TokenIntrospectionService()
+    tis.register_token("tok_expired", "c1", "u1", ["read"], ttl_seconds=-1)
+    result = tis.introspect("tok_expired")
+    assert result["active"] is False
+    assert result.get("reason") == "expired"
 
-def test_stats():
-    tokens = [{"active": True}, {"expired": True}, {"revoked": True}, {"active": True}]
-    s = compute_token_usage_stats(tokens=tokens)
-    assert s["active"] == 2
-    assert s["expired"] == 1
+
+def test_revoke():
+    tis = TokenIntrospectionService()
+    tis.register_token("tok_revoke", "c2", "u2", ["read"])
+    assert tis.revoke("tok_revoke") is True
+    result = tis.introspect("tok_revoke")
+    assert result["active"] is False
+    assert result.get("reason") == "revoked"
+
+
+def test_has_scope():
+    tis = TokenIntrospectionService()
+    tis.register_token("tok_scoped", "c3", "u3", ["read", "analytics"])
+    assert tis.has_scope("tok_scoped", "read") is True
+    assert tis.has_scope("tok_scoped", "admin") is False
+
+
+def test_wildcard_scope():
+    tis = TokenIntrospectionService()
+    tis.register_token("tok_wild", "c4", "u4", ["*"])
+    assert tis.has_scope("tok_wild", "anything") is True
+
+
+def test_active_count():
+    tis = TokenIntrospectionService()
+    tis.register_token("t1", "c5", "u1", ["r"])
+    tis.register_token("t2", "c5", "u2", ["r"])
+    tis.register_token("t3", "c6", "u3", ["r"])
+    assert tis.get_active_count("c5") == 2
+    assert tis.get_active_count() == 3

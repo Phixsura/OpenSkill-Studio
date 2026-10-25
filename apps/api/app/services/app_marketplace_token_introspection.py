@@ -1,34 +1,94 @@
-"""Token introspection — inspect and validate API tokens with scope details."""
+"""Token Introspection — inspect and validate OAuth/API tokens.
 
+Provides RFC 7662-style token introspection for validating access
+tokens, checking scopes, and retrieving token metadata.
+"""
+from __future__ import annotations
 import hashlib
 import time
+from dataclasses import dataclass, field
 
 
-def introspect_token(*, token_hash: str, stored_tokens: dict[str, dict]) -> dict:
-    token_data = stored_tokens.get(token_hash)
-    if not token_data:
-        return {"active": False, "error": "Token not found"}
-    now = int(time.time())
-    expired = token_data.get("expires_at", 0) > 0 and now > token_data["expires_at"]
-    revoked = token_data.get("revoked", False)
-    return {
-        "active": not expired and not revoked,
-        "app_id": token_data.get("app_id"),
-        "scopes": token_data.get("scopes", []),
-        "issued_at": token_data.get("issued_at"),
-        "expires_at": token_data.get("expires_at"),
-        "expired": expired, "revoked": revoked,
-    }
+@dataclass
+class TokenInfo:
+    token_hash: str
+    client_id: str
+    user_id: str
+    scopes: list[str]
+    issued_at: float
+    expires_at: float
+    token_type: str = "bearer"
+    active: bool = True
+    revoked: bool = False
+    metadata: dict = field(default_factory=dict)
 
 
-def check_token_scope(*, token_scopes: list[str], required_scope: str) -> dict:
-    has_scope = required_scope in token_scopes or "admin" in token_scopes
-    return {"authorized": has_scope, "required": required_scope,
-            "granted": token_scopes, "missing": [] if has_scope else [required_scope]}
+class TokenIntrospectionService:
+    """RFC 7662-style token introspection."""
 
+    def __init__(self):
+        self._tokens: dict[str, TokenInfo] = {}
 
-def compute_token_usage_stats(*, tokens: list[dict]) -> dict:
-    active = sum(1 for t in tokens if t.get("active"))
-    expired = sum(1 for t in tokens if t.get("expired"))
-    revoked = sum(1 for t in tokens if t.get("revoked"))
-    return {"total": len(tokens), "active": active, "expired": expired, "revoked": revoked}
+    def register_token(self, token: str, client_id: str, user_id: str,
+                       scopes: list[str], ttl_seconds: int = 3600,
+                       metadata: dict | None = None) -> TokenInfo:
+        """Register a token for introspection."""
+        now = time.time()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        info = TokenInfo(
+            token_hash=token_hash, client_id=client_id, user_id=user_id,
+            scopes=scopes, issued_at=now, expires_at=now + ttl_seconds,
+            metadata=metadata or {},
+        )
+        self._tokens[token_hash] = info
+        return info
+
+    def introspect(self, token: str) -> dict:
+        """Introspect a token. Returns RFC 7662 response."""
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        info = self._tokens.get(token_hash)
+
+        if not info:
+            return {"active": False}
+
+        if info.revoked:
+            return {"active": False, "reason": "revoked"}
+
+        if time.time() > info.expires_at:
+            info.active = False
+            return {"active": False, "reason": "expired"}
+
+        return {
+            "active": True,
+            "scope": " ".join(info.scopes),
+            "client_id": info.client_id,
+            "sub": info.user_id,
+            "token_type": info.token_type,
+            "exp": int(info.expires_at),
+            "iat": int(info.issued_at),
+            **info.metadata,
+        }
+
+    def revoke(self, token: str) -> bool:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        info = self._tokens.get(token_hash)
+        if info:
+            info.revoked = True
+            info.active = False
+            return True
+        return False
+
+    def has_scope(self, token: str, required_scope: str) -> bool:
+        """Check if token has a specific scope."""
+        result = self.introspect(token)
+        if not result.get("active"):
+            return False
+        scopes = result.get("scope", "").split()
+        return required_scope in scopes or "*" in scopes
+
+    def get_active_count(self, client_id: str | None = None) -> int:
+        now = time.time()
+        tokens = self._tokens.values()
+        if client_id:
+            tokens = [t for t in tokens if t.client_id == client_id]
+        return sum(1 for t in tokens if t.active and not t.revoked and t.expires_at > now)
