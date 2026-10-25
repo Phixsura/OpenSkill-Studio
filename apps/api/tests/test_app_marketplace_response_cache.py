@@ -25,14 +25,14 @@ def test_etag_not_modified():
 
 def test_expired():
     rc = ResponseCache()
-    rc.put("key3", b"old", max_age=0)  # immediate expiry
+    rc.put("key3", b"old", max_age=-1)  # immediate expiry
     entry, status = rc.get("key3")
     assert status == "miss"
 
 
 def test_stale_while_revalidate():
     rc = ResponseCache()
-    rc.put("key4", b"data", max_age=0, stale_while_revalidate=3600)
+    rc.put("key4", b"data", max_age=-1, stale_while_revalidate=3600)
     entry, status = rc.get("key4")
     assert status == "stale"
     assert entry is not None
