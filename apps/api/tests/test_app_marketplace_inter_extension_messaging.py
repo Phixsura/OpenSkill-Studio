@@ -50,7 +50,7 @@ def test_consume():
 def test_grant_access():
     iem = InterExtensionMessaging()
     iem.create_channel("ch-6", "Shared", "ext-a")
-    iem.grant_access("ch-6", "ext-c", can_send=True, can_receive=True)
+    iem.grant_access("ch-6", "ext-a", "ext-c", can_send=True, can_receive=True)
     msg, _ = iem.send("ch-6", "ext-c", {"from": "c"})
     assert msg is not None
 

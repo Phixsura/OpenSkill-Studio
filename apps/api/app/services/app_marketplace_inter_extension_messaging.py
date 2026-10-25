@@ -50,10 +50,10 @@ class InterExtensionMessaging:
         self._channels[channel_id] = ch
         return ch
 
-    def grant_access(self, channel_id: str, extension_id: str,
+    def grant_access(self, channel_id: str, requester_id: str, extension_id: str,
                      can_send: bool = False, can_receive: bool = False) -> bool:
         ch = self._channels.get(channel_id)
-        if not ch:
+        if not ch or requester_id != ch.owner_id:
             return False
         if can_send:
             ch.allowed_senders.add(extension_id)
@@ -63,7 +63,7 @@ class InterExtensionMessaging:
 
     def send(self, channel_id: str, sender_id: str, payload: dict) -> tuple[ExtMessage | None, str]:
         ch = self._channels.get(channel_id)
-        if not ch:
+        if not ch or requester_id != ch.owner_id:
             return None, "Channel not found"
         if sender_id not in ch.allowed_senders:
             return None, "Sender not authorized"
@@ -79,7 +79,7 @@ class InterExtensionMessaging:
     def receive(self, channel_id: str, receiver_id: str,
                 limit: int = 50) -> tuple[list[ExtMessage], str]:
         ch = self._channels.get(channel_id)
-        if not ch:
+        if not ch or requester_id != ch.owner_id:
             return [], "Channel not found"
         if receiver_id not in ch.allowed_receivers and receiver_id != ch.owner_id:
             return [], "Receiver not authorized"
