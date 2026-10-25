@@ -36,7 +36,7 @@ class InterExtensionMessaging:
 
     def __init__(self):
         self._channels: dict[str, Channel] = {}
-        self._queues: dict[str, list[ExtMessage]] = defaultdict(list)  # channel -> messages
+        self._queues: dict[str, list[ExtMessage]] = defaultdict(list)
         self._counter = 0
 
     def create_channel(self, channel_id: str, name: str, owner_id: str,
@@ -63,7 +63,7 @@ class InterExtensionMessaging:
 
     def send(self, channel_id: str, sender_id: str, payload: dict) -> tuple[ExtMessage | None, str]:
         ch = self._channels.get(channel_id)
-        if not ch or requester_id != ch.owner_id:
+        if not ch:
             return None, "Channel not found"
         if sender_id not in ch.allowed_senders:
             return None, "Sender not authorized"
@@ -79,7 +79,7 @@ class InterExtensionMessaging:
     def receive(self, channel_id: str, receiver_id: str,
                 limit: int = 50) -> tuple[list[ExtMessage], str]:
         ch = self._channels.get(channel_id)
-        if not ch or requester_id != ch.owner_id:
+        if not ch:
             return [], "Channel not found"
         if receiver_id not in ch.allowed_receivers and receiver_id != ch.owner_id:
             return [], "Receiver not authorized"
@@ -87,7 +87,6 @@ class InterExtensionMessaging:
 
     def consume(self, channel_id: str, receiver_id: str,
                 count: int = 1) -> list[ExtMessage]:
-        """Receive and remove messages from queue."""
         ch = self._channels.get(channel_id)
         if not ch or (receiver_id not in ch.allowed_receivers and receiver_id != ch.owner_id):
             return []
@@ -100,7 +99,6 @@ class InterExtensionMessaging:
         return self._channels.get(channel_id)
 
     def list_channels(self, extension_id: str) -> list[Channel]:
-        """List channels where extension is owner, sender, or receiver."""
         return [
             ch for ch in self._channels.values()
             if extension_id == ch.owner_id
