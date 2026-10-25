@@ -28,16 +28,16 @@ describe("DeploymentHistoryPanel", () => {
 
   it("shows rollback button for success", () => {
     const onRollback = vi.fn();
-    const { getByText } = render(
+    const { getByText, getAllByText } = render(
       <DeploymentHistoryPanel deployments={mockDeployments} onRollback={onRollback} />
     );
-    fireEvent.click(getByText("↩ Rollback"));
+    const btns = getAllByText("↩ Rollback"); fireEvent.click(btns[0]);
     expect(onRollback).toHaveBeenCalledWith("d1");
   });
 
   it("shows redeploy button for failed", () => {
     const onRedeploy = vi.fn();
-    const { getByText } = render(
+    const { getByText, getAllByText } = render(
       <DeploymentHistoryPanel deployments={mockDeployments} onRedeploy={onRedeploy} />
     );
     fireEvent.click(getByText("🔄 Redeploy"));
