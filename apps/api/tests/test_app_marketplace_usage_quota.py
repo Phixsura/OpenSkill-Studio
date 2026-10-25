@@ -1,25 +1,61 @@
-from app.services.app_marketplace_usage_quota import get_usage_summary, check_quota
+from app.services.app_marketplace_usage_quota import (
+    UsageQuotaManager, QuotaType, OveragePolicy,
+)
 
-def test_summary():
-    usage = {"api_calls": 800, "storage_mb": 50, "webhooks": 3, "team_members": 1}
-    r = get_usage_summary(plan="free", usage=usage)
-    assert r["plan"] == "free"
-    api = next(res for res in r["resources"] if res["resource"] == "api_calls")
-    assert api["usage_pct"] == 80.0
-    assert api["warning"]
 
-def test_enterprise_unlimited():
-    r = get_usage_summary(plan="enterprise", usage={"api_calls": 999999})
-    api = next(res for res in r["resources"] if res["resource"] == "api_calls")
-    assert api["unlimited"]
-    assert not r["any_exceeded"]
+def test_set_and_consume():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-1", QuotaType.API_CALLS, 100)
+    ok, _ = qm.consume("org-1", QuotaType.API_CALLS, 50)
+    assert ok is True
+    quota = qm.get_quota("org-1", QuotaType.API_CALLS)
+    assert quota.used == 50
+    assert quota.remaining == 50
 
-def test_check_allowed():
-    r = check_quota(plan="starter", resource="api_calls", current=5000)
-    assert r["allowed"]
-    assert r["remaining"] == 5000
 
-def test_check_exceeded():
-    r = check_quota(plan="free", resource="api_calls", current=1000)
-    assert not r["allowed"]
-    assert r["upgrade_needed"]
+def test_block_on_exceed():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-2", QuotaType.STORAGE_MB, 10)
+    qm.consume("org-2", QuotaType.STORAGE_MB, 8)
+    ok, msg = qm.consume("org-2", QuotaType.STORAGE_MB, 5)
+    assert ok is False
+    assert "exceeded" in msg
+
+
+def test_throttle_policy():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-3", QuotaType.API_CALLS, 10, OveragePolicy.THROTTLE)
+    qm.consume("org-3", QuotaType.API_CALLS, 10)
+    ok, msg = qm.consume("org-3", QuotaType.API_CALLS, 5)
+    assert ok is True
+    assert "Throttled" in msg
+
+
+def test_alert_threshold():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-4", QuotaType.WEBHOOKS, 100, alert_threshold=0.8)
+    qm.consume("org-4", QuotaType.WEBHOOKS, 85)
+    alerts = qm.get_alerts("org-4")
+    assert len(alerts) == 1
+    assert "85" in str(alerts[0]["usage_percent"])
+
+
+def test_get_all_quotas():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-5", QuotaType.API_CALLS, 1000)
+    qm.set_quota("org-5", QuotaType.STORAGE_MB, 500)
+    qm.consume("org-5", QuotaType.API_CALLS, 200)
+    all_q = qm.get_all_quotas("org-5")
+    assert len(all_q) == 2
+    api = next(q for q in all_q if q["type"] == "api_calls")
+    assert api["used"] == 200
+    assert api["remaining"] == 800
+
+
+def test_reset():
+    qm = UsageQuotaManager()
+    qm.set_quota("org-6", QuotaType.COMPUTE_SECONDS, 3600)
+    qm.consume("org-6", QuotaType.COMPUTE_SECONDS, 1000)
+    qm.reset_quota("org-6", QuotaType.COMPUTE_SECONDS)
+    quota = qm.get_quota("org-6", QuotaType.COMPUTE_SECONDS)
+    assert quota.used == 0
