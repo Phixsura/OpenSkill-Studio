@@ -46,6 +46,8 @@ class ApiGatewayRouterService:
             raise ValueError("Path must start with /")
         if ".." in path_pattern:
             raise ValueError("Path traversal not allowed")
+        # Cap priority to prevent hijacking
+        priority = min(priority, 100)
 
         route_id = f"rt_{secrets.token_urlsafe(8)}"
         route = Route(
@@ -91,8 +93,13 @@ class ApiGatewayRouterService:
             return None
         return dict(zip(param_names, m.groups()))
 
-    def unregister(self, route_id: str) -> bool:
-        route = self._routes.pop(route_id, None)
+    def unregister(self, route_id: str, caller_extension_id: str = "") -> bool:
+        route = self._routes.get(route_id)
+        if not route:
+            return False
+        if caller_extension_id and route.extension_id != caller_extension_id:
+            return False
+        self._routes.pop(route_id)
         if route:
             self._by_method[route.method] = [
                 rid for rid in self._by_method[route.method] if rid != route_id
