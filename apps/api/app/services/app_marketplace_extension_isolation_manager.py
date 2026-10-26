@@ -42,6 +42,8 @@ class IsolationManagerService:
     def register(self, sandbox_id: str, tenant_id: str,
                  isolation_level: IsolationLevel = IsolationLevel.FULL,
                  comm_policy: CommunicationPolicy = CommunicationPolicy.DENY_ALL) -> SandboxBoundary:
+        if sandbox_id in self._boundaries:
+            raise ValueError("Sandbox already registered")
         namespace = f"ns_{tenant_id}_{secrets.token_hex(4)}"
         boundary = SandboxBoundary(
             sandbox_id=sandbox_id, tenant_id=tenant_id,
@@ -53,10 +55,13 @@ class IsolationManagerService:
 
     def allow_peer(self, sandbox_id: str, peer_sandbox_id: str) -> bool:
         boundary = self._boundaries.get(sandbox_id)
-        if not boundary:
+        peer_boundary = self._boundaries.get(peer_sandbox_id)
+        if not boundary or not peer_boundary:
             return False
         if boundary.comm_policy != CommunicationPolicy.ALLOW_EXPLICIT:
             return False
+        if boundary.tenant_id != peer_boundary.tenant_id:
+            return False  # cross-tenant peer not allowed
         boundary.allowed_peers.add(peer_sandbox_id)
         return True
 
