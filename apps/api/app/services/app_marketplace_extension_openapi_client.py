@@ -26,6 +26,22 @@ class GeneratedClient:
     auth_type: str = ""
 
 
+SAFE_IDENT = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+ALLOWED_METHODS = {'get', 'post', 'put', 'delete', 'patch'}
+
+
+def _sanitize_ident(name: str) -> str:
+    clean = re.sub(r'[^A-Za-z0-9_]', '_', name)
+    if not clean or clean[0].isdigit():
+        clean = '_' + clean
+    return clean
+
+
+def _escape_str(s: str) -> str:
+    return s.replace('\', '\\').replace("'", "\'").replace('"', '\"').replace('
+', ' ')
+
+
 class OpenApiClientService:
     """Generates typed API clients from OpenAPI specs."""
 
@@ -71,13 +87,13 @@ class OpenApiClientService:
     def _make_method_name(self, method: str, path: str, operation: dict) -> str:
         op_id = operation.get("operationId")
         if op_id:
-            return self._to_camel(op_id)
+            return _sanitize_ident(self._to_camel(op_id))
         parts = [p for p in path.split("/") if p and not p.startswith("{")]
         if parts:
             resource = parts[-1]
             prefix = {"get": "get", "post": "create", "put": "update",
                        "delete": "delete", "patch": "patch"}.get(method, method)
-            return f"{prefix}{resource.capitalize()}"
+            return _sanitize_ident(f"{prefix}{resource.capitalize()}")
         return f"{method}Request"
 
     def _to_camel(self, name: str) -> str:
@@ -87,7 +103,7 @@ class OpenApiClientService:
     def generate_typescript(self, client: GeneratedClient) -> str:
         lines = [f"// Auto-generated client for {client.class_name}",
                  f"export class {client.class_name} {{",
-                 f"  private baseUrl = '{client.base_url}';"]
+                 f"  private baseUrl = '{_escape_str(client.base_url)}';"]
         if client.auth_type:
             lines.append(f"  private authType = '{client.auth_type}';")
         lines.append("")
@@ -99,7 +115,7 @@ class OpenApiClientService:
             )
             if m.has_body:
                 param_str += (", " if param_str else "") + "body: Record<string, unknown>"
-            lines.append(f"  /** {m.description} */")
+            lines.append(f"  /** {_escape_str(m.description)} */")
             lines.append(f"  async {m.name}({param_str}) {{")
             lines.append(f"    return this.request('{m.method}', `{m.path}`);")
             lines.append("  }")
@@ -122,7 +138,7 @@ class OpenApiClientService:
         lines = [f'"""Auto-generated client for {client.class_name}."""',
                  f"import httpx", "",
                  f"class {client.class_name}:",
-                 f'    def __init__(self, base_url: str = "{client.base_url}"):',
+                 f'    def __init__(self, base_url: str = "{_escape_str(client.base_url)}"):',
                  f"        self.base_url = base_url",
                  f"        self.client = httpx.Client(base_url=base_url)", ""]
 
@@ -131,7 +147,7 @@ class OpenApiClientService:
             sig = f"self, {params}" if params else "self"
             lines.append(f'    def {m.name}({sig}):')
             lines.append(f'        """{ m.description}"""')
-            lines.append(f'        return self.client.{m.method.lower()}("{m.path}").json()')
+            lines.append(f'        return self.client.{m.method.lower()}("{_escape_str(m.path)}").json()')
             lines.append("")
 
         return "\n".join(lines)
