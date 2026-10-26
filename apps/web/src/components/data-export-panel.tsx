@@ -1,27 +1,37 @@
 "use client";
-interface ExportInfo { id: string; format: string; status: string; rowCount: number; sizeBytes: number; }
-interface DataExportPanelProps { exports: ExportInfo[]; total: number; }
-const FMT_BADGE: Record<string, string> = { csv: "bg-green-100 text-green-700", json: "bg-blue-100 text-blue-700", parquet: "bg-purple-100 text-purple-700" };
-export function DataExportPanel({ exports, total }: DataExportPanelProps) {
+import { useState } from "react";
+
+const resources = ["extensions", "analytics", "reviews", "users", "connectors"];
+const formats = ["json", "csv", "yaml"];
+
+export function DataExportPanel({ onExport }: { onExport?: (resource: string, format: string) => void }) {
+  const [resource, setResource] = useState("extensions");
+  const [format, setFormat] = useState("json");
+
   return (
-    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">📤 Data Exports</h3>
-        <span className="text-xs text-gray-400">{total} exports</span>
+    <div className="border dark:border-gray-700 rounded-xl p-4 space-y-4">
+      <h3 className="font-bold text-sm">Export Data</h3>
+      <div>
+        <label className="text-xs font-medium block mb-1">Resource</label>
+        <div className="flex flex-wrap gap-1">
+          {resources.map(r => (
+            <button key={r} onClick={() => setResource(r)}
+              className={`text-xs px-3 py-1 rounded-full capitalize ${resource === r ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>{r}</button>
+          ))}
+        </div>
       </div>
-      <div className="divide-y dark:divide-gray-700">
-        {exports.map(e => (
-          <div key={e.id} className="flex items-center justify-between px-4 py-1.5 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-mono">{e.id}</span>
-              <span className={`px-1 rounded text-[10px] ${FMT_BADGE[e.format] ?? ""}`}>{e.format}</span>
-            </div>
-            <span className={e.status === "completed" ? "text-green-600" : e.status === "failed" ? "text-red-500" : "text-yellow-600"}>
-              {e.status}{e.rowCount > 0 ? ` · ${e.rowCount.toLocaleString()} rows` : ""}
-            </span>
-          </div>
-        ))}
+      <div>
+        <label className="text-xs font-medium block mb-1">Format</label>
+        <div className="flex gap-1">
+          {formats.map(f => (
+            <button key={f} onClick={() => setFormat(f)}
+              className={`text-xs px-3 py-1 rounded-full uppercase ${format === f ? "bg-green-500 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>{f}</button>
+          ))}
+        </div>
       </div>
+      <button onClick={() => onExport?.(resource, format)} className="w-full bg-blue-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-600">
+        📥 Export {resource} as {format.toUpperCase()}
+      </button>
     </div>
   );
 }
