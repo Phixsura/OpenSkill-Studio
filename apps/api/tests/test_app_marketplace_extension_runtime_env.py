@@ -20,8 +20,8 @@ def test_unsupported_runtime():
 
 def test_forbidden_env_var():
     svc = RuntimeEnvService()
-    with pytest.raises(ValueError, match="Forbidden env var"):
-        svc.create("ext-1", "node18", env_vars={"AWS_SECRET": "x"})
+    with pytest.raises(ValueError, match="EXT_"):
+        svc.create("ext-1", "node18", env_vars={"SYSTEM_PATH": "x"})
 
 
 def test_lifecycle():
@@ -57,3 +57,9 @@ def test_resource_limits_clamped():
     env = svc.create("ext-1", "node18", limits={"cpu_cores": 99, "memory_mb": 9999})
     assert env.limits.cpu_cores == 4.0
     assert env.limits.memory_mb == 2048
+
+
+def test_allowed_ext_prefix():
+    svc = RuntimeEnvService()
+    env = svc.create("ext-1", "node18", env_vars={"EXT_API_KEY": "abc123"})
+    assert env.env_vars["EXT_API_KEY"] == "abc123"

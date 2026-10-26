@@ -49,13 +49,9 @@ class RuntimeEnvironment:
 
 
 SUPPORTED_RUNTIMES = {"node18", "node20", "python3.11", "python3.12", "deno", "bun"}
-FORBIDDEN_ENV_PREFIXES = (
-    "AWS_", "AZURE_", "GCP_", "SECRET_", "INTERNAL_",
-    "LD_", "DYLD_", "NODE_OPTIONS", "NODE_EXTRA", "PYTHONPATH",
-    "BASH_", "GIT_", "SSH_", "GOOGLE_", "DOCKER_", "KUBE",
-    "DATABASE_", "DB_", "REDIS_", "S3_", "MINIO_",
-    "PATH", "HOME", "USER", "SHELL",
-)
+import re
+
+ALLOWED_ENV_KEY = re.compile(r"^EXT_[A-Z0-9_]{1,64}$")
 
 
 class RuntimeEnvService:
@@ -71,11 +67,11 @@ class RuntimeEnvService:
         if runtime not in SUPPORTED_RUNTIMES:
             raise ValueError(f"Unsupported runtime: {runtime}. Supported: {sorted(SUPPORTED_RUNTIMES)}")
 
-        # Validate env vars
+        # Validate env vars — allowlist: must match EXT_* pattern
         safe_vars = {}
         for k, v in (env_vars or {}).items():
-            if any(k.upper().startswith(p) for p in FORBIDDEN_ENV_PREFIXES):
-                raise ValueError(f"Forbidden env var prefix: {k}")
+            if not ALLOWED_ENV_KEY.fullmatch(k):
+                raise ValueError(f"Env var must match EXT_* pattern: {k}")
             safe_vars[k] = v
 
         rl = ResourceLimits()
