@@ -14,12 +14,15 @@ BLOCKED_MODULES = {
     "pickle", "shelve", "marshal", "code", "codeop", "compile",
     "child_process", "fs", "net", "cluster", "dgram", "dns",
     "process", "v8", "vm", "worker_threads",
+    "posix", "nt", "_posixsubprocess", "multiprocessing", "pty",
+    "builtins", "runpy", "signal", "gc", "inspect", "ssl",
+    "_io", "io", "module", "repl", "async_hooks",
 }
 
 BUILTIN_ALLOWED = {
     "json", "math", "re", "datetime", "collections", "itertools",
     "functools", "hashlib", "hmac", "base64", "uuid", "typing",
-    "dataclasses", "enum", "abc", "copy", "io", "string",
+    "dataclasses", "enum", "abc", "copy", "string",
     "textwrap", "difflib", "unicodedata", "time",
     # Node built-ins
     "path", "url", "querystring", "crypto", "buffer", "events",
@@ -52,8 +55,9 @@ class SandboxModuleLoaderService:
         return added
 
     def can_import(self, sandbox_id: str, module_name: str) -> ModuleImport:
-        # Strip submodules for top-level check
-        top_level = module_name.split(".")[0]
+        # Normalize and strip submodules for top-level check
+        normalized = module_name.removeprefix("node:").lstrip("_")
+        top_level = normalized.split(".")[0]
 
         if top_level in BLOCKED_MODULES:
             result = ModuleImport(module_name, False, f"Blocked: {top_level} is restricted")
