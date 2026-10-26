@@ -46,7 +46,7 @@ def test_middlewares():
 def test_unregister():
     svc = ApiGatewayRouterService()
     r = svc.register("GET", "/api/test", "ext-1", "h")
-    assert svc.unregister(r.route_id) is True
+    assert svc.unregister(r.route_id, "ext-1") is True
     assert svc.match("GET", "/api/test") is None
 
 

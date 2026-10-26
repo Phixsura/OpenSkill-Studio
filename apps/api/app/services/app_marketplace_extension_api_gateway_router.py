@@ -93,11 +93,11 @@ class ApiGatewayRouterService:
             return None
         return dict(zip(param_names, m.groups()))
 
-    def unregister(self, route_id: str, caller_extension_id: str = "") -> bool:
+    def unregister(self, route_id: str, caller_extension_id: str) -> bool:
         route = self._routes.get(route_id)
         if not route:
             return False
-        if caller_extension_id and route.extension_id != caller_extension_id:
+        if not caller_extension_id or route.extension_id != caller_extension_id:
             return False
         self._routes.pop(route_id)
         if route:
