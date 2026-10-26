@@ -2,22 +2,22 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QuickActionBar } from "@/components/quick-action-bar";
 
+const actions = [
+  { actionId: "a1", name: "Deploy", icon: "🚀", dangerous: false, requiresConfirm: false, executionCount: 5 },
+  { actionId: "a2", name: "Reset DB", icon: "💣", dangerous: true, requiresConfirm: true, executionCount: 0 },
+];
+
 describe("QuickActionBar", () => {
-  const actions = [
-    { id: "restart", label: "Restart", icon: "🔄", danger: false, confirm: false },
-    { id: "delete", label: "Delete", icon: "🗑️", danger: true, confirm: true },
-  ];
-  it("renders", () => {
-    const { container } = render(<QuickActionBar actions={actions} onExecute={vi.fn()} />);
-    expect(container.textContent).toContain("🔄");
-    expect(container.textContent).toContain("Restart");
-    expect(container.textContent).toContain("🗑️");
-    expect(container.textContent).toContain("Delete");
+  it("renders actions", () => {
+    const { container } = render(<QuickActionBar actions={actions} />);
+    expect(container.textContent).toContain("Deploy");
+    expect(container.textContent).toContain("Reset DB");
+    expect(container.textContent).toContain("×5");
   });
-  it("execute", () => {
+  it("calls onExecute", () => {
     const fn = vi.fn();
-    const { container } = render(<QuickActionBar actions={actions} onExecute={fn} />);
-    fireEvent.click(container.querySelectorAll("button")[0]);
-    expect(fn).toHaveBeenCalledWith("restart");
+    const { getByText } = render(<QuickActionBar actions={actions} onExecute={fn} />);
+    fireEvent.click(getByText("Deploy"));
+    expect(fn).toHaveBeenCalledWith("a1");
   });
 });
