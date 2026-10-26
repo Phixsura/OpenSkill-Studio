@@ -61,16 +61,15 @@ class SandboxSnapshotService:
         snapshots.append(snapshot)
         return snapshot
 
-    def restore(self, snapshot_id: str) -> dict | None:
-        for snapshots in self._snapshots.values():
-            for snap in snapshots:
-                if snap.snapshot_id == snapshot_id:
-                    return {
-                        "files": copy.deepcopy(snap.files),
-                        "env_vars": dict(snap.env_vars),
-                        "metadata": dict(snap.metadata),
-                        "restored_from": snapshot_id,
-                    }
+    def restore(self, sandbox_id: str, snapshot_id: str) -> dict | None:
+        for snap in self._snapshots.get(sandbox_id, []):
+            if snap.snapshot_id == snapshot_id:
+                return {
+                    "files": copy.deepcopy(snap.files),
+                    "env_vars": dict(snap.env_vars),
+                    "metadata": dict(snap.metadata),
+                    "restored_from": snapshot_id,
+                }
         return None
 
     def list_snapshots(self, sandbox_id: str) -> list[dict]:
@@ -81,22 +80,20 @@ class SandboxSnapshotService:
             for s in self._snapshots.get(sandbox_id, [])
         ]
 
-    def delete(self, snapshot_id: str) -> bool:
-        for sandbox_id, snapshots in self._snapshots.items():
-            for i, snap in enumerate(snapshots):
-                if snap.snapshot_id == snapshot_id:
-                    snapshots.pop(i)
-                    return True
+    def delete(self, sandbox_id: str, snapshot_id: str) -> bool:
+        for i, snap in enumerate(self._snapshots.get(sandbox_id, [])):
+            if snap.snapshot_id == snapshot_id:
+                self._snapshots[sandbox_id].pop(i)
+                return True
         return False
 
-    def compare(self, snap_id_1: str, snap_id_2: str) -> dict | None:
+    def compare(self, sandbox_id: str, snap_id_1: str, snap_id_2: str) -> dict | None:
         s1 = s2 = None
-        for snapshots in self._snapshots.values():
-            for snap in snapshots:
-                if snap.snapshot_id == snap_id_1:
-                    s1 = snap
-                if snap.snapshot_id == snap_id_2:
-                    s2 = snap
+        for snap in self._snapshots.get(sandbox_id, []):
+            if snap.snapshot_id == snap_id_1:
+                s1 = snap
+            if snap.snapshot_id == snap_id_2:
+                s2 = snap
         if not s1 or not s2:
             return None
 

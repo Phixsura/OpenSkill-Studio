@@ -19,7 +19,7 @@ def test_restore():
     snap = svc.capture("sb-1", "v1",
                        files={"/a.txt": b"hello"},
                        env_vars={"EXT_KEY": "val"})
-    restored = svc.restore(snap.snapshot_id)
+    restored = svc.restore("sb-1", snap.snapshot_id)
     assert restored is not None
     assert restored["files"]["/a.txt"] == b"hello"
     assert restored["env_vars"]["EXT_KEY"] == "val"
@@ -29,7 +29,7 @@ def test_compare():
     svc = SandboxSnapshotService()
     s1 = svc.capture("sb-1", "v1", files={"/a.txt": b"old", "/b.txt": b"keep"})
     s2 = svc.capture("sb-1", "v2", files={"/a.txt": b"new", "/c.txt": b"added"})
-    diff = svc.compare(s1.snapshot_id, s2.snapshot_id)
+    diff = svc.compare("sb-1", s1.snapshot_id, s2.snapshot_id)
     assert "/c.txt" in diff["added"]
     assert "/b.txt" in diff["removed"]
     assert "/a.txt" in diff["modified"]
@@ -38,7 +38,7 @@ def test_compare():
 def test_delete():
     svc = SandboxSnapshotService()
     snap = svc.capture("sb-1", "tmp", files={"/x": b"y"})
-    assert svc.delete(snap.snapshot_id) is True
+    assert svc.delete("sb-1", snap.snapshot_id) is True
     assert len(svc.list_snapshots("sb-1")) == 0
 
 
@@ -59,4 +59,4 @@ def test_size_limit():
 
 def test_restore_not_found():
     svc = SandboxSnapshotService()
-    assert svc.restore("nonexistent") is None
+    assert svc.restore("sb-1", "nonexistent") is None
