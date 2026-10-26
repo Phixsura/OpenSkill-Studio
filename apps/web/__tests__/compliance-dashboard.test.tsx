@@ -1,22 +1,41 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { ComplianceDashboard } from "@/components/compliance-dashboard";
 
+const mockRecords = [
+  { developerId: "d1", developerName: "Alice", status: "compliant" as const,
+    violations: 0, warnings: 0, hasAcceptedTos: true },
+  { developerId: "d2", developerName: "Bob", status: "violation" as const,
+    violations: 2, warnings: 1, hasAcceptedTos: true },
+  { developerId: "d3", developerName: "Charlie", status: "suspended" as const,
+    violations: 3, warnings: 2, hasAcceptedTos: false },
+];
+
 describe("ComplianceDashboard", () => {
-  it("renders compliance", () => {
-    const { container } = render(
-      <ComplianceDashboard overall={false} policies={{
-        gdpr: { policy: "GDPR", passed: 3, total: 5, compliant: false, compliancePct: 60,
-          checks: [{ check: "consent", passed: true }, { check: "deletion", passed: false }] },
-        soc2: { policy: "SOC 2", passed: 5, total: 5, compliant: true, compliancePct: 100,
-          checks: [{ check: "encryption", passed: true }] },
-      }} />
-    );
-    expect(container.textContent).toContain("Compliance");
-    expect(container.textContent).toContain("Action Required");
-    expect(container.textContent).toContain("GDPR");
-    expect(container.textContent).toContain("3/5");
-    expect(container.textContent).toContain("SOC 2");
-    expect(container.textContent).toContain("100%");
+  it("renders status summary", () => {
+    const { container } = render(<ComplianceDashboard records={mockRecords} />);
+    expect(container.textContent).toContain("Developer Compliance");
+    expect(container.textContent).toContain("Compliant");
+    expect(container.textContent).toContain("Suspended");
+  });
+
+  it("shows violations and warnings", () => {
+    const { container } = render(<ComplianceDashboard records={mockRecords} />);
+    expect(container.textContent).toContain("2 violations");
+    expect(container.textContent).toContain("ToS pending");
+  });
+
+  it("calls onSuspend", () => {
+    const onSuspend = vi.fn();
+    const { getByText } = render(<ComplianceDashboard records={mockRecords} onSuspend={onSuspend} />);
+    fireEvent.click(getByText("Suspend"));
+    expect(onSuspend).toHaveBeenCalledWith("d2");
+  });
+
+  it("calls onRestore", () => {
+    const onRestore = vi.fn();
+    const { getByText } = render(<ComplianceDashboard records={mockRecords} onRestore={onRestore} />);
+    fireEvent.click(getByText("Restore"));
+    expect(onRestore).toHaveBeenCalledWith("d3");
   });
 });
