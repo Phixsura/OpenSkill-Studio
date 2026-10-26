@@ -31,13 +31,13 @@ def test_block_private_ip():
     svc.create_policy("ext-1", default_action=RuleAction.ALLOW)
     r = svc.check_connection("ext-1", "192.168.1.1", 80, Protocol.HTTP)
     assert r["allowed"] is False
-    assert "Private IP" in r["reason"]
+    assert "Private" in r["reason"]
 
 
 def test_cannot_allow_private_ip_rule():
     svc = SandboxNetworkService()
     svc.create_policy("ext-1")
-    with pytest.raises(ValueError, match="private IP"):
+    with pytest.raises(ValueError, match="private"):
         svc.add_rule("ext-1", RuleAction.ALLOW, "10.0.0.1")
 
 
@@ -56,3 +56,17 @@ def test_audit_log():
     log = svc.get_audit_log("ext-1")
     assert len(log) == 1
     assert log[0]["host"] == "test.com"
+
+
+def test_block_cgnat():
+    svc = SandboxNetworkService()
+    svc.create_policy("ext-1", default_action=RuleAction.ALLOW)
+    r = svc.check_connection("ext-1", "100.64.0.1", 80, Protocol.HTTP)
+    assert r["allowed"] is False
+
+
+def test_bare_wildcard_rejected():
+    svc = SandboxNetworkService()
+    svc.create_policy("ext-1")
+    with pytest.raises(ValueError, match="wildcard"):
+        svc.add_rule("ext-1", RuleAction.ALLOW, "*")

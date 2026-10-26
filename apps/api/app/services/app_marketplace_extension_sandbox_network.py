@@ -44,13 +44,21 @@ class NetworkPolicy:
     connection_log: list[dict] = field(default_factory=list)
 
 
-PRIVATE_RANGES = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),
-]
+CGNAT_RANGE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_internal(addr: str) -> bool:
+    """Check if an IP address is internal/private/reserved."""
+    try:
+        ip = ipaddress.ip_address(addr)
+        # Handle IPv4-mapped IPv6
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        return (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_unspecified or ip.is_multicast
+                or ip in CGNAT_RANGE)
+    except ValueError:
+        return False
 
 
 class SandboxNetworkService:
@@ -80,14 +88,10 @@ class SandboxNetworkService:
             raise ValueError("No policy for extension")
         # Block private IP ranges in allow rules
         if action == RuleAction.ALLOW:
-            try:
-                ip = ipaddress.ip_address(host_pattern)
-                if any(ip in net for net in PRIVATE_RANGES):
-                    raise ValueError(f"Cannot allow private IP: {host_pattern}")
-            except ValueError as e:
-                if "private IP" in str(e):
-                    raise
-                # Not an IP, it's a hostname pattern — ok
+            if host_pattern == "*":
+                raise ValueError("Bare wildcard allow rules are not permitted")
+            if _is_internal(host_pattern):
+                raise ValueError(f"Cannot allow private/internal IP: {host_pattern}")
 
         rule = NetworkRule(
             rule_id=f"nr_{secrets.token_urlsafe(8)}",
@@ -105,13 +109,11 @@ class SandboxNetworkService:
         if not policy:
             return {"allowed": False, "reason": "No policy configured"}
 
-        # Block private IPs regardless of rules
-        try:
-            ip = ipaddress.ip_address(host)
-            if any(ip in net for net in PRIVATE_RANGES):
-                return {"allowed": False, "reason": "Private IP blocked"}
-        except ValueError:
-            pass  # hostname, not IP
+        # Block internal/private/reserved IPs regardless of rules
+        if _is_internal(host):
+            return {"allowed": False, "reason": "Private/internal IP blocked"}
+
+        host = host.rstrip(".").lower()
 
         # Evaluate rules by priority
         for rule in policy.rules:
@@ -131,7 +133,8 @@ class SandboxNetworkService:
     def _matches(self, rule: NetworkRule, host: str, port: int,
                  protocol: Protocol) -> bool:
         # Check host pattern
-        pattern = rule.host_pattern.replace(".", r"\.").replace("*", ".*")
+        escaped = re.escape(rule.host_pattern).replace(r"\*", "[^.]+")
+        pattern = escaped
         if not re.fullmatch(pattern, host):
             return False
         if rule.ports and port not in rule.ports:
