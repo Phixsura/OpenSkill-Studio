@@ -1,20 +1,46 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { QuotaUsagePanel } from "@/components/quota-usage-panel";
 
+const mockQuotas = [
+  { resource: "api_calls", state: "ok" as const, current: 500, softLimit: 800, hardLimit: 1000, usagePercent: 50 },
+  { resource: "storage_mb", state: "warning" as const, current: 85, softLimit: 80, hardLimit: 100, usagePercent: 85 },
+  { resource: "bandwidth_mb", state: "exceeded" as const, current: 105, softLimit: 80, hardLimit: 100, usagePercent: 105 },
+];
+
 describe("QuotaUsagePanel", () => {
-  it("renders quotas", () => {
+  it("renders quotas with usage", () => {
     const { container } = render(
-      <QuotaUsagePanel quotas={[
-        { resource: "api_calls", usage: 85, hard: 100, soft: 80, pct: 85, unit: "count", status: "warning" },
-        { resource: "storage", usage: 500, hard: 1000, soft: 800, pct: 50, unit: "MB", status: "ok" },
-      ]} />
+      <QuotaUsagePanel quotas={mockQuotas} extensionName="MyExt" />
     );
-    expect(container.textContent).toContain("Quotas");
     expect(container.textContent).toContain("api calls");
-    expect(container.textContent).toContain("85");
-    expect(container.textContent).toContain("/ 100");
-    expect(container.textContent).toContain("storage");
-    expect(container.textContent).toContain("500");
+    expect(container.textContent).toContain("500 / 1000");
+    expect(container.textContent).toContain("2 issues");
+  });
+
+  it("shows state colors", () => {
+    const { container } = render(
+      <QuotaUsagePanel quotas={mockQuotas} extensionName="Test" />
+    );
+    expect(container.textContent).toContain("ok");
+    expect(container.textContent).toContain("warning");
+    expect(container.textContent).toContain("exceeded");
+  });
+
+  it("shows soft/hard limit markers", () => {
+    const { container } = render(
+      <QuotaUsagePanel quotas={mockQuotas} extensionName="Test" />
+    );
+    expect(container.textContent).toContain("soft: 800");
+    expect(container.textContent).toContain("hard: 1000");
+  });
+
+  it("calls onReset for non-ok quotas", () => {
+    const onReset = vi.fn();
+    const { getAllByText } = render(
+      <QuotaUsagePanel quotas={mockQuotas} extensionName="Test" onReset={onReset} />
+    );
+    fireEvent.click(getAllByText("Reset")[0]);
+    expect(onReset).toHaveBeenCalledWith("storage_mb");
   });
 });
