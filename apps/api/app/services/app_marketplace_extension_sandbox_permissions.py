@@ -89,20 +89,24 @@ class SandboxPermissionService:
         self._grant_index[key] = grant_id
         return grant
 
-    def approve(self, grant_id: str) -> bool:
+    def approve(self, grant_id: str, approver_user_id: str = "") -> bool:
         grant = self._grants.get(grant_id)
-        if grant and grant.status == GrantStatus.PENDING:
-            grant.status = GrantStatus.GRANTED
-            return True
-        return False
+        if not grant or grant.status != GrantStatus.PENDING:
+            return False
+        if approver_user_id and grant.user_id != approver_user_id:
+            raise PermissionError("Only the target user may approve this grant")
+        grant.status = GrantStatus.GRANTED
+        return True
 
-    def deny(self, grant_id: str, reason: str = "") -> bool:
+    def deny(self, grant_id: str, reason: str = "", denier_user_id: str = "") -> bool:
         grant = self._grants.get(grant_id)
-        if grant and grant.status == GrantStatus.PENDING:
-            grant.status = GrantStatus.DENIED
-            grant.reason = reason
-            return True
-        return False
+        if not grant or grant.status != GrantStatus.PENDING:
+            return False
+        if denier_user_id and grant.user_id != denier_user_id:
+            raise PermissionError("Only the target user may deny this grant")
+        grant.status = GrantStatus.DENIED
+        grant.reason = reason
+        return True
 
     def revoke(self, grant_id: str) -> bool:
         grant = self._grants.get(grant_id)

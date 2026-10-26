@@ -64,3 +64,11 @@ def test_summary():
     s = svc.get_summary("ext-1")
     assert s["granted"] == 1
     assert s["denied"] == 1
+
+
+def test_wrong_user_cannot_approve():
+    svc = SandboxPermissionService()
+    svc.declare("ext-1", [Permission.FILE_READ])
+    grant = svc.request_grant("ext-1", "user-1", Permission.FILE_READ)
+    with pytest.raises(PermissionError, match="target user"):
+        svc.approve(grant.grant_id, approver_user_id="attacker")
