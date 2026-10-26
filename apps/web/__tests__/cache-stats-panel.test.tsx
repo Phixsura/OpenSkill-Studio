@@ -2,22 +2,30 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CacheStatsPanel } from "@/components/cache-stats-panel";
 
+const mockStats = {
+  entries: 750, sizeBytes: 25 * 1024 * 1024, hits: 15000, misses: 3000,
+  hitRate: 83.3, maxEntries: 1000, maxSizeBytes: 50 * 1024 * 1024,
+};
+
 describe("CacheStatsPanel", () => {
-  const caches = [
-    { name: "L1", type: "memory", size_mb: 64, max_size_mb: 128, hits: 900, misses: 100, hit_rate: 90, evictions: 50 },
-  ];
-  it("renders", () => {
-    const { container } = render(<CacheStatsPanel caches={caches} overallHitRate={90} onInvalidate={vi.fn()} />);
-    expect(container.textContent).toContain("Cache");
-    expect(container.textContent).toContain("90%");
-    expect(container.textContent).toContain("L1");
-    expect(container.textContent).toContain("memory");
-    expect(container.textContent).toContain("50 evictions");
+  it("renders cache metrics", () => {
+    const { container } = render(<CacheStatsPanel stats={mockStats} />);
+    expect(container.textContent).toContain("83.3%");
+    expect(container.textContent).toContain("15,000");
+    expect(container.textContent).toContain("3,000");
+    expect(container.textContent).toContain("750");
   });
-  it("flush", () => {
-    const fn = vi.fn();
-    const { container } = render(<CacheStatsPanel caches={caches} overallHitRate={90} onInvalidate={fn} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Flush")!);
-    expect(fn).toHaveBeenCalledWith("L1");
+
+  it("shows size bars", () => {
+    const { container } = render(<CacheStatsPanel stats={mockStats} />);
+    expect(container.textContent).toContain("750/1000");
+    expect(container.textContent).toContain("25.0MB");
+  });
+
+  it("calls onClear", () => {
+    const onClear = vi.fn();
+    const { getByText } = render(<CacheStatsPanel stats={mockStats} onClear={onClear} />);
+    fireEvent.click(getByText("Clear All"));
+    expect(onClear).toHaveBeenCalled();
   });
 });

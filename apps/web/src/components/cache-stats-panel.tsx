@@ -1,36 +1,82 @@
 "use client";
 
-interface CacheInfo { name: string; type: string; size_mb: number; max_size_mb: number;
-  hits: number; misses: number; hit_rate: number; evictions: number; }
-interface CacheStatsPanelProps { caches: CacheInfo[]; overallHitRate: number; onInvalidate: (name: string) => void; }
+interface CacheStats {
+  entries: number;
+  sizeBytes: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  maxEntries: number;
+  maxSizeBytes: number;
+}
 
-export function CacheStatsPanel({ caches, overallHitRate, onInvalidate }: CacheStatsPanelProps) {
+function formatBytes(b: number) {
+  if (b < 1024) return `${b}B`;
+  if (b < 1048576) return `${(b / 1024).toFixed(1)}KB`;
+  return `${(b / 1048576).toFixed(1)}MB`;
+}
+
+export function CacheStatsPanel({
+  stats,
+  onClear,
+  onInvalidate,
+}: {
+  stats: CacheStats;
+  onClear?: () => void;
+  onInvalidate?: (pattern: string) => void;
+}) {
+  const fillPct = stats.maxEntries > 0 ? Math.round((stats.entries / stats.maxEntries) * 100) : 0;
+  const sizePct = stats.maxSizeBytes > 0 ? Math.round((stats.sizeBytes / stats.maxSizeBytes) * 100) : 0;
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Cache</h2>
-        <span className={`text-sm font-bold ${overallHitRate >= 80 ? "text-green-600" : "text-yellow-600"}`}>
-          {overallHitRate}% hit rate
-        </span>
+        <h2 className="text-lg font-bold">⚡ Cache</h2>
+        <button onClick={onClear} className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg">Clear All</button>
       </div>
-      {caches.map(c => (
-        <div key={c.name} className="rounded-lg border p-3 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{c.name}</span>
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">{c.type}</span>
-            </div>
-            <button onClick={() => onInvalidate(c.name)} className="text-xs text-red-500">Flush</button>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border dark:border-gray-700 p-3 text-center">
+          <span className="text-xs text-gray-500 block">Hit Rate</span>
+          <span className={`text-2xl font-bold ${stats.hitRate >= 80 ? "text-green-600" : stats.hitRate >= 50 ? "text-yellow-600" : "text-red-600"}`}>
+            {stats.hitRate}%
+          </span>
+        </div>
+        <div className="rounded-xl border dark:border-gray-700 p-3 text-center">
+          <span className="text-xs text-gray-500 block">Hits / Misses</span>
+          <span className="text-lg font-bold">
+            <span className="text-green-600">{stats.hits.toLocaleString()}</span>
+            <span className="text-gray-400 mx-1">/</span>
+            <span className="text-red-500">{stats.misses.toLocaleString()}</span>
+          </span>
+        </div>
+        <div className="rounded-xl border dark:border-gray-700 p-3 text-center">
+          <span className="text-xs text-gray-500 block">Entries</span>
+          <span className="text-lg font-bold">{stats.entries.toLocaleString()}</span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>Entries: {stats.entries}/{stats.maxEntries}</span>
+            <span>{fillPct}%</span>
           </div>
-          <div className="mt-2 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700">
-            <div className="h-full rounded-full bg-blue-500" style={{ width: `${c.hit_rate}%` }} />
-          </div>
-          <div className="mt-1 flex justify-between text-xs text-gray-400">
-            <span>{c.hit_rate}% · {c.size_mb}/{c.max_size_mb} MB</span>
-            <span>{c.evictions} evictions</span>
+          <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${fillPct}%` }} />
           </div>
         </div>
-      ))}
+        <div>
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>Size: {formatBytes(stats.sizeBytes)}/{formatBytes(stats.maxSizeBytes)}</span>
+            <span>{sizePct}%</span>
+          </div>
+          <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full ${sizePct > 80 ? "bg-red-500" : "bg-green-500"}`}
+              style={{ width: `${sizePct}%` }} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
