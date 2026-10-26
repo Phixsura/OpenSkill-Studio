@@ -14,7 +14,7 @@ def test_add_and_get_file():
     svc = WorkspaceManagerService()
     ws = svc.create("ext-1", "dev-1", "WS")
     svc.add_file(ws.workspace_id, "src/index.ts", "export default {}", caller_id="dev-1")
-    content = svc.get_file(ws.workspace_id, "src/index.ts")
+    content = svc.get_file(ws.workspace_id, "src/index.ts", "dev-1")
     assert content == "export default {}"
 
 
@@ -45,7 +45,7 @@ def test_collaborator():
     ws = svc.create("ext-1", "dev-1", "WS")
     svc.add_collaborator(ws.workspace_id, "dev-2", "dev-1")
     svc.add_file(ws.workspace_id, "collab.ts", "// by dev-2", caller_id="dev-2")
-    assert svc.get_file(ws.workspace_id, "collab.ts") is not None
+    assert svc.get_file(ws.workspace_id, "collab.ts", "dev-2") is not None
 
 
 def test_only_owner_adds_collaborator():
