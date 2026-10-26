@@ -1,53 +1,25 @@
-from app.services.app_marketplace_extension_analytics_export import (
-    AnalyticsExporter, AnalyticsRecord, ExportFormat,
-)
-import json
+from app.services.app_marketplace_extension_analytics_export import ExtAnalyticsExportService
 
-
-SAMPLE = [
-    AnalyticsRecord("2026-10-24", 10, 2, 5000, 999, 300, 5),
-    AnalyticsRecord("2026-10-25", 15, 1, 6000, 1499, 350, 3),
-    AnalyticsRecord("2026-10-26", 8, 0, 4500, 799, 280, 1),
-]
-
+def test_record_and_report():
+    svc = ExtAnalyticsExportService()
+    svc.record_event("ext-1", "install")
+    svc.record_event("ext-1", "install")
+    svc.record_event("ext-1", "view", 5)
+    report = svc.generate_report("ext-1")
+    assert report.metrics["total_events"] == 3
+    assert report.metrics["by_event"]["install"] == 2
 
 def test_export_json():
-    exp = AnalyticsExporter()
-    exp.add_records("ext-1", SAMPLE)
-    output = exp.export("ext-1", ExportFormat.JSON)
-    data = json.loads(output)
-    assert len(data) == 3
-    assert data[0]["installs"] == 10
+    svc = ExtAnalyticsExportService()
+    svc.record_event("ext-1", "click")
+    report = svc.generate_report("ext-1")
+    data = svc.export_json(report.report_id)
+    assert '"click"' in data
+    assert '"period": "daily"' in data
 
-
-def test_export_csv():
-    exp = AnalyticsExporter()
-    exp.add_records("ext-2", SAMPLE)
-    output = exp.export("ext-2", ExportFormat.CSV)
-    lines = output.strip().split("\n")
-    assert lines[0] == "date,installs,uninstalls,api_calls,revenue_cents,active_users,errors"
-    assert len(lines) == 4  # header + 3 data rows
-
-
-def test_export_summary():
-    exp = AnalyticsExporter()
-    exp.add_records("ext-3", SAMPLE)
-    output = exp.export("ext-3", ExportFormat.SUMMARY)
-    assert "ext-3" in output
-    assert "Net: 30" in output  # 33 installs - 3 uninstalls
-    assert "$32.97" in output
-    assert "Days: 3" in output
-
-
-def test_date_filtering():
-    exp = AnalyticsExporter()
-    exp.add_records("ext-4", SAMPLE)
-    output = exp.export("ext-4", ExportFormat.JSON, date_from="2026-10-25")
-    data = json.loads(output)
-    assert len(data) == 2
-
-
-def test_empty_export():
-    exp = AnalyticsExporter()
-    output = exp.export("nonexistent", ExportFormat.SUMMARY)
-    assert "No data" in output
+def test_list_reports():
+    svc = ExtAnalyticsExportService()
+    svc.generate_report("ext-1")
+    svc.generate_report("ext-1", "weekly")
+    svc.generate_report("ext-2")
+    assert len(svc.list_reports("ext-1")) == 2
