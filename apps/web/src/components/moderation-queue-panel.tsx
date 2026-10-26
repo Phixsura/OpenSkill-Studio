@@ -1,38 +1,32 @@
 "use client";
 
-interface QueueItem { queue_id: string; content_type: string; content_id: string;
-  reason: string; reported_by: string; status: string; created_at: string; }
-interface ModerationQueuePanelProps { items: QueueItem[]; pendingCount: number;
-  onApprove: (id: string) => void; onReject: (id: string) => void; }
+interface ModItem { itemId: string; contentType: string; content: string; authorId: string; status: string; extensionId: string; }
 
-const typeIcon: Record<string, string> = {
-  review: "⭐", app_listing: "📦", profile: "👤", comment: "💬", screenshot: "🖼️",
+const statusColors: Record<string, string> = {
+  pending: "bg-yellow-100 text-yellow-700", escalated: "bg-red-100 text-red-700",
+  approved: "bg-green-100 text-green-700", rejected: "bg-gray-100 text-gray-700",
 };
 
-export function ModerationQueuePanel({ items, pendingCount, onApprove, onReject }: ModerationQueuePanelProps) {
+export function ModerationQueuePanel({ items, onAction }: {
+  items: ModItem[]; onAction?: (itemId: string, action: "approved" | "rejected") => void;
+}) {
+  if (!items.length) return <div className="text-center text-green-600 py-6 text-sm">✅ Queue empty — all caught up!</div>;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Moderation Queue</h2>
-        <span className="rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30">
-          {pendingCount} pending
-        </span>
-      </div>
-      {items.map(i => (
-        <div key={i.queue_id} className="rounded-lg border p-3 dark:border-gray-700">
-          <div className="flex items-start justify-between">
+    <div className="space-y-2">
+      <div className="text-xs text-gray-500 font-medium">{items.length} items pending review</div>
+      {items.map(item => (
+        <div key={item.itemId} className="border dark:border-gray-700 rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span>{typeIcon[i.content_type] ?? "📄"}</span>
-              <div>
-                <p className="text-sm font-medium capitalize">{i.content_type.replace("_", " ")}</p>
-                <p className="text-xs text-gray-400">{i.reason}</p>
-              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[item.status] || ""}`}>{item.status}</span>
+              <span className="text-xs text-gray-500">{item.contentType} · {item.extensionId}</span>
             </div>
-            <span className="text-xs text-gray-300">{i.reported_by}</span>
+            <span className="text-xs text-gray-400">by {item.authorId}</span>
           </div>
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => onApprove(i.queue_id)} className="rounded bg-green-600 px-3 py-1 text-xs text-white">Approve</button>
-            <button onClick={() => onReject(i.queue_id)} className="rounded bg-red-600 px-3 py-1 text-xs text-white">Reject</button>
+          <p className="text-sm bg-gray-50 dark:bg-gray-800 rounded-lg p-2">{item.content}</p>
+          <div className="flex gap-2">
+            <button onClick={() => onAction?.(item.itemId, "approved")} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg">✓ Approve</button>
+            <button onClick={() => onAction?.(item.itemId, "rejected")} className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg">✕ Reject</button>
           </div>
         </div>
       ))}

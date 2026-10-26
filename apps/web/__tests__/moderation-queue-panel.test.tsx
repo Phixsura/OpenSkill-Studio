@@ -2,26 +2,22 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ModerationQueuePanel } from "@/components/moderation-queue-panel";
 
+const items = [
+  { itemId: "m1", contentType: "review", content: "Great extension!", authorId: "u1", status: "pending", extensionId: "ext-1" },
+  { itemId: "m2", contentType: "review", content: "Suspicious content", authorId: "u2", status: "escalated", extensionId: "ext-2" },
+];
+
 describe("ModerationQueuePanel", () => {
-  const items = [{
-    queue_id: "mod_1", content_type: "review", content_id: "r1",
-    reason: "Spam content", reported_by: "user_5", status: "pending", created_at: "2026-10-23",
-  }];
-  it("renders", () => {
-    const { container } = render(
-      <ModerationQueuePanel items={items} pendingCount={1} onApprove={vi.fn()} onReject={vi.fn()} />
-    );
-    expect(container.textContent).toContain("Moderation Queue");
-    expect(container.textContent).toContain("1 pending");
-    expect(container.textContent).toContain("review");
-    expect(container.textContent).toContain("Spam content");
+  it("renders queue", () => {
+    const { container } = render(<ModerationQueuePanel items={items} />);
+    expect(container.textContent).toContain("2 items pending");
+    expect(container.textContent).toContain("Great extension!");
   });
-  it("reject", () => {
+  it("approve action", () => {
     const fn = vi.fn();
-    const { container } = render(
-      <ModerationQueuePanel items={items} pendingCount={1} onApprove={vi.fn()} onReject={fn} />
-    );
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Reject")!);
-    expect(fn).toHaveBeenCalledWith("mod_1");
+    const { container } = render(<ModerationQueuePanel items={items} onAction={fn} />);
+    const approveBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent?.includes("Approve"));
+    if (approveBtn) fireEvent.click(approveBtn);
+    expect(fn).toHaveBeenCalledWith("m1", "approved");
   });
 });
