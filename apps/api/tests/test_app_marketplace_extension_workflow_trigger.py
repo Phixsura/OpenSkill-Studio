@@ -59,3 +59,20 @@ def test_invalid_operator():
     with pytest.raises(ValueError, match="Invalid operator"):
         svc.create_trigger("ext-1", "wf-1", TriggerType.WEBHOOK, "Bad",
                            conditions=[{"field": "x", "operator": "LIKE", "value": "1"}])
+
+
+def test_fail_closed_no_payload():
+    """Conditions exist but no payload — must NOT fire."""
+    svc = WorkflowTriggerService()
+    t = svc.create_trigger("ext-1", "wf-1", TriggerType.WEBHOOK, "Guarded",
+                           conditions=[{"field": "branch", "operator": "eq", "value": "main"}])
+    result = svc.fire(t.trigger_id)  # no payload
+    assert result["fired"] is False
+
+
+def test_matches_operator():
+    svc = WorkflowTriggerService()
+    t = svc.create_trigger("ext-1", "wf-1", TriggerType.WEBHOOK, "Regex",
+                           conditions=[{"field": "tag", "operator": "matches", "value": r"v\d+\.\d+"}])
+    assert svc.fire(t.trigger_id, {"tag": "v1.0"})["fired"] is True
+    assert svc.fire(t.trigger_id, {"tag": "latest"})["fired"] is False

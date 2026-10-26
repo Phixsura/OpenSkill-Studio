@@ -4,6 +4,7 @@ Supports cron schedules, webhook events, manual triggers, and conditional
 expressions that evaluate against event payloads to decide execution.
 """
 from __future__ import annotations
+import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -87,6 +88,30 @@ class WorkflowTriggerService:
         self._triggers[trigger_id] = t
         return t
 
+    def _check_condition(self, cond: TriggerCondition, sval: str) -> bool:
+        if cond.operator == "eq":
+            return sval == cond.value
+        elif cond.operator == "ne":
+            return sval != cond.value
+        elif cond.operator == "gt":
+            try:
+                return float(sval) > float(cond.value)
+            except ValueError:
+                return False
+        elif cond.operator == "lt":
+            try:
+                return float(sval) < float(cond.value)
+            except ValueError:
+                return False
+        elif cond.operator == "contains":
+            return cond.value in sval
+        elif cond.operator == "matches":
+            try:
+                return bool(re.fullmatch(cond.value, sval))
+            except re.error:
+                return False
+        return False  # unknown operator — fail closed
+
     def evaluate_conditions(self, trigger_id: str, payload: dict) -> bool:
         t = self._triggers.get(trigger_id)
         if not t or t.status != TriggerStatus.ACTIVE:
@@ -95,16 +120,7 @@ class WorkflowTriggerService:
             val = payload.get(cond.field)
             if val is None:
                 return False
-            sval = str(val)
-            if cond.operator == "eq" and sval != cond.value:
-                return False
-            elif cond.operator == "ne" and sval == cond.value:
-                return False
-            elif cond.operator == "gt" and not (float(sval) > float(cond.value)):
-                return False
-            elif cond.operator == "lt" and not (float(sval) < float(cond.value)):
-                return False
-            elif cond.operator == "contains" and cond.value not in sval:
+            if not self._check_condition(cond, str(val)):
                 return False
         return True
 
@@ -114,8 +130,8 @@ class WorkflowTriggerService:
             return {"fired": False, "reason": "Trigger not found"}
         if t.status != TriggerStatus.ACTIVE:
             return {"fired": False, "reason": f"Trigger is {t.status.value}"}
-        if t.conditions and payload:
-            if not self.evaluate_conditions(trigger_id, payload):
+        if t.conditions:
+            if not self.evaluate_conditions(trigger_id, payload or {}):
                 return {"fired": False, "reason": "Conditions not met"}
         t.fire_count += 1
         t.last_fired = datetime.now(timezone.utc).isoformat()
