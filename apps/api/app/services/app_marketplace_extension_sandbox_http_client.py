@@ -44,7 +44,8 @@ class HttpResponse:
 
 @dataclass
 class RequestLog:
-    request: HttpRequest
+    sandbox_id: str = ""
+    request: HttpRequest = None
     response: HttpResponse | None = None
     blocked: bool = False
     block_reason: str = ""
@@ -85,7 +86,8 @@ class SandboxHttpClientService:
         patterns = self._allowlist.get(sandbox_id)
         if patterns is not None:
             for pattern in patterns:
-                if re.match(pattern.replace("*", ".*"), url):
+                escaped = re.escape(pattern).replace(r"\*", "[^/]*")
+                if re.fullmatch(escaped, url):
                     return True, ""
             return False, "URL not in allowlist"
         return True, ""
@@ -108,14 +110,14 @@ class SandboxHttpClientService:
 
         # Check body size
         if len(body.encode()) > self.MAX_BODY_SIZE:
-            log = RequestLog(request=req, blocked=True, block_reason="Request body too large")
+            log = RequestLog(sandbox_id=sandbox_id, request=req, blocked=True, block_reason="Request body too large")
             self._log.append(log)
             return log
 
         # Check URL allowlist
         allowed, reason = self._is_allowed(sandbox_id, url)
         if not allowed:
-            log = RequestLog(request=req, blocked=True, block_reason=reason)
+            log = RequestLog(sandbox_id=sandbox_id, request=req, blocked=True, block_reason=reason)
             self._log.append(log)
             return log
 
@@ -126,13 +128,13 @@ class SandboxHttpClientService:
             body='{"ok": true}',
             size_bytes=13, latency_ms=50.0,
         )
-        log = RequestLog(request=req, response=resp)
+        log = RequestLog(sandbox_id=sandbox_id, request=req, response=resp)
         self._log.append(log)
         return log
 
-    def get_log(self, sandbox_id: str | None = None,
+    def get_log(self, sandbox_id: str,
                 limit: int = 50) -> list[RequestLog]:
-        return self._log[-limit:]
+        return [l for l in self._log if l.sandbox_id == sandbox_id][-limit:]
 
     def get_blocked_count(self) -> int:
         return sum(1 for l in self._log if l.blocked)

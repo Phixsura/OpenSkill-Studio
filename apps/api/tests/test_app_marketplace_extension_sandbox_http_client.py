@@ -60,5 +60,5 @@ def test_request_log():
     svc = SandboxHttpClientService()
     svc.request("sb-1", "GET", "https://api.example.com")
     svc.request("sb-1", "GET", "http://127.0.0.1")
-    assert len(svc.get_log()) == 2
+    assert len(svc.get_log("sb-1")) == 2
     assert svc.get_blocked_count() == 1
