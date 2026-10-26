@@ -49,7 +49,13 @@ class RuntimeEnvironment:
 
 
 SUPPORTED_RUNTIMES = {"node18", "node20", "python3.11", "python3.12", "deno", "bun"}
-FORBIDDEN_ENV_PREFIXES = ("AWS_", "AZURE_", "GCP_", "SECRET_", "INTERNAL_")
+FORBIDDEN_ENV_PREFIXES = (
+    "AWS_", "AZURE_", "GCP_", "SECRET_", "INTERNAL_",
+    "LD_", "DYLD_", "NODE_OPTIONS", "NODE_EXTRA", "PYTHONPATH",
+    "BASH_", "GIT_", "SSH_", "GOOGLE_", "DOCKER_", "KUBE",
+    "DATABASE_", "DB_", "REDIS_", "S3_", "MINIO_",
+    "PATH", "HOME", "USER", "SHELL",
+)
 
 
 class RuntimeEnvService:
