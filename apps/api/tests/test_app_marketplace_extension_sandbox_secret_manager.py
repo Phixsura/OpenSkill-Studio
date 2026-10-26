@@ -53,7 +53,7 @@ def test_audit_log():
     svc.store("sb-1", "SECRET", "val")
     svc.retrieve("sb-1", "SECRET", accessor="worker")
     svc.retrieve("sb-1", "MISSING", accessor="attacker")
-    logs = svc.get_audit_log()
+    logs = svc.get_audit_log("sb-1")
     assert len(logs) == 2
     assert logs[0]["granted"] is True
     assert logs[1]["granted"] is False

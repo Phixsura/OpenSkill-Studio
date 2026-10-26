@@ -29,6 +29,7 @@ class Secret:
 
 @dataclass
 class AccessLog:
+    sandbox_id: str
     secret_name: str
     accessor: str
     timestamp: float
@@ -73,14 +74,14 @@ class SandboxSecretManagerService:
         secret = self._secrets.get(sandbox_id, {}).get(name)
         if not secret:
             self._audit.append(AccessLog(
-                secret_name=name, accessor=accessor,
+                sandbox_id=sandbox_id, secret_name=name, accessor=accessor,
                 timestamp=time.time(), granted=False,
             ))
             return None
 
         secret.access_count += 1
         self._audit.append(AccessLog(
-            secret_name=name, accessor=accessor,
+            sandbox_id=sandbox_id, secret_name=name, accessor=accessor,
             timestamp=time.time(), granted=True,
         ))
         return self._values.get(secret.secret_id)
@@ -115,8 +116,8 @@ class SandboxSecretManagerService:
                     result = result.replace(val, "***REDACTED***")
         return result
 
-    def get_audit_log(self, sandbox_id: str | None = None,
+    def get_audit_log(self, sandbox_id: str,
                       limit: int = 50) -> list[dict]:
-        logs = self._audit[-limit:]
+        logs = [l for l in self._audit if l.sandbox_id == sandbox_id][-limit:]
         return [{"name": l.secret_name, "accessor": l.accessor,
                  "granted": l.granted} for l in logs]
