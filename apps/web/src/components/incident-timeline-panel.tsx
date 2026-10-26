@@ -1,84 +1,46 @@
 "use client";
 
-interface TimelineEvent {
-  message: string;
-  author: string;
-  status: string;
-  timestamp: string;
-}
+interface IncidentEvent { eventId: string; status: string; message: string; timestamp: number; }
+interface Incident { incidentId: string; title: string; severity: string; resolved: boolean; events: IncidentEvent[]; }
 
-interface Incident {
-  id: string;
-  title: string;
-  severity: "sev1" | "sev2" | "sev3" | "sev4";
-  status: string;
-  assignee?: string;
-  affectedUsers: number;
-  rootCause?: string;
-  mttrMinutes: number;
-  timeline: TimelineEvent[];
-}
-
-const sevConfig: Record<string, { color: string; label: string }> = {
-  sev1: { color: "bg-red-600 text-white", label: "SEV1" },
-  sev2: { color: "bg-orange-500 text-white", label: "SEV2" },
-  sev3: { color: "bg-yellow-500 text-white", label: "SEV3" },
-  sev4: { color: "bg-gray-400 text-white", label: "SEV4" },
+const sevColors: Record<string, string> = {
+  critical: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400",
+  major: "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400",
+  minor: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400",
 };
 
-const statusColors: Record<string, string> = {
-  open: "text-red-600", investigating: "text-blue-600", identified: "text-purple-600",
-  mitigating: "text-yellow-600", resolved: "text-green-600", postmortem: "text-gray-600",
+const statusIcons: Record<string, string> = {
+  investigating: "🔍", identified: "🎯", monitoring: "👁️", resolved: "✅",
 };
 
-export function IncidentTimelinePanel({
-  incident,
-  onUpdateStatus,
-  onAssign,
-}: {
-  incident: Incident;
-  onUpdateStatus?: (status: string) => void;
-  onAssign?: (assignee: string) => void;
-}) {
-  const sev = sevConfig[incident.severity];
-
+export function IncidentTimelinePanel({ incidents }: { incidents: Incident[] }) {
+  if (!incidents.length) {
+    return <div className="text-center text-green-600 py-8"><span className="text-3xl block">✅</span><span className="font-semibold mt-2 block">All Systems Operational</span><span className="text-xs text-gray-500">No active incidents</span></div>;
+  }
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`text-xs px-2 py-0.5 rounded font-bold ${sev.color}`}>{sev.label}</span>
-          <h2 className="text-lg font-bold">{incident.title}</h2>
-        </div>
-        <span className={`text-sm font-bold capitalize ${statusColors[incident.status] || ""}`}>{incident.status}</span>
-      </div>
-
-      <div className="flex gap-4 text-xs text-gray-500">
-        {incident.assignee && <span>👤 {incident.assignee}</span>}
-        <span>👥 {incident.affectedUsers.toLocaleString()} affected</span>
-        {incident.mttrMinutes > 0 && <span>⏱ {incident.mttrMinutes}min MTTR</span>}
-      </div>
-
-      {incident.rootCause && (
-        <div className="text-sm bg-yellow-50 dark:bg-yellow-900/10 rounded-lg p-3">
-          <span className="font-medium">Root Cause:</span> {incident.rootCause}
-        </div>
-      )}
-
-      <div className="relative">
-        <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
-        {incident.timeline.map((evt, i) => (
-          <div key={i} className="relative pl-8 pb-3">
-            <div className={`absolute left-1.5 w-3 h-3 rounded-full mt-1 ${statusColors[evt.status] ? "bg-blue-500" : "bg-gray-400"}`} />
-            <div>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold capitalize ${statusColors[evt.status] || ""}`}>{evt.status}</span>
-                <span className="text-xs text-gray-400">{evt.author} · {evt.timestamp}</span>
-              </div>
-              <p className="text-sm">{evt.message}</p>
+      {incidents.map((inc) => (
+        <div key={inc.incidentId} className="border dark:border-gray-700 rounded-xl overflow-hidden">
+          <div className="p-3 flex items-center justify-between bg-gray-50 dark:bg-gray-800">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sevColors[inc.severity] || ""}`}>{inc.severity}</span>
+              <span className="font-semibold text-sm">{inc.title}</span>
             </div>
+            {inc.resolved && <span className="text-xs text-green-600 font-medium">Resolved</span>}
           </div>
-        ))}
-      </div>
+          <div className="p-3 space-y-2">
+            {inc.events.map((evt) => (
+              <div key={evt.eventId} className="flex gap-2 text-xs">
+                <span>{statusIcons[evt.status] || "📌"}</span>
+                <div>
+                  <span className="font-medium capitalize">{evt.status}</span>
+                  <span className="text-gray-500 ml-1">— {evt.message}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
