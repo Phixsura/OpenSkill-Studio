@@ -1,32 +1,54 @@
 "use client";
 
-interface Social { name: string; href: string; icon: string; }
-interface FooterLink { label: string; href: string; }
-interface MarketplaceFooterProps { sections: Record<string, FooterLink[]>;
-  copyright: string; social: Social[]; }
+interface FooterLink {
+  label: string;
+  href: string;
+}
 
-export function MarketplaceFooter({ sections, copyright, social }: MarketplaceFooterProps) {
+interface FooterSection {
+  title: string;
+  links: FooterLink[];
+}
+
+export function MarketplaceFooter({
+  sections,
+  version,
+  copyright,
+}: {
+  sections: FooterSection[];
+  version: string;
+  copyright: string;
+}) {
   return (
-    <footer className="border-t py-12 dark:border-gray-800">
-      <div className="mx-auto max-w-5xl px-4">
-        <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
-          {Object.entries(sections).map(([name, links]) => (
-            <div key={name}>
-              <h4 className="text-sm font-semibold mb-3">{name}</h4>
+    <footer className="border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900 mt-12">
+      <div className="max-w-6xl mx-auto px-6 py-10">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+          {sections.map((section) => (
+            <div key={section.title}>
+              <h3 className="font-semibold text-sm mb-3">{section.title}</h3>
               <ul className="space-y-2">
-                {links.map(l => (
-                  <li key={l.href}><a href={l.href} className="text-sm text-gray-500 hover:text-gray-900 dark:hover:text-white">{l.label}</a></li>
+                {section.links.map((link) => (
+                  <li key={link.label}>
+                    <a href={link.href} className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                      {link.label}
+                    </a>
+                  </li>
                 ))}
               </ul>
             </div>
           ))}
         </div>
-        <div className="mt-8 flex items-center justify-between border-t pt-6 dark:border-gray-800">
-          <p className="text-xs text-gray-400">{copyright}</p>
-          <div className="flex gap-3">
-            {social.map(s => (
-              <a key={s.name} href={s.href} title={s.name} className="text-gray-400 hover:text-gray-600">{s.icon}</a>
-            ))}
+
+        <div className="mt-8 pt-6 border-t dark:border-gray-800 flex flex-col md:flex-row items-center justify-between text-xs text-gray-400">
+          <p>{copyright}</p>
+          <div className="flex items-center gap-4 mt-2 md:mt-0">
+            <span>Platform v{version}</span>
+            <span>·</span>
+            <a href="/status" className="hover:text-gray-600">Status</a>
+            <span>·</span>
+            <a href="/privacy" className="hover:text-gray-600">Privacy</a>
+            <span>·</span>
+            <a href="/terms" className="hover:text-gray-600">Terms</a>
           </div>
         </div>
       </div>
