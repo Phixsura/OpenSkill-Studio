@@ -87,11 +87,11 @@ class AppSubmissionService:
         self._submissions[sub_id] = sub
         return sub
 
-    def update_checklist(self, submission_id: str, caller_id: str = "", **kwargs: bool) -> SubmissionChecklist | None:
+    def update_checklist(self, submission_id: str, caller_id: str, **kwargs: bool) -> SubmissionChecklist | None:
         sub = self._submissions.get(submission_id)
         if not sub or sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.CHANGES_REQUESTED):
             return None
-        if caller_id and sub.developer_id != caller_id:
+        if sub.developer_id != caller_id:
             raise PermissionError("Not the submission owner")
         for key, val in kwargs.items():
             if key in SYSTEM_FIELDS:
