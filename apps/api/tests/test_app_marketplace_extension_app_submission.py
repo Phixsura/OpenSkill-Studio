@@ -6,8 +6,8 @@ import pytest
 
 def _complete_checklist(svc, sub_id):
     svc.update_checklist(sub_id, has_manifest=True, has_description=True,
-                         has_icon=True, has_screenshots=True, has_privacy_policy=True,
-                         passes_security_scan=True, passes_content_review=True)
+                         has_icon=True, has_screenshots=True, has_privacy_policy=True)
+    svc.record_system_check(sub_id, passes_security=True, passes_content=True)
 
 
 def test_create_draft():
@@ -72,3 +72,10 @@ def test_checklist_percent():
     sub = svc.create_draft("ext-1", "dev-1", "1.0.0")
     svc.update_checklist(sub.submission_id, has_manifest=True, has_description=True)
     assert sub.checklist.completion_percent == 28
+
+
+def test_cannot_self_attest_security():
+    svc = AppSubmissionService()
+    sub = svc.create_draft("ext-1", "dev-1", "1.0.0")
+    with pytest.raises(PermissionError, match="self-attested"):
+        svc.update_checklist(sub.submission_id, passes_security_scan=True)

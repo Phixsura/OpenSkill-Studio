@@ -67,6 +67,10 @@ class Submission:
             self.created_at = datetime.now(timezone.utc).isoformat()
 
 
+DEVELOPER_FIELDS = {"has_manifest", "has_description", "has_icon", "has_screenshots", "has_privacy_policy"}
+SYSTEM_FIELDS = {"passes_security_scan", "passes_content_review"}
+
+
 class AppSubmissionService:
     """Manages the extension submission and review workflow."""
 
@@ -83,14 +87,28 @@ class AppSubmissionService:
         self._submissions[sub_id] = sub
         return sub
 
-    def update_checklist(self, submission_id: str, **kwargs: bool) -> SubmissionChecklist | None:
+    def update_checklist(self, submission_id: str, caller_id: str = "", **kwargs: bool) -> SubmissionChecklist | None:
         sub = self._submissions.get(submission_id)
         if not sub or sub.status not in (SubmissionStatus.DRAFT, SubmissionStatus.CHANGES_REQUESTED):
             return None
+        if caller_id and sub.developer_id != caller_id:
+            raise PermissionError("Not the submission owner")
         for key, val in kwargs.items():
-            if hasattr(sub.checklist, key):
-                setattr(sub.checklist, key, val)
+            if key in SYSTEM_FIELDS:
+                raise PermissionError(f"{key} cannot be self-attested")
+            if key in DEVELOPER_FIELDS and hasattr(sub.checklist, key):
+                setattr(sub.checklist, key, bool(val))
         return sub.checklist
+
+    def record_system_check(self, submission_id: str, passes_security: bool | None = None,
+                            passes_content: bool | None = None) -> None:
+        sub = self._submissions.get(submission_id)
+        if not sub:
+            return
+        if passes_security is not None:
+            sub.checklist.passes_security_scan = passes_security
+        if passes_content is not None:
+            sub.checklist.passes_content_review = passes_content
 
     def submit_for_review(self, submission_id: str) -> dict:
         sub = self._submissions.get(submission_id)
