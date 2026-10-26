@@ -1,53 +1,56 @@
 "use client";
+import { useState } from "react";
 
-interface Permission { name: string; description: string; risk: string; }
-interface InstallStep { id: string; title: string; status: string; }
-interface InstallFlowWizardProps { appName: string; appIcon: string;
-  developer: string; permissions: Permission[]; steps: InstallStep[];
-  currentStep: number; hasDangerous: boolean;
-  onAdvance: () => void; onCancel: () => void; }
+interface InstallStep { step: string; label: string; }
+const STEPS: InstallStep[] = [
+  { step: "consent", label: "Permissions" },
+  { step: "configure", label: "Configure" },
+  { step: "install", label: "Install" },
+  { step: "complete", label: "Done" },
+];
 
-const RISK_STYLE: Record<string, string> = {
-  low: "text-green-600", medium: "text-yellow-600", high: "text-red-600",
-};
+export function InstallFlowWizard({ currentStep, extensionName, permissions, onGrant, onConfigure, onComplete }: {
+  currentStep: string; extensionName: string; permissions: string[];
+  onGrant?: (perms: string[]) => void; onConfigure?: (config: Record<string, string>) => void; onComplete?: () => void;
+}) {
+  const [granted, setGranted] = useState<Set<string>>(new Set());
+  const stepIdx = STEPS.findIndex(s => s.step === currentStep);
 
-export function InstallFlowWizard({ appName, appIcon, developer, permissions,
-  steps, currentStep, hasDangerous, onAdvance, onCancel }: InstallFlowWizardProps) {
   return (
-    <div className="rounded-xl border dark:border-gray-700 p-6 max-w-lg">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-3xl">{appIcon}</span>
-        <div>
-          <h3 className="font-bold">Install {appName}</h3>
-          <p className="text-xs text-gray-400">By {developer}</p>
-        </div>
-      </div>
-      <div className="flex gap-1 mb-4">
-        {steps.map((s, i) => (
-          <div key={s.id} className={`flex-1 h-1.5 rounded-full ${
-            s.status === "completed" ? "bg-green-500" :
-            s.status === "current" ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
-          }`} />
+    <div className="space-y-4">
+      <h3 className="font-bold text-sm">Install {extensionName}</h3>
+      <div className="flex gap-1">
+        {STEPS.map((s, i) => (
+          <div key={s.step} className={`flex-1 h-1.5 rounded-full ${i <= stepIdx ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"}`} />
         ))}
       </div>
-      <p className="text-sm font-medium mb-2">{steps[currentStep]?.title}</p>
-      {currentStep === 0 && permissions.length > 0 && (
-        <div className="space-y-1 mb-4">
+      <div className="text-xs text-gray-500 text-center">{STEPS[stepIdx]?.label || currentStep}</div>
+
+      {currentStep === "consent" && (
+        <div className="space-y-2">
+          <p className="text-sm">This extension requests the following permissions:</p>
           {permissions.map(p => (
-            <div key={p.name} className="flex justify-between text-sm bg-gray-50 dark:bg-gray-800 rounded px-3 py-1.5">
-              <span>{p.name}</span>
-              <span className={`text-xs ${RISK_STYLE[p.risk] || ""}`}>{p.risk}</span>
-            </div>
+            <label key={p} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={granted.has(p)} onChange={() => {
+                const next = new Set(granted);
+                next.has(p) ? next.delete(p) : next.add(p);
+                setGranted(next);
+              }} />
+              {p}
+            </label>
           ))}
-          {hasDangerous && <p className="text-xs text-red-500">⚠️ This app requests high-risk permissions</p>}
+          <button onClick={() => onGrant?.([...granted])} className="w-full bg-blue-500 text-white py-2 rounded-lg text-sm">Grant & Continue</button>
         </div>
       )}
-      <div className="flex gap-2">
-        <button onClick={onCancel} className="flex-1 py-2 border rounded text-sm">Cancel</button>
-        <button onClick={onAdvance} className="flex-1 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
-          {currentStep === steps.length - 1 ? "Activate" : "Continue"}
-        </button>
-      </div>
+      {currentStep === "configure" && (
+        <button onClick={() => onConfigure?.({})} className="w-full bg-blue-500 text-white py-2 rounded-lg text-sm">Use Defaults & Continue</button>
+      )}
+      {currentStep === "install" && (
+        <button onClick={onComplete} className="w-full bg-green-500 text-white py-2 rounded-lg text-sm">Complete Installation</button>
+      )}
+      {currentStep === "complete" && (
+        <div className="text-center py-4"><span className="text-3xl block">🎉</span><span className="font-bold mt-2 block">Installed Successfully!</span></div>
+      )}
     </div>
   );
 }
