@@ -5,7 +5,7 @@ from app.services.app_marketplace_extension_webhook_delivery import (
 
 def test_enqueue_delivery():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com/events")
+    ep = svc.register_endpoint("https://hooks.example.com/events", endpoint_id="ep-1")
     d = svc.enqueue("ep-1", '{"event": "deploy"}')
     assert d is not None
     assert d.state == DeliveryState.QUEUED
@@ -13,7 +13,7 @@ def test_enqueue_delivery():
 
 def test_successful_delivery():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com")
+    svc.register_endpoint("https://hooks.example.com", endpoint_id="ep-1")
     d = svc.enqueue("ep-1", "{}")
     svc.process_result(d.delivery_id, success=True, status_code=200)
     assert d.state == DeliveryState.DELIVERED
@@ -21,7 +21,7 @@ def test_successful_delivery():
 
 def test_retry_on_failure():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com")
+    svc.register_endpoint("https://hooks.example.com", endpoint_id="ep-1")
     d = svc.enqueue("ep-1", "{}", max_retries=3)
     svc.process_result(d.delivery_id, success=False, status_code=500, error="timeout")
     assert d.state == DeliveryState.RETRYING
@@ -30,7 +30,7 @@ def test_retry_on_failure():
 
 def test_dead_letter_after_max_retries():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com")
+    svc.register_endpoint("https://hooks.example.com", endpoint_id="ep-1")
     d = svc.enqueue("ep-1", "{}", max_retries=2)
     svc.process_result(d.delivery_id, False, 500)
     svc.process_result(d.delivery_id, False, 500)
@@ -40,7 +40,7 @@ def test_dead_letter_after_max_retries():
 
 def test_circuit_breaker():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com", failure_threshold=3)
+    svc.register_endpoint("https://hooks.example.com", failure_threshold=3, endpoint_id="ep-1")
     for _ in range(3):
         d = svc.enqueue("ep-1", "{}", max_retries=1)
         svc.process_result(d.delivery_id, False, 500)
@@ -52,7 +52,7 @@ def test_circuit_breaker():
 
 def test_reset_circuit():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com", failure_threshold=1)
+    svc.register_endpoint("https://hooks.example.com", failure_threshold=1, endpoint_id="ep-1")
     d = svc.enqueue("ep-1", "{}", max_retries=1)
     svc.process_result(d.delivery_id, False, 500)
     assert svc.reset_circuit("ep-1") is True
@@ -61,7 +61,7 @@ def test_reset_circuit():
 
 def test_queue_stats():
     svc = WebhookDeliveryService()
-    svc.register_endpoint("ep-1", "https://hooks.example.com")
+    svc.register_endpoint("https://hooks.example.com", endpoint_id="ep-1")
     svc.enqueue("ep-1", "{}")
     svc.enqueue("ep-1", "{}")
     stats = svc.get_queue_stats()

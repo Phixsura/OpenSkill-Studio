@@ -67,8 +67,13 @@ class WebhookDeliveryService:
         self._endpoints: dict[str, EndpointHealth] = {}
         self._dead_letter: list[WebhookDelivery] = []
 
-    def register_endpoint(self, endpoint_id: str, url: str,
-                          failure_threshold: int = 5) -> EndpointHealth:
+    def register_endpoint(self, url: str,
+                          failure_threshold: int = 5,
+                          endpoint_id: str | None = None) -> EndpointHealth:
+        if endpoint_id is None:
+            endpoint_id = f"ep_{secrets.token_urlsafe(12)}"
+        if endpoint_id in self._endpoints:
+            raise ValueError("Endpoint already registered")
         health = EndpointHealth(
             endpoint_id=endpoint_id, url=url,
             failure_threshold=failure_threshold,
