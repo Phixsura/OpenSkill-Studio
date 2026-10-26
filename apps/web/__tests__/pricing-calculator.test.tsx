@@ -2,21 +2,22 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PricingCalculator } from "@/components/pricing-calculator";
 
+const tiers = [
+  { name: "Free", monthlyPrice: 0, features: ["100 API calls"] },
+  { name: "Pro", monthlyPrice: 29, features: ["10K API calls"], recommended: true },
+];
+
 describe("PricingCalculator", () => {
-  it("renders pricing", () => {
-    const onRecalc = vi.fn();
-    const { container, getByText } = render(
-      <PricingCalculator onRecalculate={onRecalc}
-        result={{ basePrice: 29, usageCost: 10, totalDisplay: "$35.10/mo",
-                   annualDisplay: "$421.20/yr", discount: 3.9 }} />
-    );
-    expect(container.textContent).toContain("Pricing Calculator");
-    expect(container.textContent).toContain("$29.00");
-    expect(container.textContent).toContain("$10.00");
-    expect(container.textContent).toContain("-$3.90");
-    expect(container.textContent).toContain("$35.10/mo");
-    expect(container.textContent).toContain("$421.20/yr");
-    fireEvent.click(getByText("Recalculate"));
-    expect(onRecalc).toHaveBeenCalled();
+  it("renders tiers", () => {
+    const { container } = render(<PricingCalculator tiers={tiers} />);
+    expect(container.textContent).toContain("Free");
+    expect(container.textContent).toContain("$29");
+    expect(container.textContent).toContain("Recommended");
+  });
+  it("calls onSelect", () => {
+    const fn = vi.fn();
+    const { getAllByText } = render(<PricingCalculator tiers={tiers} onSelect={fn} />);
+    fireEvent.click(getAllByText("Select")[1]);
+    expect(fn).toHaveBeenCalledWith("Pro");
   });
 });
