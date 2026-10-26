@@ -35,7 +35,7 @@ def test_path_traversal_blocked():
 def test_language_detection():
     svc = WorkspaceManagerService()
     ws = svc.create("ext-1", "dev-1", "WS")
-    svc.add_file(ws.workspace_id, "main.py", "print('hi')")
+    svc.add_file(ws.workspace_id, "main.py", "print('hi')", caller_id="dev-1")
     files = svc.list_files(ws.workspace_id)
     assert files[0]["language"] == "python"
 

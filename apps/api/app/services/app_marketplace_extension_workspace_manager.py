@@ -70,11 +70,11 @@ class WorkspaceManagerService:
         return ws
 
     def add_file(self, workspace_id: str, path: str, content: str,
-                 caller_id: str = "") -> WorkspaceFile | dict:
+                 caller_id: str) -> WorkspaceFile | dict:
         ws = self._workspaces.get(workspace_id)
         if not ws:
             return {"error": "Workspace not found"}
-        if caller_id and caller_id != ws.owner_id and caller_id not in ws.collaborators:
+        if not caller_id or (caller_id != ws.owner_id and caller_id not in ws.collaborators):
             return {"error": "Not authorized"}
         if len(content.encode()) > self.MAX_FILE_SIZE:
             return {"error": "File too large"}
@@ -87,18 +87,22 @@ class WorkspaceManagerService:
         ws.files[path] = f
         return f
 
-    def get_file(self, workspace_id: str, path: str) -> str | None:
+    def get_file(self, workspace_id: str, path: str, caller_id: str = "") -> str | None:
         ws = self._workspaces.get(workspace_id)
         if not ws or path not in ws.files:
             return None
+        if caller_id and caller_id != ws.owner_id and caller_id not in ws.collaborators:
+            return None
         return ws.files[path].content
 
-    def delete_file(self, workspace_id: str, path: str) -> bool:
+    def delete_file(self, workspace_id: str, path: str, caller_id: str = "") -> bool:
         ws = self._workspaces.get(workspace_id)
-        if ws and path in ws.files:
-            del ws.files[path]
-            return True
-        return False
+        if not ws or path not in ws.files:
+            return False
+        if caller_id and caller_id != ws.owner_id:
+            return False
+        del ws.files[path]
+        return True
 
     def add_collaborator(self, workspace_id: str, user_id: str,
                          caller_id: str) -> bool:
