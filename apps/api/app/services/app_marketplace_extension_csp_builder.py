@@ -6,6 +6,7 @@ report-only mode, and violation tracking for sandboxed extension UIs.
 from __future__ import annotations
 import secrets
 from dataclasses import dataclass, field
+import re
 from collections import defaultdict
 
 
@@ -16,6 +17,22 @@ VALID_DIRECTIVES = {
 }
 
 DANGEROUS_SOURCES = {"'unsafe-eval'", "'unsafe-inline'", "data:", "blob:"}
+
+VALID_SOURCE_RE = re.compile(
+    r"^('self'|'none'|'strict-dynamic'|'nonce-[A-Za-z0-9+/_=-]+'|"
+    r"https://[a-z0-9.*-]+(:\d+)?(/[^\s;,]*)?|"
+    r"'unsafe-eval'|'unsafe-inline'|data:|blob:)$",
+    re.IGNORECASE,
+)
+
+
+def _validate_source(source: str) -> str:
+    s = source.strip()
+    if not s or ';' in s or ',' in s or '\n' in s:
+        raise ValueError(f"Invalid CSP source: {source!r}")
+    if not VALID_SOURCE_RE.match(s):
+        raise ValueError(f"CSP source not allowed: {s!r}")
+    return s
 
 
 @dataclass
@@ -70,11 +87,12 @@ class CSPBuilderService:
             raise ValueError("No policy for extension")
         if directive not in VALID_DIRECTIVES:
             raise ValueError(f"Invalid directive: {directive}")
+        validated = [_validate_source(s) for s in sources]
         if not allow_dangerous:
-            dangerous = [s for s in sources if s in DANGEROUS_SOURCES]
+            dangerous = [s for s in validated if s.lower() in {d.lower() for d in DANGEROUS_SOURCES}]
             if dangerous:
                 raise ValueError(f"Dangerous sources blocked: {dangerous}")
-        policy.directives[directive] = sources
+        policy.directives[directive] = validated
         return policy
 
     def generate_nonce(self, extension_id: str) -> str:
