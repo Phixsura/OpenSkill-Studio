@@ -2,24 +2,41 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CircuitBreakerPanel } from "@/components/circuit-breaker-panel";
 
+const mockCircuits = [
+  { name: "api_gateway", state: "closed" as const, failureCount: 1,
+    totalRequests: 500, totalFailures: 5, totalShortCircuits: 0, failureRate: 1.0 },
+  { name: "db_connection", state: "open" as const, failureCount: 5,
+    totalRequests: 100, totalFailures: 30, totalShortCircuits: 45, failureRate: 30.0 },
+  { name: "cache_service", state: "half_open" as const, failureCount: 3,
+    totalRequests: 200, totalFailures: 10, totalShortCircuits: 20, failureRate: 5.0 },
+];
+
 describe("CircuitBreakerPanel", () => {
-  const breakers = [
-    { name: "api-gateway", state: "closed", failure_count: 1, failure_threshold: 5, recovery_timeout_sec: 30 },
-    { name: "db-pool", state: "open", failure_count: 5, failure_threshold: 5, recovery_timeout_sec: 60 },
-  ];
-  it("renders", () => {
-    const { container } = render(<CircuitBreakerPanel breakers={breakers} onReset={vi.fn()} />);
-    expect(container.textContent).toContain("Circuit Breakers");
-    expect(container.textContent).toContain("api-gateway");
-    expect(container.textContent).toContain("🟢");
-    expect(container.textContent).toContain("db-pool");
-    expect(container.textContent).toContain("🔴");
-    expect(container.textContent).toContain("Reset");
+  it("renders circuits with states", () => {
+    const { container } = render(<CircuitBreakerPanel circuits={mockCircuits} />);
+    expect(container.textContent).toContain("api_gateway");
+    expect(container.textContent).toContain("Closed");
+    expect(container.textContent).toContain("Open");
+    expect(container.textContent).toContain("1 open");
   });
-  it("reset", () => {
-    const fn = vi.fn();
-    const { container } = render(<CircuitBreakerPanel breakers={breakers} onReset={fn} />);
-    fireEvent.click(Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Reset")!);
-    expect(fn).toHaveBeenCalledWith("db-pool");
+
+  it("shows failure stats", () => {
+    const { container } = render(<CircuitBreakerPanel circuits={mockCircuits} />);
+    expect(container.textContent).toContain("30%");
+    expect(container.textContent).toContain("45");
+  });
+
+  it("calls onForceOpen", () => {
+    const onForceOpen = vi.fn();
+    const { getAllByText } = render(<CircuitBreakerPanel circuits={mockCircuits} onForceOpen={onForceOpen} />);
+    fireEvent.click(getAllByText("Trip")[0]);
+    expect(onForceOpen).toHaveBeenCalledWith("api_gateway");
+  });
+
+  it("calls onForceClose for open circuit", () => {
+    const onForceClose = vi.fn();
+    const { getAllByText } = render(<CircuitBreakerPanel circuits={mockCircuits} onForceClose={onForceClose} />);
+    fireEvent.click(getAllByText("Reset")[0]);
+    expect(onForceClose).toHaveBeenCalled();
   });
 });
