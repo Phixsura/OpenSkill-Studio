@@ -42,8 +42,13 @@ class FeatureRequestService:
     def __init__(self):
         self._requests: dict[str, FeatureRequest] = {}
 
-    def submit(self, request_id: str, extension_id: str, title: str,
-               description: str, author_id: str) -> FeatureRequest:
+    def submit(self, extension_id: str, title: str,
+               description: str, author_id: str, request_id: str | None = None) -> FeatureRequest:
+        import secrets
+        if request_id is None:
+            request_id = f"fr_{secrets.token_urlsafe(16)}"
+        if request_id in self._requests:
+            raise ValueError("Request ID already exists")
         fr = FeatureRequest(request_id, extension_id, title, description, author_id)
         fr.voters.add(author_id)
         fr.votes = 1
