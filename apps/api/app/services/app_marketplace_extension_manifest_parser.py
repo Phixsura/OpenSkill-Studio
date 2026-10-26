@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from enum import Enum
 
 
@@ -85,8 +86,12 @@ class ManifestParserService:
 
         # Validate entrypoint
         entrypoint = data.get("entrypoint", "")
-        if entrypoint and ".." in entrypoint:
-            errors.append("Entrypoint must not contain path traversal")
+        if not isinstance(entrypoint, str) or not re.fullmatch(r"[A-Za-z0-9_\-./]+", entrypoint):
+            errors.append("Invalid entrypoint")
+        elif entrypoint:
+            p = PurePosixPath(entrypoint)
+            if p.is_absolute() or ".." in p.parts or "\\" in entrypoint or ":" in entrypoint:
+                errors.append("Entrypoint must be a relative path inside the bundle")
 
         # Validate permissions
         permissions = data.get("permissions", [])
