@@ -72,7 +72,10 @@ class KeyRotationService:
         key = self._keys[key_id]
         if key.status == "revoked":
             return {"valid": False, "reason": "Key revoked"}
-        if time.time() > key.expires_at and key.status != "grace":
+        if time.time() > key.expires_at:
+            if key.status == "grace":
+                key.status = "revoked"
+                key.revoked_at = time.time()
             return {"valid": False, "reason": "Key expired"}
         return {"valid": True, "key_id": key_id, "extension_id": key.extension_id,
                 "status": key.status}
