@@ -85,7 +85,7 @@ class SandboxApiKeyScopeService:
             return {"valid": False, "reason": "Key expired"}
         if key.max_usage and key.usage_count >= key.max_usage:
             return {"valid": False, "reason": "Usage limit exceeded"}
-        if key.ip_allowlist and client_ip and client_ip not in key.ip_allowlist:
+        if key.ip_allowlist and (not client_ip or client_ip not in key.ip_allowlist):
             return {"valid": False, "reason": "IP not allowed"}
         if required_scope not in key.scopes:
             return {"valid": False, "reason": f"Missing scope: {required_scope}"}
