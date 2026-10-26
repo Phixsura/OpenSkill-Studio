@@ -1,24 +1,19 @@
 "use client";
-
-interface Tag { tag: string; count: number; weight: number; size: number; }
-interface TagCloudProps { tags: Tag[]; onTagClick: (tag: string) => void; }
-
-const colors = ["text-blue-500", "text-purple-500", "text-green-500", "text-orange-500",
-  "text-pink-500", "text-cyan-500", "text-indigo-500"];
-
-export function TagCloud({ tags, onTagClick }: TagCloudProps) {
+interface TagCount { tag: string; count: number; }
+export function TagCloud({ tags, onSelect }: { tags: TagCount[]; onSelect?: (tag: string) => void }) {
+  const max = Math.max(...tags.map(t => t.count), 1);
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">Popular Tags</h2>
-      <div className="flex flex-wrap items-center gap-2">
-        {tags.map((t, i) => (
-          <button key={t.tag} onClick={() => onTagClick(t.tag)}
-            className={`rounded-full border px-3 py-1 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800 ${colors[i % colors.length]}`}
-            style={{ fontSize: `${t.size}px` }}>
-            {t.tag}
-            <span className="ml-1 text-[10px] text-gray-400">({t.count})</span>
-          </button>
-        ))}
+      <h2 className="text-lg font-bold">🏷️ Popular Tags</h2>
+      <div className="flex flex-wrap gap-1">
+        {tags.map((t) => {
+          const size = 0.7 + (t.count / max) * 0.8;
+          return (
+            <button key={t.tag} onClick={() => onSelect?.(t.tag)}
+              className="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full hover:bg-blue-100"
+              style={{ fontSize: `${size}rem` }}>{t.tag} <span className="text-xs text-gray-400">{t.count}</span></button>
+          );
+        })}
       </div>
     </div>
   );
