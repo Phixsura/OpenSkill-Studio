@@ -1,45 +1,43 @@
 "use client";
-
 import { useState } from "react";
 
-interface MarketplaceSearchBarProps { recentSearches: string[]; popularSearches: string[];
-  onSearch: (query: string) => void; }
+interface SearchResult { extensionId: string; name: string; description: string; installs: number; rating: number; tags: string[]; }
 
-export function MarketplaceSearchBar({ recentSearches, popularSearches, onSearch }: MarketplaceSearchBarProps) {
+export function MarketplaceSearchBar({ results, suggestions, onSearch, onSelect }: {
+  results: SearchResult[]; suggestions?: string[]; onSearch?: (q: string) => void; onSelect?: (id: string) => void;
+}) {
   const [query, setQuery] = useState("");
-  const [focused, setFocused] = useState(false);
+  const handleSearch = () => onSearch?.(query);
 
   return (
-    <div className="relative w-full max-w-xl mx-auto">
+    <div className="space-y-3">
       <div className="flex gap-2">
-        <input value={query} onChange={e => setQuery(e.target.value)}
-          onFocus={() => setFocused(true)} onBlur={() => setTimeout(() => setFocused(false), 200)}
-          onKeyDown={e => e.key === "Enter" && onSearch(query)}
-          placeholder="🔍 Search apps, integrations, tools..."
-          className="flex-1 rounded-xl border px-4 py-3 text-sm dark:bg-gray-800 dark:border-gray-600" />
-        <button onClick={() => onSearch(query)}
-          className="rounded-xl bg-blue-600 px-5 py-3 text-sm text-white font-medium">Search</button>
+        <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleSearch()}
+          placeholder="Search extensions..." className="flex-1 border dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-transparent" />
+        <button onClick={handleSearch} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm">🔍</button>
       </div>
-      {focused && !query && (
-        <div className="absolute left-0 right-0 z-10 mt-2 rounded-xl border bg-white p-3 shadow-xl dark:bg-gray-900 dark:border-gray-700">
-          {recentSearches.length > 0 && (
-            <div className="mb-2">
-              <p className="text-xs font-semibold text-gray-400 mb-1">Recent</p>
-              <div className="flex flex-wrap gap-1">{recentSearches.map(s => (
-                <button key={s} onClick={() => { setQuery(s); onSearch(s); }}
-                  className="rounded-full bg-gray-100 px-2.5 py-1 text-xs dark:bg-gray-800">{s}</button>
-              ))}</div>
-            </div>
-          )}
-          <div>
-            <p className="text-xs font-semibold text-gray-400 mb-1">Popular</p>
-            <div className="flex flex-wrap gap-1">{popularSearches.map(s => (
-              <button key={s} onClick={() => { setQuery(s); onSearch(s); }}
-                className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">{s}</button>
-            ))}</div>
-          </div>
+      {suggestions && suggestions.length > 0 && (
+        <div className="flex gap-1 flex-wrap">
+          {suggestions.map(s => <button key={s} onClick={() => { setQuery(s); onSearch?.(s); }} className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full">{s}</button>)}
         </div>
       )}
+      <div className="space-y-2">
+        {results.map(r => (
+          <button key={r.extensionId} onClick={() => onSelect?.(r.extensionId)}
+            className="w-full text-left border dark:border-gray-700 rounded-xl p-3 hover:border-blue-400">
+            <div className="flex justify-between">
+              <span className="font-medium text-sm">{r.name}</span>
+              <span className="text-xs text-yellow-500">{"★".repeat(Math.round(r.rating))}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">{r.description}</p>
+            <div className="flex gap-1 mt-1">
+              {r.tags.map(t => <span key={t} className="text-xs bg-blue-100 dark:bg-blue-900/20 text-blue-600 px-1.5 py-0.5 rounded">{t}</span>)}
+              <span className="text-xs text-gray-400 ml-auto">{r.installs} installs</span>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
