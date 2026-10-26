@@ -42,6 +42,8 @@ class DevTeamMgrService:
         team = self._teams.get(team_id)
         if not team or role not in ROLE_HIERARCHY or role == "owner":
             return False
+        if user_id in team.members:
+            return False
         inviter = team.members.get(invited_by)
         if not inviter or ROLE_HIERARCHY[inviter.role] <= ROLE_HIERARCHY[role]:
             return False
