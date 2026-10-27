@@ -140,8 +140,14 @@ class AuditTrailLogger:
             "seq": self._sequence,
             "ts": now.isoformat(),
             "action": action.value,
+            "outcome": outcome.value,
             "actor": actor_id,
+            "actor_type": actor_type,
             "resource": f"{resource_type}:{resource_id}",
+            "org_id": org_id,
+            "ip": ip_address,
+            "ua": user_agent,
+            "details": json.dumps(details or {}, sort_keys=True),
         }, sort_keys=True)
 
         chain_hash = _hash_entry(self._last_hash, entry_data)
@@ -206,8 +212,14 @@ class AuditTrailLogger:
                 "seq": entry.sequence,
                 "ts": entry.timestamp.isoformat(),
                 "action": entry.action.value,
+                "outcome": entry.outcome.value,
                 "actor": entry.actor_id,
+                "actor_type": entry.actor_type,
                 "resource": f"{entry.resource_type}:{entry.resource_id}",
+                "org_id": entry.org_id,
+                "ip": entry.ip_address,
+                "ua": entry.user_agent,
+                "details": json.dumps(entry.details or {}, sort_keys=True),
             }, sort_keys=True)
             expected = _hash_entry(prev_hash, entry_data)
             if entry.chain_hash != expected:

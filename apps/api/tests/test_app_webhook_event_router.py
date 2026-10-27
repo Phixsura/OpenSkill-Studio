@@ -72,19 +72,19 @@ class TestSubscriptions:
     def test_unsubscribe(self):
         router = AppWebhookEventRouter()
         router.subscribe(_sub("app-1"))
-        removed = router.unsubscribe("app-1", "skill_pack.published")
+        removed = router.unsubscribe("app-1", "org-1", "skill_pack.published")
         assert removed is True
         assert router.get_subscriptions("skill_pack.published") == []
 
     def test_unsubscribe_nonexistent(self):
         router = AppWebhookEventRouter()
-        assert router.unsubscribe("app-x", "skill_pack.published") is False
+        assert router.unsubscribe("app-x", "org-1", "skill_pack.published") is False
 
     def test_unsubscribe_app_all(self):
         router = AppWebhookEventRouter()
         router.subscribe(_sub("app-1", "skill_pack.published"))
         router.subscribe(_sub("app-1", "app.installed"))
-        count = router.unsubscribe_app("app-1")
+        count = router.unsubscribe_app("app-1", "org-1")
         assert count == 2
 
     def test_get_app_subscriptions(self):

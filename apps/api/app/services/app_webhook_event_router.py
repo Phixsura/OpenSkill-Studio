@@ -123,20 +123,24 @@ class AppWebhookEventRouter:
                 return
         self._subscriptions[sub.event_type].append(sub)
 
-    def unsubscribe(self, app_id: str, event_type: str) -> bool:
-        """Remove an app's subscription to an event type."""
+    def unsubscribe(self, app_id: str, org_id: str, event_type: str) -> bool:
+        """Remove an app's subscription scoped to org_id."""
         subs = self._subscriptions.get(event_type, [])
         before = len(subs)
-        self._subscriptions[event_type] = [s for s in subs if s.app_id != app_id]
+        self._subscriptions[event_type] = [
+            s for s in subs if not (s.app_id == app_id and s.org_id == org_id)
+        ]
         return len(self._subscriptions[event_type]) < before
 
-    def unsubscribe_app(self, app_id: str) -> int:
-        """Remove all subscriptions for an app (e.g. on uninstall)."""
+    def unsubscribe_app(self, app_id: str, org_id: str) -> int:
+        """Remove all subscriptions for an app+org (e.g. on uninstall)."""
         total = 0
         for event_type in list(self._subscriptions.keys()):
             subs = self._subscriptions[event_type]
             before = len(subs)
-            self._subscriptions[event_type] = [s for s in subs if s.app_id != app_id]
+            self._subscriptions[event_type] = [
+                s for s in subs if not (s.app_id == app_id and s.org_id == org_id)
+            ]
             total += before - len(self._subscriptions[event_type])
         return total
 
