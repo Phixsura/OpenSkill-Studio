@@ -64,8 +64,8 @@ class AppManifest:
     app_id: str
     app_name: str
     version: str
-    app_status: str = "published"              # server-side: draft/published/suspended/revoked
-    version_review_status: str = "approved"     # server-side: pending/approved/rejected/revoked
+    app_status: str | None = None               # server-side: draft/published/suspended/revoked — None = fail-closed
+    version_review_status: str | None = None    # server-side: pending/approved/rejected/revoked — None = fail-closed
     min_platform_version: str | None = None
     required_permissions: list[str] = field(default_factory=list)
     config_fields: list[str] = field(default_factory=list)     # required config field names
@@ -122,11 +122,12 @@ class AppInstallValidator:
 
         app_status and version_review_status are populated server-side
         from the DB, not from the developer-supplied manifest.
+        Fail-closed: None or unexpected values always reject.
         """
-        if manifest.app_status != "published":
+        if manifest.app_status is None or manifest.app_status != "published":
             return ValidationCheck("review", CheckStatus.FAIL,
                                    f"App is not published (status: {manifest.app_status})")
-        if manifest.version_review_status != "approved":
+        if manifest.version_review_status is None or manifest.version_review_status != "approved":
             return ValidationCheck("review", CheckStatus.FAIL,
                                    f"App version not approved (review: {manifest.version_review_status})")
         return ValidationCheck("review", CheckStatus.PASS, "App is published and version approved")

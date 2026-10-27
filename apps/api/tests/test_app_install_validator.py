@@ -11,7 +11,8 @@ from app.services.app_install_validator import (
 
 
 def _manifest(**overrides) -> AppManifest:
-    defaults = dict(app_id="app-1", app_name="Test App", version="1.0.0")
+    defaults = dict(app_id="app-1", app_name="Test App", version="1.0.0",
+                    app_status="published", version_review_status="approved")
     defaults.update(overrides)
     return AppManifest(**defaults)
 
@@ -65,6 +66,23 @@ class TestReviewGate:
         v = AppInstallValidator()
         result = v.validate(_manifest(app_status="revoked"), _org())
         assert result.can_install is False
+
+    def test_none_status_fails_closed(self):
+        """Fail-closed: if server didn't populate status, reject."""
+        v = AppInstallValidator()
+        manifest = AppManifest(app_id="app-1", app_name="Test", version="1.0.0")
+        # defaults are None → must fail
+        result = v.validate(manifest, _org())
+        assert result.can_install is False
+        assert any("not published" in e for e in result.errors)
+
+    def test_none_review_status_fails_closed(self):
+        v = AppInstallValidator()
+        manifest = AppManifest(app_id="app-1", app_name="Test", version="1.0.0",
+                               app_status="published")  # review still None
+        result = v.validate(manifest, _org())
+        assert result.can_install is False
+        assert any("not approved" in e for e in result.errors)
 
     def test_published_and_approved_passes(self):
         v = AppInstallValidator()
