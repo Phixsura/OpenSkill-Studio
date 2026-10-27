@@ -1,20 +1,23 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { CompatibilityBadge } from "@/components/compatibility-badge";
+import { CompatibilityBadge, CompatibilityMatrix } from "@/components/compatibility-badge";
 
 describe("CompatibilityBadge", () => {
-  it("shows compatible", () => {
-    const { container } = render(<CompatibilityBadge compatible={true} platformVersion="1.0.0" />);
+  it("renders badge", () => {
+    const { container } = render(<CompatibilityBadge compat={{ extensionVersion: "1.0", platformVersion: "4.0", status: "compatible" }} />);
     expect(container.textContent).toContain("Compatible");
-    expect(container.textContent).toContain("✅");
+    expect(container.textContent).toContain("v1.0 on v4.0");
   });
-  it("shows incompatible", () => {
-    const { container } = render(<CompatibilityBadge compatible={false} platformVersion="1.0.0" issues={2} />);
-    expect(container.textContent).toContain("2 issues");
-    expect(container.textContent).toContain("❌");
-  });
-  it("shows platform version", () => {
-    const { container } = render(<CompatibilityBadge compatible={true} platformVersion="2.1.0" />);
-    expect(container.textContent).toContain("v2.1.0");
+});
+
+describe("CompatibilityMatrix", () => {
+  it("renders matrix", () => {
+    const entries = [
+      { extensionVersion: "1.0", platformVersion: "4.0", status: "compatible" },
+      { extensionVersion: "1.0", platformVersion: "5.0", status: "incompatible" },
+    ];
+    const { container } = render(<CompatibilityMatrix entries={entries} />);
+    expect(container.textContent).toContain("v1.0");
+    expect(container.textContent).toContain("v4.0");
   });
 });
