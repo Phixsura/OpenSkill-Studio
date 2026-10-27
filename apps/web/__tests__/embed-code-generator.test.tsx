@@ -1,18 +1,20 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { EmbedCodeGenerator } from "@/components/embed-code-generator";
 
+const options = { extensionId: "ext-1", themes: ["light", "dark", "auto"], sizes: ["small", "medium", "large"] };
+
 describe("EmbedCodeGenerator", () => {
-  it("renders embed code", () => {
-    const { container } = render(
-      <EmbedCodeGenerator iframe='<iframe src="https://x.com/embed/a"></iframe>'
-        script='<script src="https://x.com/sdk.js"></script>'
-        widgetUrl="https://x.com/embed/a" />
-    );
-    expect(container.textContent).toContain("Embed Code");
+  it("renders generator", () => {
+    const { container } = render(<EmbedCodeGenerator options={options} />);
+    expect(container.textContent).toContain("Embed Widget");
     expect(container.textContent).toContain("iframe");
-    expect(container.textContent).toContain("script");
-    expect(container.textContent).toContain("Copy");
-    expect(container.textContent).toContain("Preview");
+    expect(container.querySelector("pre")).toBeTruthy();
+  });
+  it("switches format", () => {
+    const { container } = render(<EmbedCodeGenerator options={options} />);
+    const htmlBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "HTML");
+    if (htmlBtn) fireEvent.click(htmlBtn);
+    expect(container.querySelector("pre")?.textContent).toContain("data-osk-ext");
   });
 });
