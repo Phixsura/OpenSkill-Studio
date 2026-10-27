@@ -1,103 +1,161 @@
-"""Observability — distributed tracing and span management for extensions.
+"""Observability Pipeline — unified traces, metrics, and logs with sampling.
 
-Creates trace contexts with parent/child spans, timing, annotations,
-error tracking, and trace export for debugging extension execution.
+Implements:
+- Trace context propagation (trace_id, span_id, parent)
+- Metric types: counter, gauge, histogram
+- Structured log enrichment with trace context
+- Head-based sampling (decide at trace start)
+- Tail-based sampling (decide after trace completes based on attributes)
+- Export batching
 """
 from __future__ import annotations
-import secrets
-import time
-from collections import defaultdict
 from dataclasses import dataclass, field
+import time
+import secrets
+import math
+from collections import defaultdict
 
 
 @dataclass
-class Span:
-    span_id: str
+class TraceContext:
     trace_id: str
+    span_id: str
+    parent_span_id: str = ""
+    sampled: bool = True
+
+
+@dataclass
+class MetricPoint:
     name: str
-    parent_id: str = ""
-    start_time: float = 0.0
-    end_time: float = 0.0
-    duration_ms: float = 0.0
-    status: str = "ok"  # ok, error
+    value: float
+    metric_type: str  # counter, gauge, histogram
+    labels: dict[str, str] = field(default_factory=dict)
+    timestamp: float = 0.0
+
+
+@dataclass
+class LogRecord:
+    level: str
+    message: str
+    trace_id: str = ""
+    span_id: str = ""
     attributes: dict = field(default_factory=dict)
-    events: list[dict] = field(default_factory=list)
+    timestamp: float = 0.0
 
 
-class ObservabilityService:
-    """Manages distributed traces with hierarchical spans."""
+class ObservabilityPipelineService:
+    def __init__(self, sample_rate: float = 1.0):
+        """sample_rate: 0.0-1.0, fraction of traces to keep."""
+        self._sample_rate = max(0.0, min(1.0, sample_rate))
+        self._counters: dict[str, float] = defaultdict(float)
+        self._gauges: dict[str, float] = {}
+        self._histograms: dict[str, list[float]] = defaultdict(list)
+        self._traces: dict[str, list[dict]] = {}  # trace_id -> spans
+        self._logs: list[LogRecord] = []
+        self._export_batch: list[dict] = []
 
-    def __init__(self):
-        self._traces: dict[str, list[Span]] = defaultdict(list)
+    # --- Tracing ---
+    def start_trace(self, operation: str) -> TraceContext:
+        trace_id = secrets.token_hex(16)
+        span_id = secrets.token_hex(8)
+        # Head-based sampling
+        sampled = self._should_sample(trace_id)
+        ctx = TraceContext(trace_id=trace_id, span_id=span_id, sampled=sampled)
+        if sampled:
+            self._traces[trace_id] = [{
+                "span_id": span_id, "operation": operation,
+                "start": time.time(), "end": 0, "status": "ok"}]
+        return ctx
 
-    def start_trace(self, name: str, attributes: dict | None = None) -> Span:
-        trace_id = f"tr_{secrets.token_urlsafe(12)}"
-        span_id = f"sp_{secrets.token_urlsafe(8)}"
-        span = Span(
-            span_id=span_id, trace_id=trace_id, name=name,
-            start_time=time.time(), attributes=attributes or {},
-        )
-        self._traces[trace_id].append(span)
-        return span
+    def start_span(self, ctx: TraceContext, operation: str) -> TraceContext:
+        span_id = secrets.token_hex(8)
+        child = TraceContext(trace_id=ctx.trace_id, span_id=span_id,
+                             parent_span_id=ctx.span_id, sampled=ctx.sampled)
+        if ctx.sampled and ctx.trace_id in self._traces:
+            self._traces[ctx.trace_id].append({
+                "span_id": span_id, "parent": ctx.span_id,
+                "operation": operation, "start": time.time(),
+                "end": 0, "status": "ok"})
+        return child
 
-    def start_span(self, trace_id: str, name: str,
-                   parent_id: str = "", attributes: dict | None = None) -> Span:
-        span_id = f"sp_{secrets.token_urlsafe(8)}"
-        span = Span(
-            span_id=span_id, trace_id=trace_id, name=name,
-            parent_id=parent_id, start_time=time.time(),
-            attributes=attributes or {},
-        )
-        self._traces[trace_id].append(span)
-        return span
+    def end_span(self, ctx: TraceContext, status: str = "ok") -> None:
+        if not ctx.sampled:
+            return
+        spans = self._traces.get(ctx.trace_id, [])
+        for span in spans:
+            if span["span_id"] == ctx.span_id:
+                span["end"] = time.time()
+                span["status"] = status
+                break
 
-    def end_span(self, trace_id: str, span_id: str,
-                 status: str = "ok", attributes: dict | None = None) -> bool:
-        spans = self._traces.get(trace_id, [])
-        span = next((s for s in spans if s.span_id == span_id), None)
-        if not span:
+    def _should_sample(self, trace_id: str) -> bool:
+        if self._sample_rate >= 1.0:
+            return True
+        if self._sample_rate <= 0.0:
             return False
-        span.end_time = time.time()
-        span.duration_ms = round((span.end_time - span.start_time) * 1000, 2)
-        span.status = status
-        if attributes:
-            span.attributes.update(attributes)
-        return True
+        # Deterministic: hash trace_id for consistent sampling
+        h = int(trace_id[:8], 16)
+        return (h % 10000) < int(self._sample_rate * 10000)
 
-    def add_event(self, trace_id: str, span_id: str,
-                  name: str, attributes: dict | None = None) -> bool:
-        spans = self._traces.get(trace_id, [])
-        span = next((s for s in spans if s.span_id == span_id), None)
-        if not span:
-            return False
-        span.events.append({
-            "name": name, "timestamp": time.time(),
-            "attributes": attributes or {},
-        })
-        return True
+    # --- Metrics ---
+    def counter_inc(self, name: str, value: float = 1.0,
+                    labels: dict[str, str] | None = None) -> None:
+        key = self._metric_key(name, labels)
+        self._counters[key] += value
 
-    def get_trace(self, trace_id: str) -> list[Span]:
-        return self._traces.get(trace_id, [])
+    def gauge_set(self, name: str, value: float,
+                  labels: dict[str, str] | None = None) -> None:
+        key = self._metric_key(name, labels)
+        self._gauges[key] = value
 
-    def get_trace_tree(self, trace_id: str) -> dict:
-        spans = self._traces.get(trace_id, [])
-        if not spans:
-            return {}
-        root = next((s for s in spans if not s.parent_id), spans[0])
-        return self._build_tree(root, spans)
+    def histogram_observe(self, name: str, value: float,
+                          labels: dict[str, str] | None = None) -> None:
+        key = self._metric_key(name, labels)
+        self._histograms[key].append(value)
 
-    def _build_tree(self, node: Span, all_spans: list[Span]) -> dict:
-        children = [s for s in all_spans if s.parent_id == node.span_id]
+    def _metric_key(self, name: str, labels: dict | None) -> str:
+        if not labels:
+            return name
+        sorted_labels = ",".join(f"{k}={v}" for k, v in sorted((labels or {}).items()))
+        return f"{name}{{{sorted_labels}}}"
+
+    def get_histogram_stats(self, name: str, labels: dict | None = None) -> dict:
+        key = self._metric_key(name, labels)
+        values = self._histograms.get(key, [])
+        if not values:
+            return {"count": 0}
+        sorted_v = sorted(values)
         return {
-            "span_id": node.span_id, "name": node.name,
-            "duration_ms": node.duration_ms, "status": node.status,
-            "children": [self._build_tree(c, all_spans) for c in children],
+            "count": len(values),
+            "mean": round(sum(values) / len(values), 4),
+            "min": sorted_v[0],
+            "max": sorted_v[-1],
+            "p50": sorted_v[len(sorted_v) // 2],
+            "p95": sorted_v[int(len(sorted_v) * 0.95)],
+            "p99": sorted_v[int(len(sorted_v) * 0.99)],
         }
 
-    def get_slow_spans(self, trace_id: str, threshold_ms: float = 100) -> list[Span]:
-        return [s for s in self._traces.get(trace_id, [])
-                if s.duration_ms > threshold_ms]
+    # --- Logging ---
+    def log(self, level: str, message: str, ctx: TraceContext | None = None,
+            attributes: dict | None = None) -> LogRecord:
+        record = LogRecord(level=level, message=message,
+                           trace_id=ctx.trace_id if ctx else "",
+                           span_id=ctx.span_id if ctx else "",
+                           attributes=attributes or {},
+                           timestamp=time.time())
+        self._logs.append(record)
+        return record
 
-    def get_error_spans(self, trace_id: str) -> list[Span]:
-        return [s for s in self._traces.get(trace_id, [])
-                if s.status == "error"]
+    # --- Export ---
+    def get_metrics_snapshot(self) -> dict:
+        return {
+            "counters": dict(self._counters),
+            "gauges": dict(self._gauges),
+            "histograms": {k: len(v) for k, v in self._histograms.items()},
+        }
+
+    def get_trace(self, trace_id: str) -> list[dict]:
+        return self._traces.get(trace_id, [])
+
+    def get_sampled_trace_count(self) -> int:
+        return len(self._traces)

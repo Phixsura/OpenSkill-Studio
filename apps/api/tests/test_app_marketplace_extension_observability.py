@@ -1,69 +1,92 @@
-from app.services.app_marketplace_extension_observability import (
-    ObservabilityService,
-)
+from app.services.app_marketplace_extension_observability import ObservabilityPipelineService
 
 
-def test_start_trace():
-    svc = ObservabilityService()
-    span = svc.start_trace("handle_request", {"method": "GET"})
-    assert span.trace_id.startswith("tr_")
-    assert span.name == "handle_request"
+def test_trace_lifecycle():
+    obs = ObservabilityPipelineService()
+    ctx = obs.start_trace("handle_request")
+    child = obs.start_span(ctx, "db_query")
+    obs.end_span(child)
+    obs.end_span(ctx)
+    trace = obs.get_trace(ctx.trace_id)
+    assert len(trace) == 2
+    assert trace[0]["operation"] == "handle_request"
+    assert trace[1]["parent"] == ctx.span_id
 
 
-def test_parent_child_spans():
-    svc = ObservabilityService()
-    root = svc.start_trace("request")
-    child = svc.start_span(root.trace_id, "db_query", parent_id=root.span_id)
-    assert child.parent_id == root.span_id
-    spans = svc.get_trace(root.trace_id)
-    assert len(spans) == 2
+def test_counter():
+    obs = ObservabilityPipelineService()
+    obs.counter_inc("http_requests", labels={"method": "GET"})
+    obs.counter_inc("http_requests", labels={"method": "GET"})
+    obs.counter_inc("http_requests", labels={"method": "POST"})
+    snapshot = obs.get_metrics_snapshot()
+    assert snapshot["counters"]['http_requests{method=GET}'] == 2
 
 
-def test_end_span_timing():
-    svc = ObservabilityService()
-    root = svc.start_trace("task")
-    svc.end_span(root.trace_id, root.span_id)
-    assert root.duration_ms >= 0
-    assert root.status == "ok"
+def test_gauge():
+    obs = ObservabilityPipelineService()
+    obs.gauge_set("cpu_usage", 45.5)
+    obs.gauge_set("cpu_usage", 62.3)
+    snapshot = obs.get_metrics_snapshot()
+    assert snapshot["gauges"]["cpu_usage"] == 62.3  # last value
 
 
-def test_error_span():
-    svc = ObservabilityService()
-    root = svc.start_trace("failing")
-    svc.end_span(root.trace_id, root.span_id, status="error")
-    errors = svc.get_error_spans(root.trace_id)
-    assert len(errors) == 1
+def test_histogram():
+    obs = ObservabilityPipelineService()
+    for v in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]:
+        obs.histogram_observe("latency_ms", v)
+    stats = obs.get_histogram_stats("latency_ms")
+    assert stats["count"] == 10
+    assert stats["mean"] == 55.0
+    assert stats["p50"] == 60
+    assert stats["min"] == 10
+    assert stats["max"] == 100
 
 
-def test_add_event():
-    svc = ObservabilityService()
-    root = svc.start_trace("task")
-    svc.add_event(root.trace_id, root.span_id, "cache_miss", {"key": "user:1"})
-    assert len(root.events) == 1
-    assert root.events[0]["name"] == "cache_miss"
+def test_log_with_trace_context():
+    obs = ObservabilityPipelineService()
+    ctx = obs.start_trace("api_call")
+    record = obs.log("error", "Connection failed", ctx, {"host": "db.local"})
+    assert record.trace_id == ctx.trace_id
+    assert record.span_id == ctx.span_id
+    assert record.attributes["host"] == "db.local"
 
 
-def test_trace_tree():
-    svc = ObservabilityService()
-    root = svc.start_trace("request")
-    c1 = svc.start_span(root.trace_id, "auth", parent_id=root.span_id)
-    c2 = svc.start_span(root.trace_id, "handler", parent_id=root.span_id)
-    svc.start_span(root.trace_id, "db", parent_id=c2.span_id)
-    for s in svc.get_trace(root.trace_id):
-        svc.end_span(root.trace_id, s.span_id)
-    tree = svc.get_trace_tree(root.trace_id)
-    assert tree["name"] == "request"
-    assert len(tree["children"]) == 2
-    handler = next(c for c in tree["children"] if c["name"] == "handler")
-    assert len(handler["children"]) == 1
+def test_head_based_sampling():
+    obs = ObservabilityPipelineService(sample_rate=0.5)
+    sampled = 0
+    for _ in range(200):
+        ctx = obs.start_trace("test")
+        if ctx.sampled:
+            sampled += 1
+    # ~50% should be sampled (with variance)
+    assert 50 < sampled < 150
 
 
-def test_slow_spans():
-    svc = ObservabilityService()
-    root = svc.start_trace("req")
-    child = svc.start_span(root.trace_id, "slow_query", parent_id=root.span_id)
-    # Manually set duration
-    child.duration_ms = 250
-    svc.end_span(root.trace_id, root.span_id)
-    slow = svc.get_slow_spans(root.trace_id, threshold_ms=100)
-    assert any(s.name == "slow_query" for s in slow)
+def test_full_sampling():
+    obs = ObservabilityPipelineService(sample_rate=1.0)
+    for _ in range(10):
+        ctx = obs.start_trace("test")
+        obs.end_span(ctx)
+    assert obs.get_sampled_trace_count() == 10
+
+
+def test_no_sampling():
+    obs = ObservabilityPipelineService(sample_rate=0.0)
+    for _ in range(10):
+        obs.start_trace("test")
+    assert obs.get_sampled_trace_count() == 0
+
+
+def test_unsampled_spans_not_stored():
+    obs = ObservabilityPipelineService(sample_rate=0.0)
+    ctx = obs.start_trace("test")
+    obs.start_span(ctx, "child")
+    assert obs.get_trace(ctx.trace_id) == []
+
+
+def test_labeled_metrics():
+    obs = ObservabilityPipelineService()
+    obs.counter_inc("errors", labels={"service": "auth", "code": "500"})
+    obs.counter_inc("errors", labels={"service": "auth", "code": "404"})
+    snapshot = obs.get_metrics_snapshot()
+    assert len(snapshot["counters"]) == 2
