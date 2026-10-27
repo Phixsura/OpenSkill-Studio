@@ -188,27 +188,36 @@ class OAuthTokenIntrospector:
 
     def has_scope(self, raw_token: str, required_scope: str,
                   now: float | None = None) -> bool:
-        """Check if a token has a specific scope."""
+        """Check if an ACCESS token has a specific scope.
+
+        Rejects refresh tokens to prevent token type confusion.
+        """
         resp = self.introspect(raw_token, now)
         if not resp.active or not resp.scope:
+            return False
+        if resp.token_type != TokenType.ACCESS.value:
             return False
         token_scopes = set(resp.scope.split())
         return required_scope in token_scopes
 
     def has_all_scopes(self, raw_token: str, required: list[str],
                        now: float | None = None) -> bool:
-        """Check if a token has ALL required scopes."""
+        """Check if an ACCESS token has ALL required scopes."""
         resp = self.introspect(raw_token, now)
         if not resp.active or not resp.scope:
+            return False
+        if resp.token_type != TokenType.ACCESS.value:
             return False
         token_scopes = set(resp.scope.split())
         return all(s in token_scopes for s in required)
 
     def has_any_scope(self, raw_token: str, required: list[str],
                       now: float | None = None) -> bool:
-        """Check if a token has ANY of the required scopes."""
+        """Check if an ACCESS token has ANY of the required scopes."""
         resp = self.introspect(raw_token, now)
         if not resp.active or not resp.scope:
+            return False
+        if resp.token_type != TokenType.ACCESS.value:
             return False
         token_scopes = set(resp.scope.split())
         return any(s in token_scopes for s in required)
