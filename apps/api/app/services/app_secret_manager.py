@@ -245,11 +245,10 @@ class AppSecretManager:
 
     # ── Audit ────────────────────────────────────────────
 
-    def get_access_log(self, installation_id: str | None = None,
+    def get_access_log(self, installation_id: str,
                        limit: int = 50) -> list[AccessLogEntry]:
-        entries = self._access_log
-        if installation_id:
-            entries = [e for e in entries if e.installation_id == installation_id]
+        """Get access log scoped to an installation. Always filters."""
+        entries = [e for e in self._access_log if e.installation_id == installation_id]
         return entries[-limit:]
 
     def _log_access(self, installation_id: str, key: str,
