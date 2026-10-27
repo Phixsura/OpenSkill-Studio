@@ -19,14 +19,13 @@ def test_index_preferred_for_selective():
     assert plan.strategy in ("index_scan", "index_only_scan")
 
 
-def test_seq_scan_preferred_for_low_selectivity():
+def test_seq_scan_when_no_index():
     qp = QueryPlannerService()
-    qp.register_table("logs", row_count=1000, avg_row_size=100,
-                       indexes=["level"],
-                       index_cardinality={"level": 3})  # only 3 distinct values
-    plan = qp.plan_scan("logs", filter_col="level", selectivity=0.9)
-    # Seq scan should be cheaper when reading 90% of table
+    qp.register_table("logs", row_count=10000, avg_row_size=100)
+    plan = qp.plan_scan("logs", filter_col="status", selectivity=0.9)
+    # No index on status → must use seq scan
     assert plan.strategy == "seq_scan"
+    assert plan.estimated_rows == 9000
 
 
 def test_hash_join_preferred():
