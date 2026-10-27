@@ -122,19 +122,27 @@ class AppSandboxPolicyEngine:
     def check_network(self, app_id: str, domain: str,
                       protocol: NetworkProtocol = NetworkProtocol.HTTPS,
                       org_id: str | None = None) -> PolicyCheckResult:
-        """Check if a network request to domain is allowed."""
+        """Check if a network request to domain is allowed.
+
+        DENY rules are evaluated first regardless of list order,
+        so a wildcard allow cannot shadow a specific deny.
+        """
         policy = self.get_effective_policy(app_id, org_id)
 
+        # Phase 1: check all DENY rules first
         for rule in policy.network_rules:
-            if self._domain_matches(rule.domain, domain):
+            if rule.action == PolicyAction.DENY and self._domain_matches(rule.domain, domain):
+                return PolicyCheckResult(
+                    allowed=False, rule_matched=f"Denied by rule: {rule.domain}",
+                )
+
+        # Phase 2: check ALLOW rules
+        for rule in policy.network_rules:
+            if rule.action == PolicyAction.ALLOW and self._domain_matches(rule.domain, domain):
                 if protocol not in rule.protocols:
                     return PolicyCheckResult(
                         allowed=False,
                         rule_matched=f"Protocol {protocol.value} not allowed for {rule.domain}",
-                    )
-                if rule.action == PolicyAction.DENY:
-                    return PolicyCheckResult(
-                        allowed=False, rule_matched=f"Denied by rule: {rule.domain}",
                     )
                 return PolicyCheckResult(
                     allowed=True, rule_matched=f"Allowed by rule: {rule.domain}",
@@ -202,6 +210,13 @@ class AppSandboxPolicyEngine:
 
     @staticmethod
     def _domain_matches(pattern: str, domain: str) -> bool:
+        """Match domain against pattern with normalization.
+
+        Both sides are lowercased and trailing dots stripped to prevent
+        bypass via case or FQDN dot tricks.
+        """
+        domain = domain.rstrip(".").lower()
+        pattern = pattern.rstrip(".").lower()
         if pattern.startswith("*."):
             suffix = pattern[1:]  # e.g. ".example.com"
             return domain.endswith(suffix) or domain == pattern[2:]

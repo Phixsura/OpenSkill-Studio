@@ -75,6 +75,7 @@ class AutomationRule:
 
     rule_id: str
     app_id: str
+    org_id: str              # mandatory: installation scope, set server-side
     name: str
     event_type: str          # e.g. "submission.graded"
     conditions: list[Condition]
@@ -160,10 +161,12 @@ class AppAutomationEngine:
 
     # ── Rule CRUD ────────────────────────────────────────
 
-    def add_rule(self, app_id: str, name: str, event_type: str,
+    def add_rule(self, app_id: str, org_id: str, name: str, event_type: str,
                  conditions: list[Condition], actions: list[Action],
                  logic: LogicOp = LogicOp.AND) -> AutomationRule | str:
-        """Add a rule. Returns the rule or an error string."""
+        """Add a rule. org_id is set server-side from the installation."""
+        if not org_id:
+            return "org_id is required"
         app_rules = [r for r in self._rules.values() if r.app_id == app_id]
         if len(app_rules) >= MAX_RULES_PER_APP:
             return f"Rule limit reached: {MAX_RULES_PER_APP} per app"
@@ -175,7 +178,7 @@ class AppAutomationEngine:
         self._next_id += 1
         rule_id = f"rule-{self._next_id}"
         rule = AutomationRule(
-            rule_id=rule_id, app_id=app_id, name=name,
+            rule_id=rule_id, app_id=app_id, org_id=org_id, name=name,
             event_type=event_type, conditions=conditions,
             logic=logic, actions=actions,
         )
@@ -218,12 +221,20 @@ class AppAutomationEngine:
     # ── Execution ────────────────────────────────────────
 
     def process_event(self, event_type: str, event_data: dict,
+                      org_id: str | None = None,
                       dry_run: bool = False) -> list[ExecutionResult]:
-        """Process an event against all matching enabled rules."""
+        """Process an event against all matching enabled rules.
+
+        org_id scopes execution to rules belonging to that org.
+        Rules without a matching org_id are skipped (fail-closed).
+        """
         results: list[ExecutionResult] = []
 
         for rule in self._rules.values():
             if not rule.enabled or rule.event_type != event_type:
+                continue
+            # Cross-tenant isolation: skip rules from other orgs
+            if org_id and rule.org_id != org_id:
                 continue
 
             matched = self._evaluate_rule(rule, event_data)
