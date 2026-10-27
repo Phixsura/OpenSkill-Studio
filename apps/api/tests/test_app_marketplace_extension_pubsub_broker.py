@@ -52,9 +52,12 @@ def test_nack_dead_letter():
     broker._max_redeliveries = 2
     broker.subscribe("g1", "t1")
     msg = broker.publish("t1", "k", {"poison": True})
-    broker.poll("g1", "t1")
-    broker.nack("g1", "t1", msg.msg_id)
-    broker.nack("g1", "t1", msg.msg_id)  # exceeds max
+    # First attempt
+    msgs = broker.poll("g1", "t1")
+    broker.nack("g1", "t1", msgs[0].msg_id)
+    # Second attempt (re-poll since offset not advanced)
+    msgs = broker.poll("g1", "t1")
+    broker.nack("g1", "t1", msgs[0].msg_id)  # exceeds max
     assert len(broker.get_dead_letters()) == 1
 
 
