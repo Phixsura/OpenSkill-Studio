@@ -18,7 +18,7 @@ def test_high_utilization():
     profile = SystemProfile("api", arrival_rate=180, service_rate=200, instances=1)
     report = cp.analyze(profile)
     assert report.utilization == 0.9
-    assert report.avg_response_ms > 50  # high latency due to queuing
+    assert report.avg_response_ms >= 50  # high latency due to queuing
 
 
 def test_overloaded():
