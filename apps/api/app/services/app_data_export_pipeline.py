@@ -188,12 +188,18 @@ class AppDataExportPipeline:
                 count += 1
         return count
 
-    def get_job(self, job_id: str) -> ExportJob | None:
-        return self._jobs.get(job_id)
+    def get_job(self, job_id: str, user_id: str) -> ExportJob | None:
+        """Get job metadata (never includes output). Scoped to requester."""
+        job = self._jobs.get(job_id)
+        if job is None or job.requested_by != user_id:
+            return None
+        return job
 
-    def list_jobs(self, installation_id: str) -> list[ExportJob]:
+    def list_jobs(self, installation_id: str, user_id: str) -> list[ExportJob]:
+        """List jobs for an installation, scoped to the requesting user."""
         return sorted(
-            [j for j in self._jobs.values() if j.installation_id == installation_id],
+            [j for j in self._jobs.values()
+             if j.installation_id == installation_id and j.requested_by == user_id],
             key=lambda j: j.requested_at, reverse=True,
         )
 
@@ -211,11 +217,25 @@ class AppDataExportPipeline:
         return result
 
     @staticmethod
+    def _csv_safe(value: object) -> str:
+        """Escape CSV formula injection: prefix dangerous first chars with a quote."""
+        s = str(value) if value is not None else ""
+        if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + s
+        return s
+
+    @staticmethod
     def _render_csv(rows: list[dict]) -> str:
         if not rows:
             return ""
+        # Sanitize both keys and values against formula injection
+        safe_rows = [
+            {AppDataExportPipeline._csv_safe(k): AppDataExportPipeline._csv_safe(v)
+             for k, v in row.items()}
+            for row in rows
+        ]
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+        writer = csv.DictWriter(output, fieldnames=safe_rows[0].keys())
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(safe_rows)
         return output.getvalue()

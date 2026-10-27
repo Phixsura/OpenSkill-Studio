@@ -22,53 +22,53 @@ SAMPLE_ROWS = [
 class TestLifecycle:
     def test_request_creates_job(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
+        r = p.request_export("inst-1", "admin")
         assert r.success is True
-        job = p.get_job(r.job_id)
+        job = p.get_job(r.job_id, "admin")
         assert job.status == ExportStatus.REQUESTED
 
     def test_process_sets_ready(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
+        r = p.request_export("inst-1", "admin")
         pr = p.process_export(r.job_id, SAMPLE_ROWS)
         assert pr.success is True
-        job = p.get_job(r.job_id)
+        job = p.get_job(r.job_id, "admin")
         assert job.status == ExportStatus.READY
         assert job.row_count == 2
         assert job.byte_size > 0
 
     def test_download_returns_output(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
+        r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, SAMPLE_ROWS)
-        output, err = p.download(r.job_id, "admin-1")
+        output, err = p.download(r.job_id, "admin")
         assert err is None
         assert output is not None
         assert "Alice" in output  # not redacted (no PII fields specified)
 
     def test_download_sets_downloaded(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
+        r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, SAMPLE_ROWS)
-        p.download(r.job_id, "admin-1")
-        assert p.get_job(r.job_id).status == ExportStatus.DOWNLOADED
+        p.download(r.job_id, "admin")
+        assert p.get_job(r.job_id, "admin").status == ExportStatus.DOWNLOADED
 
     def test_download_wrong_user_denied(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
+        r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, SAMPLE_ROWS)
         _, err = p.download(r.job_id, "hacker")
         assert err == "Access denied"
 
     def test_download_not_ready(self):
         p = AppDataExportPipeline()
-        r = p.request_export("inst-1", "admin-1")
-        _, err = p.download(r.job_id, "admin-1")
+        r = p.request_export("inst-1", "admin")
+        _, err = p.download(r.job_id, "admin")
         assert "not ready" in err
 
     def test_nonexistent_job(self):
         p = AppDataExportPipeline()
-        assert p.get_job("nope") is None
+        assert p.get_job("nope", "admin") is None
         _, err = p.download("nope", "admin")
         assert err == "Job not found"
 
@@ -152,7 +152,7 @@ class TestFormats:
         p = AppDataExportPipeline()
         r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, [])
-        job = p.get_job(r.job_id)
+        job = p.get_job(r.job_id, "admin")
         assert job.row_count == 0
         assert job.status == ExportStatus.READY
 
@@ -165,7 +165,7 @@ class TestLimits:
         pr = p.process_export(r.job_id, rows)
         assert pr.success is False
         assert "exceeds limit" in pr.error
-        assert p.get_job(r.job_id).status == ExportStatus.FAILED
+        assert p.get_job(r.job_id, "admin").status == ExportStatus.FAILED
 
     def test_process_wrong_status(self):
         p = AppDataExportPipeline()
@@ -180,7 +180,7 @@ class TestExpiry:
         p = AppDataExportPipeline()
         r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, SAMPLE_ROWS)
-        job = p.get_job(r.job_id)
+        job = p.get_job(r.job_id, "admin")
         job.expires_at = datetime.now(UTC) - timedelta(hours=1)
         _, err = p.download(r.job_id, "admin")
         assert "expired" in err
@@ -189,7 +189,7 @@ class TestExpiry:
         p = AppDataExportPipeline()
         r = p.request_export("inst-1", "admin")
         p.process_export(r.job_id, SAMPLE_ROWS)
-        job = p.get_job(r.job_id)
+        job = p.get_job(r.job_id, "admin")
         job.expires_at = datetime.now(UTC) - timedelta(hours=1)
         count = p.cleanup_expired()
         assert count == 1
@@ -202,5 +202,53 @@ class TestListing:
         p.request_export("inst-1", "admin")
         p.request_export("inst-1", "admin")
         p.request_export("inst-2", "admin")
-        jobs = p.list_jobs("inst-1")
+        jobs = p.list_jobs("inst-1", "admin")
         assert len(jobs) == 2
+
+    def test_list_jobs_scoped_to_user(self):
+        p = AppDataExportPipeline()
+        p.request_export("inst-1", "admin")
+        p.request_export("inst-1", "other-admin")
+        assert len(p.list_jobs("inst-1", "admin")) == 1
+        assert len(p.list_jobs("inst-1", "other-admin")) == 1
+
+
+class TestScopedAccess:
+    def test_get_job_wrong_user_returns_none(self):
+        p = AppDataExportPipeline()
+        r = p.request_export("inst-1", "admin")
+        assert p.get_job(r.job_id, "hacker") is None
+
+    def test_get_job_correct_user(self):
+        p = AppDataExportPipeline()
+        r = p.request_export("inst-1", "admin")
+        assert p.get_job(r.job_id, "admin") is not None
+
+
+class TestCSVFormulaInjection:
+    def test_formula_prefix_escaped(self):
+        p = AppDataExportPipeline()
+        rows = [{"name": "=cmd|'/C calc'!A0", "safe": "hello"}]
+        r = p.request_export("inst-1", "admin", export_format=ExportFormat.CSV)
+        p.process_export(r.job_id, rows)
+        output, _ = p.download(r.job_id, "admin")
+        # The dangerous value is prefixed with a quote to neutralize formula
+        data_row = output.split("\n")[1]
+        assert data_row.startswith("'=") or "'=cmd" in data_row
+
+    def test_plus_prefix_escaped(self):
+        p = AppDataExportPipeline()
+        rows = [{"val": "+1-555-0100"}]
+        r = p.request_export("inst-1", "admin", export_format=ExportFormat.CSV)
+        p.process_export(r.job_id, rows)
+        output, _ = p.download(r.job_id, "admin")
+        assert "'+1-555-0100" in output
+
+    def test_safe_values_unchanged(self):
+        p = AppDataExportPipeline()
+        rows = [{"name": "Alice", "score": "95"}]
+        r = p.request_export("inst-1", "admin", export_format=ExportFormat.CSV)
+        p.process_export(r.job_id, rows)
+        output, _ = p.download(r.job_id, "admin")
+        assert "Alice" in output
+        assert "'Alice" not in output
