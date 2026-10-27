@@ -34,12 +34,14 @@ def test_wrong_key_fails():
 
 
 def test_tampered_ciphertext():
+    from app.services.app_marketplace_extension_config_encrypt import EncryptedValue
     ce = ConfigEncryptionService()
     ce.create_key("master")
     encrypted = ce.encrypt("secret")
-    # Tamper with ciphertext
+    # Tamper: change the HMAC
     parts = encrypted.ciphertext.split(":")
-    tampered = EncryptedValue(ciphertext=f"AAAA{parts[0][4:]}:{parts[1]}",
+    bad_mac = "0" * 16
+    tampered = EncryptedValue(ciphertext=f"{parts[0]}:{bad_mac}",
                                key_id=encrypted.key_id)
     try:
         ce.decrypt(tampered)
