@@ -221,20 +221,22 @@ class AppAutomationEngine:
     # ── Execution ────────────────────────────────────────
 
     def process_event(self, event_type: str, event_data: dict,
-                      org_id: str | None = None,
+                      org_id: str,
                       dry_run: bool = False) -> list[ExecutionResult]:
         """Process an event against all matching enabled rules.
 
-        org_id scopes execution to rules belonging to that org.
-        Rules without a matching org_id are skipped (fail-closed).
+        org_id is mandatory and scopes execution to that org's rules only.
         """
+        if not org_id:
+            raise ValueError("org_id is required for event processing")
+
         results: list[ExecutionResult] = []
 
         for rule in self._rules.values():
             if not rule.enabled or rule.event_type != event_type:
                 continue
             # Cross-tenant isolation: skip rules from other orgs
-            if org_id and rule.org_id != org_id:
+            if rule.org_id != org_id:
                 continue
 
             matched = self._evaluate_rule(rule, event_data)
