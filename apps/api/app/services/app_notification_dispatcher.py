@@ -126,38 +126,46 @@ class AppNotificationDispatcher:
 
     # ── Read/dismiss ─────────────────────────────────────
 
-    def mark_read(self, notification_id: str) -> bool:
+    def mark_read(self, notification_id: str, user_id: str, org_id: str) -> bool:
+        """Mark a notification as read. Requires caller identity to prevent IDOR."""
         notif = self._notifications.get(notification_id)
-        if notif is None:
+        if notif is None or notif.org_id != org_id:
+            return False
+        if not self._targets_user(notif, user_id):
             return False
         notif.read = True
         return True
 
-    def dismiss(self, notification_id: str) -> bool:
+    def dismiss(self, notification_id: str, user_id: str, org_id: str) -> bool:
+        """Dismiss a notification. Requires caller identity to prevent IDOR."""
         notif = self._notifications.get(notification_id)
-        if notif is None:
+        if notif is None or notif.org_id != org_id:
+            return False
+        if not self._targets_user(notif, user_id):
             return False
         notif.dismissed = True
         return True
 
-    def mark_all_read(self, user_id: str, org_id: str) -> int:
+    def mark_all_read(self, user_id: str, org_id: str,
+                      user_roles: set[str] | None = None) -> int:
         """Mark all notifications targeting a user as read."""
         count = 0
         for notif in self._notifications.values():
             if notif.org_id != org_id or notif.dismissed:
                 continue
-            if self._targets_user(notif, user_id):
+            if self._targets_user(notif, user_id, user_roles):
                 if not notif.read:
                     notif.read = True
                     count += 1
         return count
 
-    def dismiss_all(self, user_id: str, org_id: str) -> int:
+    def dismiss_all(self, user_id: str, org_id: str,
+                    user_roles: set[str] | None = None) -> int:
         count = 0
         for notif in self._notifications.values():
             if notif.org_id != org_id:
                 continue
-            if self._targets_user(notif, user_id) and not notif.dismissed:
+            if self._targets_user(notif, user_id, user_roles) and not notif.dismissed:
                 notif.dismissed = True
                 count += 1
         return count
@@ -165,14 +173,20 @@ class AppNotificationDispatcher:
     # ── Query ────────────────────────────────────────────
 
     def get_for_user(self, user_id: str, org_id: str,
+                     user_roles: set[str] | None = None,
                      unread_only: bool = False,
                      limit: int = 50) -> list[AppNotification]:
-        """Get notifications visible to a user."""
+        """Get notifications visible to a user.
+
+        user_roles: the user's roles in the org (e.g. {"admin", "instructor"}).
+        Required for role-targeted notifications; if None, role-targeted
+        notifications are excluded (fail-closed).
+        """
         results = []
         for notif in self._notifications.values():
             if notif.org_id != org_id or notif.dismissed:
                 continue
-            if not self._targets_user(notif, user_id):
+            if not self._targets_user(notif, user_id, user_roles):
                 continue
             if unread_only and notif.read:
                 continue
@@ -180,8 +194,10 @@ class AppNotificationDispatcher:
         results.sort(key=lambda n: n.created_at, reverse=True)
         return results[:limit]
 
-    def unread_count(self, user_id: str, org_id: str) -> int:
-        return len(self.get_for_user(user_id, org_id, unread_only=True, limit=10000))
+    def unread_count(self, user_id: str, org_id: str,
+                     user_roles: set[str] | None = None) -> int:
+        return len(self.get_for_user(user_id, org_id, user_roles=user_roles,
+                                     unread_only=True, limit=10000))
 
     def get_by_app(self, app_id: str, limit: int = 50) -> list[AppNotification]:
         results = [n for n in self._notifications.values() if n.app_id == app_id]
@@ -195,11 +211,20 @@ class AppNotificationDispatcher:
     # ── Internal ─────────────────────────────────────────
 
     @staticmethod
-    def _targets_user(notif: AppNotification, user_id: str) -> bool:
+    def _targets_user(notif: AppNotification, user_id: str,
+                      user_roles: set[str] | None = None) -> bool:
+        """Check if a notification targets a user.
+
+        Fail-closed for role targeting: if user_roles is None, role-targeted
+        notifications are NOT shown (prevents leaking to unauthenticated callers).
+        """
         if notif.target_type == TargetType.USER:
             return notif.target_value == user_id
         if notif.target_type == TargetType.ORG_ALL:
             return True  # caller already filtered by org_id
         if notif.target_type == TargetType.ROLE:
-            return True  # simplified: role check done by caller
+            # Fail-closed: no roles provided → deny
+            if user_roles is None:
+                return False
+            return notif.target_value in user_roles
         return False

@@ -105,20 +105,35 @@ class TestReadDismiss:
     def test_mark_read(self):
         d = AppNotificationDispatcher()
         r = d.send("app-1", "App", "org-1", "Title", "Body")
-        assert d.mark_read(r.notification_id) is True
+        assert d.mark_read(r.notification_id, "user-1", "org-1") is True
         notif = d._notifications[r.notification_id]
         assert notif.read is True
 
     def test_mark_read_nonexistent(self):
         d = AppNotificationDispatcher()
-        assert d.mark_read("nonexistent") is False
+        assert d.mark_read("nonexistent", "user-1", "org-1") is False
+
+    def test_mark_read_wrong_org_blocked(self):
+        d = AppNotificationDispatcher()
+        r = d.send("app-1", "App", "org-1", "Title", "Body")
+        assert d.mark_read(r.notification_id, "user-1", "org-2") is False
+
+    def test_mark_read_wrong_user_blocked(self):
+        d = AppNotificationDispatcher()
+        r = d.send("app-1", "App", "org-1", "Title", "Body",
+                    target_type=TargetType.USER, target_value="user-1")
+        assert d.mark_read(r.notification_id, "user-2", "org-1") is False
 
     def test_dismiss(self):
         d = AppNotificationDispatcher()
         r = d.send("app-1", "App", "org-1", "Title", "Body")
-        assert d.dismiss(r.notification_id) is True
-        # Dismissed notifications excluded from queries
+        assert d.dismiss(r.notification_id, "user-1", "org-1") is True
         assert len(d.get_for_user("user-1", "org-1")) == 0
+
+    def test_dismiss_wrong_org_blocked(self):
+        d = AppNotificationDispatcher()
+        r = d.send("app-1", "App", "org-1", "Title", "Body")
+        assert d.dismiss(r.notification_id, "user-1", "org-2") is False
 
     def test_mark_all_read(self):
         d = AppNotificationDispatcher()
@@ -140,10 +155,34 @@ class TestReadDismiss:
         d = AppNotificationDispatcher()
         r1 = d.send("app-1", "App", "org-1", "Read", "B")
         d.send("app-1", "App", "org-1", "Unread", "B")
-        d.mark_read(r1.notification_id)
+        d.mark_read(r1.notification_id, "user-1", "org-1")
         unread = d.get_for_user("user-1", "org-1", unread_only=True)
         assert len(unread) == 1
         assert unread[0].title == "Unread"
+
+
+class TestRoleTargeting:
+    def test_role_targeting_with_matching_role(self):
+        d = AppNotificationDispatcher()
+        d.send("app-1", "App", "org-1", "Admin alert", "Details",
+               target_type=TargetType.ROLE, target_value="admin")
+        notifs = d.get_for_user("user-1", "org-1", user_roles={"admin", "instructor"})
+        assert len(notifs) == 1
+
+    def test_role_targeting_without_matching_role(self):
+        d = AppNotificationDispatcher()
+        d.send("app-1", "App", "org-1", "Admin alert", "Details",
+               target_type=TargetType.ROLE, target_value="admin")
+        notifs = d.get_for_user("user-1", "org-1", user_roles={"student"})
+        assert len(notifs) == 0
+
+    def test_role_targeting_fail_closed_no_roles(self):
+        """If user_roles is None, role-targeted notifications are excluded."""
+        d = AppNotificationDispatcher()
+        d.send("app-1", "App", "org-1", "Admin alert", "Details",
+               target_type=TargetType.ROLE, target_value="admin")
+        notifs = d.get_for_user("user-1", "org-1", user_roles=None)
+        assert len(notifs) == 0
 
 
 class TestQuery:
