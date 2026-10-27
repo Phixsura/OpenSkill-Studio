@@ -147,11 +147,23 @@ class AppSandboxPolicyEngine:
 
     def check_filesystem(self, app_id: str, path: str, write: bool = False,
                          org_id: str | None = None) -> PolicyCheckResult:
-        """Check if filesystem access to path is allowed."""
+        """Check if filesystem access to path is allowed.
+
+        Resolves symlinks/.. to prevent path traversal attacks.
+        Rejects NUL bytes in paths.
+        """
+        import os
+
+        # Reject NUL bytes
+        if "\x00" in path:
+            return PolicyCheckResult(allowed=False, rule_matched="NUL byte in path")
+
         policy = self.get_effective_policy(app_id, org_id)
+        real_path = os.path.realpath(path)
 
         for rule in policy.filesystem_rules:
-            if path.startswith(rule.path_prefix):
+            real_prefix = os.path.realpath(rule.path_prefix).rstrip("/") + "/"
+            if real_path == real_prefix.rstrip("/") or real_path.startswith(real_prefix):
                 if write and not rule.writable:
                     return PolicyCheckResult(
                         allowed=False, rule_matched=f"Write denied on {rule.path_prefix}",
@@ -197,11 +209,54 @@ class AppSandboxPolicyEngine:
 
     @staticmethod
     def _compose(base: SandboxPolicy, override: SandboxPolicy) -> SandboxPolicy:
-        """Compose two policies. Override can only restrict, not expand."""
+        """Compose two policies. Override can only restrict, not expand.
+
+        - Network: deny rules from BOTH apply; allow requires BOTH to allow.
+          Override ALLOW rules for domains not in base are dropped.
+        - Filesystem: only override rules whose prefix is within a base rule
+          are kept; R/W flags are ANDed (both must allow).
+        - Env/secrets: intersection only.
+        - Limits: min of both.
+        """
+        # Network: collect all deny rules from both; for allows, keep only
+        # those present in both base and override
+        composed_net: list[NetworkRule] = []
+        # All deny rules win unconditionally
+        for r in base.network_rules + override.network_rules:
+            if r.action == PolicyAction.DENY:
+                composed_net.append(r)
+        # Allow rules: only keep base allows that the override also allows
+        base_allow_domains = {r.domain for r in base.network_rules if r.action == PolicyAction.ALLOW}
+        override_allow_domains = {r.domain for r in override.network_rules if r.action == PolicyAction.ALLOW}
+        # If override has no allow rules, keep base allows (override didn't restrict)
+        allowed_domains = base_allow_domains & override_allow_domains if override_allow_domains else base_allow_domains
+        for r in base.network_rules:
+            if r.action == PolicyAction.ALLOW and r.domain in allowed_domains:
+                composed_net.append(r)
+
+        # Filesystem: only keep override rules within a base prefix, AND the flags
+        import os
+        composed_fs: list[FilesystemRule] = []
+        if override.filesystem_rules:
+            for ov_rule in override.filesystem_rules:
+                ov_real = os.path.realpath(ov_rule.path_prefix).rstrip("/") + "/"
+                for base_rule in base.filesystem_rules:
+                    base_real = os.path.realpath(base_rule.path_prefix).rstrip("/") + "/"
+                    if ov_real.startswith(base_real) or ov_real == base_real:
+                        composed_fs.append(FilesystemRule(
+                            path_prefix=ov_rule.path_prefix,
+                            readable=base_rule.readable and ov_rule.readable,
+                            writable=base_rule.writable and ov_rule.writable,
+                            max_file_bytes=min(base_rule.max_file_bytes, ov_rule.max_file_bytes),
+                        ))
+                        break
+        else:
+            composed_fs = list(base.filesystem_rules)
+
         return SandboxPolicy(
             app_id=base.app_id,
-            network_rules=base.network_rules + override.network_rules,
-            filesystem_rules=override.filesystem_rules or base.filesystem_rules,
+            network_rules=composed_net,
+            filesystem_rules=composed_fs,
             allowed_env_vars=list(set(base.allowed_env_vars) & set(override.allowed_env_vars))
                 if override.allowed_env_vars else base.allowed_env_vars,
             allowed_secret_keys=list(set(base.allowed_secret_keys) & set(override.allowed_secret_keys))
