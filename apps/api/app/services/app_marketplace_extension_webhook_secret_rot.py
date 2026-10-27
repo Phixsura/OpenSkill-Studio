@@ -36,9 +36,15 @@ class WebhookSecretRotService:
 
     def rotate(self, extension_id: str) -> WebhookSecret:
         old_secrets = self._secrets.get(extension_id, [])
+        now = time.time()
         for s in old_secrets:
-            if s.active:
-                s.expires_at = time.time() + self.GRACE_PERIOD
+            if not s.active:
+                continue
+            if s.expires_at != 0 and s.expires_at <= now:
+                s.active = False
+                continue
+            if s.expires_at == 0:
+                s.expires_at = now + self.GRACE_PERIOD
         return self.create(extension_id)
 
     def get_active(self, extension_id: str) -> list[WebhookSecret]:
