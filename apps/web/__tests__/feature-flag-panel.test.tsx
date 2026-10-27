@@ -1,22 +1,24 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { FeatureFlagPanel } from "@/components/feature-flag-panel";
 
+const flags = [
+  { flagId: "dark", name: "Dark Mode", description: "Enable dark theme", enabled: true, rolloutPct: 50 },
+  { flagId: "beta", name: "Beta UI", description: "", enabled: false, rolloutPct: 0 },
+];
+
 describe("FeatureFlagPanel", () => {
-  it("renders", () => {
-    const { container } = render(
-      <FeatureFlagPanel userId="u1" enabledCount={2}
-        flags={[
-          { flag: "dark_mode", value: true, reason: "rollout" },
-          { flag: "beta_ui", value: true, reason: "allowlisted" },
-          { flag: "v3_api", value: false, reason: "disabled" },
-        ]} />
-    );
-    expect(container.textContent).toContain("Feature Flags");
-    expect(container.textContent).toContain("u1");
-    expect(container.textContent).toContain("2/3 on");
-    expect(container.textContent).toContain("dark_mode");
-    expect(container.textContent).toContain("rollout");
-    expect(container.textContent).toContain("disabled");
+  it("renders flags", () => {
+    const { container } = render(<FeatureFlagPanel flags={flags} />);
+    expect(container.textContent).toContain("Dark Mode");
+    expect(container.textContent).toContain("50%");
+    expect(container.textContent).toContain("Beta UI");
+  });
+  it("toggle flag", () => {
+    const fn = vi.fn();
+    const { container } = render(<FeatureFlagPanel flags={flags} onToggle={fn} />);
+    const btns = container.querySelectorAll("button");
+    fireEvent.click(btns[0]); // Disable dark mode
+    expect(fn).toHaveBeenCalledWith("dark", false);
   });
 });
