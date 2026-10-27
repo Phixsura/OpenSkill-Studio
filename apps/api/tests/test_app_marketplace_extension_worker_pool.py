@@ -31,11 +31,15 @@ def test_affinity_routing():
 
 def test_work_stealing():
     pool = WorkerPoolService(num_workers=2)
-    # All tasks go to worker-0 via affinity
+    # All tasks to one specific worker via affinity
     for i in range(6):
         pool.submit(f"t{i}", affinity_key="heavy")
-    # Process from worker-1 (empty) → should steal from worker-0
-    stolen = pool.process("worker-1")
+    # Find which worker has all tasks, steal from the other
+    w0_q = len(pool._workers[0].queue)
+    w1_q = len(pool._workers[1].queue)
+    busy = "worker-0" if w0_q > w1_q else "worker-1"
+    idle = "worker-1" if busy == "worker-0" else "worker-0"
+    stolen = pool.process(idle)
     if stolen:
         assert stolen.status == "completed"
         assert pool.stats()["total_steals"] >= 1
