@@ -42,11 +42,11 @@ def test_overdraft():
 
 def test_overdraft_exhausted():
     tb = TokenBucketV2Service()
-    tb.create_bucket("api", capacity=2, refill_rate=0.001, overdraft_limit=2)
-    for _ in range(2):
-        tb.consume("api")
-    tb.consume("api", 2)  # use all overdraft
-    result = tb.consume("api")
+    tb.create_bucket("api", capacity=5, refill_rate=0.001, overdraft_limit=3)
+    # Consume all capacity + all overdraft in one shot
+    tb.consume("api", 5)  # exhaust capacity
+    tb.consume("api", 3)  # exhaust overdraft (tokens now at -3)
+    result = tb.consume("api", 1)  # should fail, would go to -4 < -3
     assert result["allowed"] is False
 
 
