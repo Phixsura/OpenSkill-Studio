@@ -145,6 +145,9 @@ class ApiQuotaAllocator:
     def allocate(self, org_id: str, quota_type: QuotaType,
                  entity_id: str, entity_type: str, amount: int) -> AllocationResult:
         """Reserve a quota slice for a team or app."""
+        if amount <= 0:
+            return AllocationResult(success=False, error="Amount must be positive")
+
         key = (org_id, quota_type)
         pool = self._pools.get(key)
         if pool is None:
@@ -190,6 +193,8 @@ class ApiQuotaAllocator:
 
     def transfer(self, from_alloc_id: str, to_alloc_id: str, amount: int) -> bool:
         """Transfer quota between two sub-allocations in the same pool."""
+        if amount <= 0:
+            return False
         src = self._allocations.get(from_alloc_id)
         dst = self._allocations.get(to_alloc_id)
         if src is None or dst is None:
@@ -207,6 +212,9 @@ class ApiQuotaAllocator:
 
     def consume(self, alloc_id: str, amount: int) -> ConsumeResult:
         """Consume quota from a sub-allocation."""
+        if amount <= 0:
+            return ConsumeResult(allowed=False, error="Amount must be positive")
+
         alloc = self._allocations.get(alloc_id)
         if alloc is None:
             return ConsumeResult(allowed=False, error="Allocation not found")
