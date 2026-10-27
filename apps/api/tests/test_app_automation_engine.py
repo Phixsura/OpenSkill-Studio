@@ -150,15 +150,15 @@ class TestRuleCRUD:
     def test_update_rule(self):
         e = AppAutomationEngine()
         rule = e.add_rule("app-1", "org-1", "R", "event", self._cond(), self._action())
-        updated = e.update_rule("app-1", rule.rule_id, enabled=False, name="Updated")
+        updated = e.update_rule("app-1", "org-1", rule.rule_id, enabled=False, name="Updated")
         assert updated.enabled is False
         assert updated.name == "Updated"
 
     def test_delete_rule(self):
         e = AppAutomationEngine()
         rule = e.add_rule("app-1", "org-1", "R", "event", self._cond(), self._action())
-        assert e.delete_rule("app-1", rule.rule_id) is True
-        assert e.get_rule("app-1", rule.rule_id) is None
+        assert e.delete_rule("app-1", "org-1", rule.rule_id) is True
+        assert e.get_rule("app-1", "org-1", rule.rule_id) is None
 
     def test_list_rules(self):
         e = AppAutomationEngine()
@@ -201,7 +201,7 @@ class TestExecution:
         rule = e.add_rule("app-1", "org-1", "R", "event",
                            [Condition("x", ConditionOp.EXISTS)],
                            [Action(ActionType.LOG)])
-        e.update_rule("app-1", rule.rule_id, enabled=False)
+        e.update_rule("app-1", "org-1", rule.rule_id, enabled=False)
         results = e.process_event("event", {"x": 1}, org_id="org-1")
         assert len(results) == 0
 
