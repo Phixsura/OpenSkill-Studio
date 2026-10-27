@@ -92,19 +92,19 @@ class TestRevoke:
     def test_revoke(self):
         m = AppApiKeyManager()
         _, key = m.create("inst-1", "app-1", ["read:skills"])
-        assert m.revoke(key.key_id) is True
+        assert m.revoke("inst-1", key.key_id) is True
 
     def test_revoked_key_invalid(self):
         m = AppApiKeyManager()
         raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke(key.key_id)
+        m.revoke("inst-1", key.key_id)
         result = m.validate(raw)
         assert result.valid is False
         assert "revoked" in result.error.lower()
 
     def test_revoke_nonexistent(self):
         m = AppApiKeyManager()
-        assert m.revoke("key-999") is False
+        assert m.revoke("inst-1", "key-999") is False
 
 
 class TestRotate:
@@ -124,12 +124,23 @@ class TestRotate:
         result = m.validate(raw_old)
         assert result.valid is True  # overlap period
 
-    def test_rotate_with_new_scopes(self):
+    def test_rotate_with_reduced_scopes(self):
+        m = AppApiKeyManager()
+        raw_old, _ = m.create("inst-1", "app-1", ["read:skills", "write:projects"])
+        result = m.rotate(raw_old, new_scopes=["read:skills"])
+        _, new_key = result
+        assert new_key.scopes == ["read:skills"]
+
+    def test_rotate_scope_expansion_blocked(self):
         m = AppApiKeyManager()
         raw_old, _ = m.create("inst-1", "app-1", ["read:skills"])
-        result = m.rotate(raw_old, new_scopes=["read:skills", "write:projects"])
-        _, new_key = result
-        assert "write:projects" in new_key.scopes
+        with pytest.raises(PermissionError, match="Cannot expand"):
+            m.rotate(raw_old, new_scopes=["read:skills", "admin:org"])
+
+    def test_revoke_wrong_installation_blocked(self):
+        m = AppApiKeyManager()
+        _, key = m.create("inst-1", "app-1", ["read:skills"])
+        assert m.revoke("inst-2", key.key_id) is False  # wrong owner
 
     def test_rotate_invalid_key(self):
         m = AppApiKeyManager()
@@ -138,7 +149,7 @@ class TestRotate:
     def test_rotate_revoked_key(self):
         m = AppApiKeyManager()
         raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke(key.key_id)
+        m.revoke("inst-1", key.key_id)
         assert m.rotate(raw) is None
 
 
@@ -155,7 +166,7 @@ class TestListing:
         m = AppApiKeyManager()
         m.create("inst-1", "app-1", ["read:skills"])
         _, key2 = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke(key2.key_id)
+        m.revoke("inst-1", key2.key_id)
         assert m.get_active_count("inst-1") == 1
 
     def test_newest_first(self):

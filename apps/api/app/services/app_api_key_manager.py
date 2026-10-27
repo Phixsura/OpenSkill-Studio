@@ -132,28 +132,37 @@ class AppApiKeyManager:
 
     def rotate(self, raw_old_key: str, new_scopes: list[str] | None = None,
                overlap_hours: int = 24) -> tuple[str, ApiKey] | None:
-        """Rotate a key: create new, mark old as rotated after overlap."""
+        """Rotate a key: create new, mark old as rotated with overlap.
+
+        Scope reduction only — cannot expand scopes on rotation.
+        Overlap capped at 24h. Already-rotated keys cannot be rotated again.
+        """
         old_hash = _hash_key(raw_old_key)
         old_key = self._keys.get(old_hash)
         if old_key is None or old_key.status != KeyStatus.ACTIVE:
             return None
+        if old_key.rotated_to is not None:
+            return None  # already rotated
 
         scopes = new_scopes or old_key.scopes
+        # Scope expansion check: new scopes must be subset of old
+        if not set(scopes) <= set(old_key.scopes):
+            raise PermissionError("Cannot expand scopes on rotation")
+
         raw_new, new_key = self.create(old_key.installation_id, old_key.app_id, scopes)
 
-        old_key.status = KeyStatus.ROTATED
+        overlap_hours = min(overlap_hours, 24)  # cap overlap
         old_key.rotated_to = new_key.key_id
-        # Old key remains valid for overlap period via expires_at
         old_key.expires_at = datetime.now(UTC) + timedelta(hours=overlap_hours)
-        old_key.status = KeyStatus.ACTIVE  # keep active during overlap
+        # Old key stays ACTIVE during overlap, validate() checks expires_at
 
         log.info("api_key.rotated", old_id=old_key.key_id, new_id=new_key.key_id)
         return raw_new, new_key
 
-    def revoke(self, key_id: str) -> bool:
-        """Revoke a key by key_id."""
+    def revoke(self, installation_id: str, key_id: str) -> bool:
+        """Revoke a key by key_id. Requires installation_id ownership to prevent IDOR."""
         for key in self._keys.values():
-            if key.key_id == key_id:
+            if key.key_id == key_id and key.installation_id == installation_id:
                 key.status = KeyStatus.REVOKED
                 key.revoked_at = datetime.now(UTC)
                 return True
