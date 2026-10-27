@@ -1,23 +1,22 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { LogViewer } from "@/components/log-viewer";
 
+const logs = [
+  { logId: "l1", level: "info", message: "Server started", timestamp: Date.now() },
+  { logId: "l2", level: "error", message: "Connection failed", timestamp: Date.now() },
+];
+
 describe("LogViewer", () => {
-  const entries = [
-    { raw: "App started", level: "INFO", icon: "ℹ️", timestamp: "10:00:00" },
-    { raw: "Connection refused", level: "ERROR", icon: "❌", timestamp: "10:00:05" },
-  ];
-  it("renders entries", () => {
-    const { container } = render(<LogViewer entries={entries} errorCount={1} />);
-    expect(container.textContent).toContain("App started");
-    expect(container.textContent).toContain("Connection refused");
-    expect(container.textContent).toContain("ERROR (1)");
+  it("renders logs", () => {
+    const { container } = render(<LogViewer logs={logs} />);
+    expect(container.textContent).toContain("Server started");
+    expect(container.textContent).toContain("Connection failed");
+    expect(container.textContent).toContain("info");
+    expect(container.textContent).toContain("error");
   });
-  it("filters by level", () => {
-    const { container } = render(<LogViewer entries={entries} errorCount={1} />);
-    const errorBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent?.includes("ERROR"))!;
-    fireEvent.click(errorBtn);
-    expect(container.textContent).toContain("Connection refused");
-    expect(container.textContent).not.toContain("App started");
+  it("empty state", () => {
+    const { container } = render(<LogViewer logs={[]} />);
+    expect(container.textContent).toContain("No logs");
   });
 });

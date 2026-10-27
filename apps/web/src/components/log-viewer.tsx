@@ -1,41 +1,39 @@
 "use client";
-
 import { useState } from "react";
 
-interface LogEntry { raw: string; level: string; icon: string; timestamp: string | null; }
-interface LogViewerProps { entries: LogEntry[]; errorCount: number; }
+interface LogEntry { logId: string; level: string; message: string; timestamp: number; }
 
 const levelColors: Record<string, string> = {
-  DEBUG: "text-gray-400", INFO: "text-blue-500", WARN: "text-yellow-500",
-  ERROR: "text-red-500", FATAL: "text-red-700 font-bold",
+  debug: "text-gray-400", info: "text-blue-500", warn: "text-yellow-500", error: "text-red-500", fatal: "text-red-700 font-bold",
 };
 
-export function LogViewer({ entries, errorCount }: LogViewerProps) {
-  const [filter, setFilter] = useState("ALL");
-  const filtered = filter === "ALL" ? entries : entries.filter(e => e.level === filter);
+const levels = ["all", "debug", "info", "warn", "error", "fatal"];
+
+export function LogViewer({ logs, onSearch }: { logs: LogEntry[]; onSearch?: (query: string, level: string) => void }) {
+  const [level, setLevel] = useState("all");
+  const [search, setSearch] = useState("");
+  const filtered = level === "all" ? logs : logs.filter(l => l.level === level);
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Logs</h3>
-        <div className="flex gap-1">
-          {["ALL", "ERROR", "WARN", "INFO", "DEBUG"].map(lv => (
-            <button key={lv} onClick={() => setFilter(lv)}
-              className={`rounded px-2 py-0.5 text-xs ${filter === lv ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>
-              {lv}{lv === "ERROR" && errorCount > 0 ? ` (${errorCount})` : ""}
-            </button>
-          ))}
-        </div>
+      <div className="flex gap-2">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search logs..."
+          onKeyDown={e => e.key === "Enter" && onSearch?.(search, level)}
+          className="flex-1 border dark:border-gray-700 rounded-lg px-3 py-1.5 text-xs bg-transparent font-mono" />
+        <select value={level} onChange={e => setLevel(e.target.value)}
+          className="border dark:border-gray-700 rounded-lg px-2 py-1.5 text-xs bg-transparent">
+          {levels.map(l => <option key={l}>{l}</option>)}
+        </select>
       </div>
-      <div className="max-h-80 overflow-y-auto rounded-lg bg-gray-950 p-3 font-mono text-xs">
-        {filtered.map((e, i) => (
-          <div key={i} className={`py-0.5 ${levelColors[e.level] ?? ""}`}>
-            {e.timestamp && <span className="text-gray-600 mr-2">{e.timestamp}</span>}
-            <span className="mr-1">{e.icon}</span>
-            <span>{e.raw}</span>
+      <div className="bg-gray-900 rounded-xl p-3 max-h-64 overflow-y-auto font-mono text-xs space-y-0.5">
+        {filtered.length === 0 ? (
+          <span className="text-gray-500">No logs</span>
+        ) : filtered.map(l => (
+          <div key={l.logId} className="flex gap-2">
+            <span className={`w-12 shrink-0 uppercase ${levelColors[l.level] || "text-gray-400"}`}>{l.level}</span>
+            <span className="text-gray-300">{l.message}</span>
           </div>
         ))}
-        {filtered.length === 0 && <p className="text-gray-600">No log entries</p>}
       </div>
     </div>
   );
