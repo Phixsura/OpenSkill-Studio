@@ -43,9 +43,9 @@ class DelayedSchedulerService:
 
     def schedule_at(self, handler: str, fire_at: float,
                     payload: dict | None = None, task_id: str = "",
-                    repeat_interval: float = 0) -> ScheduledTask:
+                    repeat_interval: float = 0, max_retries: int = 0) -> ScheduledTask:
         """Schedule a task at a specific timestamp."""
-        return self._schedule(handler, fire_at, payload, task_id, repeat_interval)
+        return self._schedule(handler, fire_at, payload, task_id, repeat_interval, max_retries)
 
     def _schedule(self, handler: str, fire_at: float, payload: dict | None,
                   task_id: str, repeat_interval: float,
