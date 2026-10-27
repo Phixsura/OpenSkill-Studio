@@ -1,33 +1,35 @@
 "use client";
-
 import { useState } from "react";
 
-interface Screenshot { url: string; altText: string; order: number; }
-interface ScreenshotGalleryProps { screenshots: Screenshot[]; meetsMinimum: boolean; }
+interface Screenshot { screenshotId: string; url: string; caption: string; }
 
-export function ScreenshotGallery({ screenshots, meetsMinimum }: ScreenshotGalleryProps) {
-  const [active, setActive] = useState(0);
-  if (screenshots.length === 0) {
-    return <p className="py-8 text-center text-sm text-gray-400">No screenshots uploaded</p>;
-  }
+export function ScreenshotGallery({ screenshots, onDelete }: {
+  screenshots: Screenshot[]; onDelete?: (id: string) => void;
+}) {
+  const [selected, setSelected] = useState(0);
+  if (!screenshots.length) return <div className="text-center text-gray-400 py-8 text-sm">No screenshots uploaded</div>;
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Screenshots</h3>
-        {!meetsMinimum && <span className="text-xs text-yellow-600">⚠ Minimum 2 required</span>}
-      </div>
-      <div className="aspect-video overflow-hidden rounded-lg border dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
-        <img src={screenshots[active]?.url} alt={screenshots[active]?.altText}
-          className="h-full w-full object-contain" />
+      <div className="relative rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 aspect-video flex items-center justify-center">
+        <img src={screenshots[selected]?.url} alt={screenshots[selected]?.caption || "Screenshot"}
+          className="max-h-full max-w-full object-contain" />
+        {screenshots[selected]?.caption && (
+          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-2">{screenshots[selected].caption}</div>
+        )}
       </div>
       <div className="flex gap-2 overflow-x-auto">
-        {screenshots.map((s, i) => (
-          <button key={i} onClick={() => setActive(i)}
-            className={`h-16 w-24 shrink-0 overflow-hidden rounded border ${active === i ? "ring-2 ring-blue-500" : "dark:border-gray-700"}`}>
-            <img src={s.url} alt={s.altText} className="h-full w-full object-cover" />
+        {screenshots.map((ss, i) => (
+          <button key={ss.screenshotId} onClick={() => setSelected(i)}
+            className={`shrink-0 w-16 h-10 rounded-lg overflow-hidden border-2 ${i === selected ? "border-blue-500" : "border-transparent"}`}>
+            <img src={ss.url} alt="" className="w-full h-full object-cover" />
           </button>
         ))}
       </div>
+      {onDelete && (
+        <button onClick={() => onDelete(screenshots[selected]?.screenshotId)}
+          className="text-xs text-red-400 hover:text-red-600">🗑️ Delete selected</button>
+      )}
     </div>
   );
 }
