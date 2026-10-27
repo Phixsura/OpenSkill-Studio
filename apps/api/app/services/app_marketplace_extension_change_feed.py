@@ -91,7 +91,15 @@ class ChangeFeedService:
         if last_ok > 0:
             self.checkpoint(consumer, partition, last_ok)
 
-        return {"processed": len(batch) - len(errors), "errors": errors,
+        processed_count = sum(1 for _ in batch[:len(batch) - len(errors)] if True)
+        # Actually count by last_ok position
+        ok_count = 0
+        for c in batch:
+            if c.sequence <= last_ok:
+                ok_count += 1
+            else:
+                break
+        return {"processed": ok_count, "errors": errors,
                 "status": "error" if errors else "ok",
                 "last_sequence": last_ok}
 
