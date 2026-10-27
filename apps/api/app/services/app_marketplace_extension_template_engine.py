@@ -115,14 +115,18 @@ class TemplateEngineService:
                 body, end_pos = self._find_block_end(template, next_token.end(), "endif")
                 value = self._resolve(args, context)
                 if value:
-                    result.append(self._process_blocks(body, context))
+                    rendered = self._process_blocks(body, context)
+                    rendered = self._interpolate(rendered, context)
+                    result.append(rendered)
                 pos = end_pos
 
             elif keyword == "if not":
                 body, end_pos = self._find_block_end(template, next_token.end(), "endif")
                 value = self._resolve(args, context)
                 if not value:
-                    result.append(self._process_blocks(body, context))
+                    rendered = self._process_blocks(body, context)
+                    rendered = self._interpolate(rendered, context)
+                    result.append(rendered)
                 pos = end_pos
 
             elif keyword == "for":
@@ -138,7 +142,9 @@ class TemplateEngineService:
                         loop_ctx = {**context, var_name: item,
                                     "loop": {"index": idx, "first": idx == 0,
                                              "last": idx == len(items) - 1}}
-                        result.append(self._process_blocks(body, loop_ctx))
+                        rendered = self._process_blocks(body, loop_ctx)
+                        rendered = self._interpolate(rendered, loop_ctx)
+                        result.append(rendered)
                 pos = end_pos
 
             else:
