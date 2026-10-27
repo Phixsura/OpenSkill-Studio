@@ -17,7 +17,7 @@ import html
 # Regex patterns
 VAR_RE = re.compile(r'\{\{\{\s*(.+?)\s*\}\}\}|\{\{\s*(.+?)\s*\}\}')
 BLOCK_RE = re.compile(
-    r'\{%\s*(if|if not|for|endif|endfor|block|endblock)\s*(.*?)\s*%\}',
+    r'\{%\s*(if not|if|for|endif|endfor|block|endblock)\s*(.*?)\s*%\}',
     re.DOTALL
 )
 
