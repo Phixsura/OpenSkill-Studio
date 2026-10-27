@@ -1,66 +1,39 @@
-"""Platform Changelog — track all platform-level changes.
-
-Manages platform releases, breaking changes, deprecations, and
-new feature announcements with version tracking.
-"""
+"""Platform Changelog — track platform-level changes and updates."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+import time
 
 
 @dataclass
-class PlatformRelease:
+class PlatformChange:
+    change_id: str
     version: str
-    date: str
     title: str
-    features: list[str] = field(default_factory=list)
-    fixes: list[str] = field(default_factory=list)
-    breaking: list[str] = field(default_factory=list)
-    deprecations: list[str] = field(default_factory=list)
+    description: str
+    category: str = "feature"  # feature, improvement, fix, breaking, security
+    date: str = ""
+    def __post_init__(self):
+        if not self.date: self.date = time.strftime("%Y-%m-%d")
 
 
 class PlatformChangelogService:
-    """Manages platform release changelog."""
-
     def __init__(self):
-        self._releases: list[PlatformRelease] = []
+        self._changes: list[PlatformChange] = []
+        self._counter = 0
 
-    def add_release(self, version: str, date: str, title: str,
-                    features: list[str] | None = None,
-                    fixes: list[str] | None = None,
-                    breaking: list[str] | None = None,
-                    deprecations: list[str] | None = None) -> PlatformRelease:
-        release = PlatformRelease(
-            version=version, date=date, title=title,
-            features=features or [], fixes=fixes or [],
-            breaking=breaking or [], deprecations=deprecations or [],
-        )
-        self._releases.append(release)
-        self._releases.sort(key=lambda r: r.version, reverse=True)
-        return release
+    def add(self, version: str, title: str, description: str,
+            category: str = "feature") -> PlatformChange:
+        self._counter += 1
+        c = PlatformChange(change_id=f"pc-{self._counter}", version=version,
+                           title=title, description=description, category=category)
+        self._changes.append(c)
+        return c
 
-    def get_latest(self) -> PlatformRelease | None:
-        return self._releases[0] if self._releases else None
+    def get_by_version(self, version: str) -> list[PlatformChange]:
+        return [c for c in self._changes if c.version == version]
 
-    def get_all(self) -> list[PlatformRelease]:
-        return list(self._releases)
+    def get_latest(self, limit: int = 20) -> list[PlatformChange]:
+        return list(reversed(self._changes))[:limit]
 
-    def get_breaking_changes(self) -> list[dict]:
-        result = []
-        for r in self._releases:
-            for b in r.breaking:
-                result.append({"version": r.version, "change": b})
-        return result
-
-    def search(self, query: str) -> list[PlatformRelease]:
-        q = query.lower()
-        return [r for r in self._releases
-                if q in r.title.lower()
-                or any(q in f.lower() for f in r.features + r.fixes)]
-
-    def get_stats(self) -> dict:
-        return {
-            "total_releases": len(self._releases),
-            "total_features": sum(len(r.features) for r in self._releases),
-            "total_fixes": sum(len(r.fixes) for r in self._releases),
-            "total_breaking": sum(len(r.breaking) for r in self._releases),
-        }
+    def get_breaking(self) -> list[PlatformChange]:
+        return [c for c in self._changes if c.category == "breaking"]
