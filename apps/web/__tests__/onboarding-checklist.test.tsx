@@ -2,27 +2,24 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OnboardingChecklist } from "@/components/onboarding-checklist";
 
+const items = [
+  { itemId: "profile", title: "Complete Profile", description: "Add bio", completed: true, required: true },
+  { itemId: "api_key", title: "Generate API Key", description: "Create key", completed: false, required: true },
+];
+const progress = { total: 2, completed: 1, percentage: 50 };
+
 describe("OnboardingChecklist", () => {
-  const tasks = [
-    { id: "1", title: "Create app", description: "Set up your first app", completed: true, action_url: null, icon: "🔧", required: true },
-    { id: "2", title: "Add webhook", description: "", completed: false, action_url: null, icon: "🔗", required: true },
-  ];
-  it("renders tasks", () => {
-    const { container } = render(
-      <OnboardingChecklist tasks={tasks} greeting="Welcome!" progressPct={50} onComplete={vi.fn()} />
-    );
-    expect(container.textContent).toContain("Welcome!");
-    expect(container.textContent).toContain("Create app");
-    expect(container.textContent).toContain("Add webhook");
-    expect(container.textContent).toContain("50%");
+  it("renders checklist", () => {
+    const { container } = render(<OnboardingChecklist items={items} progress={progress} />);
+    expect(container.textContent).toContain("Complete Profile");
+    expect(container.textContent).toContain("1/2 (50%)");
+    expect(container.textContent).toContain("required");
   });
-  it("complete click", () => {
+  it("complete item", () => {
     const fn = vi.fn();
-    const { container } = render(
-      <OnboardingChecklist tasks={tasks} greeting="Hi" progressPct={50} onComplete={fn} />
-    );
-    const buttons = container.querySelectorAll("button");
-    fireEvent.click(buttons[1]); // second task (uncompleted)
-    expect(fn).toHaveBeenCalledWith("2");
+    const { container } = render(<OnboardingChecklist items={items} progress={progress} onComplete={fn} />);
+    const btns = container.querySelectorAll("button");
+    fireEvent.click(btns[1]); // api_key not completed
+    expect(fn).toHaveBeenCalledWith("api_key");
   });
 });
