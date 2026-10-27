@@ -1,50 +1,192 @@
-"""App installation validator — pre-install checks.
+"""App Install Validator — pre-installation checks for developer apps.
 
-Validates that an app can be installed in an org:
-- App status must be PUBLISHED
-- Version must be APPROVED
-- Org doesn't already have it installed
-- Required permissions are acceptable
+Validates that an app can be safely installed into an org:
+- Platform version compatibility
+- Required permission availability
+- Config schema completeness
+- Dependency satisfaction
+- Existing installation conflict detection
+- Org plan limits (max installed apps)
+- Blocklist/allowlist enforcement
 """
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
 
 import structlog
 
 log = structlog.get_logger()
 
 
-def validate_installation(
-    *,
-    app_status: str,
-    version_review_status: str,
-    already_installed: bool,
-    required_permissions: list[str],
-    org_allowed_permissions: list[str] | None = None,
-) -> dict:
-    """Pre-validate an app installation.
-    
-    Returns {"allowed": bool, "errors": [...], "warnings": [...]}
-    """
-    errors = []
-    warnings = []
+class CheckStatus(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    WARN = "warn"
 
-    if app_status != "published":
-        errors.append(f"App is not published (status: {app_status})")
 
-    if version_review_status != "approved":
-        errors.append(f"Version not approved (review: {version_review_status})")
+@dataclass
+class ValidationCheck:
+    """A single validation check result."""
 
-    if already_installed:
-        errors.append("App is already installed in this organization")
+    name: str
+    status: CheckStatus
+    message: str
 
-    if org_allowed_permissions is not None:
-        denied = [p for p in required_permissions if p not in org_allowed_permissions]
-        if denied:
-            errors.append(f"Organization does not allow permissions: {', '.join(denied)}")
 
-    # Warnings for high-privilege permissions
-    HIGH_PRIV = {"write:settings", "write:evaluations", "run:background_jobs"}
-    high_privs = [p for p in required_permissions if p in HIGH_PRIV]
-    if high_privs:
-        warnings.append(f"App requests elevated permissions: {', '.join(high_privs)}")
+@dataclass
+class InstallValidationResult:
+    """Complete pre-install validation result."""
 
-    return {"allowed": len(errors) == 0, "errors": errors, "warnings": warnings}
+    can_install: bool
+    checks: list[ValidationCheck]
+    errors: list[str]
+    warnings: list[str]
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for c in self.checks if c.status == CheckStatus.FAIL)
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for c in self.checks if c.status == CheckStatus.WARN)
+
+
+@dataclass
+class AppManifest:
+    """Simplified manifest for validation."""
+
+    app_id: str
+    app_name: str
+    version: str
+    min_platform_version: str | None = None
+    required_permissions: list[str] = field(default_factory=list)
+    config_fields: list[str] = field(default_factory=list)     # required config field names
+    dependencies: list[str] = field(default_factory=list)       # app_ids this app depends on
+
+
+@dataclass
+class OrgContext:
+    """Organization context for install validation."""
+
+    org_id: str
+    plan_max_apps: int = 50
+    installed_app_ids: list[str] = field(default_factory=list)
+    available_permissions: set[str] = field(default_factory=set)
+    platform_version: str = "1.0.0"
+    blocklist: set[str] = field(default_factory=set)   # blocked app_ids
+    allowlist: set[str] | None = None                    # if set, only these allowed
+
+
+class AppInstallValidator:
+    """Run pre-installation validation checks."""
+
+    def validate(self, manifest: AppManifest, org: OrgContext,
+                 provided_config: dict | None = None) -> InstallValidationResult:
+        """Run all validation checks and return the result."""
+        checks: list[ValidationCheck] = []
+
+        checks.append(self._check_blocklist(manifest, org))
+        checks.append(self._check_allowlist(manifest, org))
+        checks.append(self._check_duplicate(manifest, org))
+        checks.append(self._check_plan_limit(org))
+        checks.append(self._check_platform_version(manifest, org))
+        checks.append(self._check_permissions(manifest, org))
+        checks.append(self._check_config(manifest, provided_config))
+        checks.append(self._check_dependencies(manifest, org))
+
+        errors = [c.message for c in checks if c.status == CheckStatus.FAIL]
+        warnings = [c.message for c in checks if c.status == CheckStatus.WARN]
+        can_install = len(errors) == 0
+
+        return InstallValidationResult(
+            can_install=can_install,
+            checks=checks,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    # ── Individual checks ────────────────────────────────
+
+    @staticmethod
+    def _check_blocklist(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if manifest.app_id in org.blocklist:
+            return ValidationCheck("blocklist", CheckStatus.FAIL,
+                                   f"App {manifest.app_id} is blocked for this organization")
+        return ValidationCheck("blocklist", CheckStatus.PASS, "App is not blocked")
+
+    @staticmethod
+    def _check_allowlist(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if org.allowlist is not None and manifest.app_id not in org.allowlist:
+            return ValidationCheck("allowlist", CheckStatus.FAIL,
+                                   f"App {manifest.app_id} is not in the org allowlist")
+        return ValidationCheck("allowlist", CheckStatus.PASS, "Allowlist check passed")
+
+    @staticmethod
+    def _check_duplicate(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if manifest.app_id in org.installed_app_ids:
+            return ValidationCheck("duplicate", CheckStatus.FAIL,
+                                   f"App {manifest.app_id} is already installed")
+        return ValidationCheck("duplicate", CheckStatus.PASS, "No duplicate installation")
+
+    @staticmethod
+    def _check_plan_limit(org: OrgContext) -> ValidationCheck:
+        current = len(org.installed_app_ids)
+        if current >= org.plan_max_apps:
+            return ValidationCheck("plan_limit", CheckStatus.FAIL,
+                                   f"Org has reached the app limit ({current}/{org.plan_max_apps})")
+        if current >= org.plan_max_apps * 0.9:
+            return ValidationCheck("plan_limit", CheckStatus.WARN,
+                                   f"Org is near the app limit ({current}/{org.plan_max_apps})")
+        return ValidationCheck("plan_limit", CheckStatus.PASS,
+                               f"Within app limit ({current}/{org.plan_max_apps})")
+
+    @staticmethod
+    def _check_platform_version(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if not manifest.min_platform_version:
+            return ValidationCheck("platform_version", CheckStatus.PASS,
+                                   "No minimum platform version required")
+        if manifest.min_platform_version > org.platform_version:
+            return ValidationCheck("platform_version", CheckStatus.FAIL,
+                                   f"Requires platform >= {manifest.min_platform_version}, "
+                                   f"current is {org.platform_version}")
+        return ValidationCheck("platform_version", CheckStatus.PASS,
+                               f"Platform {org.platform_version} meets requirement "
+                               f"{manifest.min_platform_version}")
+
+    @staticmethod
+    def _check_permissions(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if not manifest.required_permissions:
+            return ValidationCheck("permissions", CheckStatus.PASS, "No permissions required")
+        missing = set(manifest.required_permissions) - org.available_permissions
+        if missing:
+            return ValidationCheck("permissions", CheckStatus.FAIL,
+                                   f"Missing permissions: {', '.join(sorted(missing))}")
+        return ValidationCheck("permissions", CheckStatus.PASS,
+                               f"All {len(manifest.required_permissions)} permissions available")
+
+    @staticmethod
+    def _check_config(manifest: AppManifest, provided_config: dict | None) -> ValidationCheck:
+        if not manifest.config_fields:
+            return ValidationCheck("config", CheckStatus.PASS, "No config required")
+        if provided_config is None:
+            return ValidationCheck("config", CheckStatus.WARN,
+                                   "Config not provided — will use defaults if available")
+        missing = [f for f in manifest.config_fields if f not in provided_config]
+        if missing:
+            return ValidationCheck("config", CheckStatus.FAIL,
+                                   f"Missing config fields: {', '.join(missing)}")
+        return ValidationCheck("config", CheckStatus.PASS,
+                               f"All {len(manifest.config_fields)} config fields provided")
+
+    @staticmethod
+    def _check_dependencies(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
+        if not manifest.dependencies:
+            return ValidationCheck("dependencies", CheckStatus.PASS, "No dependencies")
+        missing = [d for d in manifest.dependencies if d not in org.installed_app_ids]
+        if missing:
+            return ValidationCheck("dependencies", CheckStatus.FAIL,
+                                   f"Missing dependencies: {', '.join(missing)}")
+        return ValidationCheck("dependencies", CheckStatus.PASS,
+                               f"All {len(manifest.dependencies)} dependencies installed")

@@ -13,13 +13,17 @@ from app.services.app_webhook_event_router import (
 
 def _sub(app_id: str, event_type: str = "skill_pack.published",
          filters: dict | None = None,
-         priority: DeliveryPriority = DeliveryPriority.NORMAL) -> EventSubscription:
+         priority: DeliveryPriority = DeliveryPriority.NORMAL,
+         org_id: str = "org-1",
+         platform_scoped: bool = False) -> EventSubscription:
     return EventSubscription(
         app_id=app_id, app_name=f"App {app_id}",
         event_type=event_type,
         webhook_url=f"https://{app_id}.example.com/hook",
         secret=f"secret-{app_id}",
+        org_id=org_id,
         filters=filters, priority=priority,
+        platform_scoped=platform_scoped,
     )
 
 
@@ -201,11 +205,48 @@ class TestDedup:
         assert r2.matched == 1
 
 
+class TestCrossTenantSecurity:
+    def test_cross_org_blocked(self):
+        """App in org-1 must NOT receive events from org-2."""
+        router = AppWebhookEventRouter()
+        router.subscribe(_sub("app-1", org_id="org-1"))
+        result = router.route(_event(org_id="org-2"))
+        assert result.matched == 0
+        assert result.filtered_out == 1
+
+    def test_same_org_allowed(self):
+        router = AppWebhookEventRouter()
+        router.subscribe(_sub("app-1", org_id="org-1"))
+        result = router.route(_event(org_id="org-1"))
+        assert result.matched == 1
+
+    def test_none_org_blocked(self):
+        """Events without org_id are blocked for org-scoped apps."""
+        router = AppWebhookEventRouter()
+        router.subscribe(_sub("app-1", org_id="org-1"))
+        result = router.route(_event(org_id=None))
+        assert result.matched == 0
+
+    def test_platform_scoped_bypasses_org_check(self):
+        """Admin-approved platform-scoped apps receive cross-org events."""
+        router = AppWebhookEventRouter()
+        router.subscribe(_sub("platform-app", org_id="org-1", platform_scoped=True))
+        result = router.route(_event(org_id="org-2"))
+        assert result.matched == 1
+
+    def test_filter_fail_closed_missing_key(self):
+        """Filter on a key not in the event payload should fail-closed (no match)."""
+        router = AppWebhookEventRouter()
+        router.subscribe(_sub("app-1", filters={"nonexistent_field": "value"}))
+        result = router.route(_event(payload={"name": "Test"}))
+        assert result.matched == 0
+
+
 class TestStats:
     def test_stats(self):
         router = AppWebhookEventRouter()
         router.subscribe(_sub("app-1"))
-        router.subscribe(_sub("app-2", filters={"org_id": "org-99"}))
+        router.subscribe(_sub("app-2", filters={"nonexistent": "x"}))
         router.route(_event())
         stats = router.stats
         assert stats["total_routed"] == 1

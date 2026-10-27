@@ -38,9 +38,11 @@ class EventSubscription:
     event_type: str         # e.g. "skill_pack.published"
     webhook_url: str
     secret: str
-    filters: dict | None = None  # e.g. {"org_id": "org-1"} or {"category": "ai"}
+    org_id: str             # mandatory: installation scope, set server-side
+    filters: dict | None = None  # e.g. {"category": "ai"}
     priority: DeliveryPriority = DeliveryPriority.NORMAL
     active: bool = True
+    platform_scoped: bool = False  # admin-approved cross-org apps only
 
 
 @dataclass
@@ -160,7 +162,14 @@ class AppWebhookEventRouter:
         deduped = 0
 
         for sub in subs:
-            # Evaluate filters
+            # Mandatory org-scope check: deny cross-tenant delivery
+            # unless the app is explicitly platform-scoped (admin-approved)
+            if not sub.platform_scoped:
+                if not sub.org_id or not event.org_id or sub.org_id != event.org_id:
+                    filtered_out += 1
+                    continue
+
+            # Evaluate additional filters
             if not self._matches_filter(sub.filters, event):
                 filtered_out += 1
                 continue
@@ -237,16 +246,24 @@ class AppWebhookEventRouter:
 
     @staticmethod
     def _matches_filter(filters: dict | None, event: PlatformEvent) -> bool:
-        """Check if an event matches subscription filters."""
+        """Check if an event matches subscription filters.
+
+        Fail-closed: if a filter key is not present in the event, the filter
+        does NOT match (prevents accidental leakage when events lack a field).
+        """
         if not filters:
             return True
 
         for key, expected in filters.items():
-            if key == "org_id" and event.org_id != expected:
-                return False
-            elif key == "user_id" and event.user_id != expected:
-                return False
-            elif key in event.payload and event.payload[key] != expected:
-                return False
+            if key == "org_id":
+                if event.org_id != expected:
+                    return False
+            elif key == "user_id":
+                if event.user_id != expected:
+                    return False
+            else:
+                # Fail-closed: key must exist in payload AND match
+                if key not in event.payload or event.payload[key] != expected:
+                    return False
 
         return True
