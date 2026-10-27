@@ -22,7 +22,9 @@ describe("SupportTicketThread", () => {
     const { container } = render(<SupportTicketThread ticket={ticket} currentUserId="u1" onReply={fn} />);
     const input = container.querySelector("input")!;
     fireEvent.change(input, { target: { value: "Thanks!" } });
-    fireEvent.click(container.querySelector("button:last-of-type")!);
+    const btns = container.querySelectorAll("button");
+    const sendBtn = Array.from(btns).find(b => b.textContent === "Send");
+    fireEvent.click(sendBtn!);
     expect(fn).toHaveBeenCalledWith("Thanks!");
   });
 });
