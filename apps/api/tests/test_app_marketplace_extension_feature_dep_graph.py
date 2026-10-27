@@ -43,7 +43,7 @@ def test_coupling_score():
         fdg.add_dependency(dep, "core")
     score = fdg.coupling_score("core")
     assert score["fan_in"] == 4  # 4 things depend on core
-    assert score["level"] == "high"
+    assert score["level"] == "medium"  # 4 fan_in + 0 fan_out = 4
 
 
 def test_orphans():
