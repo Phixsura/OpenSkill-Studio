@@ -109,14 +109,16 @@ class AppApiRatePlan:
 
     def upgrade(self, app_id: str, new_tier: PlanTier) -> AppPlanAssignment:
         current = self._assignments.get(app_id)
-        if current and _tier_rank(new_tier) <= _tier_rank(current.tier):
-            raise ValueError(f"Cannot upgrade from {current.tier.value} to {new_tier.value}")
+        current_tier = current.tier if current else PlanTier.FREE
+        if _tier_rank(new_tier) <= _tier_rank(current_tier):
+            raise ValueError(f"Cannot upgrade from {current_tier.value} to {new_tier.value}")
         return self.assign(app_id, new_tier)
 
     def downgrade(self, app_id: str, new_tier: PlanTier) -> AppPlanAssignment:
         current = self._assignments.get(app_id)
-        if current and _tier_rank(new_tier) >= _tier_rank(current.tier):
-            raise ValueError(f"Cannot downgrade from {current.tier.value} to {new_tier.value}")
+        current_tier = current.tier if current else PlanTier.FREE
+        if _tier_rank(new_tier) >= _tier_rank(current_tier):
+            raise ValueError(f"Cannot downgrade from {current_tier.value} to {new_tier.value}")
         return self.assign(app_id, new_tier)
 
     def record_usage(self, app_id: str, count: int = 1) -> PlanCheckResult:
