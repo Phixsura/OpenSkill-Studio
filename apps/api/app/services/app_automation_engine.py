@@ -260,14 +260,10 @@ class AppAutomationEngine:
         return results
 
     def get_history(self, app_id: str, org_id: str, limit: int = 50) -> list[ExecutionResult]:
-        """Get execution history scoped to app_id + org_id."""
+        """Get execution history scoped to app_id + org_id. Always filters."""
         rule_ids = {r.rule_id for r in self._rules.values()
                     if r.app_id == app_id and r.org_id == org_id}
-        if not rule_ids:
-            return []
-        entries = self._history
-        if rule_ids:
-            entries = [e for e in entries if e.rule_id in rule_ids]
+        entries = [e for e in self._history if e.rule_id in rule_ids]
         return entries[-limit:]
 
     # ── Internal ─────────────────────────────────────────
