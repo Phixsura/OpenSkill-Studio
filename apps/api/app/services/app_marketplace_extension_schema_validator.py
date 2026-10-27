@@ -39,12 +39,12 @@ class SchemaValidatorService:
 
         # Type check
         if expected_type and expected_type != "null":
+            # Special case: bool is subclass of int in Python
+            if isinstance(data, bool) and expected_type not in ("boolean",):
+                errors.append(SchemaValidationError(path or "$", f"Expected {expected_type}, got boolean"))
+                return errors
             py_type = self.TYPE_MAP.get(expected_type)
             if py_type and not isinstance(data, py_type):
-                # Special case: bool is int in Python
-                if expected_type == "integer" and isinstance(data, bool):
-                    errors.append(SchemaValidationError(path or "$", f"Expected integer, got boolean"))
-                    return errors
                 errors.append(SchemaValidationError(path or "$", f"Expected {expected_type}, got {type(data).__name__}"))
                 return errors
 
