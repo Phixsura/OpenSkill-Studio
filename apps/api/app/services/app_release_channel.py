@@ -135,8 +135,19 @@ class AppReleaseChannel:
 
     # ── Subscriptions ────────────────────────────────────
 
+    # Internal channel is restricted to developer orgs
+    RESTRICTED_CHANNELS = {Channel.INTERNAL}
+
     def subscribe(self, installation_id: str, app_id: str,
-                  channel: Channel) -> ChannelSubscription:
+                  channel: Channel, *,
+                  is_developer_org: bool = False) -> ChannelSubscription:
+        """Subscribe an installation to a channel.
+
+        Internal channel requires is_developer_org=True.
+        """
+        if channel in self.RESTRICTED_CHANNELS and not is_developer_org:
+            raise PermissionError(f"Channel '{channel.value}' is restricted to developer organizations")
+
         sub = ChannelSubscription(
             installation_id=installation_id, app_id=app_id, channel=channel,
         )
@@ -144,9 +155,17 @@ class AppReleaseChannel:
         return sub
 
     def pin_version(self, installation_id: str, version: str) -> bool:
+        """Pin to a specific version. Only versions published on the channel are allowed."""
         sub = self._subscriptions.get(installation_id)
         if sub is None:
             return False
+
+        # Validate version exists on the subscribed channel
+        releases = self._releases.get((sub.app_id, sub.channel), [])
+        published_versions = {r.version for r in releases}
+        if version not in published_versions:
+            return False
+
         sub.pinned_version = version
         return True
 
@@ -171,7 +190,13 @@ class AppReleaseChannel:
         if sub is None:
             return None
 
-        # Pinned version
+        # Pinned version — re-validate it still exists on the channel
+        if sub.pinned_version:
+            releases = self._releases.get((sub.app_id, sub.channel), [])
+            if sub.pinned_version not in {r.version for r in releases}:
+                # Pinned version no longer valid → clear and fall through
+                sub.pinned_version = None
+
         if sub.pinned_version:
             return ResolvedVersion(
                 version=sub.pinned_version, channel=sub.channel,

@@ -122,13 +122,21 @@ class TestSubscriptions:
 
     def test_pin_version(self):
         rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
         rc.subscribe("inst-1", "app-1", Channel.STABLE)
         assert rc.pin_version("inst-1", "1.0.0") is True
         sub = rc.get_subscription("inst-1")
         assert sub.pinned_version == "1.0.0"
 
+    def test_pin_unpublished_version_rejected(self):
+        rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
+        rc.subscribe("inst-1", "app-1", Channel.STABLE)
+        assert rc.pin_version("inst-1", "9.9.9") is False  # not published
+
     def test_unpin_version(self):
         rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
         rc.subscribe("inst-1", "app-1", Channel.STABLE)
         rc.pin_version("inst-1", "1.0.0")
         rc.unpin_version("inst-1")
@@ -151,6 +159,7 @@ class TestVersionResolution:
 
     def test_resolve_pinned(self):
         rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
         rc.publish("app-1", Channel.STABLE, "2.0.0")
         rc.subscribe("inst-1", "app-1", Channel.STABLE)
         rc.pin_version("inst-1", "1.0.0")
@@ -177,3 +186,42 @@ class TestVersionResolution:
         rc = AppReleaseChannel()
         rc.subscribe("inst-1", "app-1", Channel.STABLE)
         assert rc.resolve_version("inst-1") is None
+
+
+class TestChannelSecurity:
+    def test_internal_channel_restricted(self):
+        rc = AppReleaseChannel()
+        with pytest.raises(PermissionError, match="restricted"):
+            rc.subscribe("inst-1", "app-1", Channel.INTERNAL)
+
+    def test_internal_channel_allowed_for_developer(self):
+        rc = AppReleaseChannel()
+        sub = rc.subscribe("inst-1", "app-1", Channel.INTERNAL, is_developer_org=True)
+        assert sub.channel == Channel.INTERNAL
+
+    def test_public_channels_unrestricted(self):
+        rc = AppReleaseChannel()
+        for ch in (Channel.STABLE, Channel.BETA, Channel.CANARY):
+            sub = rc.subscribe(f"inst-{ch.value}", "app-1", ch)
+            assert sub.channel == ch
+
+    def test_pin_version_must_be_published(self):
+        rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
+        rc.subscribe("inst-1", "app-1", Channel.STABLE)
+        assert rc.pin_version("inst-1", "1.0.0") is True
+        assert rc.pin_version("inst-1", "99.0.0") is False
+
+    def test_resolve_clears_invalid_pin(self):
+        """If pinned version is no longer on the channel, resolve falls through."""
+        rc = AppReleaseChannel()
+        rc.publish("app-1", Channel.STABLE, "1.0.0")
+        rc.publish("app-1", Channel.STABLE, "2.0.0")
+        rc.subscribe("inst-1", "app-1", Channel.STABLE)
+        rc.pin_version("inst-1", "1.0.0")
+        # Manually remove 1.0.0 from history to simulate revocation
+        releases = rc._releases[("app-1", Channel.STABLE)]
+        rc._releases[("app-1", Channel.STABLE)] = [r for r in releases if r.version != "1.0.0"]
+        resolved = rc.resolve_version("inst-1")
+        assert resolved.version == "2.0.0"  # fell through to channel latest
+        assert resolved.source == "channel_latest"
