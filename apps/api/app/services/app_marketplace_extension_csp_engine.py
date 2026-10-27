@@ -26,7 +26,8 @@ SOURCE_RE = re.compile(
     r"|data:|blob:|wss?://[a-zA-Z0-9.*-]+)$"
 )
 
-BLOCKED_SOURCES = {"'unsafe-inline'", "'unsafe-eval'"}
+BLOCKED_SOURCES = {"'unsafe-inline'", "'unsafe-eval'", "'unsafe-hashes'", "data:", "blob:"}
+SCRIPT_DIRECTIVES = {"script-src", "default-src", "worker-src", "object-src"}
 
 
 @dataclass
@@ -77,8 +78,11 @@ class CspEngineService:
             return False, f"Invalid directive: {directive}"
         if not SOURCE_RE.match(source):
             return False, f"Invalid source format: {source}"
-        if policy.strict and source in BLOCKED_SOURCES:
-            return False, f"Source {source} blocked in strict mode"
+        if policy.strict and directive in SCRIPT_DIRECTIVES:
+            if source in BLOCKED_SOURCES or source.startswith("http://") or "*" in source:
+                return False, f"Source {source} blocked in strict mode for {directive}"
+            if source.startswith("'nonce-"):
+                return False, "Nonces must be generated via generate_nonce()"
         if directive not in policy.directives:
             policy.directives[directive] = []
         if source not in policy.directives[directive]:
