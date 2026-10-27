@@ -13,7 +13,7 @@ describe("EmbedCodeGenerator", () => {
   });
   it("switches format", () => {
     const { container } = render(<EmbedCodeGenerator options={options} />);
-    const htmlBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "HTML");
+    const htmlBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "html" || b.textContent === "HTML");
     if (htmlBtn) fireEvent.click(htmlBtn);
     expect(container.querySelector("pre")?.textContent).toContain("data-osk-ext");
   });
