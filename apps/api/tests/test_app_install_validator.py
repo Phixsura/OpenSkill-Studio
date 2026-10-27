@@ -48,6 +48,31 @@ class TestPassingValidation:
         assert all(c.status in (CheckStatus.PASS, CheckStatus.WARN) for c in result.checks)
 
 
+class TestReviewGate:
+    def test_unpublished_app_fails(self):
+        v = AppInstallValidator()
+        result = v.validate(_manifest(app_status="draft"), _org())
+        assert result.can_install is False
+        assert any("not published" in e for e in result.errors)
+
+    def test_unapproved_version_fails(self):
+        v = AppInstallValidator()
+        result = v.validate(_manifest(version_review_status="pending"), _org())
+        assert result.can_install is False
+        assert any("not approved" in e for e in result.errors)
+
+    def test_revoked_app_fails(self):
+        v = AppInstallValidator()
+        result = v.validate(_manifest(app_status="revoked"), _org())
+        assert result.can_install is False
+
+    def test_published_and_approved_passes(self):
+        v = AppInstallValidator()
+        result = v.validate(_manifest(app_status="published", version_review_status="approved"), _org())
+        check = [c for c in result.checks if c.name == "review"][0]
+        assert check.status == CheckStatus.PASS
+
+
 class TestBlocklist:
     def test_blocked_app_fails(self):
         v = AppInstallValidator()

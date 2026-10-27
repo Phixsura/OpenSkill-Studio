@@ -55,11 +55,17 @@ class InstallValidationResult:
 
 @dataclass
 class AppManifest:
-    """Simplified manifest for validation."""
+    """Simplified manifest for validation.
+
+    app_status and version_review_status MUST be populated server-side
+    from the DB, never from the developer-supplied manifest.
+    """
 
     app_id: str
     app_name: str
     version: str
+    app_status: str = "published"              # server-side: draft/published/suspended/revoked
+    version_review_status: str = "approved"     # server-side: pending/approved/rejected/revoked
     min_platform_version: str | None = None
     required_permissions: list[str] = field(default_factory=list)
     config_fields: list[str] = field(default_factory=list)     # required config field names
@@ -87,6 +93,7 @@ class AppInstallValidator:
         """Run all validation checks and return the result."""
         checks: list[ValidationCheck] = []
 
+        checks.append(self._check_review(manifest))
         checks.append(self._check_blocklist(manifest, org))
         checks.append(self._check_allowlist(manifest, org))
         checks.append(self._check_duplicate(manifest, org))
@@ -108,6 +115,21 @@ class AppInstallValidator:
         )
 
     # ── Individual checks ────────────────────────────────
+
+    @staticmethod
+    def _check_review(manifest: AppManifest) -> ValidationCheck:
+        """Gate: only published+approved apps can be installed.
+
+        app_status and version_review_status are populated server-side
+        from the DB, not from the developer-supplied manifest.
+        """
+        if manifest.app_status != "published":
+            return ValidationCheck("review", CheckStatus.FAIL,
+                                   f"App is not published (status: {manifest.app_status})")
+        if manifest.version_review_status != "approved":
+            return ValidationCheck("review", CheckStatus.FAIL,
+                                   f"App version not approved (review: {manifest.version_review_status})")
+        return ValidationCheck("review", CheckStatus.PASS, "App is published and version approved")
 
     @staticmethod
     def _check_blocklist(manifest: AppManifest, org: OrgContext) -> ValidationCheck:
