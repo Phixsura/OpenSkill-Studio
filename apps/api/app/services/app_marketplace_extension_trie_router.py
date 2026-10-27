@@ -28,7 +28,7 @@ class TrieNode:
     wildcard_child: TrieNode | None = None
     wildcard_name: str = ""
     handlers: dict[str, str] = field(default_factory=dict)  # method -> handler
-    middleware: list[str] = field(default_factory=list)
+    middleware: dict[str, list[str]] = field(default_factory=dict)  # method -> chain
 
 
 class TrieRouterService:
@@ -65,7 +65,7 @@ class TrieRouterService:
         if method in node.handlers:
             raise ValueError(f"Route conflict: {method} {path}")
         node.handlers[method] = handler
-        node.middleware = middleware or []
+        node.middleware[method] = list(middleware or [])
         self._routes.append({"method": method, "path": path, "handler": handler})
 
     def match(self, method: str, path: str) -> RouteMatch | None:
@@ -82,7 +82,7 @@ class TrieRouterService:
             return None
 
         return RouteMatch(handler=handler, params=captured_params,
-                          method=method, path=path, middleware=node.middleware)
+                          method=method, path=path, middleware=list(node.middleware.get(method, [])))
 
     def _match_node(self, node: TrieNode, parts: list[str], idx: int,
                     params: dict[str, str]) -> tuple[TrieNode, dict] | None:
