@@ -17,6 +17,12 @@ class EmbedConfig:
     show_installs: bool = True
     show_button: bool = True
 
+    def __post_init__(self):
+        if self.theme not in ALLOWED_THEMES:
+            raise ValueError(f"Invalid theme: {self.theme}")
+        if self.size not in ALLOWED_SIZES:
+            raise ValueError(f"Invalid size: {self.size}")
+
 
 class ExtEmbedWidgetService:
     BASE_URL = "https://marketplace.openskill.dev"
