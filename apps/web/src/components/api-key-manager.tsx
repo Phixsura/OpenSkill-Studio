@@ -1,37 +1,38 @@
 "use client";
 
-interface ApiKey { prefix: string; name: string; scopes: string[]; created_at: string; revoked: boolean; }
-interface ApiKeyManagerProps { keys: ApiKey[]; onRevoke: (prefix: string) => void; }
+interface ApiKeyInfo { keyId: string; prefix: string; name: string; scopes: string[]; active: boolean; expiresAt: number; }
 
-export function ApiKeyManager({ keys, onRevoke }: ApiKeyManagerProps) {
-  const active = keys.filter(k => !k.revoked).length;
+export function ApiKeyManager({ keys, onRotate, onRevoke, onCreate }: {
+  keys: ApiKeyInfo[]; onRotate?: (keyId: string) => void; onRevoke?: (keyId: string) => void; onCreate?: () => void;
+}) {
+  const now = Date.now() / 1000;
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">API Keys</h3>
-        <span className="text-xs text-gray-400">{active} active</span>
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm">API Keys ({keys.length})</h3>
+        <button onClick={onCreate} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-lg">+ New Key</button>
       </div>
-      <div className="divide-y dark:divide-gray-700">
-        {keys.map(k => (
-          <div key={k.prefix} className={`flex items-center justify-between py-3 ${k.revoked ? "opacity-50" : ""}`}>
-            <div>
-              <div className="flex items-center gap-2">
-                <code className="text-sm font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{k.prefix}••••</code>
-                <span className="text-sm">{k.name}</span>
+      {keys.map(k => {
+        const daysLeft = Math.max(0, Math.round((k.expiresAt - now) / 86400));
+        return (
+          <div key={k.keyId} className="border dark:border-gray-700 rounded-xl p-3">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="font-medium text-sm">{k.name}</span>
+                <code className="text-xs text-gray-400 ml-2">{k.prefix}...</code>
               </div>
-              <div className="mt-1 flex gap-1">
-                {k.scopes.map(s => (
-                  <span key={s} className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{s}</span>
-                ))}
+              <div className="flex gap-1">
+                <button onClick={() => onRotate?.(k.keyId)} className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">Rotate</button>
+                <button onClick={() => onRevoke?.(k.keyId)} className="text-xs text-red-400 px-2 py-1">Revoke</button>
               </div>
             </div>
-            {!k.revoked && (
-              <button onClick={() => onRevoke(k.prefix)} className="text-xs text-red-600 hover:underline">Revoke</button>
-            )}
-            {k.revoked && <span className="text-xs text-red-500">Revoked</span>}
+            <div className="flex gap-2 mt-1">
+              {k.scopes.map(s => <span key={s} className="text-[10px] bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{s}</span>)}
+              <span className={`text-[10px] ${daysLeft < 7 ? "text-red-500" : "text-gray-400"}`}>{daysLeft}d remaining</span>
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
