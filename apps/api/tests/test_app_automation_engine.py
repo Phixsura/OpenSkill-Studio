@@ -165,7 +165,7 @@ class TestRuleCRUD:
         e.add_rule("app-1", "org-1", "A", "event", self._cond(), self._action())
         e.add_rule("app-1", "org-1", "B", "event", self._cond(), self._action())
         e.add_rule("app-2", "org-1", "C", "event", self._cond(), self._action())
-        assert len(e.list_rules("app-1")) == 2
+        assert len(e.list_rules("app-1", "org-1")) == 2
 
 
 class TestExecution:
@@ -252,5 +252,5 @@ class TestExecution:
                     [Action(ActionType.LOG)])
         e.process_event("event", {"x": 1}, org_id="org-1")
         e.process_event("event", {"x": 2}, org_id="org-1")
-        history = e.get_history("app-1")
+        history = e.get_history("app-1", "org-1")
         assert len(history) == 2

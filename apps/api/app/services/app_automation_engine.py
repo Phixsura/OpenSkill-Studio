@@ -212,9 +212,10 @@ class AppAutomationEngine:
             return None
         return rule
 
-    def list_rules(self, app_id: str) -> list[AutomationRule]:
+    def list_rules(self, app_id: str, org_id: str) -> list[AutomationRule]:
+        """List rules scoped to app_id + org_id."""
         return sorted(
-            [r for r in self._rules.values() if r.app_id == app_id],
+            [r for r in self._rules.values() if r.app_id == app_id and r.org_id == org_id],
             key=lambda r: r.created_at,
         )
 
@@ -258,10 +259,12 @@ class AppAutomationEngine:
 
         return results
 
-    def get_history(self, app_id: str | None = None, limit: int = 50) -> list[ExecutionResult]:
+    def get_history(self, app_id: str, org_id: str, limit: int = 50) -> list[ExecutionResult]:
+        """Get execution history scoped to app_id + org_id."""
+        rule_ids = {r.rule_id for r in self._rules.values()
+                    if r.app_id == app_id and r.org_id == org_id}
         entries = self._history
-        if app_id:
-            rule_ids = {r.rule_id for r in self._rules.values() if r.app_id == app_id}
+        if rule_ids:
             entries = [e for e in entries if e.rule_id in rule_ids]
         return entries[-limit:]
 
