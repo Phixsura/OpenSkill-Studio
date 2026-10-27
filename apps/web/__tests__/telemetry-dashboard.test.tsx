@@ -1,51 +1,121 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { TelemetryDashboard } from "@/components/telemetry-dashboard";
 
-const mockStats = {
-  totalRecords: 5000, droppedBySampling: 500,
-  exported: { prometheus: 4000, datadog: 3000 }, configuredExtensions: 5,
+const MOCK_SUMMARY = {
+  installation_id: "inst-1",
+  total_metrics: 1250,
+  total_errors: 15,
+  total_spans: 340,
+  error_rate: 0.94,
+  avg_span_ms: 125.5,
+  top_errors: [
+    ["ValueError", 8],
+    ["TimeoutError", 5],
+    ["KeyError", 2],
+  ] as [string, number][],
+  top_slow_ops: [
+    ["db_query", 450.2],
+    ["api_call", 220.0],
+    ["render", 55.0],
+  ] as [string, number][],
 };
-const mockAggregates = [
-  { name: "request_latency", count: 1000, sum: 50000, avg: 50, min: 5, max: 500 },
-];
-const mockRecords = [
-  { id: "t1", type: "metric" as const, name: "cpu", value: 65, tags: { host: "a" } },
-  { id: "t2", type: "event" as const, name: "deploy", value: 1, tags: {} },
-];
+
+const EMPTY_SUMMARY = {
+  installation_id: "inst-2",
+  total_metrics: 0,
+  total_errors: 0,
+  total_spans: 0,
+  error_rate: 0,
+  avg_span_ms: 0,
+  top_errors: [] as [string, number][],
+  top_slow_ops: [] as [string, number][],
+};
 
 describe("TelemetryDashboard", () => {
-  it("renders stats", () => {
+  it("renders heading and app name", () => {
     const { container } = render(
-      <TelemetryDashboard stats={mockStats} aggregates={mockAggregates} recentRecords={mockRecords} />
+      <TelemetryDashboard
+        summary={MOCK_SUMMARY}
+        appName="My App"
+        quotaUsed={500}
+        quotaLimit={10000}
+      />,
     );
-    expect(container.textContent).toContain("5,000");
-    expect(container.textContent).toContain("91%"); // accept rate
+    expect(container.textContent).toContain("Telemetry");
+    expect(container.textContent).toContain("My App");
   });
 
-  it("shows export targets", () => {
+  it("renders stat tiles", () => {
     const { container } = render(
-      <TelemetryDashboard stats={mockStats} aggregates={mockAggregates} recentRecords={mockRecords} />
+      <TelemetryDashboard summary={MOCK_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
     );
-    expect(container.textContent).toContain("prometheus");
-    expect(container.textContent).toContain("4,000");
+    expect(container.textContent).toContain("1,250");
+    expect(container.textContent).toContain("15");
+    expect(container.textContent).toContain("340");
+    expect(container.textContent).toContain("0.94%");
+    expect(container.textContent).toContain("125.5ms");
   });
 
-  it("shows aggregates tab", () => {
-    const { getByText, container } = render(
-      <TelemetryDashboard stats={mockStats} aggregates={mockAggregates} recentRecords={mockRecords} />
+  it("renders quota bar", () => {
+    const { container } = render(
+      <TelemetryDashboard
+        summary={MOCK_SUMMARY}
+        appName="App"
+        quotaUsed={8000}
+        quotaLimit={10000}
+      />,
     );
-    fireEvent.click(getByText("Aggregates"));
-    expect(container.textContent).toContain("request_latency");
-    expect(container.textContent).toContain("avg: 50");
+    expect(container.textContent).toContain("8,000/10,000");
   });
 
-  it("calls onFlush", () => {
-    const onFlush = vi.fn();
-    const { getByText } = render(
-      <TelemetryDashboard stats={mockStats} aggregates={[]} recentRecords={[]} onFlush={onFlush} />
+  it("renders top errors", () => {
+    const { container } = render(
+      <TelemetryDashboard summary={MOCK_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
     );
-    fireEvent.click(getByText("Flush"));
-    expect(onFlush).toHaveBeenCalled();
+    expect(container.textContent).toContain("Top Errors");
+    expect(container.textContent).toContain("ValueError");
+    expect(container.textContent).toContain("8×");
+    expect(container.textContent).toContain("TimeoutError");
+  });
+
+  it("renders slowest operations", () => {
+    const { container } = render(
+      <TelemetryDashboard summary={MOCK_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
+    );
+    expect(container.textContent).toContain("Slowest Operations");
+    expect(container.textContent).toContain("db_query");
+    expect(container.textContent).toContain("450.2ms");
+  });
+
+  it("shows no errors state", () => {
+    const { container } = render(
+      <TelemetryDashboard summary={EMPTY_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
+    );
+    expect(container.textContent).toContain("No errors");
+  });
+
+  it("shows no spans state", () => {
+    const { container } = render(
+      <TelemetryDashboard summary={EMPTY_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
+    );
+    expect(container.textContent).toContain("No spans");
+  });
+
+  it("shows slow label for high avg span", () => {
+    const slowSummary = { ...MOCK_SUMMARY, avg_span_ms: 600 };
+    const { container } = render(
+      <TelemetryDashboard summary={slowSummary} appName="App" quotaUsed={0} quotaLimit={10000} />,
+    );
+    expect(container.textContent).toContain("slow");
+  });
+
+  it("renders ranking numbers", () => {
+    const { container } = render(
+      <TelemetryDashboard summary={MOCK_SUMMARY} appName="App" quotaUsed={0} quotaLimit={10000} />,
+    );
+    expect(container.textContent).toContain("1.");
+    expect(container.textContent).toContain("2.");
+    expect(container.textContent).toContain("3.");
   });
 });

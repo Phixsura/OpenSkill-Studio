@@ -1,126 +1,146 @@
 "use client";
 
-import { useState } from "react";
-
-interface TelemetryStats {
-  totalRecords: number;
-  droppedBySampling: number;
-  exported: Record<string, number>;
-  configuredExtensions: number;
+interface TelemetrySummary {
+  installation_id: string;
+  total_metrics: number;
+  total_errors: number;
+  total_spans: number;
+  error_rate: number;
+  avg_span_ms: number;
+  top_errors: [string, number][];
+  top_slow_ops: [string, number][];
 }
 
-interface MetricAggregate {
-  name: string;
-  count: number;
-  sum: number;
-  avg: number;
-  min: number;
-  max: number;
+interface TelemetryDashboardProps {
+  summary: TelemetrySummary;
+  appName: string;
+  quotaUsed: number;
+  quotaLimit: number;
 }
 
-interface TelemetryRecord {
-  id: string;
-  type: "metric" | "trace" | "log" | "event";
-  name: string;
-  value: number;
-  tags: Record<string, string>;
+function StatTile({
+  label,
+  value,
+  sub,
+  warn,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  warn?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 text-center dark:border-gray-700">
+      <p className={`text-lg font-bold ${warn ? "text-red-600" : ""}`}>{value}</p>
+      <p className="text-[10px] text-gray-500">{label}</p>
+      {sub && <p className="text-[10px] text-gray-400">{sub}</p>}
+    </div>
+  );
 }
 
-const typeIcons: Record<string, string> = {
-  metric: "📊", trace: "🔍", log: "📝", event: "⚡",
-};
+function RankList({
+  title,
+  items,
+  unit,
+}: {
+  title: string;
+  items: [string, number][];
+  unit: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase text-gray-400">{title}</p>
+      <ul className="mt-1 space-y-1">
+        {items.map(([name, value], i) => (
+          <li key={name} className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5">
+              <span className="text-gray-400">{i + 1}.</span>
+              <code className="font-medium">{name}</code>
+            </span>
+            <span className="text-gray-500">
+              {typeof value === "number" && value % 1 !== 0 ? value.toFixed(1) : value}
+              {unit}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function TelemetryDashboard({
-  stats,
-  aggregates,
-  recentRecords,
-  onFlush,
-}: {
-  stats: TelemetryStats;
-  aggregates: MetricAggregate[];
-  recentRecords: TelemetryRecord[];
-  onFlush?: () => void;
-}) {
-  const [tab, setTab] = useState<"overview" | "metrics" | "recent">("overview");
-  const acceptRate = stats.totalRecords + stats.droppedBySampling > 0
-    ? Math.round(stats.totalRecords / (stats.totalRecords + stats.droppedBySampling) * 100) : 100;
+  summary,
+  appName,
+  quotaUsed,
+  quotaLimit,
+}: TelemetryDashboardProps) {
+  const quotaPct = quotaLimit > 0 ? Math.round((quotaUsed / quotaLimit) * 100) : 0;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">📡 Telemetry</h2>
-        <button onClick={onFlush} className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg">Flush</button>
-      </div>
-
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <div className="rounded-lg border dark:border-gray-700 p-2">
-          <span className="text-xs text-gray-500 block">Records</span>
-          <span className="font-bold">{stats.totalRecords.toLocaleString()}</span>
+        <div>
+          <h2 className="text-lg font-semibold">Telemetry</h2>
+          <p className="text-xs text-gray-500">{appName}</p>
         </div>
-        <div className="rounded-lg border dark:border-gray-700 p-2">
-          <span className="text-xs text-gray-500 block">Accept Rate</span>
-          <span className="font-bold text-green-600">{acceptRate}%</span>
-        </div>
-        <div className="rounded-lg border dark:border-gray-700 p-2">
-          <span className="text-xs text-gray-500 block">Dropped</span>
-          <span className="font-bold text-yellow-600">{stats.droppedBySampling}</span>
-        </div>
-        <div className="rounded-lg border dark:border-gray-700 p-2">
-          <span className="text-xs text-gray-500 block">Extensions</span>
-          <span className="font-bold">{stats.configuredExtensions}</span>
+        <div className="text-right text-xs">
+          <p className="text-gray-500">
+            Quota: {quotaUsed.toLocaleString()}/{quotaLimit.toLocaleString()}
+          </p>
+          <div className="mt-0.5 h-1.5 w-24 rounded-full bg-gray-200 dark:bg-gray-700">
+            <div
+              className={`h-full rounded-full ${quotaPct >= 90 ? "bg-red-500" : "bg-blue-500"}`}
+              style={{ width: `${Math.min(quotaPct, 100)}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      <div className="flex gap-1">
-        {(["overview", "metrics", "recent"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`text-xs px-3 py-1 rounded-lg ${tab === t ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-500"}`}>
-            {t === "overview" ? "Exports" : t === "metrics" ? "Aggregates" : "Recent"}
-          </button>
-        ))}
+      {/* Stats */}
+      <div className="grid grid-cols-5 gap-2">
+        <StatTile label="Metrics" value={summary.total_metrics.toLocaleString()} />
+        <StatTile
+          label="Errors"
+          value={summary.total_errors.toLocaleString()}
+          warn={summary.total_errors > 0}
+        />
+        <StatTile label="Spans" value={summary.total_spans.toLocaleString()} />
+        <StatTile
+          label="Error Rate"
+          value={`${summary.error_rate}%`}
+          warn={summary.error_rate > 5}
+        />
+        <StatTile
+          label="Avg Span"
+          value={`${summary.avg_span_ms}ms`}
+          sub={summary.avg_span_ms > 500 ? "slow" : "ok"}
+        />
       </div>
 
-      {tab === "overview" && (
-        <div className="space-y-1">
-          {Object.entries(stats.exported).map(([target, count]) => (
-            <div key={target} className="flex justify-between rounded-lg border dark:border-gray-700 p-2 text-sm">
-              <span className="capitalize">{target}</span>
-              <span className="font-bold">{count.toLocaleString()}</span>
+      {/* Rankings */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+          {summary.top_errors.length > 0 ? (
+            <RankList title="Top Errors" items={summary.top_errors} unit="×" />
+          ) : (
+            <div className="py-3 text-center">
+              <span className="text-xl">✅</span>
+              <p className="mt-1 text-[10px] text-gray-500">No errors</p>
             </div>
-          ))}
+          )}
         </div>
-      )}
-
-      {tab === "metrics" && (
-        <div className="space-y-1">
-          {aggregates.map((m) => (
-            <div key={m.name} className="rounded-lg border dark:border-gray-700 p-3">
-              <code className="text-sm font-semibold">{m.name}</code>
-              <div className="flex gap-3 text-xs text-gray-500 mt-1">
-                <span>count: {m.count}</span>
-                <span>avg: {m.avg}</span>
-                <span>min: {m.min}</span>
-                <span>max: {m.max}</span>
-              </div>
+        <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+          {summary.top_slow_ops.length > 0 ? (
+            <RankList title="Slowest Operations" items={summary.top_slow_ops} unit="ms" />
+          ) : (
+            <div className="py-3 text-center">
+              <span className="text-xl">⚡</span>
+              <p className="mt-1 text-[10px] text-gray-500">No spans</p>
             </div>
-          ))}
+          )}
         </div>
-      )}
-
-      {tab === "recent" && (
-        <div className="space-y-1">
-          {recentRecords.map((r) => (
-            <div key={r.id} className="flex items-center gap-2 rounded-lg border dark:border-gray-700 p-2 text-xs">
-              <span>{typeIcons[r.type]}</span>
-              <code>{r.name}</code>
-              <span className="text-gray-400">{r.value}</span>
-              {Object.entries(r.tags).map(([k, v]) => (
-                <span key={k} className="text-gray-400">{k}={v}</span>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
