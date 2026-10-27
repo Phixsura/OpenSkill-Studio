@@ -71,7 +71,9 @@ class MigrationRecord:
     status: MigrationStatus
     plan: MigrationPlan
     config_snapshot: dict       # config before migration (for rollback)
-    started_at: datetime
+    permissions_snapshot: list[str]  # permissions before migration (for rollback)
+    approved_permissions: set[str] = field(default_factory=set)  # admin-consented new permissions
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     error: str | None = None
 
@@ -158,8 +160,20 @@ class AppVersionMigrator:
 
     # ── Execution ────────────────────────────────────────
 
-    def start_migration(self, installation_id: str, target_version: str) -> MigrationRecord:
-        """Start a version migration. Takes a config snapshot for rollback."""
+    def start_migration(self, installation_id: str, target_version: str,
+                        consent_granted: bool = False,
+                        approved_permissions: set[str] | None = None,
+                        force: bool = False) -> MigrationRecord:
+        """Start a version migration with consent and permission gates.
+
+        consent_granted: admin has consented to new permissions (required when
+            plan.requires_reauth is True).
+        approved_permissions: the set of new permissions the admin approved —
+            must come from an authenticated admin consent flow, not from the
+            app manifest. Only these will be added on completion.
+        force: allow breaking upgrades without auto_migratable (requires
+            explicit admin approval).
+        """
         state = self._installations.get(installation_id)
         if state is None:
             raise ValueError(f"Installation {installation_id} not found")
@@ -168,6 +182,20 @@ class AppVersionMigrator:
             raise ValueError(f"Installation {installation_id} is version-pinned")
 
         plan = self.plan_upgrade(installation_id, target_version)
+
+        # Gate: new permissions require explicit admin consent
+        if plan.requires_reauth and not consent_granted:
+            raise PermissionError(
+                "New permissions require admin consent: "
+                + ", ".join(plan.added_permissions)
+            )
+
+        # Gate: breaking changes require explicit force
+        if not plan.auto_migratable and not force:
+            raise ValueError(
+                "Breaking upgrade requires manual approval (force=True): "
+                + "; ".join(plan.breaking_reasons)
+            )
 
         self._next_id += 1
         mid = f"mig-{self._next_id}"
@@ -178,8 +206,9 @@ class AppVersionMigrator:
             to_version=target_version,
             status=MigrationStatus.IN_PROGRESS,
             plan=plan,
+            approved_permissions=approved_permissions or set(),
             config_snapshot=dict(state.config),
-            started_at=datetime.now(UTC),
+            permissions_snapshot=list(state.granted_permissions),
         )
         self._migrations[mid] = record
         log.info("migration.started", migration_id=mid, installation_id=installation_id,
@@ -187,10 +216,18 @@ class AppVersionMigrator:
         return record
 
     def complete_migration(self, migration_id: str) -> MigrationRecord:
-        """Mark a migration as completed and update the installation."""
+        """Mark a migration as completed and update the installation.
+
+        Only permissions present in approved_permissions (from the admin
+        consent flow) are actually added — the plan's added_permissions
+        list is treated as the REQUEST, not the grant.
+        """
         record = self._migrations.get(migration_id)
         if record is None:
             raise ValueError(f"Migration {migration_id} not found")
+
+        if record.status != MigrationStatus.IN_PROGRESS:
+            raise ValueError(f"Cannot complete migration in status {record.status.value}")
 
         record.status = MigrationStatus.COMPLETED
         record.completed_at = datetime.now(UTC)
@@ -198,9 +235,10 @@ class AppVersionMigrator:
         state = self._installations.get(record.installation_id)
         if state:
             state.current_version = record.to_version
-            # Add new permissions
             current = set(state.granted_permissions)
-            current.update(record.plan.added_permissions)
+            # Only add permissions that were explicitly approved by admin
+            approved_adds = set(record.plan.added_permissions) & record.approved_permissions
+            current.update(approved_adds)
             # Remove old permissions
             current -= set(record.plan.removed_permissions)
             state.granted_permissions = sorted(current)
@@ -220,7 +258,10 @@ class AppVersionMigrator:
         return record
 
     def rollback(self, migration_id: str) -> MigrationRecord:
-        """Rollback a completed or failed migration using the config snapshot."""
+        """Rollback a completed or failed migration.
+
+        Restores version, config, AND permissions from the pre-migration snapshot.
+        """
         record = self._migrations.get(migration_id)
         if record is None:
             raise ValueError(f"Migration {migration_id} not found")
@@ -232,6 +273,7 @@ class AppVersionMigrator:
         if state:
             state.current_version = record.from_version
             state.config = dict(record.config_snapshot)
+            state.granted_permissions = list(record.permissions_snapshot)
 
         record.status = MigrationStatus.ROLLED_BACK
         record.completed_at = datetime.now(UTC)
