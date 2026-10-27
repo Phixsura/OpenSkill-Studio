@@ -2,27 +2,23 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ErrorTrackingDashboard } from "@/components/error-tracking-dashboard";
 
+const groups = [
+  { fingerprint: "fp1", errorType: "TypeError", message: "undefined is not a function", count: 42, lastSeen: Date.now(), resolved: false },
+  { fingerprint: "fp2", errorType: "RangeError", message: "Index out of bounds", count: 5, lastSeen: Date.now(), resolved: false },
+];
+
 describe("ErrorTrackingDashboard", () => {
-  const groups = [
-    { fingerprint: "fp1", message: "NullPointer", count: 15, users_affected: 5, level: "error", last_seen: "2026-10-23" },
-  ];
-  it("renders", () => {
-    const { container } = render(
-      <ErrorTrackingDashboard groups={groups} uniqueErrors={1} totalOccurrences={15}
-        trend="increasing" onSelect={vi.fn()} />
-    );
-    expect(container.textContent).toContain("Error Tracking");
-    expect(container.textContent).toContain("NullPointer");
-    expect(container.textContent).toContain("15×");
-    expect(container.textContent).toContain("📈");
+  it("renders error groups", () => {
+    const { container } = render(<ErrorTrackingDashboard groups={groups} />);
+    expect(container.textContent).toContain("TypeError");
+    expect(container.textContent).toContain("42×");
+    expect(container.textContent).toContain("47 total");
   });
-  it("select", () => {
+  it("resolve error", () => {
     const fn = vi.fn();
-    const { container } = render(
-      <ErrorTrackingDashboard groups={groups} uniqueErrors={1} totalOccurrences={15}
-        trend="stable" onSelect={fn} />
-    );
-    fireEvent.click(container.querySelector("button")!);
+    const { container } = render(<ErrorTrackingDashboard groups={groups} onResolve={fn} />);
+    const btns = container.querySelectorAll("button");
+    fireEvent.click(btns[0]);
     expect(fn).toHaveBeenCalledWith("fp1");
   });
 });
