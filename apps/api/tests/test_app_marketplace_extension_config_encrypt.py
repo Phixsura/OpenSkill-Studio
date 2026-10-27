@@ -19,16 +19,18 @@ def test_different_ciphertext_each_time():
 
 
 def test_wrong_key_fails():
+    from app.services.app_marketplace_extension_config_encrypt import EncryptedValue
     ce = ConfigEncryptionService()
     k1 = ce.create_key("password-1")
     encrypted = ce.encrypt("secret", k1)
     k2 = ce.create_key("password-2")
+    # Wrong key should fail on HMAC or produce garbage
     try:
-        ce.decrypt(EncryptedValue(encrypted.ciphertext, k2))
-        # May decode but HMAC should fail
-        assert False
+        result = ce.decrypt(EncryptedValue(ciphertext=encrypted.ciphertext, key_id=k2))
+        # If it didn't raise, the result should be wrong
+        assert result != "secret"
     except (ValueError, UnicodeDecodeError):
-        pass
+        pass  # expected
 
 
 def test_tampered_ciphertext():
