@@ -58,6 +58,8 @@ class TemplateEngineService:
         parts = path.strip().split(".")
         current = context
         for part in parts:
+            if part.startswith("_"):
+                return None
             if isinstance(current, dict):
                 current = current.get(part)
             elif hasattr(current, part):
