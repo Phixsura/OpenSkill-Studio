@@ -41,15 +41,18 @@ class AccessPolicy:
 
 
 class SecretVaultService:
-    def __init__(self):
+    def __init__(self, root_token: str = "root"):
         self._secrets: dict[str, VaultSecret] = {}
-        self._policies: dict[str, list[AccessPolicy]] = {}  # token → policies
+        self._policies: dict[str, list[AccessPolicy]] = {}
+        self._root_tokens: set[str] = {root_token}
         self._audit: list[dict] = []
 
     def _check_access(self, token: str, path: str, capability: str) -> bool:
+        if token in self._root_tokens:
+            return True
         policies = self._policies.get(token, [])
         if not policies:
-            return True  # no policies = unrestricted (root)
+            return False  # deny by default
         for policy in policies:
             if self._path_matches(policy.path_pattern, path):
                 if capability in policy.capabilities:
