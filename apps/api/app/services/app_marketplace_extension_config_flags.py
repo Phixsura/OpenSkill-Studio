@@ -77,7 +77,7 @@ class ConfigFlagsService:
             if user_id:
                 h = int(hashlib.md5(f"{flag_name}:{user_id}".encode()).hexdigest()[:8], 16)
                 if (h % 100) >= flag.rollout_pct:
-                    return flag.default_value
+                    return False if flag.flag_type == "boolean" else flag.default_value
 
         # Override hierarchy: user > tenant > environment > default
         user_scope = f"user:{context.get('user_id', '')}"
