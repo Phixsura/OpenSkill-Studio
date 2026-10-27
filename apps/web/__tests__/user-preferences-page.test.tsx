@@ -1,21 +1,21 @@
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { UserPreferencesPage } from "@/components/user-preferences-page";
 
+const prefs = { theme: "system", language: "en", notificationsEnabled: true, emailDigest: "weekly", defaultView: "grid", showBeta: false, autoUpdate: true };
+
 describe("UserPreferencesPage", () => {
-  const prefs = {
-    theme: { value: "dark", options: ["light", "dark", "system"], category: "appearance", is_default: false },
-    language: { value: "en", options: ["en", "es"], category: "localization", is_default: true },
-  };
-  it("renders", () => {
-    const { container } = render(
-      <UserPreferencesPage preferences={prefs} categories={["appearance", "localization"]}
-        onUpdate={vi.fn()} onReset={vi.fn()} />
-    );
+  it("renders preferences", () => {
+    const { container } = render(<UserPreferencesPage prefs={prefs} />);
     expect(container.textContent).toContain("Preferences");
-    expect(container.textContent).toContain("🎨");
-    expect(container.textContent).toContain("theme");
-    expect(container.textContent).toContain("Reset"); // dark is not default
-    expect(container.textContent).toContain("🌐");
+    expect(container.textContent).toContain("Theme");
+    expect(container.textContent).toContain("Show beta");
+  });
+  it("save preferences", () => {
+    const fn = vi.fn();
+    const { container } = render(<UserPreferencesPage prefs={prefs} onSave={fn} />);
+    const saveBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Save Preferences");
+    if (saveBtn) fireEvent.click(saveBtn);
+    expect(fn).toHaveBeenCalled();
   });
 });

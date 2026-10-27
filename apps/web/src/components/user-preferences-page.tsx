@@ -1,48 +1,53 @@
 "use client";
+import { useState } from "react";
 
-interface Preference { value: unknown; options: unknown[] | null; category: string; is_default: boolean; }
-interface UserPreferencesPageProps { preferences: Record<string, Preference>; categories: string[];
-  onUpdate: (key: string, value: unknown) => void; onReset: (key: string) => void; }
+interface Prefs { theme: string; language: string; notificationsEnabled: boolean; emailDigest: string; defaultView: string; showBeta: boolean; autoUpdate: boolean; }
 
-const catIcons: Record<string, string> = {
-  appearance: "🎨", localization: "🌐", notifications: "🔔", editor: "✏️",
-};
+export function UserPreferencesPage({ prefs, onSave }: { prefs: Prefs; onSave?: (prefs: Prefs) => void }) {
+  const [local, setLocal] = useState(prefs);
+  const set = <K extends keyof Prefs>(k: K, v: Prefs[K]) => setLocal({ ...local, [k]: v });
 
-export function UserPreferencesPage({ preferences, categories, onUpdate, onReset }: UserPreferencesPageProps) {
   return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold">Preferences</h2>
-      {categories.map(cat => (
-        <div key={cat}>
-          <h3 className="flex items-center gap-1.5 text-sm font-medium capitalize text-gray-500">
-            <span>{catIcons[cat] ?? "⚙️"}</span> {cat}
-          </h3>
-          <div className="mt-2 space-y-2">
-            {Object.entries(preferences)
-              .filter(([_, p]) => p.category === cat)
-              .map(([key, pref]) => (
-                <div key={key} className="flex items-center justify-between rounded-lg border px-4 py-2.5 dark:border-gray-700">
-                  <span className="text-sm capitalize">{key.replace(/_/g, " ")}</span>
-                  <div className="flex items-center gap-2">
-                    {pref.options && Array.isArray(pref.options) ? (
-                      <select value={String(pref.value)} onChange={e => {
-                        const v = e.target.value;
-                        onUpdate(key, v === "true" ? true : v === "false" ? false : isNaN(Number(v)) ? v : Number(v));
-                      }} className="rounded border px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-700">
-                        {pref.options.map(o => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
-                      </select>
-                    ) : (
-                      <span className="text-sm text-gray-400">{String(pref.value)}</span>
-                    )}
-                    {!pref.is_default && (
-                      <button onClick={() => onReset(key)} className="text-xs text-blue-500">Reset</button>
-                    )}
-                  </div>
-                </div>
-              ))}
+    <div className="space-y-4 max-w-lg">
+      <h3 className="font-bold text-sm">Preferences</h3>
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium block mb-1">Theme</label>
+          <div className="flex gap-1">
+            {["system", "light", "dark"].map(t => (
+              <button key={t} onClick={() => set("theme", t)}
+                className={`text-xs px-3 py-1 rounded-full capitalize ${local.theme === t ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>{t}</button>
+            ))}
           </div>
         </div>
-      ))}
+        <div>
+          <label className="text-xs font-medium block mb-1">Default View</label>
+          <div className="flex gap-1">
+            {["grid", "list"].map(v => (
+              <button key={v} onClick={() => set("defaultView", v)}
+                className={`text-xs px-3 py-1 rounded-full capitalize ${local.defaultView === v ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>{v}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-medium block mb-1">Email Digest</label>
+          <div className="flex gap-1">
+            {["none", "daily", "weekly"].map(d => (
+              <button key={d} onClick={() => set("emailDigest", d)}
+                className={`text-xs px-3 py-1 rounded-full capitalize ${local.emailDigest === d ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-gray-800"}`}>{d}</button>
+            ))}
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={local.showBeta} onChange={e => set("showBeta", e.target.checked)} />
+          Show beta extensions
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={local.autoUpdate} onChange={e => set("autoUpdate", e.target.checked)} />
+          Auto-update extensions
+        </label>
+      </div>
+      <button onClick={() => onSave?.(local)} className="w-full bg-blue-500 text-white py-2 rounded-lg text-sm">Save Preferences</button>
     </div>
   );
 }
