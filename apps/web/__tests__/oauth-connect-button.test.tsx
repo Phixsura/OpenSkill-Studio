@@ -2,22 +2,23 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OAuthConnectButton } from "@/components/oauth-connect-button";
 
+const connectors = [
+  { connectorId: "slack", name: "Slack", icon: "💬", connected: true, scopes: ["read", "write"] },
+  { connectorId: "github", name: "GitHub", icon: "🐙", connected: false, scopes: ["repo"] },
+];
+
 describe("OAuthConnectButton", () => {
-  const provider = { id: "github", name: "GitHub", icon: "🐙", color: "#333" };
-  it("shows connect when not connected", () => {
-    const { container } = render(
-      <OAuthConnectButton provider={provider} connected={false} onConnect={vi.fn()} onDisconnect={vi.fn()} />
-    );
-    expect(container.textContent).toContain("Not connected");
+  it("renders connectors", () => {
+    const { container } = render(<OAuthConnectButton connectors={connectors} />);
+    expect(container.textContent).toContain("Slack");
+    expect(container.textContent).toContain("Connected ✓");
     expect(container.textContent).toContain("Connect");
   });
-  it("shows disconnect when connected", () => {
+  it("connect action", () => {
     const fn = vi.fn();
-    const { container } = render(
-      <OAuthConnectButton provider={provider} connected={true} onConnect={vi.fn()} onDisconnect={fn} />
-    );
-    expect(container.textContent).toContain("Connected");
-    fireEvent.click(container.querySelector("button")!);
-    expect(fn).toHaveBeenCalled();
+    const { container } = render(<OAuthConnectButton connectors={connectors} onConnect={fn} />);
+    const connectBtn = Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Connect");
+    if (connectBtn) fireEvent.click(connectBtn);
+    expect(fn).toHaveBeenCalledWith("github");
   });
 });

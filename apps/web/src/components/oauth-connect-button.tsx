@@ -1,30 +1,31 @@
 "use client";
 
-interface OAuthProvider { id: string; name: string; icon: string; color: string; }
-interface OAuthConnectButtonProps { provider: OAuthProvider; connected: boolean;
-  onConnect: () => void; onDisconnect: () => void; }
+interface ConnectorAuth { connectorId: string; name: string; icon: string; connected: boolean; scopes: string[]; }
 
-export function OAuthConnectButton({ provider, connected, onConnect, onDisconnect }: OAuthConnectButtonProps) {
+export function OAuthConnectButton({ connectors, onConnect, onDisconnect }: {
+  connectors: ConnectorAuth[]; onConnect?: (id: string) => void; onDisconnect?: (id: string) => void;
+}) {
   return (
-    <div className="flex items-center justify-between rounded-lg border p-4 dark:border-gray-700">
-      <div className="flex items-center gap-3">
-        <span className="text-2xl">{provider.icon}</span>
-        <div>
-          <p className="text-sm font-semibold">{provider.name}</p>
-          <p className="text-xs text-gray-400">{connected ? "Connected" : "Not connected"}</p>
+    <div className="space-y-2">
+      {connectors.map(c => (
+        <div key={c.connectorId} className="flex items-center justify-between border dark:border-gray-700 rounded-xl p-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{c.icon}</span>
+            <div>
+              <span className="font-medium text-sm block">{c.name}</span>
+              <span className="text-xs text-gray-500">{c.scopes.join(", ")}</span>
+            </div>
+          </div>
+          {c.connected ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-green-600 font-medium">Connected ✓</span>
+              <button onClick={() => onDisconnect?.(c.connectorId)} className="text-xs text-red-400 hover:text-red-600">Disconnect</button>
+            </div>
+          ) : (
+            <button onClick={() => onConnect?.(c.connectorId)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg">Connect</button>
+          )}
         </div>
-      </div>
-      {connected ? (
-        <button onClick={onDisconnect}
-          className="rounded border px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-gray-600 dark:hover:bg-red-900/10">
-          Disconnect
-        </button>
-      ) : (
-        <button onClick={onConnect}
-          className="rounded px-3 py-1.5 text-xs text-white" style={{ backgroundColor: provider.color }}>
-          Connect
-        </button>
-      )}
+      ))}
     </div>
   );
 }
