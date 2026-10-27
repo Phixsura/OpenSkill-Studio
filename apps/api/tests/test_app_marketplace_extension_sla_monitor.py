@@ -1,58 +1,85 @@
-from app.services.app_marketplace_extension_sla_monitor import (
-    SLAMonitor, SLATarget, SLAMetrics,
-)
+from app.services.app_marketplace_extension_sla_monitor import SlaMonitorService
 
 
-def test_compliant():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("ext-1", uptime_target=99.9, latency_p99_ms=500, error_rate_max=1.0))
-    mon.update_metrics("ext-1", SLAMetrics(uptime_actual=99.95, latency_p99_actual=250, error_rate_actual=0.5))
-    result = mon.check_compliance("ext-1")
-    assert result["compliant"] is True
-    assert result["sla_score"] == 100.0
+def test_perfect_slo():
+    svc = SlaMonitorService()
+    svc.define_slo("availability", 0.999, window_seconds=3600)
+    svc.record_batch("availability", good_count=1000, total_count=1000)
+    status = svc.get_status("availability")
+    assert status.current == 1.0
+    assert status.error_budget_pct == 100
+    assert status.alerting is False
 
 
-def test_uptime_violation():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("ext-2", uptime_target=99.9))
-    mon.update_metrics("ext-2", SLAMetrics(uptime_actual=99.5))
-    result = mon.check_compliance("ext-2")
-    assert result["compliant"] is False
-    assert "uptime" in result["violations"]
+def test_degraded_slo():
+    svc = SlaMonitorService()
+    svc.define_slo("availability", 0.999, window_seconds=3600)
+    svc.record_batch("availability", good_count=990, total_count=1000)
+    status = svc.get_status("availability")
+    assert status.current == 0.99
+    # 99.9% target allows 1 error per 1000, but we have 10
+    assert status.error_budget_remaining < status.error_budget_total
 
 
-def test_latency_violation():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("ext-3", latency_p99_ms=200))
-    mon.update_metrics("ext-3", SLAMetrics(latency_p99_actual=350))
-    result = mon.check_compliance("ext-3")
-    assert result["checks"]["latency_p99"]["met"] is False
+def test_budget_exhausted():
+    svc = SlaMonitorService()
+    svc.define_slo("latency", 0.99, window_seconds=3600)
+    svc.record_batch("latency", good_count=900, total_count=1000)
+    # 99% target allows 10 errors, we have 100
+    status = svc.get_status("latency")
+    assert status.error_budget_remaining == 0
+    assert status.error_budget_pct == 0
 
 
-def test_multiple_violations():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("ext-4", uptime_target=99.9, error_rate_max=1.0))
-    mon.update_metrics("ext-4", SLAMetrics(uptime_actual=95.0, error_rate_actual=5.0))
-    result = mon.check_compliance("ext-4")
-    assert len(result["violations"]) == 2
-    assert result["sla_score"] < 100
+def test_burn_rate():
+    svc = SlaMonitorService()
+    svc.define_slo("slo", 0.999, window_seconds=3600)
+    # 0.1% budget, but we're producing 1% errors = 10x burn rate
+    svc.record_batch("slo", good_count=990, total_count=1000)
+    status = svc.get_status("slo")
+    assert status.burn_rate == 10.0
 
 
-def test_sla_report():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("ext-5"))
-    mon.update_metrics("ext-5", SLAMetrics(uptime_actual=100.0))
-    report = mon.get_sla_report("ext-5")
-    assert "total_violations" in report
+def test_burn_rate_alert():
+    svc = SlaMonitorService()
+    svc.define_slo("slo", 0.999, window_seconds=3600, burn_rate_threshold=5.0)
+    svc.record_batch("slo", good_count=990, total_count=1000)
+    status = svc.get_status("slo")
+    assert status.alerting is True  # 10x > 5x threshold
 
 
-def test_compliance_summary():
-    mon = SLAMonitor()
-    mon.set_target(SLATarget("good"))
-    mon.set_target(SLATarget("bad"))
-    mon.update_metrics("good", SLAMetrics(uptime_actual=100.0))
-    mon.update_metrics("bad", SLAMetrics(uptime_actual=90.0))
-    summary = mon.get_compliance_summary()
-    assert summary["total_extensions"] == 2
-    assert summary["compliant"] == 1
-    assert summary["compliance_rate"] == 50.0
+def test_no_alert_normal():
+    svc = SlaMonitorService()
+    svc.define_slo("slo", 0.999, window_seconds=3600, burn_rate_threshold=5.0)
+    svc.record_batch("slo", good_count=999, total_count=1000)
+    status = svc.get_status("slo")
+    assert status.alerting is False
+
+
+def test_individual_records():
+    svc = SlaMonitorService()
+    svc.define_slo("api", 0.99, window_seconds=3600)
+    for _ in range(95):
+        svc.record("api", True)
+    for _ in range(5):
+        svc.record("api", False)
+    status = svc.get_status("api")
+    assert status.current == 0.95
+
+
+def test_no_events():
+    svc = SlaMonitorService()
+    svc.define_slo("empty", 0.999)
+    status = svc.get_status("empty")
+    assert status.current == 1.0
+    assert status.alerting is False
+
+
+def test_all_statuses():
+    svc = SlaMonitorService()
+    svc.define_slo("a", 0.999)
+    svc.define_slo("b", 0.99)
+    svc.record_batch("a", 999, 1000)
+    svc.record_batch("b", 95, 100)
+    statuses = svc.get_all_statuses()
+    assert len(statuses) == 2
