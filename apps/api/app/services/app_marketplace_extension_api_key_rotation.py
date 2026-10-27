@@ -58,7 +58,7 @@ class ExtApiKeyRotationService:
 
     def rotate(self, key_id: str, grace_hours: int = 24) -> tuple[str, ApiKey] | None:
         old = self._keys.get(key_id)
-        if not old: return None
+        if not old or not old.active: return None
         old.expires_at = time.time() + grace_hours * 3600
         raw, new_key = self.create(old.extension_id, old.name, old.scopes)
         return raw, new_key
