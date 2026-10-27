@@ -1,34 +1,106 @@
 "use client";
 
-interface ChecklistItem { itemId: string; title: string; description: string; completed: boolean; required: boolean; }
-interface Progress { total: number; completed: number; percentage: number; }
+interface ChecklistStep {
+  step_id: string;
+  title: string;
+  description: string;
+  required: boolean;
+  status: "pending" | "completed" | "skipped";
+}
 
-export function OnboardingChecklist({ items, progress, onComplete }: {
-  items: ChecklistItem[]; progress: Progress; onComplete?: (id: string) => void;
-}) {
+interface ChecklistProgress {
+  total_steps: number;
+  completed: number;
+  progress_pct: number;
+  can_publish: boolean;
+}
+
+interface OnboardingChecklistProps {
+  appName: string;
+  steps: ChecklistStep[];
+  progress: ChecklistProgress;
+  onComplete: (stepId: string) => void;
+  onSkip: (stepId: string) => void;
+}
+
+const STATUS_ICONS: Record<string, { icon: string; color: string }> = {
+  completed: { icon: "✓", color: "text-green-600 bg-green-100 dark:bg-green-900/20" },
+  skipped: { icon: "—", color: "text-gray-400 bg-gray-100 dark:bg-gray-800" },
+  pending: { icon: "○", color: "text-gray-400 bg-gray-100 dark:bg-gray-800" },
+};
+
+export function OnboardingChecklist({
+  appName,
+  steps,
+  progress,
+  onComplete,
+  onSkip,
+}: OnboardingChecklistProps) {
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="flex justify-between text-sm mb-1">
-          <span className="font-bold">Getting Started</span>
-          <span className="text-gray-500">{progress.completed}/{progress.total} ({progress.percentage}%)</span>
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700">
+      {/* Header */}
+      <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold">Getting Started</h3>
+            <p className="text-xs text-gray-500">{appName}</p>
+          </div>
+          <span className="text-sm font-bold">{progress.progress_pct}%</span>
         </div>
-        <div className="h-2.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${progress.percentage}%` }} />
+        <div className="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700">
+          <div
+            className={`h-full rounded-full transition-all ${progress.can_publish ? "bg-green-500" : "bg-blue-500"}`}
+            style={{ width: `${progress.progress_pct}%` }}
+          />
         </div>
+        {progress.can_publish && (
+          <p className="mt-1 text-[10px] font-medium text-green-600">✓ Ready to publish</p>
+        )}
       </div>
-      <div className="space-y-1.5">
-        {items.map(item => (
-          <button key={item.itemId} onClick={() => !item.completed && onComplete?.(item.itemId)}
-            className={`w-full text-left border rounded-xl p-3 flex items-start gap-3 ${item.completed ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10" : "border-gray-200 dark:border-gray-700"}`}>
-            <span className={`mt-0.5 ${item.completed ? "text-green-500" : "text-gray-300"}`}>{item.completed ? "✅" : "⬜"}</span>
-            <div>
-              <span className={`text-sm font-medium ${item.completed ? "line-through text-gray-400" : ""}`}>{item.title}</span>
-              {item.required && !item.completed && <span className="text-xs text-red-400 ml-1">required</span>}
-              <p className="text-xs text-gray-500">{item.description}</p>
+
+      {/* Steps */}
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {steps.map((step, i) => {
+          const st = STATUS_ICONS[step.status] ?? STATUS_ICONS.pending;
+          const isPending = step.status === "pending";
+          return (
+            <div
+              key={step.step_id}
+              className={`flex items-start gap-3 px-4 py-3 ${!isPending ? "opacity-60" : ""}`}
+            >
+              <span
+                className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${st.color}`}
+              >
+                {step.status === "pending" ? i + 1 : st.icon}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${isPending ? "font-medium" : ""}`}>{step.title}</span>
+                  {step.required && <span className="text-[9px] text-red-500">required</span>}
+                </div>
+                <p className="text-xs text-gray-500">{step.description}</p>
+                {isPending && (
+                  <div className="mt-1.5 flex gap-1.5">
+                    <button
+                      onClick={() => onComplete(step.step_id)}
+                      className="rounded bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-blue-700"
+                    >
+                      Complete
+                    </button>
+                    {!step.required && (
+                      <button
+                        onClick={() => onSkip(step.step_id)}
+                        className="rounded border border-gray-300 px-2.5 py-1 text-[10px] text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+                      >
+                        Skip
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
