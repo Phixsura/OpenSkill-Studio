@@ -13,7 +13,7 @@ export function DeveloperAnalyticsCard({ stats }: { stats: DevStats }) {
     { label: "Reviews", value: stats.totalReviews.toLocaleString(), icon: "⭐" },
     { label: "Active Users", value: stats.activeUsers30d.toLocaleString(), icon: "👥" },
     { label: "Rating", value: `${stats.avgRating.toFixed(1)}/5`, icon: "🏆" },
-    { label: "Revenue", value: `$${(stats.totalRevenueCents / 100).toFixed(2)}`, icon: "💰" },
+    { label: "Revenue", value: `$${(stats.totalRevenueCents / 100).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, icon: "💰" },
   ];
 
   return (
