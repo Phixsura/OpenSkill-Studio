@@ -1,38 +1,32 @@
 "use client";
 
-interface BillingTier { range: string; units: number; rate: number; cost: number; }
-interface UsageBillingCardProps { usage: number; totalCost: number; display: string;
-  breakdown: BillingTier[]; projectedMonthly?: number; projectedCost?: number; }
+interface BillItem { metric: string; quantity: number; unitPrice: number; total: number; }
+interface Bill { items: BillItem[]; totalCents: number; }
 
-export function UsageBillingCard({ usage, totalCost, display, breakdown, projectedMonthly, projectedCost }: UsageBillingCardProps) {
+const metricIcons: Record<string, string> = { api_calls: "📡", compute_minutes: "⚡", storage_mb: "💾", bandwidth_gb: "🌐" };
+
+export function UsageBillingCard({ bill }: { bill: Bill }) {
+  if (!bill.items.length) return <div className="text-center text-gray-400 py-6 text-sm">No usage this period</div>;
   return (
-    <div className="rounded-xl border dark:border-gray-700 overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
-        <h3 className="font-semibold">📊 Usage Billing</h3>
-        <div className="text-right">
-          <div className="text-lg font-bold">{display}</div>
-          <div className="text-[10px] text-gray-400">{usage.toLocaleString()} units</div>
-        </div>
+    <div className="border dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="p-4 bg-gray-50 dark:bg-gray-800">
+        <span className="font-bold text-sm">Usage Bill</span>
+        <span className="text-2xl font-extrabold block mt-1">${(bill.totalCents / 100).toFixed(2)}</span>
       </div>
-      <div className="divide-y dark:divide-gray-700 text-sm">
-        {breakdown.map((t, i) => (
-          <div key={i} className="flex items-center justify-between px-4 py-2">
-            <div>
-              <span className="text-xs text-gray-400">{t.range}</span>
-              <span className="text-xs ml-2">{t.units.toLocaleString()} units × ${t.rate}</span>
+      <div className="divide-y dark:divide-gray-700">
+        {bill.items.map(item => (
+          <div key={item.metric} className="p-3 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2">
+              <span>{metricIcons[item.metric] || "📊"}</span>
+              <div>
+                <span className="font-medium capitalize">{item.metric.replace(/_/g, " ")}</span>
+                <span className="text-xs text-gray-500 block">{item.quantity} × ${(item.unitPrice / 100).toFixed(3)}/unit</span>
+              </div>
             </div>
-            <span className="text-xs font-mono">${t.cost.toFixed(2)}</span>
+            <span className="font-medium">${(item.total / 100).toFixed(2)}</span>
           </div>
         ))}
-        <div className="flex justify-between px-4 py-2 font-bold text-xs">
-          <span>Total</span><span>${totalCost.toFixed(2)}</span>
-        </div>
       </div>
-      {projectedMonthly !== undefined && (
-        <div className="p-3 border-t dark:border-gray-700 bg-blue-50 dark:bg-blue-900/10 text-xs text-blue-700 dark:text-blue-400">
-          Projected: {projectedMonthly.toLocaleString()} units/mo → ${projectedCost?.toFixed(2)}/mo
-        </div>
-      )}
     </div>
   );
 }
