@@ -195,6 +195,48 @@ class TestQuerying:
         assert reg.get_slot_status("nonexistent") is None
 
 
+class TestPermissionChecks:
+    def test_register_with_required_permissions_granted(self):
+        reg = ExtensionPointRegistry()
+        reg.define_slot(ExtensionSlot(
+            slot_id="secure_slot", surface=SurfaceType.API_PRE_HOOK,
+            label="Secure Hook", description="Requires permissions",
+            required_permissions=["read:skills", "write:submissions"],
+        ))
+        result = reg.register("app-1", "App 1", "secure_slot",
+                              granted_permissions={"read:skills", "write:submissions", "read:projects"})
+        assert result.success is True
+
+    def test_register_denied_missing_permissions(self):
+        reg = ExtensionPointRegistry()
+        reg.define_slot(ExtensionSlot(
+            slot_id="secure_slot", surface=SurfaceType.API_PRE_HOOK,
+            label="Secure Hook", description="Requires permissions",
+            required_permissions=["read:skills", "write:submissions"],
+        ))
+        result = reg.register("app-1", "App 1", "secure_slot",
+                              granted_permissions={"read:skills"})
+        assert result.success is False
+        assert "write:submissions" in (result.error or "")
+
+    def test_register_denied_no_permissions_provided(self):
+        reg = ExtensionPointRegistry()
+        reg.define_slot(ExtensionSlot(
+            slot_id="secure_slot", surface=SurfaceType.API_PRE_HOOK,
+            label="Secure Hook", description="Requires permissions",
+            required_permissions=["admin:org"],
+        ))
+        result = reg.register("app-1", "App 1", "secure_slot")
+        assert result.success is False
+        assert "admin:org" in (result.error or "")
+
+    def test_no_required_permissions_allows_anyone(self):
+        reg = _setup_registry()
+        # sidebar_nav has no required_permissions
+        result = reg.register("app-1", "App 1", "sidebar_nav")
+        assert result.success is True
+
+
 class TestManifestValidation:
     def test_validate_valid_surfaces(self):
         reg = _setup_registry()

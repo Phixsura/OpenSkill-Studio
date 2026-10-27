@@ -130,13 +130,29 @@ class ExtensionPointRegistry:
     # ── Extension registration ───────────────────────────
 
     def register(self, app_id: str, app_name: str, slot_id: str,
-                 priority: int = 0, config: dict | None = None) -> RegistrationResult:
-        """Register an extension to a slot."""
+                 priority: int = 0, config: dict | None = None,
+                 granted_permissions: set[str] | None = None) -> RegistrationResult:
+        """Register an extension to a slot.
+
+        granted_permissions should come from the server-side app installation
+        record, NOT from the app-supplied manifest. Slots with
+        required_permissions will deny registration if any are missing.
+        """
         slot = self._slots.get(slot_id)
         if slot is None:
             return RegistrationResult(
                 success=False, error=f"Unknown slot: {slot_id}"
             )
+
+        # Permission check: deny if the slot requires permissions the app doesn't have
+        if slot.required_permissions:
+            actual = granted_permissions or set()
+            missing = set(slot.required_permissions) - actual
+            if missing:
+                return RegistrationResult(
+                    success=False,
+                    error=f"Missing permissions: {', '.join(sorted(missing))}",
+                )
 
         existing = self._registrations.get(slot_id, [])
 
