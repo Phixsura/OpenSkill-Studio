@@ -182,10 +182,11 @@ class AppAutomationEngine:
         self._rules[rule_id] = rule
         return rule
 
-    def update_rule(self, rule_id: str, enabled: bool | None = None,
+    def update_rule(self, app_id: str, rule_id: str, enabled: bool | None = None,
                     name: str | None = None) -> AutomationRule | None:
+        """Update a rule. Requires app_id ownership to prevent IDOR."""
         rule = self._rules.get(rule_id)
-        if rule is None:
+        if rule is None or rule.app_id != app_id:
             return None
         if enabled is not None:
             rule.enabled = enabled
@@ -193,11 +194,20 @@ class AppAutomationEngine:
             rule.name = name
         return rule
 
-    def delete_rule(self, rule_id: str) -> bool:
-        return self._rules.pop(rule_id, None) is not None
+    def delete_rule(self, app_id: str, rule_id: str) -> bool:
+        """Delete a rule. Requires app_id ownership to prevent IDOR."""
+        rule = self._rules.get(rule_id)
+        if rule is None or rule.app_id != app_id:
+            return False
+        del self._rules[rule_id]
+        return True
 
-    def get_rule(self, rule_id: str) -> AutomationRule | None:
-        return self._rules.get(rule_id)
+    def get_rule(self, app_id: str, rule_id: str) -> AutomationRule | None:
+        """Get a rule. Requires app_id ownership to prevent IDOR."""
+        rule = self._rules.get(rule_id)
+        if rule is None or rule.app_id != app_id:
+            return None
+        return rule
 
     def list_rules(self, app_id: str) -> list[AutomationRule]:
         return sorted(
