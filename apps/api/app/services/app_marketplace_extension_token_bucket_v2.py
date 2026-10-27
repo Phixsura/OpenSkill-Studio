@@ -74,7 +74,7 @@ class TokenBucketV2Service:
                     "capacity": bucket.capacity}
 
         # Overdraft check
-        if bucket.overdraft_limit > 0 and bucket.tokens > -bucket.overdraft_limit:
+        if bucket.overdraft_limit > 0 and bucket.tokens + tokens >= -bucket.overdraft_limit:
             bucket.tokens -= tokens
             bucket.total_allowed += 1
             bucket.total_overdraft += 1
