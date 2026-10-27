@@ -134,6 +134,7 @@ class TestProgress:
         p = c.get_progress("app-x")
         assert p.total_steps == 0
         assert p.progress_pct == 0.0
+        assert p.can_publish is False  # fail-closed: no checklist = no publish
 
 
 class TestNextStep:

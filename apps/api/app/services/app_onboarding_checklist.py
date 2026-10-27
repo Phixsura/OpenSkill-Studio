@@ -120,8 +120,13 @@ class AppOnboardingChecklist:
         return None
 
     def get_progress(self, app_id: str) -> ChecklistProgress:
-        """Compute overall progress."""
-        steps = self._checklists.get(app_id, [])
+        """Compute overall progress. Fail-closed: no checklist = can_publish False."""
+        steps = self._checklists.get(app_id)
+        if not steps:
+            return ChecklistProgress(
+                app_id=app_id, total_steps=0, completed=0, skipped=0, pending=0,
+                required_completed=0, required_total=0, progress_pct=0.0, can_publish=False,
+            )
         total = len(steps)
         completed = sum(1 for s in steps if s.status == StepStatus.COMPLETED)
         skipped = sum(1 for s in steps if s.status == StepStatus.SKIPPED)
@@ -140,7 +145,7 @@ class AppOnboardingChecklist:
             required_completed=req_completed,
             required_total=req_total,
             progress_pct=round(pct, 1),
-            can_publish=req_completed == req_total,
+            can_publish=req_total > 0 and req_completed == req_total,
         )
 
     def get_next_step(self, app_id: str) -> ChecklistStep | None:
