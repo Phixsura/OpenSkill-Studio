@@ -4,14 +4,22 @@ import time
 
 def test_normal_access():
     svc = AccessPatternAnalyzerService()
-    # Build baseline
+    # Build baseline with spread timestamps
+    import time as _time
+    base_time = _time.time() - 3600
     for i in range(50):
         svc.record("client-1", "/api/users", "us-east")
+        # Backdate events to spread across an hour
+        svc._events["client-1"][-1] = type(svc._events["client-1"][-1])(
+            timestamp=base_time + i * 60, endpoint="/api/users", ip_region="us-east")
     baseline = svc.build_baseline("client-1")
     assert baseline["event_count"] == 50
     assert baseline["unique_endpoints"] == 1
 
-    report = svc.analyze("client-1")
+    # Record a few normal events now
+    for _ in range(3):
+        svc.record("client-1", "/api/users", "us-east")
+    report = svc.analyze("client-1", window_seconds=5)
     assert report.severity == "normal"
 
 
