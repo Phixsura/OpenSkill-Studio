@@ -34,8 +34,8 @@ TOKEN_RE = re.compile(r'''
     ("(?:[^"\\]|\\.)*") | # strings
     (and|or|not) |       # logical ops (must be before ident)
     ([a-zA-Z_]\w*) |     # identifiers
+    (\*\*) |             # power (before single *)
     (==|!=|<=|>=|[+\-*/%<>]) | # operators
-    (\*\*) |             # power
     (\() | (\)) | (,) |  # parens, comma
     (\s+)                # whitespace (skip)
 ''', re.VERBOSE)
@@ -77,10 +77,10 @@ class ExprEvaluatorService:
                 tokens.append((T.OP, m.group(3)))
             elif m.group(4):  # identifier
                 tokens.append((T.IDENT, m.group(4)))
-            elif m.group(5):  # operator
-                tokens.append((T.OP, m.group(5)))
-            elif m.group(6):  # **
+            elif m.group(5):  # **
                 tokens.append((T.OP, "**"))
+            elif m.group(6):  # operator
+                tokens.append((T.OP, m.group(6)))
             elif m.group(7):
                 tokens.append((T.LPAREN, "("))
             elif m.group(8):
