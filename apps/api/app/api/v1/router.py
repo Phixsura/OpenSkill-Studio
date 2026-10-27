@@ -1,19 +1,20 @@
 from fastapi import APIRouter
 
+# ── Federation (Issue #45) ──
 from app.api.v1.endpoints import (
-    admin,
-    app_installations,
-    app_marketplace,
-    app_review,
     adapter_registry,
+    admin,
     app_admin,
     app_batch,
     app_categories,
-    app_version_ops,
     app_conformance,
     app_export,
+    app_installations,
+    app_marketplace,
     app_observability,
+    app_review,
     app_sandbox,
+    app_version_ops,
     auth,
     certificates,
     client_briefs,
@@ -21,21 +22,21 @@ from app.api.v1.endpoints import (
     composer,
     dev_sandbox_tools,
     developer_accounts,
-    openapi_docs,
-    webhook_deliveries,
     developer_apps,
     discussions,
-    manifest_validation,
-    oauth,
     duplicate,
     evaluation,
+    federation,
     gamification,
     health,
     installations,
     learning_paths,
     lti,
+    manifest_validation,
     matching,
     notifications,
+    oauth,
+    openapi_docs,
     organizations,
     overview,
     pack_io,
@@ -49,6 +50,7 @@ from app.api.v1.endpoints import (
     requirement_profiles,
     skill_packs,
     skills,
+    webhook_deliveries,
     webhooks,
     workflow_installations,
     workflow_packs,
@@ -125,6 +127,9 @@ api_v1_router.include_router(dev_sandbox_tools.router)
 api_v1_router.include_router(webhook_deliveries.router)
 api_v1_router.include_router(openapi_docs.router)
 api_v1_router.include_router(oauth.router)
+
+# ── Federation (Issue #45) ──
+api_v1_router.include_router(federation.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)

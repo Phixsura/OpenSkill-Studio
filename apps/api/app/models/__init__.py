@@ -51,12 +51,52 @@ from app.models.developer import (  # noqa: F401
     UiSurface,
 )
 from app.models.discussion import PackDiscussion  # noqa: F401
-from app.models.webhook_delivery import AppWebhookDelivery, DeliveryStatus  # noqa: F401
 from app.models.evaluation import (  # noqa: F401
     EvalStatus,
     EvalType,
     EvaluationTask,
     EvalUsageMonthly,
+)
+from app.models.federation import (  # noqa: F401
+    AccountLinkStatus,
+    CredentialType,
+    DataResidencyPolicy,
+    EntitlementGrantStatus,
+    FederatedAccountLink,
+    FederatedArtifact,
+    FederatedArtifactType,
+    FederatedCredentialVerification,
+    FederatedEcosystemObservation,
+    FederatedEntitlementGrant,
+    FederatedMarketplaceListing,
+    FederatedOpportunity,
+    FederationCircuitBreaker,
+    FederationGrant,
+    FederationGrantStatus,
+    FederationGrantType,
+    FederationInstance,
+    FederationRevocation,
+    FederationSearchCache,
+    IncidentSeverity,
+    IncidentType,
+    InstanceTrustStatus,
+    ListingStatus,
+    LocalInstanceIdentity,
+    MirrorStatus,
+    ObservationStatus,
+    OpportunityStatus,
+    PeerIncident,
+    PeerReputationScore,
+    PortabilityRecord,
+    PortabilityRecordType,
+    ResidencyEnforcement,
+    ResidencyPolicyType,
+    RevocationType,
+    SettlementStatus,
+    TrustAction,
+    TrustArtifactType,
+    TrustPolicy,
+    VerificationStatus,
 )
 from app.models.gamification import PointsLedger, UserPoints  # noqa: F401
 from app.models.learning_path import (  # noqa: F401
@@ -160,6 +200,7 @@ from app.models.user import (  # noqa: F401
     UserStatus,
 )
 from app.models.webhook import WebhookSubscription  # noqa: F401
+from app.models.webhook_delivery import AppWebhookDelivery, DeliveryStatus  # noqa: F401
 from app.models.workflow_pack import (  # noqa: F401
     ComfyUIImport,
     WorkflowPack,
