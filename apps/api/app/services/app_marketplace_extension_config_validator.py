@@ -1,105 +1,63 @@
-"""Config Validator — validate extension runtime config against schemas.
-
-Provides deep config validation with type coercion, range checks,
-regex patterns, enum enforcement, and nested object support.
-"""
+"""Extension Config Validator — validate extension.json manifest files."""
 from __future__ import annotations
 import re
-from dataclasses import dataclass, field
 
 
-@dataclass
-class FieldValidator:
-    name: str
-    field_type: str  # string, int, float, bool, enum, url, email, regex
-    required: bool = True
-    default: object = None
-    min_val: float | None = None
-    max_val: float | None = None
-    min_length: int | None = None
-    max_length: int | None = None
-    enum_values: list[str] = field(default_factory=list)
-    pattern: str = ""
-    description: str = ""
+REQUIRED_FIELDS = {"name", "version", "description", "author", "entry_point"}
+OPTIONAL_FIELDS = {"homepage", "repository", "license", "keywords", "permissions",
+                   "min_platform_version", "icon", "screenshots", "pricing"}
+VERSION_RE = re.compile(r'^\d+\.\d+\.\d+$')
+NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$')
 
 
-class ConfigValidator:
-    """Deep config validation with comprehensive type checking."""
-
-    URL_PATTERN = re.compile(r'^https?://[^\s/$.?#].[^\s]*$')
-    EMAIL_PATTERN = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-
-    def __init__(self):
-        self._schemas: dict[str, list[FieldValidator]] = {}
-
-    def register_schema(self, extension_id: str, fields: list[FieldValidator]) -> None:
-        self._schemas[extension_id] = fields
-
-    def validate(self, extension_id: str, config: dict) -> tuple[bool, list[str], dict]:
-        """Validate config, apply defaults, return (valid, errors, processed_config)."""
-        schema = self._schemas.get(extension_id, [])
-        if not schema:
-            return True, [], dict(config)
-
+class ExtConfigValidatorService:
+    def validate(self, config: dict) -> tuple[bool, list[str]]:
         errors = []
-        processed = dict(config)
+        warnings = []
 
-        for fv in schema:
-            value = config.get(fv.name)
+        # Required fields
+        for field in REQUIRED_FIELDS:
+            if field not in config:
+                errors.append(f"Missing required field: {field}")
 
-            # Apply default
-            if value is None and fv.default is not None:
-                processed[fv.name] = fv.default
-                continue
+        # Name format
+        name = config.get("name", "")
+        if name and not NAME_RE.match(name):
+            errors.append("Invalid name: must be lowercase alphanumeric with hyphens, 3-64 chars")
 
-            # Required check
-            if value is None and fv.required:
-                errors.append(f"{fv.name}: required field missing")
-                continue
+        # Version format
+        version = config.get("version", "")
+        if version and not VERSION_RE.match(version):
+            errors.append(f"Invalid version: {version} (must be semver X.Y.Z)")
 
-            if value is None:
-                continue
+        # Description length
+        desc = config.get("description", "")
+        if desc and len(desc) < 10:
+            warnings.append("Description should be at least 10 characters")
+        if desc and len(desc) > 500:
+            errors.append("Description too long (max 500 chars)")
 
-            # Type validation
-            type_err = self._check_type(fv, value)
-            if type_err:
-                errors.append(f"{fv.name}: {type_err}")
-                continue
+        # Permissions
+        perms = config.get("permissions", [])
+        if not isinstance(perms, list):
+            errors.append("permissions must be an array")
 
-            # Range validation
-            if fv.min_val is not None and isinstance(value, (int, float)) and value < fv.min_val:
-                errors.append(f"{fv.name}: {value} below minimum {fv.min_val}")
-            if fv.max_val is not None and isinstance(value, (int, float)) and value > fv.max_val:
-                errors.append(f"{fv.name}: {value} above maximum {fv.max_val}")
+        # Keywords
+        keywords = config.get("keywords", [])
+        if keywords and len(keywords) > 20:
+            errors.append("Too many keywords (max 20)")
 
-            # Length validation
-            if isinstance(value, str):
-                if fv.min_length is not None and len(value) < fv.min_length:
-                    errors.append(f"{fv.name}: length {len(value)} below minimum {fv.min_length}")
-                if fv.max_length is not None and len(value) > fv.max_length:
-                    errors.append(f"{fv.name}: length {len(value)} above maximum {fv.max_length}")
+        # Unknown fields
+        known = REQUIRED_FIELDS | OPTIONAL_FIELDS
+        for k in config:
+            if k not in known:
+                warnings.append(f"Unknown field: {k}")
 
-        return len(errors) == 0, errors, processed
+        return len(errors) == 0, errors + [f"[warn] {w}" for w in warnings]
 
-    def _check_type(self, fv: FieldValidator, value: object) -> str:
-        if fv.field_type == "string" and not isinstance(value, str):
-            return f"expected string, got {type(value).__name__}"
-        if fv.field_type == "int" and not isinstance(value, int):
-            return f"expected int, got {type(value).__name__}"
-        if fv.field_type == "float" and not isinstance(value, (int, float)):
-            return f"expected number, got {type(value).__name__}"
-        if fv.field_type == "bool" and not isinstance(value, bool):
-            return f"expected bool, got {type(value).__name__}"
-        if fv.field_type == "enum" and str(value) not in fv.enum_values:
-            return f"must be one of {fv.enum_values}"
-        if fv.field_type == "url" and (not isinstance(value, str) or not self.URL_PATTERN.match(value)):
-            return "invalid URL format"
-        if fv.field_type == "email" and (not isinstance(value, str) or not self.EMAIL_PATTERN.match(value)):
-            return "invalid email format"
-        if fv.field_type == "regex" and isinstance(value, str) and fv.pattern:
-            if not re.match(fv.pattern, value):
-                return f"does not match pattern {fv.pattern}"
-        return ""
-
-    def get_schema(self, extension_id: str) -> list[FieldValidator]:
-        return self._schemas.get(extension_id, [])
+    def generate_template(self, name: str, author: str) -> dict:
+        return {
+            "name": name, "version": "0.1.0", "description": "",
+            "author": author, "entry_point": "src/index.js",
+            "permissions": [], "keywords": [],
+        }
