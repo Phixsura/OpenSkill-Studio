@@ -104,15 +104,21 @@ class ContentHashVerifyService:
     def generate_hash_chain(self, files: dict[str, bytes],
                             algorithm: str = "sha256") -> str:
         """Generate a single hash representing the ordered chain of all files."""
+        if algorithm not in SUPPORTED_ALGORITHMS:
+            raise ValueError(f"Unsupported algorithm: {algorithm}")
         chain = hashlib.new(algorithm)
         for path in sorted(files.keys()):
-            chain.update(path.encode())
-            chain.update(files[path])
+            p = path.encode()
+            c = files[path]
+            chain.update(len(p).to_bytes(8, 'big'))
+            chain.update(p)
+            chain.update(len(c).to_bytes(8, 'big'))
+            chain.update(c)
         return base64.b64encode(chain.digest()).decode()
 
     def verify_chain(self, expected_chain: str, files: dict[str, bytes],
                      algorithm: str = "sha256") -> bool:
         actual = self.generate_hash_chain(files, algorithm)
         # Constant-time comparison
-        return len(expected_chain) == len(actual) and all(
-            a == b for a, b in zip(expected_chain, actual))
+        import hmac as _hmac
+        return _hmac.compare_digest(expected_chain, actual)
