@@ -263,6 +263,8 @@ class AppAutomationEngine:
         """Get execution history scoped to app_id + org_id."""
         rule_ids = {r.rule_id for r in self._rules.values()
                     if r.app_id == app_id and r.org_id == org_id}
+        if not rule_ids:
+            return []
         entries = self._history
         if rule_ids:
             entries = [e for e in entries if e.rule_id in rule_ids]
