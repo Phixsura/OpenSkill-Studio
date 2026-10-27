@@ -1,37 +1,38 @@
 "use client";
-
 import { useState } from "react";
 
-interface Command { id: string; label: string; shortcut: string | null; icon: string; category: string; }
-interface CommandPaletteProps { commands: Command[]; onSelect: (id: string) => void; onClose: () => void; }
+interface Command { commandId: string; label: string; category: string; shortcut: string; icon: string; handler: string; }
 
-export function CommandPalette({ commands, onSelect, onClose }: CommandPaletteProps) {
+export function CommandPalette({ commands, open, onClose, onExecute }: {
+  commands: Command[]; open: boolean; onClose?: () => void; onExecute?: (handler: string) => void;
+}) {
   const [query, setQuery] = useState("");
-  const q = query.toLowerCase();
-  const filtered = commands.filter(c => !q || c.label.toLowerCase().includes(q) || c.category.toLowerCase().includes(q));
-  const groups = filtered.reduce<Record<string, Command[]>>((acc, c) => {
-    (acc[c.category] ??= []).push(c); return acc;
-  }, {});
+  const filtered = query ? commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase())) : commands;
+  const grouped = filtered.reduce((acc, c) => { (acc[c.category] = acc[c.category] || []).push(c); return acc; }, {} as Record<string, Command[]>);
 
+  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[20vh]" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl border bg-white shadow-2xl dark:bg-gray-900 dark:border-gray-700" onClick={e => e.stopPropagation()}>
-        <input autoFocus type="text" placeholder="Type a command..." value={query} onChange={e => setQuery(e.target.value)}
-          className="w-full border-b px-4 py-3 text-sm outline-none dark:bg-gray-900 dark:border-gray-700" />
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center pt-24 z-50" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-lg border dark:border-gray-700" onClick={e => e.stopPropagation()}>
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Type a command..."
+          className="w-full px-4 py-3 text-sm bg-transparent border-b dark:border-gray-700 outline-none" autoFocus />
         <div className="max-h-72 overflow-y-auto p-2">
-          {Object.entries(groups).map(([cat, cmds]) => (
+          {Object.entries(grouped).map(([cat, cmds]) => (
             <div key={cat}>
-              <p className="px-2 py-1 text-xs font-semibold text-gray-400 uppercase">{cat}</p>
+              <span className="text-[10px] uppercase text-gray-400 px-2 py-1 block">{cat}</span>
               {cmds.map(c => (
-                <button key={c.id} onClick={() => onSelect(c.id)}
-                  className="flex w-full items-center justify-between rounded px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800">
-                  <span className="flex items-center gap-2"><span>{c.icon}</span>{c.label}</span>
-                  {c.shortcut && <kbd className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{c.shortcut}</kbd>}
+                <button key={c.commandId} onClick={() => { onExecute?.(c.handler); onClose?.(); }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span>{c.icon}</span>
+                    <span>{c.label}</span>
+                  </div>
+                  {c.shortcut && <kbd className="text-[10px] bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{c.shortcut}</kbd>}
                 </button>
               ))}
             </div>
           ))}
-          {filtered.length === 0 && <p className="py-4 text-center text-sm text-gray-400">No commands found</p>}
+          {filtered.length === 0 && <div className="text-center text-gray-400 py-4 text-sm">No commands found</div>}
         </div>
       </div>
     </div>

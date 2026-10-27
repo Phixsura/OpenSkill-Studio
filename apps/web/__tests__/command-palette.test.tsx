@@ -2,22 +2,27 @@ import { render, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "@/components/command-palette";
 
+const commands = [
+  { commandId: "nav-home", label: "Go to Home", category: "navigation", shortcut: "⌘H", icon: "🏠", handler: "/" },
+  { commandId: "action-deploy", label: "Deploy", category: "action", shortcut: "⌘⇧D", icon: "🚀", handler: "/deploy" },
+];
+
 describe("CommandPalette", () => {
-  const cmds = [
-    { id: "1", label: "New App", shortcut: "Ctrl+N", icon: "📄", category: "File" },
-    { id: "2", label: "Deploy", shortcut: null, icon: "🚀", category: "Actions" },
-  ];
-  it("renders commands", () => {
-    const { container } = render(<CommandPalette commands={cmds} onSelect={vi.fn()} onClose={vi.fn()} />);
-    expect(container.textContent).toContain("New App");
+  it("renders when open", () => {
+    const { container } = render(<CommandPalette commands={commands} open />);
+    expect(container.textContent).toContain("Go to Home");
     expect(container.textContent).toContain("Deploy");
-    expect(container.textContent).toContain("Ctrl+N");
+    expect(container.textContent).toContain("⌘H");
   });
-  it("selects command", () => {
+  it("hidden when closed", () => {
+    const { container } = render(<CommandPalette commands={commands} open={false} />);
+    expect(container.textContent).toBe("");
+  });
+  it("execute command", () => {
     const fn = vi.fn();
-    const { container } = render(<CommandPalette commands={cmds} onSelect={fn} onClose={vi.fn()} />);
-    const buttons = container.querySelectorAll("button");
-    fireEvent.click(buttons[0]);
-    expect(fn).toHaveBeenCalledWith("1");
+    const { container } = render(<CommandPalette commands={commands} open onExecute={fn} />);
+    const btns = container.querySelectorAll("button");
+    fireEvent.click(btns[0]);
+    expect(fn).toHaveBeenCalledWith("/");
   });
 });
