@@ -87,10 +87,15 @@ class ApiGatewayV2Service:
         return response
 
     def _match_route(self, path: str) -> RouteConfig | None:
+        # Normalize path
+        path = "/" + path.strip("/")
+        candidates = []
         for route in self._routes:
-            if path.startswith(route.path_pattern):
-                return route
-        return None
+            pattern = route.path_pattern.rstrip("/")
+            if path == pattern or path.startswith(pattern + "/"):
+                candidates.append(route)
+        # Most specific (longest) prefix wins
+        return max(candidates, key=lambda r: len(r.path_pattern)) if candidates else None
 
     def _check_rate(self, client_id: str, limit: int) -> bool:
         now = time.time()
