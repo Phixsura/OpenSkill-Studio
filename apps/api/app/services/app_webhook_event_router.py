@@ -106,12 +106,15 @@ class AppWebhookEventRouter:
     # ── Subscription management ──────────────────────────
 
     def subscribe(self, sub: EventSubscription) -> None:
-        """Register an app's webhook subscription for an event type."""
-        # Prevent duplicate subscriptions for same app + event
+        """Register an app's webhook subscription for an event type.
+
+        Keyed by (app_id, org_id) — never overwrites a different org's subscription.
+        org_id and platform_scoped are immutable after creation.
+        """
         existing = self._subscriptions[sub.event_type]
         for s in existing:
-            if s.app_id == sub.app_id:
-                # Update in place
+            if s.app_id == sub.app_id and s.org_id == sub.org_id:
+                # Update mutable fields in place (never org_id or platform_scoped)
                 s.webhook_url = sub.webhook_url
                 s.secret = sub.secret
                 s.filters = sub.filters
