@@ -91,7 +91,9 @@ def test_insufficient_data():
     svc = AccessPatternAnalyzerService()
     svc.record("new-client", "/api/data")
     svc.build_baseline("new-client")
-    report = svc.analyze("new-client")
+    # Analyze with wide window to capture the event
+    report = svc.analyze("new-client", window_seconds=60)
+    assert len(report.anomalies) > 0
     assert "Insufficient" in report.anomalies[0]
 
 
