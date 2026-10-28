@@ -2,66 +2,34 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import RequestValidatorCard from "../src/components/request-validator-card";
 
-const issues = [
-  { field: "name", message: "Required field missing" },
-  { field: "age", message: "Below minimum (0)" },
+const rules = [
+  { rule_id: "r1", rule_type: "required_header", value: "Authorization", enabled: true },
+  { rule_id: "r2", rule_type: "content_type", value: "application/json", enabled: true },
+  { rule_id: "r3", rule_type: "max_size", value: "1048576", enabled: false },
 ];
 
 describe("RequestValidatorCard", () => {
-  it("renders header and schema id", () => {
-    const { container } = render(
-      <RequestValidatorCard
-        schemaId="create_user"
-        valid={false}
-        issues={issues}
-        fieldCount={5}
-        appName="My App"
-      />,
-    );
-    expect(container.textContent).toContain("Request Validation");
-    expect(container.textContent).toContain("create_user");
+  it("renders header and active count", () => {
+    const { container } = render(<RequestValidatorCard rules={rules} appName="App" />);
+    expect(container.textContent).toContain("Request Validator");
+    expect(container.textContent).toContain("2/3 active");
   });
 
-  it("shows valid badge", () => {
-    const { container } = render(
-      <RequestValidatorCard schemaId="s1" valid={true} issues={[]} fieldCount={3} appName="App" />,
-    );
-    expect(container.textContent).toContain("Valid");
-    expect(container.textContent).toContain("All fields validated");
+  it("shows rule type labels", () => {
+    const { container } = render(<RequestValidatorCard rules={rules} appName="App" />);
+    expect(container.textContent).toContain("Header");
+    expect(container.textContent).toContain("Content-Type");
+    expect(container.textContent).toContain("Max Size");
   });
 
-  it("shows issue count badge", () => {
-    const { container } = render(
-      <RequestValidatorCard
-        schemaId="s1"
-        valid={false}
-        issues={issues}
-        fieldCount={5}
-        appName="App"
-      />,
-    );
-    expect(container.textContent).toContain("2 issues");
+  it("shows rule values", () => {
+    const { container } = render(<RequestValidatorCard rules={rules} appName="App" />);
+    expect(container.textContent).toContain("Authorization");
+    expect(container.textContent).toContain("application/json");
   });
 
-  it("renders issue fields and messages", () => {
-    const { container } = render(
-      <RequestValidatorCard
-        schemaId="s1"
-        valid={false}
-        issues={issues}
-        fieldCount={5}
-        appName="App"
-      />,
-    );
-    expect(container.textContent).toContain("name");
-    expect(container.textContent).toContain("Required field missing");
-    expect(container.textContent).toContain("age");
-  });
-
-  it("shows field count", () => {
-    const { container } = render(
-      <RequestValidatorCard schemaId="s1" valid={true} issues={[]} fieldCount={5} appName="App" />,
-    );
-    expect(container.textContent).toContain("5 fields");
+  it("shows empty state", () => {
+    const { container } = render(<RequestValidatorCard rules={[]} appName="App" />);
+    expect(container.textContent).toContain("No validation rules");
   });
 });
