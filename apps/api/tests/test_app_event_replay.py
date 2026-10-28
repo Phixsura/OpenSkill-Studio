@@ -1,45 +1,58 @@
-"""Event replay service tests."""
+"""Tests for App Event Replay — store, replay, filter."""
 
 import pytest
-from app.services.app_event_replay import create_replay_request, validate_replay_request, _is_safe_replay_url
 
-def test_create_replay():
-    r = create_replay_request(event_id="e1", event_type="submission.completed",
-        original_data={"id": "sub-1"}, target_url="https://x.com/hook", installation_id="i1")
-    assert r["original_event_id"] == "e1"
-    assert r["status"] == "pending"
-    assert r["replay_id"].startswith("replay_")
+from app.services.app_event_replay import AppEventReplay
 
-def test_validate_no_event_type():
-    r = validate_replay_request(event_type="", target_url="https://x.com")
-    assert r["allowed"] is False
 
-def test_validate_no_url():
-    r = validate_replay_request(event_type="test", target_url="")
-    assert r["allowed"] is False
+class TestStore:
+    def test_store(self):
+        r = AppEventReplay()
+        e = r.store("inst-1", "e1", "webhook.sent", "api", {"url": "https://example.com"})
+        assert e.event_type == "webhook.sent"
+        assert e.replayed is False
 
-def test_validate_bad_url():
-    r = validate_replay_request(event_type="test", target_url="ftp://x.com")
-    assert r["allowed"] is False
+    def test_retention(self):
+        r = AppEventReplay(max_events=3)
+        for i in range(5):
+            r.store("inst-1", f"e{i}", "test", "api", {})
+        assert r.count("inst-1") == 3
 
-def test_validate_rate_limit():
-    r = validate_replay_request(event_type="test", target_url="https://x.com",
-        max_replays_per_hour=5, current_replays_this_hour=5)
-    assert r["allowed"] is False
 
-# SSRF protection
-def test_ssrf_localhost():
-    errors = _is_safe_replay_url("http://127.0.0.1/hook")
-    assert len(errors) > 0
+class TestReplay:
+    def test_replay_all(self):
+        r = AppEventReplay()
+        r.store("inst-1", "e1", "webhook.sent", "api", {})
+        r.store("inst-1", "e2", "user.created", "auth", {})
+        events = r.replay("inst-1")
+        assert len(events) == 2
+        assert all(e.replayed for e in events)
 
-def test_ssrf_private():
-    errors = _is_safe_replay_url("http://10.0.0.1/hook")
-    assert len(errors) > 0
+    def test_filter_by_type(self):
+        r = AppEventReplay()
+        r.store("inst-1", "e1", "webhook.sent", "api", {})
+        r.store("inst-1", "e2", "user.created", "auth", {})
+        events = r.replay("inst-1", event_type="webhook.sent")
+        assert len(events) == 1
 
-def test_ssrf_empty():
-    errors = _is_safe_replay_url("")
-    assert len(errors) > 0
+    def test_filter_by_source(self):
+        r = AppEventReplay()
+        r.store("inst-1", "e1", "webhook.sent", "api", {})
+        r.store("inst-1", "e2", "user.created", "auth", {})
+        events = r.replay("inst-1", source="auth")
+        assert len(events) == 1
 
-def test_ssrf_bad_scheme():
-    errors = _is_safe_replay_url("ftp://evil.com")
-    assert len(errors) > 0
+
+class TestEventTypes:
+    def test_types(self):
+        r = AppEventReplay()
+        r.store("inst-1", "e1", "webhook.sent", "api", {})
+        r.store("inst-1", "e2", "user.created", "auth", {})
+        assert r.event_types("inst-1") == ["user.created", "webhook.sent"]
+
+
+class TestIsolation:
+    def test_cross(self):
+        r = AppEventReplay()
+        r.store("inst-1", "e1", "test", "api", {})
+        assert r.count("inst-2") == 0

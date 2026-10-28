@@ -1,96 +1,92 @@
-"""Event replay service — re-deliver past events for debugging.
+"""App Event Replay — replay stored events for debugging.
 
-Allows developers to replay events that failed delivery or
-to test their webhook endpoints with real event data.
+Manages event replay:
+- Store events with metadata
+- Replay events by time range or type
+- Filter events by source
+- Per-installation scoped events
 """
 
-import ipaddress
-import socket
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+
 import structlog
-from datetime import UTC, datetime
-from urllib.parse import urlparse
 
 log = structlog.get_logger()
 
 
-def _is_safe_replay_url(url: str) -> list[str]:
-    """Validate URL is safe for replay delivery (SSRF protection)."""
-    errors = []
-    if not url:
-        errors.append("Target URL is required")
-        return errors
+@dataclass
+class StoredEvent:
+    """A stored event for replay."""
 
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        errors.append("Invalid URL format")
-        return errors
-
-    if parsed.scheme not in ("http", "https"):
-        errors.append("Target URL must be HTTP(S)")
-        return errors
-
-    host = (parsed.hostname or "").rstrip(".").lower()
-    if not host:
-        errors.append("Invalid host")
-        return errors
-
-    # DNS resolution + private IP check
-    try:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        for info in socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP):
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-                errors.append("Target URL resolves to a disallowed address")
-                return errors
-    except socket.gaierror:
-        errors.append("Cannot resolve target hostname")
-
-    return errors
+    event_id: str
+    event_type: str
+    source: str
+    payload: dict
+    timestamp: float = field(default_factory=time.time)
+    replayed: bool = False
 
 
-def create_replay_request(
-    *,
-    event_id: str,
-    event_type: str,
-    original_data: dict,
-    target_url: str,
-    installation_id: str,
-) -> dict:
-    """Create an event replay request."""
-    return {
-        "replay_id": f"replay_{event_id}_{int(datetime.now(UTC).timestamp())}",
-        "original_event_id": event_id,
-        "event_type": event_type,
-        "data": original_data,
-        "target_url": target_url,
-        "installation_id": installation_id,
-        "status": "pending",
-        "created_at": datetime.now(UTC).isoformat(),
-    }
+class AppEventReplay:
+    """Store and replay events for debugging."""
 
+    def __init__(self, max_events: int = 10000) -> None:
+        self._max = max(1, max_events)
+        self._events: dict[str, list[StoredEvent]] = {}
 
-def validate_replay_request(
-    *,
-    event_type: str,
-    target_url: str,
-    max_replays_per_hour: int = 10,
-    current_replays_this_hour: int = 0,
-) -> dict:
-    """Validate whether a replay should be allowed.
+    def store(
+        self, installation_id: str, event_id: str,
+        event_type: str, source: str, payload: dict,
+    ) -> StoredEvent:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if not event_type:
+            raise ValueError("event_type is required")
 
-    Returns {"allowed": bool, "errors": [...]}
-    """
-    errors = []
+        event = StoredEvent(
+            event_id=event_id, event_type=event_type,
+            source=source, payload=payload,
+        )
+        events = self._events.setdefault(installation_id, [])
+        events.append(event)
+        if len(events) > self._max:
+            self._events[installation_id] = events[-self._max:]
+        return event
 
-    if not event_type:
-        errors.append("Event type is required")
+    def replay(
+        self, installation_id: str, event_type: str | None = None,
+        source: str | None = None, since: float | None = None,
+        limit: int = 100,
+    ) -> list[StoredEvent]:
+        events = list(self._events.get(installation_id, []))
+        if event_type:
+            events = [e for e in events if e.event_type == event_type]
+        if source:
+            events = [e for e in events if e.source == source]
+        if since is not None:
+            events = [e for e in events if e.timestamp >= since]
 
-    # SSRF-safe URL validation
-    url_errors = _is_safe_replay_url(target_url)
-    errors.extend(url_errors)
+        result = events[-limit:]
+        for e in result:
+            e.replayed = True
+        return result
 
-    if current_replays_this_hour >= max_replays_per_hour:
-        errors.append(f"Replay rate limit exceeded ({max_replays_per_hour}/hour)")
+    def get_event(self, installation_id: str, event_id: str) -> StoredEvent:
+        for e in self._events.get(installation_id, []):
+            if e.event_id == event_id:
+                return e
+        raise KeyError(f"Event {event_id} not found")
 
-    return {"allowed": len(errors) == 0, "errors": errors}
+    def event_types(self, installation_id: str) -> list[str]:
+        types: set[str] = set()
+        for e in self._events.get(installation_id, []):
+            types.add(e.event_type)
+        return sorted(types)
+
+    def count(self, installation_id: str, event_type: str | None = None) -> int:
+        events = self._events.get(installation_id, [])
+        if event_type:
+            events = [e for e in events if e.event_type == event_type]
+        return len(events)
