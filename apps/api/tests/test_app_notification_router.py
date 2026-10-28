@@ -122,7 +122,7 @@ class TestDeliveryHistory:
         r.register_channel("inst-1", "ch-1", ChannelType.WEBHOOK, "https://a.com")
         r.route(_event(event_id="evt-1"))
         r.route(_event(event_id="evt-2"))
-        records = r.get_deliveries(event_id="evt-1")
+        records = r.get_deliveries("inst-1", event_id="evt-1")
         assert len(records) == 1
         assert records[0].event_id == "evt-1"
 
@@ -131,8 +131,18 @@ class TestDeliveryHistory:
         r.register_channel("inst-1", "ch-1", ChannelType.WEBHOOK, "https://a.com")
         for i in range(10):
             r.route(_event(event_id=f"evt-{i}"))
-        records = r.get_deliveries(limit=5)
+        records = r.get_deliveries("inst-1", limit=5)
         assert len(records) == 5
+
+    def test_deliveries_scoped_to_installation(self):
+        r = AppNotificationRouter()
+        r.register_channel("inst-1", "ch-1", ChannelType.WEBHOOK, "https://a.com")
+        r.register_channel("inst-2", "ch-2", ChannelType.WEBHOOK, "https://b.com")
+        r.route(_event(event_id="evt-1", installation_id="inst-1"))
+        r.route(_event(event_id="evt-2", installation_id="inst-2"))
+        records = r.get_deliveries("inst-1")
+        assert len(records) == 1
+        assert records[0].installation_id == "inst-1"
 
 
 class TestListChannels:

@@ -61,6 +61,7 @@ class DeliveryRecord:
 
     event_id: str
     channel_id: str
+    installation_id: str
     status: DeliveryStatus
     timestamp: float = field(default_factory=time.time)
     error: str = ""
@@ -129,6 +130,7 @@ class AppNotificationRouter:
                 record = DeliveryRecord(
                     event_id=event.event_id,
                     channel_id=config.channel_id,
+                    installation_id=event.installation_id,
                     status=DeliveryStatus.SKIPPED,
                     error="channel disabled",
                 )
@@ -138,6 +140,7 @@ class AppNotificationRouter:
                 record = DeliveryRecord(
                     event_id=event.event_id,
                     channel_id=config.channel_id,
+                    installation_id=event.installation_id,
                     status=DeliveryStatus.DELIVERED,
                 )
                 log.info("notification.delivered",
@@ -163,12 +166,14 @@ class AppNotificationRouter:
 
     def get_deliveries(
         self,
-        installation_id: str | None = None,
+        installation_id: str,
         event_id: str | None = None,
         limit: int = 50,
     ) -> list[DeliveryRecord]:
-        """Get delivery records, newest first."""
-        records = self._deliveries
+        """Get delivery records for an installation, newest first."""
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        records = [r for r in self._deliveries if r.installation_id == installation_id]
         if event_id:
             records = [r for r in records if r.event_id == event_id]
         return list(reversed(records[-limit:]))
