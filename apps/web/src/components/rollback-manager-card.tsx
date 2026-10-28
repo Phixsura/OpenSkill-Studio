@@ -1,50 +1,44 @@
 "use client";
 
-interface RollbackInfo {
+interface RollbackRecordInfo {
   rollback_id: string;
   from_version: string;
   to_version: string;
   reason: string;
-  status: "pending" | "in_progress" | "completed" | "failed" | "blocked";
+  status: "pending" | "in_progress" | "completed" | "failed";
   initiated_by: string;
-  created_at: string;
 }
 
 interface RollbackManagerCardProps {
-  rollbacks: RollbackInfo[];
+  currentVersion: string | null;
+  rollbacks: RollbackRecordInfo[];
   appName: string;
 }
 
-const STATUS_STYLES: Record<string, { icon: string; text: string }> = {
-  pending: { icon: "⏳", text: "text-gray-500" },
-  in_progress: { icon: "🔄", text: "text-blue-600 dark:text-blue-400" },
-  completed: { icon: "✅", text: "text-green-600 dark:text-green-400" },
-  failed: { icon: "❌", text: "text-red-600 dark:text-red-400" },
-  blocked: { icon: "🚫", text: "text-yellow-600 dark:text-yellow-400" },
+const statusStyle: Record<string, string> = {
+  pending: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  in_progress: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+  completed: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+  failed: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
 };
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}
-
-export default function RollbackManagerCard({ rollbacks, appName }: RollbackManagerCardProps) {
-  const activeCount = rollbacks.filter(
-    (r) => r.status === "pending" || r.status === "in_progress",
-  ).length;
-
+export default function RollbackManagerCard({
+  currentVersion,
+  rollbacks,
+  appName,
+}: RollbackManagerCardProps) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Rollbacks</h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            ⏪ Rollback Manager
+          </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400">{appName}</p>
         </div>
-        {activeCount > 0 && (
-          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
-            {activeCount} active
+        {currentVersion && (
+          <span className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            {currentVersion}
           </span>
         )}
       </div>
@@ -53,32 +47,27 @@ export default function RollbackManagerCard({ rollbacks, appName }: RollbackMana
         <p className="text-center text-sm text-gray-400">No rollbacks</p>
       ) : (
         <div className="space-y-2">
-          {rollbacks.map((r) => {
-            const st = STATUS_STYLES[r.status] ?? STATUS_STYLES.pending;
-            return (
-              <div
-                key={r.rollback_id}
-                className="rounded-lg border border-gray-100 px-3 py-2.5 dark:border-gray-800"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span>{st.icon}</span>
-                    <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
-                      {r.from_version} → {r.to_version}
-                    </span>
-                  </div>
-                  <span className={`text-xs font-medium capitalize ${st.text}`}>
-                    {r.status.replace("_", " ")}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{r.reason}</p>
-                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
-                  {r.initiated_by && <span>by {r.initiated_by}</span>}
-                  <span>· {timeAgo(r.created_at)}</span>
-                </div>
+          {rollbacks.map((r) => (
+            <div
+              key={r.rollback_id}
+              className="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-700 dark:text-gray-300">
+                  {r.from_version} → {r.to_version}
+                </span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusStyle[r.status] ?? ""}`}
+                >
+                  {r.status.replace("_", " ")}
+                </span>
               </div>
-            );
-          })}
+              <div className="mt-0.5 flex justify-between text-[10px] text-gray-400">
+                {r.reason && <span>{r.reason}</span>}
+                {r.initiated_by && <span>by {r.initiated_by}</span>}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

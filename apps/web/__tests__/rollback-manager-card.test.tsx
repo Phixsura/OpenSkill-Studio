@@ -4,60 +4,60 @@ import RollbackManagerCard from "../src/components/rollback-manager-card";
 
 const rollbacks = [
   {
-    rollback_id: "rb-1",
-    from_version: "2.0.0",
-    to_version: "1.9.0",
-    reason: "Critical bug in payments",
+    rollback_id: "rb1",
+    from_version: "v2.0",
+    to_version: "v1.0",
+    reason: "Bug in v2.0",
     status: "completed" as const,
-    initiated_by: "ops-team",
-    created_at: new Date(Date.now() - 3_600_000).toISOString(),
+    initiated_by: "alice",
   },
   {
-    rollback_id: "rb-2",
-    from_version: "2.1.0",
-    to_version: "2.0.0",
-    reason: "Performance regression",
+    rollback_id: "rb2",
+    from_version: "v3.0",
+    to_version: "v2.0",
+    reason: "Performance",
     status: "in_progress" as const,
-    initiated_by: "admin",
-    created_at: new Date(Date.now() - 300_000).toISOString(),
+    initiated_by: "bob",
   },
 ];
 
 describe("RollbackManagerCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="My App" />);
-    expect(container.textContent).toContain("Rollbacks");
-    expect(container.textContent).toContain("My App");
+  it("renders header and current version", () => {
+    const { container } = render(
+      <RollbackManagerCard currentVersion="v1.0" rollbacks={rollbacks} appName="App" />,
+    );
+    expect(container.textContent).toContain("Rollback Manager");
+    expect(container.textContent).toContain("v1.0");
   });
 
-  it("shows active count", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="App" />);
-    expect(container.textContent).toContain("1 active");
+  it("shows version transitions", () => {
+    const { container } = render(
+      <RollbackManagerCard currentVersion="v1.0" rollbacks={rollbacks} appName="App" />,
+    );
+    expect(container.textContent).toContain("v2.0 → v1.0");
+    expect(container.textContent).toContain("v3.0 → v2.0");
   });
 
-  it("renders version transition", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="App" />);
-    expect(container.textContent).toContain("2.0.0 → 1.9.0");
-  });
-
-  it("shows reason", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="App" />);
-    expect(container.textContent).toContain("Critical bug in payments");
-  });
-
-  it("shows initiator", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="App" />);
-    expect(container.textContent).toContain("ops-team");
-  });
-
-  it("shows status", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={rollbacks} appName="App" />);
+  it("shows status badges", () => {
+    const { container } = render(
+      <RollbackManagerCard currentVersion="v1.0" rollbacks={rollbacks} appName="App" />,
+    );
     expect(container.textContent).toContain("completed");
     expect(container.textContent).toContain("in progress");
   });
 
+  it("shows reason and initiator", () => {
+    const { container } = render(
+      <RollbackManagerCard currentVersion="v1.0" rollbacks={rollbacks} appName="App" />,
+    );
+    expect(container.textContent).toContain("Bug in v2.0");
+    expect(container.textContent).toContain("by alice");
+  });
+
   it("shows empty state", () => {
-    const { container } = render(<RollbackManagerCard rollbacks={[]} appName="App" />);
+    const { container } = render(
+      <RollbackManagerCard currentVersion={null} rollbacks={[]} appName="App" />,
+    );
     expect(container.textContent).toContain("No rollbacks");
   });
 });
