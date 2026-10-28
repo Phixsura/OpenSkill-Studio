@@ -1,9 +1,9 @@
-"""App Cost Tracker — track and allocate infrastructure costs per installation.
+"""App Cost Tracker — track API and resource usage costs.
 
 Manages cost tracking for installed apps:
 - Record cost entries by category
-- Compute total costs per period
-- Cost allocation across categories
+- Daily/monthly aggregation
+- Budget alerts when spending exceeds threshold
 - Per-installation scoped costs
 """
 
@@ -19,68 +19,87 @@ log = structlog.get_logger()
 
 @dataclass
 class CostEntry:
-    """A cost record."""
+    """A single cost entry."""
 
     entry_id: str
-    category: str  # compute, storage, network, api_calls
-    amount_cents: int
+    category: str  # "compute", "storage", "api_calls", "bandwidth"
+    amount: float
+    currency: str = "USD"
     description: str = ""
     timestamp: float = field(default_factory=time.time)
 
 
+@dataclass
+class CostBudget:
+    """A spending budget."""
+
+    category: str
+    monthly_limit: float
+    currency: str = "USD"
+
+
 class AppCostTracker:
-    """Track and allocate infrastructure costs."""
+    """Track API and resource usage costs."""
 
     def __init__(self) -> None:
         self._entries: dict[str, list[CostEntry]] = {}
+        self._budgets: dict[tuple[str, str], CostBudget] = {}
 
-    def record_cost(
-        self,
-        installation_id: str,
-        entry_id: str,
-        category: str,
-        amount_cents: int,
-        description: str = "",
-        now: float | None = None,
+    def record(
+        self, installation_id: str, entry_id: str, category: str,
+        amount: float, currency: str = "USD", description: str = "",
     ) -> CostEntry:
         if not installation_id:
             raise ValueError("installation_id is required")
+        if amount < 0:
+            raise ValueError("amount must be non-negative")
         if not category:
             raise ValueError("category is required")
-        if amount_cents < 0:
-            raise ValueError("amount_cents must be non-negative")
 
         entry = CostEntry(
-            entry_id=entry_id, category=category,
-            amount_cents=amount_cents, description=description,
-            timestamp=now or time.time(),
+            entry_id=entry_id, category=category, amount=amount,
+            currency=currency, description=description,
         )
         self._entries.setdefault(installation_id, []).append(entry)
         return entry
 
-    def total_cents(self, installation_id: str, since: float | None = None) -> int:
-        entries = self._entries.get(installation_id, [])
-        if since is not None:
-            entries = [e for e in entries if e.timestamp >= since]
-        return sum(e.amount_cents for e in entries)
-
-    def total_dollars(self, installation_id: str, since: float | None = None) -> float:
-        return self.total_cents(installation_id, since) / 100
-
-    def by_category(self, installation_id: str) -> dict[str, int]:
-        """Cost breakdown by category in cents."""
-        result: dict[str, int] = {}
-        for e in self._entries.get(installation_id, []):
-            result[e.category] = result.get(e.category, 0) + e.amount_cents
-        return result
-
-    def get_entries(
-        self, installation_id: str, category: str | None = None, limit: int = 50
-    ) -> list[CostEntry]:
+    def total(self, installation_id: str, category: str | None = None) -> float:
         entries = self._entries.get(installation_id, [])
         if category:
             entries = [e for e in entries if e.category == category]
-        return list(reversed(entries[-limit:]))
+        return round(sum(e.amount for e in entries), 2)
 
-    def entry_count(self, installation_id: str) -> int:
-        return len(self._entries.get(installation_id, []))
+    def by_category(self, installation_id: str) -> dict[str, float]:
+        entries = self._entries.get(installation_id, [])
+        cats: dict[str, float] = {}
+        for e in entries:
+            cats[e.category] = round(cats.get(e.category, 0) + e.amount, 2)
+        return cats
+
+    def set_budget(
+        self, installation_id: str, category: str, monthly_limit: float,
+        currency: str = "USD",
+    ) -> CostBudget:
+        if monthly_limit <= 0:
+            raise ValueError("monthly_limit must be positive")
+        budget = CostBudget(category=category, monthly_limit=monthly_limit, currency=currency)
+        self._budgets[(installation_id, category)] = budget
+        return budget
+
+    def budget_alerts(self, installation_id: str, threshold_pct: float = 80.0) -> list[dict]:
+        alerts = []
+        for (inst, cat), budget in self._budgets.items():
+            if inst != installation_id:
+                continue
+            spent = self.total(installation_id, cat)
+            pct = round(spent / budget.monthly_limit * 100, 1) if budget.monthly_limit > 0 else 0
+            if pct >= threshold_pct:
+                alerts.append({
+                    "category": cat, "spent": spent,
+                    "limit": budget.monthly_limit, "pct": pct,
+                })
+        return alerts
+
+    def recent(self, installation_id: str, limit: int = 20) -> list[CostEntry]:
+        entries = self._entries.get(installation_id, [])
+        return list(reversed(entries[-limit:]))
