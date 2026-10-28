@@ -47,6 +47,17 @@ class AppRequestSampler:
         h = int(hashlib.sha256(request_id.encode()).hexdigest()[:8], 16)
         return (h % 10000) < (self._rate * 10000)
 
+    _SENSITIVE_HEADERS = {"authorization", "cookie", "set-cookie", "x-api-key",
+                          "proxy-authorization", "x-auth-token"}
+
+    def _scrub_headers(self, headers: dict) -> dict:
+        return {
+            k: ("[REDACTED]" if k.lower() in self._SENSITIVE_HEADERS
+                or any(t in k.lower() for t in ("token", "secret", "key", "password"))
+                else v)
+            for k, v in headers.items()
+        }
+
     def store_sample(
         self,
         installation_id: str,
@@ -54,6 +65,8 @@ class AppRequestSampler:
     ) -> SampledRequest:
         if not installation_id:
             raise ValueError("installation_id is required")
+        # Scrub sensitive headers before storing
+        sample.request_headers = self._scrub_headers(sample.request_headers)
         samples = self._samples.setdefault(installation_id, [])
         samples.append(sample)
         if len(samples) > self._max:
