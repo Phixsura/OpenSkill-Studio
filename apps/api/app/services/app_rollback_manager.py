@@ -9,6 +9,7 @@ Handles rollback operations for installed apps:
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -42,6 +43,17 @@ class RollbackRecord:
     error: str | None = None
 
 
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+
+def _parse_version(v: str) -> tuple[int, int, int]:
+    """Parse a version string into a comparable tuple."""
+    m = _SEMVER_RE.match(v)
+    if not m:
+        raise ValueError(f"Invalid version string: {v}")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
 class AppRollbackManager:
     """Manage version rollbacks with safety checks."""
 
@@ -50,6 +62,7 @@ class AppRollbackManager:
         min_version: str = "0.0.0",
         cooldown_seconds: float = 300,
     ) -> None:
+        _parse_version(min_version)  # validate
         self._min_version = min_version
         self._cooldown = cooldown_seconds
         self._rollbacks: dict[tuple[str, str], RollbackRecord] = {}
@@ -72,11 +85,14 @@ class AppRollbackManager:
             raise ValueError("rollback_id is required")
         if not reason:
             raise ValueError("reason is required")
-        if to_version == from_version:
+        to_parsed = _parse_version(to_version)
+        from_parsed = _parse_version(from_version)
+
+        if to_parsed == from_parsed:
             raise ValueError("Cannot rollback to the same version")
 
         # Check min version
-        if to_version < self._min_version:
+        if to_parsed < _parse_version(self._min_version):
             raise ValueError(f"Cannot rollback below minimum version {self._min_version}")
 
         now = now or time.time()
