@@ -57,12 +57,16 @@ class AppFeatureRequest:
         if not title:
             raise ValueError("title is required")
 
+        key = (installation_id, request_id)
+        if key in self._requests:
+            raise ValueError(f"Request {request_id} already exists")
+
         req = FeatureRequest(
             request_id=request_id, title=title, description=description,
             submitter=submitter, tags=tags or [],
         )
         req.votes.add(submitter)  # auto-upvote by submitter
-        self._requests[(installation_id, request_id)] = req
+        self._requests[key] = req
         return req
 
     def vote(self, installation_id: str, request_id: str, user_id: str) -> FeatureRequest:
