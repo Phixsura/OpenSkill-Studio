@@ -9,6 +9,8 @@ Manages idempotency keys:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass, field
 
@@ -24,6 +26,7 @@ class IdempotencyEntry:
     key: str
     status_code: int
     response_body: str
+    payload_hash: str = ""
     created_at: float = field(default_factory=time.time)
     ttl_seconds: int = 86400  # 24h default
 
@@ -39,8 +42,10 @@ class AppIdempotencyStore:
         self._default_ttl = default_ttl
         self._store: dict[tuple[str, str], IdempotencyEntry] = {}
 
-    def check(self, installation_id: str, key: str) -> IdempotencyEntry | None:
-        """Check if key exists and is not expired."""
+    def check(
+        self, installation_id: str, key: str, payload: str = "",
+    ) -> IdempotencyEntry | None:
+        """Check if key exists and is not expired. Validates payload hash."""
         if not key:
             return None
         entry = self._store.get((installation_id, key))
@@ -49,12 +54,17 @@ class AppIdempotencyStore:
         if entry.is_expired:
             del self._store[(installation_id, key)]
             return None
+        # Payload binding: reject mismatched payloads
+        if payload and entry.payload_hash:
+            incoming_hash = self._hash_payload(payload)
+            if incoming_hash != entry.payload_hash:
+                raise ValueError("Idempotency key reused with different payload")
         return entry
 
     def store(
         self, installation_id: str, key: str,
         status_code: int, response_body: str,
-        ttl_seconds: int | None = None,
+        payload: str = "", ttl_seconds: int | None = None,
     ) -> IdempotencyEntry:
         if not installation_id:
             raise ValueError("installation_id is required")
@@ -69,6 +79,7 @@ class AppIdempotencyStore:
         entry = IdempotencyEntry(
             key=key, status_code=status_code,
             response_body=response_body,
+            payload_hash=self._hash_payload(payload) if payload else "",
             ttl_seconds=ttl_seconds or self._default_ttl,
         )
         self._store[(installation_id, key)] = entry
@@ -90,6 +101,10 @@ class AppIdempotencyStore:
         for k in to_remove:
             del self._store[k]
         return len(to_remove)
+
+    @staticmethod
+    def _hash_payload(payload: str) -> str:
+        return hashlib.sha256(payload.encode()).hexdigest()
 
     def count(self, installation_id: str) -> int:
         return sum(1 for (inst, _) in self._store if inst == installation_id)

@@ -36,6 +36,20 @@ class TestCheck:
         assert s.check("inst-1", "req-123") is None
 
 
+class TestPayloadBinding:
+    def test_same_payload(self):
+        s = AppIdempotencyStore()
+        s.store("inst-1", "req-123", 201, '{"id": "1"}', payload='{"name": "test"}')
+        entry = s.check("inst-1", "req-123", payload='{"name": "test"}')
+        assert entry is not None
+
+    def test_different_payload(self):
+        s = AppIdempotencyStore()
+        s.store("inst-1", "req-123", 201, '{"id": "1"}', payload='{"name": "test"}')
+        with pytest.raises(ValueError, match="different payload"):
+            s.check("inst-1", "req-123", payload='{"name": "other"}')
+
+
 class TestRemove:
     def test_remove(self):
         s = AppIdempotencyStore()
