@@ -1,28 +1,59 @@
-import { render, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { OnboardingChecklistCard } from "@/components/onboarding-checklist-card";
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import OnboardingChecklistCard from "../src/components/onboarding-checklist-card";
+
+const steps = [
+  {
+    step_id: "s1",
+    title: "Create App",
+    description: "Register your first app",
+    required: true,
+    completed: true,
+  },
+  {
+    step_id: "s2",
+    title: "Add Webhook",
+    description: "Set up webhook",
+    required: true,
+    completed: false,
+  },
+  {
+    step_id: "s3",
+    title: "Invite Team",
+    description: "Add teammates",
+    required: false,
+    completed: false,
+  },
+];
 
 describe("OnboardingChecklistCard", () => {
-  const steps = [
-    { id: "profile", label: "Complete profile", required: true, completed: true },
-    { id: "app", label: "Create app", required: false, completed: false },
-  ];
-  it("renders", () => {
+  it("renders header and percentage", () => {
     const { container } = render(
-      <OnboardingChecklistCard steps={steps} progressPct={50} onStepClick={vi.fn()} />
+      <OnboardingChecklistCard steps={steps} completionPct={50} appName="App" />,
     );
-    expect(container.textContent).toContain("Getting Started");
-    expect(container.textContent).toContain("50% complete");
-    expect(container.textContent).toContain("Complete profile");
-    expect(container.textContent).toContain("Create app");
+    expect(container.textContent).toContain("Onboarding");
+    expect(container.textContent).toContain("50%");
   });
-  it("click step", () => {
-    const fn = vi.fn();
+
+  it("shows step count", () => {
     const { container } = render(
-      <OnboardingChecklistCard steps={steps} progressPct={50} onStepClick={fn} />
+      <OnboardingChecklistCard steps={steps} completionPct={33} appName="App" />,
     );
-    const btns = container.querySelectorAll("button");
-    fireEvent.click(btns[1]);
-    expect(fn).toHaveBeenCalledWith("app");
+    expect(container.textContent).toContain("1/3 steps completed");
+  });
+
+  it("shows step titles", () => {
+    const { container } = render(
+      <OnboardingChecklistCard steps={steps} completionPct={33} appName="App" />,
+    );
+    expect(container.textContent).toContain("Create App");
+    expect(container.textContent).toContain("Add Webhook");
+  });
+
+  it("shows optional label", () => {
+    const { container } = render(
+      <OnboardingChecklistCard steps={steps} completionPct={33} appName="App" />,
+    );
+    expect(container.textContent).toContain("optional");
   });
 });
