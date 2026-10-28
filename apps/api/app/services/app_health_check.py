@@ -1,11 +1,10 @@
-"""App Health Check Manager — monitor app endpoint health with configurable probes.
+"""App Health Check — monitor service health endpoints.
 
-Manages health check probes for installed apps:
-- Register probes per endpoint (HTTP, TCP, custom)
-- Record check results (pass/fail/timeout)
-- Compute availability percentage over a window
-- Consecutive failure tracking for alerting
-- Per-installation scoped probes
+Manages health check configurations:
+- Register health endpoints with intervals
+- Record check results (up/down/degraded)
+- Calculate uptime percentage
+- Per-installation scoped checks
 """
 
 from __future__ import annotations
@@ -19,192 +18,106 @@ import structlog
 log = structlog.get_logger()
 
 
-class ProbeType(str, Enum):
-    HTTP = "http"
-    TCP = "tcp"
-    CUSTOM = "custom"
-
-
-class CheckResult(str, Enum):
-    PASS = "pass"
-    FAIL = "fail"
-    TIMEOUT = "timeout"
+class HealthStatus(str, Enum):
+    UP = "up"
+    DOWN = "down"
+    DEGRADED = "degraded"
 
 
 @dataclass
-class ProbeConfig:
-    """Configuration for a health check probe."""
+class HealthResult:
+    """Result of a health check."""
 
-    probe_id: str
-    installation_id: str
-    endpoint: str
-    probe_type: ProbeType = ProbeType.HTTP
-    interval_seconds: int = 30
-    timeout_seconds: int = 5
-    failure_threshold: int = 3  # consecutive failures before unhealthy
-
-
-@dataclass
-class CheckRecord:
-    """A single check result."""
-
-    result: CheckResult
+    status: HealthStatus
     latency_ms: float
-    timestamp: float = field(default_factory=time.time)
     message: str = ""
+    checked_at: float = field(default_factory=time.time)
 
 
 @dataclass
-class ProbeStatus:
-    """Current status of a probe."""
+class HealthEndpoint:
+    """A registered health check endpoint."""
 
-    probe_id: str
-    endpoint: str
-    healthy: bool
-    consecutive_failures: int
-    total_checks: int
-    availability_pct: float
-    last_check: CheckRecord | None
-    last_failure: CheckRecord | None
+    endpoint_id: str
+    url: str
+    interval_seconds: int = 30
+    timeout_ms: int = 5000
+    results: list[HealthResult] = field(default_factory=list)
+
+    @property
+    def current_status(self) -> HealthStatus | None:
+        if not self.results:
+            return None
+        return self.results[-1].status
+
+    @property
+    def uptime_pct(self) -> float:
+        if not self.results:
+            return 100.0
+        up = sum(1 for r in self.results if r.status == HealthStatus.UP)
+        return round(up / len(self.results) * 100, 1)
 
 
-class AppHealthCheckManager:
-    """Manage health check probes for installed apps."""
+class AppHealthCheck:
+    """Monitor service health endpoints."""
 
-    def __init__(self, history_limit: int = 100) -> None:
-        self._probes: dict[tuple[str, str], ProbeConfig] = {}
-        self._history: dict[tuple[str, str], list[CheckRecord]] = {}
-        self._consecutive_failures: dict[tuple[str, str], int] = {}
-        self._history_limit = max(1, history_limit)
+    def __init__(self, max_results: int = 100) -> None:
+        self._max = max(1, max_results)
+        self._endpoints: dict[tuple[str, str], HealthEndpoint] = {}
 
-    def register_probe(
-        self,
-        installation_id: str,
-        probe_id: str,
-        endpoint: str,
-        probe_type: ProbeType = ProbeType.HTTP,
-        interval_seconds: int = 30,
-        timeout_seconds: int = 5,
-        failure_threshold: int = 3,
-    ) -> ProbeConfig:
-        """Register a new health check probe."""
+    def register(
+        self, installation_id: str, endpoint_id: str, url: str,
+        interval_seconds: int = 30, timeout_ms: int = 5000,
+    ) -> HealthEndpoint:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not probe_id:
-            raise ValueError("probe_id is required")
-        if not endpoint:
-            raise ValueError("endpoint is required")
-        if interval_seconds < 1:
-            raise ValueError("interval_seconds must be >= 1")
-        if timeout_seconds < 1:
-            raise ValueError("timeout_seconds must be >= 1")
+        if not endpoint_id:
+            raise ValueError("endpoint_id is required")
+        if not url:
+            raise ValueError("url is required")
 
-        config = ProbeConfig(
-            probe_id=probe_id,
-            installation_id=installation_id,
-            endpoint=endpoint,
-            probe_type=probe_type,
-            interval_seconds=interval_seconds,
-            timeout_seconds=timeout_seconds,
-            failure_threshold=failure_threshold,
+        ep = HealthEndpoint(
+            endpoint_id=endpoint_id, url=url,
+            interval_seconds=interval_seconds, timeout_ms=timeout_ms,
         )
-        key = (installation_id, probe_id)
-        self._probes[key] = config
-        self._history.setdefault(key, [])
-        self._consecutive_failures.setdefault(key, 0)
-        return config
+        self._endpoints[(installation_id, endpoint_id)] = ep
+        return ep
 
-    def record_check(
-        self,
-        installation_id: str,
-        probe_id: str,
-        result: CheckResult,
-        latency_ms: float = 0.0,
-        message: str = "",
-        now: float | None = None,
-    ) -> ProbeStatus:
-        """Record a health check result."""
-        key = (installation_id, probe_id)
-        if key not in self._probes:
-            raise KeyError(f"Probe {probe_id} not found")
+    def record(
+        self, installation_id: str, endpoint_id: str,
+        status: HealthStatus, latency_ms: float, message: str = "",
+    ) -> HealthResult:
+        ep = self._get(installation_id, endpoint_id)
+        result = HealthResult(status=status, latency_ms=latency_ms, message=message)
+        ep.results.append(result)
+        if len(ep.results) > self._max:
+            ep.results = ep.results[-self._max:]
+        return result
 
-        record = CheckRecord(
-            result=result,
-            latency_ms=max(0.0, latency_ms),
-            timestamp=now or time.time(),
-            message=message,
-        )
+    def get_status(self, installation_id: str, endpoint_id: str) -> HealthStatus | None:
+        return self._get(installation_id, endpoint_id).current_status
 
-        history = self._history[key]
-        history.append(record)
-        # Trim history
-        if len(history) > self._history_limit:
-            self._history[key] = history[-self._history_limit:]
+    def get_uptime(self, installation_id: str, endpoint_id: str) -> float:
+        return self._get(installation_id, endpoint_id).uptime_pct
 
-        if result == CheckResult.PASS:
-            self._consecutive_failures[key] = 0
-        else:
-            self._consecutive_failures[key] += 1
+    def avg_latency(self, installation_id: str, endpoint_id: str) -> float:
+        ep = self._get(installation_id, endpoint_id)
+        if not ep.results:
+            return 0.0
+        return round(sum(r.latency_ms for r in ep.results) / len(ep.results), 1)
 
-        return self.get_status(installation_id, probe_id)
+    def list_endpoints(self, installation_id: str) -> list[HealthEndpoint]:
+        return [ep for (inst, _), ep in self._endpoints.items() if inst == installation_id]
 
-    def get_status(self, installation_id: str, probe_id: str) -> ProbeStatus:
-        """Get current status of a probe."""
-        key = (installation_id, probe_id)
-        config = self._probes.get(key)
-        if config is None:
-            raise KeyError(f"Probe {probe_id} not found")
-
-        history = self._history.get(key, [])
-        consec = self._consecutive_failures.get(key, 0)
-        total = len(history)
-        passes = sum(1 for r in history if r.result == CheckResult.PASS)
-        avail = (passes / total * 100) if total > 0 else 100.0
-
-        last_check = history[-1] if history else None
-        last_failure = None
-        for r in reversed(history):
-            if r.result != CheckResult.PASS:
-                last_failure = r
-                break
-
-        return ProbeStatus(
-            probe_id=probe_id,
-            endpoint=config.endpoint,
-            healthy=consec < config.failure_threshold,
-            consecutive_failures=consec,
-            total_checks=total,
-            availability_pct=round(avail, 2),
-            last_check=last_check,
-            last_failure=last_failure,
-        )
-
-    def remove_probe(self, installation_id: str, probe_id: str) -> None:
-        """Remove a probe and its history."""
-        key = (installation_id, probe_id)
-        if key not in self._probes:
-            raise KeyError(f"Probe {probe_id} not found")
-        del self._probes[key]
-        self._history.pop(key, None)
-        self._consecutive_failures.pop(key, None)
-
-    def list_probes(self, installation_id: str) -> list[ProbeConfig]:
-        """List all probes for an installation."""
+    def down_endpoints(self, installation_id: str) -> list[HealthEndpoint]:
         return [
-            config for (inst, _), config in self._probes.items()
-            if inst == installation_id
+            ep for (inst, _), ep in self._endpoints.items()
+            if inst == installation_id and ep.current_status == HealthStatus.DOWN
         ]
 
-    def get_availability(
-        self, installation_id: str, probe_id: str, last_n: int = 0
-    ) -> float:
-        """Compute availability percentage, optionally over last N checks."""
-        key = (installation_id, probe_id)
-        if key not in self._probes:
-            raise KeyError(f"Probe {probe_id} not found")
-        history = self._history.get(key, [])
-        if not history:
-            return 100.0
-        window = history[-last_n:] if last_n > 0 else history
-        passes = sum(1 for r in window if r.result == CheckResult.PASS)
-        return round(passes / len(window) * 100, 2)
+    def _get(self, installation_id: str, endpoint_id: str) -> HealthEndpoint:
+        key = (installation_id, endpoint_id)
+        ep = self._endpoints.get(key)
+        if ep is None:
+            raise KeyError(f"Endpoint {endpoint_id} not found")
+        return ep
