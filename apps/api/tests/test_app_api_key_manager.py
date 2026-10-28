@@ -1,177 +1,143 @@
-"""Tests for App API Key Manager — create, validate, rotate, revoke, scopes."""
-
-from datetime import UTC, datetime, timedelta
+"""Tests for App API Key Manager — create, validate, revoke, scope check."""
 
 import pytest
 
-from app.services.app_api_key_manager import (
-    AppApiKeyManager,
-    KeyStatus,
-)
+from app.services.app_api_key_manager import AppApiKeyManager
 
 
-class TestCreate:
-    def test_create_returns_raw_and_record(self):
+class TestCreateKey:
+    def test_create(self):
         m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        assert raw.startswith("osk_")
-        assert key.key_id is not None
-        assert key.installation_id == "inst-1"
-        assert key.scopes == ["read:skills"]
-        assert key.status == KeyStatus.ACTIVE
+        record, raw_key = m.create_key("inst-1", "k1", "Production Key", scopes=["read", "write"])
+        assert record.key_id == "k1"
+        assert record.name == "Production Key"
+        assert record.scopes == ["read", "write"]
+        assert len(raw_key) > 20
+        assert record.prefix == raw_key[:8]
 
-    def test_raw_key_not_stored(self):
+    def test_duplicate_key_id(self):
         m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        # Raw should not appear in any stored key
-        for stored in m._keys.values():
-            assert raw not in stored.key_hash
-            assert raw not in stored.key_prefix  # prefix is truncated
+        m.create_key("inst-1", "k1", "Key 1")
+        with pytest.raises(ValueError, match="already exists"):
+            m.create_key("inst-1", "k1", "Key 2")
 
-    def test_no_scopes_rejected(self):
+    def test_missing_name(self):
         m = AppApiKeyManager()
-        with pytest.raises(ValueError, match="scope"):
-            m.create("inst-1", "app-1", [])
+        with pytest.raises(ValueError, match="name"):
+            m.create_key("inst-1", "k1", "")
 
-    def test_with_ttl(self):
+    def test_missing_installation_id(self):
         m = AppApiKeyManager()
-        _, key = m.create("inst-1", "app-1", ["read:skills"], ttl_days=30)
-        assert key.expires_at is not None
-
-    def test_unique_keys(self):
-        m = AppApiKeyManager()
-        raw1, _ = m.create("inst-1", "app-1", ["read:skills"])
-        raw2, _ = m.create("inst-1", "app-1", ["read:skills"])
-        assert raw1 != raw2
+        with pytest.raises(ValueError, match="installation_id"):
+            m.create_key("", "k1", "Key")
 
 
-class TestValidate:
+class TestValidateKey:
     def test_valid_key(self):
         m = AppApiKeyManager()
-        raw, _ = m.create("inst-1", "app-1", ["read:skills", "write:projects"])
-        result = m.validate(raw)
+        _, raw = m.create_key("inst-1", "k1", "Key", scopes=["read"])
+        result = m.validate_key(raw)
         assert result.valid is True
-        assert "read:skills" in result.scopes
+        assert result.key_id == "k1"
+        assert result.installation_id == "inst-1"
 
     def test_invalid_key(self):
         m = AppApiKeyManager()
-        result = m.validate("osk_fake_key_that_doesnt_exist")
+        result = m.validate_key("bogus-key-value")
         assert result.valid is False
-        assert "Invalid" in result.error
+        assert result.reason == "key_not_found"
 
-    def test_scope_check_pass(self):
+    def test_revoked_key(self):
         m = AppApiKeyManager()
-        raw, _ = m.create("inst-1", "app-1", ["read:skills"])
-        result = m.validate(raw, required_scope="read:skills")
-        assert result.valid is True
-
-    def test_scope_check_fail(self):
-        m = AppApiKeyManager()
-        raw, _ = m.create("inst-1", "app-1", ["read:skills"])
-        result = m.validate(raw, required_scope="admin:org")
+        _, raw = m.create_key("inst-1", "k1", "Key")
+        m.revoke_key("inst-1", "k1")
+        result = m.validate_key(raw)
         assert result.valid is False
-        assert "Missing scope" in result.error
+        assert result.reason == "revoked"
 
     def test_expired_key(self):
         m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"], ttl_days=1)
-        future = datetime.now(UTC) + timedelta(days=2)
-        result = m.validate(raw, now=future)
+        _, raw = m.create_key("inst-1", "k1", "Key", expires_in_seconds=60)
+        record = m.get_key("inst-1", "k1")
+        result = m.validate_key(raw, now=record.expires_at + 1)
         assert result.valid is False
-        assert "expired" in result.error.lower()
+        assert result.reason == "expired"
 
-    def test_updates_last_used(self):
+    def test_not_yet_expired(self):
         m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        assert key.last_used_at is None
-        m.validate(raw)
-        assert key.last_used_at is not None
+        _, raw = m.create_key("inst-1", "k1", "Key", expires_in_seconds=3600)
+        record = m.get_key("inst-1", "k1")
+        result = m.validate_key(raw, now=record.created_at + 100)
+        assert result.valid is True
+
+
+class TestScopeCheck:
+    def test_valid_scope(self):
+        m = AppApiKeyManager()
+        _, raw = m.create_key("inst-1", "k1", "Key", scopes=["read", "write"])
+        result = m.validate_key(raw, required_scope="read")
+        assert result.valid is True
+
+    def test_insufficient_scope(self):
+        m = AppApiKeyManager()
+        _, raw = m.create_key("inst-1", "k1", "Key", scopes=["read"])
+        result = m.validate_key(raw, required_scope="admin")
+        assert result.valid is False
+        assert result.reason == "insufficient_scope"
+
+    def test_no_scope_required(self):
+        m = AppApiKeyManager()
+        _, raw = m.create_key("inst-1", "k1", "Key", scopes=[])
+        result = m.validate_key(raw)
+        assert result.valid is True
 
 
 class TestRevoke:
     def test_revoke(self):
         m = AppApiKeyManager()
-        _, key = m.create("inst-1", "app-1", ["read:skills"])
-        assert m.revoke("inst-1", key.key_id) is True
+        m.create_key("inst-1", "k1", "Key")
+        record = m.revoke_key("inst-1", "k1")
+        assert record.revoked is True
+        assert record.revoked_at is not None
 
-    def test_revoked_key_invalid(self):
+    def test_double_revoke(self):
         m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke("inst-1", key.key_id)
-        result = m.validate(raw)
-        assert result.valid is False
-        assert "revoked" in result.error.lower()
+        m.create_key("inst-1", "k1", "Key")
+        m.revoke_key("inst-1", "k1")
+        with pytest.raises(ValueError, match="already revoked"):
+            m.revoke_key("inst-1", "k1")
 
-    def test_revoke_nonexistent(self):
+
+class TestLastUsed:
+    def test_tracks_last_used(self):
         m = AppApiKeyManager()
-        assert m.revoke("inst-1", "key-999") is False
+        _, raw = m.create_key("inst-1", "k1", "Key")
+        m.validate_key(raw, now=1000.0)
+        record = m.get_key("inst-1", "k1")
+        assert record.last_used_at == 1000.0
 
 
-class TestRotate:
-    def test_rotate_creates_new(self):
+class TestListKeys:
+    def test_list_excludes_revoked(self):
         m = AppApiKeyManager()
-        raw_old, _ = m.create("inst-1", "app-1", ["read:skills"])
-        result = m.rotate(raw_old)
-        assert result is not None
-        raw_new, new_key = result
-        assert raw_new != raw_old
-        assert new_key.scopes == ["read:skills"]
-
-    def test_old_key_still_valid_during_overlap(self):
-        m = AppApiKeyManager()
-        raw_old, _ = m.create("inst-1", "app-1", ["read:skills"])
-        m.rotate(raw_old, overlap_hours=24)
-        result = m.validate(raw_old)
-        assert result.valid is True  # overlap period
-
-    def test_rotate_with_reduced_scopes(self):
-        m = AppApiKeyManager()
-        raw_old, _ = m.create("inst-1", "app-1", ["read:skills", "write:projects"])
-        result = m.rotate(raw_old, new_scopes=["read:skills"])
-        _, new_key = result
-        assert new_key.scopes == ["read:skills"]
-
-    def test_rotate_scope_expansion_blocked(self):
-        m = AppApiKeyManager()
-        raw_old, _ = m.create("inst-1", "app-1", ["read:skills"])
-        with pytest.raises(PermissionError, match="Cannot expand"):
-            m.rotate(raw_old, new_scopes=["read:skills", "admin:org"])
-
-    def test_revoke_wrong_installation_blocked(self):
-        m = AppApiKeyManager()
-        _, key = m.create("inst-1", "app-1", ["read:skills"])
-        assert m.revoke("inst-2", key.key_id) is False  # wrong owner
-
-    def test_rotate_invalid_key(self):
-        m = AppApiKeyManager()
-        assert m.rotate("osk_fake") is None
-
-    def test_rotate_revoked_key(self):
-        m = AppApiKeyManager()
-        raw, key = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke("inst-1", key.key_id)
-        assert m.rotate(raw) is None
-
-
-class TestListing:
-    def test_list_keys(self):
-        m = AppApiKeyManager()
-        m.create("inst-1", "app-1", ["read:skills"])
-        m.create("inst-1", "app-1", ["write:projects"])
-        m.create("inst-2", "app-1", ["read:skills"])
+        m.create_key("inst-1", "k1", "Key 1")
+        m.create_key("inst-1", "k2", "Key 2")
+        m.revoke_key("inst-1", "k2")
         keys = m.list_keys("inst-1")
+        assert len(keys) == 1
+
+    def test_list_includes_revoked(self):
+        m = AppApiKeyManager()
+        m.create_key("inst-1", "k1", "Key 1")
+        m.create_key("inst-1", "k2", "Key 2")
+        m.revoke_key("inst-1", "k2")
+        keys = m.list_keys("inst-1", include_revoked=True)
         assert len(keys) == 2
 
-    def test_active_count(self):
-        m = AppApiKeyManager()
-        m.create("inst-1", "app-1", ["read:skills"])
-        _, key2 = m.create("inst-1", "app-1", ["read:skills"])
-        m.revoke("inst-1", key2.key_id)
-        assert m.get_active_count("inst-1") == 1
 
-    def test_newest_first(self):
+class TestIsolation:
+    def test_cross_installation(self):
         m = AppApiKeyManager()
-        m.create("inst-1", "app-1", ["a"])
-        m.create("inst-1", "app-1", ["b"])
-        keys = m.list_keys("inst-1")
-        assert keys[0].key_id == "key-2"  # newest
+        m.create_key("inst-1", "k1", "Key")
+        with pytest.raises(KeyError):
+            m.get_key("inst-2", "k1")
