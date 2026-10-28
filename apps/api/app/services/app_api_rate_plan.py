@@ -1,169 +1,111 @@
-"""App API Rate Plan — tiered rate plan assignment and enforcement for developer apps.
+"""App API Rate Plan — manage tiered rate limiting plans.
 
-Maps apps to rate limit tiers based on their marketplace plan:
-- Plan tiers with per-endpoint rate limits
-- Burst allowance configuration
-- Plan upgrade/downgrade with instant enforcement
-- Usage-to-plan ratio reporting
-- Overage tracking for billing
+Manages rate limit plans:
+- Define plans with request limits per time window
+- Assign plans to tenants/tokens
+- Check rate limit status
+- Per-installation scoped plans
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import Enum
 
 import structlog
 
 log = structlog.get_logger()
 
 
-class PlanTier(str, Enum):
-    FREE = "free"
-    STARTER = "starter"
-    GROWTH = "growth"
-    ENTERPRISE = "enterprise"
+@dataclass
+class RatePlan:
+    """A rate limiting plan."""
 
-
-@dataclass(frozen=True)
-class RatePlanLimits:
-    """Rate limits for a plan tier."""
-
-    requests_per_second: int
+    plan_id: str
+    name: str
     requests_per_minute: int
     requests_per_hour: int
-    burst_size: int              # max concurrent burst
-    daily_quota: int
-    webhook_deliveries_per_hour: int
-    sandbox_executions_per_hour: int
-
-
-PLAN_LIMITS: dict[PlanTier, RatePlanLimits] = {
-    PlanTier.FREE: RatePlanLimits(
-        requests_per_second=2, requests_per_minute=60, requests_per_hour=1_000,
-        burst_size=5, daily_quota=5_000,
-        webhook_deliveries_per_hour=50, sandbox_executions_per_hour=20,
-    ),
-    PlanTier.STARTER: RatePlanLimits(
-        requests_per_second=10, requests_per_minute=300, requests_per_hour=10_000,
-        burst_size=20, daily_quota=50_000,
-        webhook_deliveries_per_hour=500, sandbox_executions_per_hour=200,
-    ),
-    PlanTier.GROWTH: RatePlanLimits(
-        requests_per_second=50, requests_per_minute=1_500, requests_per_hour=50_000,
-        burst_size=100, daily_quota=500_000,
-        webhook_deliveries_per_hour=5_000, sandbox_executions_per_hour=2_000,
-    ),
-    PlanTier.ENTERPRISE: RatePlanLimits(
-        requests_per_second=200, requests_per_minute=6_000, requests_per_hour=200_000,
-        burst_size=500, daily_quota=2_000_000,
-        webhook_deliveries_per_hour=50_000, sandbox_executions_per_hour=20_000,
-    ),
-}
+    requests_per_day: int
+    burst_limit: int = 0  # 0 = no burst
 
 
 @dataclass
-class AppPlanAssignment:
-    """An app's assigned rate plan."""
+class RateWindow:
+    """Rate tracking for a window."""
 
-    app_id: str
-    tier: PlanTier
-    assigned_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    overages: int = 0           # count of quota exceeded events
+    count: int = 0
+    window_start: float = field(default_factory=time.time)
 
 
-@dataclass
-class PlanCheckResult:
-    """Result of checking an app's plan limits."""
+class AppAPIRatePlan:
+    """Manage tiered rate limiting plans."""
 
-    allowed: bool
-    tier: PlanTier
-    limit_name: str
-    limit_value: int
-    current_usage: int
-    remaining: int
+    def __init__(self) -> None:
+        self._plans: dict[tuple[str, str], RatePlan] = {}
+        self._assignments: dict[tuple[str, str], str] = {}  # (inst, tenant) → plan_id
+        self._counters: dict[tuple[str, str, str], RateWindow] = {}  # (inst, tenant, window_type)
 
+    def create_plan(
+        self, installation_id: str, plan_id: str, name: str,
+        rpm: int, rph: int, rpd: int, burst: int = 0,
+    ) -> RatePlan:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if rpm < 0 or rph < 0 or rpd < 0:
+            raise ValueError("limits must be non-negative")
 
-class AppApiRatePlan:
-    """Manage rate plan assignments and enforcement."""
-
-    def __init__(self):
-        self._assignments: dict[str, AppPlanAssignment] = {}
-        # (app_id, day_key) → daily request count
-        self._daily_usage: dict[tuple[str, str], int] = {}
-
-    def assign(self, app_id: str, tier: PlanTier) -> AppPlanAssignment:
-        assignment = AppPlanAssignment(app_id=app_id, tier=tier)
-        self._assignments[app_id] = assignment
-        log.info("rate_plan.assigned", app_id=app_id, tier=tier.value)
-        return assignment
-
-    def get_assignment(self, app_id: str) -> AppPlanAssignment | None:
-        return self._assignments.get(app_id)
-
-    def get_limits(self, app_id: str) -> RatePlanLimits:
-        assignment = self._assignments.get(app_id)
-        tier = assignment.tier if assignment else PlanTier.FREE
-        return PLAN_LIMITS[tier]
-
-    def upgrade(self, app_id: str, new_tier: PlanTier) -> AppPlanAssignment:
-        current = self._assignments.get(app_id)
-        current_tier = current.tier if current else PlanTier.FREE
-        if _tier_rank(new_tier) <= _tier_rank(current_tier):
-            raise ValueError(f"Cannot upgrade from {current_tier.value} to {new_tier.value}")
-        return self.assign(app_id, new_tier)
-
-    def downgrade(self, app_id: str, new_tier: PlanTier) -> AppPlanAssignment:
-        current = self._assignments.get(app_id)
-        current_tier = current.tier if current else PlanTier.FREE
-        if _tier_rank(new_tier) >= _tier_rank(current_tier):
-            raise ValueError(f"Cannot downgrade from {current_tier.value} to {new_tier.value}")
-        return self.assign(app_id, new_tier)
-
-    def record_usage(self, app_id: str, count: int = 1) -> PlanCheckResult:
-        """Record API usage and check daily quota."""
-        limits = self.get_limits(app_id)
-        day_key = datetime.now(UTC).strftime("%Y-%m-%d")
-        usage_key = (app_id, day_key)
-        current = self._daily_usage.get(usage_key, 0)
-        new_total = current + count
-        self._daily_usage[usage_key] = new_total
-
-        assignment = self._assignments.get(app_id)
-        tier = assignment.tier if assignment else PlanTier.FREE
-
-        if new_total > limits.daily_quota:
-            if assignment:
-                assignment.overages += 1
-            return PlanCheckResult(
-                allowed=False, tier=tier, limit_name="daily_quota",
-                limit_value=limits.daily_quota, current_usage=new_total,
-                remaining=0,
-            )
-
-        return PlanCheckResult(
-            allowed=True, tier=tier, limit_name="daily_quota",
-            limit_value=limits.daily_quota, current_usage=new_total,
-            remaining=limits.daily_quota - new_total,
+        plan = RatePlan(
+            plan_id=plan_id, name=name,
+            requests_per_minute=rpm, requests_per_hour=rph,
+            requests_per_day=rpd, burst_limit=burst,
         )
+        self._plans[(installation_id, plan_id)] = plan
+        return plan
 
-    def get_daily_usage(self, app_id: str) -> int:
-        day_key = datetime.now(UTC).strftime("%Y-%m-%d")
-        return self._daily_usage.get((app_id, day_key), 0)
+    def assign_plan(self, installation_id: str, tenant_id: str, plan_id: str) -> None:
+        if (installation_id, plan_id) not in self._plans:
+            raise KeyError(f"Plan {plan_id} not found")
+        self._assignments[(installation_id, tenant_id)] = plan_id
 
-    def get_usage_ratio(self, app_id: str) -> float:
-        """Usage as percentage of daily quota."""
-        limits = self.get_limits(app_id)
-        usage = self.get_daily_usage(app_id)
-        return (usage / limits.daily_quota * 100) if limits.daily_quota > 0 else 0.0
+    def check_limit(self, installation_id: str, tenant_id: str) -> dict:
+        """Check current rate limit status."""
+        plan_id = self._assignments.get((installation_id, tenant_id))
+        if plan_id is None:
+            return {"allowed": True, "plan": None}
 
-    def list_assignments(self, tier: PlanTier | None = None) -> list[AppPlanAssignment]:
-        assignments = list(self._assignments.values())
-        if tier:
-            assignments = [a for a in assignments if a.tier == tier]
-        return sorted(assignments, key=lambda a: a.app_id)
+        plan = self._plans.get((installation_id, plan_id))
+        if plan is None:
+            return {"allowed": True, "plan": None}
 
+        now = time.time()
+        minute_key = (installation_id, tenant_id, "minute")
+        hour_key = (installation_id, tenant_id, "hour")
 
-def _tier_rank(tier: PlanTier) -> int:
-    return {PlanTier.FREE: 0, PlanTier.STARTER: 1, PlanTier.GROWTH: 2, PlanTier.ENTERPRISE: 3}[tier]
+        # Check minute window
+        mw = self._counters.get(minute_key)
+        if mw and (now - mw.window_start) < 60:
+            if mw.count >= plan.requests_per_minute:
+                return {"allowed": False, "reason": "rpm_exceeded", "plan": plan.name}
+        elif mw:
+            mw.count = 0
+            mw.window_start = now
+
+        return {"allowed": True, "plan": plan.name}
+
+    def record_request(self, installation_id: str, tenant_id: str) -> None:
+        now = time.time()
+        minute_key = (installation_id, tenant_id, "minute")
+        mw = self._counters.get(minute_key)
+        if mw is None or (now - mw.window_start) >= 60:
+            self._counters[minute_key] = RateWindow(count=1, window_start=now)
+        else:
+            mw.count += 1
+
+    def list_plans(self, installation_id: str) -> list[RatePlan]:
+        return [p for (inst, _), p in self._plans.items() if inst == installation_id]
+
+    def tenant_plan(self, installation_id: str, tenant_id: str) -> RatePlan | None:
+        plan_id = self._assignments.get((installation_id, tenant_id))
+        if plan_id is None:
+            return None
+        return self._plans.get((installation_id, plan_id))

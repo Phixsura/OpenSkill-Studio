@@ -1,130 +1,62 @@
-"""Tests for App API Rate Plan — tiers, usage, upgrade/downgrade, overage."""
+"""Tests for App API Rate Plan — create, assign, check limits."""
 
 import pytest
 
-from app.services.app_api_rate_plan import (
-    AppApiRatePlan,
-    PlanTier,
-)
+from app.services.app_api_rate_plan import AppAPIRatePlan
 
 
-class TestAssignment:
-    def test_assign_plan(self):
-        rp = AppApiRatePlan()
-        a = rp.assign("app-1", PlanTier.STARTER)
-        assert a.tier == PlanTier.STARTER
+class TestCreate:
+    def test_create(self):
+        r = AppAPIRatePlan()
+        p = r.create_plan("inst-1", "free", "Free", rpm=60, rph=1000, rpd=10000)
+        assert p.requests_per_minute == 60
 
-    def test_default_free(self):
-        rp = AppApiRatePlan()
-        limits = rp.get_limits("unassigned-app")
-        assert limits.requests_per_second == 2  # free tier
-
-    def test_get_assignment(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.GROWTH)
-        a = rp.get_assignment("app-1")
-        assert a is not None
-        assert a.tier == PlanTier.GROWTH
-
-    def test_list_by_tier(self):
-        rp = AppApiRatePlan()
-        rp.assign("a1", PlanTier.FREE)
-        rp.assign("a2", PlanTier.STARTER)
-        rp.assign("a3", PlanTier.FREE)
-        free = rp.list_assignments(PlanTier.FREE)
-        assert len(free) == 2
+    def test_negative(self):
+        r = AppAPIRatePlan()
+        with pytest.raises(ValueError):
+            r.create_plan("inst-1", "bad", "Bad", rpm=-1, rph=0, rpd=0)
 
 
-class TestLimits:
-    def test_free_limits(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        l = rp.get_limits("app-1")
-        assert l.daily_quota == 5_000
-        assert l.requests_per_second == 2
+class TestAssign:
+    def test_assign(self):
+        r = AppAPIRatePlan()
+        r.create_plan("inst-1", "free", "Free", rpm=60, rph=1000, rpd=10000)
+        r.assign_plan("inst-1", "tenant-1", "free")
+        p = r.tenant_plan("inst-1", "tenant-1")
+        assert p is not None
+        assert p.name == "Free"
 
-    def test_enterprise_limits(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.ENTERPRISE)
-        l = rp.get_limits("app-1")
-        assert l.daily_quota == 2_000_000
-        assert l.requests_per_second == 200
-
-    def test_tiers_ordered(self):
-        rp = AppApiRatePlan()
-        for tier in (PlanTier.FREE, PlanTier.STARTER, PlanTier.GROWTH, PlanTier.ENTERPRISE):
-            rp.assign(tier.value, tier)
-        quotas = [rp.get_limits(t.value).daily_quota for t in
-                  (PlanTier.FREE, PlanTier.STARTER, PlanTier.GROWTH, PlanTier.ENTERPRISE)]
-        assert quotas == sorted(quotas)
+    def test_invalid_plan(self):
+        r = AppAPIRatePlan()
+        with pytest.raises(KeyError):
+            r.assign_plan("inst-1", "tenant-1", "nonexistent")
 
 
-class TestUsage:
-    def test_record_usage(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        result = rp.record_usage("app-1", 100)
-        assert result.allowed is True
-        assert result.current_usage == 100
-        assert result.remaining == 4900
+class TestCheck:
+    def test_under_limit(self):
+        r = AppAPIRatePlan()
+        r.create_plan("inst-1", "free", "Free", rpm=10, rph=100, rpd=1000)
+        r.assign_plan("inst-1", "t1", "free")
+        result = r.check_limit("inst-1", "t1")
+        assert result["allowed"] is True
 
-    def test_quota_exceeded(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        rp.record_usage("app-1", 5000)
-        result = rp.record_usage("app-1", 1)
-        assert result.allowed is False
-        assert result.remaining == 0
+    def test_over_limit(self):
+        r = AppAPIRatePlan()
+        r.create_plan("inst-1", "strict", "Strict", rpm=2, rph=100, rpd=1000)
+        r.assign_plan("inst-1", "t1", "strict")
+        for _ in range(3):
+            r.record_request("inst-1", "t1")
+        result = r.check_limit("inst-1", "t1")
+        assert result["allowed"] is False
 
-    def test_overage_counted(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        rp.record_usage("app-1", 5001)
-        a = rp.get_assignment("app-1")
-        assert a.overages == 1
-
-    def test_usage_ratio(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        rp.record_usage("app-1", 2500)
-        ratio = rp.get_usage_ratio("app-1")
-        assert ratio == pytest.approx(50.0)
-
-    def test_daily_usage(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        rp.record_usage("app-1", 100)
-        rp.record_usage("app-1", 200)
-        assert rp.get_daily_usage("app-1") == 300
+    def test_no_plan(self):
+        r = AppAPIRatePlan()
+        result = r.check_limit("inst-1", "t1")
+        assert result["allowed"] is True
 
 
-class TestUpgradeDowngrade:
-    def test_upgrade(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        a = rp.upgrade("app-1", PlanTier.STARTER)
-        assert a.tier == PlanTier.STARTER
-
-    def test_upgrade_same_tier_blocked(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.STARTER)
-        with pytest.raises(ValueError, match="Cannot upgrade"):
-            rp.upgrade("app-1", PlanTier.STARTER)
-
-    def test_upgrade_lower_tier_blocked(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.GROWTH)
-        with pytest.raises(ValueError, match="Cannot upgrade"):
-            rp.upgrade("app-1", PlanTier.FREE)
-
-    def test_downgrade(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.ENTERPRISE)
-        a = rp.downgrade("app-1", PlanTier.GROWTH)
-        assert a.tier == PlanTier.GROWTH
-
-    def test_downgrade_higher_blocked(self):
-        rp = AppApiRatePlan()
-        rp.assign("app-1", PlanTier.FREE)
-        with pytest.raises(ValueError, match="Cannot downgrade"):
-            rp.downgrade("app-1", PlanTier.STARTER)
+class TestIsolation:
+    def test_cross(self):
+        r = AppAPIRatePlan()
+        r.create_plan("inst-1", "free", "Free", rpm=60, rph=1000, rpd=10000)
+        assert r.list_plans("inst-2") == []
