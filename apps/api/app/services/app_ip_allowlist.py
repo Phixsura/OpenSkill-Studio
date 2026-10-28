@@ -1,15 +1,16 @@
-"""App IP Allow List — IP-based access control for installed apps.
+"""App IP Allowlist — manage IP-based access control.
 
-Manages IP allowlists and denylists:
-- Add/remove IP addresses and CIDR ranges
+Manages IP allowlists for installed apps:
+- Add/remove CIDR ranges or individual IPs
 - Check if an IP is allowed
-- Support for both allowlist and denylist modes
-- Per-installation scoped rules
+- Temporary allowlist entries with expiration
+- Per-installation scoped lists
 """
 
 from __future__ import annotations
 
 import ipaddress
+import time
 from dataclasses import dataclass, field
 
 import structlog
@@ -18,94 +19,88 @@ log = structlog.get_logger()
 
 
 @dataclass
-class IPRule:
-    """An IP access rule."""
+class AllowlistEntry:
+    """An IP allowlist entry."""
 
-    rule_id: str
-    network: str  # IP or CIDR
-    description: str = ""
-    _parsed: ipaddress.IPv4Network | ipaddress.IPv6Network | None = field(
-        default=None, repr=False, compare=False,
-    )
-
-
-class AppIPAllowList:
-    """IP-based access control for installed apps."""
-
-    def __init__(self, mode: str = "allowlist") -> None:
-        if mode not in ("allowlist", "denylist"):
-            raise ValueError("mode must be 'allowlist' or 'denylist'")
-        self._mode = mode
-        # installation_id → list[IPRule]
-        self._rules: dict[str, list[IPRule]] = {}
+    entry_id: str
+    cidr: str
+    label: str = ""
+    expires_at: float | None = None
+    created_at: float = field(default_factory=time.time)
 
     @property
-    def mode(self) -> str:
-        return self._mode
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return time.time() > self.expires_at
 
-    def add_rule(
-        self,
-        installation_id: str,
-        rule_id: str,
-        network: str,
-        description: str = "",
-    ) -> IPRule:
-        """Add an IP or CIDR rule."""
+
+class AppIPAllowlist:
+    """Manage IP-based access control."""
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[str, str], AllowlistEntry] = {}
+
+    def add(
+        self, installation_id: str, entry_id: str, cidr: str,
+        label: str = "", ttl_seconds: int | None = None,
+    ) -> AllowlistEntry:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not rule_id:
-            raise ValueError("rule_id is required")
+        if not entry_id:
+            raise ValueError("entry_id is required")
 
-        # Validate network
+        # Validate CIDR/IP
         try:
-            parsed = ipaddress.ip_network(network, strict=False)
-        except ValueError as e:
-            raise ValueError(f"Invalid network: {network}") from e
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            raise ValueError(f"Invalid CIDR: {cidr}")
 
-        rules = self._rules.setdefault(installation_id, [])
-        for r in rules:
-            if r.rule_id == rule_id:
-                raise ValueError(f"Rule {rule_id} already exists")
+        expires_at = None
+        if ttl_seconds is not None:
+            if ttl_seconds <= 0:
+                raise ValueError("ttl_seconds must be positive")
+            expires_at = time.time() + ttl_seconds
 
-        rule = IPRule(
-            rule_id=rule_id,
-            network=str(parsed),
-            description=description,
-            _parsed=parsed,
+        entry = AllowlistEntry(
+            entry_id=entry_id, cidr=cidr, label=label, expires_at=expires_at,
         )
-        rules.append(rule)
-        return rule
+        self._entries[(installation_id, entry_id)] = entry
+        return entry
 
-    def remove_rule(self, installation_id: str, rule_id: str) -> bool:
-        """Remove a rule. Returns True if found."""
-        rules = self._rules.get(installation_id, [])
-        before = len(rules)
-        self._rules[installation_id] = [r for r in rules if r.rule_id != rule_id]
-        return len(self._rules[installation_id]) < before
-
-    def check_ip(self, installation_id: str, ip: str) -> bool:
-        """Check if an IP is allowed. Returns True if access is granted."""
+    def is_allowed(self, installation_id: str, ip: str) -> bool:
+        """Check if an IP is in the allowlist."""
         try:
             addr = ipaddress.ip_address(ip)
         except ValueError:
             return False
 
-        rules = self._rules.get(installation_id, [])
+        entries = [
+            e for (inst, _), e in self._entries.items()
+            if inst == installation_id and not e.is_expired
+        ]
 
-        if self._mode == "allowlist":
-            if not rules:
-                return True  # no rules = allow all
-            return any(self._matches(r, addr) for r in rules)
-        else:  # denylist
-            return not any(self._matches(r, addr) for r in rules)
+        if not entries:
+            return False  # empty allowlist = deny all
 
-    def list_rules(self, installation_id: str) -> list[IPRule]:
-        return list(self._rules.get(installation_id, []))
+        for entry in entries:
+            network = ipaddress.ip_network(entry.cidr, strict=False)
+            if addr in network:
+                return True
+        return False
 
-    def _matches(self, rule: IPRule, addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        if rule._parsed is None:
-            try:
-                rule._parsed = ipaddress.ip_network(rule.network, strict=False)
-            except ValueError:
-                return False
-        return addr in rule._parsed
+    def remove(self, installation_id: str, entry_id: str) -> bool:
+        key = (installation_id, entry_id)
+        if key in self._entries:
+            del self._entries[key]
+            return True
+        return False
+
+    def list_entries(self, installation_id: str, include_expired: bool = False) -> list[AllowlistEntry]:
+        entries = [e for (inst, _), e in self._entries.items() if inst == installation_id]
+        if not include_expired:
+            entries = [e for e in entries if not e.is_expired]
+        return entries
+
+    def count(self, installation_id: str) -> int:
+        return len([e for (inst, _), e in self._entries.items() if inst == installation_id and not e.is_expired])
