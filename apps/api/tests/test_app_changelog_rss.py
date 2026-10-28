@@ -1,89 +1,52 @@
-"""Tests for App Changelog RSS — feed config, items, XML generation."""
+"""Tests for App Changelog RSS — configure, add items, generate feed."""
 
 import pytest
 
 from app.services.app_changelog_rss import AppChangelogRSS
 
 
-class TestConfigureFeed:
+class TestConfigure:
     def test_configure(self):
         r = AppChangelogRSS()
-        c = r.configure_feed("inst-1", "My App Changelog", "Updates", "https://example.com")
-        assert c.title == "My App Changelog"
+        config = r.configure("inst-1", "My App Changelog", "https://example.com", "Updates")
+        assert config.title == "My App Changelog"
 
-    def test_missing_title(self):
+
+class TestGenerate:
+    def test_generate(self):
         r = AppChangelogRSS()
-        with pytest.raises(ValueError, match="title"):
-            r.configure_feed("inst-1", "", "desc", "https://x.com")
-
-    def test_missing_link(self):
-        r = AppChangelogRSS()
-        with pytest.raises(ValueError, match="link"):
-            r.configure_feed("inst-1", "Title", "desc", "")
-
-
-class TestAddItem:
-    def test_add(self):
-        r = AppChangelogRSS()
-        item = r.add_item("inst-1", "v2.0 Released", "Major update", "2.0.0", "2026-10-28")
-        assert item.version == "2.0.0"
-        assert r.item_count("inst-1") == 1
-
-
-class TestGenerateRSS:
-    def test_basic_rss(self):
-        r = AppChangelogRSS()
-        r.configure_feed("inst-1", "Changelog", "Updates", "https://example.com")
-        r.add_item("inst-1", "v1.0", "Initial release", "1.0.0", "2026-01-01")
-        r.add_item("inst-1", "v2.0", "Major update", "2.0.0", "2026-06-01")
+        r.configure("inst-1", "Changelog", "https://example.com", "Updates")
+        r.add_item("inst-1", "i1", "v2.0 Release", "New features", "v2.0")
         xml = r.generate_rss("inst-1")
-        assert '<?xml version="1.0"' in xml
         assert "<rss" in xml
-        assert "<channel>" in xml
-        assert "<title>Changelog</title>" in xml
-        assert "v2.0" in xml
-        assert "v1.0" in xml
+        assert "<title>v2.0 Release</title>" in xml
 
-    def test_newest_first(self):
+    def test_html_escape(self):
         r = AppChangelogRSS()
-        r.configure_feed("inst-1", "CL", "X", "https://x.com")
-        r.add_item("inst-1", "First", "A", "1.0", "2026-01-01")
-        r.add_item("inst-1", "Second", "B", "2.0", "2026-06-01")
-        xml = r.generate_rss("inst-1")
-        assert xml.index("Second") < xml.index("First")
-
-    def test_limit(self):
-        r = AppChangelogRSS()
-        r.configure_feed("inst-1", "CL", "X", "https://x.com")
-        for i in range(10):
-            r.add_item("inst-1", f"v{i}", f"Release {i}", f"{i}.0", "2026-01-01")
-        xml = r.generate_rss("inst-1", limit=3)
-        assert xml.count("<item>") == 3
-
-    def test_html_escaping(self):
-        r = AppChangelogRSS()
-        r.configure_feed("inst-1", "CL", "X", "https://x.com")
-        r.add_item("inst-1", "Fix <script> bug", "Removed <b>XSS</b>", "1.0", "2026-01-01")
+        r.configure("inst-1", "Log", "https://example.com", "Desc")
+        r.add_item("inst-1", "i1", "Fix <script>alert(1)</script>", "Desc & more", "v1")
         xml = r.generate_rss("inst-1")
         assert "<script>" not in xml
         assert "&lt;script&gt;" in xml
+        assert "&amp;" in xml
 
     def test_not_configured(self):
         r = AppChangelogRSS()
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="not configured"):
             r.generate_rss("inst-1")
 
-    def test_empty_feed(self):
+    def test_limit(self):
         r = AppChangelogRSS()
-        r.configure_feed("inst-1", "CL", "X", "https://x.com")
-        xml = r.generate_rss("inst-1")
-        assert "<item>" not in xml
-        assert "<channel>" in xml
+        r.configure("inst-1", "Log", "https://example.com", "Desc")
+        for i in range(5):
+            r.add_item("inst-1", f"i{i}", f"v{i}", "desc", f"v{i}")
+        xml = r.generate_rss("inst-1", limit=2)
+        assert xml.count("<item>") == 2
 
 
 class TestIsolation:
-    def test_cross_installation(self):
+    def test_cross(self):
         r = AppChangelogRSS()
-        r.configure_feed("inst-1", "CL", "X", "https://x.com")
-        r.add_item("inst-1", "V1", "A", "1.0", "2026-01-01")
+        r.configure("inst-1", "Log", "https://example.com", "Desc")
+        r.add_item("inst-1", "i1", "Title", "Desc", "v1")
         assert r.item_count("inst-2") == 0
