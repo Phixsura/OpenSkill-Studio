@@ -1,9 +1,9 @@
-"""App Maintenance Window — schedule and manage maintenance windows.
+"""App Maintenance Window — schedule and manage maintenance periods.
 
-Manages scheduled maintenance for installed apps:
-- Create windows with start/end times
-- Track maintenance status (scheduled, active, completed, cancelled)
-- Affected service listing
+Manages maintenance windows:
+- Schedule windows with start/end times
+- Track active/upcoming/past windows
+- Affected services list
 - Per-installation scoped windows
 """
 
@@ -27,95 +27,80 @@ class WindowStatus(str, Enum):
 
 @dataclass
 class MaintenanceWindow:
-    """A scheduled maintenance window."""
+    """A maintenance window."""
 
     window_id: str
-    installation_id: str
     title: str
-    description: str
     start_at: float
     end_at: float
-    status: WindowStatus = WindowStatus.SCHEDULED
     affected_services: list[str] = field(default_factory=list)
-    created_at: float = field(default_factory=time.time)
+    status: WindowStatus = WindowStatus.SCHEDULED
+    message: str = ""
+
+    @property
+    def duration_minutes(self) -> float:
+        return round((self.end_at - self.start_at) / 60, 1)
 
 
 class AppMaintenanceWindow:
-    """Schedule and manage maintenance windows."""
+    """Schedule and manage maintenance periods."""
 
     def __init__(self) -> None:
         self._windows: dict[tuple[str, str], MaintenanceWindow] = {}
 
     def schedule(
-        self,
-        installation_id: str,
-        window_id: str,
-        title: str,
-        description: str,
-        start_at: float,
-        end_at: float,
-        affected_services: list[str] | None = None,
+        self, installation_id: str, window_id: str, title: str,
+        start_at: float, end_at: float,
+        affected_services: list[str] | None = None, message: str = "",
     ) -> MaintenanceWindow:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not window_id:
-            raise ValueError("window_id is required")
-        if not title:
-            raise ValueError("title is required")
         if end_at <= start_at:
             raise ValueError("end_at must be after start_at")
 
-        key = (installation_id, window_id)
-        if key in self._windows:
-            raise ValueError(f"Window {window_id} already exists")
-
         window = MaintenanceWindow(
-            window_id=window_id, installation_id=installation_id,
-            title=title, description=description,
+            window_id=window_id, title=title,
             start_at=start_at, end_at=end_at,
             affected_services=affected_services or [],
+            message=message,
         )
-        self._windows[key] = window
+        self._windows[(installation_id, window_id)] = window
         return window
 
     def activate(self, installation_id: str, window_id: str) -> MaintenanceWindow:
         w = self._get(installation_id, window_id)
         if w.status != WindowStatus.SCHEDULED:
-            raise ValueError(f"Cannot activate window in {w.status} state")
+            raise ValueError("Window is not scheduled")
         w.status = WindowStatus.ACTIVE
         return w
 
     def complete(self, installation_id: str, window_id: str) -> MaintenanceWindow:
         w = self._get(installation_id, window_id)
         if w.status != WindowStatus.ACTIVE:
-            raise ValueError(f"Cannot complete window in {w.status} state")
+            raise ValueError("Window is not active")
         w.status = WindowStatus.COMPLETED
         return w
 
     def cancel(self, installation_id: str, window_id: str) -> MaintenanceWindow:
         w = self._get(installation_id, window_id)
         if w.status in (WindowStatus.COMPLETED, WindowStatus.CANCELLED):
-            raise ValueError(f"Cannot cancel window in {w.status} state")
+            raise ValueError("Window already finished")
         w.status = WindowStatus.CANCELLED
         return w
 
-    def is_in_maintenance(self, installation_id: str, now: float | None = None) -> bool:
-        now = now or time.time()
-        return any(
-            w.status == WindowStatus.ACTIVE
-            for (inst, _), w in self._windows.items()
-            if inst == installation_id
-        )
+    def is_in_maintenance(self, installation_id: str, service: str | None = None) -> bool:
+        for (inst, _), w in self._windows.items():
+            if inst != installation_id or w.status != WindowStatus.ACTIVE:
+                continue
+            if service is None or service in w.affected_services or not w.affected_services:
+                return True
+        return False
 
-    def get_upcoming(self, installation_id: str, limit: int = 10) -> list[MaintenanceWindow]:
-        windows = [
-            w for (inst, _), w in self._windows.items()
-            if inst == installation_id and w.status == WindowStatus.SCHEDULED
-        ]
-        return sorted(windows, key=lambda w: w.start_at)[:limit]
-
-    def list_windows(self, installation_id: str) -> list[MaintenanceWindow]:
-        return [w for (inst, _), w in self._windows.items() if inst == installation_id]
+    def list_windows(self, installation_id: str, status: WindowStatus | None = None) -> list[MaintenanceWindow]:
+        windows = [w for (inst, _), w in self._windows.items() if inst == installation_id]
+        if status:
+            windows = [w for w in windows if w.status == status]
+        return windows
 
     def _get(self, installation_id: str, window_id: str) -> MaintenanceWindow:
         key = (installation_id, window_id)
