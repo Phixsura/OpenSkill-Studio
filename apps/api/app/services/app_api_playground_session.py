@@ -72,10 +72,12 @@ class AppAPIPlaygroundSession:
         return session
 
     def add_request(
-        self, installation_id: str, session_id: str,
+        self, installation_id: str, session_id: str, user_id: str,
         method: str, path: str, status_code: int, duration_ms: float,
     ) -> PlaygroundSession:
         s = self._get(installation_id, session_id)
+        if s.user_id != user_id:
+            raise ValueError("Not session owner")
         if not s.active or s.is_expired:
             raise ValueError("Session expired or inactive")
         s.history.append(SessionRequest(
@@ -84,8 +86,10 @@ class AppAPIPlaygroundSession:
         ))
         return s
 
-    def end(self, installation_id: str, session_id: str) -> PlaygroundSession:
+    def end(self, installation_id: str, session_id: str, user_id: str) -> PlaygroundSession:
         s = self._get(installation_id, session_id)
+        if s.user_id != user_id:
+            raise ValueError("Not session owner")
         s.active = False
         return s
 

@@ -23,15 +23,15 @@ class TestHistory:
     def test_add_request(self):
         p = AppAPIPlaygroundSession()
         p.create("inst-1", "s1", "user-1")
-        s = p.add_request("inst-1", "s1", "GET", "/api/users", 200, 45.0)
+        s = p.add_request("inst-1", "s1", "user-1", "GET", "/api/users", 200, 45.0)
         assert s.request_count == 1
 
     def test_ended_rejects(self):
         p = AppAPIPlaygroundSession()
         p.create("inst-1", "s1", "user-1")
-        p.end("inst-1", "s1")
+        p.end("inst-1", "s1", "user-1")
         with pytest.raises(ValueError, match="expired"):
-            p.add_request("inst-1", "s1", "GET", "/api", 200, 10)
+            p.add_request("inst-1", "s1", "user-1", "GET", "/api", 200, 10)
 
 
 class TestActive:
@@ -39,7 +39,7 @@ class TestActive:
         p = AppAPIPlaygroundSession()
         p.create("inst-1", "s1", "user-1")
         p.create("inst-1", "s2", "user-2")
-        p.end("inst-1", "s1")
+        p.end("inst-1", "s1", "user-1")
         assert len(p.active_sessions("inst-1")) == 1
 
 
