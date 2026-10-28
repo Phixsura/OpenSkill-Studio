@@ -1,18 +1,69 @@
-from app.services.app_api_changelog import get_api_changelog, get_latest_api_version, get_changes_since
+"""Tests for App API Changelog — endpoint changes, breaking, counts."""
 
-def test_changelog():
-    cl = get_api_changelog()
-    assert len(cl) >= 1
-    assert "changes" in cl[0]
+import pytest
 
-def test_latest():
-    v = get_latest_api_version()
-    assert v == "2024-01-01"
+from app.services.app_api_changelog import AppAPIChangelog
 
-def test_changes_since():
-    changes = get_changes_since("2023-01-01")
-    assert len(changes) >= 6
+CHANGES = [
+    {"method": "GET", "path": "/api/v2/users", "change_type": "added", "description": "New users endpoint"},
+    {"method": "DELETE", "path": "/api/v1/users", "change_type": "removed", "breaking": True},
+    {"method": "PUT", "path": "/api/v1/settings", "change_type": "modified", "description": "New field added"},
+    {"method": "GET", "path": "/api/v1/legacy", "change_type": "deprecated"},
+]
 
-def test_no_changes():
-    changes = get_changes_since("2099-01-01")
-    assert len(changes) == 0
+
+class TestRecordChanges:
+    def test_record(self):
+        c = AppAPIChangelog()
+        cl = c.record_changes("inst-1", "1.0.0", "2.0.0", CHANGES)
+        assert len(cl.changes) == 4
+
+    def test_missing_versions(self):
+        c = AppAPIChangelog()
+        with pytest.raises(ValueError):
+            c.record_changes("inst-1", "", "2.0.0", [])
+
+
+class TestProperties:
+    def test_breaking_count(self):
+        c = AppAPIChangelog()
+        cl = c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        assert cl.breaking_count == 1
+
+    def test_added_count(self):
+        c = AppAPIChangelog()
+        cl = c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        assert cl.added_count == 1
+
+    def test_removed_count(self):
+        c = AppAPIChangelog()
+        cl = c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        assert cl.removed_count == 1
+
+
+class TestGet:
+    def test_get(self):
+        c = AppAPIChangelog()
+        c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        cl = c.get_changelog("inst-1", "1.0", "2.0")
+        assert cl.to_version == "2.0"
+
+    def test_not_found(self):
+        c = AppAPIChangelog()
+        with pytest.raises(KeyError):
+            c.get_changelog("inst-1", "1.0", "9.0")
+
+
+class TestList:
+    def test_list(self):
+        c = AppAPIChangelog()
+        c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        c.record_changes("inst-1", "2.0", "3.0", CHANGES[:1])
+        assert len(c.list_changelogs("inst-1")) == 2
+
+
+class TestIsolation:
+    def test_cross_installation(self):
+        c = AppAPIChangelog()
+        c.record_changes("inst-1", "1.0", "2.0", CHANGES)
+        assert c.list_changelogs("inst-2") == []
