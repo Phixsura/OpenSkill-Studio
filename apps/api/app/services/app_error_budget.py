@@ -1,145 +1,112 @@
-"""App Error Budget — SLO-based error budget tracking for installed apps.
+"""App Error Budget — track SLO-based error budgets.
 
-Tracks error budget consumption against Service Level Objectives:
-- Configurable SLO target (e.g. 99.9% success rate)
-- Rolling window budget computation (30-day default)
-- Budget burn rate alerting
-- Budget remaining / exhausted status
-- Historical budget snapshots
+Manages error budgets:
+- Define SLO targets per service
+- Consume budget on errors
+- Calculate remaining budget and burn rate
+- Alert when budget is exhausted
+- Per-installation scoped budgets
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import Enum
+from dataclasses import dataclass
 
 import structlog
 
 log = structlog.get_logger()
 
 
-class BudgetStatus(str, Enum):
-    HEALTHY = "healthy"       # >50% remaining
-    WARNING = "warning"       # 10-50% remaining
-    CRITICAL = "critical"     # <10% remaining
-    EXHAUSTED = "exhausted"   # 0% remaining
-
-
 @dataclass
-class ErrorBudgetConfig:
-    """SLO configuration for an app."""
+class ErrorBudget:
+    """An error budget for a service."""
 
-    app_id: str
-    slo_target_pct: float = 99.9      # e.g. 99.9%
-    window_days: int = 30
-    total_requests: int = 0
-    failed_requests: int = 0
+    service_id: str
+    slo_target: float  # e.g., 99.9 (%)
+    window_requests: int  # total requests in window
+    error_count: int = 0
 
+    @property
+    def budget_total(self) -> int:
+        """Max errors allowed in window."""
+        return int(self.window_requests * (1 - self.slo_target / 100))
 
-@dataclass
-class BudgetSnapshot:
-    """Point-in-time error budget state."""
+    @property
+    def budget_remaining(self) -> int:
+        return max(0, self.budget_total - self.error_count)
 
-    app_id: str
-    slo_target_pct: float
-    actual_success_pct: float
-    budget_total_minutes: float    # allowed downtime in window
-    budget_consumed_minutes: float
-    budget_remaining_minutes: float
-    budget_remaining_pct: float
-    burn_rate: float               # >1 = burning faster than sustainable
-    status: BudgetStatus
-    window_days: int
-    computed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    @property
+    def budget_consumed_pct(self) -> float:
+        if self.budget_total == 0:
+            return 100.0 if self.error_count > 0 else 0.0
+        return round(self.error_count / self.budget_total * 100, 1)
+
+    @property
+    def is_exhausted(self) -> bool:
+        return self.error_count >= self.budget_total
+
+    @property
+    def current_error_rate(self) -> float:
+        if self.window_requests == 0:
+            return 0.0
+        return round(self.error_count / self.window_requests * 100, 3)
 
 
 class AppErrorBudget:
     """Track SLO-based error budgets."""
 
-    def __init__(self):
-        self._configs: dict[str, ErrorBudgetConfig] = {}
+    def __init__(self) -> None:
+        self._budgets: dict[tuple[str, str], ErrorBudget] = {}
 
-    def configure(self, app_id: str, slo_target_pct: float = 99.9,
-                  window_days: int = 30) -> ErrorBudgetConfig:
-        if not 0 < slo_target_pct < 100:
-            raise ValueError("SLO target must be between 0 and 100 (exclusive)")
-        config = ErrorBudgetConfig(app_id=app_id, slo_target_pct=slo_target_pct,
-                                    window_days=window_days)
-        self._configs[app_id] = config
-        return config
+    def create(
+        self, installation_id: str, service_id: str,
+        slo_target: float, window_requests: int,
+    ) -> ErrorBudget:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if not (90 <= slo_target <= 100):
+            raise ValueError("slo_target must be between 90 and 100")
+        if window_requests <= 0:
+            raise ValueError("window_requests must be positive")
 
-    def record(self, app_id: str, total: int, failed: int) -> None:
-        """Record request counts for the current window."""
-        config = self._configs.get(app_id)
-        if config is None:
-            config = self.configure(app_id)
-        if total < 0 or failed < 0:
-            raise ValueError("Counts must be non-negative")
-        if failed > total:
-            raise ValueError("Failed cannot exceed total")
-        config.total_requests = total
-        config.failed_requests = failed
-
-    def get_snapshot(self, app_id: str) -> BudgetSnapshot:
-        """Compute the current error budget snapshot."""
-        config = self._configs.get(app_id)
-        if config is None:
-            return BudgetSnapshot(
-                app_id=app_id, slo_target_pct=99.9,
-                actual_success_pct=100.0,
-                budget_total_minutes=0, budget_consumed_minutes=0,
-                budget_remaining_minutes=0, budget_remaining_pct=100.0,
-                burn_rate=0, status=BudgetStatus.HEALTHY, window_days=30,
-            )
-
-        total = config.total_requests
-        failed = config.failed_requests
-        slo = config.slo_target_pct
-        window = config.window_days
-
-        if total == 0:
-            return BudgetSnapshot(
-                app_id=app_id, slo_target_pct=slo,
-                actual_success_pct=100.0,
-                budget_total_minutes=window * 24 * 60 * (1 - slo / 100),
-                budget_consumed_minutes=0,
-                budget_remaining_minutes=window * 24 * 60 * (1 - slo / 100),
-                budget_remaining_pct=100.0,
-                burn_rate=0, status=BudgetStatus.HEALTHY, window_days=window,
-            )
-
-        actual_success = ((total - failed) / total) * 100
-        total_minutes = window * 24 * 60
-        allowed_error_pct = 100 - slo
-        budget_total = total_minutes * (allowed_error_pct / 100)
-        actual_error_pct = (failed / total) * 100
-        budget_consumed = total_minutes * (actual_error_pct / 100)
-        budget_remaining = max(0, budget_total - budget_consumed)
-        budget_remaining_pct = (budget_remaining / budget_total * 100) if budget_total > 0 else 0
-
-        # Burn rate: >1 means burning faster than the SLO allows
-        burn_rate = (actual_error_pct / allowed_error_pct) if allowed_error_pct > 0 else 0
-
-        if budget_remaining_pct <= 0:
-            status = BudgetStatus.EXHAUSTED
-        elif budget_remaining_pct < 10:
-            status = BudgetStatus.CRITICAL
-        elif budget_remaining_pct < 50:
-            status = BudgetStatus.WARNING
-        else:
-            status = BudgetStatus.HEALTHY
-
-        return BudgetSnapshot(
-            app_id=app_id, slo_target_pct=slo,
-            actual_success_pct=round(actual_success, 4),
-            budget_total_minutes=round(budget_total, 2),
-            budget_consumed_minutes=round(budget_consumed, 2),
-            budget_remaining_minutes=round(budget_remaining, 2),
-            budget_remaining_pct=round(budget_remaining_pct, 2),
-            burn_rate=round(burn_rate, 4),
-            status=status, window_days=window,
+        budget = ErrorBudget(
+            service_id=service_id, slo_target=slo_target,
+            window_requests=window_requests,
         )
+        self._budgets[(installation_id, service_id)] = budget
+        return budget
 
-    def get_config(self, app_id: str) -> ErrorBudgetConfig | None:
-        return self._configs.get(app_id)
+    def record_errors(
+        self, installation_id: str, service_id: str, count: int = 1,
+    ) -> ErrorBudget:
+        b = self._get(installation_id, service_id)
+        if count < 0:
+            raise ValueError("count must be non-negative")
+        b.error_count += count
+        return b
+
+    def get(self, installation_id: str, service_id: str) -> ErrorBudget:
+        return self._get(installation_id, service_id)
+
+    def exhausted_services(self, installation_id: str) -> list[ErrorBudget]:
+        return [
+            b for (inst, _), b in self._budgets.items()
+            if inst == installation_id and b.is_exhausted
+        ]
+
+    def list_budgets(self, installation_id: str) -> list[ErrorBudget]:
+        return [b for (inst, _), b in self._budgets.items() if inst == installation_id]
+
+    def reset(self, installation_id: str, service_id: str, new_window: int | None = None) -> ErrorBudget:
+        b = self._get(installation_id, service_id)
+        b.error_count = 0
+        if new_window is not None:
+            b.window_requests = new_window
+        return b
+
+    def _get(self, installation_id: str, service_id: str) -> ErrorBudget:
+        key = (installation_id, service_id)
+        b = self._budgets.get(key)
+        if b is None:
+            raise KeyError(f"Budget for {service_id} not found")
+        return b
