@@ -5,54 +5,45 @@ import CustomDomainCard from "../src/components/custom-domain-card";
 const domains = [
   {
     domain_id: "d1",
-    domain: "app.example.com",
-    status: "verified" as const,
+    hostname: "api.example.com",
+    target: "app-123.internal",
+    dns_status: "verified" as const,
     ssl_status: "active" as const,
+    is_ready: true,
   },
   {
     domain_id: "d2",
-    domain: "api.example.com",
-    status: "verifying" as const,
-    ssl_status: "provisioning" as const,
-  },
-  {
-    domain_id: "d3",
-    domain: "beta.example.com",
-    status: "failed" as const,
+    hostname: "docs.example.com",
+    target: "app-456.internal",
+    dns_status: "pending" as const,
     ssl_status: "none" as const,
+    is_ready: false,
   },
 ];
 
 describe("CustomDomainCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(<CustomDomainCard domains={domains} appName="My App" />);
+  it("renders header and ready count", () => {
+    const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
     expect(container.textContent).toContain("Custom Domains");
-    expect(container.textContent).toContain("My App");
+    expect(container.textContent).toContain("1/2 ready");
   });
 
-  it("shows verified count", () => {
+  it("shows hostnames", () => {
     const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
-    expect(container.textContent).toContain("1/3 verified");
-  });
-
-  it("renders domain names", () => {
-    const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
-    expect(container.textContent).toContain("app.example.com");
     expect(container.textContent).toContain("api.example.com");
+    expect(container.textContent).toContain("docs.example.com");
   });
 
-  it("shows SSL status", () => {
+  it("shows DNS status", () => {
+    const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
+    expect(container.textContent).toContain("DNS verified");
+    expect(container.textContent).toContain("DNS pending");
+  });
+
+  it("shows SSL status and target", () => {
     const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
     expect(container.textContent).toContain("SSL active");
-    expect(container.textContent).toContain("SSL provisioning");
-    expect(container.textContent).toContain("No SSL");
-  });
-
-  it("shows verification status", () => {
-    const { container } = render(<CustomDomainCard domains={domains} appName="App" />);
-    expect(container.textContent).toContain("verified");
-    expect(container.textContent).toContain("verifying");
-    expect(container.textContent).toContain("failed");
+    expect(container.textContent).toContain("app-123.internal");
   });
 
   it("shows empty state", () => {

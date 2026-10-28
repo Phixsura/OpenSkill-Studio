@@ -9,6 +9,7 @@ Manages custom domains for installed apps:
 
 from __future__ import annotations
 
+import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -56,7 +57,7 @@ class AppCustomDomain:
 
     def add_domain(
         self, installation_id: str, domain_id: str, hostname: str,
-        target: str, verification_token: str = "",
+        target: str,
     ) -> CustomDomain:
         if not installation_id:
             raise ValueError("installation_id is required")
@@ -68,11 +69,22 @@ class AppCustomDomain:
         # Normalize hostname
         hostname = hostname.lower().strip().rstrip(".")
 
+        # Cross-tenant uniqueness: reject hostname already registered by any installation
+        if any(d.hostname == hostname for d in self._domains.values()):
+            raise ValueError(f"Domain {hostname} already registered")
+
+        key = (installation_id, domain_id)
+        if key in self._domains:
+            raise ValueError(f"Domain ID {domain_id} already exists")
+
+        # Server-generated verification token
+        verification_token = f"openskill-verify-{secrets.token_urlsafe(32)}"
+
         domain = CustomDomain(
             domain_id=domain_id, hostname=hostname, target=target,
             verification_token=verification_token,
         )
-        self._domains[(installation_id, domain_id)] = domain
+        self._domains[key] = domain
         return domain
 
     def verify_dns(self, installation_id: str, domain_id: str, success: bool) -> CustomDomain:

@@ -18,6 +18,18 @@ class TestAdd:
         assert dom.hostname == "api.example.com"
 
 
+    def test_duplicate_hostname(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        with pytest.raises(ValueError, match="already registered"):
+            d.add_domain("inst-2", "d2", "api.example.com", "other")
+
+    def test_server_generated_token(self):
+        d = AppCustomDomain()
+        dom = d.add_domain("inst-1", "d1", "api.example.com", "target")
+        assert dom.verification_token.startswith("openskill-verify-")
+
+
 class TestVerify:
     def test_dns_success(self):
         d = AppCustomDomain()
