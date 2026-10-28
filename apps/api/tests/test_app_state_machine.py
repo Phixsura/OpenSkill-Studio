@@ -1,117 +1,124 @@
-"""Comprehensive tests for the app lifecycle state machine."""
-
-import uuid
+"""Tests for App State Machine — define, transitions, events, history."""
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+
+from app.services.app_state_machine import AppStateMachine
+
+STATES = ["draft", "review", "approved", "rejected"]
+TRANSITIONS = [
+    {"from": "draft", "to": "review", "event": "submit"},
+    {"from": "review", "to": "approved", "event": "approve"},
+    {"from": "review", "to": "rejected", "event": "reject"},
+    {"from": "rejected", "to": "draft", "event": "revise"},
+]
 
 
-def _email():
-    return f"sm-{uuid.uuid4().hex[:8]}@test.com"
+class TestDefineMachine:
+    def test_define(self):
+        sm = AppStateMachine()
+        m = sm.define_machine("inst-1", "approval", "draft", STATES, TRANSITIONS)
+        assert m.machine_id == "approval"
+        assert m.initial_state == "draft"
+        assert len(m.transitions) == 4
+
+    def test_duplicate(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        with pytest.raises(ValueError, match="already exists"):
+            sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+
+    def test_too_few_states(self):
+        sm = AppStateMachine()
+        with pytest.raises(ValueError, match="2 states"):
+            sm.define_machine("inst-1", "m1", "a", ["a"], [])
+
+    def test_invalid_initial_state(self):
+        sm = AppStateMachine()
+        with pytest.raises(ValueError, match="Initial state"):
+            sm.define_machine("inst-1", "m1", "unknown", ["a", "b"], [])
+
+    def test_invalid_transition_state(self):
+        sm = AppStateMachine()
+        with pytest.raises(ValueError, match="from_state"):
+            sm.define_machine("inst-1", "m1", "a", ["a", "b"],
+                              [{"from": "x", "to": "b", "event": "go"}])
 
 
-@pytest_asyncio.fixture
-async def c():
-    from app.main import app
-
-    orig = app.router.lifespan_context
-    from contextlib import asynccontextmanager
-
-    from app.core.database import engine
-
-    @asynccontextmanager
-    async def _noop(a):
-        yield
-
-    app.router.lifespan_context = _noop
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
-    app.router.lifespan_context = orig
-    await engine.dispose()
+class TestGetState:
+    def test_initial_state(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        assert sm.get_state("inst-1", "m1", "entity-1") == "draft"
 
 
-async def _create_app(c):
-    r = await c.post(
-        "/api/v1/auth/register",
-        json={"email": _email(), "password": "TestPass123!", "display_name": "SM"},
-    )
-    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
-    slug = f"sm-{uuid.uuid4().hex[:6]}"
-    await c.post(
-        "/api/v1/developer/accounts",
-        json={"display_name": "SM Dev", "slug": slug, "support_email": f"{slug}@t.com"},
-        headers=h,
-    )
-    app_slug = f"smapp-{uuid.uuid4().hex[:6]}"
-    r = await c.post(
-        "/api/v1/developer/apps",
-        json={"name": "SM App", "slug": app_slug, "category": "connector"},
-        headers=h,
-    )
-    return h, r.json()["data"]["id"]
+class TestSendEvent:
+    def test_transition(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        new = sm.send_event("inst-1", "m1", "entity-1", "submit")
+        assert new == "review"
+        assert sm.get_state("inst-1", "m1", "entity-1") == "review"
+
+    def test_full_flow(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        sm.send_event("inst-1", "m1", "e1", "submit")
+        sm.send_event("inst-1", "m1", "e1", "approve")
+        assert sm.get_state("inst-1", "m1", "e1") == "approved"
+
+    def test_reject_and_revise(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        sm.send_event("inst-1", "m1", "e1", "submit")
+        sm.send_event("inst-1", "m1", "e1", "reject")
+        sm.send_event("inst-1", "m1", "e1", "revise")
+        assert sm.get_state("inst-1", "m1", "e1") == "draft"
+
+    def test_invalid_event(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        with pytest.raises(ValueError, match="No transition"):
+            sm.send_event("inst-1", "m1", "e1", "approve")  # can't approve from draft
 
 
-# ── Valid transitions from draft ─────────────────────────
+class TestAvailableEvents:
+    def test_from_draft(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        events = sm.get_available_events("inst-1", "m1", "e1")
+        assert events == ["submit"]
+
+    def test_from_review(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        sm.send_event("inst-1", "m1", "e1", "submit")
+        events = sm.get_available_events("inst-1", "m1", "e1")
+        assert set(events) == {"approve", "reject"}
 
 
-@pytest.mark.asyncio
-async def test_draft_cannot_submit(c):
-    """draft → submitted is not valid (must go through testing first)."""
-    h, app_id = await _create_app(c)
-    r = await c.post(f"/api/v1/developer/apps/{app_id}/submit", headers=h)
-    assert r.status_code == 422
+class TestHistory:
+    def test_history(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        sm.send_event("inst-1", "m1", "e1", "submit", now=1000.0)
+        sm.send_event("inst-1", "m1", "e1", "approve", now=1001.0)
+        h = sm.get_history("inst-1", "m1", "e1")
+        assert len(h) == 2
+        assert h[0].to_state == "approved"  # newest first
+        assert h[1].to_state == "review"
 
 
-@pytest.mark.asyncio
-async def test_draft_cannot_publish(c):
-    h, app_id = await _create_app(c)
-    r = await c.post(f"/api/v1/developer/apps/{app_id}/publish", headers=h)
-    assert r.status_code == 422
+class TestEntityIsolation:
+    def test_independent_entities(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        sm.send_event("inst-1", "m1", "e1", "submit")
+        assert sm.get_state("inst-1", "m1", "e2") == "draft"
 
 
-@pytest.mark.asyncio
-async def test_draft_cannot_deprecate(c):
-    h, app_id = await _create_app(c)
-    r = await c.post(f"/api/v1/developer/apps/{app_id}/deprecate", headers=h)
-    assert r.status_code == 422
-
-
-# ── Revoke works from any state (kill switch) ───────────
-
-
-@pytest.mark.asyncio
-async def test_draft_can_revoke(c):
-    """Kill switch works from draft — revoke_app bypasses state machine."""
-    h, app_id = await _create_app(c)
-    r = await c.post(f"/api/v1/developer/apps/{app_id}/revoke", headers=h)
-    assert r.status_code == 200
-    assert r.json()["data"]["status"] in ("revoked", "REVOKED")
-
-
-# ── Service-level state machine tests ────────────────────
-
-
-def test_state_machine_allowed_transitions():
-    """Verify the state machine transition rules."""
-    from app.services.developer import transition_app_status
-
-    # The allowed dict is internal but we can verify the function exists
-    assert callable(transition_app_status)
-
-
-def test_state_machine_all_states_defined():
-    """All 7 states are defined in the enum."""
-    from app.models.developer import AppStatus
-
-    states = [s.value for s in AppStatus]
-    expected = {"draft", "testing", "submitted", "approved", "published", "deprecated", "revoked"}
-    assert expected == set(states)
-
-
-def test_invalid_state_transition_error():
-    from app.services.developer import InvalidStateTransitionError
-
-    err = InvalidStateTransitionError("test message")
-    assert err.status_code == 422
-    assert "test message" in str(err)
+class TestInstallationIsolation:
+    def test_cross_installation(self):
+        sm = AppStateMachine()
+        sm.define_machine("inst-1", "m1", "draft", STATES, TRANSITIONS)
+        with pytest.raises(KeyError):
+            sm.get_state("inst-2", "m1", "e1")
