@@ -104,10 +104,21 @@ class TestToggle:
         m = AppFeatureFlagManager()
         m.create_flag("inst-1", "f1", enabled=False)
         m.toggle("inst-1", "f1", True)
-        changes = m.get_changes(flag_id="f1")
+        changes = m.get_changes("inst-1", flag_id="f1")
         assert len(changes) == 1
         assert changes[0].old_value is False
         assert changes[0].new_value is True
+        assert changes[0].installation_id == "inst-1"
+
+    def test_changes_scoped_to_installation(self):
+        m = AppFeatureFlagManager()
+        m.create_flag("inst-1", "f1", enabled=False)
+        m.create_flag("inst-2", "f2", enabled=False)
+        m.toggle("inst-1", "f1", True)
+        m.toggle("inst-2", "f2", True)
+        changes = m.get_changes("inst-1")
+        assert len(changes) == 1
+        assert changes[0].flag_id == "f1"
 
 
 class TestRollout:

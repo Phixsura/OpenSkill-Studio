@@ -46,6 +46,7 @@ class FlagChange:
     """Audit record for a flag change."""
 
     flag_id: str
+    installation_id: str
     field: str
     old_value: object
     new_value: object
@@ -137,7 +138,8 @@ class AppFeatureFlagManager:
         config.enabled = enabled
         config.updated_at = time.time()
         self._changes.append(FlagChange(
-            flag_id=flag_id, field="enabled", old_value=old, new_value=enabled))
+            flag_id=flag_id, installation_id=installation_id,
+            field="enabled", old_value=old, new_value=enabled))
         return config
 
     def set_rollout(self, installation_id: str, flag_id: str, pct: float) -> FlagConfig:
@@ -149,7 +151,8 @@ class AppFeatureFlagManager:
         config.rollout_pct = pct
         config.updated_at = time.time()
         self._changes.append(FlagChange(
-            flag_id=flag_id, field="rollout_pct", old_value=old, new_value=pct))
+            flag_id=flag_id, installation_id=installation_id,
+            field="rollout_pct", old_value=old, new_value=pct))
         return config
 
     def add_override(
@@ -173,8 +176,10 @@ class AppFeatureFlagManager:
             if inst == installation_id
         ]
 
-    def get_changes(self, flag_id: str | None = None, limit: int = 50) -> list[FlagChange]:
-        records = self._changes
+    def get_changes(self, installation_id: str, flag_id: str | None = None, limit: int = 50) -> list[FlagChange]:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        records = [c for c in self._changes if c.installation_id == installation_id]
         if flag_id:
             records = [c for c in records if c.flag_id == flag_id]
         return list(reversed(records[-limit:]))
