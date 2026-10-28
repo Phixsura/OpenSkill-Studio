@@ -1,31 +1,60 @@
-"""Webhook delivery queue tests."""
-from app.services.app_webhook_queue import enqueue_delivery, dequeue_delivery, get_queue_size, clear_queue
+"""Tests for App Webhook Queue — enqueue, deliver, retry, dead letter."""
 
-def test_enqueue_dequeue():
-    e = enqueue_delivery(app_id="wq1", event_type="test", url="https://x.com", payload={})
-    assert e["status"] == "queued"
-    d = dequeue_delivery("wq1")
-    assert d is not None
+import pytest
 
-def test_priority_order():
-    enqueue_delivery(app_id="wq2", event_type="low", url="u", payload={}, priority=10)
-    enqueue_delivery(app_id="wq2", event_type="high", url="u", payload={}, priority=1)
-    d = dequeue_delivery("wq2")
-    assert d["event_type"] == "high"
+from app.services.app_webhook_queue import AppWebhookQueue, DeliveryStatus
 
-def test_empty_dequeue():
-    assert dequeue_delivery("nonexist") is None
 
-def test_queue_size():
-    app = "wq3"
-    clear_queue(app)
-    enqueue_delivery(app_id=app, event_type="a", url="u", payload={})
-    enqueue_delivery(app_id=app, event_type="b", url="u", payload={})
-    assert get_queue_size(app) == 2
+class TestEnqueue:
+    def test_enqueue(self):
+        q = AppWebhookQueue()
+        wh = q.enqueue("inst-1", "wh1", "https://example.com/hook", '{"event":"push"}')
+        assert wh.status == DeliveryStatus.QUEUED
 
-def test_clear():
-    app = "wq4"
-    enqueue_delivery(app_id=app, event_type="x", url="u", payload={})
-    count = clear_queue(app)
-    assert count >= 1
-    assert get_queue_size(app) == 0
+
+class TestDelivery:
+    def test_fifo(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}")
+        q.enqueue("inst-1", "wh2", "https://b.com", "{}")
+        wh = q.next("inst-1")
+        assert wh is not None
+        assert wh.webhook_id == "wh1"
+
+    def test_mark_delivered(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}")
+        q.next("inst-1")
+        wh = q.mark_delivered("inst-1", "wh1")
+        assert wh.status == DeliveryStatus.DELIVERED
+
+    def test_retry(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}", max_attempts=3)
+        q.next("inst-1")
+        wh = q.mark_failed("inst-1", "wh1", "timeout")
+        assert wh.status == DeliveryStatus.QUEUED  # re-queued
+
+    def test_dead_letter(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}", max_attempts=1)
+        q.next("inst-1")
+        wh = q.mark_failed("inst-1", "wh1", "timeout")
+        assert wh.status == DeliveryStatus.DEAD_LETTER
+        assert len(q.dead_letters("inst-1")) == 1
+
+
+class TestStats:
+    def test_stats(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}")
+        q.enqueue("inst-1", "wh2", "https://b.com", "{}")
+        s = q.stats("inst-1")
+        assert s["queued"] == 2
+
+
+class TestIsolation:
+    def test_cross(self):
+        q = AppWebhookQueue()
+        q.enqueue("inst-1", "wh1", "https://a.com", "{}")
+        assert q.queue_depth("inst-2") == 0

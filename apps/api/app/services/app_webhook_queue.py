@@ -1,49 +1,109 @@
-"""Webhook delivery queue — manage pending webhook deliveries with priority."""
+"""App Webhook Queue — queue and deliver webhooks with ordering.
 
-from collections import defaultdict
-from datetime import UTC, datetime
-import heapq
+Manages webhook delivery queue:
+- Enqueue webhooks with ordering guarantees
+- Process in FIFO order per destination
+- Track delivery attempts and status
+- Dead letter queue for failed deliveries
+- Per-installation scoped queues
+"""
 
+from __future__ import annotations
 
-_queues: dict[str, list] = defaultdict(list)
-_counter = 0
+import time
+from dataclasses import dataclass, field
+from enum import Enum
 
+import structlog
 
-def enqueue_delivery(*, app_id: str, event_type: str, url: str, payload: dict, priority: int = 5) -> dict:
-    """Enqueue a webhook delivery. Lower priority number = higher priority."""
-    global _counter
-    _counter += 1
-    entry = {
-        "id": f"whd_{_counter}",
-        "app_id": app_id,
-        "event_type": event_type,
-        "url": url,
-        "payload": payload,
-        "priority": priority,
-        "status": "queued",
-        "queued_at": datetime.now(UTC).isoformat(),
-    }
-    heapq.heappush(_queues[app_id], (priority, _counter, entry))
-    return entry
+log = structlog.get_logger()
 
 
-def dequeue_delivery(app_id: str) -> dict | None:
-    """Get the highest priority delivery from the queue."""
-    q = _queues.get(app_id, [])
-    if not q:
+class DeliveryStatus(str, Enum):
+    QUEUED = "queued"
+    DELIVERING = "delivering"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    DEAD_LETTER = "dead_letter"
+
+
+@dataclass
+class QueuedWebhook:
+    """A queued webhook."""
+
+    webhook_id: str
+    destination: str
+    payload: str
+    status: DeliveryStatus = DeliveryStatus.QUEUED
+    attempts: int = 0
+    max_attempts: int = 5
+    created_at: float = field(default_factory=time.time)
+    error: str = ""
+
+
+class AppWebhookQueue:
+    """Queue and deliver webhooks with ordering."""
+
+    def __init__(self) -> None:
+        self._queues: dict[str, list[QueuedWebhook]] = {}
+
+    def enqueue(
+        self, installation_id: str, webhook_id: str, destination: str,
+        payload: str, max_attempts: int = 5,
+    ) -> QueuedWebhook:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if not destination:
+            raise ValueError("destination is required")
+
+        wh = QueuedWebhook(
+            webhook_id=webhook_id, destination=destination,
+            payload=payload, max_attempts=max_attempts,
+        )
+        self._queues.setdefault(installation_id, []).append(wh)
+        return wh
+
+    def next(self, installation_id: str) -> QueuedWebhook | None:
+        """Get next queued webhook (FIFO)."""
+        for wh in self._queues.get(installation_id, []):
+            if wh.status == DeliveryStatus.QUEUED:
+                wh.status = DeliveryStatus.DELIVERING
+                wh.attempts += 1
+                return wh
         return None
-    _, _, entry = heapq.heappop(q)
-    return entry
 
+    def mark_delivered(self, installation_id: str, webhook_id: str) -> QueuedWebhook:
+        wh = self._find(installation_id, webhook_id)
+        wh.status = DeliveryStatus.DELIVERED
+        return wh
 
-def get_queue_size(app_id: str) -> int:
-    return len(_queues.get(app_id, []))
+    def mark_failed(self, installation_id: str, webhook_id: str, error: str = "") -> QueuedWebhook:
+        wh = self._find(installation_id, webhook_id)
+        wh.error = error
+        if wh.attempts >= wh.max_attempts:
+            wh.status = DeliveryStatus.DEAD_LETTER
+        else:
+            wh.status = DeliveryStatus.QUEUED  # re-queue for retry
+        return wh
 
+    def dead_letters(self, installation_id: str) -> list[QueuedWebhook]:
+        return [
+            wh for wh in self._queues.get(installation_id, [])
+            if wh.status == DeliveryStatus.DEAD_LETTER
+        ]
 
-def get_total_queued() -> int:
-    return sum(len(q) for q in _queues.values())
+    def queue_depth(self, installation_id: str) -> int:
+        return sum(
+            1 for wh in self._queues.get(installation_id, [])
+            if wh.status == DeliveryStatus.QUEUED
+        )
 
+    def stats(self, installation_id: str) -> dict[str, int]:
+        webhooks = self._queues.get(installation_id, [])
+        return {s.value: sum(1 for w in webhooks if w.status == s) for s in DeliveryStatus}
 
-def clear_queue(app_id: str) -> int:
-    count = len(_queues.pop(app_id, []))
-    return count
+    def _find(self, installation_id: str, webhook_id: str) -> QueuedWebhook:
+        for wh in self._queues.get(installation_id, []):
+            if wh.webhook_id == webhook_id:
+                return wh
+        raise KeyError(f"Webhook {webhook_id} not found")
