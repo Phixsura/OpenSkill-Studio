@@ -5,64 +5,51 @@ import MaintenanceWindowCard from "../src/components/maintenance-window-card";
 const windows = [
   {
     window_id: "w1",
-    title: "DB Migration",
+    title: "DB Upgrade",
     status: "active" as const,
-    start_at: new Date().toISOString(),
-    end_at: new Date(Date.now() + 3600000).toISOString(),
+    duration_minutes: 60,
     affected_services: ["db", "api"],
+    message: "",
   },
   {
     window_id: "w2",
-    title: "Security Patch",
+    title: "Cache Flush",
     status: "scheduled" as const,
-    start_at: new Date(Date.now() + 86400000).toISOString(),
-    end_at: new Date(Date.now() + 90000000).toISOString(),
-    affected_services: ["auth"],
+    duration_minutes: 15,
+    affected_services: ["cache"],
+    message: "",
   },
 ];
 
 describe("MaintenanceWindowCard", () => {
-  it("renders header and app name", () => {
+  it("renders header and maintenance banner", () => {
     const { container } = render(
-      <MaintenanceWindowCard windows={windows} inMaintenance={true} appName="My App" />,
+      <MaintenanceWindowCard windows={windows} isInMaintenance={true} appName="App" />,
     );
-    expect(container.textContent).toContain("Maintenance");
-    expect(container.textContent).toContain("My App");
+    expect(container.textContent).toContain("Maintenance Windows");
+    expect(container.textContent).toContain("In Maintenance");
   });
 
-  it("shows in-progress badge", () => {
+  it("shows window titles and status", () => {
     const { container } = render(
-      <MaintenanceWindowCard windows={windows} inMaintenance={true} appName="App" />,
+      <MaintenanceWindowCard windows={windows} isInMaintenance={false} appName="App" />,
     );
-    expect(container.textContent).toContain("In Progress");
+    expect(container.textContent).toContain("DB Upgrade");
+    expect(container.textContent).toContain("active");
+    expect(container.textContent).toContain("scheduled");
   });
 
-  it("shows window count when not in maintenance", () => {
+  it("shows duration and services", () => {
     const { container } = render(
-      <MaintenanceWindowCard windows={windows} inMaintenance={false} appName="App" />,
+      <MaintenanceWindowCard windows={windows} isInMaintenance={false} appName="App" />,
     );
-    expect(container.textContent).toContain("2 windows");
-  });
-
-  it("renders window titles", () => {
-    const { container } = render(
-      <MaintenanceWindowCard windows={windows} inMaintenance={false} appName="App" />,
-    );
-    expect(container.textContent).toContain("DB Migration");
-    expect(container.textContent).toContain("Security Patch");
-  });
-
-  it("shows affected services", () => {
-    const { container } = render(
-      <MaintenanceWindowCard windows={windows} inMaintenance={false} appName="App" />,
-    );
-    expect(container.textContent).toContain("db");
-    expect(container.textContent).toContain("api");
+    expect(container.textContent).toContain("60 min");
+    expect(container.textContent).toContain("db, api");
   });
 
   it("shows empty state", () => {
     const { container } = render(
-      <MaintenanceWindowCard windows={[]} inMaintenance={false} appName="App" />,
+      <MaintenanceWindowCard windows={[]} isInMaintenance={false} appName="App" />,
     );
     expect(container.textContent).toContain("No maintenance windows");
   });
