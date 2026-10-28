@@ -1,90 +1,69 @@
-"""Tests for App Service Dependency Graph — deps, impact, cycles, topo sort."""
+"""Tests for App Dependency Graph — circular detection, depth, affected services."""
 
 import pytest
 
 from app.services.app_dependency_graph import AppDependencyGraph
 
 
-class TestAddService:
-    def test_add(self):
+class TestRegister:
+    def test_register(self):
         g = AppDependencyGraph()
-        n = g.add_service("inst-1", "api", "API Gateway", depends_on=["auth", "db"])
-        assert n.depends_on == ["auth", "db"]
+        n = g.register_service("inst-1", "api", "API Service", "v1.0", ["db", "cache"])
+        assert n.name == "API Service"
+        assert n.depends_on == ["db", "cache"]
 
-    def test_duplicate(self):
+    def test_self_dependency(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "api", "API")
-        with pytest.raises(ValueError, match="already exists"):
-            g.add_service("inst-1", "api", "API2")
-
-
-class TestDependencies:
-    def test_direct_deps(self):
-        g = AppDependencyGraph()
-        g.add_service("inst-1", "api", "API", depends_on=["auth", "db"])
-        assert g.get_dependencies("inst-1", "api") == ["auth", "db"]
-
-    def test_dependents(self):
-        g = AppDependencyGraph()
-        g.add_service("inst-1", "db", "Database")
-        g.add_service("inst-1", "api", "API", depends_on=["db"])
-        g.add_service("inst-1", "worker", "Worker", depends_on=["db"])
-        deps = g.get_dependents("inst-1", "db")
-        assert set(deps) == {"api", "worker"}
-
-
-class TestImpact:
-    def test_transitive_impact(self):
-        g = AppDependencyGraph()
-        g.add_service("inst-1", "db", "Database")
-        g.add_service("inst-1", "api", "API", depends_on=["db"])
-        g.add_service("inst-1", "frontend", "Frontend", depends_on=["api"])
-        impact = g.get_impact("inst-1", "db")
-        assert impact == ["api", "frontend"]
-
-    def test_no_impact(self):
-        g = AppDependencyGraph()
-        g.add_service("inst-1", "standalone", "Standalone")
-        assert g.get_impact("inst-1", "standalone") == []
+        with pytest.raises(ValueError, match="itself"):
+            g.register_service("inst-1", "api", "API", depends_on=["api"])
 
 
 class TestCircular:
-    def test_no_cycle(self):
+    def test_no_circular(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "a", "A")
-        g.add_service("inst-1", "b", "B", depends_on=["a"])
+        g.register_service("inst-1", "db", "Database")
+        g.register_service("inst-1", "api", "API", depends_on=["db"])
+        g.register_service("inst-1", "web", "Web", depends_on=["api"])
         assert g.has_circular("inst-1") is False
 
-    def test_cycle(self):
+    def test_circular(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "a", "A", depends_on=["b"])
-        g.add_service("inst-1", "b", "B", depends_on=["a"])
+        g.register_service("inst-1", "a", "A", depends_on=["b"])
+        g.register_service("inst-1", "b", "B", depends_on=["c"])
+        g.register_service("inst-1", "c", "C", depends_on=["a"])
         assert g.has_circular("inst-1") is True
 
 
-class TestTopologicalSort:
-    def test_order(self):
+class TestDepth:
+    def test_depth(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "db", "DB")
-        g.add_service("inst-1", "cache", "Cache")
-        g.add_service("inst-1", "api", "API", depends_on=["db", "cache"])
-        g.add_service("inst-1", "web", "Web", depends_on=["api"])
-        order = g.topological_sort("inst-1")
-        assert order.index("db") < order.index("api")
-        assert order.index("cache") < order.index("api")
-        assert order.index("api") < order.index("web")
+        g.register_service("inst-1", "db", "DB")
+        g.register_service("inst-1", "cache", "Cache")
+        g.register_service("inst-1", "api", "API", depends_on=["db", "cache"])
+        g.register_service("inst-1", "web", "Web", depends_on=["api"])
+        assert g.dependency_depth("inst-1", "web") == 2
 
-    def test_circular_raises(self):
+    def test_leaf_depth(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "a", "A", depends_on=["b"])
-        g.add_service("inst-1", "b", "B", depends_on=["a"])
-        with pytest.raises(ValueError, match="circular"):
-            g.topological_sort("inst-1")
+        g.register_service("inst-1", "db", "DB")
+        assert g.dependency_depth("inst-1", "db") == 0
+
+
+class TestAffected:
+    def test_affected(self):
+        g = AppDependencyGraph()
+        g.register_service("inst-1", "db", "DB")
+        g.register_service("inst-1", "api", "API", depends_on=["db"])
+        g.register_service("inst-1", "web", "Web", depends_on=["api"])
+        g.register_service("inst-1", "worker", "Worker", depends_on=["db"])
+        affected = g.affected_by("inst-1", "db")
+        assert "api" in affected
+        assert "web" in affected
+        assert "worker" in affected
 
 
 class TestIsolation:
-    def test_cross_installation(self):
+    def test_cross(self):
         g = AppDependencyGraph()
-        g.add_service("inst-1", "api", "API")
-        with pytest.raises(KeyError):
-            g.get_dependencies("inst-2", "api")
+        g.register_service("inst-1", "db", "DB")
+        assert g.list_services("inst-2") == []
