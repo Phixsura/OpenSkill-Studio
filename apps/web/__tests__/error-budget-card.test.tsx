@@ -1,93 +1,54 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ErrorBudgetCard } from "@/components/error-budget-card";
+import ErrorBudgetCard from "../src/components/error-budget-card";
 
-const HEALTHY = {
-  app_id: "app-1",
-  slo_target_pct: 99.9,
-  actual_success_pct: 99.99,
-  budget_total_minutes: 43.2,
-  budget_consumed_minutes: 4.32,
-  budget_remaining_minutes: 38.88,
-  budget_remaining_pct: 90.0,
-  burn_rate: 0.1,
-  status: "healthy" as const,
-  window_days: 30,
-};
-
-const EXHAUSTED = {
-  ...HEALTHY,
-  actual_success_pct: 95.0,
-  budget_remaining_minutes: 0,
-  budget_remaining_pct: 0,
-  burn_rate: 50.0,
-  status: "exhausted" as const,
-};
-
-const CRITICAL = {
-  ...HEALTHY,
-  budget_remaining_pct: 5.0,
-  budget_remaining_minutes: 2.16,
-  burn_rate: 0.95,
-  status: "critical" as const,
-};
+const budgets = [
+  {
+    service_id: "api",
+    slo_target: 99.9,
+    budget_total: 99,
+    error_count: 30,
+    budget_remaining: 69,
+    budget_consumed_pct: 30.3,
+    is_exhausted: false,
+  },
+  {
+    service_id: "payments",
+    slo_target: 99.99,
+    budget_total: 10,
+    error_count: 10,
+    budget_remaining: 0,
+    budget_consumed_pct: 100,
+    is_exhausted: true,
+  },
+];
 
 describe("ErrorBudgetCard", () => {
-  it("renders heading and app name", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="My App" />);
-    expect(container.textContent).toContain("Error Budget");
-    expect(container.textContent).toContain("My App");
+  it("renders header and service count", () => {
+    const { container } = render(<ErrorBudgetCard budgets={budgets} appName="App" />);
+    expect(container.textContent).toContain("Error Budgets");
+    expect(container.textContent).toContain("2 services");
   });
 
-  it("renders window days", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("30-day");
+  it("shows exhausted count", () => {
+    const { container } = render(<ErrorBudgetCard budgets={budgets} appName="App" />);
+    expect(container.textContent).toContain("1 exhausted");
   });
 
-  it("renders budget remaining percentage", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("90%");
-    expect(container.textContent).toContain("remaining");
+  it("shows SLO targets", () => {
+    const { container } = render(<ErrorBudgetCard budgets={budgets} appName="App" />);
+    expect(container.textContent).toContain("SLO 99.9%");
+    expect(container.textContent).toContain("SLO 99.99%");
   });
 
-  it("renders healthy status", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("healthy");
+  it("shows consumed and remaining", () => {
+    const { container } = render(<ErrorBudgetCard budgets={budgets} appName="App" />);
+    expect(container.textContent).toContain("30.3% consumed");
+    expect(container.textContent).toContain("69 remaining");
   });
 
-  it("renders exhausted status", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={EXHAUSTED} appName="App" />);
-    expect(container.textContent).toContain("exhausted");
-    expect(container.textContent).toContain("SLO breached");
-  });
-
-  it("renders critical status", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={CRITICAL} appName="App" />);
-    expect(container.textContent).toContain("action needed");
-  });
-
-  it("renders SLO target", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("99.9%");
-  });
-
-  it("renders actual success", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("99.99%");
-  });
-
-  it("renders budget remaining minutes", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("39 min");
-  });
-
-  it("renders burn rate", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={HEALTHY} appName="App" />);
-    expect(container.textContent).toContain("0.10×");
-  });
-
-  it("renders high burn rate in red", () => {
-    const { container } = render(<ErrorBudgetCard snapshot={EXHAUSTED} appName="App" />);
-    expect(container.textContent).toContain("50.00×");
+  it("shows empty state", () => {
+    const { container } = render(<ErrorBudgetCard budgets={[]} appName="App" />);
+    expect(container.textContent).toContain("No error budgets");
   });
 });
