@@ -2,102 +2,56 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import HealthCheckCard from "../src/components/health-check-card";
 
-const healthyProbe = {
-  probe_id: "p1",
-  endpoint: "/api/health",
-  healthy: true,
-  consecutive_failures: 0,
-  total_checks: 100,
-  availability_pct: 99.9,
-  last_check_result: "pass" as const,
-  last_check_latency_ms: 42,
-  last_failure_message: null,
-};
-
-const unhealthyProbe = {
-  probe_id: "p2",
-  endpoint: "/api/payments",
-  healthy: false,
-  consecutive_failures: 5,
-  total_checks: 50,
-  availability_pct: 85.0,
-  last_check_result: "fail" as const,
-  last_check_latency_ms: null,
-  last_failure_message: "connection refused",
-};
-
-const timeoutProbe = {
-  probe_id: "p3",
-  endpoint: "/api/search",
-  healthy: true,
-  consecutive_failures: 1,
-  total_checks: 200,
-  availability_pct: 98.5,
-  last_check_result: "timeout" as const,
-  last_check_latency_ms: 5000,
-  last_failure_message: null,
-};
+const endpoints = [
+  {
+    endpoint_id: "api",
+    url: "https://api.example.com/health",
+    current_status: "up" as const,
+    uptime_pct: 99.5,
+    avg_latency_ms: 45,
+  },
+  {
+    endpoint_id: "db",
+    url: "https://db.example.com/health",
+    current_status: "down" as const,
+    uptime_pct: 85.0,
+    avg_latency_ms: 120,
+  },
+  {
+    endpoint_id: "cache",
+    url: "https://cache/ping",
+    current_status: "degraded" as const,
+    uptime_pct: 92.3,
+    avg_latency_ms: 200,
+  },
+];
 
 describe("HealthCheckCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(<HealthCheckCard probes={[healthyProbe]} appName="My App" />);
+  it("renders header and count", () => {
+    const { container } = render(<HealthCheckCard endpoints={endpoints} appName="My App" />);
     expect(container.textContent).toContain("Health Checks");
-    expect(container.textContent).toContain("My App");
+    expect(container.textContent).toContain("3 endpoints");
   });
 
-  it("shows overall availability percentage", () => {
-    const { container } = render(<HealthCheckCard probes={[healthyProbe]} appName="App" />);
-    expect(container.textContent).toContain("99.9%");
+  it("shows down count", () => {
+    const { container } = render(<HealthCheckCard endpoints={endpoints} appName="App" />);
+    expect(container.textContent).toContain("1 down");
   });
 
-  it("shows all-healthy badge when everything is up", () => {
-    const { container } = render(<HealthCheckCard probes={[healthyProbe]} appName="App" />);
-    expect(container.textContent).toContain("All healthy");
+  it("shows uptime percentages", () => {
+    const { container } = render(<HealthCheckCard endpoints={endpoints} appName="App" />);
+    expect(container.textContent).toContain("99.5% uptime");
+    expect(container.textContent).toContain("85% uptime");
   });
 
-  it("shows unhealthy count badge", () => {
-    const { container } = render(
-      <HealthCheckCard probes={[healthyProbe, unhealthyProbe]} appName="App" />,
-    );
-    expect(container.textContent).toContain("1 unhealthy");
+  it("shows latency", () => {
+    const { container } = render(<HealthCheckCard endpoints={endpoints} appName="App" />);
+    expect(container.textContent).toContain("45ms avg");
+    expect(container.textContent).toContain("120ms avg");
   });
 
-  it("renders endpoint names", () => {
-    const { container } = render(
-      <HealthCheckCard probes={[healthyProbe, unhealthyProbe]} appName="App" />,
-    );
-    expect(container.textContent).toContain("/api/health");
-    expect(container.textContent).toContain("/api/payments");
-  });
-
-  it("shows latency for healthy probe", () => {
-    const { container } = render(<HealthCheckCard probes={[healthyProbe]} appName="App" />);
-    expect(container.textContent).toContain("42ms");
-  });
-
-  it("shows result badges", () => {
-    const { container } = render(
-      <HealthCheckCard probes={[healthyProbe, unhealthyProbe, timeoutProbe]} appName="App" />,
-    );
-    expect(container.textContent).toContain("Pass");
-    expect(container.textContent).toContain("Fail");
-    expect(container.textContent).toContain("Timeout");
-  });
-
-  it("shows consecutive failures and error message for unhealthy", () => {
-    const { container } = render(<HealthCheckCard probes={[unhealthyProbe]} appName="App" />);
-    expect(container.textContent).toContain("5 consecutive failures");
-    expect(container.textContent).toContain("connection refused");
-  });
-
-  it("shows check count and uptime", () => {
-    const { container } = render(<HealthCheckCard probes={[healthyProbe]} appName="App" />);
-    expect(container.textContent).toContain("100 checks");
-    expect(container.textContent).toContain("uptime");
-  });
-
-  it("shows empty state when no probes", () => {
-    const { container } = render(<HealthCheckCard probes={[]} appName="App" />);
-    expect(container.textContent).toContain("No probes configured");
+  it("shows empty state", () => {
+    const { container } = render(<HealthCheckCard endpoints={[]} appName="App" />);
+    expect(container.textContent).toContain("No health checks");
   });
 });
