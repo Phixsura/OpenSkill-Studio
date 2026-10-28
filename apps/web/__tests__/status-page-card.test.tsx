@@ -1,22 +1,63 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { StatusPageCard } from "@/components/status-page-card";
+import StatusPageCard from "../src/components/status-page-card";
 
-const SERVICES = [{ name: "API", status: "operational", uptimePct: 99.99 }, { name: "Webhooks", status: "degraded", uptimePct: 98 }];
+const components = [
+  { component_id: "api", name: "API", status: "operational" as const },
+  { component_id: "db", name: "Database", status: "major_outage" as const },
+];
+const incidents = [{ incident_id: "inc-1", title: "DB Down", status: "investigating" }];
 
 describe("StatusPageCard", () => {
-  it("shows overall status", () => {
-    const { container } = render(<StatusPageCard overall="operational" services={SERVICES} uptimePct={99} />);
-    expect(container.textContent).toContain("operational");
-    expect(container.textContent).toContain("🟢");
+  it("renders header and overall status", () => {
+    const { container } = render(
+      <StatusPageCard
+        components={components}
+        incidents={incidents}
+        overallStatus="major_outage"
+        appName="App"
+      />,
+    );
+    expect(container.textContent).toContain("Status Page");
+    expect(container.textContent).toContain("major outage");
   });
-  it("shows services", () => {
-    const { container } = render(<StatusPageCard overall="degraded" services={SERVICES} uptimePct={98} />);
+
+  it("shows component names and statuses", () => {
+    const { container } = render(
+      <StatusPageCard
+        components={components}
+        incidents={[]}
+        overallStatus="operational"
+        appName="App"
+      />,
+    );
     expect(container.textContent).toContain("API");
-    expect(container.textContent).toContain("Webhooks");
+    expect(container.textContent).toContain("operational");
+    expect(container.textContent).toContain("Database");
   });
-  it("shows uptime", () => {
-    const { container } = render(<StatusPageCard overall="operational" services={[]} uptimePct={99.5} />);
-    expect(container.textContent).toContain("99.5%");
+
+  it("shows incidents", () => {
+    const { container } = render(
+      <StatusPageCard
+        components={components}
+        incidents={incidents}
+        overallStatus="major_outage"
+        appName="App"
+      />,
+    );
+    expect(container.textContent).toContain("DB Down");
+    expect(container.textContent).toContain("investigating");
+  });
+
+  it("shows component count", () => {
+    const { container } = render(
+      <StatusPageCard
+        components={components}
+        incidents={[]}
+        overallStatus="operational"
+        appName="App"
+      />,
+    );
+    expect(container.textContent).toContain("2 components");
   });
 });
