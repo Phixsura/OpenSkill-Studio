@@ -11,9 +11,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import re
+from urllib.parse import urlparse
+
 import structlog
 
 log = structlog.get_logger()
+
+_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def _safe_url(u: str) -> str:
+    if not u:
+        return u
+    if u.startswith("/") and not u.startswith("//"):
+        return u
+    p = urlparse(u)
+    if p.scheme in ("http", "https") and p.hostname:
+        return u
+    raise ValueError(f"Invalid URL scheme: {u}")
 
 
 @dataclass
@@ -53,6 +69,11 @@ class AppDeveloperPortal:
         if not portal_name:
             raise ValueError("portal_name is required")
 
+        if logo_url:
+            _safe_url(logo_url)
+        if not _COLOR_RE.match(theme_color):
+            raise ValueError(f"Invalid theme_color: {theme_color}")
+
         config = PortalConfig(
             portal_name=portal_name, logo_url=logo_url,
             theme_color=theme_color, welcome_message=welcome_message,
@@ -65,6 +86,10 @@ class AppDeveloperPortal:
         items: list[dict], sort_order: int = 0,
     ) -> NavSection:
         config = self._get(installation_id)
+        for item in items:
+            if "href" in item:
+                _safe_url(item["href"])
+
         section = NavSection(
             section_id=section_id, title=title,
             items=items, sort_order=sort_order,
@@ -77,6 +102,8 @@ class AppDeveloperPortal:
         return self._get(installation_id)
 
     def update_theme(self, installation_id: str, theme_color: str) -> PortalConfig:
+        if not _COLOR_RE.match(theme_color):
+            raise ValueError(f"Invalid theme_color: {theme_color}")
         config = self._get(installation_id)
         config.theme_color = theme_color
         return config
