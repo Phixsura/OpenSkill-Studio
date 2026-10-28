@@ -2,48 +2,74 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import CostTrackerCard from "../src/components/cost-tracker-card";
 
-const breakdown = [
-  { category: "compute", amount_cents: 5000 },
-  { category: "storage", amount_cents: 2000 },
-  { category: "network", amount_cents: 800 },
+const categories = [
+  { category: "compute", amount: 85.0 },
+  { category: "storage", amount: 15.0 },
 ];
 
+const alerts = [{ category: "compute", spent: 85, limit: 100, pct: 85 }];
+
 describe("CostTrackerCard", () => {
-  it("renders header and app name", () => {
+  it("renders header and total", () => {
     const { container } = render(
-      <CostTrackerCard totalDollars={78} breakdown={breakdown} appName="My App" />,
+      <CostTrackerCard
+        categories={categories}
+        alerts={[]}
+        totalSpent={100}
+        currency="USD"
+        appName="App"
+      />,
     );
     expect(container.textContent).toContain("Cost Tracker");
-    expect(container.textContent).toContain("My App");
+    expect(container.textContent).toContain("USD 100.00");
   });
 
-  it("shows total dollars", () => {
+  it("shows categories with percentages", () => {
     const { container } = render(
-      <CostTrackerCard totalDollars={78} breakdown={breakdown} appName="App" />,
-    );
-    expect(container.textContent).toContain("$78.00");
-  });
-
-  it("renders category names", () => {
-    const { container } = render(
-      <CostTrackerCard totalDollars={78} breakdown={breakdown} appName="App" />,
+      <CostTrackerCard
+        categories={categories}
+        alerts={[]}
+        totalSpent={100}
+        currency="USD"
+        appName="App"
+      />,
     );
     expect(container.textContent).toContain("compute");
+    expect(container.textContent).toContain("85%");
     expect(container.textContent).toContain("storage");
-    expect(container.textContent).toContain("network");
   });
 
-  it("shows category amounts", () => {
+  it("shows budget alerts", () => {
     const { container } = render(
-      <CostTrackerCard totalDollars={78} breakdown={breakdown} appName="App" />,
+      <CostTrackerCard
+        categories={categories}
+        alerts={alerts}
+        totalSpent={100}
+        currency="USD"
+        appName="App"
+      />,
     );
-    expect(container.textContent).toContain("$50.00");
-    expect(container.textContent).toContain("$20.00");
-    expect(container.textContent).toContain("$8.00");
+    expect(container.textContent).toContain("85% of budget");
+  });
+
+  it("shows amounts", () => {
+    const { container } = render(
+      <CostTrackerCard
+        categories={categories}
+        alerts={[]}
+        totalSpent={100}
+        currency="USD"
+        appName="App"
+      />,
+    );
+    expect(container.textContent).toContain("USD 85.00");
+    expect(container.textContent).toContain("USD 15.00");
   });
 
   it("shows empty state", () => {
-    const { container } = render(<CostTrackerCard totalDollars={0} breakdown={[]} appName="App" />);
+    const { container } = render(
+      <CostTrackerCard categories={[]} alerts={[]} totalSpent={0} currency="USD" appName="App" />,
+    );
     expect(container.textContent).toContain("No costs recorded");
   });
 });
