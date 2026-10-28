@@ -51,6 +51,7 @@ class AlertEvent:
     """An alert firing or resolution event."""
 
     rule_id: str
+    installation_id: str
     state: AlertState
     value: float
     threshold: float
@@ -117,7 +118,8 @@ class AppAlertRuleEngine:
                 self._states[key] = AlertState.FIRING
                 self._last_fired[key] = now
                 event = AlertEvent(
-                    rule_id=rule.rule_id, state=AlertState.FIRING,
+                    rule_id=rule.rule_id, installation_id=installation_id,
+                    state=AlertState.FIRING,
                     value=value, threshold=rule.threshold, timestamp=now,
                 )
                 events.append(event)
@@ -126,7 +128,8 @@ class AppAlertRuleEngine:
             elif not triggered and current_state == AlertState.FIRING:
                 self._states[key] = AlertState.RESOLVED
                 event = AlertEvent(
-                    rule_id=rule.rule_id, state=AlertState.RESOLVED,
+                    rule_id=rule.rule_id, installation_id=installation_id,
+                    state=AlertState.RESOLVED,
                     value=value, threshold=rule.threshold, timestamp=now,
                 )
                 events.append(event)
@@ -144,9 +147,9 @@ class AppAlertRuleEngine:
         return [r for (inst, _), r in self._rules.items() if inst == installation_id]
 
     def get_events(self, installation_id: str, limit: int = 50) -> list[AlertEvent]:
-        matching = [e for e in self._events
-                    if any(k[0] == installation_id and k[1] == e.rule_id
-                           for k in self._rules)]
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        matching = [e for e in self._events if e.installation_id == installation_id]
         return list(reversed(matching[-limit:]))
 
     def _check(self, op: Operator, value: float, threshold: float) -> bool:
