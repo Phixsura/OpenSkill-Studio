@@ -3,63 +3,42 @@ import { describe, expect, it } from "vitest";
 import DependencyGraphCard from "../src/components/dependency-graph-card";
 
 const services = [
-  { service_id: "db", name: "Database", depends_on: [], dependent_count: 2 },
-  { service_id: "api", name: "API Gateway", depends_on: ["db", "cache"], dependent_count: 1 },
-  { service_id: "cache", name: "Cache", depends_on: [], dependent_count: 1 },
-  { service_id: "web", name: "Web App", depends_on: ["api"], dependent_count: 0 },
+  { service_id: "db", name: "Database", version: "v14", depends_on: [] },
+  { service_id: "api", name: "API", version: "v2.1", depends_on: ["db", "cache"] },
+  { service_id: "cache", name: "Cache", version: "", depends_on: [] },
+  { service_id: "web", name: "Web App", version: "v3.0", depends_on: ["api"] },
 ];
 
 describe("DependencyGraphCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(
-      <DependencyGraphCard services={services} hasCircular={false} appName="My App" />,
-    );
-    expect(container.textContent).toContain("Service Dependencies");
-    expect(container.textContent).toContain("My App");
-  });
-
-  it("shows service count", () => {
+  it("renders header and service count", () => {
     const { container } = render(
       <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
     );
+    expect(container.textContent).toContain("Dependency Graph");
     expect(container.textContent).toContain("4 services");
+  });
+
+  it("shows edge count", () => {
+    const { container } = render(
+      <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
+    );
+    expect(container.textContent).toContain("3");
+    expect(container.textContent).toContain("Edges");
   });
 
   it("shows circular warning", () => {
     const { container } = render(
       <DependencyGraphCard services={services} hasCircular={true} appName="App" />,
     );
-    expect(container.textContent).toContain("Circular");
+    expect(container.textContent).toContain("Circular detected");
   });
 
-  it("renders service names", () => {
+  it("shows dependency counts per service", () => {
     const { container } = render(
       <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
     );
-    expect(container.textContent).toContain("Database");
-    expect(container.textContent).toContain("API Gateway");
-  });
-
-  it("shows dependency arrows", () => {
-    const { container } = render(
-      <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
-    );
-    expect(container.textContent).toContain("← db");
-    expect(container.textContent).toContain("← cache");
-  });
-
-  it("shows root label for no dependencies", () => {
-    const { container } = render(
-      <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
-    );
-    expect(container.textContent).toContain("No dependencies (root)");
-  });
-
-  it("shows dependent count", () => {
-    const { container } = render(
-      <DependencyGraphCard services={services} hasCircular={false} appName="App" />,
-    );
-    expect(container.textContent).toContain("2 dependents");
+    expect(container.textContent).toContain("2 deps");
+    expect(container.textContent).toContain("no deps");
   });
 
   it("shows empty state", () => {
