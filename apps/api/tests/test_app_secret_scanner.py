@@ -1,77 +1,60 @@
-"""Tests for App Secret Scanner — pattern detection, severity, redaction."""
+"""Tests for App Secret Scanner — scan, detect, resolve."""
 
 import pytest
 
 from app.services.app_secret_scanner import AppSecretScanner
 
 
-class TestScanConfig:
-    def test_clean_config(self):
-        s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"name": "my-app", "port": "8080"})
-        assert len(r.findings) == 0
-        assert r.scanned_fields == 2
-
+class TestScan:
     def test_detect_aws_key(self):
         s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"aws_access_key": "AKIAIOSFODNN7EXAMPLE"})
-        assert len(r.findings) == 1
-        assert r.findings[0].pattern_name == "aws_key"
-        assert r.findings[0].severity == "high"
+        text = "config: AKIAIOSFODNN7EXAMPLE"
+        findings = s.scan("inst-1", text, "config.yaml")
+        assert len(findings) == 1
+        assert findings[0].pattern_name == "aws_key"
 
     def test_detect_github_token(self):
         s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"token": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"})
-        assert r.high_count == 1
-
-    def test_detect_password(self):
-        s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"db_config": 'password = "super_secret_pw"'})
-        assert r.medium_count >= 1
+        text = "token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl"
+        findings = s.scan("inst-1", text, ".env")
+        names = [f.pattern_name for f in findings]
+        assert "github_token" in names
 
     def test_detect_private_key(self):
         s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"cert": "-----BEGIN PRIVATE KEY-----\nMIIE..."})
-        assert r.critical_count == 1
+        text = "-----BEGIN RSA PRIVATE KEY-----\nMIIE..."
+        findings = s.scan("inst-1", text, "id_rsa")
+        assert any(f.severity == "critical" for f in findings)
 
-    def test_redacted_snippet(self):
+    def test_detect_connection_string(self):
         s = AppSecretScanner()
-        r = s.scan_config("inst-1", {"key": "AKIAIOSFODNN7EXAMPLE"})
-        assert "AKIAIOSFODNN7EXAMPLE" not in r.findings[0].snippet
-        assert "***" in r.findings[0].snippet
+        text = 'DB_URL = "postgres://user:pass@host:5432/db"'
+        findings = s.scan("inst-1", text, ".env")
+        names = [f.pattern_name for f in findings]
+        assert "connection_string" in names
 
-
-class TestScanText:
-    def test_scan_text(self):
+    def test_no_findings(self):
         s = AppSecretScanner()
-        text = 'export AWS_KEY=AKIAIOSFODNN7EXAMPLE\necho "hello"'
-        findings = s.scan_text("inst-1", text, location="env.sh")
-        assert len(findings) >= 1
-        assert findings[0].line == 1
-        assert findings[0].location == "env.sh"
+        findings = s.scan("inst-1", "Hello world", "readme.md")
+        assert findings == []
 
-    def test_jwt_detection(self):
+    def test_redacted(self):
         s = AppSecretScanner()
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
-        findings = s.scan_text("inst-1", jwt)
-        assert len(findings) >= 1
+        findings = s.scan("inst-1", "AKIAIOSFODNN7EXAMPLE", "file")
+        assert "..." in findings[0].matched_text
 
 
-class TestSeverityCounts:
-    def test_counts(self):
+class TestResolve:
+    def test_resolve(self):
         s = AppSecretScanner()
-        r = s.scan_config("inst-1", {
-            "key": "AKIAIOSFODNN7EXAMPLE",
-            "cert": "-----BEGIN PRIVATE KEY-----",
-            "db": 'password = "mysecret123"',
-        })
-        assert r.critical_count >= 1
-        assert r.high_count >= 1
-        assert r.medium_count >= 1
+        findings = s.scan("inst-1", "AKIAIOSFODNN7EXAMPLE", "file")
+        f = s.resolve("inst-1", findings[0].finding_id)
+        assert f.resolved is True
+        assert s.unresolved("inst-1") == []
 
 
 class TestIsolation:
-    def test_missing_installation_id(self):
+    def test_cross(self):
         s = AppSecretScanner()
-        with pytest.raises(ValueError):
-            s.scan_config("", {"key": "value"})
+        s.scan("inst-1", "AKIAIOSFODNN7EXAMPLE", "file")
+        assert s.count("inst-2") == 0

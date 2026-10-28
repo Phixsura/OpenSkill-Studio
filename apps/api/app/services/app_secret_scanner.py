@@ -1,9 +1,11 @@
-"""App Secret Scanner — detect accidentally exposed secrets in app config.
+"""App Secret Scanner — detect leaked secrets in code and configs.
 
-Scans configuration and code for leaked secrets:
-- Pattern-based detection (API keys, tokens, passwords)
-- Severity classification
-- Per-installation scoped scans
+Scans text for potential secrets:
+- API key patterns
+- JWT tokens
+- Private keys
+- Connection strings
+- Per-installation scoped findings
 """
 
 from __future__ import annotations
@@ -15,110 +17,85 @@ import structlog
 
 log = structlog.get_logger()
 
-_PATTERNS: list[tuple[str, str, str]] = [
-    ("aws_key", r"AKIA[0-9A-Z]{16}", "high"),
-    ("github_token", r"ghp_[A-Za-z0-9]{36}", "high"),
-    ("generic_secret", r"(?i)(password|secret|api_key|token)\s*[=:]\s*['\"][^'\"]{8,}['\"]", "medium"),
-    ("private_key", r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "critical"),
-    ("jwt", r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", "medium"),
-]
-
 
 @dataclass
 class SecretFinding:
-    """A detected secret."""
+    """A detected secret in text."""
 
     finding_id: str
     pattern_name: str
-    severity: str
-    location: str  # field name or file path
-    snippet: str   # redacted snippet
-    line: int = 0
+    matched_text: str  # redacted preview
+    location: str  # file path or config key
+    severity: str = "high"  # "critical", "high", "medium", "low"
+    resolved: bool = False
 
 
-@dataclass
-class ScanReport:
-    """Result of a secret scan."""
+_PATTERNS: list[tuple[str, str, re.Pattern]] = [
+    ("aws_key", "high", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("github_token", "high", re.compile(r"gh[ps]_[A-Za-z0-9_]{36,}")),
+    ("jwt_token", "medium", re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
+    ("private_key", "critical", re.compile(r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----")),
+    ("generic_secret", "medium", re.compile(r"""(?:password|secret|api_key|token)\s*[=:]\s*["'][^"']{8,}["']""", re.IGNORECASE)),
+    ("connection_string", "high", re.compile(r"(?:postgres|mysql|mongodb)://[^\s]{10,}")),
+]
 
-    installation_id: str
-    findings: list[SecretFinding]
-    scanned_fields: int
-    critical_count: int = 0
-    high_count: int = 0
-    medium_count: int = 0
+
+def _redact(text: str, max_show: int = 8) -> str:
+    """Show first few chars then redact."""
+    if len(text) <= max_show:
+        return text
+    return text[:max_show] + "..." + "*" * min(8, len(text) - max_show)
 
 
 class AppSecretScanner:
-    """Detect accidentally exposed secrets."""
+    """Detect leaked secrets in code and configs."""
 
     def __init__(self) -> None:
-        self._compiled = [(name, re.compile(pat), sev) for name, pat, sev in _PATTERNS]
+        self._findings: dict[str, list[SecretFinding]] = {}
 
-    def scan_config(
-        self,
-        installation_id: str,
-        config: dict[str, str],
-    ) -> ScanReport:
-        """Scan config key-value pairs for secrets."""
+    def scan(
+        self, installation_id: str, text: str, location: str,
+        finding_id_prefix: str = "f",
+    ) -> list[SecretFinding]:
         if not installation_id:
             raise ValueError("installation_id is required")
+        if not text:
+            return []
 
         findings: list[SecretFinding] = []
-        idx = 0
+        seen: set[str] = set()
 
-        for key, value in config.items():
-            if not isinstance(value, str):
-                continue
-            for name, pattern, severity in self._compiled:
-                if pattern.search(value):
-                    idx += 1
-                    # Redact: show first 4 chars + ***
-                    match = pattern.search(value)
-                    raw = match.group(0) if match else value
-                    redacted = raw[:4] + "***" + raw[-2:] if len(raw) > 6 else "***"
-                    findings.append(SecretFinding(
-                        finding_id=f"f-{idx}",
-                        pattern_name=name,
-                        severity=severity,
-                        location=key,
-                        snippet=redacted,
-                    ))
+        for name, severity, pattern in _PATTERNS:
+            for match in pattern.finditer(text):
+                matched = match.group(0)
+                key = (name, matched)
+                if key in seen:
+                    continue
+                seen.add(key)
 
-        critical = sum(1 for f in findings if f.severity == "critical")
-        high = sum(1 for f in findings if f.severity == "high")
-        medium = sum(1 for f in findings if f.severity == "medium")
+                fid = f"{finding_id_prefix}_{name}_{len(findings)}"
+                finding = SecretFinding(
+                    finding_id=fid, pattern_name=name,
+                    matched_text=_redact(matched),
+                    location=location, severity=severity,
+                )
+                findings.append(finding)
 
-        return ScanReport(
-            installation_id=installation_id,
-            findings=findings,
-            scanned_fields=len(config),
-            critical_count=critical,
-            high_count=high,
-            medium_count=medium,
-        )
-
-    def scan_text(
-        self,
-        installation_id: str,
-        text: str,
-        location: str = "unknown",
-    ) -> list[SecretFinding]:
-        """Scan a block of text for secrets."""
-        findings: list[SecretFinding] = []
-        idx = 0
-        for line_num, line in enumerate(text.split("\n"), 1):
-            for name, pattern, severity in self._compiled:
-                if pattern.search(line):
-                    idx += 1
-                    match = pattern.search(line)
-                    raw = match.group(0) if match else ""
-                    redacted = raw[:4] + "***" if len(raw) > 4 else "***"
-                    findings.append(SecretFinding(
-                        finding_id=f"f-{idx}",
-                        pattern_name=name,
-                        severity=severity,
-                        location=location,
-                        snippet=redacted,
-                        line=line_num,
-                    ))
+        self._findings.setdefault(installation_id, []).extend(findings)
         return findings
+
+    def resolve(self, installation_id: str, finding_id: str) -> SecretFinding:
+        for f in self._findings.get(installation_id, []):
+            if f.finding_id == finding_id:
+                f.resolved = True
+                return f
+        raise KeyError(f"Finding {finding_id} not found")
+
+    def unresolved(self, installation_id: str) -> list[SecretFinding]:
+        return [f for f in self._findings.get(installation_id, []) if not f.resolved]
+
+    def by_severity(self, installation_id: str, severity: str) -> list[SecretFinding]:
+        return [f for f in self._findings.get(installation_id, []) if f.severity == severity]
+
+    def count(self, installation_id: str) -> int:
+        return len(self._findings.get(installation_id, []))
