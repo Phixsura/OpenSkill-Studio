@@ -1,16 +1,14 @@
-"""App Custom Domain Manager — manage custom domains for installed apps.
+"""App Custom Domain — manage custom domain mappings.
 
-Handles custom domain lifecycle:
-- Register domains with DNS verification
-- Track verification status
+Manages custom domains for installed apps:
+- Map custom domains to app endpoints
 - SSL certificate status tracking
+- DNS verification status
 - Per-installation scoped domains
 """
 
 from __future__ import annotations
 
-import re
-import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,12 +17,9 @@ import structlog
 
 log = structlog.get_logger()
 
-_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$")
-
 
 class DomainStatus(str, Enum):
     PENDING = "pending"
-    VERIFYING = "verifying"
     VERIFIED = "verified"
     FAILED = "failed"
 
@@ -38,93 +33,80 @@ class SSLStatus(str, Enum):
 
 @dataclass
 class CustomDomain:
-    """A custom domain record."""
+    """A custom domain mapping."""
 
     domain_id: str
-    installation_id: str
-    domain: str
-    status: DomainStatus = DomainStatus.PENDING
+    hostname: str
+    target: str  # app endpoint
+    dns_status: DomainStatus = DomainStatus.PENDING
     ssl_status: SSLStatus = SSLStatus.NONE
     verification_token: str = ""
     created_at: float = field(default_factory=time.time)
-    verified_at: float | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self.dns_status == DomainStatus.VERIFIED and self.ssl_status == SSLStatus.ACTIVE
 
 
-class AppCustomDomainManager:
-    """Manage custom domains for installed apps."""
+class AppCustomDomain:
+    """Manage custom domain mappings."""
 
     def __init__(self) -> None:
         self._domains: dict[tuple[str, str], CustomDomain] = {}
 
-    def register_domain(
-        self,
-        installation_id: str,
-        domain_id: str,
-        domain: str,
-        now: float | None = None,
+    def add_domain(
+        self, installation_id: str, domain_id: str, hostname: str,
+        target: str, verification_token: str = "",
     ) -> CustomDomain:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not domain_id:
-            raise ValueError("domain_id is required")
-        if not _DOMAIN_RE.match(domain.lower()):
-            raise ValueError(f"Invalid domain: {domain}")
+        if not hostname:
+            raise ValueError("hostname is required")
+        if not target:
+            raise ValueError("target is required")
 
-        key = (installation_id, domain_id)
-        if key in self._domains:
-            raise ValueError(f"Domain {domain_id} already exists")
+        # Normalize hostname
+        hostname = hostname.lower().strip().rstrip(".")
 
-        # Check domain uniqueness across all installations
-        for (_, _), d in self._domains.items():
-            if d.domain.lower() == domain.lower():
-                raise ValueError(f"Domain {domain} already registered")
-
-        token = f"openskill-verify-{secrets.token_urlsafe(32)}"
-        record = CustomDomain(
-            domain_id=domain_id, installation_id=installation_id,
-            domain=domain.lower(), verification_token=token,
-            created_at=now or time.time(),
+        domain = CustomDomain(
+            domain_id=domain_id, hostname=hostname, target=target,
+            verification_token=verification_token,
         )
-        self._domains[key] = record
-        return record
+        self._domains[(installation_id, domain_id)] = domain
+        return domain
 
-    def start_verification(self, installation_id: str, domain_id: str) -> CustomDomain:
+    def verify_dns(self, installation_id: str, domain_id: str, success: bool) -> CustomDomain:
         d = self._get(installation_id, domain_id)
-        if d.status != DomainStatus.PENDING:
-            raise ValueError(f"Cannot verify domain in {d.status} state")
-        d.status = DomainStatus.VERIFYING
+        d.dns_status = DomainStatus.VERIFIED if success else DomainStatus.FAILED
         return d
 
-    def complete_verification(self, installation_id: str, domain_id: str, now: float | None = None) -> CustomDomain:
+    def update_ssl(self, installation_id: str, domain_id: str, status: SSLStatus) -> CustomDomain:
         d = self._get(installation_id, domain_id)
-        if d.status != DomainStatus.VERIFYING:
-            raise ValueError(f"Cannot complete verification in {d.status} state")
-        d.status = DomainStatus.VERIFIED
-        d.verified_at = now or time.time()
+        d.ssl_status = status
         return d
 
-    def fail_verification(self, installation_id: str, domain_id: str) -> CustomDomain:
-        d = self._get(installation_id, domain_id)
-        d.status = DomainStatus.FAILED
-        return d
+    def get_domain(self, installation_id: str, domain_id: str) -> CustomDomain:
+        return self._get(installation_id, domain_id)
 
-    def update_ssl(self, installation_id: str, domain_id: str, ssl_status: SSLStatus) -> CustomDomain:
-        d = self._get(installation_id, domain_id)
-        d.ssl_status = ssl_status
-        return d
+    def find_by_hostname(self, installation_id: str, hostname: str) -> CustomDomain | None:
+        normalized = hostname.lower().strip().rstrip(".")
+        for (inst, _), d in self._domains.items():
+            if inst == installation_id and d.hostname == normalized:
+                return d
+        return None
 
-    def remove_domain(self, installation_id: str, domain_id: str) -> bool:
+    def ready_domains(self, installation_id: str) -> list[CustomDomain]:
+        return [d for (inst, _), d in self._domains.items() if inst == installation_id and d.is_ready]
+
+    def list_domains(self, installation_id: str) -> list[CustomDomain]:
+        return [d for (inst, _), d in self._domains.items() if inst == installation_id]
+
+    def remove(self, installation_id: str, domain_id: str) -> bool:
         key = (installation_id, domain_id)
         if key in self._domains:
             del self._domains[key]
             return True
         return False
-
-    def get_domain(self, installation_id: str, domain_id: str) -> CustomDomain:
-        return self._get(installation_id, domain_id)
-
-    def list_domains(self, installation_id: str) -> list[CustomDomain]:
-        return [d for (inst, _), d in self._domains.items() if inst == installation_id]
 
     def _get(self, installation_id: str, domain_id: str) -> CustomDomain:
         key = (installation_id, domain_id)

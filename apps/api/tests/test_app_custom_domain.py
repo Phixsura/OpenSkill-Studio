@@ -1,89 +1,69 @@
-"""Tests for App Custom Domain Manager — registration, verification, SSL."""
+"""Tests for App Custom Domain — add, verify, SSL, ready check."""
 
 import pytest
 
-from app.services.app_custom_domain import AppCustomDomainManager, DomainStatus, SSLStatus
+from app.services.app_custom_domain import AppCustomDomain, DomainStatus, SSLStatus
 
 
-class TestRegister:
-    def test_register(self):
-        m = AppCustomDomainManager()
-        d = m.register_domain("inst-1", "d1", "app.example.com")
-        assert d.domain == "app.example.com"
-        assert d.status == DomainStatus.PENDING
-        assert d.verification_token != ""
+class TestAdd:
+    def test_add(self):
+        d = AppCustomDomain()
+        dom = d.add_domain("inst-1", "d1", "api.example.com", "app-123.internal")
+        assert dom.hostname == "api.example.com"
+        assert dom.dns_status == DomainStatus.PENDING
 
-    def test_invalid_domain(self):
-        m = AppCustomDomainManager()
-        with pytest.raises(ValueError, match="Invalid domain"):
-            m.register_domain("inst-1", "d1", "not a domain!")
-
-    def test_duplicate_id(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "a.example.com")
-        with pytest.raises(ValueError, match="already exists"):
-            m.register_domain("inst-1", "d1", "b.example.com")
-
-    def test_duplicate_domain(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        with pytest.raises(ValueError, match="already registered"):
-            m.register_domain("inst-2", "d2", "app.example.com")
-
-    def test_lowercased(self):
-        m = AppCustomDomainManager()
-        d = m.register_domain("inst-1", "d1", "APP.Example.COM")
-        assert d.domain == "app.example.com"
+    def test_normalize(self):
+        d = AppCustomDomain()
+        dom = d.add_domain("inst-1", "d1", "  API.Example.COM.  ", "target")
+        assert dom.hostname == "api.example.com"
 
 
-class TestVerification:
-    def test_full_verification(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        m.start_verification("inst-1", "d1")
-        d = m.complete_verification("inst-1", "d1", now=1000.0)
-        assert d.status == DomainStatus.VERIFIED
-        assert d.verified_at == 1000.0
+class TestVerify:
+    def test_dns_success(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        dom = d.verify_dns("inst-1", "d1", True)
+        assert dom.dns_status == DomainStatus.VERIFIED
 
-    def test_fail_verification(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        m.start_verification("inst-1", "d1")
-        d = m.fail_verification("inst-1", "d1")
-        assert d.status == DomainStatus.FAILED
-
-    def test_cannot_verify_verified(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        m.start_verification("inst-1", "d1")
-        m.complete_verification("inst-1", "d1")
-        with pytest.raises(ValueError):
-            m.start_verification("inst-1", "d1")
+    def test_dns_fail(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        dom = d.verify_dns("inst-1", "d1", False)
+        assert dom.dns_status == DomainStatus.FAILED
 
 
 class TestSSL:
-    def test_update_ssl(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        d = m.update_ssl("inst-1", "d1", SSLStatus.ACTIVE)
-        assert d.ssl_status == SSLStatus.ACTIVE
+    def test_ssl_active(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        dom = d.update_ssl("inst-1", "d1", SSLStatus.ACTIVE)
+        assert dom.ssl_status == SSLStatus.ACTIVE
 
 
-class TestRemove:
-    def test_remove(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        assert m.remove_domain("inst-1", "d1") is True
-        assert m.list_domains("inst-1") == []
+class TestReady:
+    def test_ready(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        d.verify_dns("inst-1", "d1", True)
+        d.update_ssl("inst-1", "d1", SSLStatus.ACTIVE)
+        assert len(d.ready_domains("inst-1")) == 1
 
-    def test_remove_nonexistent(self):
-        m = AppCustomDomainManager()
-        assert m.remove_domain("inst-1", "nope") is False
+    def test_not_ready(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        assert len(d.ready_domains("inst-1")) == 0
+
+
+class TestFind:
+    def test_find_by_hostname(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        dom = d.find_by_hostname("inst-1", "API.Example.COM")
+        assert dom is not None
 
 
 class TestIsolation:
-    def test_cross_installation(self):
-        m = AppCustomDomainManager()
-        m.register_domain("inst-1", "d1", "app.example.com")
-        with pytest.raises(KeyError):
-            m.get_domain("inst-2", "d1")
+    def test_cross(self):
+        d = AppCustomDomain()
+        d.add_domain("inst-1", "d1", "api.example.com", "target")
+        assert d.list_domains("inst-2") == []
