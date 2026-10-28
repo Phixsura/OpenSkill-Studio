@@ -1,12 +1,10 @@
-"""App Circuit Breaker — protect downstream services from cascading failures.
+"""App Circuit Breaker — protect services from cascading failures.
 
-Implements the circuit breaker pattern for app-to-service calls:
-- States: closed (normal) → open (failing) → half-open (probing)
-- Configurable failure threshold and recovery timeout
-- Per-service isolated breakers
-- Success/failure recording
-- Manual reset support
-- State history for debugging
+Implements circuit breaker pattern:
+- Closed → Open on failure threshold
+- Open → Half-open after cooldown
+- Half-open → Closed on success, Open on failure
+- Per-installation scoped breakers
 """
 
 from __future__ import annotations
@@ -27,119 +25,97 @@ class BreakerState(str, Enum):
 
 
 @dataclass
-class BreakerConfig:
-    """Configuration for a circuit breaker."""
+class CircuitBreaker:
+    """A circuit breaker for a service."""
 
-    failure_threshold: int = 5      # failures before opening
-    recovery_timeout: float = 30.0  # seconds before half-open probe
-    success_threshold: int = 2      # successes in half-open to close
+    breaker_id: str
+    service_name: str
+    failure_threshold: int = 5
+    cooldown_seconds: float = 30.0
+    state: BreakerState = BreakerState.CLOSED
+    failure_count: int = 0
+    success_count: int = 0
+    last_failure_at: float | None = None
+    opened_at: float | None = None
 
-
-@dataclass
-class BreakerStatus:
-    """Current status of a circuit breaker."""
-
-    service: str
-    state: BreakerState
-    failure_count: int
-    success_count: int
-    last_failure_at: float | None
-    opened_at: float | None
-    config: BreakerConfig
+    def should_allow(self) -> bool:
+        if self.state == BreakerState.CLOSED:
+            return True
+        if self.state == BreakerState.OPEN:
+            if self.opened_at and (time.time() - self.opened_at) >= self.cooldown_seconds:
+                self.state = BreakerState.HALF_OPEN
+                return True
+            return False
+        # half_open: allow one request
+        return True
 
 
 class AppCircuitBreaker:
-    """Per-service circuit breaker manager."""
+    """Manage circuit breakers for services."""
 
-    def __init__(self, config: BreakerConfig | None = None):
-        self._config = config or BreakerConfig()
-        self._states: dict[str, BreakerState] = {}
-        self._failures: dict[str, int] = {}
-        self._successes: dict[str, int] = {}  # half-open successes
-        self._last_failure: dict[str, float] = {}
-        self._opened_at: dict[str, float] = {}
+    def __init__(self) -> None:
+        self._breakers: dict[tuple[str, str], CircuitBreaker] = {}
 
-    def can_execute(self, service: str, now: float | None = None) -> bool:
-        """Check if a call to this service is allowed."""
-        now = now or time.time()
-        state = self._states.get(service, BreakerState.CLOSED)
+    def create(
+        self, installation_id: str, breaker_id: str, service_name: str,
+        failure_threshold: int = 5, cooldown_seconds: float = 30.0,
+    ) -> CircuitBreaker:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if failure_threshold < 1:
+            raise ValueError("failure_threshold must be at least 1")
 
-        if state == BreakerState.CLOSED:
-            return True
-
-        if state == BreakerState.OPEN:
-            opened = self._opened_at.get(service, 0)
-            if now - opened >= self._config.recovery_timeout:
-                self._states[service] = BreakerState.HALF_OPEN
-                self._successes[service] = 0
-                log.info("circuit_breaker.half_open", service=service)
-                return True  # allow probe
-            return False
-
-        if state == BreakerState.HALF_OPEN:
-            return True  # allow probes
-
-        return False
-
-    def record_success(self, service: str) -> BreakerState:
-        """Record a successful call."""
-        state = self._states.get(service, BreakerState.CLOSED)
-
-        if state == BreakerState.HALF_OPEN:
-            self._successes[service] = self._successes.get(service, 0) + 1
-            if self._successes[service] >= self._config.success_threshold:
-                self._states[service] = BreakerState.CLOSED
-                self._failures[service] = 0
-                self._successes[service] = 0
-                self._opened_at.pop(service, None)
-                log.info("circuit_breaker.closed", service=service)
-                return BreakerState.CLOSED
-            return BreakerState.HALF_OPEN
-
-        # Closed state: reset failure count
-        self._failures[service] = 0
-        return BreakerState.CLOSED
-
-    def record_failure(self, service: str, now: float | None = None) -> BreakerState:
-        """Record a failed call."""
-        now = now or time.time()
-        state = self._states.get(service, BreakerState.CLOSED)
-
-        if state == BreakerState.HALF_OPEN:
-            # Probe failed → reopen
-            self._states[service] = BreakerState.OPEN
-            self._opened_at[service] = now
-            self._last_failure[service] = now
-            log.warning("circuit_breaker.reopened", service=service)
-            return BreakerState.OPEN
-
-        # Closed state
-        self._failures[service] = self._failures.get(service, 0) + 1
-        self._last_failure[service] = now
-
-        if self._failures[service] >= self._config.failure_threshold:
-            self._states[service] = BreakerState.OPEN
-            self._opened_at[service] = now
-            log.warning("circuit_breaker.opened", service=service,
-                         failures=self._failures[service])
-            return BreakerState.OPEN
-
-        return BreakerState.CLOSED
-
-    def get_status(self, service: str) -> BreakerStatus:
-        return BreakerStatus(
-            service=service,
-            state=self._states.get(service, BreakerState.CLOSED),
-            failure_count=self._failures.get(service, 0),
-            success_count=self._successes.get(service, 0),
-            last_failure_at=self._last_failure.get(service),
-            opened_at=self._opened_at.get(service),
-            config=self._config,
+        cb = CircuitBreaker(
+            breaker_id=breaker_id, service_name=service_name,
+            failure_threshold=failure_threshold, cooldown_seconds=cooldown_seconds,
         )
+        self._breakers[(installation_id, breaker_id)] = cb
+        return cb
 
-    def reset(self, service: str) -> None:
-        """Manually reset a breaker to closed."""
-        self._states[service] = BreakerState.CLOSED
-        self._failures[service] = 0
-        self._successes[service] = 0
-        self._opened_at.pop(service, None)
+    def record_success(self, installation_id: str, breaker_id: str) -> CircuitBreaker:
+        cb = self._get(installation_id, breaker_id)
+        cb.success_count += 1
+        if cb.state == BreakerState.HALF_OPEN:
+            cb.state = BreakerState.CLOSED
+            cb.failure_count = 0
+        return cb
+
+    def record_failure(self, installation_id: str, breaker_id: str) -> CircuitBreaker:
+        cb = self._get(installation_id, breaker_id)
+        cb.failure_count += 1
+        cb.last_failure_at = time.time()
+        if cb.state == BreakerState.HALF_OPEN:
+            cb.state = BreakerState.OPEN
+            cb.opened_at = time.time()
+        elif cb.failure_count >= cb.failure_threshold:
+            cb.state = BreakerState.OPEN
+            cb.opened_at = time.time()
+        return cb
+
+    def is_allowed(self, installation_id: str, breaker_id: str) -> bool:
+        return self._get(installation_id, breaker_id).should_allow()
+
+    def reset(self, installation_id: str, breaker_id: str) -> CircuitBreaker:
+        cb = self._get(installation_id, breaker_id)
+        cb.state = BreakerState.CLOSED
+        cb.failure_count = 0
+        return cb
+
+    def get_state(self, installation_id: str, breaker_id: str) -> BreakerState:
+        return self._get(installation_id, breaker_id).state
+
+    def list_breakers(self, installation_id: str) -> list[CircuitBreaker]:
+        return [cb for (inst, _), cb in self._breakers.items() if inst == installation_id]
+
+    def open_breakers(self, installation_id: str) -> list[CircuitBreaker]:
+        return [
+            cb for (inst, _), cb in self._breakers.items()
+            if inst == installation_id and cb.state == BreakerState.OPEN
+        ]
+
+    def _get(self, installation_id: str, breaker_id: str) -> CircuitBreaker:
+        key = (installation_id, breaker_id)
+        cb = self._breakers.get(key)
+        if cb is None:
+            raise KeyError(f"Breaker {breaker_id} not found")
+        return cb
