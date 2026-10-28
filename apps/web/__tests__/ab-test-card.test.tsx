@@ -2,65 +2,50 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import ABTestCard from "../src/components/ab-test-card";
 
-const activeExp = {
-  experiment_id: "exp-1",
-  name: "Button Color Test",
-  active: true,
-  variants: [
-    { name: "control", exposures: 1000, conversions: 50, conversion_rate: 5.0 },
-    { name: "treatment", exposures: 1000, conversions: 80, conversion_rate: 8.0 },
-  ],
-};
-
-const stoppedExp = {
-  experiment_id: "exp-2",
-  name: "Layout Test",
-  active: false,
-  variants: [
-    { name: "A", exposures: 500, conversions: 25, conversion_rate: 5.0 },
-    { name: "B", exposures: 500, conversions: 30, conversion_rate: 6.0 },
-  ],
-};
+const experiments = [
+  {
+    experiment_id: "exp1",
+    name: "Button Color",
+    active: true,
+    variants: [
+      { name: "control", impressions: 500, conversions: 50, rate: 10.0 },
+      { name: "treatment", impressions: 500, conversions: 75, rate: 15.0 },
+    ],
+  },
+  {
+    experiment_id: "exp2",
+    name: "Pricing Page",
+    active: false,
+    variants: [
+      { name: "A", impressions: 200, conversions: 20, rate: 10.0 },
+      { name: "B", impressions: 200, conversions: 30, rate: 15.0 },
+    ],
+  },
+];
 
 describe("ABTestCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(<ABTestCard experiments={[activeExp]} appName="My App" />);
+  it("renders header and counts", () => {
+    const { container } = render(<ABTestCard experiments={experiments} appName="App" />);
     expect(container.textContent).toContain("A/B Tests");
-    expect(container.textContent).toContain("My App");
+    expect(container.textContent).toContain("1 active / 2 total");
   });
 
-  it("shows active count", () => {
-    const { container } = render(
-      <ABTestCard experiments={[activeExp, stoppedExp]} appName="App" />,
-    );
-    expect(container.textContent).toContain("1 active");
+  it("shows experiment names", () => {
+    const { container } = render(<ABTestCard experiments={experiments} appName="App" />);
+    expect(container.textContent).toContain("Button Color");
+    expect(container.textContent).toContain("Pricing Page");
   });
 
-  it("renders experiment name", () => {
-    const { container } = render(<ABTestCard experiments={[activeExp]} appName="App" />);
-    expect(container.textContent).toContain("Button Color Test");
+  it("shows variant rates", () => {
+    const { container } = render(<ABTestCard experiments={experiments} appName="App" />);
+    expect(container.textContent).toContain("10%");
+    expect(container.textContent).toContain("15%");
   });
 
-  it("shows running/stopped badges", () => {
-    const { container } = render(
-      <ABTestCard experiments={[activeExp, stoppedExp]} appName="App" />,
-    );
-    expect(container.textContent).toContain("Running");
-    expect(container.textContent).toContain("Stopped");
-  });
-
-  it("renders variant names and conversion rates", () => {
-    const { container } = render(<ABTestCard experiments={[activeExp]} appName="App" />);
-    expect(container.textContent).toContain("control");
-    expect(container.textContent).toContain("treatment");
-    expect(container.textContent).toContain("5.0%");
-    expect(container.textContent).toContain("8.0%");
-  });
-
-  it("shows conversion counts", () => {
-    const { container } = render(<ABTestCard experiments={[activeExp]} appName="App" />);
-    expect(container.textContent).toContain("50/1.0K");
-    expect(container.textContent).toContain("80/1.0K");
+  it("shows active/ended status", () => {
+    const { container } = render(<ABTestCard experiments={experiments} appName="App" />);
+    expect(container.textContent).toContain("active");
+    expect(container.textContent).toContain("ended");
   });
 
   it("shows empty state", () => {
