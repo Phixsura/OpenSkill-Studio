@@ -1,89 +1,63 @@
-"""Tests for App Webhook Filter — patterns, include/exclude, delivery."""
+"""Tests for App Webhook Filter — rules, matching, delivery decisions."""
 
 import pytest
 
 from app.services.app_webhook_filter import AppWebhookFilter
 
 
-class TestCreateFilter:
-    def test_create(self):
+class TestAddRule:
+    def test_add(self):
         f = AppWebhookFilter()
-        flt = f.create_filter("inst-1", "f1", "wh-1", ["user.*"])
-        assert flt.patterns == ["user.*"]
-        assert flt.mode == "include"
+        r = f.add_rule("inst-1", "r1", "issue.created", "include")
+        assert r.action == "include"
 
-    def test_empty_patterns(self):
+    def test_invalid_action(self):
         f = AppWebhookFilter()
-        with pytest.raises(ValueError, match="at least one"):
-            f.create_filter("inst-1", "f1", "wh-1", [])
+        with pytest.raises(ValueError):
+            f.add_rule("inst-1", "r1", "*", "drop")
 
-    def test_invalid_mode(self):
+
+class TestDeliver:
+    def test_type_include(self):
         f = AppWebhookFilter()
-        with pytest.raises(ValueError, match="mode"):
-            f.create_filter("inst-1", "f1", "wh-1", ["*"], mode="block")
+        f.add_rule("inst-1", "r1", "issue.created", "include")
+        assert f.should_deliver("inst-1", "issue.created", {}) is True
 
-    def test_duplicate(self):
+    def test_type_exclude(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["*"])
-        with pytest.raises(ValueError, match="already exists"):
-            f.create_filter("inst-1", "f1", "wh-1", ["*"])
+        f.add_rule("inst-1", "r1", "issue.created", "exclude")
+        assert f.should_deliver("inst-1", "issue.created", {}) is False
 
-
-class TestShouldDeliver:
-    def test_no_filters_delivers_all(self):
+    def test_field_eq(self):
         f = AppWebhookFilter()
-        assert f.should_deliver("inst-1", "wh-1", "user.created") is True
+        f.add_rule("inst-1", "r1", "*", "exclude", field="data.status", operator="eq", value="draft")
+        assert f.should_deliver("inst-1", "issue.created", {"data": {"status": "draft"}}) is False
+        assert f.should_deliver("inst-1", "issue.created", {"data": {"status": "open"}}) is True
 
-    def test_include_match(self):
+    def test_field_contains(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["user.*"], mode="include")
-        assert f.should_deliver("inst-1", "wh-1", "user.created") is True
-        assert f.should_deliver("inst-1", "wh-1", "order.placed") is False
+        f.add_rule("inst-1", "r1", "*", "include", field="data.title", operator="contains", value="urgent")
+        assert f.should_deliver("inst-1", "issue.created", {"data": {"title": "urgent fix"}}) is True
 
-    def test_exclude_match(self):
+    def test_field_exists(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["internal.*"], mode="exclude")
-        assert f.should_deliver("inst-1", "wh-1", "user.created") is True
-        assert f.should_deliver("inst-1", "wh-1", "internal.debug") is False
+        f.add_rule("inst-1", "r1", "*", "exclude", field="data.internal", operator="exists")
+        assert f.should_deliver("inst-1", "test", {"data": {"internal": True}}) is False
+        assert f.should_deliver("inst-1", "test", {"data": {}}) is True
 
-    def test_exact_match(self):
+    def test_priority(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["order.created"], mode="include")
-        assert f.should_deliver("inst-1", "wh-1", "order.created") is True
-        assert f.should_deliver("inst-1", "wh-1", "order.updated") is False
+        f.add_rule("inst-1", "r1", "*", "exclude", priority=1)
+        f.add_rule("inst-1", "r2", "issue.created", "include", priority=10)
+        assert f.should_deliver("inst-1", "issue.created", {}) is True
 
-    def test_wildcard_all(self):
+    def test_default_deliver(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["*"], mode="include")
-        assert f.should_deliver("inst-1", "wh-1", "anything") is True
-
-
-class TestMatchPatterns:
-    def test_glob(self):
-        f = AppWebhookFilter()
-        assert f.match_patterns("user.created", ["user.*"]) is True
-        assert f.match_patterns("order.placed", ["user.*"]) is False
-
-    def test_multiple_patterns(self):
-        f = AppWebhookFilter()
-        assert f.match_patterns("order.placed", ["user.*", "order.*"]) is True
-
-
-class TestRemoveFilter:
-    def test_remove(self):
-        f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["*"])
-        assert f.remove_filter("inst-1", "f1") is True
-        assert f.list_filters("inst-1") == []
-
-    def test_remove_nonexistent(self):
-        f = AppWebhookFilter()
-        assert f.remove_filter("inst-1", "nope") is False
+        assert f.should_deliver("inst-1", "any.event", {}) is True
 
 
 class TestIsolation:
-    def test_cross_installation(self):
+    def test_cross(self):
         f = AppWebhookFilter()
-        f.create_filter("inst-1", "f1", "wh-1", ["user.*"], mode="include")
-        # inst-2 has no filters → deliver all
-        assert f.should_deliver("inst-2", "wh-1", "user.created") is True
+        f.add_rule("inst-1", "r1", "*", "exclude")
+        assert f.should_deliver("inst-2", "test", {}) is True
