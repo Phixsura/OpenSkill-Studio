@@ -1,11 +1,11 @@
-"""App Request Validator — validate incoming API requests against schemas.
+"""App Request Validator — validate incoming API requests.
 
-Validates request payloads before processing:
-- Required/optional field checks
-- Type validation
-- String length limits
-- Numeric range checks
-- Nested object support
+Validates incoming requests:
+- Required header checks
+- Content-type validation
+- Request size limits
+- Custom validation rules
+- Per-installation scoped validators
 """
 
 from __future__ import annotations
@@ -18,102 +18,93 @@ log = structlog.get_logger()
 
 
 @dataclass
-class FieldRule:
-    """Validation rule for a field."""
-
-    field: str
-    required: bool = True
-    field_type: str = "string"  # string, int, float, bool, list, object
-    min_length: int | None = None
-    max_length: int | None = None
-    min_value: float | None = None
-    max_value: float | None = None
-
-
-@dataclass
-class ValidationIssue:
-    """A validation issue."""
+class ValidationError:
+    """A validation error."""
 
     field: str
     message: str
+    code: str = "invalid"
 
 
 @dataclass
-class RequestValidationResult:
-    """Result of validating a request."""
+class ValidatorRule:
+    """A request validation rule."""
+
+    rule_id: str
+    rule_type: str  # "required_header", "content_type", "max_size", "path_regex"
+    value: str
+    enabled: bool = True
+
+
+@dataclass
+class ValidationResult:
+    """Result of request validation."""
 
     valid: bool
-    issues: list[ValidationIssue] = field(default_factory=list)
-
-
-TYPE_MAP: dict[str, type | tuple[type, ...]] = {
-    "string": str,
-    "int": int,
-    "float": (int, float),
-    "bool": bool,
-    "list": list,
-    "object": dict,
-}
+    errors: list[ValidationError]
 
 
 class AppRequestValidator:
-    """Validate incoming API requests against schemas."""
+    """Validate incoming API requests."""
 
     def __init__(self) -> None:
-        # (installation_id, schema_id) → list[FieldRule]
-        self._schemas: dict[tuple[str, str], list[FieldRule]] = {}
+        self._rules: dict[tuple[str, str], ValidatorRule] = {}
 
-    def define_schema(
-        self, installation_id: str, schema_id: str, rules: list[FieldRule]
-    ) -> None:
+    def add_rule(
+        self, installation_id: str, rule_id: str, rule_type: str, value: str,
+    ) -> ValidatorRule:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not schema_id:
-            raise ValueError("schema_id is required")
-        self._schemas[(installation_id, schema_id)] = list(rules)
+        if rule_type not in ("required_header", "content_type", "max_size"):
+            raise ValueError(f"Unknown rule_type: {rule_type}")
+
+        rule = ValidatorRule(rule_id=rule_id, rule_type=rule_type, value=value)
+        self._rules[(installation_id, rule_id)] = rule
+        return rule
 
     def validate(
-        self, installation_id: str, schema_id: str, payload: dict
-    ) -> RequestValidationResult:
-        key = (installation_id, schema_id)
-        rules = self._schemas.get(key)
-        if rules is None:
-            raise KeyError(f"Schema {schema_id} not found")
+        self, installation_id: str, headers: dict[str, str],
+        content_type: str = "", body_size: int = 0,
+    ) -> ValidationResult:
+        errors: list[ValidationError] = []
+        rules = [r for (inst, _), r in self._rules.items() if inst == installation_id and r.enabled]
 
-        issues: list[ValidationIssue] = []
         for rule in rules:
-            value = payload.get(rule.field)
+            if rule.rule_type == "required_header":
+                header_name = rule.value.lower()
+                if not any(k.lower() == header_name for k in headers):
+                    errors.append(ValidationError(
+                        field=rule.value, message=f"Missing required header: {rule.value}",
+                        code="missing_header",
+                    ))
+            elif rule.rule_type == "content_type":
+                allowed = [ct.strip() for ct in rule.value.split(",")]
+                if content_type and content_type not in allowed:
+                    errors.append(ValidationError(
+                        field="Content-Type", message=f"Content-Type must be one of: {rule.value}",
+                        code="invalid_content_type",
+                    ))
+            elif rule.rule_type == "max_size":
+                max_bytes = int(rule.value)
+                if body_size > max_bytes:
+                    errors.append(ValidationError(
+                        field="body", message=f"Body size {body_size} exceeds limit {max_bytes}",
+                        code="body_too_large",
+                    ))
 
-            if value is None:
-                if rule.required:
-                    issues.append(ValidationIssue(rule.field, "Required field missing"))
-                continue
+        return ValidationResult(valid=len(errors) == 0, errors=errors)
 
-            # Type check (bool before int since bool is subclass of int)
-            if rule.field_type in ("int", "float") and isinstance(value, bool):
-                issues.append(ValidationIssue(rule.field, f"Expected {rule.field_type}, got bool"))
-                continue
+    def toggle(self, installation_id: str, rule_id: str, enabled: bool) -> ValidatorRule:
+        r = self._get(installation_id, rule_id)
+        r.enabled = enabled
+        return r
 
-            expected = TYPE_MAP.get(rule.field_type)
-            if expected and not isinstance(value, expected):
-                issues.append(ValidationIssue(rule.field, f"Expected {rule.field_type}"))
-                continue
+    def list_rules(self, installation_id: str) -> list[ValidatorRule]:
+        return [r for (inst, _), r in self._rules.items() if inst == installation_id]
 
-            # String length
-            if isinstance(value, str):
-                if rule.min_length is not None and len(value) < rule.min_length:
-                    issues.append(ValidationIssue(rule.field, f"Too short (min {rule.min_length})"))
-                if rule.max_length is not None and len(value) > rule.max_length:
-                    issues.append(ValidationIssue(rule.field, f"Too long (max {rule.max_length})"))
-
-            # Numeric range
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                if rule.min_value is not None and value < rule.min_value:
-                    issues.append(ValidationIssue(rule.field, f"Below minimum ({rule.min_value})"))
-                if rule.max_value is not None and value > rule.max_value:
-                    issues.append(ValidationIssue(rule.field, f"Above maximum ({rule.max_value})"))
-
-        return RequestValidationResult(valid=len(issues) == 0, issues=issues)
-
-    def list_schemas(self, installation_id: str) -> list[str]:
-        return [sid for (inst, sid) in self._schemas if inst == installation_id]
+    def _get(self, installation_id: str, rule_id: str) -> ValidatorRule:
+        key = (installation_id, rule_id)
+        r = self._rules.get(key)
+        if r is None:
+            raise KeyError(f"Rule {rule_id} not found")
+        return r
