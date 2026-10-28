@@ -1,22 +1,52 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { HealthScoreCard } from "@/components/health-score-card";
+import HealthScoreCard from "../src/components/health-score-card";
+
+const signals = [
+  { name: "uptime", value: 99.95, score: 99.95, status: "ok" as const },
+  { name: "error_rate", value: 2, score: 80, status: "degraded" as const },
+  { name: "latency", value: 150, score: 85, status: "ok" as const },
+  { name: "saturation", value: 75, score: 25, status: "degraded" as const },
+];
 
 describe("HealthScoreCard", () => {
-  it("renders score", () => {
+  it("renders header and app name", () => {
     const { container } = render(
-      <HealthScoreCard score={92.3} grade="A" status="healthy" delta={5.2}
-        breakdown={{
-          uptime: { raw: 99, weight: 0.3, weighted: 29.7 },
-          error_rate: { raw: 95, weight: 0.25, weighted: 23.75 },
-          latency: { raw: 85, weight: 0.2, weighted: 17 },
-        }} />
+      <HealthScoreCard overallScore={85} grade="B" signals={signals} appName="My App" />,
     );
-    expect(container.textContent).toContain("A");
-    expect(container.textContent).toContain("92.3");
-    expect(container.textContent).toContain("healthy");
-    expect(container.textContent).toContain("5.2 pts");
+    expect(container.textContent).toContain("Health Score");
+    expect(container.textContent).toContain("My App");
+  });
+
+  it("shows grade and score", () => {
+    const { container } = render(
+      <HealthScoreCard overallScore={85} grade="B" signals={signals} appName="App" />,
+    );
+    expect(container.textContent).toContain("B");
+    expect(container.textContent).toContain("85/100");
+  });
+
+  it("renders signal names", () => {
+    const { container } = render(
+      <HealthScoreCard overallScore={85} grade="B" signals={signals} appName="App" />,
+    );
     expect(container.textContent).toContain("uptime");
-    expect(container.textContent).toContain("29.7");
+    expect(container.textContent).toContain("error rate");
+    expect(container.textContent).toContain("latency");
+  });
+
+  it("shows signal scores", () => {
+    const { container } = render(
+      <HealthScoreCard overallScore={85} grade="B" signals={signals} appName="App" />,
+    );
+    expect(container.textContent).toContain("100"); // uptime rounded
+    expect(container.textContent).toContain("80");
+  });
+
+  it("renders different grades", () => {
+    const { container } = render(
+      <HealthScoreCard overallScore={50} grade="F" signals={signals} appName="App" />,
+    );
+    expect(container.textContent).toContain("F");
   });
 });
