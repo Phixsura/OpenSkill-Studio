@@ -1,32 +1,59 @@
-"""OAuth session manager tests."""
+"""Tests for App Session Manager — create, validate, revoke."""
+
 import pytest
-from app.services.app_session_manager import create_auth_code, consume_auth_code, revoke_session
 
-def test_create_code():
-    code = create_auth_code(client_id="c1", redirect_uri="https://x.com/cb", scopes=["read:cohorts"], user_id="u1", state="s1")
-    assert len(code) > 20
+from app.services.app_session_manager import AppSessionManager
 
-def test_consume_code():
-    code = create_auth_code(client_id="c2", redirect_uri="https://x.com/cb", scopes=[], user_id="u1", state="s")
-    result = consume_auth_code(code, client_id="c2", redirect_uri="https://x.com/cb")
-    assert result is not None
-    assert result["user_id"] == "u1"
 
-def test_consume_only_once():
-    code = create_auth_code(client_id="c3", redirect_uri="https://x.com/cb", scopes=[], user_id="u1", state="s")
-    consume_auth_code(code, client_id="c3", redirect_uri="https://x.com/cb")
-    assert consume_auth_code(code, client_id="c3", redirect_uri="https://x.com/cb") is None
+class TestCreate:
+    def test_create(self):
+        m = AppSessionManager()
+        session, token = m.create("inst-1", "user-1", ip_address="10.0.0.1")
+        assert session.user_id == "user-1"
+        assert session.is_active is True
+        assert len(token) > 20
 
-def test_consume_wrong_client():
-    code = create_auth_code(client_id="c4", redirect_uri="https://x.com/cb", scopes=[], user_id="u1", state="s")
-    assert consume_auth_code(code, client_id="wrong", redirect_uri="https://x.com/cb") is None
 
-def test_consume_wrong_redirect():
-    code = create_auth_code(client_id="c5", redirect_uri="https://x.com/cb", scopes=[], user_id="u1", state="s")
-    assert consume_auth_code(code, client_id="c5", redirect_uri="https://evil.com/cb") is None
+class TestValidate:
+    def test_valid(self):
+        m = AppSessionManager()
+        _, token = m.create("inst-1", "user-1")
+        s = m.validate("inst-1", token)
+        assert s is not None
+        assert s.user_id == "user-1"
 
-def test_consume_unknown_code():
-    assert consume_auth_code("nonexistent", client_id="c", redirect_uri="u") is None
+    def test_invalid(self):
+        m = AppSessionManager()
+        m.create("inst-1", "user-1")
+        assert m.validate("inst-1", "bad-token") is None
 
-def test_revoke_missing():
-    assert revoke_session("nonexistent") is False
+    def test_revoked(self):
+        m = AppSessionManager()
+        session, token = m.create("inst-1", "user-1")
+        m.revoke("inst-1", session.session_id)
+        assert m.validate("inst-1", token) is None
+
+
+class TestRevoke:
+    def test_revoke_single(self):
+        m = AppSessionManager()
+        session, _ = m.create("inst-1", "user-1")
+        s = m.revoke("inst-1", session.session_id)
+        assert s.revoked is True
+
+    def test_revoke_all(self):
+        m = AppSessionManager()
+        m.create("inst-1", "user-1")
+        m.create("inst-1", "user-1")
+        m.create("inst-1", "user-2")
+        count = m.revoke_all("inst-1", "user-1")
+        assert count == 2
+        assert len(m.active_sessions("inst-1", "user-1")) == 0
+        assert len(m.active_sessions("inst-1", "user-2")) == 1
+
+
+class TestIsolation:
+    def test_cross(self):
+        m = AppSessionManager()
+        _, token = m.create("inst-1", "user-1")
+        assert m.validate("inst-2", token) is None
