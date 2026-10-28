@@ -1,78 +1,67 @@
 "use client";
 
-interface FilterInfo {
-  filter_id: string;
-  webhook_id: string;
-  patterns: string[];
-  mode: "include" | "exclude";
+interface FilterRuleInfo {
+  rule_id: string;
+  event_type: string;
+  action: "include" | "exclude";
+  field: string | null;
+  operator: string;
+  value: string | null;
+  priority: number;
 }
 
 interface WebhookFilterCardProps {
-  filters: FilterInfo[];
+  rules: FilterRuleInfo[];
   appName: string;
 }
 
-export default function WebhookFilterCard({ filters, appName }: WebhookFilterCardProps) {
-  const includeCount = filters.filter((f) => f.mode === "include").length;
-  const excludeCount = filters.filter((f) => f.mode === "exclude").length;
+export default function WebhookFilterCard({ rules, appName }: WebhookFilterCardProps) {
+  const includes = rules.filter((r) => r.action === "include").length;
+  const excludes = rules.filter((r) => r.action === "exclude").length;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            Webhook Filters
+            🔽 Webhook Filters
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400">{appName}</p>
         </div>
-        <div className="flex gap-2">
-          {includeCount > 0 && (
-            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-              {includeCount} include
-            </span>
-          )}
-          {excludeCount > 0 && (
-            <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-              {excludeCount} exclude
-            </span>
-          )}
-        </div>
+        <span className="text-xs text-gray-400">
+          {includes} include · {excludes} exclude
+        </span>
       </div>
 
-      {filters.length === 0 ? (
-        <p className="text-center text-sm text-gray-400">No filters — all events delivered</p>
+      {rules.length === 0 ? (
+        <p className="text-center text-sm text-gray-400">No filter rules — all events delivered</p>
       ) : (
-        <div className="space-y-2">
-          {filters.map((f) => (
+        <div className="space-y-1.5">
+          {rules.map((r) => (
             <div
-              key={f.filter_id}
+              key={r.rule_id}
               className="rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-xs font-bold ${f.mode === "include" ? "text-green-600 dark:text-green-400" : "text-red-500"}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      r.action === "include"
+                        ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                        : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                    }`}
                   >
-                    {f.mode === "include" ? "✓" : "✕"}
+                    {r.action}
                   </span>
-                  <span className="text-xs text-gray-500">{f.webhook_id}</span>
+                  <span className="text-xs text-gray-700 dark:text-gray-300">{r.event_type}</span>
                 </div>
-                <span
-                  className={`text-[10px] font-medium uppercase ${f.mode === "include" ? "text-green-600" : "text-red-500"}`}
-                >
-                  {f.mode}
-                </span>
+                <span className="text-[10px] text-gray-400">P{r.priority}</span>
               </div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {f.patterns.map((p) => (
-                  <span
-                    key={p}
-                    className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                  >
-                    {p}
-                  </span>
-                ))}
-              </div>
+              {r.field && (
+                <p className="mt-0.5 font-mono text-[10px] text-gray-400">
+                  {r.field} {r.operator} {r.value ?? ""}
+                </p>
+              )}
             </div>
           ))}
         </div>

@@ -2,49 +2,56 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import WebhookFilterCard from "../src/components/webhook-filter-card";
 
-const filters = [
+const rules = [
   {
-    filter_id: "f1",
-    webhook_id: "wh-1",
-    patterns: ["user.*", "order.*"],
-    mode: "include" as const,
+    rule_id: "r1",
+    event_type: "issue.created",
+    action: "include" as const,
+    field: null,
+    operator: "eq",
+    value: null,
+    priority: 10,
   },
-  { filter_id: "f2", webhook_id: "wh-1", patterns: ["internal.*"], mode: "exclude" as const },
+  {
+    rule_id: "r2",
+    event_type: "*",
+    action: "exclude" as const,
+    field: "data.status",
+    operator: "eq",
+    value: "draft",
+    priority: 1,
+  },
 ];
 
 describe("WebhookFilterCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(<WebhookFilterCard filters={filters} appName="My App" />);
+  it("renders header and counts", () => {
+    const { container } = render(<WebhookFilterCard rules={rules} appName="App" />);
     expect(container.textContent).toContain("Webhook Filters");
-    expect(container.textContent).toContain("My App");
-  });
-
-  it("shows include/exclude counts", () => {
-    const { container } = render(<WebhookFilterCard filters={filters} appName="App" />);
     expect(container.textContent).toContain("1 include");
     expect(container.textContent).toContain("1 exclude");
   });
 
-  it("renders patterns", () => {
-    const { container } = render(<WebhookFilterCard filters={filters} appName="App" />);
-    expect(container.textContent).toContain("user.*");
-    expect(container.textContent).toContain("order.*");
-    expect(container.textContent).toContain("internal.*");
-  });
-
-  it("shows webhook id", () => {
-    const { container } = render(<WebhookFilterCard filters={filters} appName="App" />);
-    expect(container.textContent).toContain("wh-1");
-  });
-
-  it("shows mode labels", () => {
-    const { container } = render(<WebhookFilterCard filters={filters} appName="App" />);
+  it("shows action badges and event types", () => {
+    const { container } = render(<WebhookFilterCard rules={rules} appName="App" />);
     expect(container.textContent).toContain("include");
     expect(container.textContent).toContain("exclude");
+    expect(container.textContent).toContain("issue.created");
+  });
+
+  it("shows field conditions", () => {
+    const { container } = render(<WebhookFilterCard rules={rules} appName="App" />);
+    expect(container.textContent).toContain("data.status");
+    expect(container.textContent).toContain("draft");
+  });
+
+  it("shows priority", () => {
+    const { container } = render(<WebhookFilterCard rules={rules} appName="App" />);
+    expect(container.textContent).toContain("P10");
+    expect(container.textContent).toContain("P1");
   });
 
   it("shows empty state", () => {
-    const { container } = render(<WebhookFilterCard filters={[]} appName="App" />);
-    expect(container.textContent).toContain("all events delivered");
+    const { container } = render(<WebhookFilterCard rules={[]} appName="App" />);
+    expect(container.textContent).toContain("No filter rules");
   });
 });
