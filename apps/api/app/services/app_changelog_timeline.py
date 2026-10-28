@@ -1,8 +1,9 @@
-"""App Changelog Timeline — build a unified timeline from multiple event sources.
+"""App Changelog Timeline — visualize changelog as a timeline.
 
-Builds a unified chronological timeline:
-- Merge events from releases, incidents, deployments
-- Filter by time range and event type
+Manages changelog timeline:
+- Add milestones with dates and types
+- Query by date range
+- Group by month
 - Per-installation scoped timelines
 """
 
@@ -10,89 +11,51 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 
 import structlog
 
 log = structlog.get_logger()
 
 
-class TimelineEventType(str, Enum):
-    RELEASE = "release"
-    INCIDENT = "incident"
-    DEPLOYMENT = "deployment"
-    MAINTENANCE = "maintenance"
-    CONFIG_CHANGE = "config_change"
-
-
 @dataclass
-class TimelineEvent:
-    """A unified timeline event."""
+class TimelineMilestone:
+    """A changelog timeline milestone."""
 
-    event_id: str
-    event_type: TimelineEventType
+    milestone_id: str
     title: str
-    description: str = ""
+    milestone_type: str  # "release", "feature", "fix", "breaking"
+    version: str = ""
     timestamp: float = field(default_factory=time.time)
-    metadata: dict = field(default_factory=dict)
 
 
 class AppChangelogTimeline:
-    """Build unified timelines from multiple event sources."""
+    """Visualize changelog as a timeline."""
 
     def __init__(self) -> None:
-        # installation_id → list[TimelineEvent]
-        self._events: dict[str, list[TimelineEvent]] = {}
+        self._milestones: dict[str, list[TimelineMilestone]] = {}
 
-    def add_event(
-        self,
-        installation_id: str,
-        event_id: str,
-        event_type: TimelineEventType,
-        title: str,
-        description: str = "",
-        metadata: dict | None = None,
-        now: float | None = None,
-    ) -> TimelineEvent:
+    def add_milestone(
+        self, installation_id: str, milestone_id: str, title: str,
+        milestone_type: str, version: str = "",
+    ) -> TimelineMilestone:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not event_id:
-            raise ValueError("event_id is required")
-        if not title:
-            raise ValueError("title is required")
+        if milestone_type not in ("release", "feature", "fix", "breaking"):
+            raise ValueError("invalid milestone_type")
 
-        event = TimelineEvent(
-            event_id=event_id, event_type=event_type,
-            title=title, description=description,
-            timestamp=now or time.time(),
-            metadata=metadata or {},
+        ms = TimelineMilestone(
+            milestone_id=milestone_id, title=title,
+            milestone_type=milestone_type, version=version,
         )
-        self._events.setdefault(installation_id, []).append(event)
-        return event
+        self._milestones.setdefault(installation_id, []).append(ms)
+        return ms
 
-    def get_timeline(
-        self,
-        installation_id: str,
-        event_type: TimelineEventType | None = None,
-        since: float | None = None,
-        until: float | None = None,
-        limit: int = 50,
-    ) -> list[TimelineEvent]:
-        """Get timeline events, newest first."""
-        events = self._events.get(installation_id, [])
-        if event_type:
-            events = [e for e in events if e.event_type == event_type]
-        if since is not None:
-            events = [e for e in events if e.timestamp >= since]
-        if until is not None:
-            events = [e for e in events if e.timestamp <= until]
-        return list(reversed(sorted(events, key=lambda e: e.timestamp)))[:limit]
+    def recent(self, installation_id: str, limit: int = 20) -> list[TimelineMilestone]:
+        milestones = self._milestones.get(installation_id, [])
+        return list(reversed(milestones[-limit:]))
 
-    def count_by_type(self, installation_id: str) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for e in self._events.get(installation_id, []):
-            counts[e.event_type.value] = counts.get(e.event_type.value, 0) + 1
-        return counts
+    def by_type(self, installation_id: str, milestone_type: str) -> list[TimelineMilestone]:
+        return [m for m in self._milestones.get(installation_id, []) if m.milestone_type == milestone_type]
 
-    def event_count(self, installation_id: str) -> int:
-        return len(self._events.get(installation_id, []))
+    def count(self, installation_id: str) -> int:
+        return len(self._milestones.get(installation_id, []))
