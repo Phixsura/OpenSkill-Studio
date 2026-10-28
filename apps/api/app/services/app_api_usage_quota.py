@@ -65,6 +65,8 @@ class AppAPIUsageQuota:
         q = self._quotas.get(key)
         if q is None:
             raise KeyError(f"Quota for {metric} in {period} not found")
+        if not isinstance(amount, int) or amount < 0:
+            raise ValueError("amount must be a non-negative integer")
         q.used += amount
         return q
 
