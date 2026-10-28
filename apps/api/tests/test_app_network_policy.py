@@ -31,7 +31,7 @@ class TestAddRule:
 class TestEgressCheck:
     def test_no_rules_allows(self):
         p = AppNetworkPolicy()
-        assert p.check_egress("inst-1", "any.com") is True
+        assert p.check_egress("inst-1", "any.com") is False  # default deny
 
     def test_allow_rule(self):
         p = AppNetworkPolicy()
@@ -68,4 +68,4 @@ class TestIsolation:
     def test_cross_installation(self):
         p = AppNetworkPolicy()
         p.add_rule("inst-1", NetworkRule(rule_id="r1", direction="egress", action="allow", destination="api.com"))
-        assert p.check_egress("inst-2", "api.com") is True  # no rules = allow
+        assert p.check_egress("inst-2", "api.com") is False  # no rules = default deny

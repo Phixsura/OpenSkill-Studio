@@ -64,7 +64,7 @@ class AppNetworkPolicy:
             if inst == installation_id and r.direction == "egress"
         ]
         if not rules:
-            return True  # no rules = allow all
+            return False  # no rules = default deny
 
         for r in rules:
             if r.action == "deny" and self._matches(r, destination, port):
@@ -88,8 +88,10 @@ class AppNetworkPolicy:
         return False
 
     def _matches(self, rule: NetworkRule, destination: str, port: int | None) -> bool:
-        if rule.destination != "*" and rule.destination != destination:
+        dest = destination.rstrip(".").lower()
+        rule_dest = rule.destination.rstrip(".").lower()
+        if rule_dest != "*" and rule_dest != dest:
             return False
-        if rule.port is not None and port is not None and rule.port != port:
+        if rule.port is not None and (port is None or rule.port != port):
             return False
         return True
