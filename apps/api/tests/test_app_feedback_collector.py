@@ -113,6 +113,15 @@ class TestModeration:
         c.hide("app-1", fb.feedback_id)
         assert fb.status == FeedbackStatus.HIDDEN
 
+    def test_flagged_still_in_summary(self):
+        """Flagged entries remain visible until a moderator hides them."""
+        c = AppFeedbackCollector()
+        fb = c.submit("app-1", "u1", 3, "meh")
+        c.submit("app-1", "u2", 5, "great")
+        c.flag("app-1", fb.feedback_id)
+        s = c.get_summary("app-1")
+        assert s.total_count == 2  # flagged still counted
+
     def test_hidden_excluded_from_summary(self):
         c = AppFeedbackCollector()
         fb = c.submit("app-1", "u1", 1, "spam")

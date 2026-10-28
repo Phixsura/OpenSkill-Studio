@@ -118,7 +118,7 @@ class AppFeedbackCollector:
 
     def get_summary(self, app_id: str) -> FeedbackSummary:
         entries = [fb for fb in self._feedback.get(app_id, [])
-                   if fb.status == FeedbackStatus.VISIBLE]
+                   if fb.status in (FeedbackStatus.VISIBLE, FeedbackStatus.FLAGGED)]
         total = len(entries)
         avg = sum(fb.rating for fb in entries) / total if total > 0 else 0.0
         dist = Counter(fb.rating for fb in entries)
@@ -137,12 +137,12 @@ class AppFeedbackCollector:
                      visible_only: bool = True) -> list[FeedbackEntry]:
         entries = self._feedback.get(app_id, [])
         if visible_only:
-            entries = [fb for fb in entries if fb.status == FeedbackStatus.VISIBLE]
+            entries = [fb for fb in entries if fb.status in (FeedbackStatus.VISIBLE, FeedbackStatus.FLAGGED)]
         return sorted(entries, key=lambda f: f.created_at, reverse=True)[:limit]
 
     def get_avg_rating(self, app_id: str) -> float:
         entries = [fb for fb in self._feedback.get(app_id, [])
-                   if fb.status == FeedbackStatus.VISIBLE]
+                   if fb.status in (FeedbackStatus.VISIBLE, FeedbackStatus.FLAGGED)]
         if not entries:
             return 0.0
         return round(sum(fb.rating for fb in entries) / len(entries), 2)
