@@ -99,7 +99,7 @@ class AppChangelogRSS:
             f"<title>{html.escape(config.title)}</title>",
             f"<description>{html.escape(config.description)}</description>",
             f"<link>{html.escape(config.link)}</link>",
-            f"<language>{config.language}</language>",
+            f"<language>{html.escape(config.language)}</language>",
         ]
 
         for item in recent:
@@ -108,8 +108,8 @@ class AppChangelogRSS:
             lines.append(f"<description>{html.escape(item.description)}</description>")
             if item.link:
                 lines.append(f"<link>{html.escape(item.link)}</link>")
-            lines.append(f"<pubDate>{item.date}</pubDate>")
-            lines.append(f"<guid>{item.version}</guid>")
+            lines.append(f"<pubDate>{html.escape(item.date)}</pubDate>")
+            lines.append(f'<guid isPermaLink="false">{html.escape(item.version)}</guid>')
             lines.append("</item>")
 
         lines.append("</channel>")
