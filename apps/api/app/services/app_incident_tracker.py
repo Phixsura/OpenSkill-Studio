@@ -1,18 +1,17 @@
-"""App Incident Tracker — track and manage operational incidents for installed apps.
+"""App Incident Tracker — manage incidents for installed apps.
 
-Provides incident lifecycle management:
-- Incident creation with severity and affected components
-- Status progression: investigating → identified → monitoring → resolved
-- Timeline events per incident
-- MTTR (Mean Time To Resolve) computation
-- Incident history and filtering
-- Impact summary per app
+Tracks incidents affecting app services:
+- Incident lifecycle: investigating → identified → monitoring → resolved
+- Severity levels: critical, major, minor
+- Timeline updates with status transitions
+- Affected component tracking
+- Duration computation
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 import structlog
@@ -20,11 +19,10 @@ import structlog
 log = structlog.get_logger()
 
 
-class Severity(str, Enum):
+class IncidentSeverity(str, Enum):
     CRITICAL = "critical"
     MAJOR = "major"
     MINOR = "minor"
-    INFO = "info"
 
 
 class IncidentStatus(str, Enum):
@@ -35,142 +33,140 @@ class IncidentStatus(str, Enum):
 
 
 @dataclass
-class TimelineEvent:
+class TimelineEntry:
     """A status update on an incident."""
 
     status: IncidentStatus
     message: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    author: str = "system"
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class Incident:
-    """An operational incident."""
+    """An incident record."""
 
     incident_id: str
-    app_id: str
+    installation_id: str
     title: str
-    severity: Severity
+    severity: IncidentSeverity
     status: IncidentStatus = IncidentStatus.INVESTIGATING
     affected_components: list[str] = field(default_factory=list)
-    timeline: list[TimelineEvent] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    resolved_at: datetime | None = None
-
-    @property
-    def duration_minutes(self) -> float | None:
-        if self.resolved_at is None:
-            return None
-        return (self.resolved_at - self.created_at).total_seconds() / 60
-
-
-@dataclass
-class IncidentSummary:
-    """Summary statistics for an app's incidents."""
-
-    app_id: str
-    total: int
-    open: int
-    resolved: int
-    mttr_minutes: float | None  # mean time to resolve
-    by_severity: dict[str, int]
+    timeline: list[TimelineEntry] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+    resolved_at: float | None = None
 
 
 class AppIncidentTracker:
-    """Track and manage app incidents."""
+    """Manage incidents for installed apps."""
 
-    def __init__(self):
-        self._incidents: dict[str, Incident] = {}
-        self._next_id = 0
+    def __init__(self) -> None:
+        self._incidents: dict[tuple[str, str], Incident] = {}
 
-    def create(self, app_id: str, title: str, severity: Severity,
-               affected_components: list[str] | None = None,
-               author: str = "system") -> Incident:
+    def create_incident(
+        self,
+        installation_id: str,
+        incident_id: str,
+        title: str,
+        severity: IncidentSeverity,
+        affected_components: list[str] | None = None,
+        message: str = "",
+        now: float | None = None,
+    ) -> Incident:
         """Create a new incident."""
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if not incident_id:
+            raise ValueError("incident_id is required")
         if not title:
-            raise ValueError("Incident title is required")
+            raise ValueError("title is required")
 
-        self._next_id += 1
-        iid = f"inc-{self._next_id}"
+        key = (installation_id, incident_id)
+        if key in self._incidents:
+            raise ValueError(f"Incident {incident_id} already exists")
+
+        now = now or time.time()
         incident = Incident(
-            incident_id=iid, app_id=app_id, title=title,
+            incident_id=incident_id,
+            installation_id=installation_id,
+            title=title,
             severity=severity,
             affected_components=affected_components or [],
+            created_at=now,
         )
-        incident.timeline.append(TimelineEvent(
+        # Initial timeline entry
+        incident.timeline.append(TimelineEntry(
             status=IncidentStatus.INVESTIGATING,
-            message=f"Incident created: {title}",
-            author=author,
+            message=message or f"Investigating: {title}",
+            timestamp=now,
         ))
-        self._incidents[iid] = incident
-        log.warning("incident.created", incident_id=iid, app_id=app_id,
-                     severity=severity.value)
+        self._incidents[key] = incident
+        log.warning("incident.created", incident_id=incident_id, severity=severity.value)
         return incident
 
-    def update_status(self, incident_id: str, status: IncidentStatus,
-                      message: str, author: str = "system") -> Incident | None:
-        """Update incident status with a timeline event."""
-        incident = self._incidents.get(incident_id)
-        if incident is None:
-            return None
+    def update_status(
+        self,
+        installation_id: str,
+        incident_id: str,
+        status: IncidentStatus,
+        message: str,
+        now: float | None = None,
+    ) -> Incident:
+        """Update incident status with a timeline entry."""
+        incident = self._get(installation_id, incident_id)
         if incident.status == IncidentStatus.RESOLVED:
-            return None  # can't update resolved incidents
+            raise ValueError("Cannot update a resolved incident")
+        if not message:
+            raise ValueError("message is required")
 
+        now = now or time.time()
         incident.status = status
-        incident.timeline.append(TimelineEvent(
-            status=status, message=message, author=author,
+        incident.timeline.append(TimelineEntry(
+            status=status, message=message, timestamp=now,
         ))
 
         if status == IncidentStatus.RESOLVED:
-            incident.resolved_at = datetime.now(UTC)
-            log.info("incident.resolved", incident_id=incident_id,
-                     duration_min=round(incident.duration_minutes or 0, 1))
+            incident.resolved_at = now
+            log.info("incident.resolved", incident_id=incident_id)
 
         return incident
 
-    def get(self, incident_id: str) -> Incident | None:
-        return self._incidents.get(incident_id)
+    def get_incident(self, installation_id: str, incident_id: str) -> Incident:
+        return self._get(installation_id, incident_id)
 
-    def list_incidents(self, app_id: str | None = None,
-                       status: IncidentStatus | None = None,
-                       severity: Severity | None = None,
-                       limit: int = 50) -> list[Incident]:
-        results = list(self._incidents.values())
-        if app_id:
-            results = [i for i in results if i.app_id == app_id]
-        if status:
-            results = [i for i in results if i.status == status]
-        if severity:
-            results = [i for i in results if i.severity == severity]
-        results.sort(key=lambda i: i.created_at, reverse=True)
-        return results[:limit]
+    def list_incidents(
+        self,
+        installation_id: str,
+        active_only: bool = False,
+        limit: int = 20,
+    ) -> list[Incident]:
+        """List incidents, newest first."""
+        incidents = [
+            inc for (inst, _), inc in self._incidents.items()
+            if inst == installation_id
+        ]
+        if active_only:
+            incidents = [i for i in incidents if i.status != IncidentStatus.RESOLVED]
+        incidents.sort(key=lambda i: i.created_at, reverse=True)
+        return incidents[:limit]
 
-    def get_open_count(self, app_id: str) -> int:
-        return len([i for i in self._incidents.values()
-                    if i.app_id == app_id and i.status != IncidentStatus.RESOLVED])
+    def get_duration_seconds(self, installation_id: str, incident_id: str,
+                             now: float | None = None) -> float:
+        """Get incident duration in seconds."""
+        incident = self._get(installation_id, incident_id)
+        end = incident.resolved_at or (now or time.time())
+        return max(0.0, end - incident.created_at)
 
-    def get_summary(self, app_id: str) -> IncidentSummary:
-        """Compute incident summary with MTTR."""
-        app_incidents = [i for i in self._incidents.values() if i.app_id == app_id]
-        resolved = [i for i in app_incidents if i.status == IncidentStatus.RESOLVED]
-        open_count = len(app_incidents) - len(resolved)
+    def get_affected_components(self, installation_id: str) -> list[str]:
+        """Get all currently affected components across active incidents."""
+        components: set[str] = set()
+        for (inst, _), inc in self._incidents.items():
+            if inst == installation_id and inc.status != IncidentStatus.RESOLVED:
+                components.update(inc.affected_components)
+        return sorted(components)
 
-        mttr = None
-        if resolved:
-            durations = [i.duration_minutes for i in resolved if i.duration_minutes is not None]
-            if durations:
-                mttr = round(sum(durations) / len(durations), 1)
-
-        by_severity: dict[str, int] = {}
-        for i in app_incidents:
-            by_severity[i.severity.value] = by_severity.get(i.severity.value, 0) + 1
-
-        return IncidentSummary(
-            app_id=app_id,
-            total=len(app_incidents),
-            open=open_count,
-            resolved=len(resolved),
-            mttr_minutes=mttr,
-            by_severity=by_severity,
-        )
+    def _get(self, installation_id: str, incident_id: str) -> Incident:
+        key = (installation_id, incident_id)
+        incident = self._incidents.get(key)
+        if incident is None:
+            raise KeyError(f"Incident {incident_id} not found")
+        return incident
