@@ -44,9 +44,9 @@ class ReleaseGateResult:
 
     @property
     def all_required_passed(self) -> bool:
-        return all(
-            g.status == GateStatus.PASSED
-            for g in self.gates if g.required
+        required = [g for g in self.gates if g.required]
+        return bool(required) and all(
+            g.status == GateStatus.PASSED for g in required
         )
 
     @property
@@ -102,14 +102,15 @@ class AppReleaseGate:
             if g.gate_id == gate_id:
                 g.status = status
                 g.message = message
+                # Recompute approval on any gate change
+                result.approved = result.all_required_passed
                 return g
         raise KeyError(f"Gate {gate_id} not found")
 
     def check_approval(self, installation_id: str, version: str) -> bool:
         """Check if all required gates passed → approve release."""
         result = self._get(installation_id, version)
-        if result.all_required_passed:
-            result.approved = True
+        result.approved = result.all_required_passed
         return result.approved
 
     def get_result(self, installation_id: str, version: str) -> ReleaseGateResult:
