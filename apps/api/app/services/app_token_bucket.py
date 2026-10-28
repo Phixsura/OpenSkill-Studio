@@ -1,12 +1,10 @@
-"""App Token Bucket — classic token bucket rate limiter for burst-tolerant endpoints.
+"""App Token Bucket — token bucket rate limiter.
 
-Provides token bucket rate limiting complementing the sliding window limiter:
-- Configurable bucket capacity and refill rate
-- Burst tolerance up to bucket capacity
-- Per-key isolated buckets
-- Consume N tokens at once
-- Current bucket state query
-- Auto-refill on access
+Implements token bucket algorithm:
+- Configurable capacity and refill rate
+- Consume tokens for requests
+- Check remaining tokens
+- Per-installation scoped buckets
 """
 
 from __future__ import annotations
@@ -20,98 +18,78 @@ log = structlog.get_logger()
 
 
 @dataclass
-class BucketState:
-    """Current state of a token bucket."""
+class TokenBucket:
+    """A token bucket."""
 
-    tokens: float
+    bucket_id: str
     capacity: int
-    refill_rate: float    # tokens per second
-    last_refill: float    # unix timestamp
+    refill_rate: float  # tokens per second
+    tokens: float
+    last_refill: float
 
+    def refill(self) -> None:
+        now = time.time()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)
+        self.last_refill = now
 
-@dataclass
-class ConsumeResult:
-    """Result of attempting to consume tokens."""
+    def consume(self, count: int = 1) -> bool:
+        self.refill()
+        if self.tokens >= count:
+            self.tokens -= count
+            return True
+        return False
 
-    allowed: bool
-    tokens_remaining: float
-    retry_after_seconds: float   # 0 if allowed
+    @property
+    def available(self) -> int:
+        self.refill()
+        return int(self.tokens)
 
 
 class AppTokenBucket:
-    """Token bucket rate limiter with burst support."""
+    """Token bucket rate limiter."""
 
-    def __init__(self, capacity: int = 100, refill_rate: float = 10.0):
-        """
-        capacity: max tokens in the bucket (burst limit).
-        refill_rate: tokens added per second.
-        """
-        if capacity <= 0:
-            raise ValueError("Capacity must be positive")
+    def __init__(self) -> None:
+        self._buckets: dict[tuple[str, str], TokenBucket] = {}
+
+    def create_bucket(
+        self, installation_id: str, bucket_id: str,
+        capacity: int = 100, refill_rate: float = 10.0,
+    ) -> TokenBucket:
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        if capacity < 1:
+            raise ValueError("capacity must be at least 1")
         if refill_rate <= 0:
-            raise ValueError("Refill rate must be positive")
-        self._capacity = capacity
-        self._refill_rate = refill_rate
-        # key → BucketState
-        self._buckets: dict[str, BucketState] = {}
+            raise ValueError("refill_rate must be positive")
 
-    def _get_or_create(self, key: str, now: float) -> BucketState:
-        bucket = self._buckets.get(key)
-        if bucket is None:
-            bucket = BucketState(
-                tokens=float(self._capacity),
-                capacity=self._capacity,
-                refill_rate=self._refill_rate,
-                last_refill=now,
-            )
-            self._buckets[key] = bucket
-        return bucket
-
-    def _refill(self, bucket: BucketState, now: float) -> None:
-        elapsed = now - bucket.last_refill
-        if elapsed > 0:
-            bucket.tokens = min(
-                bucket.capacity,
-                bucket.tokens + elapsed * bucket.refill_rate,
-            )
-            bucket.last_refill = now
-
-    def consume(self, key: str, tokens: int = 1,
-                now: float | None = None) -> ConsumeResult:
-        """Try to consume tokens from a bucket.
-
-        Returns allowed=True if sufficient tokens available.
-        """
-        if tokens <= 0:
-            raise ValueError("Tokens must be positive")
-        now = now or time.time()
-        bucket = self._get_or_create(key, now)
-        self._refill(bucket, now)
-
-        if bucket.tokens >= tokens:
-            bucket.tokens -= tokens
-            return ConsumeResult(
-                allowed=True,
-                tokens_remaining=bucket.tokens,
-                retry_after_seconds=0,
-            )
-
-        # Not enough tokens — compute wait time
-        deficit = tokens - bucket.tokens
-        retry_after = deficit / bucket.refill_rate
-        return ConsumeResult(
-            allowed=False,
-            tokens_remaining=bucket.tokens,
-            retry_after_seconds=round(retry_after, 3),
+        bucket = TokenBucket(
+            bucket_id=bucket_id, capacity=capacity,
+            refill_rate=refill_rate, tokens=float(capacity),
+            last_refill=time.time(),
         )
-
-    def peek(self, key: str, now: float | None = None) -> BucketState:
-        """Get current bucket state without consuming."""
-        now = now or time.time()
-        bucket = self._get_or_create(key, now)
-        self._refill(bucket, now)
+        self._buckets[(installation_id, bucket_id)] = bucket
         return bucket
 
-    def reset(self, key: str) -> None:
-        """Reset a bucket to full capacity."""
-        self._buckets.pop(key, None)
+    def consume(self, installation_id: str, bucket_id: str, count: int = 1) -> bool:
+        b = self._get(installation_id, bucket_id)
+        return b.consume(count)
+
+    def available(self, installation_id: str, bucket_id: str) -> int:
+        return self._get(installation_id, bucket_id).available
+
+    def reset(self, installation_id: str, bucket_id: str) -> TokenBucket:
+        b = self._get(installation_id, bucket_id)
+        b.tokens = float(b.capacity)
+        b.last_refill = time.time()
+        return b
+
+    def list_buckets(self, installation_id: str) -> list[TokenBucket]:
+        return [b for (inst, _), b in self._buckets.items() if inst == installation_id]
+
+    def _get(self, installation_id: str, bucket_id: str) -> TokenBucket:
+        key = (installation_id, bucket_id)
+        b = self._buckets.get(key)
+        if b is None:
+            raise KeyError(f"Bucket {bucket_id} not found")
+        return b
