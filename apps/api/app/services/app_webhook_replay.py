@@ -1,119 +1,90 @@
 """App Webhook Replay — replay failed webhook deliveries.
 
-Manages webhook replay for installed apps:
-- Queue failed deliveries for replay
-- Track replay status
-- Configurable delay between replays
+Manages webhook replay:
+- Store failed deliveries for replay
+- Replay individual or batch
+- Track replay attempts and outcomes
+- Per-installation scoped replays
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 
 import structlog
 
 log = structlog.get_logger()
 
 
-class ReplayStatus(str, Enum):
-    QUEUED = "queued"
-    REPLAYING = "replaying"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-
-
 @dataclass
-class ReplayRequest:
-    """A webhook replay request."""
+class FailedDelivery:
+    """A failed webhook delivery eligible for replay."""
 
-    replay_id: str
-    installation_id: str
-    original_event_id: str
-    webhook_url: str
+    delivery_id: str
+    destination: str
+    event_type: str
     payload: str
-    status: ReplayStatus = ReplayStatus.QUEUED
-    attempt: int = 0
-    max_attempts: int = 3
-    created_at: float = field(default_factory=time.time)
-    completed_at: float | None = None
-    error: str = ""
+    original_status: int
+    failed_at: float = field(default_factory=time.time)
+    replay_count: int = 0
+    last_replay_status: int | None = None
+    resolved: bool = False
 
 
 class AppWebhookReplay:
     """Replay failed webhook deliveries."""
 
-    def __init__(self) -> None:
-        self._replays: dict[tuple[str, str], ReplayRequest] = {}
+    def __init__(self, max_replays: int = 3) -> None:
+        self._max_replays = max_replays
+        self._deliveries: dict[tuple[str, str], FailedDelivery] = {}
 
-    def queue_replay(
-        self,
-        installation_id: str,
-        replay_id: str,
-        original_event_id: str,
-        webhook_url: str,
-        payload: str,
-        max_attempts: int = 3,
-        now: float | None = None,
-    ) -> ReplayRequest:
+    def record_failure(
+        self, installation_id: str, delivery_id: str, destination: str,
+        event_type: str, payload: str, status_code: int,
+    ) -> FailedDelivery:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not replay_id:
-            raise ValueError("replay_id is required")
-        if not webhook_url:
-            raise ValueError("webhook_url is required")
 
-        key = (installation_id, replay_id)
-        if key in self._replays:
-            raise ValueError(f"Replay {replay_id} already exists")
-
-        req = ReplayRequest(
-            replay_id=replay_id, installation_id=installation_id,
-            original_event_id=original_event_id, webhook_url=webhook_url,
-            payload=payload, max_attempts=max(1, max_attempts),
-            created_at=now or time.time(),
+        fd = FailedDelivery(
+            delivery_id=delivery_id, destination=destination,
+            event_type=event_type, payload=payload,
+            original_status=status_code,
         )
-        self._replays[key] = req
-        return req
+        self._deliveries[(installation_id, delivery_id)] = fd
+        return fd
 
-    def start_replay(self, installation_id: str, replay_id: str) -> ReplayRequest:
-        req = self._get(installation_id, replay_id)
-        if req.status not in (ReplayStatus.QUEUED, ReplayStatus.FAILED):
-            raise ValueError(f"Cannot replay in {req.status} state")
-        req.status = ReplayStatus.REPLAYING
-        req.attempt += 1
-        return req
+    def replay(self, installation_id: str, delivery_id: str, result_status: int) -> FailedDelivery:
+        fd = self._get(installation_id, delivery_id)
+        if fd.resolved:
+            raise ValueError("Already resolved")
+        if fd.replay_count >= self._max_replays:
+            raise ValueError("Max replay attempts reached")
 
-    def succeed_replay(self, installation_id: str, replay_id: str) -> ReplayRequest:
-        req = self._get(installation_id, replay_id)
-        if req.status != ReplayStatus.REPLAYING:
-            raise ValueError("Not currently replaying")
-        req.status = ReplayStatus.SUCCEEDED
-        req.completed_at = time.time()
-        return req
+        fd.replay_count += 1
+        fd.last_replay_status = result_status
+        if 200 <= result_status < 300:
+            fd.resolved = True
+        return fd
 
-    def fail_replay(self, installation_id: str, replay_id: str, error: str = "") -> ReplayRequest:
-        req = self._get(installation_id, replay_id)
-        if req.status != ReplayStatus.REPLAYING:
-            raise ValueError("Not currently replaying")
-        req.error = error
-        if req.attempt >= req.max_attempts:
-            req.status = ReplayStatus.FAILED
-            req.completed_at = time.time()
-        else:
-            req.status = ReplayStatus.QUEUED  # re-queue for retry
-        return req
+    def pending(self, installation_id: str) -> list[FailedDelivery]:
+        return [
+            fd for (inst, _), fd in self._deliveries.items()
+            if inst == installation_id and not fd.resolved and fd.replay_count < self._max_replays
+        ]
 
-    def list_replays(self, installation_id: str, status: ReplayStatus | None = None) -> list[ReplayRequest]:
-        replays = [r for (inst, _), r in self._replays.items() if inst == installation_id]
-        if status:
-            replays = [r for r in replays if r.status == status]
-        return replays
+    def resolved_count(self, installation_id: str) -> int:
+        return sum(
+            1 for (inst, _), fd in self._deliveries.items()
+            if inst == installation_id and fd.resolved
+        )
 
-    def _get(self, installation_id: str, replay_id: str) -> ReplayRequest:
-        key = (installation_id, replay_id)
-        req = self._replays.get(key)
-        if req is None:
-            raise KeyError(f"Replay {replay_id} not found")
-        return req
+    def list_all(self, installation_id: str) -> list[FailedDelivery]:
+        return [fd for (inst, _), fd in self._deliveries.items() if inst == installation_id]
+
+    def _get(self, installation_id: str, delivery_id: str) -> FailedDelivery:
+        key = (installation_id, delivery_id)
+        fd = self._deliveries.get(key)
+        if fd is None:
+            raise KeyError(f"Delivery {delivery_id} not found")
+        return fd

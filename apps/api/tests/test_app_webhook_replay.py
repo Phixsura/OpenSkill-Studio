@@ -1,68 +1,51 @@
-"""Tests for App Webhook Replay — queue, replay, retry, succeed/fail."""
+"""Tests for App Webhook Replay — record, replay, resolve."""
 
 import pytest
 
-from app.services.app_webhook_replay import AppWebhookReplay, ReplayStatus
+from app.services.app_webhook_replay import AppWebhookReplay
 
 
-class TestQueue:
-    def test_queue(self):
+class TestRecord:
+    def test_record(self):
         r = AppWebhookReplay()
-        req = r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com/hook", '{"data":1}')
-        assert req.status == ReplayStatus.QUEUED
-        assert req.attempt == 0
-
-    def test_duplicate(self):
-        r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}")
-        with pytest.raises(ValueError, match="already exists"):
-            r.queue_replay("inst-1", "rp-1", "evt-2", "https://x.com", "{}")
+        fd = r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        assert fd.replay_count == 0
 
 
 class TestReplay:
-    def test_start(self):
+    def test_replay_success(self):
         r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}")
-        req = r.start_replay("inst-1", "rp-1")
-        assert req.status == ReplayStatus.REPLAYING
-        assert req.attempt == 1
+        r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        fd = r.replay("inst-1", "d1", 200)
+        assert fd.resolved is True
+        assert fd.replay_count == 1
 
-    def test_succeed(self):
+    def test_replay_fail(self):
         r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}")
-        r.start_replay("inst-1", "rp-1")
-        req = r.succeed_replay("inst-1", "rp-1")
-        assert req.status == ReplayStatus.SUCCEEDED
+        r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        fd = r.replay("inst-1", "d1", 502)
+        assert fd.resolved is False
 
-    def test_fail_retry(self):
-        r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}", max_attempts=3)
-        r.start_replay("inst-1", "rp-1")
-        req = r.fail_replay("inst-1", "rp-1", "timeout")
-        assert req.status == ReplayStatus.QUEUED  # re-queued
-
-    def test_fail_exhausted(self):
-        r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}", max_attempts=1)
-        r.start_replay("inst-1", "rp-1")
-        req = r.fail_replay("inst-1", "rp-1", "error")
-        assert req.status == ReplayStatus.FAILED
+    def test_max_replays(self):
+        r = AppWebhookReplay(max_replays=2)
+        r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        r.replay("inst-1", "d1", 500)
+        r.replay("inst-1", "d1", 500)
+        with pytest.raises(ValueError, match="Max replay"):
+            r.replay("inst-1", "d1", 200)
 
 
-class TestList:
-    def test_filter_status(self):
+class TestPending:
+    def test_pending(self):
         r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}")
-        r.queue_replay("inst-1", "rp-2", "evt-2", "https://x.com", "{}")
-        r.start_replay("inst-1", "rp-1")
-        r.succeed_replay("inst-1", "rp-1")
-        queued = r.list_replays("inst-1", status=ReplayStatus.QUEUED)
-        assert len(queued) == 1
+        r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        r.record_failure("inst-1", "d2", "https://a.com", "push", "{}", 502)
+        r.replay("inst-1", "d1", 200)
+        assert len(r.pending("inst-1")) == 1
 
 
 class TestIsolation:
-    def test_cross_installation(self):
+    def test_cross(self):
         r = AppWebhookReplay()
-        r.queue_replay("inst-1", "rp-1", "evt-1", "https://x.com", "{}")
-        with pytest.raises(KeyError):
-            r._get("inst-2", "rp-1")
+        r.record_failure("inst-1", "d1", "https://a.com", "push", "{}", 500)
+        assert r.list_all("inst-2") == []
