@@ -10,6 +10,7 @@ Handles custom domain lifecycle:
 from __future__ import annotations
 
 import re
+import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -78,7 +79,7 @@ class AppCustomDomainManager:
             if d.domain.lower() == domain.lower():
                 raise ValueError(f"Domain {domain} already registered")
 
-        token = f"openskill-verify-{domain_id}"
+        token = f"openskill-verify-{secrets.token_urlsafe(32)}"
         record = CustomDomain(
             domain_id=domain_id, installation_id=installation_id,
             domain=domain.lower(), verification_token=token,
