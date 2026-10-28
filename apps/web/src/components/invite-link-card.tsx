@@ -1,32 +1,62 @@
 "use client";
-import { useState } from "react";
 
-interface InviteLinkCardProps { url: string; code: string; role: string;
-  maxUses: number | string; uses: number; onRevoke: (code: string) => void; }
+interface InviteLinkInfo {
+  invite_id: string;
+  code: string;
+  role: string;
+  max_uses: number;
+  uses: number;
+  is_valid: boolean;
+  created_by: string;
+}
 
-export function InviteLinkCard({ url, code, role, maxUses, uses, onRevoke }: InviteLinkCardProps) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  };
+interface InviteLinkCardProps {
+  links: InviteLinkInfo[];
+  appName: string;
+}
+
+export default function InviteLinkCard({ links, appName }: InviteLinkCardProps) {
+  const valid = links.filter((l) => l.is_valid).length;
+
   return (
-    <div className="rounded-xl border p-4 dark:border-gray-700">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-sm font-semibold">🔗 Invite Link</h4>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 capitalize">{role}</span>
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            🔗 Invite Links
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{appName}</p>
+        </div>
+        <span className="text-xs text-gray-400">
+          {valid}/{links.length} valid
+        </span>
       </div>
-      <div className="flex items-center gap-2 mb-3">
-        <input readOnly value={url} className="flex-1 text-xs font-mono px-2 py-1.5 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-600" />
-        <button onClick={handleCopy}
-          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">
-          {copied ? "✅ Copied" : "Copy"}
-        </button>
-      </div>
-      <div className="flex items-center justify-between text-xs text-gray-400">
-        <span>{uses} / {maxUses === "unlimited" ? "∞" : maxUses} uses</span>
-        <button onClick={() => onRevoke(code)}
-          className="text-red-500 hover:text-red-700">Revoke</button>
-      </div>
+
+      {links.length === 0 ? (
+        <p className="text-center text-sm text-gray-400">No invite links</p>
+      ) : (
+        <div className="space-y-1.5">
+          {links.map((l) => (
+            <div
+              key={l.invite_id}
+              className={`flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800 ${!l.is_valid ? "opacity-50" : ""}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">
+                  {l.code.slice(0, 8)}...
+                </span>
+                <span className="rounded bg-gray-100 px-1 py-0.5 text-[9px] text-gray-500 dark:bg-gray-800">
+                  {l.role}
+                </span>
+              </div>
+              <span className="text-[10px] text-gray-400">
+                {l.uses}
+                {l.max_uses > 0 ? `/${l.max_uses}` : ""} used
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
