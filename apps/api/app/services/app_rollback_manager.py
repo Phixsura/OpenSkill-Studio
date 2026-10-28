@@ -1,15 +1,14 @@
-"""App Rollback Manager — manage version rollbacks with safety checks.
+"""App Rollback Manager — manage version rollbacks.
 
-Handles rollback operations for installed apps:
-- Track rollback history
-- Safety checks (min version, cooldown)
-- Rollback reason recording
-- Per-installation scoped rollbacks
+Manages rollback operations:
+- Track deployment versions
+- Initiate rollbacks to previous versions
+- Rollback history with reasons
+- Per-installation scoped versions
 """
 
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,7 +23,15 @@ class RollbackStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
-    BLOCKED = "blocked"
+
+
+@dataclass
+class DeployVersion:
+    """A deployed version."""
+
+    version: str
+    deployed_at: float = field(default_factory=time.time)
+    is_current: bool = True
 
 
 @dataclass
@@ -32,132 +39,86 @@ class RollbackRecord:
     """A rollback operation record."""
 
     rollback_id: str
-    installation_id: str
     from_version: str
     to_version: str
     reason: str
     status: RollbackStatus = RollbackStatus.PENDING
     initiated_by: str = ""
     created_at: float = field(default_factory=time.time)
-    completed_at: float | None = None
-    error: str | None = None
-
-
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
-
-
-def _parse_version(v: str) -> tuple[int, int, int]:
-    """Parse a version string into a comparable tuple."""
-    m = _SEMVER_RE.match(v)
-    if not m:
-        raise ValueError(f"Invalid version string: {v}")
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
 class AppRollbackManager:
-    """Manage version rollbacks with safety checks."""
+    """Manage version rollbacks."""
 
-    def __init__(
-        self,
-        min_version: str = "0.0.0",
-        cooldown_seconds: float = 300,
-    ) -> None:
-        _parse_version(min_version)  # validate
-        self._min_version = min_version
-        self._cooldown = cooldown_seconds
-        self._rollbacks: dict[tuple[str, str], RollbackRecord] = {}
-        self._history: dict[str, list[RollbackRecord]] = {}
+    def __init__(self) -> None:
+        self._versions: dict[str, list[DeployVersion]] = {}
+        self._rollbacks: dict[str, list[RollbackRecord]] = {}
 
-    def initiate_rollback(
-        self,
-        installation_id: str,
-        rollback_id: str,
-        from_version: str,
-        to_version: str,
-        reason: str,
-        initiated_by: str = "",
-        now: float | None = None,
-    ) -> RollbackRecord:
-        """Initiate a rollback with safety checks."""
+    def record_deploy(self, installation_id: str, version: str) -> DeployVersion:
         if not installation_id:
             raise ValueError("installation_id is required")
-        if not rollback_id:
-            raise ValueError("rollback_id is required")
-        if not reason:
-            raise ValueError("reason is required")
-        to_parsed = _parse_version(to_version)
-        from_parsed = _parse_version(from_version)
+        if not version:
+            raise ValueError("version is required")
 
-        if to_parsed == from_parsed:
-            raise ValueError("Cannot rollback to the same version")
+        versions = self._versions.setdefault(installation_id, [])
+        # Mark previous as not current
+        for v in versions:
+            v.is_current = False
 
-        # Check min version
-        if to_parsed < _parse_version(self._min_version):
-            raise ValueError(f"Cannot rollback below minimum version {self._min_version}")
+        dv = DeployVersion(version=version)
+        versions.append(dv)
+        return dv
 
-        now = now or time.time()
+    def rollback(
+        self, installation_id: str, rollback_id: str,
+        reason: str = "", initiated_by: str = "",
+    ) -> RollbackRecord:
+        versions = self._versions.get(installation_id, [])
+        if len(versions) < 2:
+            raise ValueError("No previous version to rollback to")
 
-        # Check cooldown
-        history = self._history.get(installation_id, [])
-        if history:
-            last = history[-1]
-            if now - last.created_at < self._cooldown:
-                raise ValueError(
-                    f"Rollback cooldown: wait {self._cooldown}s between rollbacks"
-                )
-
-        key = (installation_id, rollback_id)
-        if key in self._rollbacks:
-            raise ValueError(f"Rollback {rollback_id} already exists")
+        current = versions[-1]
+        previous = versions[-2]
 
         record = RollbackRecord(
-            rollback_id=rollback_id,
-            installation_id=installation_id,
-            from_version=from_version,
-            to_version=to_version,
-            reason=reason,
-            initiated_by=initiated_by,
-            created_at=now,
+            rollback_id=rollback_id, from_version=current.version,
+            to_version=previous.version, reason=reason,
+            initiated_by=initiated_by, status=RollbackStatus.IN_PROGRESS,
         )
-        self._rollbacks[key] = record
-        self._history.setdefault(installation_id, []).append(record)
-        log.warning("rollback.initiated", rollback_id=rollback_id,
-                     from_version=from_version, to_version=to_version)
+        self._rollbacks.setdefault(installation_id, []).append(record)
+
+        # Update version state
+        current.is_current = False
+        previous.is_current = True
+
         return record
 
-    def start_rollback(self, installation_id: str, rollback_id: str) -> RollbackRecord:
-        r = self._get(installation_id, rollback_id)
-        if r.status != RollbackStatus.PENDING:
-            raise ValueError(f"Cannot start rollback in {r.status} state")
-        r.status = RollbackStatus.IN_PROGRESS
-        return r
-
     def complete_rollback(self, installation_id: str, rollback_id: str) -> RollbackRecord:
-        r = self._get(installation_id, rollback_id)
+        r = self._find_rollback(installation_id, rollback_id)
         if r.status != RollbackStatus.IN_PROGRESS:
-            raise ValueError(f"Cannot complete rollback in {r.status} state")
+            raise ValueError("Rollback not in progress")
         r.status = RollbackStatus.COMPLETED
-        r.completed_at = time.time()
         return r
 
     def fail_rollback(self, installation_id: str, rollback_id: str, error: str = "") -> RollbackRecord:
-        r = self._get(installation_id, rollback_id)
+        r = self._find_rollback(installation_id, rollback_id)
         if r.status != RollbackStatus.IN_PROGRESS:
-            raise ValueError(f"Cannot fail rollback in {r.status} state")
+            raise ValueError("Rollback not in progress")
         r.status = RollbackStatus.FAILED
-        r.error = error
         return r
 
-    def get_rollback(self, installation_id: str, rollback_id: str) -> RollbackRecord:
-        return self._get(installation_id, rollback_id)
+    def current_version(self, installation_id: str) -> str | None:
+        versions = self._versions.get(installation_id, [])
+        for v in reversed(versions):
+            if v.is_current:
+                return v.version
+        return None
 
-    def get_history(self, installation_id: str, limit: int = 20) -> list[RollbackRecord]:
-        history = self._history.get(installation_id, [])
-        return list(reversed(history[-limit:]))
+    def rollback_history(self, installation_id: str) -> list[RollbackRecord]:
+        return list(reversed(self._rollbacks.get(installation_id, [])))
 
-    def _get(self, installation_id: str, rollback_id: str) -> RollbackRecord:
-        key = (installation_id, rollback_id)
-        r = self._rollbacks.get(key)
-        if r is None:
-            raise KeyError(f"Rollback {rollback_id} not found")
-        return r
+    def _find_rollback(self, installation_id: str, rollback_id: str) -> RollbackRecord:
+        for r in self._rollbacks.get(installation_id, []):
+            if r.rollback_id == rollback_id:
+                return r
+        raise KeyError(f"Rollback {rollback_id} not found")
