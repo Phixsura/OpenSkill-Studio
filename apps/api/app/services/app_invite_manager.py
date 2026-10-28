@@ -59,12 +59,15 @@ class AppInviteManager:
         invited_by: str = "",
         now: float | None = None,
     ) -> Invite:
+        ALLOWED_ROLES = {"viewer", "member", "admin"}
         if not installation_id:
             raise ValueError("installation_id is required")
         if not invite_id:
             raise ValueError("invite_id is required")
         if not email:
             raise ValueError("email is required")
+        if role not in ALLOWED_ROLES:
+            raise ValueError(f"Invalid role: {role}. Must be one of {ALLOWED_ROLES}")
 
         key = (installation_id, invite_id)
         if key in self._invites:
@@ -81,16 +84,20 @@ class AppInviteManager:
         self._token_index[token] = key
         return invite
 
-    def accept_invite(self, token: str, now: float | None = None) -> Invite:
+    def accept_invite(self, token: str, accepting_email: str, now: float | None = None) -> Invite:
         invite = self._get_by_token(token, now)
+        if accepting_email.strip().lower() != invite.email.strip().lower():
+            raise PermissionError("Invite not addressed to this user")
         if invite.status != InviteStatus.PENDING:
             raise ValueError(f"Cannot accept invite in {invite.status} state")
         invite.status = InviteStatus.ACCEPTED
         invite.responded_at = now or time.time()
         return invite
 
-    def decline_invite(self, token: str, now: float | None = None) -> Invite:
+    def decline_invite(self, token: str, declining_email: str, now: float | None = None) -> Invite:
         invite = self._get_by_token(token, now)
+        if declining_email.strip().lower() != invite.email.strip().lower():
+            raise PermissionError("Invite not addressed to this user")
         if invite.status != InviteStatus.PENDING:
             raise ValueError(f"Cannot decline invite in {invite.status} state")
         invite.status = InviteStatus.DECLINED
