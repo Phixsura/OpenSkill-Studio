@@ -1,61 +1,82 @@
-"""App error tracker — collect and analyze sandbox execution errors.
+"""App Error Tracker — track and group application errors.
 
-Tracks error patterns, frequencies, and provides error grouping
-for developer debugging in the observability dashboard.
+Manages error tracking:
+- Record errors with fingerprinting
+- Group by fingerprint (dedup)
+- Track occurrence counts
+- Per-installation scoped errors
 """
 
-from collections import defaultdict
-from datetime import UTC, datetime
+from __future__ import annotations
 
-_error_store: dict[str, list[dict]] = defaultdict(list)
+import hashlib
+import time
+from dataclasses import dataclass, field
 
+import structlog
 
-def record_error(
-    *,
-    app_id: str,
-    error_type: str,
-    message: str,
-    function_name: str | None = None,
-    stack_trace: str | None = None,
-) -> dict:
-    """Record an execution error."""
-    entry = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "error_type": error_type,
-        "message": message,
-        "function_name": function_name,
-        "stack_trace": stack_trace,
-    }
-    _error_store[app_id].append(entry)
-    return entry
+log = structlog.get_logger()
 
 
-def get_errors(app_id: str, *, limit: int = 50) -> list[dict]:
-    """Get recent errors for an app."""
-    return _error_store.get(app_id, [])[-limit:]
+@dataclass
+class ErrorGroup:
+    """A group of similar errors."""
+
+    fingerprint: str
+    message: str
+    source: str
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    count: int = 1
+    resolved: bool = False
 
 
-def get_error_summary(app_id: str) -> dict:
-    """Get error summary grouped by type."""
-    errors = _error_store.get(app_id, [])
-    by_type: dict[str, int] = defaultdict(int)
-    for e in errors:
-        by_type[e["error_type"]] += 1
-    return {
-        "total": len(errors),
-        "by_type": dict(by_type),
-        "unique_types": len(by_type),
-    }
+class AppErrorTracker:
+    """Track and group application errors."""
 
+    def __init__(self) -> None:
+        self._groups: dict[tuple[str, str], ErrorGroup] = {}
 
-def get_top_errors(app_id: str, *, limit: int = 5) -> list[dict]:
-    """Get most frequent error types."""
-    summary = get_error_summary(app_id)
-    sorted_types = sorted(summary["by_type"].items(), key=lambda x: x[1], reverse=True)
-    return [{"error_type": t, "count": c} for t, c in sorted_types[:limit]]
+    def record(
+        self, installation_id: str, message: str, source: str,
+        stack_trace: str = "",
+    ) -> ErrorGroup:
+        if not installation_id:
+            raise ValueError("installation_id is required")
 
+        # Fingerprint by message + source
+        fp = hashlib.sha256(f"{message}:{source}".encode()).hexdigest()[:16]
 
-def clear_errors(app_id: str) -> int:
-    """Clear error history for an app."""
-    count = len(_error_store.pop(app_id, []))
-    return count
+        key = (installation_id, fp)
+        if key in self._groups:
+            group = self._groups[key]
+            group.count += 1
+            group.last_seen = time.time()
+            if group.resolved:
+                group.resolved = False  # re-open on recurrence
+            return group
+
+        group = ErrorGroup(fingerprint=fp, message=message, source=source)
+        self._groups[key] = group
+        return group
+
+    def resolve(self, installation_id: str, fingerprint: str) -> ErrorGroup:
+        key = (installation_id, fingerprint)
+        g = self._groups.get(key)
+        if g is None:
+            raise KeyError(f"Error group {fingerprint} not found")
+        g.resolved = True
+        return g
+
+    def unresolved(self, installation_id: str) -> list[ErrorGroup]:
+        return [
+            g for (inst, _), g in self._groups.items()
+            if inst == installation_id and not g.resolved
+        ]
+
+    def top_errors(self, installation_id: str, limit: int = 10) -> list[ErrorGroup]:
+        groups = [g for (inst, _), g in self._groups.items() if inst == installation_id]
+        return sorted(groups, key=lambda g: g.count, reverse=True)[:limit]
+
+    def count(self, installation_id: str) -> int:
+        return len([g for (inst, _) in self._groups if inst == installation_id])
