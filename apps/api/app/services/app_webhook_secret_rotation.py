@@ -1,29 +1,84 @@
-"""Webhook secret rotation — rotate webhook signing secrets safely."""
+"""App Webhook Secret Rotation — rotate webhook signing secrets.
 
-from datetime import UTC, datetime, timedelta
-from app.services.webhook_verify import generate_webhook_secret
+Manages secret rotation:
+- Schedule rotations with grace period
+- Track rotation status
+- Old secret remains valid during grace
+- Per-installation scoped rotations
+"""
 
+from __future__ import annotations
 
-def create_rotation(*, current_secret_id: str, grace_hours: int = 24) -> dict:
-    """Create a webhook secret rotation with grace period."""
-    _, new_secret = generate_webhook_secret()
-    now = datetime.now(UTC)
-    return {
-        "old_secret_id": current_secret_id,
-        "new_secret": new_secret,
-        "grace_until": (now + timedelta(hours=grace_hours)).isoformat(),
-        "created_at": now.isoformat(),
-        "status": "active",
-    }
+import secrets
+import time
+from dataclasses import dataclass, field
 
+import structlog
 
-def is_in_grace(rotation: dict) -> bool:
-    grace = datetime.fromisoformat(rotation["grace_until"].replace("Z", "+00:00"))
-    return datetime.now(UTC) < grace
+log = structlog.get_logger()
 
 
-def should_accept_old_secret(rotation: dict | None) -> bool:
-    """During grace period, accept both old and new secrets."""
-    if not rotation:
-        return False
-    return is_in_grace(rotation)
+@dataclass
+class SecretRotation:
+    """A webhook secret rotation."""
+
+    rotation_id: str
+    old_secret_hash: str
+    new_secret_hash: str
+    grace_until: float
+    completed: bool = False
+    created_at: float = field(default_factory=time.time)
+
+    @property
+    def in_grace_period(self) -> bool:
+        return not self.completed and time.time() < self.grace_until
+
+
+class AppWebhookSecretRotation:
+    """Rotate webhook signing secrets."""
+
+    def __init__(self) -> None:
+        self._rotations: dict[tuple[str, str], SecretRotation] = {}
+        self._current_secrets: dict[str, str] = {}
+
+    def initialize_secret(self, installation_id: str) -> str:
+        """Generate initial secret. Returns raw secret."""
+        if not installation_id:
+            raise ValueError("installation_id is required")
+        import hashlib
+        raw = secrets.token_urlsafe(32)
+        self._current_secrets[installation_id] = hashlib.sha256(raw.encode()).hexdigest()
+        return raw
+
+    def rotate(
+        self, installation_id: str, rotation_id: str, grace_seconds: int = 3600,
+    ) -> tuple[SecretRotation, str]:
+        """Rotate to a new secret. Returns (rotation, new_raw_secret)."""
+        import hashlib
+        old_hash = self._current_secrets.get(installation_id)
+        if old_hash is None:
+            raise ValueError("No existing secret to rotate")
+        if grace_seconds < 0:
+            raise ValueError("grace_seconds must be non-negative")
+
+        new_raw = secrets.token_urlsafe(32)
+        new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
+
+        rotation = SecretRotation(
+            rotation_id=rotation_id, old_secret_hash=old_hash,
+            new_secret_hash=new_hash, grace_until=time.time() + grace_seconds,
+        )
+        self._rotations[(installation_id, rotation_id)] = rotation
+        self._current_secrets[installation_id] = new_hash
+        return rotation, new_raw
+
+    def complete(self, installation_id: str, rotation_id: str) -> SecretRotation:
+        key = (installation_id, rotation_id)
+        r = self._rotations.get(key)
+        if r is None:
+            raise KeyError(f"Rotation {rotation_id} not found")
+        r.completed = True
+        return r
+
+    def list_rotations(self, installation_id: str) -> list[SecretRotation]:
+        return [r for (inst, _), r in self._rotations.items() if inst == installation_id]

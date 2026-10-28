@@ -1,18 +1,44 @@
-from app.services.app_webhook_secret_rotation import create_rotation, is_in_grace, should_accept_old_secret
+"""Tests for App Webhook Secret Rotation — init, rotate, complete."""
 
-def test_create():
-    r = create_rotation(current_secret_id="s1")
-    assert r["old_secret_id"] == "s1"
-    assert len(r["new_secret"]) > 10
-    assert r["status"] == "active"
+import pytest
 
-def test_in_grace():
-    r = create_rotation(current_secret_id="s1", grace_hours=24)
-    assert is_in_grace(r) is True
+from app.services.app_webhook_secret_rotation import AppWebhookSecretRotation
 
-def test_should_accept_old():
-    r = create_rotation(current_secret_id="s1")
-    assert should_accept_old_secret(r) is True
 
-def test_should_not_accept_none():
-    assert should_accept_old_secret(None) is False
+class TestInit:
+    def test_initialize(self):
+        s = AppWebhookSecretRotation()
+        raw = s.initialize_secret("inst-1")
+        assert len(raw) > 20
+
+
+class TestRotate:
+    def test_rotate(self):
+        s = AppWebhookSecretRotation()
+        s.initialize_secret("inst-1")
+        rotation, new_raw = s.rotate("inst-1", "r1", grace_seconds=60)
+        assert rotation.in_grace_period is True
+        assert len(new_raw) > 20
+
+    def test_no_existing(self):
+        s = AppWebhookSecretRotation()
+        with pytest.raises(ValueError, match="No existing"):
+            s.rotate("inst-1", "r1")
+
+
+class TestComplete:
+    def test_complete(self):
+        s = AppWebhookSecretRotation()
+        s.initialize_secret("inst-1")
+        s.rotate("inst-1", "r1")
+        r = s.complete("inst-1", "r1")
+        assert r.completed is True
+        assert r.in_grace_period is False
+
+
+class TestIsolation:
+    def test_cross(self):
+        s = AppWebhookSecretRotation()
+        s.initialize_secret("inst-1")
+        s.rotate("inst-1", "r1")
+        assert s.list_rotations("inst-2") == []
