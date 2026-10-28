@@ -1,55 +1,39 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import IPAllowListCard from "../src/components/ip-allowlist-card";
+import IPAllowlistCard from "../src/components/ip-allowlist-card";
 
-const rules = [
-  { rule_id: "r1", network: "10.0.0.0/8", description: "Internal network" },
-  { rule_id: "r2", network: "203.0.113.50/32", description: "Office IP" },
+const entries = [
+  { entry_id: "e1", cidr: "10.0.0.0/24", label: "Office", is_expired: false },
+  { entry_id: "e2", cidr: "192.168.1.1/32", label: "VPN", is_expired: false },
+  { entry_id: "e3", cidr: "172.16.0.0/16", label: "Temp", is_expired: true },
 ];
 
-describe("IPAllowListCard", () => {
-  it("renders header and app name", () => {
-    const { container } = render(
-      <IPAllowListCard rules={rules} mode="allowlist" appName="My App" />,
-    );
-    expect(container.textContent).toContain("IP Access Control");
-    expect(container.textContent).toContain("My App");
+describe("IPAllowlistCard", () => {
+  it("renders header and active count", () => {
+    const { container } = render(<IPAllowlistCard entries={entries} appName="App" />);
+    expect(container.textContent).toContain("IP Allowlist");
+    expect(container.textContent).toContain("2 active rules");
   });
 
-  it("shows allowlist mode badge", () => {
-    const { container } = render(<IPAllowListCard rules={rules} mode="allowlist" appName="App" />);
-    expect(container.textContent).toContain("Allowlist");
+  it("shows CIDR ranges", () => {
+    const { container } = render(<IPAllowlistCard entries={entries} appName="App" />);
+    expect(container.textContent).toContain("10.0.0.0/24");
+    expect(container.textContent).toContain("192.168.1.1/32");
   });
 
-  it("shows denylist mode badge", () => {
-    const { container } = render(<IPAllowListCard rules={rules} mode="denylist" appName="App" />);
-    expect(container.textContent).toContain("Denylist");
+  it("shows labels", () => {
+    const { container } = render(<IPAllowlistCard entries={entries} appName="App" />);
+    expect(container.textContent).toContain("Office");
+    expect(container.textContent).toContain("VPN");
   });
 
-  it("shows rule count", () => {
-    const { container } = render(<IPAllowListCard rules={rules} mode="allowlist" appName="App" />);
-    expect(container.textContent).toContain("2 rules");
+  it("shows expired badge", () => {
+    const { container } = render(<IPAllowlistCard entries={entries} appName="App" />);
+    expect(container.textContent).toContain("expired");
   });
 
-  it("renders networks", () => {
-    const { container } = render(<IPAllowListCard rules={rules} mode="allowlist" appName="App" />);
-    expect(container.textContent).toContain("10.0.0.0/8");
-    expect(container.textContent).toContain("203.0.113.50/32");
-  });
-
-  it("shows descriptions", () => {
-    const { container } = render(<IPAllowListCard rules={rules} mode="allowlist" appName="App" />);
-    expect(container.textContent).toContain("Internal network");
-    expect(container.textContent).toContain("Office IP");
-  });
-
-  it("shows empty allowlist message", () => {
-    const { container } = render(<IPAllowListCard rules={[]} mode="allowlist" appName="App" />);
-    expect(container.textContent).toContain("all IPs allowed");
-  });
-
-  it("shows empty denylist message", () => {
-    const { container } = render(<IPAllowListCard rules={[]} mode="denylist" appName="App" />);
-    expect(container.textContent).toContain("no IPs blocked");
+  it("shows empty deny-all state", () => {
+    const { container } = render(<IPAllowlistCard entries={[]} appName="App" />);
+    expect(container.textContent).toContain("No IP rules");
   });
 });
