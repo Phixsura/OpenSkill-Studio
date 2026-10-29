@@ -28,11 +28,11 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiWebhookCircuitBreaker:
     def __init__(self) -> None:
         self._breakers: dict[tuple[str, str], CircuitBreaker] = {}
 
-    def get_or_create(self, installation_id: str, consumer_id: str, failure_threshold: int = 5, recovery_timeout_s: int = 60) -> CircuitBreaker:
+    def get_or_create(self, installation_id: str, consumer_id: str, failure_threshold: int = 5, recovery_timeout_s: int = 60, half_open_max: int = 3) -> CircuitBreaker:
         if not installation_id: raise ValueError("installation_id is required")
         key = (installation_id, consumer_id)
         if key not in self._breakers:
-            self._breakers[key] = CircuitBreaker(consumer_id=consumer_id, failure_threshold=failure_threshold, recovery_timeout_s=recovery_timeout_s)
+            self._breakers[key] = CircuitBreaker(consumer_id=consumer_id, failure_threshold=failure_threshold, recovery_timeout_s=recovery_timeout_s, half_open_max=half_open_max)
         return self._breakers[key]
 
     def should_allow(self, installation_id: str, consumer_id: str) -> bool:
