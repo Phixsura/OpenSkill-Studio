@@ -33,7 +33,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiFeatureFlag:
         if not flag.enabled: return False
         if consumer_id in flag.allowlist: return True
         if flag.rollout_pct == 100: return True
-        if flag.rollout_pct == 0: return bool(flag.allowlist)
+        if flag.rollout_pct == 0: return False
         if consumer_id:
             h = int(hashlib.sha256(f"{flag_id}:{consumer_id}".encode()).hexdigest()[:8], 16)
             return (h % 100) < flag.rollout_pct
