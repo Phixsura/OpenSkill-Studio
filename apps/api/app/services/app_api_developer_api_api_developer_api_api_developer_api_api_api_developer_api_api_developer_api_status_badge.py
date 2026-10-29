@@ -1,6 +1,7 @@
 """App API Developer Status Badge — generate embeddable status badges."""
 from __future__ import annotations
 from dataclasses import dataclass
+import html
 import structlog
 
 log = structlog.get_logger()
@@ -44,4 +45,6 @@ class AppAPIDeveloperAPIApiDeveloperApiApiDeveloperApiApiApiDeveloperApiApiDevel
         if b is None: raise KeyError(f"Badge {badge_id} not found")
         colors = {"green": "#4c1", "yellow": "#dfb317", "red": "#e05d44", "blue": "#007ec6", "gray": "#555"}
         c = colors.get(b.color, "#555")
-        return f'<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#555" width="80" height="20"/><rect x="80" fill="{c}" width="60" height="20"/><text x="40" y="14" fill="#fff">{b.label}</text><text x="110" y="14" fill="#fff">{b.value}</text></svg>'
+        label = html.escape(b.label, quote=True)
+        value = html.escape(b.value, quote=True)
+        return f'<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#555" width="80" height="20"/><rect x="80" fill="{c}" width="60" height="20"/><text x="40" y="14" fill="#fff">{label}</text><text x="110" y="14" fill="#fff">{value}</text></svg>'

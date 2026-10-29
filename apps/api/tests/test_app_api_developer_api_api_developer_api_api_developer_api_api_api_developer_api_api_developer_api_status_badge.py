@@ -30,3 +30,10 @@ class TestStatusBadge:
         b = AppAPIDeveloperAPIApiDeveloperApiApiDeveloperApiApiApiDeveloperApiApiDeveloperApiStatusBadge()
         b.create("inst-1", "b1", "x", "y", "green")
         assert len(b.all_badges("inst-2")) == 0
+
+    def test_svg_xss_escape(self):
+        b = AppAPIDeveloperAPIApiDeveloperApiApiDeveloperApiApiApiDeveloperApiApiDeveloperApiStatusBadge()
+        b.create("inst-1", "b1", '<script>alert("xss")</script>', "val", "green")
+        svg = b.render_svg("inst-1", "b1")
+        assert "<script>" not in svg
+        assert "&lt;script&gt;" in svg
