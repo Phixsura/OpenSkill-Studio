@@ -29,9 +29,12 @@ class AppAPIDeveloperAPIApiDeveloperApiApiWebhookPayloadTransformTemplate:
 
     def apply(self, installation_id: str, template_id: str, values: dict[str, str]) -> str:
         t = self._get(installation_id, template_id)
-        result = t.template
-        for var in t.variables:
-            result = result.replace("{{" + var + "}}", values.get(var, ""))
+        # Single-pass substitution prevents re-scanning of substituted values
+        import json as _json
+        def _escape(val: str) -> str:
+            # JSON-safe escape: prevent injection
+            return _json.dumps(val)[1:-1]  # strip outer quotes
+        result = re.sub(r"\{\{(\w+)\}\}", lambda m: _escape(values.get(m.group(1), "")), t.template)
         t.usage_count += 1
         return result
 

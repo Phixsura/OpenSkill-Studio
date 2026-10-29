@@ -30,3 +30,10 @@ class TestTransformTemplate:
         t = AppAPIDeveloperAPIApiDeveloperApiApiWebhookPayloadTransformTemplate()
         t.create("inst-1", "t1", "Tpl", "{{x}}")
         assert len(t.list_templates("inst-2")) == 0
+
+    def test_injection_safe(self):
+        t = AppAPIDeveloperAPIApiDeveloperApiApiWebhookPayloadTransformTemplate()
+        t.create("inst-1", "t1", "JSON", '{"name": "{{name}}"}')
+        result = t.apply("inst-1", "t1", {"name": '", "admin": true, "x": "'})
+        # The injected JSON should be escaped, not interpreted
+        assert '"admin"' not in result or '\\"admin\\"' in result
