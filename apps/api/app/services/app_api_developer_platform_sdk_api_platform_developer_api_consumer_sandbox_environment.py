@@ -42,6 +42,8 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiConsumerSandboxEnvironmen
 
     def use_request(self, installation_id: str, sandbox_id: str) -> SandboxEnv:
         env = self._get(installation_id, sandbox_id)
+        if env.expires_at > 0 and time.time() >= env.expires_at:
+            env.status = SandboxStatus.EXPIRED
         if env.status != SandboxStatus.ACTIVE: raise ValueError(f"Sandbox is {env.status.value}")
         if env.request_count >= env.request_limit: raise ValueError("Request limit reached")
         env.request_count += 1
