@@ -10,7 +10,7 @@ describe("APIDeveloperChangelogWidgetCard", () => {
     expect(container.textContent).toContain("Changelog Widget");
     expect(container.textContent).toContain("bottom-right");
     expect(container.textContent).toContain("bell");
-    expect(container.textContent).toContain("5.0% CTR");
+    expect(container.textContent).toContain("5% CTR");
   });
   it("shows not configured", () => {
     const { container } = render(<APIDeveloperChangelogWidgetCard widget={null} appName="App" />);
