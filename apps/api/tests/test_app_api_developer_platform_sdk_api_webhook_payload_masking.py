@@ -32,3 +32,15 @@ class TestPayloadMasking:
         m = AppAPIDeveloperPlatformSDKApiWebhookPayloadMasking()
         m.configure("inst-1", "https://a.com", [])
         assert len(m.all_configs("inst-2")) == 0
+
+    def test_negative_visible_chars_rejected(self):
+        import pytest
+        m = AppAPIDeveloperPlatformSDKApiWebhookPayloadMasking()
+        with pytest.raises(ValueError, match="visible_chars"):
+            m.configure("inst-1", "https://a.com", [{"field_pattern": "key", "visible_chars": -1}])
+
+    def test_zero_visible_chars(self):
+        m = AppAPIDeveloperPlatformSDKApiWebhookPayloadMasking()
+        m.configure("inst-1", "https://a.com", [{"field_pattern": "secret", "visible_chars": 0}])
+        result = m.mask("inst-1", "https://a.com", {"secret": "mysecretvalue"})
+        assert result["secret"] == "*" * 13

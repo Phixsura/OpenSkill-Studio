@@ -26,7 +26,11 @@ class AppAPIDeveloperPlatformSDKApiWebhookPayloadMasking:
 
     def configure(self, installation_id: str, destination: str, rules: list[dict]) -> MaskingConfig:
         if not installation_id: raise ValueError("installation_id is required")
-        parsed = [MaskingRule(field_pattern=r["field_pattern"], mask_char=r.get("mask_char", "*"), visible_chars=r.get("visible_chars", 4)) for r in rules]
+        parsed = []
+        for r in rules:
+            vc = int(r.get("visible_chars", 4))
+            if vc < 0: raise ValueError("visible_chars must be >= 0")
+            parsed.append(MaskingRule(field_pattern=r["field_pattern"], mask_char=r.get("mask_char", "*"), visible_chars=vc))
         key = (installation_id, destination)
         c = MaskingConfig(destination=destination, rules=parsed)
         self._configs[key] = c
@@ -42,7 +46,8 @@ class AppAPIDeveloperPlatformSDKApiWebhookPayloadMasking:
             for rule in c.rules:
                 if re.search(rule.field_pattern, field_name, re.IGNORECASE):
                     if isinstance(value, str) and len(value) > rule.visible_chars:
-                        result[field_name] = rule.mask_char * (len(value) - rule.visible_chars) + value[-rule.visible_chars:]
+                        visible = value[-rule.visible_chars:] if rule.visible_chars > 0 else ""
+                        result[field_name] = rule.mask_char * (len(value) - rule.visible_chars) + visible
                     else:
                         result[field_name] = "[MASKED]"
                     c.masked_count += 1
