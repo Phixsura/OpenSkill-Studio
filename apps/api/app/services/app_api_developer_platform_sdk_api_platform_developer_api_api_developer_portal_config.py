@@ -39,12 +39,19 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiDeveloperPortalConfig:
         self._configs[key] = config
         return config
 
+    _UPDATABLE = {"title", "description", "logo_url", "primary_color", "custom_domain", "sections", "analytics_enabled", "signup_enabled"}
+
     def update(self, installation_id: str, portal_id: str, **kwargs: object) -> PortalConfig:
         config = self._get(installation_id, portal_id)
         for k, v in kwargs.items():
-            if not hasattr(config, k): raise ValueError(f"Unknown field: {k}")
+            if k not in self._UPDATABLE: raise ValueError(f"Cannot update field: {k}")
             if k == "primary_color" and v and not _COLOR_RE.match(str(v)):
                 raise ValueError(f"Invalid color: {v}")
+            if k == "custom_domain" and v and not _DOMAIN_RE.match(str(v)):
+                raise ValueError(f"Invalid domain: {v}")
+            if k == "sections" and isinstance(v, list):
+                invalid = set(v) - VALID_SECTIONS
+                if invalid: raise ValueError(f"Invalid sections: {invalid}")
             setattr(config, k, v)
         return config
 
