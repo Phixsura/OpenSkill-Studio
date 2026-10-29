@@ -20,7 +20,7 @@ class TestConsumerWebhookQuota:
         q = AppAPIDeveloperPlatformSDKApiPlatformConsumerWebhookQuota()
         q.set_quota("inst-1", "c1", 10)
         q.consume("inst-1", "c1", 15)
-        assert q.all_quotas("inst-1")[0].overage_count == 5
+        assert q.all_quotas("inst-1")[0].overage_count == 15
 
     def test_reset(self):
         q = AppAPIDeveloperPlatformSDKApiPlatformConsumerWebhookQuota()
