@@ -50,7 +50,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerComplianceChec
         results = [r for (inst, cid, _), r in self._results.items() if inst == installation_id and cid == consumer_id]
         compliant = sum(1 for r in results if r.status == ComplianceStatus.COMPLIANT)
         non_compliant = sum(1 for r in results if r.status == ComplianceStatus.NON_COMPLIANT)
-        return {"total_rules": len(rules), "checked": len(results), "compliant": compliant, "non_compliant": non_compliant, "overall": "compliant" if non_compliant == 0 and len(results) == len(rules) else "non_compliant"}
+        return {"total_rules": len(rules), "checked": len(results), "compliant": compliant, "non_compliant": non_compliant, "overall": "compliant" if non_compliant == 0 and len(results) >= len(rules) and len(rules) > 0 else "non_compliant"}
 
     def non_compliant_consumers(self, installation_id: str) -> list[str]:
         consumers: set[str] = set()

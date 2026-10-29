@@ -31,6 +31,12 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerSsoConfig:
         for d in config.domains:
             if not _DOMAIN_RE.match(d): raise ValueError(f"Invalid domain: {d}")
         if config.enforce and not config.enabled: raise ValueError("Cannot enforce disabled SSO")
+        # Enforce domain uniqueness across consumers
+        for d in config.domains:
+            dl = d.lower()
+            for (inst, cid), other in self._configs.items():
+                if inst == installation_id and cid != config.consumer_id and dl in {x.lower() for x in other.domains}:
+                    raise ValueError(f"Domain {d} already claimed by another consumer")
         key = (installation_id, config.consumer_id)
         self._configs[key] = config
         return config
