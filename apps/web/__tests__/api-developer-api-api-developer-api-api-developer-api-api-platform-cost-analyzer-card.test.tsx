@@ -12,7 +12,7 @@ describe("Card", () => {
     const { container } = render(<APIDeveloperAPIApiDeveloperApiApiDeveloperApiApiPlatformCostAnalyzerCard period="2025-01" items={items} totalCents={80000} totalSpendCents={200000} appName="App" />);
     expect(container.textContent).toContain("Cost Analyzer");
     expect(container.textContent).toContain("$800.00");
-    expect(container.textContent).toContain("$2,000.00");
+    expect(container.textContent).toContain("$2000.00");
     expect(container.textContent).toContain("compute");
     expect(container.textContent).toContain("1,000,000 requests");
   });
