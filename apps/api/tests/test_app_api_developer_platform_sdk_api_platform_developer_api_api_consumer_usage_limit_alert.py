@@ -9,9 +9,9 @@ class TestConsumerUsageLimitAlert:
     def test_no_alert_below_threshold(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerUsageLimitAlert()
         alert = svc.check_and_alert("inst-1", "c1", "requests", 100, 10000)
-        assert alert is not None and alert.threshold_pct == 75
+        assert alert is None
 
-    def test_no_duplicate_alert(self):
+    def test_progressive_threshold(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerUsageLimitAlert()
         svc.check_and_alert("inst-1", "c1", "requests", 8000, 10000)  # 80% → triggers 75
         alert = svc.check_and_alert("inst-1", "c1", "requests", 8100, 10000)  # 81% → triggers 75
