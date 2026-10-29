@@ -1,31 +1,41 @@
-"""App API Developer Rate Limit Dashboard — unified rate limiting overview."""
+"""App API Developer Rate Limit Dashboard — real-time rate limit visibility."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import time
 import structlog
 
 log = structlog.get_logger()
 
 @dataclass
-class RateLimitDashboard:
-    total_rules: int = 0
-    active_rules: int = 0
-    throttled_requests: int = 0
-    total_consumers: int = 0
-    exhausted_consumers: int = 0
-    avg_utilization_pct: float = 0.0
+class RateLimitSnapshot:
+    endpoint: str
+    limit: int
+    remaining: int
+    reset_at: float
+    consumer_id: str = ""
+
+    @property
+    def usage_pct(self) -> float:
+        return round((self.limit - self.remaining) / self.limit * 100, 1) if self.limit > 0 else 0.0
 
 class AppAPIDeveloperAPIRateLimitDashboard:
     def __init__(self) -> None:
-        self._dashboards: dict[str, RateLimitDashboard] = {}
+        self._snapshots: dict[str, list[RateLimitSnapshot]] = {}
 
-    def update(self, installation_id: str, **kwargs) -> RateLimitDashboard:
+    def record(self, installation_id: str, endpoint: str, limit: int, remaining: int, reset_at: float, consumer_id: str = "") -> RateLimitSnapshot:
         if not installation_id: raise ValueError("installation_id is required")
-        if installation_id not in self._dashboards:
-            self._dashboards[installation_id] = RateLimitDashboard()
-        d = self._dashboards[installation_id]
-        for k, v in kwargs.items():
-            if hasattr(d, k): setattr(d, k, v)
-        return d
+        if limit < 0: raise ValueError("limit must be non-negative")
+        if remaining < 0: remaining = 0
+        s = RateLimitSnapshot(endpoint=endpoint, limit=limit, remaining=remaining, reset_at=reset_at, consumer_id=consumer_id)
+        self._snapshots.setdefault(installation_id, []).append(s)
+        return s
 
-    def get(self, installation_id: str) -> RateLimitDashboard:
-        return self._dashboards.get(installation_id, RateLimitDashboard())
+    def current(self, installation_id: str) -> list[RateLimitSnapshot]:
+        now = time.time()
+        return [s for s in self._snapshots.get(installation_id, []) if s.reset_at > now]
+
+    def hotspots(self, installation_id: str, threshold_pct: float = 80.0) -> list[RateLimitSnapshot]:
+        return [s for s in self._snapshots.get(installation_id, []) if s.usage_pct >= threshold_pct]
+
+    def by_consumer(self, installation_id: str, consumer_id: str) -> list[RateLimitSnapshot]:
+        return [s for s in self._snapshots.get(installation_id, []) if s.consumer_id == consumer_id]
