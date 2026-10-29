@@ -34,3 +34,9 @@ class TestConsumerBillingProfile:
         b = AppAPIDeveloperAPIApiDeveloperApiApiConsumerBillingProfile()
         b.create("inst-1", "c1", "free", "a@b.com")
         assert b.by_plan("inst-2") == {}
+
+    def test_duplicate_rejected(self):
+        b = AppAPIDeveloperAPIApiDeveloperApiApiConsumerBillingProfile()
+        b.create("inst-1", "c1", "free", "a@b.com")
+        with pytest.raises(ValueError, match="already exists"):
+            b.create("inst-1", "c1", "pro", "new@b.com")

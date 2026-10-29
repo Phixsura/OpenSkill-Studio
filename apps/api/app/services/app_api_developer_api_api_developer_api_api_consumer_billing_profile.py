@@ -33,6 +33,8 @@ class AppAPIDeveloperAPIApiDeveloperApiApiConsumerBillingProfile:
         if plan not in ("free", "starter", "pro", "enterprise"): raise ValueError("invalid plan")
         if "@" not in billing_email: raise ValueError("invalid email")
         key = (installation_id, consumer_id)
+        if key in self._profiles: raise ValueError("Profile already exists")
+        if monthly_budget_cents < 0: raise ValueError("budget must be non-negative")
         p = BillingProfile(consumer_id=consumer_id, plan=plan, billing_email=billing_email, monthly_budget_cents=monthly_budget_cents)
         self._profiles[key] = p
         return p
