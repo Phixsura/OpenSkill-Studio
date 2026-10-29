@@ -27,6 +27,9 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiGatewayConfig:
         if not installation_id: raise ValueError("installation_id is required")
         if not route.path_pattern: raise ValueError("path_pattern is required")
         if not route.upstream: raise ValueError("upstream is required")
+        parsed = urlparse(route.upstream)
+        if parsed.scheme not in ("http", "https"): raise ValueError("upstream must use http or https")
+        if not parsed.hostname: raise ValueError("upstream must have a hostname")
         invalid_methods = set(m.upper() for m in route.methods) - VALID_METHODS
         if invalid_methods: raise ValueError(f"Invalid methods: {invalid_methods}")
         invalid_mw = set(route.middlewares) - VALID_MIDDLEWARES

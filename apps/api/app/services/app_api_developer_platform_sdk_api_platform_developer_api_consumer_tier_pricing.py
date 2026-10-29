@@ -38,8 +38,13 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiConsumerTierPricing:
 
     def assign_tier(self, installation_id: str, consumer_id: str, tier_id: str) -> ConsumerBilling:
         if (installation_id, tier_id) not in self._tiers: raise KeyError(f"Tier {tier_id} not found")
+        key = (installation_id, consumer_id)
+        existing = self._billing.get(key)
+        if existing:
+            existing.tier_id = tier_id
+            return existing
         billing = ConsumerBilling(consumer_id=consumer_id, tier_id=tier_id)
-        self._billing[(installation_id, consumer_id)] = billing
+        self._billing[key] = billing
         return billing
 
     def record_usage(self, installation_id: str, consumer_id: str, requests: int) -> ConsumerBilling:
