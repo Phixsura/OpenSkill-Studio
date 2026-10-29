@@ -1,17 +1,16 @@
-from app.services.app_api_usage_dashboard import build_dashboard_data
+from app.services.app_api_usage_dashboard import AppAPIUsageDashboard
 
-def test_basic():
-    d = build_dashboard_data(apps=[{"id": "a1", "name": "X", "status": "published"}],
-                             total_api_calls=500, total_executions=100)
-    assert d["summary"]["total_apps"] == 1
-    assert d["summary"]["published"] == 1
-    assert d["summary"]["api_calls"] == 500
+class TestDashboard:
+    def test_update(self):
+        d = AppAPIUsageDashboard()
+        dash = d.update("inst-1", total_requests=100000, total_errors=500, unique_consumers=50)
+        assert dash.error_rate == 0.5
 
-def test_health():
-    d = build_dashboard_data(apps=[], health_scores=[90, 100, 80])
-    assert d["summary"]["avg_health"] == 90.0
+    def test_default(self):
+        d = AppAPIUsageDashboard()
+        assert d.get("inst-1").total_requests == 0
 
-def test_empty():
-    d = build_dashboard_data(apps=[])
-    assert d["summary"]["total_apps"] == 0
-    assert d["summary"]["avg_health"] == 100.0
+    def test_isolation(self):
+        d = AppAPIUsageDashboard()
+        d.update("inst-1", total_requests=1000)
+        assert d.get("inst-2").total_requests == 0
