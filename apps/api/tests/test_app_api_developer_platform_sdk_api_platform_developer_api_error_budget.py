@@ -1,4 +1,5 @@
 import pytest
+import pytest
 from app.services.app_api_developer_platform_sdk_api_platform_developer_api_error_budget import AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiErrorBudget
 
 class TestErrorBudget:
@@ -7,8 +8,8 @@ class TestErrorBudget:
         svc.create("inst-1", "/api/users", 99.9)
         b = svc.record_requests("inst-1", "/api/users", 10000, 5)
         # budget_total = 10000 * 0.001 = 10
-        assert b.budget_total == 10.0
-        assert b.budget_remaining == 5.0
+        assert b.budget_total == pytest.approx(10.0)
+        assert b.budget_remaining == pytest.approx(5.0)
         assert b.budget_consumed_pct == 50.0
         assert b.status == "warning"
 
