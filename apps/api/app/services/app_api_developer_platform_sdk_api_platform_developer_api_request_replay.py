@@ -47,6 +47,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiRequestReplay:
             oldest_key = next((k for k in self._captures if k[0] == installation_id), None)
             if oldest_key: del self._captures[oldest_key]; count -= 1
         req.headers = {k: ("[REDACTED]" if k.lower() in _REDACT_HEADERS else v) for k, v in req.headers.items()}
+        if len(req.body) > 4096: req.body = req.body[:4096] + "...[TRUNCATED]"
         self._captures[(installation_id, req.request_id)] = req
         self._counts[installation_id] = count + 1
         return req
