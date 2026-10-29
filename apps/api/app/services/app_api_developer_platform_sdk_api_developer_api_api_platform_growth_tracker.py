@@ -24,7 +24,7 @@ class GrowthSnapshot:
 
     @property
     def growth_healthy(self) -> bool:
-        return self.net_growth > 0 and self.churn_rate_pct < 5
+        return self.net_growth > 0 and self.churn_rate_pct <= 5
 
 class AppAPIDeveloperPlatformSDKApiDeveloperApiApiPlatformGrowthTracker:
     def __init__(self) -> None:
