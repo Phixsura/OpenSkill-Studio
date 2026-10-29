@@ -22,7 +22,7 @@ class TestEndpointPermission:
 
     def test_no_rule_allows(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiEndpointPermission()
-        assert svc.check_access("inst-1", "GET", "/anything")["allowed"] is True
+        assert svc.check_access("inst-1", "GET", "/anything")["allowed"] is False
 
     def test_isolation(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiEndpointPermission()

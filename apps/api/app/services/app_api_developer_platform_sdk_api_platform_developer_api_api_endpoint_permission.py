@@ -28,7 +28,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiEndpointPermission:
     def check_access(self, installation_id: str, method: str, endpoint: str, scopes: list[str] | None = None, roles: list[str] | None = None) -> dict[str, object]:
         key = (installation_id, method.upper(), endpoint)
         rule = self._rules.get(key)
-        if rule is None: return {"allowed": True, "reason": "no_rule"}
+        if rule is None: return {"allowed": False, "reason": "no_rule"}
         if rule.public: return {"allowed": True, "reason": "public"}
         consumer_scopes = set(scopes or [])
         consumer_roles = set(roles or [])
