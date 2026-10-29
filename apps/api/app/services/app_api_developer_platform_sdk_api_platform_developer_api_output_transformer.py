@@ -44,4 +44,4 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiOutputTransformer:
         return self._rules.get((installation_id, endpoint), [])
 
     def total_transforms(self, installation_id: str) -> int:
-        return sum(r.applied_count for rules in self._rules.values() for r in rules)
+        return sum(r.applied_count for (inst, _ep), rules in self._rules.items() if inst == installation_id for r in rules)
