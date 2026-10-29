@@ -25,8 +25,8 @@ class TestUsageForecast:
 
     def test_growing_endpoints(self):
         f = AppAPIDeveloperAPIApiUsageForecast()
-        for v in [100, 200, 300]: f.add_daily_sample("inst-1", "/grow", v)
-        for v in [100, 100, 100]: f.add_daily_sample("inst-1", "/flat", v)
+        for v in [100, 110, 120, 200, 250, 300]: f.add_daily_sample("inst-1", "/grow", v)
+        for v in [100, 100, 100, 100, 100, 100]: f.add_daily_sample("inst-1", "/flat", v)
         assert len(f.growing_endpoints("inst-1")) == 1
 
     def test_isolation(self):
