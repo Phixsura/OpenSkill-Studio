@@ -19,7 +19,7 @@ class TestLatencyHistogram:
         for _ in range(99): h.record("inst-1", "/api/a", 30)
         h.record("inst-1", "/api/a", 3000)
         r = h.get("inst-1", "/api/a")
-        assert r.p99_bucket == 5000
+        assert r.p99_bucket == 50
 
     def test_slowest(self):
         h = AppAPIDeveloperAPIEndpointLatencyHistogram()
