@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 import time
+from xml.sax.saxutils import escape
 import structlog
 
 log = structlog.get_logger()
@@ -40,5 +41,5 @@ class AppAPIDeveloperAPIApiDeveloperApiChangelogRss:
 
     def render_xml(self, installation_id: str, title: str = "API Changelog") -> str:
         items = self.feed(installation_id)
-        xml_items = "\n".join(f"<item><title>{i.title}</title><description>{i.description}</description><category>{i.category}</category></item>" for i in items)
-        return f'<?xml version="1.0"?><rss version="2.0"><channel><title>{title}</title>{xml_items}</channel></rss>'
+        xml_items = "\n".join(f"<item><title>{escape(i.title)}</title><description>{escape(i.description)}</description><category>{escape(i.category)}</category></item>" for i in items)
+        return f'<?xml version="1.0"?><rss version="2.0"><channel><title>{escape(title)}</title>{xml_items}</channel></rss>'

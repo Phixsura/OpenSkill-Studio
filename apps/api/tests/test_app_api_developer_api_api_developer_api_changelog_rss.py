@@ -36,3 +36,11 @@ class TestChangelogRss:
         r = AppAPIDeveloperAPIApiDeveloperApiChangelogRss()
         r.publish("inst-1", "i1", "A", "d", "feature", "1.0")
         assert len(r.feed("inst-2")) == 0
+
+    def test_xml_escape(self):
+        r = AppAPIDeveloperAPIApiDeveloperApiChangelogRss()
+        r.publish("inst-1", "i1", '<script>alert("xss")</script>', "A & B", "feature", "1.0")
+        xml = r.render_xml("inst-1", "Test & Title")
+        assert "<script>" not in xml
+        assert "&lt;script&gt;" in xml
+        assert "&amp;" in xml
