@@ -28,6 +28,7 @@ class PlaygroundSession:
     environment: str = "sandbox"  # "sandbox", "staging"
 
 VALID_ENVS = {"sandbox", "staging"}
+_REDACT_HEADERS = {"authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token", "proxy-authorization"}
 
 class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiPlaygroundSession:
     def __init__(self, max_requests_per_session: int = 100) -> None:
@@ -47,6 +48,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiPlaygroundSession:
         session = self._sessions.get(key)
         if session is None: raise KeyError(f"Session {session_id} not found")
         if len(session.requests) >= self._max: raise ValueError("Max requests per session reached")
+        req.headers = {k: ("[REDACTED]" if k.lower() in _REDACT_HEADERS else v) for k, v in req.headers.items()}
         if len(req.body) > 8192: req.body = req.body[:8192] + "...[TRUNCATED]"
         if len(req.response_body) > 8192: req.response_body = req.response_body[:8192] + "...[TRUNCATED]"
         session.requests.append(req)
