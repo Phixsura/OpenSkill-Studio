@@ -26,7 +26,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiCircuitStat
     def __init__(self, failure_threshold: int = 5, recovery_s: int = 30) -> None:
         self._circuits: dict[tuple[str, str, str], CircuitInfo] = {}
         self._threshold = max(1, failure_threshold)
-        self._recovery = max(1, recovery_s)
+        self._recovery = max(0, recovery_s)
 
     def get_or_create(self, installation_id: str, consumer_id: str, endpoint: str) -> CircuitInfo:
         if not installation_id: raise ValueError("installation_id is required")
