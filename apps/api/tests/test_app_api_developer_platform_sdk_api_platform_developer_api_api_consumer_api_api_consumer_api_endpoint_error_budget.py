@@ -7,7 +7,7 @@ class TestConsumerEndpointErrorBudget:
     def test_track_budget(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiConsumerApiEndpointErrorBudget()
         svc.create("inst-1", "c1", "/api", "GET", slo_pct=99.0)
-        for _ in range(95): svc.record("inst-1", "c1", "/api", "GET", False)
+        for _ in range(995): svc.record("inst-1", "c1", "/api", "GET", False)
         for _ in range(5): svc.record("inst-1", "c1", "/api", "GET", True)
         b = svc._budgets[("inst-1", "c1", "GET", "/api")]
         assert b.budget_used_pct == 50.0 and b.status == "warning"
