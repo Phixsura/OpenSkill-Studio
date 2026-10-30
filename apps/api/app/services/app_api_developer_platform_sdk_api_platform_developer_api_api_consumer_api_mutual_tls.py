@@ -35,6 +35,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiMutualTls:
             if inst == installation_id and existing.fingerprint == cert.fingerprint and existing.status == CertStatus.ACTIVE:
                 raise ValueError("Certificate fingerprint already registered")
         key = (installation_id, cert.cert_id)
+        if key in self._certs: raise ValueError(f"cert_id {cert.cert_id} already exists")
         self._certs[key] = cert
         return cert
 
