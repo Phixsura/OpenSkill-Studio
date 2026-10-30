@@ -36,7 +36,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestB
         if schema is None: return BodyValidationResult(valid=True)
         errors: list[str] = []
         if len(body.encode("utf-8")) > schema.max_body_bytes:
-            errors.append(f"Body too large: max {schema.max_body_bytes} bytes")
+            return BodyValidationResult(valid=False, errors=[f"Body too large: max {schema.max_body_bytes} bytes"])
         try:
             data = json.loads(body) if body else {}
         except json.JSONDecodeError:
