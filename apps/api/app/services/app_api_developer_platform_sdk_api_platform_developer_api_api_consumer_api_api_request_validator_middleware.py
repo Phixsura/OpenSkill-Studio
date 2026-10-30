@@ -40,15 +40,18 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestV
     def validate_request(self, installation_id: str, endpoint: str, headers: dict[str, str] | None = None, query: dict[str, str] | None = None, body: dict | None = None) -> MiddlewareResult:
         rules = self._rules.get((installation_id, endpoint), [])
         errors: list[str] = []
-        sources = {"header": headers or {}, "query": query or {}, "body": body or {}}
+        sources = {"header": {k.lower(): v for k, v in (headers or {}).items()}, "query": query or {}, "body": body or {}}
         for r in rules:
             source = sources.get(r.target, {})
-            val = source.get(r.field_name)
+            val = source.get(r.field_name.lower() if r.target == "header" else r.field_name)
             if r.check == "required" and val is None:
                 errors.append(f"{r.target}.{r.field_name} is required")
             elif r.check == "regex" and val is not None:
                 if not re.match(str(r.config.get("pattern", "")), str(val)):
                     errors.append(f"{r.target}.{r.field_name} fails regex")
+            elif r.check == "min_length" and val is not None:
+                if len(str(val)) < int(r.config.get("min", 0)):
+                    errors.append(f"{r.target}.{r.field_name} below min length")
             elif r.check == "max_length" and val is not None:
                 if len(str(val)) > int(r.config.get("max", 9999)):
                     errors.append(f"{r.target}.{r.field_name} exceeds max length")
