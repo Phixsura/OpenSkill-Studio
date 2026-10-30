@@ -28,7 +28,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestD
             decompressed_size = original_size
         else:
             try:
-                decompressed = zlib.decompress(data, zlib.MAX_WBITS | 16 if encoding == "gzip" else -zlib.MAX_WBITS)
+                decompressed = zlib.decompress(data, zlib.MAX_WBITS | 16 if encoding == "gzip" else zlib.MAX_WBITS)
             except zlib.error as e:
                 raise ValueError(f"Decompression failed: {e}") from e
             decompressed_size = len(decompressed)
