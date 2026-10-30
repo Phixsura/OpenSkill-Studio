@@ -29,6 +29,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestI
         if not installation_id: raise ValueError("installation_id is required")
         # Redact sensitive headers
         req.request_headers = {k: ("[REDACTED]" if k.lower() in _REDACT_HEADERS else v) for k, v in req.request_headers.items()}
+        req.response_headers = {k: ("[REDACTED]" if k.lower() in _REDACT_HEADERS else v) for k, v in req.response_headers.items()}
         if len(req.body_preview) > 2048: req.body_preview = req.body_preview[:2048] + "...[TRUNCATED]"
         entries = self._inspections.setdefault(installation_id, [])
         entries.append(req)
