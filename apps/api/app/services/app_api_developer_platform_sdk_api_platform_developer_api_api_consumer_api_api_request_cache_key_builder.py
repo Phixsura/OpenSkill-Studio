@@ -25,7 +25,7 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestC
 
     def build_key(self, installation_id: str, consumer_id: str, method: str, path: str, query_params: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> str:
         config = self._configs.get((installation_id, consumer_id))
-        parts = [config.prefix if config else "api", method.upper(), path]
+        parts = [installation_id, consumer_id, config.prefix if config else "api", method.upper(), path]
         if query_params and (config is None or config.include_query_params):
             ignore = set(config.ignore_params) if config else set()
             filtered = {k: v for k, v in sorted(query_params.items()) if k not in ignore}
