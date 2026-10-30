@@ -24,9 +24,9 @@ class TestRequestMirror:
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestMirror()
         import pytest
         with pytest.raises(ValueError):
-            svc.configure("inst-1", MirrorConfig(consumer_id="c1", mirror_url="x", sample_rate=1.5))
+            svc.configure("inst-1", MirrorConfig(consumer_id="c1", mirror_url="https://x.example.com", sample_rate=1.5))
 
     def test_isolation(self):
         svc = AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestMirror()
-        svc.configure("inst-1", MirrorConfig(consumer_id="c1", mirror_url="x"))
+        svc.configure("inst-1", MirrorConfig(consumer_id="c1", mirror_url="https://x.example.com"))
         assert len(svc.list_configs("inst-2")) == 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import time
 import structlog
+from urllib.parse import urlparse
 
 log = structlog.get_logger()
 
@@ -29,6 +30,9 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiApiRequestM
     def configure(self, installation_id: str, config: MirrorConfig) -> MirrorConfig:
         if not installation_id: raise ValueError("installation_id is required")
         if not 0.0 <= config.sample_rate <= 1.0: raise ValueError("sample_rate must be 0.0-1.0")
+        parsed = urlparse(config.mirror_url)
+        if parsed.scheme not in ("https",): raise ValueError("mirror_url must use HTTPS")
+        if not parsed.hostname: raise ValueError("mirror_url must have a hostname")
         self._configs[(installation_id, config.consumer_id)] = config
         return config
 
