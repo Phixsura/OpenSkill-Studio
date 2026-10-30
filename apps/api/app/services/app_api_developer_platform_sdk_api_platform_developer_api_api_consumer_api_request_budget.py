@@ -45,7 +45,8 @@ class AppAPIDeveloperPlatformSDKApiPlatformDeveloperApiApiConsumerApiRequestBudg
         key = (installation_id, consumer_id, period)
         b = self._budgets.get(key)
         if b is None: raise KeyError(f"No budget for {consumer_id}/{period}")
-        if b.exhausted: raise ValueError("Budget exhausted")
+        if count < 1: raise ValueError("count must be >= 1")
+        if count > b.remaining: raise ValueError("Budget exhausted")
         b.used += count
         return b
 
