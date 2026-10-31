@@ -202,10 +202,26 @@ export default function TrustDashboardPage() {
       </div>
 
       {/* Quick Links */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <Link href={`${base}/systems`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
           <p className="font-medium">AI Systems</p>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">Manage system inventory</p>
+        </Link>
+        <Link href={`${base}/evidence`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Evidence</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Assurance cases & evidence items</p>
+        </Link>
+        <Link href={`${base}/reviews`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Reviews</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Human oversight review queue</p>
+        </Link>
+        <Link href={`${base}/guardrails`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Guardrails</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Runtime policies & action limits</p>
+        </Link>
+        <Link href={`${base}/incidents`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Incidents</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Incident lifecycle & alerts</p>
         </Link>
         <Link href={`${base}/risk-policies`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
           <p className="font-medium">Risk Policies</p>
