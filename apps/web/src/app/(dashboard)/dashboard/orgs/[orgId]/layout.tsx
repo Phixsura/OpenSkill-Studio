@@ -23,6 +23,7 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
     { href: `${base}/paths`, label: "Paths" },
     { href: `${base}/installations`, label: "Installed" },
     { href: `${base}/workflow-installations`, label: "WF Installed" },
+    { href: `${base}/apps`, label: "🧩 Apps" },
     { href: `${base}/opportunities`, label: "Opportunities" },
     { href: `${base}/progress`, label: "Progress" },
     { href: `${base}/members`, label: "Members" },

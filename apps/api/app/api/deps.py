@@ -1,6 +1,6 @@
 """Shared FastAPI dependencies."""
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,3 +139,110 @@ async def require_cohort_member(
     if roles and member.role not in roles:
         raise HTTPException(status_code=403, detail="Insufficient cohort permissions")
     return member
+
+
+def require_app_scopes(*required_scopes: str):
+    """Factory: return a dependency that accepts JWT or API key auth.
+
+    When authenticated by API key, the key's scopes must include all
+    required_scopes. When no scopes are required (empty), API keys are
+    rejected — use get_current_user for JWT-only endpoints.
+    """
+
+    async def _dep(
+        request: Request,
+        token: str | None = Depends(oauth2_scheme_optional),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer osk_app_"):
+            if not required_scopes:
+                raise HTTPException(
+                    status_code=403,
+                    detail="API key not accepted on this endpoint",
+                )
+            return await _authenticate_api_key(request, auth_header, db, set(required_scopes))
+
+        # Fall back to JWT auth
+        if token is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return await get_current_user(token, db)
+
+    return _dep
+
+
+async def get_current_user_or_app(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Authenticate via JWT token or app API key (osk_app_ prefix).
+
+    API key auth is read-only — scopes are stored in request.state for
+    downstream checking. For write endpoints, use get_current_user (JWT only)
+    or require_app_scopes() for explicit scope gating.
+    """
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer osk_app_"):
+        return await _authenticate_api_key(request, auth_header, db)
+
+    # Fall back to JWT auth
+    if token is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await get_current_user(token, db)
+
+
+async def _authenticate_api_key(
+    request: Request,
+    auth_header: str,
+    db: AsyncSession,
+    required_scopes: set[str] | None = None,
+) -> User:
+    """Resolve an API key to its owner user. Optionally enforce scopes."""
+    raw_key = auth_header.removeprefix("Bearer ").strip()
+    from app.services.developer import authenticate_api_key
+
+    api_key = await authenticate_api_key(db, raw_key)
+    if api_key is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired API key")
+
+    # Enforce scopes if required
+    if required_scopes:
+        granted = set(api_key.scopes or [])
+        missing = required_scopes - granted
+        if missing:
+            raise HTTPException(
+                status_code=403,
+                detail=f"API key missing required scopes: {', '.join(sorted(missing))}",
+            )
+
+    # Check the app is in a valid state
+    from sqlalchemy import select
+
+    from app.models.developer import AppStatus, DeveloperApp
+
+    app_result = await db.execute(
+        select(DeveloperApp).where(DeveloperApp.id == api_key.app_id)
+    )
+    app = app_result.scalar_one_or_none()
+    if not app or app.status in (AppStatus.REVOKED, AppStatus.DEPRECATED):
+        raise HTTPException(status_code=401, detail="App is revoked or deprecated")
+
+    # Resolve the app owner as the acting user
+    from app.models.developer import DeveloperAccount
+
+    dev_result = await db.execute(
+        select(DeveloperAccount).where(DeveloperAccount.id == app.developer_id)
+    )
+    dev_account = dev_result.scalar_one_or_none()
+    if not dev_account:
+        raise HTTPException(status_code=401, detail="Developer account not found")
+
+    user = await db.get(User, dev_account.owner_user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    # Store API key context for scope checking
+    request.state.app_api_key = api_key
+    request.state.app_scopes = api_key.scopes or []
+    return user

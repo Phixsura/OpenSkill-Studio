@@ -1,0 +1,30 @@
+"use client";
+
+interface ConsumerInfo { consumer_id: string; total_requests: number; error_rate: number; avg_latency_ms: number; }
+interface Props { consumers: ConsumerInfo[]; appName: string; }
+
+export default function APIConsumerAnalyticsCard({ consumers, appName }: Props) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">📊 Consumer Analytics</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{appName}</p>
+        </div>
+        <span className="text-xs text-gray-400">{consumers.length} consumers</span>
+      </div>
+      {consumers.length === 0 ? (
+        <p className="text-center text-sm text-gray-400">No consumer data</p>
+      ) : (
+        <div className="space-y-1.5">
+          {consumers.map((c) => (
+            <div key={c.consumer_id} className="flex items-center justify-between text-[11px]">
+              <span className="text-gray-700 dark:text-gray-300">{c.consumer_id}</span>
+              <span className="text-gray-400">{c.total_requests} reqs · {c.error_rate}% err · {c.avg_latency_ms}ms</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
