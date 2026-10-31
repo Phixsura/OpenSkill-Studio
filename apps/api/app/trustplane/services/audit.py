@@ -67,6 +67,11 @@ TRUST_AUDIT_ACTIONS = frozenset(
         "incident.created",
         "incident.status_changed",
         "incident.action_added",
+        # governance & reporting (Phase 6)
+        "template.created",
+        "template.activated",
+        "report.created",
+        "tenant_policy.created",
     }
 )
 

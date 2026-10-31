@@ -384,6 +384,9 @@ class TestAuditRegistry:
             # Phase 5
             "monitor.created",
             "incident.created", "incident.status_changed", "incident.action_added",
+            # Phase 6
+            "template.created", "template.activated",
+            "report.created", "tenant_policy.created",
         }
         assert TRUST_AUDIT_ACTIONS == expected
 
@@ -867,3 +870,84 @@ class TestPhase5ResponseSchemas:
     def test_action_response(self):
         from app.trustplane.schemas.monitoring import ActionResponse
         assert ActionResponse.model_config.get("from_attributes") is True
+
+
+# ── Phase 6: Governance & Compliance schema tests ────────────────────
+
+
+class TestTemplateSchemaValidation:
+
+    def test_create_template_rejects_invalid_scope(self):
+        from app.trustplane.schemas.governance import CreateTemplateRequest
+        with pytest.raises(ValueError, match="scope must be one of"):
+            CreateTemplateRequest(name="Test", scope="invalid", config={})
+
+    def test_create_template_accepts_valid(self):
+        from app.trustplane.schemas.governance import CreateTemplateRequest, VALID_TEMPLATE_SCOPES
+        for s in VALID_TEMPLATE_SCOPES:
+            req = CreateTemplateRequest(name="Test", scope=s, config={"rules": []})
+            assert req.scope == s
+
+    def test_create_template_rejects_empty_name(self):
+        from app.trustplane.schemas.governance import CreateTemplateRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateTemplateRequest(name="  ", scope="global", config={})
+
+
+class TestReportSchemaValidation:
+
+    def test_create_report_rejects_invalid_type(self):
+        from app.trustplane.schemas.governance import CreateReportRequest
+        with pytest.raises(ValueError, match="report_type must be one of"):
+            CreateReportRequest(report_type="invalid", title="Test")
+
+    def test_create_report_accepts_valid(self):
+        from app.trustplane.schemas.governance import CreateReportRequest, VALID_REPORT_TYPES
+        for t in VALID_REPORT_TYPES:
+            req = CreateReportRequest(report_type=t, title="Test Report")
+            assert req.report_type == t
+
+    def test_create_report_rejects_empty_title(self):
+        from app.trustplane.schemas.governance import CreateReportRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateReportRequest(report_type="system_inventory", title="  ")
+
+
+class TestPolicyOverrideSchemaValidation:
+
+    def test_create_override_rejects_invalid_type(self):
+        from app.trustplane.schemas.governance import CreatePolicyOverrideRequest
+        with pytest.raises(ValueError, match="override_type must be one of"):
+            CreatePolicyOverrideRequest(override_type="invalid", name="Test", config={})
+
+    def test_create_override_accepts_valid(self):
+        from app.trustplane.schemas.governance import CreatePolicyOverrideRequest, VALID_OVERRIDE_TYPES
+        for t in VALID_OVERRIDE_TYPES:
+            req = CreatePolicyOverrideRequest(override_type=t, name="Test", config={"key": "val"})
+            assert req.override_type == t
+
+
+class TestPhase6AuditRegistry:
+
+    def test_governance_actions_registered(self):
+        from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
+        phase6_actions = {
+            "template.created", "template.activated",
+            "report.created", "tenant_policy.created",
+        }
+        assert phase6_actions.issubset(TRUST_AUDIT_ACTIONS)
+
+
+class TestPhase6ResponseSchemas:
+
+    def test_template_response(self):
+        from app.trustplane.schemas.governance import TemplateResponse
+        assert TemplateResponse.model_config.get("from_attributes") is True
+
+    def test_report_response(self):
+        from app.trustplane.schemas.governance import ReportResponse
+        assert ReportResponse.model_config.get("from_attributes") is True
+
+    def test_policy_override_response(self):
+        from app.trustplane.schemas.governance import PolicyOverrideResponse
+        assert PolicyOverrideResponse.model_config.get("from_attributes") is True
