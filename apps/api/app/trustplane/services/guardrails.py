@@ -19,7 +19,21 @@ from app.trustplane.models.guardrails import (
     GuardrailStatus,
     GuardrailType,
 )
+from app.trustplane.models.inventory import AISystem
 from app.trustplane.services.audit import record_trust_audit
+from app.trustplane.services.inventory import SystemNotFoundError
+
+
+async def _validate_system_ownership(db: AsyncSession, system_id: str | None, org_id: str) -> None:
+    """Validate that system_id belongs to org_id when provided (IDOR guard)."""
+    if system_id is None:
+        return
+    result = await db.execute(
+        select(AISystem.id).where(AISystem.id == system_id, AISystem.org_id == org_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise SystemNotFoundError()
+
 
 # ── Errors ───────────────────────────────────────────────────────────
 
@@ -59,6 +73,8 @@ async def create_guardrail(
     is_blocking: bool = True,
     priority: int = 100,
 ) -> GuardrailPolicy:
+    await _validate_system_ownership(db, system_id, org_id)
+
     policy = GuardrailPolicy(
         org_id=org_id,
         system_id=system_id,
@@ -267,6 +283,8 @@ async def create_boundary(
     limit_period: str | None = None,
     system_id: str | None = None,
 ) -> ActionBoundary:
+    await _validate_system_ownership(db, system_id, org_id)
+
     boundary = ActionBoundary(
         org_id=org_id,
         system_id=system_id,

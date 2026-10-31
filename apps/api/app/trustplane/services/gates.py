@@ -86,10 +86,25 @@ async def create_profile(
 
 
 async def get_profile(db: AsyncSession, profile_id: str, org_id: str) -> AssuranceProfile:
+    """Read-only lookup: org-owned OR platform defaults."""
     result = await db.execute(
         select(AssuranceProfile).where(
             AssuranceProfile.id == profile_id,
             (AssuranceProfile.org_id == org_id) | (AssuranceProfile.org_id.is_(None)),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise ProfileNotFoundError()
+    return profile
+
+
+async def _get_profile_for_write(db: AsyncSession, profile_id: str, org_id: str) -> AssuranceProfile:
+    """Write-scoped lookup: org-owned only — cannot modify platform defaults."""
+    result = await db.execute(
+        select(AssuranceProfile).where(
+            AssuranceProfile.id == profile_id,
+            AssuranceProfile.org_id == org_id,
         )
     )
     profile = result.scalar_one_or_none()
@@ -136,7 +151,7 @@ async def activate_profile(
     org_id: str,
     user_id: str,
 ) -> AssuranceProfile:
-    profile = await get_profile(db, profile_id, org_id)
+    profile = await _get_profile_for_write(db, profile_id, org_id)
     profile.status = ProfileStatus.ACTIVE
     await db.flush()
 
@@ -167,7 +182,7 @@ async def add_check(
     config: dict | None = None,
     description: str | None = None,
 ) -> GateCheck:
-    await get_profile(db, profile_id, org_id)
+    await _get_profile_for_write(db, profile_id, org_id)
 
     # Auto-ordinal
     max_ord = await db.execute(
@@ -225,12 +240,26 @@ async def evaluate_gate(
     """
     await get_profile(db, profile_id, org_id)  # validates existence & org access
     checks = await list_checks(db, profile_id, org_id)
-    check_map = {c.id: c for c in checks}
+    check_ids = {c.id for c in checks}
 
-    failed_blocking = []
+    # Reject submitted check_ids not in the profile
+    results_by_id = {}
     for cr in check_results:
-        check = check_map.get(cr.get("check_id", ""))
-        if check and check.is_blocking and cr.get("outcome") == "failed":
+        cid = cr.get("check_id", "")
+        if cid not in check_ids:
+            raise AppError(
+                "UNKNOWN_CHECK_ID",
+                f"check_id '{cid}' is not part of this profile",
+                422,
+            )
+        results_by_id[cid] = cr
+
+    # Fail-closed: iterate over profile checks, require a result for every
+    # blocking check. Missing or non-passed → failure.
+    failed_blocking = []
+    for check in checks:
+        cr = results_by_id.get(check.id)
+        if check.is_blocking and (cr is None or cr.get("outcome") != "passed"):
             failed_blocking.append(check.name)
 
     overall = GateOutcome.PASSED if not failed_blocking else GateOutcome.FAILED
