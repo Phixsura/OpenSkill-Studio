@@ -258,9 +258,15 @@ async def create_assessment(
     if result.scalar_one_or_none() is None:
         raise SystemNotFoundError()
 
-    # Resolve policy
+    # Resolve policy — scoped to caller's org or platform default (IDOR guard)
     if policy_id:
-        policy = await db.get(RiskScoringPolicy, policy_id)
+        result = await db.execute(
+            select(RiskScoringPolicy).where(
+                RiskScoringPolicy.id == policy_id,
+                (RiskScoringPolicy.org_id == org_id) | (RiskScoringPolicy.org_id.is_(None)),
+            )
+        )
+        policy = result.scalar_one_or_none()
         if policy is None:
             raise PolicyNotFoundError()
     else:
