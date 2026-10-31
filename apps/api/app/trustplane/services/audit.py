@@ -36,6 +36,22 @@ TRUST_AUDIT_ACTIONS = frozenset(
         "policy.updated",
         "policy.activated",
         "policy.deactivated",
+        # assurance cases (Phase 2)
+        "case.created",
+        "case.updated",
+        "case.status_changed",
+        # evidence items (Phase 2)
+        "evidence.created",
+        "evidence.updated",
+        "evidence.status_changed",
+        "evidence.linked",
+        "evidence.unlinked",
+        # reviews (Phase 2)
+        "review.created",
+        "review.assigned",
+        "review.decided",
+        "review.cancelled",
+        "review.expired",
     }
 )
 

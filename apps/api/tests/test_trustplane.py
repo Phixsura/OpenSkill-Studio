@@ -362,6 +362,7 @@ class TestAuditRegistry:
     def test_all_actions_registered(self):
         from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
         expected = {
+            # Phase 1
             "system.created", "system.updated", "system.lifecycle_changed",
             "system.owner_changed", "system.linked",
             "use_case.created", "use_case.updated", "use_case.deleted",
@@ -369,6 +370,12 @@ class TestAuditRegistry:
             "assessment.rejected", "assessment.superseded",
             "assessment.tier_overridden",
             "policy.created", "policy.updated", "policy.activated", "policy.deactivated",
+            # Phase 2
+            "case.created", "case.updated", "case.status_changed",
+            "evidence.created", "evidence.updated", "evidence.status_changed",
+            "evidence.linked", "evidence.unlinked",
+            "review.created", "review.assigned", "review.decided",
+            "review.cancelled", "review.expired",
         }
         assert TRUST_AUDIT_ACTIONS == expected
 
@@ -456,3 +463,150 @@ class TestDefaultDimensions:
             DEFAULT_TIER_THRESHOLDS["high"]["max_score"],
         ]
         assert scores == sorted(scores), "Thresholds must be monotonically increasing"
+
+
+# ── Phase 2: Evidence & Review schema tests ──────────────────────────
+
+
+class TestCaseSchemaValidation:
+
+    def test_create_case_rejects_empty_title(self):
+        from app.trustplane.schemas.evidence import CreateCaseRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateCaseRequest(system_id="x", title="  ", claim="test claim")
+
+    def test_create_case_rejects_long_title(self):
+        from app.trustplane.schemas.evidence import CreateCaseRequest
+        with pytest.raises(ValueError, match="300 characters"):
+            CreateCaseRequest(system_id="x", title="x" * 301, claim="test claim")
+
+    def test_create_case_rejects_empty_claim(self):
+        from app.trustplane.schemas.evidence import CreateCaseRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateCaseRequest(system_id="x", title="Test", claim="  ")
+
+    def test_create_case_accepts_valid(self):
+        from app.trustplane.schemas.evidence import CreateCaseRequest
+        req = CreateCaseRequest(
+            system_id="sys01", title="Safety Claim",
+            claim="The system does not produce harmful outputs",
+        )
+        assert req.title == "Safety Claim"
+
+    def test_change_status_rejects_invalid(self):
+        from app.trustplane.schemas.evidence import ChangeCaseStatusRequest
+        with pytest.raises(ValueError, match="status must be one of"):
+            ChangeCaseStatusRequest(status="invalid")
+
+    def test_change_status_accepts_valid(self):
+        from app.trustplane.schemas.evidence import ChangeCaseStatusRequest
+        for s in ("draft", "active", "challenged", "retired"):
+            req = ChangeCaseStatusRequest(status=s)
+            assert req.status == s
+
+
+class TestEvidenceSchemaValidation:
+
+    def test_create_evidence_rejects_invalid_type(self):
+        from app.trustplane.schemas.evidence import CreateEvidenceRequest
+        with pytest.raises(ValueError, match="evidence_type must be one of"):
+            CreateEvidenceRequest(title="Test", evidence_type="invalid")
+
+    def test_create_evidence_accepts_all_types(self):
+        from app.trustplane.schemas.evidence import CreateEvidenceRequest, VALID_EVIDENCE_TYPES
+        for t in VALID_EVIDENCE_TYPES:
+            req = CreateEvidenceRequest(title="Test", evidence_type=t)
+            assert req.evidence_type == t
+
+    def test_create_evidence_rejects_ctrl_in_title(self):
+        from app.trustplane.schemas.evidence import CreateEvidenceRequest
+        with pytest.raises(ValueError, match="control characters"):
+            CreateEvidenceRequest(title="test\x00", evidence_type="benchmark")
+
+    def test_change_evidence_status_rejects_invalid(self):
+        from app.trustplane.schemas.evidence import ChangeEvidenceStatusRequest
+        with pytest.raises(ValueError, match="status must be one of"):
+            ChangeEvidenceStatusRequest(status="invalid")
+
+
+class TestLinkSchemaValidation:
+
+    def test_link_rejects_invalid_relation(self):
+        from app.trustplane.schemas.evidence import LinkEvidenceRequest
+        with pytest.raises(ValueError, match="relation must be one of"):
+            LinkEvidenceRequest(evidence_id="e01", relation="invalid")
+
+    def test_link_accepts_valid_relations(self):
+        from app.trustplane.schemas.evidence import LinkEvidenceRequest
+        for r in ("supports", "weakens", "mitigates", "depends_on"):
+            req = LinkEvidenceRequest(evidence_id="e01", relation=r)
+            assert req.relation == r
+
+
+class TestReviewSchemaValidation:
+
+    def test_create_review_rejects_invalid_type(self):
+        from app.trustplane.schemas.evidence import CreateReviewRequest
+        with pytest.raises(ValueError, match="review_type must be one of"):
+            CreateReviewRequest(
+                review_type="invalid", title="Test",
+                target_type="ai_system", target_id="s01",
+            )
+
+    def test_create_review_accepts_valid(self):
+        from app.trustplane.schemas.evidence import CreateReviewRequest
+        req = CreateReviewRequest(
+            review_type="risk_assessment", title="Review risk",
+            target_type="ai_system", target_id="s01",
+        )
+        assert req.review_type == "risk_assessment"
+
+    def test_decide_rejects_invalid_decision(self):
+        from app.trustplane.schemas.evidence import DecideReviewRequest
+        with pytest.raises(ValueError, match="decision must be one of"):
+            DecideReviewRequest(decision="invalid", rationale="reason")
+
+    def test_decide_rejects_empty_rationale(self):
+        from app.trustplane.schemas.evidence import DecideReviewRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            DecideReviewRequest(decision="approve", rationale="  ")
+
+    def test_decide_accepts_valid(self):
+        from app.trustplane.schemas.evidence import DecideReviewRequest
+        for d in ("approve", "reject", "return", "escalate"):
+            req = DecideReviewRequest(decision=d, rationale="Good reason")
+            assert req.decision == d
+
+
+class TestPhase2AuditRegistry:
+    """Verify Phase 2 actions are in the canonical registry."""
+
+    def test_evidence_actions_registered(self):
+        from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
+        phase2_actions = {
+            "case.created", "case.updated", "case.status_changed",
+            "evidence.created", "evidence.updated", "evidence.status_changed",
+            "evidence.linked", "evidence.unlinked",
+            "review.created", "review.assigned", "review.decided",
+            "review.cancelled", "review.expired",
+        }
+        assert phase2_actions.issubset(TRUST_AUDIT_ACTIONS)
+
+
+class TestPhase2ResponseSchemas:
+
+    def test_case_response_from_attributes(self):
+        from app.trustplane.schemas.evidence import CaseResponse
+        assert CaseResponse.model_config.get("from_attributes") is True
+
+    def test_evidence_response_from_attributes(self):
+        from app.trustplane.schemas.evidence import EvidenceResponse
+        assert EvidenceResponse.model_config.get("from_attributes") is True
+
+    def test_review_response_from_attributes(self):
+        from app.trustplane.schemas.evidence import ReviewResponse
+        assert ReviewResponse.model_config.get("from_attributes") is True
+
+    def test_decision_response_from_attributes(self):
+        from app.trustplane.schemas.evidence import DecisionResponse
+        assert DecisionResponse.model_config.get("from_attributes") is True

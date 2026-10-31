@@ -68,6 +68,7 @@ from app.controlplane.api import tenants as cp_tenants
 from app.controlplane.api import usage as cp_usage
 from app.controlplane.api import whitelabel as cp_whitelabel
 from app.talent.api import talent_router
+from app.trustplane.api.v1 import evidence as tp_evidence
 from app.trustplane.api.v1 import trust as tp_trust
 
 api_v1_router = APIRouter()
@@ -146,3 +147,4 @@ api_v1_router.include_router(talent_router)
 
 # ── Trust & Safety plane (Issue #52) ──
 api_v1_router.include_router(tp_trust.router)
+api_v1_router.include_router(tp_evidence.router)
