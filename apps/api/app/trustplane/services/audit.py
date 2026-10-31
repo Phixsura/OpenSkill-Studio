@@ -52,6 +52,16 @@ TRUST_AUDIT_ACTIONS = frozenset(
         "review.decided",
         "review.cancelled",
         "review.expired",
+        # assurance profiles & gates (Phase 3)
+        "profile.created",
+        "profile.activated",
+        "gate.evaluated",
+        "gate.overridden",
+        # guardrails & boundaries (Phase 4)
+        "guardrail.created",
+        "guardrail.activated",
+        "guardrail.disabled",
+        "boundary.created",
     }
 )
 

@@ -376,6 +376,11 @@ class TestAuditRegistry:
             "evidence.linked", "evidence.unlinked",
             "review.created", "review.assigned", "review.decided",
             "review.cancelled", "review.expired",
+            # Phase 3-4
+            "profile.created", "profile.activated",
+            "gate.evaluated", "gate.overridden",
+            "guardrail.created", "guardrail.activated", "guardrail.disabled",
+            "boundary.created",
         }
         assert TRUST_AUDIT_ACTIONS == expected
 
@@ -610,3 +615,143 @@ class TestPhase2ResponseSchemas:
     def test_decision_response_from_attributes(self):
         from app.trustplane.schemas.evidence import DecisionResponse
         assert DecisionResponse.model_config.get("from_attributes") is True
+
+
+# ── Phase 3-4: Gates & Guardrails schema tests ──────────────────────
+
+
+class TestProfileSchemaValidation:
+
+    def test_create_profile_rejects_invalid_trigger(self):
+        from app.trustplane.schemas.gates import CreateProfileRequest
+        with pytest.raises(ValueError, match="trigger must be one of"):
+            CreateProfileRequest(name="Test", trigger="invalid")
+
+    def test_create_profile_accepts_valid(self):
+        from app.trustplane.schemas.gates import CreateProfileRequest, VALID_GATE_TRIGGERS
+        for t in VALID_GATE_TRIGGERS:
+            req = CreateProfileRequest(name="Test", trigger=t)
+            assert req.trigger == t
+
+    def test_create_profile_rejects_empty_name(self):
+        from app.trustplane.schemas.gates import CreateProfileRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateProfileRequest(name="  ", trigger="publish_pack")
+
+
+class TestCheckSchemaValidation:
+
+    def test_add_check_rejects_invalid_type(self):
+        from app.trustplane.schemas.gates import AddCheckRequest
+        with pytest.raises(ValueError, match="check_type must be one of"):
+            AddCheckRequest(name="Test", check_type="invalid")
+
+    def test_add_check_accepts_valid(self):
+        from app.trustplane.schemas.gates import AddCheckRequest, VALID_CHECK_TYPES
+        for t in VALID_CHECK_TYPES:
+            req = AddCheckRequest(name="Test", check_type=t)
+            assert req.check_type == t
+
+
+class TestGateResultSchemaValidation:
+
+    def test_evaluate_gate_rejects_bad_outcome(self):
+        from app.trustplane.schemas.gates import EvaluateGateRequest
+        with pytest.raises(ValueError, match="outcome must be"):
+            EvaluateGateRequest(
+                profile_id="p01", target_type="pack", target_id="t01",
+                check_results=[{"check_id": "c01", "outcome": "bad"}],
+            )
+
+    def test_evaluate_gate_rejects_missing_fields(self):
+        from app.trustplane.schemas.gates import EvaluateGateRequest
+        with pytest.raises(ValueError, match="must have check_id"):
+            EvaluateGateRequest(
+                profile_id="p01", target_type="pack", target_id="t01",
+                check_results=[{"outcome": "passed"}],
+            )
+
+    def test_override_gate_rejects_empty_justification(self):
+        from app.trustplane.schemas.gates import OverrideGateRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            OverrideGateRequest(justification="  ")
+
+
+class TestGuardrailSchemaValidation:
+
+    def test_create_guardrail_rejects_invalid_type(self):
+        from app.trustplane.schemas.gates import CreateGuardrailRequest
+        with pytest.raises(ValueError, match="guardrail_type must be one of"):
+            CreateGuardrailRequest(name="Test", guardrail_type="invalid", config={})
+
+    def test_create_guardrail_accepts_valid(self):
+        from app.trustplane.schemas.gates import CreateGuardrailRequest, VALID_GUARDRAIL_TYPES
+        for t in VALID_GUARDRAIL_TYPES:
+            req = CreateGuardrailRequest(name="Test", guardrail_type=t, config={"rule": True})
+            assert req.guardrail_type == t
+
+
+class TestBoundarySchemaValidation:
+
+    def test_create_boundary_rejects_invalid_type(self):
+        from app.trustplane.schemas.gates import CreateBoundaryRequest
+        with pytest.raises(ValueError, match="boundary_type must be one of"):
+            CreateBoundaryRequest(name="Test", boundary_type="invalid", limit_value=100)
+
+    def test_create_boundary_rejects_zero_limit(self):
+        from app.trustplane.schemas.gates import CreateBoundaryRequest
+        with pytest.raises(ValueError, match="must be positive"):
+            CreateBoundaryRequest(name="Test", boundary_type="spend_ceiling", limit_value=0)
+
+    def test_create_boundary_rejects_invalid_period(self):
+        from app.trustplane.schemas.gates import CreateBoundaryRequest
+        with pytest.raises(ValueError, match="must be hour, day"):
+            CreateBoundaryRequest(
+                name="Test", boundary_type="rate_limit",
+                limit_value=100, limit_period="minute",
+            )
+
+    def test_create_boundary_accepts_valid(self):
+        from app.trustplane.schemas.gates import CreateBoundaryRequest
+        req = CreateBoundaryRequest(
+            name="API calls", boundary_type="rate_limit",
+            limit_value=1000, limit_period="hour",
+        )
+        assert req.limit_value == 1000
+        assert req.limit_period == "hour"
+
+
+class TestPhase34AuditRegistry:
+
+    def test_gate_actions_registered(self):
+        from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
+        phase34_actions = {
+            "profile.created", "profile.activated",
+            "gate.evaluated", "gate.overridden",
+            "guardrail.created", "guardrail.activated", "guardrail.disabled",
+            "boundary.created",
+        }
+        assert phase34_actions.issubset(TRUST_AUDIT_ACTIONS)
+
+
+class TestPhase34ResponseSchemas:
+
+    def test_profile_response(self):
+        from app.trustplane.schemas.gates import ProfileResponse
+        assert ProfileResponse.model_config.get("from_attributes") is True
+
+    def test_check_response(self):
+        from app.trustplane.schemas.gates import CheckResponse
+        assert CheckResponse.model_config.get("from_attributes") is True
+
+    def test_gate_result_response(self):
+        from app.trustplane.schemas.gates import GateResultResponse
+        assert GateResultResponse.model_config.get("from_attributes") is True
+
+    def test_guardrail_response(self):
+        from app.trustplane.schemas.gates import GuardrailResponse
+        assert GuardrailResponse.model_config.get("from_attributes") is True
+
+    def test_boundary_response(self):
+        from app.trustplane.schemas.gates import BoundaryResponse
+        assert BoundaryResponse.model_config.get("from_attributes") is True
