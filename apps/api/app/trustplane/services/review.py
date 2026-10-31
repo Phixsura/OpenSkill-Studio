@@ -52,6 +52,21 @@ class RationaleRequiredError(AppError):
         )
 
 
+async def _validate_org_member(db: AsyncSession, org_id: str, user_id: str) -> None:
+    """Validate user is an active member of the org (IDOR guard)."""
+    from app.models.organization import MemberStatus, OrgMember
+
+    r = await db.execute(
+        select(OrgMember.user_id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+            OrgMember.status == MemberStatus.ACTIVE,
+        )
+    )
+    if r.scalar_one_or_none() is None:
+        raise AppError("ASSIGNEE_NOT_FOUND", "Assigned user is not an active member of this org", 422)
+
+
 # ── Review Request CRUD ──────────────────────────────────────────────
 
 
@@ -69,6 +84,10 @@ async def create_review(
     context: dict | None = None,
     due_at: str | None = None,
 ) -> ReviewRequest:
+    # Validate assignee is an org member (IDOR guard)
+    if assigned_to:
+        await _validate_org_member(db, org_id, assigned_to)
+
     review = ReviewRequest(
         org_id=org_id,
         review_type=ReviewType(review_type),
@@ -151,6 +170,9 @@ async def assign_review(
     user_id: str,
     assigned_to: str,
 ) -> ReviewRequest:
+    # Validate assignee is an org member (IDOR guard)
+    await _validate_org_member(db, org_id, assigned_to)
+
     review = await get_review(db, review_id, org_id)
     old = review.assigned_to
     review.assigned_to = assigned_to
