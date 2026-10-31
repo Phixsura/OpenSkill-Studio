@@ -54,6 +54,10 @@ async def create_template(
     parent_template_id: str | None = None,
     is_restrictive: bool = False,
 ) -> GovernanceTemplate:
+    # Validate parent template belongs to same org or platform (IDOR guard)
+    if parent_template_id and org_id:
+        await get_template(db, parent_template_id, org_id)
+
     template = GovernanceTemplate(
         org_id=org_id,
         name=name,
@@ -275,6 +279,10 @@ async def create_policy_override(
     description: str | None = None,
     template_id: str | None = None,
 ) -> TenantPolicyOverride:
+    # Validate referenced template belongs to same org or platform (IDOR guard)
+    if template_id:
+        await get_template(db, template_id, org_id)
+
     override = TenantPolicyOverride(
         org_id=org_id,
         override_type=PolicyOverrideType(override_type),
