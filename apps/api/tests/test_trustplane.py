@@ -381,6 +381,9 @@ class TestAuditRegistry:
             "gate.evaluated", "gate.overridden",
             "guardrail.created", "guardrail.activated", "guardrail.disabled",
             "boundary.created",
+            # Phase 5
+            "monitor.created",
+            "incident.created", "incident.status_changed", "incident.action_added",
         }
         assert TRUST_AUDIT_ACTIONS == expected
 
@@ -755,3 +758,112 @@ class TestPhase34ResponseSchemas:
     def test_boundary_response(self):
         from app.trustplane.schemas.gates import BoundaryResponse
         assert BoundaryResponse.model_config.get("from_attributes") is True
+
+
+# ── Phase 5: Monitoring & Incidents schema tests ─────────────────────
+
+
+class TestMonitorSchemaValidation:
+
+    def test_create_monitor_rejects_invalid_type(self):
+        from app.trustplane.schemas.monitoring import CreateMonitorRequest
+        with pytest.raises(ValueError, match="monitor_type must be one of"):
+            CreateMonitorRequest(name="Test", monitor_type="invalid", config={})
+
+    def test_create_monitor_accepts_valid_types(self):
+        from app.trustplane.schemas.monitoring import CreateMonitorRequest, VALID_MONITOR_TYPES
+        for t in VALID_MONITOR_TYPES:
+            req = CreateMonitorRequest(name="Test", monitor_type=t, config={"threshold": 0.9})
+            assert req.monitor_type == t
+
+    def test_create_monitor_rejects_bad_interval(self):
+        from app.trustplane.schemas.monitoring import CreateMonitorRequest
+        with pytest.raises(ValueError, match="between 1 and 10080"):
+            CreateMonitorRequest(name="Test", monitor_type="custom", config={}, check_interval_minutes=0)
+
+    def test_create_monitor_rejects_bad_severity(self):
+        from app.trustplane.schemas.monitoring import CreateMonitorRequest
+        with pytest.raises(ValueError, match="alert_severity must be one of"):
+            CreateMonitorRequest(name="Test", monitor_type="custom", config={}, alert_severity="extreme")
+
+
+class TestIncidentSchemaValidation:
+
+    def test_create_incident_rejects_invalid_severity(self):
+        from app.trustplane.schemas.monitoring import CreateIncidentRequest
+        with pytest.raises(ValueError, match="severity must be one of"):
+            CreateIncidentRequest(title="Test", severity="invalid")
+
+    def test_create_incident_accepts_valid(self):
+        from app.trustplane.schemas.monitoring import CreateIncidentRequest
+        for s in ("low", "medium", "high", "critical"):
+            req = CreateIncidentRequest(title="Test Incident", severity=s)
+            assert req.severity == s
+
+    def test_change_incident_status_rejects_invalid(self):
+        from app.trustplane.schemas.monitoring import ChangeIncidentStatusRequest
+        with pytest.raises(ValueError, match="status must be one of"):
+            ChangeIncidentStatusRequest(status="invalid")
+
+
+class TestActionSchemaValidation:
+
+    def test_add_action_rejects_invalid_type(self):
+        from app.trustplane.schemas.monitoring import AddActionRequest
+        with pytest.raises(ValueError, match="action_type must be one of"):
+            AddActionRequest(action_type="invalid", title="Test")
+
+    def test_add_action_accepts_valid(self):
+        from app.trustplane.schemas.monitoring import AddActionRequest, VALID_ACTION_TYPES
+        for t in VALID_ACTION_TYPES:
+            req = AddActionRequest(action_type=t, title="Action")
+            assert req.action_type == t
+
+
+class TestIncidentTransitions:
+
+    def test_valid_transitions(self):
+        from app.trustplane.services.monitoring import INCIDENT_TRANSITIONS, IncidentStatus
+        assert IncidentStatus.TRIAGING in INCIDENT_TRANSITIONS[IncidentStatus.REPORTED]
+        assert IncidentStatus.CLOSED in INCIDENT_TRANSITIONS[IncidentStatus.VALIDATING]
+        assert len(INCIDENT_TRANSITIONS[IncidentStatus.CLOSED]) == 0
+
+    def test_invalid_transitions(self):
+        from app.trustplane.services.monitoring import INCIDENT_TRANSITIONS, IncidentStatus
+        assert IncidentStatus.CLOSED not in INCIDENT_TRANSITIONS[IncidentStatus.REPORTED]
+        assert IncidentStatus.REPORTED not in INCIDENT_TRANSITIONS[IncidentStatus.CLOSED]
+
+    def test_all_states_have_entry(self):
+        from app.trustplane.services.monitoring import INCIDENT_TRANSITIONS, IncidentStatus
+        for state in IncidentStatus:
+            assert state in INCIDENT_TRANSITIONS
+
+
+class TestPhase5AuditRegistry:
+
+    def test_monitoring_actions_registered(self):
+        from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
+        phase5_actions = {
+            "monitor.created",
+            "incident.created", "incident.status_changed", "incident.action_added",
+        }
+        assert phase5_actions.issubset(TRUST_AUDIT_ACTIONS)
+
+
+class TestPhase5ResponseSchemas:
+
+    def test_monitor_response(self):
+        from app.trustplane.schemas.monitoring import MonitorResponse
+        assert MonitorResponse.model_config.get("from_attributes") is True
+
+    def test_alert_response(self):
+        from app.trustplane.schemas.monitoring import AlertResponse
+        assert AlertResponse.model_config.get("from_attributes") is True
+
+    def test_incident_response(self):
+        from app.trustplane.schemas.monitoring import IncidentResponse
+        assert IncidentResponse.model_config.get("from_attributes") is True
+
+    def test_action_response(self):
+        from app.trustplane.schemas.monitoring import ActionResponse
+        assert ActionResponse.model_config.get("from_attributes") is True

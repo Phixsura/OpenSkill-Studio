@@ -62,6 +62,11 @@ TRUST_AUDIT_ACTIONS = frozenset(
         "guardrail.activated",
         "guardrail.disabled",
         "boundary.created",
+        # monitoring & incidents (Phase 5)
+        "monitor.created",
+        "incident.created",
+        "incident.status_changed",
+        "incident.action_added",
     }
 )
 
