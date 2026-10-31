@@ -289,6 +289,20 @@ async def create_incident(
         if r.scalar_one_or_none() is None:
             raise SystemNotFoundError()
 
+    # Validate assignee is an org member (IDOR guard)
+    if assigned_to:
+        from app.models.organization import MemberStatus, OrgMember
+
+        r = await db.execute(
+            select(OrgMember.user_id).where(
+                OrgMember.org_id == org_id,
+                OrgMember.user_id == assigned_to,
+                OrgMember.status == MemberStatus.ACTIVE,
+            )
+        )
+        if r.scalar_one_or_none() is None:
+            raise AppError("ASSIGNEE_NOT_FOUND", "Assigned user is not an active member of this org", 422)
+
     incident = TrustIncident(
         org_id=org_id,
         system_id=system_id,
