@@ -29,6 +29,7 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
     { href: `${base}/members`, label: "Members" },
     { href: `${base}/evaluation`, label: "AI Evaluation" },
     { href: `${base}/reviews`, label: "Reviews" },
+    { href: `${base}/trust`, label: "🛡️ Trust" },
     { href: `${base}/settings`, label: "Settings" },
   ];
 
