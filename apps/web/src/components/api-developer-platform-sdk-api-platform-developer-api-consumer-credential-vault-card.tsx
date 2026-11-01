@@ -1,0 +1,32 @@
+"use client";
+
+interface VaultInfo { entry_id: string; credential_type: string; masked_value: string; rotated: boolean; }
+interface Props { consumerId: string; entries: VaultInfo[]; appName: string; }
+
+const typeIcon: Record<string, string> = { api_key: "🔑", oauth_token: "🎫", webhook_secret: "🔐", client_secret: "🔒" };
+
+export default function APIDeveloperPlatformSDKApiPlatformDeveloperApiConsumerCredentialVaultCard({ consumerId, entries, appName }: Props) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">🔐 Credential Vault</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{appName} — {consumerId}</p>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-center text-sm text-gray-400">No credentials stored</p>
+      ) : (
+        <div className="space-y-1">
+          {entries.map((e) => (
+            <div key={e.entry_id} className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span>{typeIcon[e.credential_type] ?? "•"}</span>
+                <span className="text-gray-700 dark:text-gray-300">{e.credential_type}</span>
+              </div>
+              <span className="font-mono text-gray-400">{e.masked_value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
