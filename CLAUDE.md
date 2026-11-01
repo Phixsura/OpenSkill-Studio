@@ -15,7 +15,12 @@ apps/api/       — FastAPI backend (SQLAlchemy, asyncpg, structlog)
   migrations/   — Alembic database migrations
   tests/        — pytest test suite (runs without DB via noop lifespan)
   .venv/        — Python virtual env (managed by uv, gitignored)
-packages/       — Shared configs (typescript-config, eslint-config, shared types)
+packages/       — Shared configs + SDKs
+  typescript-config/  — Shared tsconfig
+  eslint-config/      — Shared ESLint config
+  shared/             — Auto-generated TypeScript API types
+  sdk-typescript/     — @openskill/sdk TypeScript SDK
+  sdk-python/         — openskill-sdk Python SDK
 docker/         — Docker init scripts
 docs/design/    — Architecture Decision Records (ADR)
 ```
