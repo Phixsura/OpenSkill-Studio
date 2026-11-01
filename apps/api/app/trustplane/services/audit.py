@@ -72,6 +72,16 @@ TRUST_AUDIT_ACTIONS = frozenset(
         "template.activated",
         "report.created",
         "tenant_policy.created",
+        # threats & red-team (Part E)
+        "threat.created",
+        "suite.created",
+        "run.started",
+        # privacy & consent (Part G)
+        "privacy_review.created",
+        "consent.created",
+        # change management (Part K)
+        "change.recorded",
+        "change.revalidated",
     }
 )
 

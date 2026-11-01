@@ -218,7 +218,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("before_value", postgresql.JSONB, nullable=True),
         sa.Column("after_value", postgresql.JSONB, nullable=True),
-        sa.Column("impact", trust_change_impact, nullable=False, server_default="pending"),
+        sa.Column("impact", trust_change_impact, nullable=False, server_default="low"),
         sa.Column("affected_evidence", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("affected_assessments", postgresql.JSONB, nullable=False, server_default="[]"),
         sa.Column("requires_revalidation", sa.Boolean, nullable=False, server_default=sa.text("false")),

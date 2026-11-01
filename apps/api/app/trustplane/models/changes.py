@@ -85,7 +85,7 @@ class ChangeEvent(Base):
     impact: Mapped[ChangeImpact] = mapped_column(
         Enum(ChangeImpact, name="trust_change_impact", create_constraint=True),
         nullable=False,
-        default=ChangeImpact.PENDING,
+        default=ChangeImpact.LOW,
     )
     affected_evidence: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"

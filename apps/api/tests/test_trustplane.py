@@ -387,6 +387,10 @@ class TestAuditRegistry:
             # Phase 6
             "template.created", "template.activated",
             "report.created", "tenant_policy.created",
+            # Parts E, G, K
+            "threat.created", "suite.created", "run.started",
+            "privacy_review.created", "consent.created",
+            "change.recorded", "change.revalidated",
         }
         assert TRUST_AUDIT_ACTIONS == expected
 
