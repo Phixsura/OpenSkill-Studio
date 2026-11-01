@@ -98,6 +98,10 @@ async def get_threat_model(db: AsyncSession, threat_id: str, org_id: str) -> Thr
 async def create_suite(
     db: AsyncSession, org_id: str, user_id: str, **data
 ) -> RedTeamSuite:
+    # Validate threat_model_id belongs to org (IDOR guard)
+    if data.get("threat_model_id"):
+        await get_threat_model(db, data["threat_model_id"], org_id)
+
     suite = RedTeamSuite(
         org_id=org_id,
         threat_model_id=data.get("threat_model_id"),
@@ -144,6 +148,11 @@ async def start_run(
     db: AsyncSession, org_id: str, user_id: str, suite_id: str, system_id: str | None = None,
 ) -> RedTeamRun:
     await get_suite(db, suite_id, org_id)
+    # Validate system_id belongs to org (IDOR guard)
+    if system_id:
+        r = await db.execute(select(AISystem.id).where(AISystem.id == system_id, AISystem.org_id == org_id))
+        if r.scalar_one_or_none() is None:
+            raise SystemNotFoundError()
     run = RedTeamRun(
         org_id=org_id, suite_id=suite_id, system_id=system_id,
         status=TestRunStatus.PENDING, started_by=user_id,
@@ -173,8 +182,14 @@ async def list_runs(
 
 
 async def list_findings(
-    db: AsyncSession, run_id: str,
+    db: AsyncSession, run_id: str, org_id: str,
 ) -> list[RedTeamFinding]:
+    # Validate run belongs to org (IDOR guard)
+    r = await db.execute(
+        select(RedTeamRun.id).where(RedTeamRun.id == run_id, RedTeamRun.org_id == org_id)
+    )
+    if r.scalar_one_or_none() is None:
+        raise RunNotFoundError()
     result = await db.execute(
         select(RedTeamFinding).where(RedTeamFinding.run_id == run_id).order_by(RedTeamFinding.created_at)
     )

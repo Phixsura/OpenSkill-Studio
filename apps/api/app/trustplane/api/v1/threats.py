@@ -77,5 +77,5 @@ async def list_runs(org_id: str, suite_id: str | None = None, page: int = Query(
 @router.get("/orgs/{org_id}/trust/redteam/runs/{run_id}/findings", response_model=DataResponse[list[FindingResponse]], dependencies=[Depends(rate_limit(30, 60))])
 async def list_findings(org_id: str, run_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await require_org_member(org_id, user, db)
-    findings = await threats_svc.list_findings(db, run_id)
+    findings = await threats_svc.list_findings(db, run_id, org_id)
     return DataResponse(data=[FindingResponse.model_validate(f) for f in findings])
