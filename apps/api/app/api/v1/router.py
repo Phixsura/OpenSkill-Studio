@@ -1,22 +1,44 @@
 from fastapi import APIRouter
 
+# ── Federation (Issue #45) ──
 from app.api.v1.endpoints import (
+    adapter_registry,
     admin,
+    app_admin,
+    app_batch,
+    app_categories,
+    app_conformance,
+    app_export,
+    app_installations,
+    app_marketplace,
+    app_observability,
+    app_review,
+    app_sandbox,
+    app_version_ops,
     auth,
     certificates,
     client_briefs,
     cohorts,
     composer,
+    dev_sandbox_tools,
+    developer_accounts,
+    developer_apps,
     discussions,
     duplicate,
     evaluation,
+    federation,
+    federation_collaboration,
+    federation_exchange,
     gamification,
     health,
     installations,
     learning_paths,
     lti,
+    manifest_validation,
     matching,
     notifications,
+    oauth,
+    openapi_docs,
     organizations,
     overview,
     pack_io,
@@ -30,6 +52,7 @@ from app.api.v1.endpoints import (
     requirement_profiles,
     skill_packs,
     skills,
+    webhook_deliveries,
     webhooks,
     workflow_installations,
     workflow_packs,
@@ -85,6 +108,32 @@ api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
 api_v1_router.include_router(requirement_profiles.router)
 api_v1_router.include_router(matching.router)
+
+# ── Developer Platform (Issue #44) ──
+api_v1_router.include_router(developer_accounts.router)
+api_v1_router.include_router(developer_apps.router)
+api_v1_router.include_router(app_installations.router)
+api_v1_router.include_router(app_review.router)
+api_v1_router.include_router(app_marketplace.router)
+api_v1_router.include_router(app_sandbox.router)
+api_v1_router.include_router(app_observability.router)
+api_v1_router.include_router(app_conformance.router)
+api_v1_router.include_router(app_export.router)
+api_v1_router.include_router(app_admin.router)
+api_v1_router.include_router(app_batch.router)
+api_v1_router.include_router(app_categories.router)
+api_v1_router.include_router(app_version_ops.router)
+api_v1_router.include_router(adapter_registry.router)
+api_v1_router.include_router(manifest_validation.router)
+api_v1_router.include_router(dev_sandbox_tools.router)
+api_v1_router.include_router(webhook_deliveries.router)
+api_v1_router.include_router(openapi_docs.router)
+api_v1_router.include_router(oauth.router)
+
+# ── Federation (Issue #45) ──
+api_v1_router.include_router(federation.router)
+api_v1_router.include_router(federation_exchange.router)
+api_v1_router.include_router(federation_collaboration.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)
