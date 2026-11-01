@@ -160,3 +160,8 @@ api_v1_router.include_router(tp_governance.router)
 api_v1_router.include_router(tp_threats.router)
 api_v1_router.include_router(tp_privacy.router)
 api_v1_router.include_router(tp_changes.router)
+
+# ── Operations plane (Issue #46) ──
+from app.opsplane.api.v1 import operations as ops_operations
+
+api_v1_router.include_router(ops_operations.router)
