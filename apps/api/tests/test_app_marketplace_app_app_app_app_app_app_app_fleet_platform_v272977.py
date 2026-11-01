@@ -1,0 +1,3 @@
+from app.services.app_marketplace_app_app_app_app_app_app_app_fleet_platform_v272977 import platform_v272977
+def test_v272977():
+    assert platform_v272977()["version"] == "272977.0"
