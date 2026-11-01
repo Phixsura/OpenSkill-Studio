@@ -223,6 +223,18 @@ export default function TrustDashboardPage() {
           <p className="font-medium">Incidents</p>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">Incident lifecycle & alerts</p>
         </Link>
+        <Link href={`${base}/threats`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Threats</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Threat models & red-team testing</p>
+        </Link>
+        <Link href={`${base}/privacy`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Privacy</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Data flows, consent & compliance</p>
+        </Link>
+        <Link href={`${base}/changes`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
+          <p className="font-medium">Changes</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))]">Change tracking & revalidation</p>
+        </Link>
         <Link href={`${base}/risk-policies`} className="rounded-lg border p-4 hover:bg-[hsl(var(--secondary))]">
           <p className="font-medium">Risk Policies</p>
           <p className="text-xs text-[hsl(var(--muted-foreground))]">Configure scoring dimensions</p>
