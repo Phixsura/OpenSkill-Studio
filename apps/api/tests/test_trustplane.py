@@ -955,3 +955,131 @@ class TestPhase6ResponseSchemas:
     def test_policy_override_response(self):
         from app.trustplane.schemas.governance import PolicyOverrideResponse
         assert PolicyOverrideResponse.model_config.get("from_attributes") is True
+
+
+# ── Parts E, G, K schema tests ──────────────────────────────────────
+
+
+class TestThreatSchemaValidation:
+
+    def test_create_threat_rejects_invalid_category(self):
+        from app.trustplane.schemas.threats import CreateThreatModelRequest
+        with pytest.raises(ValueError, match="category must be one of"):
+            CreateThreatModelRequest(name="Test", category="invalid")
+
+    def test_create_threat_accepts_all_categories(self):
+        from app.trustplane.schemas.threats import CreateThreatModelRequest, VALID_THREAT_CATEGORIES
+        for c in VALID_THREAT_CATEGORIES:
+            req = CreateThreatModelRequest(name="Test", category=c)
+            assert req.category == c
+
+    def test_create_threat_rejects_invalid_severity(self):
+        from app.trustplane.schemas.threats import CreateThreatModelRequest
+        with pytest.raises(ValueError, match="severity must be one of"):
+            CreateThreatModelRequest(name="Test", category="custom", severity="extreme")
+
+    def test_create_suite_rejects_empty_name(self):
+        from app.trustplane.schemas.threats import CreateSuiteRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateSuiteRequest(name="  ")
+
+
+class TestPrivacySchemaValidation:
+
+    def test_create_review_rejects_invalid_classification(self):
+        from app.trustplane.schemas.privacy import CreatePrivacyReviewRequest
+        with pytest.raises(ValueError, match="data_classification must be one of"):
+            CreatePrivacyReviewRequest(system_id="s01", title="Test", data_classification="top_secret")
+
+    def test_create_review_accepts_valid_classifications(self):
+        from app.trustplane.schemas.privacy import CreatePrivacyReviewRequest, VALID_DATA_CLASSIFICATIONS
+        for c in VALID_DATA_CLASSIFICATIONS:
+            req = CreatePrivacyReviewRequest(system_id="s01", title="Test", data_classification=c)
+            assert req.data_classification == c
+
+    def test_create_review_rejects_invalid_legal_basis(self):
+        from app.trustplane.schemas.privacy import CreatePrivacyReviewRequest
+        with pytest.raises(ValueError, match="legal_basis must be one of"):
+            CreatePrivacyReviewRequest(system_id="s01", title="Test", legal_basis="invalid")
+
+    def test_create_consent_rejects_invalid_status(self):
+        from app.trustplane.schemas.privacy import CreateConsentRecordRequest
+        with pytest.raises(ValueError, match="consent_status must be one of"):
+            CreateConsentRecordRequest(system_id="s01", purpose="Test", consent_status="invalid")
+
+    def test_create_consent_accepts_valid_statuses(self):
+        from app.trustplane.schemas.privacy import CreateConsentRecordRequest, VALID_CONSENT_STATUSES
+        for s in VALID_CONSENT_STATUSES:
+            req = CreateConsentRecordRequest(system_id="s01", purpose="Test", consent_status=s)
+            assert req.consent_status == s
+
+
+class TestChangeSchemaValidation:
+
+    def test_create_change_rejects_invalid_type(self):
+        from app.trustplane.schemas.changes import CreateChangeEventRequest
+        with pytest.raises(ValueError, match="change_type must be one of"):
+            CreateChangeEventRequest(system_id="s01", change_type="invalid", title="Test")
+
+    def test_create_change_accepts_all_types(self):
+        from app.trustplane.schemas.changes import CreateChangeEventRequest, VALID_CHANGE_TYPES
+        for t in VALID_CHANGE_TYPES:
+            req = CreateChangeEventRequest(system_id="s01", change_type=t, title="Test")
+            assert req.change_type == t
+
+    def test_create_change_rejects_invalid_impact(self):
+        from app.trustplane.schemas.changes import CreateChangeEventRequest
+        with pytest.raises(ValueError, match="impact must be one of"):
+            CreateChangeEventRequest(system_id="s01", change_type="model_version", title="Test", impact="extreme")
+
+    def test_create_change_rejects_empty_title(self):
+        from app.trustplane.schemas.changes import CreateChangeEventRequest
+        with pytest.raises(ValueError, match="must not be empty"):
+            CreateChangeEventRequest(system_id="s01", change_type="model_version", title="  ")
+
+
+class TestEGKResponseSchemas:
+
+    def test_threat_response(self):
+        from app.trustplane.schemas.threats import ThreatModelResponse
+        assert ThreatModelResponse.model_config.get("from_attributes") is True
+
+    def test_suite_response(self):
+        from app.trustplane.schemas.threats import SuiteResponse
+        assert SuiteResponse.model_config.get("from_attributes") is True
+
+    def test_run_response(self):
+        from app.trustplane.schemas.threats import RunResponse
+        assert RunResponse.model_config.get("from_attributes") is True
+
+    def test_finding_response(self):
+        from app.trustplane.schemas.threats import FindingResponse
+        assert FindingResponse.model_config.get("from_attributes") is True
+
+    def test_privacy_review_response(self):
+        from app.trustplane.schemas.privacy import PrivacyReviewResponse
+        assert PrivacyReviewResponse.model_config.get("from_attributes") is True
+
+    def test_consent_response(self):
+        from app.trustplane.schemas.privacy import ConsentRecordResponse
+        assert ConsentRecordResponse.model_config.get("from_attributes") is True
+
+    def test_change_event_response(self):
+        from app.trustplane.schemas.changes import ChangeEventResponse
+        assert ChangeEventResponse.model_config.get("from_attributes") is True
+
+    def test_change_summary_response(self):
+        from app.trustplane.schemas.changes import ChangeEventSummaryResponse
+        assert ChangeEventSummaryResponse.model_config.get("from_attributes") is True
+
+
+class TestEGKAuditRegistry:
+
+    def test_egk_actions_registered(self):
+        from app.trustplane.services.audit import TRUST_AUDIT_ACTIONS
+        egk_actions = {
+            "threat.created", "suite.created", "run.started",
+            "privacy_review.created", "consent.created",
+            "change.recorded", "change.revalidated",
+        }
+        assert egk_actions.issubset(TRUST_AUDIT_ACTIONS)
