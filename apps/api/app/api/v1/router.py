@@ -2,12 +2,31 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin,
+    app_installations,
+    app_marketplace,
+    app_review,
+    adapter_registry,
+    app_admin,
+    app_batch,
+    app_categories,
+    app_version_ops,
+    app_conformance,
+    app_export,
+    app_observability,
+    app_sandbox,
     auth,
     certificates,
     client_briefs,
     cohorts,
     composer,
+    dev_sandbox_tools,
+    developer_accounts,
+    openapi_docs,
+    webhook_deliveries,
+    developer_apps,
     discussions,
+    manifest_validation,
+    oauth,
     duplicate,
     evaluation,
     gamification,
@@ -85,6 +104,27 @@ api_v1_router.include_router(workflow_installations.router)
 api_v1_router.include_router(workflow_registry.router)
 api_v1_router.include_router(requirement_profiles.router)
 api_v1_router.include_router(matching.router)
+
+# ── Developer Platform (Issue #44) ──
+api_v1_router.include_router(developer_accounts.router)
+api_v1_router.include_router(developer_apps.router)
+api_v1_router.include_router(app_installations.router)
+api_v1_router.include_router(app_review.router)
+api_v1_router.include_router(app_marketplace.router)
+api_v1_router.include_router(app_sandbox.router)
+api_v1_router.include_router(app_observability.router)
+api_v1_router.include_router(app_conformance.router)
+api_v1_router.include_router(app_export.router)
+api_v1_router.include_router(app_admin.router)
+api_v1_router.include_router(app_batch.router)
+api_v1_router.include_router(app_categories.router)
+api_v1_router.include_router(app_version_ops.router)
+api_v1_router.include_router(adapter_registry.router)
+api_v1_router.include_router(manifest_validation.router)
+api_v1_router.include_router(dev_sandbox_tools.router)
+api_v1_router.include_router(webhook_deliveries.router)
+api_v1_router.include_router(openapi_docs.router)
+api_v1_router.include_router(oauth.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)
