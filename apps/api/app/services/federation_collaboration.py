@@ -48,6 +48,10 @@ async def list_collaboration_grants(
     return list(result.scalars().all()), total
 
 
+GRANTABLE_TYPES = {"skill_pack", "workflow_pack", "project", "cohort"}
+VALID_GRANT_PERMISSIONS = {"read", "comment", "fork", "install"}
+
+
 async def create_collaboration_grant(
     db: AsyncSession,
     org_id: str,
@@ -59,6 +63,30 @@ async def create_collaboration_grant(
     expires_at: str | None = None,
 ) -> object:
     from app.models.federation import FederationGrant
+
+    # Validate resource type is grantable
+    if resource_type not in GRANTABLE_TYPES:
+        raise AppError(
+            "INVALID_RESOURCE_TYPE",
+            f"resource_type must be one of: {', '.join(sorted(GRANTABLE_TYPES))}",
+            422,
+        )
+
+    # Validate permissions against allowlist
+    invalid = set(permissions) - VALID_GRANT_PERMISSIONS
+    if invalid:
+        raise AppError(
+            "INVALID_PERMISSIONS",
+            f"Invalid permissions: {', '.join(sorted(invalid))}. Valid: {', '.join(sorted(VALID_GRANT_PERMISSIONS))}",
+            422,
+        )
+
+    # Validate peer instance exists and is trusted
+    peer = await db.execute(
+        select(FederationInstance).where(FederationInstance.id == peer_instance_id)
+    )
+    if peer.scalar_one_or_none() is None:
+        raise AppError("PEER_NOT_FOUND", "Peer instance not found", 404)
 
     grant = FederationGrant(
         org_id=org_id,
