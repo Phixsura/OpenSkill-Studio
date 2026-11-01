@@ -23,6 +23,21 @@ from app.models.federation import (
 )
 
 
+async def _validate_org_member(db: AsyncSession, org_id: str, user_id: str) -> None:
+    """Validate user is an active member of the org (IDOR guard)."""
+    from app.models.organization import MemberStatus, OrgMember
+
+    r = await db.execute(
+        select(OrgMember.user_id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user_id,
+            OrgMember.status == MemberStatus.ACTIVE,
+        )
+    )
+    if r.scalar_one_or_none() is None:
+        raise AppError("USER_NOT_IN_ORG", "User is not a member of this organization", 404)
+
+
 class PeerNotFoundError(AppError):
     def __init__(self):
         super().__init__("PEER_NOT_FOUND", "Federation peer not found", 404)
@@ -119,6 +134,8 @@ async def create_credential_verification(
     issuer_instance_id: str,
     verification_data: dict,
 ) -> FederatedCredentialVerification:
+    await _validate_org_member(db, org_id, user_id)
+
     verification = FederatedCredentialVerification(
         org_id=org_id,
         user_id=user_id,
@@ -172,6 +189,8 @@ async def create_account_link(
     remote_user_ref: str,
     link_type: str = "portable_profile",
 ) -> FederatedAccountLink:
+    await _validate_org_member(db, org_id, user_id)
+
     link = FederatedAccountLink(
         org_id=org_id,
         user_id=user_id,
@@ -218,6 +237,8 @@ async def create_portability_record(
     destination_instance_id: str,
     data_manifest: dict,
 ) -> PortabilityRecord:
+    await _validate_org_member(db, org_id, user_id)
+
     record = PortabilityRecord(
         org_id=org_id,
         user_id=user_id,
