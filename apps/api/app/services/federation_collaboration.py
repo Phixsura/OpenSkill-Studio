@@ -81,7 +81,25 @@ async def create_collaboration_grant(
             422,
         )
 
-    # Validate peer instance exists and is trusted
+    # Validate resource belongs to this org (IDOR guard)
+    resource_models = {
+        "skill_pack": ("app.models.skill_pack", "SkillPack", "owner_org_id"),
+        "workflow_pack": ("app.models.workflow_pack", "WorkflowPack", "owner_org_id"),
+        "project": ("app.models.project", "Project", "org_id"),
+        "cohort": ("app.models.cohort", "Cohort", "org_id"),
+    }
+    mod_path, cls_name, org_col = resource_models[resource_type]
+    import importlib
+    mod = importlib.import_module(mod_path)
+    model_cls = getattr(mod, cls_name)
+    org_attr = getattr(model_cls, org_col)
+    res = await db.execute(
+        select(model_cls.id).where(model_cls.id == resource_id, org_attr == org_id)
+    )
+    if res.scalar_one_or_none() is None:
+        raise AppError("RESOURCE_NOT_FOUND", f"{resource_type} not found in this org", 404)
+
+    # Validate peer instance exists
     peer = await db.execute(
         select(FederationInstance).where(FederationInstance.id == peer_instance_id)
     )
