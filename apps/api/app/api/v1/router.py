@@ -27,6 +27,7 @@ from app.api.v1.endpoints import (
     duplicate,
     evaluation,
     federation,
+    federation_collaboration,
     federation_exchange,
     gamification,
     health,
@@ -132,6 +133,7 @@ api_v1_router.include_router(oauth.router)
 # ── Federation (Issue #45) ──
 api_v1_router.include_router(federation.router)
 api_v1_router.include_router(federation_exchange.router)
+api_v1_router.include_router(federation_collaboration.router)
 
 # ── Control plane (Issue #27) ──
 api_v1_router.include_router(cp_platform.router)
